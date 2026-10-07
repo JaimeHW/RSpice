@@ -1445,7 +1445,7 @@ impl MixedSignalHost {
         control: &dyn rspice_veriloga::PipelineControl,
         setup: &mut dyn FnMut(&mut VerilogADevice) -> Result<(), String>,
     ) -> Result<Self, MixedSignalError> {
-        if canonical_ir.digital.is_empty() {
+        if !canonical_ir.digital.has_executable_content() {
             return Err(MixedSignalError::Compile {
                 detail: format!(
                     "module `{}` has no digital processes or drivers for the mixed host",

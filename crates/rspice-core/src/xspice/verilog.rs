@@ -304,7 +304,7 @@ impl CompiledDigitalDesign {
                 detail: error.to_string(),
             })?;
 
-        if artifact.digital.is_empty() {
+        if !artifact.digital.has_executable_content() {
             return Err(DigitalRunError::NoDigitalContent {
                 module: artifact.mir.module_name.to_string(),
             });

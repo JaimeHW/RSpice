@@ -188,6 +188,16 @@ impl ScopeMap {
                 .parameters
                 .insert(parameter.name.clone(), parameter.name.clone());
         }
+        for parameter in &module.digital.elaboration_parameters {
+            scope
+                .parameters
+                .insert(parameter.name.clone(), parameter.name.clone());
+            for alias in &parameter.aliases {
+                scope
+                    .parameters
+                    .insert(alias.clone(), parameter.name.clone());
+            }
+        }
         for variable in &module.variables {
             scope
                 .variables
@@ -225,6 +235,10 @@ impl<'a> HierarchyElaborator<'a> {
         let mut used_names = HashSet::new();
         used_names.extend(flattened.ports.iter().map(|item| item.name.clone()));
         used_names.extend(flattened.parameters.iter().map(|item| item.name.clone()));
+        for parameter in &flattened.digital.elaboration_parameters {
+            used_names.insert(parameter.name.clone());
+            used_names.extend(parameter.aliases.iter().cloned());
+        }
         used_names.extend(flattened.variables.iter().map(|item| item.name.clone()));
         used_names.extend(
             flattened
@@ -559,6 +573,25 @@ impl<'a> HierarchyElaborator<'a> {
         // Allocate all parameter names before rewriting defaults and ranges;
         // this makes forward references diagnostic-preserving instead of
         // accidentally binding to a similarly named parent parameter.
+        for parameter in &child.digital.elaboration_parameters {
+            let mut retained = parameter.clone();
+            retained.name = self.fresh_name(&parameter.name);
+            retained.is_public = false;
+            scope
+                .parameters
+                .insert(parameter.name.clone(), retained.name.clone());
+            retained.aliases = parameter
+                .aliases
+                .iter()
+                .map(|alias| {
+                    scope
+                        .parameters
+                        .insert(alias.clone(), retained.name.clone());
+                    self.fresh_name(alias)
+                })
+                .collect();
+            self.flattened.digital.elaboration_parameters.push(retained);
+        }
         let parameter_base = self.flattened.parameters.len();
         for (index, parameter) in child.parameters.iter().enumerate() {
             let name = self.fresh_name(&parameter.name);

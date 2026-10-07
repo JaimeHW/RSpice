@@ -563,7 +563,7 @@ assignment conversion. `Bits` preserves width, signedness and X/Z values.
 The existing numeric specialization API remains available. Both APIs resolve
 parameter aliases and reject duplicate assignments through an alias.
 
-Closed digital-only scalar parameters that cannot be represented exactly by
+Closed scalar parameters that cannot be represented exactly by
 the numeric ABI are retained in `digital.elaboration_parameters` and the public
 runtime ABI summary. They have no numeric runtime slot. Serialization, plan
 identity, source re-specialization and circuit-wide linking preserve their
@@ -590,6 +590,19 @@ parameters produced by an exact constant calculation. Dependent defaults
 therefore still recompute after numeric updates. Changing an exact parent
 re-elaborates its dependent defaults from the retained source. The exact
 constant environment is reset for each module.
+
+Schema 96 retains wide and X/Z scalar `localparam` values as private exact
+elaboration metadata. Copies and derived packed constants preserve their width
+and sign without creating analog variables or numeric parameter slots. Numeric
+localparams still execute in the analog prologue and follow numeric parameter
+updates. Localparams cannot be overridden through either public parameter API.
+
+Digital instance specialization and analog hierarchy flattening retain each
+instance's private constants. Serialization and content identity include those
+constants even in an otherwise analog-only model; `has_executable_content()`
+distinguishes retained metadata from work that needs a digital runtime.
+Unsupported direct analog reads and packed localparam range constraints still
+produce diagnostics.
 
 General packed operations over mutable numeric parameters, forward exact
 dependencies, non-scalar overrides, and typed range constraints remain open.

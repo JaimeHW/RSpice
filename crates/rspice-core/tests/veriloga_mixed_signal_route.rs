@@ -11,9 +11,10 @@
 //! # What the route is
 //!
 //! `.VERILOGA` compiles the file once, with `enable_ams` on, and the compiled
-//! artifact's *discrete plan* decides what the X-card builds: empty, and it is
-//! the `VerilogADevice` it has always been; non-empty, and it is a
-//! a mixed analog host plus the circuit's shared digital runtime. HDL-only
+//! artifact's executable discrete content decides what the X-card builds:
+//! without it, the `VerilogADevice` it has always been; with it, a mixed
+//! analog host plus the circuit's shared digital runtime. Exact elaboration
+//! constants alone do not select the mixed route. HDL-only
 //! port bits join resolved event nets. Bits also used by continuous devices
 //! keep A/D or D/A bridges, with supply-derived thresholds and output levels.
 //!
@@ -2832,19 +2833,26 @@ fn exact_packed_parameters_drive_loaded_mixed_instances() {
         "exact_packed",
         r#"
 `timescale 1ns/1ps
-module exact_packed(p,q);
- inout p; electrical p; output reg q=0;
+module packed_local_driver(q);
+ output reg q=0;
  parameter PATTERN=129'h1_00000000_00000000_00000000_000000xz;
- parameter COPY=PATTERN;
- parameter MASKED=COPY & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
  parameter COUNT=64'h20000000000001;
- parameter real GAIN=2;
- parameter real RESULT=GAIN+(COPY[15:8]+8'd255+8'd1);
- aliasparam STRENGTH=GAIN;
- analog I(p)<+(V(p)-RESULT*q)/1000;
+ localparam COPY=PATTERN;
+ localparam MASKED=COPY & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
  initial #1 q=(COPY===129'h1_00000000_00000000_00000000_000000xz)
               &&(MASKED===129'h1_00000000_00000000_00000000_00000000)
-              &&(COUNT===64'h20000000000001)&&(RESULT==GAIN);
+              &&(COUNT===64'h20000000000001);
+endmodule
+module exact_packed(p,q);
+ inout p; electrical p; output wire q;
+ parameter PATTERN=129'h1_00000000_00000000_00000000_000000xz;
+ parameter COUNT=64'h20000000000001;
+ parameter real GAIN=2;
+ localparam COPY=PATTERN;
+ localparam real RESULT=GAIN+(COPY[15:8]+8'd255+8'd1);
+ aliasparam STRENGTH=GAIN;
+ packed_local_driver #(.PATTERN(COPY), .COUNT(COUNT)) driver(q);
+ analog I(p)<+(V(p)-RESULT*q)/1000;
 endmodule
 "#,
     );
@@ -2879,5 +2887,34 @@ endmodule
             rspice_core::xspice::DigitalState::One
         );
         assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+    }
+}
+
+#[test]
+fn exact_localparams_keep_analog_only_decks_on_the_analog_route() {
+    let model = ModelFile::new(
+        "analog_locals",
+        r#"
+module analog_local_leaf(p);
+ inout p; electrical p;
+ localparam WORD=129'h1_00000000_00000000_00000000_000001xz;
+ localparam real LEVEL=WORD[15:8]+0.0;
+ analog I(p)<+(V(p)-LEVEL)/1000;
+endmodule
+module analog_local_top(p);
+ inout p; electrical p;
+ analog_local_leaf child(p);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* analog exact locals\nXp p analog_local_top\nRp p 0 1k\n\
+         .va \"{}\" analog_local_top module=analog_local_top\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    assert!(result.digital_traces.is_empty());
+    for value in waveform(&result, "p") {
+        assert!((value - 0.5).abs() < 1e-8, "{value}");
     }
 }

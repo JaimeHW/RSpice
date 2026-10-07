@@ -781,12 +781,17 @@ pub struct CanonicalDigitalPlan {
 
 impl CanonicalDigitalPlan {
     pub fn is_empty(&self) -> bool {
-        self.elaboration_parameters.is_empty()
-            && self.signals.is_empty()
-            && self.arrays.is_empty()
-            && self.processes.is_empty()
-            && self.drivers.is_empty()
-            && self.analog_probes.is_empty()
+        self.elaboration_parameters.is_empty() && !self.has_executable_content()
+    }
+
+    /// Whether this plan needs a digital runtime. Retained constants still
+    /// participate in serialization and identity even without executable work.
+    pub fn has_executable_content(&self) -> bool {
+        !self.signals.is_empty()
+            || !self.arrays.is_empty()
+            || !self.processes.is_empty()
+            || !self.drivers.is_empty()
+            || !self.analog_probes.is_empty()
     }
 
     /// The probe an id names.

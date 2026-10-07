@@ -585,17 +585,32 @@ fn lower_with_analog_variables(
     CanonicalDigitalPlan {
         timing,
         content_identity: [0; 32],
-        elaboration_parameters: digital
-            .elaboration_parameters
-            .iter()
-            .map(|parameter| super::digital::DigitalElaborationParameter {
-                name: parameter.name.clone(),
-                aliases: parameter.aliases.clone(),
-                is_public: parameter.is_public,
-                scope: parameter.scope,
-                also_model: parameter.also_model,
-                value: super::digital_value::FourStateValue::from_literal(&parameter.value),
-                signed: parameter.value.signed,
+        elaboration_parameters: std::iter::once(("", &digital.elaboration_parameters))
+            .chain(
+                digital
+                    .instances
+                    .iter()
+                    .map(|instance| (instance.path.as_str(), &instance.elaboration_parameters)),
+            )
+            .flat_map(|(path, parameters)| {
+                parameters.iter().map(move |parameter| {
+                    let qualify = |name: &SmolStr| {
+                        if path.is_empty() {
+                            name.clone()
+                        } else {
+                            format!("{path}.{name}").into()
+                        }
+                    };
+                    super::digital::DigitalElaborationParameter {
+                        name: qualify(&parameter.name),
+                        aliases: parameter.aliases.iter().map(qualify).collect(),
+                        is_public: path.is_empty() && parameter.is_public,
+                        scope: parameter.scope,
+                        also_model: parameter.also_model,
+                        value: super::digital_value::FourStateValue::from_literal(&parameter.value),
+                        signed: parameter.value.signed,
+                    }
+                })
             })
             .collect(),
         arrays,

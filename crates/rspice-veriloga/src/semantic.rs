@@ -1613,6 +1613,8 @@ impl SemanticAnalyzer {
                     self.normalize_scalar_parameter_default(localparam, expression, module)
                 })
                 .transpose()?;
+            self.exact_parameter_constants
+                .retain(localparam, default.as_ref());
             if let Some(default) = &default {
                 if let Some(value) = self.eval_const_value(default).and_then(|value| {
                     Self::constant_for_declared_type(value, localparam.param_type)
@@ -1741,6 +1743,34 @@ impl SemanticAnalyzer {
                 );
                 continue;
             };
+
+            if let Expression::Digital(DigitalExpr::FourState(literal)) = default {
+                if localparam.range.is_some() {
+                    return Err(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "packed localparam '{}' requires typed range validation",
+                            localparam.name
+                        )),
+                        localparam.span,
+                    )
+                    .into());
+                }
+                // Exact constants are elaboration values, not analog variables
+                // initialized with a placeholder. Numeric localparams below
+                // still run in the prologue and respond to parameter updates.
+                analyzed
+                    .digital
+                    .elaboration_parameters
+                    .push(AnalyzedPackedParameter {
+                        name: localparam.name.clone(),
+                        aliases: Vec::new(),
+                        is_public: false,
+                        scope: ParameterScope::Model,
+                        also_model: false,
+                        value: literal.value.clone(),
+                    });
+                continue;
+            }
 
             let var_index = analyzed.variables.len();
             analyzed.variables.push(AnalyzedVariable {

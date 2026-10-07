@@ -202,7 +202,7 @@ pub(super) fn try_build_mixed_signal_instance(
         // simply has no plan to consult, which is the analog route.
         return Ok(false);
     };
-    if artifact.digital.is_empty() {
+    if !artifact.digital.has_executable_content() {
         return Ok(false);
     }
 

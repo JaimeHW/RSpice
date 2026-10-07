@@ -146,7 +146,7 @@ pub(crate) fn elaborate_digital_hierarchy(
 /// by both or by neither. A child with no discrete-domain content is an analog
 /// child and the analog pass flattens it as it always has.
 pub(crate) fn is_digital_child(child: &AnalyzedModule) -> bool {
-    !child.digital.is_empty()
+    child.digital.has_executable_content()
 }
 
 /// How the elaborated scope sees one name.
@@ -386,6 +386,7 @@ impl DigitalElaborator<'_> {
 
         self.instances.push(ElaboratedDigitalInstance {
             time_scale: child.digital.time_scale,
+            elaboration_parameters: child.digital.elaboration_parameters.clone(),
             path: path.into(),
             module: instance.module.clone(),
             signals,

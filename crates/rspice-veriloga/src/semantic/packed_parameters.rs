@@ -1,4 +1,4 @@
-//! Keep exact digital-only constants out of the analog binary64 parameter ABI.
+//! Keep exact elaboration constants out of the analog binary64 parameter ABI.
 
 use super::*;
 use std::borrow::Cow;
@@ -17,9 +17,6 @@ pub(crate) fn retain_packed_parameters(
     mut selected: Cow<'_, AnalyzedModule>,
 ) -> CompileResult<Cow<'_, AnalyzedModule>> {
     let module = selected.as_ref();
-    if module.digital.is_empty() {
-        return Ok(selected);
-    }
     let mut packed = HashMap::new();
     for (index, parameter) in module.parameters.iter().enumerate() {
         if parameter.default.is_none()
@@ -37,16 +34,26 @@ pub(crate) fn retain_packed_parameters(
             packed.insert(index, literal.value.clone());
         }
     }
-    if packed.is_empty() {
+    if packed.is_empty() && module.digital.elaboration_parameters.is_empty() {
         return Ok(selected);
     }
     let names: HashSet<_> = packed
         .keys()
         .map(|index| module.parameters[*index].name.as_str())
+        .chain(
+            module
+                .digital
+                .elaboration_parameters
+                .iter()
+                .map(|parameter| parameter.name.as_str()),
+        )
         .collect();
     // Check before partitioning, including names of built-in numeric constants:
     // removing a parameter named M_PI must never reveal the built-in value.
     reject_numeric_uses(module, &names)?;
+    if packed.is_empty() {
+        return Ok(selected);
+    }
     let module = selected.to_mut();
     let mut slots = Vec::with_capacity(module.parameters.len());
     let mut numeric = Vec::with_capacity(module.parameters.len() - packed.len());

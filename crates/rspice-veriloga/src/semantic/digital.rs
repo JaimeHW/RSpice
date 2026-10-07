@@ -132,11 +132,15 @@ impl DigitalConstants {
 
 impl AnalyzedDigital {
     pub fn is_empty(&self) -> bool {
-        self.elaboration_parameters.is_empty()
-            && self.signals.is_empty()
-            && self.processes.is_empty()
-            && self.continuous_assigns.is_empty()
-            && self.instances.is_empty()
+        self.elaboration_parameters.is_empty() && !self.has_executable_content()
+    }
+
+    /// Exact elaboration constants alone do not require digital execution.
+    pub fn has_executable_content(&self) -> bool {
+        !self.signals.is_empty()
+            || !self.processes.is_empty()
+            || !self.continuous_assigns.is_empty()
+            || !self.instances.is_empty()
     }
 
     /// The first discrete-domain construct a backend would have to execute.
@@ -460,6 +464,8 @@ pub struct AnalyzedContinuousAssign {
 #[derive(Debug, Clone)]
 pub struct ElaboratedDigitalInstance {
     pub time_scale: crate::time_scale::ModuleTimeScale,
+    /// Exact constants retained in this instance's own specialization scope.
+    pub elaboration_parameters: Vec<AnalyzedPackedParameter>,
     /// Instance path below the compiled module: `g1`, or `u1.g2` when nested.
     ///
     /// The IEEE 1364-2005 section 12.4 hierarchical name, minus the top
@@ -657,7 +663,7 @@ impl SemanticAnalyzer {
         }
         analyzed.digital = AnalyzedDigital {
             time_scale: module.time_scale,
-            elaboration_parameters: Vec::new(),
+            elaboration_parameters: std::mem::take(&mut analyzed.digital.elaboration_parameters),
             signals,
             processes,
             continuous_assigns,

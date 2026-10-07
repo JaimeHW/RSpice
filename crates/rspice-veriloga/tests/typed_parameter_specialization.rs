@@ -384,3 +384,284 @@ fn exact_parameter_conversion_is_explicit_and_scoped_to_one_module() {
     device.try_resolve_parameter_defaults().unwrap();
     assert_eq!(device.try_evaluate().unwrap()[0], 5.0);
 }
+
+#[test]
+fn exact_localparams_keep_private_values_and_numeric_prologues() {
+    let compiler = compiler();
+    let source = r#"
+module local_exact(p,q);
+ inout p; electrical p;
+ parameter real BASE=2.5;
+ localparam WORD=129'h1_00000000_00000000_00000000_000101xz;
+ localparam COPY=WORD;
+ localparam MASKED=COPY & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
+ localparam integer UNKNOWN=32'bx;
+ localparam integer LOW=COPY[15:8];
+ localparam real RESULT=BASE+(COPY[15:8]+8'd255);
+ output reg [128:0] q=MASKED;
+ reg [63:0] extended=UNKNOWN;
+ analog I(p)<+RESULT+LOW;
+endmodule
+"#;
+    let report = compiler.compile_runtime(source, None).unwrap();
+    report.validate_integrity().unwrap();
+    assert_eq!(
+        initial(&report, "q"),
+        DigitalInitialValue::FourState(bits("129'h1_00000000_00000000_00000000_00010100"))
+    );
+    assert_eq!(
+        initial(&report, "extended"),
+        DigitalInitialValue::FourState(bits("64'bx"))
+    );
+    assert!(report.abi.elaboration_parameters.is_empty());
+    assert_eq!(
+        report
+            .abi
+            .parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        ["BASE"]
+    );
+    let exact = &report.canonical_ir.digital.elaboration_parameters;
+    assert_eq!(
+        exact
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        ["WORD", "COPY", "MASKED", "UNKNOWN"]
+    );
+    assert!(
+        exact
+            .iter()
+            .all(|parameter| !parameter.is_public && parameter.aliases.is_empty())
+    );
+    assert!(exact[3].signed);
+    for parameter in exact {
+        assert!(
+            !report
+                .canonical_ir
+                .hir
+                .variables
+                .iter()
+                .any(|variable| variable.name == parameter.name)
+        );
+    }
+    let serialized = serde_json::to_vec(&report).unwrap();
+    let decoded: rspice_veriloga::RuntimeCompileReport =
+        serde_json::from_slice(&serialized).unwrap();
+    decoded.validate_integrity().unwrap();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "local",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 3.5);
+    device.try_set_parameter("BASE", 10.5).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 11.5);
+    assert!(!device.try_set_parameter("COPY", 0.0).unwrap());
+    assert!(
+        compiler
+            .specialize_mixed_runtime_typed(
+                &report.canonical_ir,
+                &[("COPY", ScalarParameterValue::Integer(0))],
+                &NoPipelineControl
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn exact_localparams_keep_each_child_specialization_and_reject_numeric_reads() {
+    let compiler = compiler();
+    let report = compiler
+        .compile_runtime(
+            r#"
+module local_leaf(q);
+ parameter WORD=129'h1_00000000_00000000_00000000_000001xz;
+ localparam MASKED=WORD & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
+ output reg [128:0] q=MASKED;
+endmodule
+module local_top(a,b);
+ output wire [128:0] a,b;
+ local_leaf first(a);
+ local_leaf #(.WORD(129'h1_00000000_00000000_00000000_000002xz)) second(b);
+endmodule
+"#,
+            Some("local_top"),
+        )
+        .unwrap();
+    let exact = &report.canonical_ir.digital.elaboration_parameters;
+    let first = exact
+        .iter()
+        .find(|parameter| parameter.name == "first.MASKED")
+        .unwrap();
+    let second = exact
+        .iter()
+        .find(|parameter| parameter.name == "second.MASKED")
+        .unwrap();
+    assert_eq!(
+        first.value,
+        bits("129'h1_00000000_00000000_00000000_00000100")
+    );
+    assert_eq!(
+        second.value,
+        bits("129'h1_00000000_00000000_00000000_00000200")
+    );
+    assert!(!first.is_public && !second.is_public);
+    assert!(report.abi.elaboration_parameters.is_empty());
+    assert_eq!(
+        initial(&report, "first.q"),
+        DigitalInitialValue::FourState(first.value.clone())
+    );
+    assert_eq!(
+        initial(&report, "second.q"),
+        DigitalInitialValue::FourState(second.value.clone())
+    );
+    report.validate_integrity().unwrap();
+    for name in ["LOCAL", "M_PI"] {
+        let source = format!(
+            "module bad(p,q); inout p; electrical p; localparam {name}=129'h1_00000000_00000000_00000000_000001xz; output reg q=0; analog I(p)<+{name}; endmodule"
+        );
+        let error = compiler
+            .compile_runtime(&source, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(&format!("packed parameter '{name}'")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn exact_localparams_in_analog_hierarchy_need_no_digital_execution() {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let report = compiler
+        .compile_runtime(
+            r#"
+module analog_leaf(p);
+ inout p; electrical p;
+ localparam WORD=129'h1_00000000_00000000_00000000_000001xz;
+ localparam real LEVEL=WORD[15:8]+0.0;
+ analog I(p)<+LEVEL;
+endmodule
+module analog_top(p);
+ inout p; electrical p;
+ localparam WORD=129'h1_00000000_00000000_00000000_000002xz;
+ localparam real LEVEL=WORD[15:8]+0.0;
+ analog I(p)<+LEVEL;
+ analog_leaf first(p), second(p);
+endmodule
+"#,
+            Some("analog_top"),
+        )
+        .unwrap();
+    let plan = &report.canonical_ir.digital;
+    assert!(
+        !plan.is_empty(),
+        "exact metadata must survive serialization"
+    );
+    assert!(!plan.has_executable_content());
+    assert_eq!(plan.elaboration_parameters.len(), 3);
+    assert!(
+        plan.elaboration_parameters
+            .iter()
+            .all(|parameter| !parameter.is_public)
+    );
+    let names: std::collections::HashSet<_> = plan
+        .elaboration_parameters
+        .iter()
+        .map(|parameter| &parameter.name)
+        .collect();
+    assert_eq!(
+        names.len(),
+        3,
+        "each analog instance has its own constant scope"
+    );
+    assert_eq!(
+        plan.elaboration_parameters
+            .iter()
+            .filter(
+                |parameter| parameter.value == bits("129'h1_00000000_00000000_00000000_000001xz")
+            )
+            .count(),
+        2
+    );
+    let serialized = serde_json::to_vec(&report).unwrap();
+    let decoded: rspice_veriloga::RuntimeCompileReport =
+        serde_json::from_slice(&serialized).unwrap();
+    decoded.validate_integrity().unwrap();
+    assert_eq!(decoded.canonical_ir.digital, *plan);
+    // Flattened branch orientations can differ. Compare current entering p,
+    // using the residual stamp sign rather than summing raw branch values.
+    let weights: Vec<f64> = report
+        .model
+        .stamp_programs
+        .iter()
+        .map(|program| {
+            program
+                .stamp_locations
+                .iter()
+                .filter(|location| {
+                    matches!(
+                        location.row,
+                        rspice_veriloga::codegen::StampIndex::Terminal(0)
+                    )
+                })
+                .map(|location| -location.sign)
+                .sum()
+        })
+        .collect();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "analog",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(
+        device
+            .try_evaluate()
+            .unwrap()
+            .iter()
+            .zip(weights)
+            .map(|(value, sign)| value * sign)
+            .sum::<f64>(),
+        4.0
+    );
+
+    // A public packed parameter also remains metadata without adding a runtime.
+    let report = compiler
+        .compile_runtime(
+            "module analog_exact(p); inout p; electrical p; \
+         parameter P=64'h20000000000001; localparam real R=P; analog I(p)<+R; endmodule",
+            None,
+        )
+        .unwrap();
+    assert!(!report.canonical_ir.digital.has_executable_content());
+    assert_eq!(
+        report.abi.elaboration_parameters[0].value,
+        bits("64'h20000000000001")
+    );
+    report.validate_integrity().unwrap();
+
+    // Flattening must keep the name of an unsupported analog read bound to the
+    // private constant; a parent symbol or built-in M_PI is never a substitute.
+    let error = compiler
+        .compile_runtime(
+            "module bad_leaf(p); inout p; electrical p; localparam M_PI=32'bx; \
+         analog I(p)<+M_PI; endmodule \
+         module bad_top(p); inout p; electrical p; bad_leaf child(p); endmodule",
+            Some("bad_top"),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("packed parameter") && error.contains("M_PI"),
+        "{error}"
+    );
+}
