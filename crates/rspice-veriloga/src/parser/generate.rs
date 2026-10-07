@@ -578,13 +578,13 @@ impl Unroller<'_> {
                 default: Some(Expression::Number(NumberLit {
                     value: *value as f64,
                     raw: format!("32'sb{:032b}", *value as i32 as u32).into(),
-                    span: span,
+                    span,
                 })),
                 range: None,
                 units: None,
                 description: None,
                 attributes: Vec::new(),
-                span: span,
+                span,
             });
         }
         environment
