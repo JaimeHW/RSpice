@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 87 specializes digital child parameters and uses typed generate constants.
 /// Version 86 gives process-local arrays scoped, scheduler-visible element storage.
 /// Version 85 adds exact digital integer power and corrects power associativity.
 /// Version 84 binds static local initializers in complete lexical scopes and source order.
@@ -88,7 +89,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 86;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 87;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

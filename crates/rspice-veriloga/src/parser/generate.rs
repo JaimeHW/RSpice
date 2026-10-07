@@ -324,6 +324,7 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
     let mut unroller = Unroller {
         genvars,
         constants,
+        time_scale: module.time_scale,
         bindings: HashMap::new(),
         next_process_id,
     };
@@ -335,26 +336,16 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
     Ok(())
 }
 
-/// The module's own integer parameters and localparams, by name.
-///
-/// Section 12.2 fixes these at elaboration and a generate region is elaborated
-/// against them. Folded in declaration order so a `localparam` may be written
-/// in terms of a `parameter` above it, which is how a width is normally
-/// derived.
-///
-/// A default this small evaluator cannot fold is simply absent, and a region
-/// that needed it is refused rather than unrolled — see [`Unroller::value`].
-fn module_constants(module: &Module) -> HashMap<SmolStr, i64> {
-    let mut constants = HashMap::new();
-    for declaration in module.parameters.iter().chain(&module.localparams) {
-        let Some(default) = &declaration.default else {
-            continue;
-        };
-        if let Some(value) = constant_value(default, &constants) {
-            constants.insert(declaration.name.clone(), value);
-        }
+fn module_constants(module: &Module) -> crate::semantic::DigitalConstants {
+    crate::semantic::DigitalConstants {
+        definitions: module
+            .parameters
+            .iter()
+            .chain(&module.localparams)
+            .cloned()
+            .collect(),
+        ..Default::default()
     }
-    constants
 }
 
 /// Move every item of `expanded` onto `module`.
@@ -379,7 +370,8 @@ fn absorb(module: &mut Module, expanded: Module) {
 struct Unroller<'a> {
     /// Names declared `genvar`, so a loop over anything else is refused.
     genvars: Vec<SmolStr>,
-    constants: HashMap<SmolStr, i64>,
+    constants: crate::semantic::DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
     /// The genvars currently bound, innermost loop last.
     bindings: HashMap<SmolStr, i64>,
     next_process_id: &'a mut u32,
@@ -474,7 +466,7 @@ impl Unroller<'_> {
             ));
         }
 
-        let mut index = self.value(&loop_.init, "generate for initial value")?;
+        let mut index = self.genvar_assignment(&loop_.init, "generate for initial value")?;
         let mut iterations = 0usize;
         loop {
             self.bindings.insert(loop_.genvar.clone(), index);
@@ -504,7 +496,7 @@ impl Unroller<'_> {
             // `bit_slice[3].bit_slice.stage`.
             self.block_contents(&loop_.body, &iteration_prefix, out)?;
 
-            index = self.value(&loop_.update, "generate for update")?;
+            index = self.genvar_assignment(&loop_.update, "generate for update")?;
             self.bindings.remove(&loop_.genvar);
         }
     }
@@ -572,11 +564,76 @@ impl Unroller<'_> {
         Ok(())
     }
 
+    fn constant_environment(&self, span: Span) -> crate::semantic::DigitalConstants {
+        let mut environment = self.constants.clone();
+        environment
+            .definitions
+            .retain(|parameter| !self.bindings.contains_key(&parameter.name));
+        for (name, value) in &self.bindings {
+            environment.definitions.push(ParameterDecl {
+                param_type: ParamType::Integer,
+                type_is_explicit: true,
+                name: name.clone(),
+                dimensions: Vec::new(),
+                default: Some(Expression::Number(NumberLit {
+                    value: *value as f64,
+                    raw: format!("32'sb{:032b}", *value as i32 as u32).into(),
+                    span: span,
+                })),
+                range: None,
+                units: None,
+                description: None,
+                attributes: Vec::new(),
+                span: span,
+            });
+        }
+        environment
+    }
+
+    /// A genvar initializer/update has the assignment context of an integer.
+    fn genvar_assignment(&self, expression: &Expression, context: &str) -> Result<i64, ParseError> {
+        let declaration = ParameterDecl {
+            param_type: ParamType::Integer,
+            type_is_explicit: true,
+            name: "$generate_index".into(),
+            dimensions: Vec::new(),
+            default: Some(expression.clone()),
+            range: None,
+            units: None,
+            description: None,
+            attributes: Vec::new(),
+            span: expression.span(),
+        };
+        let literal = crate::canonical_ir::digital_lower::parameter_override_literal(
+            &declaration,
+            &self.constant_environment(expression.span()),
+            self.time_scale,
+        )
+        .map_err(|detail| {
+            ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: context.into(),
+                    found: detail,
+                },
+                expression.span(),
+            )
+        })?;
+        self.value(&literal, context)
+    }
+
     /// The constant value of an elaboration-time expression.
     fn value(&self, expression: &Expression, context: &str) -> Result<i64, ParseError> {
-        let mut environment = self.constants.clone();
-        environment.extend(self.bindings.iter().map(|(k, v)| (k.clone(), *v)));
-        constant_value(expression, &environment).ok_or_else(|| {
+        let environment = self.constant_environment(expression.span());
+        crate::canonical_ir::digital_lower::selector_constant(
+            expression,
+            &environment,
+            self.time_scale,
+        )
+        .and_then(|value| match value {
+            crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+            crate::numeric_literal::NumericLiteralValue::Real(_) => None,
+        })
+        .ok_or_else(|| {
             ParseError::new(
                 ParseErrorKind::UnsupportedConstruct {
                     context: context.to_string(),
@@ -598,7 +655,7 @@ impl Unroller<'_> {
                 if let Some(value) = self.bindings.get(&identifier.name) {
                     *expression = Expression::Number(NumberLit {
                         value: *value as f64,
-                        raw: SmolStr::from(value.to_string()),
+                        raw: format!("32'sb{:032b}", *value as i32 as u32).into(),
                         span: identifier.span,
                     });
                 }
@@ -854,83 +911,4 @@ fn reject_declarations(items: &Module) -> Result<(), ParseError> {
         ));
     }
     Ok(())
-}
-
-/// Fold one elaboration-time expression against a constant environment.
-///
-/// Deliberately small. What a generate bound is allowed to be is a *constant
-/// expression* of section 12.4, and everything it may legally contain is
-/// either a literal, a name the environment knows, or an operator over those.
-/// Anything outside that returns `None`, which becomes a refusal naming the
-/// clause rather than a value nothing derived.
-fn constant_value(expression: &Expression, environment: &HashMap<SmolStr, i64>) -> Option<i64> {
-    match expression {
-        Expression::Number(number) if number.value.fract() == 0.0 && number.value.is_finite() => {
-            Some(number.value as i64)
-        }
-        Expression::Identifier(identifier) => environment.get(&identifier.name).copied(),
-        Expression::Unary(unary) => {
-            let operand = constant_value(&unary.operand, environment)?;
-            Some(match unary.op {
-                UnaryOp::ToInteger => i64::from(i32::try_from(operand).ok()?),
-                UnaryOp::Neg => operand.checked_neg()?,
-                UnaryOp::Pos => operand,
-                UnaryOp::Not => i64::from(operand == 0),
-                UnaryOp::BitNot => !operand,
-            })
-        }
-        Expression::Binary(binary) => {
-            let left = constant_value(&binary.left, environment)?;
-            let right = constant_value(&binary.right, environment)?;
-            let boolean = |flag: bool| Some(i64::from(flag));
-            match binary.op {
-                BinaryOp::CheckedValue | BinaryOp::DiscreteValue => None,
-                BinaryOp::IntAdd
-                | BinaryOp::IntSub
-                | BinaryOp::IntMul
-                | BinaryOp::IntDiv
-                | BinaryOp::IntMod
-                | BinaryOp::IntPow => crate::integer_runtime::integer_arithmetic(
-                    binary.op.integer_arithmetic()?,
-                    left as f64,
-                    right as f64,
-                )
-                .ok()
-                .map(|v| v as i64),
-                BinaryOp::Add => left.checked_add(right),
-                BinaryOp::Sub => left.checked_sub(right),
-                BinaryOp::Mul => left.checked_mul(right),
-                BinaryOp::Div => left.checked_div(right),
-                BinaryOp::Mod => left.checked_rem(right),
-                BinaryOp::Pow => u32::try_from(right).ok().and_then(|e| left.checked_pow(e)),
-                BinaryOp::Eq => boolean(left == right),
-                BinaryOp::Ne => boolean(left != right),
-                BinaryOp::Lt => boolean(left < right),
-                BinaryOp::Le => boolean(left <= right),
-                BinaryOp::Gt => boolean(left > right),
-                BinaryOp::Ge => boolean(left >= right),
-                BinaryOp::And => boolean(left != 0 && right != 0),
-                BinaryOp::Or => boolean(left != 0 || right != 0),
-                BinaryOp::BitAnd => Some(left & right),
-                BinaryOp::BitOr => Some(left | right),
-                BinaryOp::BitXor => Some(left ^ right),
-                BinaryOp::Shl => u32::try_from(right).ok().map(|shift| left << shift),
-                BinaryOp::Shr => u32::try_from(right).ok().map(|shift| left >> shift),
-            }
-        }
-        Expression::Conditional(conditional) => {
-            let condition = constant_value(&conditional.condition, environment)?;
-            if condition != 0 {
-                constant_value(&conditional.then_expr, environment)
-            } else {
-                constant_value(&conditional.else_expr, environment)
-            }
-        }
-        Expression::Digital(DigitalExpr::Xnor(xnor)) => {
-            let left = constant_value(&xnor.left, environment)?;
-            let right = constant_value(&xnor.right, environment)?;
-            Some(!(left ^ right))
-        }
-        _ => None,
-    }
 }

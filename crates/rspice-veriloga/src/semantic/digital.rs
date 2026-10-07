@@ -1439,26 +1439,33 @@ impl SemanticAnalyzer {
     /// against the declared defaults, which is what elaborating the top module
     /// with no overrides means.
     ///
-    /// What that does not yet cover is an instance *override* reaching a
-    /// digital range — `child #(.WIDTH(8)) u1 (...)` — which would elaborate
-    /// the child's signals at a different width than its own default says.
-    /// Hierarchy elaboration refuses a parameter override on a digital instance
-    /// rather than applying the default silently.
+    /// Digital child instances are reanalyzed after their effective parameter
+    /// values are installed, so this same path resolves each specialized shape.
     fn resolve_vector_range(
         &mut self,
         range: Option<&VectorRange>,
         keyword: &str,
     ) -> Option<VectorBounds> {
         let range = range?;
-        let (Some(msb), Some(lsb)) = (
-            self.eval_const_invariant_value(&range.msb)
-                .or_else(|| self.eval_const_value(&range.msb)),
-            self.eval_const_invariant_value(&range.lsb)
-                .or_else(|| self.eval_const_value(&range.lsb)),
-        ) else {
+        let bound = |expression| {
+            crate::canonical_ir::digital_lower::selector_constant(
+                expression,
+                &self.digital_selector_constants,
+                self.current_time_scale,
+            )
+            .map(|value| match value {
+                crate::numeric_literal::NumericLiteralValue::Integer(value) => {
+                    ConstantValue::Integer(value)
+                }
+                crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                    ConstantValue::Real(value)
+                }
+            })
+        };
+        let (Some(msb), Some(lsb)) = (bound(&range.msb), bound(&range.lsb)) else {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "`{keyword}` vector bounds must be compile-time constants"
+                    "`{keyword}` vector bounds must be compile-time constants within the supported signed 64-bit index range"
                 )),
                 range.span,
             );

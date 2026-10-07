@@ -208,12 +208,12 @@ pub struct Module {
     pub genvars: Vec<GenvarDecl>,
     /// Generate regions **as written**, before elaboration-time unrolling.
     ///
-    /// Empty on every module the rest of the compiler ever sees: the parser
-    /// unrolls each region at `endmodule` and appends the result to the item
-    /// lists above, so nothing downstream has a second shape of module item to
-    /// understand. A region that survives here is one that could not be
-    /// unrolled, and the parser has already refused it by then.
+    /// Empty on executable module item lists. The parser expands defaults at
+    /// `endmodule`; parameter specialization repeats expansion from
+    /// `generate_template` before analysis and lowering.
     pub generates: Vec<GenerateConstruct>,
+    /// Original generate structure, retained for parameter specialization.
+    pub generate_template: Option<Box<GenerateTemplate>>,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
@@ -261,10 +261,18 @@ impl Module {
             digital_processes: Vec::new(),
             genvars: Vec::new(),
             generates: Vec::new(),
+            generate_template: None,
             attributes: Vec::new(),
             span,
         }
     }
+}
+
+/// Source module before its generate regions were expanded.
+#[derive(Debug, Clone)]
+pub struct GenerateTemplate {
+    pub module: Module,
+    pub next_process_id: u32,
 }
 
 /// `genvar i, j;` — IEEE 1364-2005 section 12.1.3.2.

@@ -1367,7 +1367,15 @@ impl SemanticAnalyzer {
                 .default
                 .as_ref()
                 .filter(|_| !is_parameter_array)
-                .map(|expression| self.normalize_integer_expression(expression))
+                .map(|expression| {
+                    // Retain exact packed parameter defaults for digital elaboration.
+                    // Continuous lowering still rejects a value its scalar ABI cannot carry.
+                    if matches!(expression, Expression::Digital(DigitalExpr::FourState(_))) {
+                        Ok(expression.clone())
+                    } else {
+                        self.normalize_integer_expression(expression)
+                    }
+                })
                 .transpose()?;
             let declared_default_value = normalized_default
                 .as_ref()
@@ -1486,8 +1494,13 @@ impl SemanticAnalyzer {
                 } else {
                     normalized_default
                         .map(|expression| {
-                            self.coerce_assignment_expression(expression, value_type)
-                                .map(|(expression, _)| expression)
+                            if matches!(expression, Expression::Digital(DigitalExpr::FourState(_)))
+                            {
+                                Ok(expression)
+                            } else {
+                                self.coerce_assignment_expression(expression, value_type)
+                                    .map(|(expression, _)| expression)
+                            }
                         })
                         .transpose()?
                 },

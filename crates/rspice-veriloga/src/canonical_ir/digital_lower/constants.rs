@@ -579,3 +579,57 @@ fn collect_visible(value: &Expression, locals: &BTreeSet<String>, reads: &mut BT
     collect_expression_reads(value, &mut names);
     reads.extend(names.into_iter().filter(|name| !locals.contains(name)));
 }
+
+/// Close an instance override in its parent's scope using the child's declared
+/// assignment type. Only source expressions cross back into elaboration.
+pub(super) fn override_literal(
+    declaration: &ParameterDecl,
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Result<Expression, String> {
+    let expression = declaration
+        .default
+        .as_ref()
+        .ok_or("missing override expression")?;
+    if !declaration.dimensions.is_empty() || declaration.param_type == ParamType::String {
+        return Err(
+            "array and string digital parameter overrides require additional constant lowering"
+                .into(),
+        );
+    }
+    let diagnostic = |errors: Vec<DigitalLoweringDiagnostic>| {
+        errors
+            .into_iter()
+            .map(|error| error.diagnostic.message)
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    let mut resolved = resolve(source, time_scale, &[], &[], [expression]).map_err(diagnostic)?;
+    // This name cannot shadow an operand: the expression is evaluated before
+    // resolve_one publishes its result in the constant environment.
+    let name = "$rspice_override";
+    resolve_one(name, declaration, &mut resolved, time_scale).map_err(diagnostic)?;
+    if let Some((value, signed)) = resolved.bits.get(name) {
+        let raw = format!(
+            "{}'{}b{}",
+            value.width(),
+            if *signed { "s" } else { "" },
+            value.spelling()
+        );
+        let literal = crate::four_state::decode(&raw).map_err(|error| error.to_string())?;
+        return Ok(Expression::Digital(crate::ast::DigitalExpr::FourState(
+            crate::ast::FourStateLit {
+                value: literal,
+                span: declaration.span,
+            },
+        )));
+    }
+    let value = resolved
+        .real(name)
+        .ok_or("non-finite parameter overrides require non-finite real execution")?;
+    Ok(Expression::Number(crate::ast::NumberLit {
+        value,
+        raw: format!("{value:e}").into(),
+        span: declaration.span,
+    }))
+}

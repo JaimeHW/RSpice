@@ -7494,3 +7494,190 @@ fn integer_output_ports_reject_invalid_declarations_and_keep_ownership_diagnosti
     assert!(q.integer && q.signed);
     artifact.digital.validate().unwrap();
 }
+
+#[test]
+fn digital_child_overrides_rebuild_shapes_constants_and_generated_instances() {
+    use rspice_veriloga::canonical_ir::digital::DigitalInitialValue;
+    let source = r#"
+module leaf(output reg [WIDTH-1:0] word=VALUE, output integer count=0,
+            output real level=STEP, input wire clk);
+ parameter integer WIDTH=4 from [1:32]; parameter integer VALUE=0;
+ parameter real STEP=1.0;
+ parameter integer OFFSET=WIDTH+1 from [WIDTH:WIDTH+2];
+ localparam integer LIMIT=OFFSET+1;
+ aliasparam SIZE=WIDTH;
+ reg [WIDTH-1:0] memory[1:WIDTH];
+ wire [WIDTH-1:0] mirror; integer branch;
+ assign mirror=word;
+ genvar i;
+ generate
+   for(i=0;i<WIDTH;i=i+1) begin : bits
+     initial memory[i+1]=VALUE+i;
+   end
+   if(WIDTH>7) begin : wide
+     initial branch=WIDTH;
+   end else begin : narrow
+     initial branch=-WIDTH;
+   end
+ endgenerate
+ always @(posedge clk) begin word<=word+1; count<=LIMIT; level<=STEP+0.5; end
+endmodule
+module wrapper(output wire [WIDTH-1:0] q,input wire clk);
+ parameter integer WIDTH=4,VALUE=0;
+ leaf #(.WIDTH(WIDTH),.VALUE(VALUE+1),.STEP(1.25)) child(.word(q),.count(),.level(),.clk(clk));
+endmodule
+module wide(output reg [159:0] q=DATA);
+ parameter DATA=0;
+endmodule
+module top(input wire clk);
+ parameter integer WIDTH=12;
+ wire [11:0] a_word,a2_word; wire [4:0] b_word; wire [6:0] c_word;
+ leaf #(.SIZE(WIDTH),.VALUE(8'd255+8'd1),.STEP(3.25)) a(.word(a_word),.count(),.level(),.clk(clk));
+ leaf #(.WIDTH(WIDTH),.VALUE(256),.STEP(3.25)) a2(.word(a2_word),.count(),.level(),.clk(clk));
+ leaf #(5,-2,2.5) b(.word(b_word),.count(),.level(),.clk(clk));
+ wrapper #(.WIDTH(7),.VALUE(9)) c(c_word,clk);
+ wide #(.DATA(160'hfedcba98765432100123456789abcdef0123456789)) w();
+ genvar j;
+ generate for(j=-1;j<1;j=j+1) begin : copies
+   wide #(.DATA(j)) row();
+ end endgenerate
+endmodule
+"#;
+    let mut design = Design::new(source, "top");
+    for signal in &design.plan.signals {
+        match &signal.initial_value {
+            Some(DigitalInitialValue::FourState(value)) => {
+                design.store.values[usize::from(signal.id)] = value.clone()
+            }
+            Some(DigitalInitialValue::Real(value)) => {
+                design.store.reals[usize::from(signal.id)] = *value
+            }
+            None => {}
+        }
+    }
+    for (name, width) in [
+        ("a.word", 12),
+        ("a2.word", 12),
+        ("b.word", 5),
+        ("c.child.word", 7),
+    ] {
+        assert_eq!(
+            design.plan.signal(design.signal(name)).unwrap().width,
+            width,
+            "{name}"
+        );
+    }
+    assert_eq!(
+        design.get("a.word"),
+        "000100000000",
+        "integer assignment context must preserve carry"
+    );
+    assert_eq!(design.get("b.word"), "11110");
+    assert_eq!(design.get("c.child.word"), "0001010");
+    let expected_wide =
+        rspice_veriloga::four_state::decode("160'hfedcba98765432100123456789abcdef0123456789")
+            .unwrap();
+    assert_eq!(
+        design.get("w.q"),
+        FourStateValue::from_literal(&expected_wide).spelling()
+    );
+    design.set("clk", "0");
+    design.start_all();
+    design.settle();
+    assert_eq!(design.get("a.memory[12]"), "000100001011");
+    assert_eq!(design.get("b.memory[5]"), "00010");
+    assert_eq!(design.get("c.child.memory[7]"), "0010000");
+    assert_eq!(design.get("copies[-1].row.q"), "1".repeat(160));
+    assert_eq!(design.get("copies[0].row.q"), "0".repeat(160));
+    assert_eq!(design.get("a.branch"), format!("{:032b}", 12));
+    assert_eq!(design.get("b.branch"), format!("{:032b}", -5i32 as u32));
+    for (prefix, width) in [("a", 12), ("a2", 12), ("b", 5), ("c.child", 7)] {
+        assert_eq!(
+            design.get(&format!("{prefix}.mirror")),
+            design.get(&format!("{prefix}.word"))
+        );
+        assert!(
+            design
+                .plan
+                .signals
+                .iter()
+                .any(|signal| signal.name == format!("{prefix}.memory[{width}]"))
+        );
+        assert!(
+            !design
+                .plan
+                .signals
+                .iter()
+                .any(|signal| signal.name == format!("{prefix}.memory[{}]", width + 1))
+        );
+    }
+    assert_eq!(design.get_real("a.level"), 3.25);
+    design.transition("clk", "1");
+    assert_eq!(design.get("a_word"), "000100000001");
+    assert_eq!(design.get("a2_word"), "000100000001");
+    assert_eq!(design.get("b_word"), "11111");
+    assert_eq!(design.get("c_word"), "0001011");
+    for (name, value) in [
+        ("a.count", 14),
+        ("a2.count", 14),
+        ("b.count", 7),
+        ("c.child.count", 9),
+    ] {
+        assert_eq!(design.get(name), format!("{value:032b}"), "{name}");
+    }
+    assert_eq!(design.get_real("a.level"), 3.75);
+    assert_eq!(design.get_real("b.level"), 3.0);
+    assert_eq!(design.get_real("c.child.level"), 1.75);
+    let encoded = serde_json::to_string(&design.plan).unwrap();
+    let decoded: CanonicalDigitalPlan = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, design.plan);
+    decoded.validate().unwrap();
+}
+
+#[test]
+fn digital_child_overrides_reject_invalid_binding_and_runtime_values() {
+    for parameters in [
+        ".MISSING(3)",
+        ".WIDTH(3),.SIZE(4)",
+        "3,4,5",
+        ".WIDTH(runtime)",
+        ".WIDTH($time)",
+        ".WIDTH(4),3",
+        ".WIDTH(33)",
+        ".WIDTH(32)",
+        ".WIDTH(8),.VALUE(9)",
+    ] {
+        let source = format!(
+            r#"
+module leaf(output reg [WIDTH-1:0] q);
+ parameter integer WIDTH=4 from [1:32] exclude 32; parameter integer VALUE=0 from [0:WIDTH]; aliasparam SIZE=WIDTH;
+ initial q=VALUE;
+endmodule
+module top; integer runtime; initial runtime=3;
+ leaf #({parameters}) child();
+endmodule
+"#
+        );
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir_module(&source, Some("top"))
+            .expect_err(&source)
+            .to_string();
+        assert!(!error.contains("Internal error"), "{error}");
+    }
+    // The generate evaluator must use typed four-state arithmetic rather than
+    // a second i64/f64 evaluator with different overflow and shift behavior.
+    let mut design = Design::new(
+        r#"
+module leaf(output integer q);
+ parameter N=8'd255+8'd1;
+ generate if(N==0) begin : wrapped initial q=1; end
+ else begin : wrong initial q=2; end endgenerate
+endmodule
+module top; parameter K=8'd255+8'd2; leaf a(); leaf #(.N(K)) b(); endmodule
+"#,
+        "top",
+    );
+    design.start_all();
+    assert_eq!(design.get("a.q"), format!("{:032b}", 1));
+    assert_eq!(design.get("b.q"), format!("{:032b}", 2));
+}

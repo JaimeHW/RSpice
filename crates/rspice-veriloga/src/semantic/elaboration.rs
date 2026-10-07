@@ -1153,7 +1153,7 @@ fn parameter_bounds_label(bounds: &[(i64, i64)]) -> String {
         .collect::<String>()
 }
 
-fn bind_parameter_overrides(
+pub(super) fn bind_parameter_overrides(
     instance: &ModuleInstance,
     child: &AnalyzedModule,
     path: &str,

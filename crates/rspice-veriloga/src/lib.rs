@@ -1076,6 +1076,7 @@ impl VerilogACompiler {
                     span: parameter.span,
                 }));
             }
+            parser::expand_specialized_generates(selected)?;
         }
         measurements.record(PipelinePhase::Parse, phase_started.elapsed())?;
         measurements.metrics_mut().top_level_item_count =

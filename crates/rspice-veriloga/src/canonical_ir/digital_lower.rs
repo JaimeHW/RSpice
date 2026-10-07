@@ -133,6 +133,14 @@ pub(crate) fn selector_constant(
     constants::scalar(expression, &resolved, time_scale)
 }
 
+pub(crate) fn parameter_override_literal(
+    declaration: &crate::ast::ParameterDecl,
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Result<Expression, String> {
+    constants::override_literal(declaration, source, time_scale)
+}
+
 /// Whether a diagnostic is the author's to fix or the compiler's.
 ///
 /// The distinction decides what the author is told. A *refusal* is a construct

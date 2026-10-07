@@ -2580,24 +2580,31 @@ fn integer_output_ports_drive_spice_loaded_mixed_instances() {
         "integer_port_sampler",
         r#"
 `timescale 1ns/1ps
-module integer_source(output integer code=-2);
- initial #1 code=-4;
+module integer_source(output integer code=BASE);
+ parameter integer BASE=-2;
+ initial #1 code=2*BASE;
 endmodule
 module integer_port_sampler(p,q);
  inout p; electrical p; output reg q=0;
- wire [7:0] code;
- integer_source source(code);
+ parameter integer START=-2;
+ wire [7:0] code; reg configured;
+ integer_source #(.BASE(START)) source(code);
+ generate if(START < -2) begin : larger
+   initial configured=1;
+ end else begin : smaller
+   initial configured=0;
+ end endgenerate
  analog I(p)<+(V(p)-(code-256.0))/1000;
- initial #1.001 q=(code==252);
+ initial #1.001 q=(code==2*START+256) && (configured==(START < -2));
 endmodule
 "#,
     );
     let deck = format!(
-        "* integer output drives a mixed hierarchy\n.param vcc=1\nXa pa qa integer_port_sampler\nXb pb qb integer_port_sampler\nRa pa 0 1k\nRb pb 0 2k\nRqa qa 0 1k\nRqb qb 0 1k\nCqa qa 0 1p\nCqb qb 0 1p\n.va \"{}\" integer_port_sampler module=integer_port_sampler\n.end\n",
+        "* integer output drives a mixed hierarchy\n.param vcc=1\nXa pa qa integer_port_sampler\nXb pb qb integer_port_sampler START=-3\nRa pa 0 1k\nRb pb 0 2k\nRqa qa 0 1k\nRqb qb 0 1k\nCqa qa 0 1p\nCqb qb 0 1p\n.va \"{}\" integer_port_sampler module=integer_port_sampler\n.end\n",
         model.deck_path()
     );
     let result = run(&deck, 2e-9, 0.1e-9);
-    for (node, initial, final_value) in [("pa", -1.0, -2.0), ("pb", -4.0 / 3.0, -8.0 / 3.0)] {
+    for (node, initial, final_value) in [("pa", -1.0, -2.0), ("pb", -2.0, -4.0)] {
         let values = waveform(&result, node);
         assert!(
             (values[0] - initial).abs() < 1e-8,

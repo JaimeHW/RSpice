@@ -1902,7 +1902,7 @@ fn a_child_folds_its_own_parameters_and_never_the_parents() {
 fn unelaborated_instance_constructs_refuse_by_name() {
     let cases: Vec<(&str, String, Vec<&str>)> = vec![
         (
-            "a parameter override",
+            "an excess ordered parameter override",
             hierarchy(
                 "module gate(y, a);\n\
                  \x20   output y;\n     input a;\n     wire y, a;\n\
@@ -1910,7 +1910,7 @@ fn unelaborated_instance_constructs_refuse_by_name() {
                  endmodule\n",
                 "    wire x, z;\n     gate #(2) g1(z, x);",
             ),
-            vec!["overrides a parameter", "12.2"],
+            vec!["at most 0 parameter overrides"],
         ),
         (
             "an expression in a port connection",

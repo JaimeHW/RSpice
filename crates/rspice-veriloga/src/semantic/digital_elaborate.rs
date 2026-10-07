@@ -66,17 +66,15 @@
 //! reason a driver identity exists at all, and it is what makes collapsing
 //! safe here.
 //!
+//! Numeric child parameter overrides are closed in the parent's effective scope,
+//! with the child's declared assignment type. Equal specializations share an
+//! analyzed template, while each instance retains independent storage and process
+//! identities. Widths, initializers and generated structure are rebuilt together.
+//!
 //! # What is refused
 //!
 //! Every refusal names the construct and the clause. Nothing is dropped.
 //!
-//! * a parameter override (`#(...)`) on a digital instance (section 12.2).
-//!   The child's *own* parameters are not refused: section 12.2 makes the
-//!   declared default the value in the absence of an override, and the frame
-//!   carries that table so a parameter-sized expression inside the child folds
-//!   against the child's numbers. An override is what stays refused, because
-//!   honouring one would give two instances of a module two different signal
-//!   widths and this pass produces one signal table per module body;
 //! * a port connection that is neither a declared net nor a bit- or
 //!   part-select of one — an arbitrary expression, a constant, a concatenation
 //!   (section 12.3.9);
@@ -86,7 +84,7 @@
 //! * a connection naming something that is not a declared discrete-domain
 //!   signal, because this compiler does not create implicit nets (section
 //!   4.5);
-//! * a port whose width differs from the net it is connected to, because two
+//! * a net port whose width differs from the net it is connected to, because two
 //!   collapsed nets are one net and one net has one width (section 12.3.9);
 //! * an `input` or `inout` port declared as a variable (section 12.3.3);
 //! * an output or inout port connected to a variable, or to anything the
@@ -132,8 +130,9 @@ pub(crate) fn elaborate_digital_hierarchy(
         analyzed,
         source_modules,
         instances: Vec::new(),
+        specializations: HashMap::new(),
     };
-    let scope = Scope::for_root(root);
+    let scope = Scope::for_root(root, root_source);
     let mut module_stack = vec![root.name.clone()];
     elaborator.append_instances(root_source, &scope, &mut module_stack, "", true)?;
     Ok(elaborator.instances)
@@ -169,11 +168,25 @@ struct Binding {
 #[derive(Debug, Default)]
 struct Scope {
     signals: HashMap<SmolStr, Binding>,
+    constants: super::DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
 }
 
 impl Scope {
-    fn for_root(root: &AnalyzedModule) -> Self {
-        let mut scope = Self::default();
+    fn for_root(root: &AnalyzedModule, source: &Module) -> Self {
+        let mut scope = Self {
+            constants: super::DigitalConstants {
+                definitions: source
+                    .parameters
+                    .iter()
+                    .chain(&source.localparams)
+                    .cloned()
+                    .collect(),
+                ..Default::default()
+            },
+            time_scale: source.time_scale,
+            ..Self::default()
+        };
         for signal in &root.digital.signals {
             scope.signals.insert(
                 signal.name.clone(),
@@ -196,6 +209,12 @@ struct DigitalElaborator<'a> {
     analyzed: &'a AnalyzedFile,
     source_modules: &'a HashMap<SmolStr, &'a Module>,
     instances: Vec<ElaboratedDigitalInstance>,
+    specializations: HashMap<(SmolStr, Vec<(usize, String)>), std::sync::Arc<SpecializedModule>>,
+}
+
+struct SpecializedModule {
+    source: Module,
+    analyzed: AnalyzedModule,
 }
 
 impl DigitalElaborator<'_> {
@@ -281,27 +300,13 @@ impl DigitalElaborator<'_> {
                 ))
             })?;
 
-        // A module with content in both domains is refused with the wording
-        // every other digital-backend boundary uses, so an author meets one
-        // message for "this compiler cannot execute that" rather than two.
-        if has_analog_content(child) {
+        let specialized = self.specialize(instance, child_source, child, parent_scope, path)?;
+        let (child_source, child) = specialized
+            .as_deref()
+            .map(|specialized| (&specialized.source, &specialized.analyzed))
+            .unwrap_or((child_source, child));
+        if has_analog_content(child, child_source) {
             reject_digital_content(child)?;
-        }
-        // A child that declares parameters elaborates at its own declared
-        // defaults, which section 12.2 makes the value in the absence of an
-        // override. What stays refused is the override itself — see below —
-        // because honouring one would give two instances of a module two
-        // different signal *widths*, and this pass produces one signal table
-        // per module body.
-        if let Some(override_) = instance.parameters.first() {
-            return Err(semantic_error(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "instance `{path}` overrides a parameter of `{}`; IEEE 1364-2005 section \
-                     12.2 parameter value assignment on a digital instance is not supported yet",
-                    instance.module
-                )),
-                override_.span,
-            ));
         }
 
         let connections = bind_connections(instance, child, path)?;
@@ -333,6 +338,76 @@ impl DigitalElaborator<'_> {
         let nested = self.append_instances(child_source, &scope, module_stack, path, false);
         module_stack.pop();
         nested
+    }
+
+    fn specialize(
+        &mut self,
+        instance: &ModuleInstance,
+        source: &Module,
+        child: &AnalyzedModule,
+        parent: &Scope,
+        path: &str,
+    ) -> CompileResult<Option<std::sync::Arc<SpecializedModule>>> {
+        if instance.parameters.is_empty() {
+            validate_parameter_ranges(source, path)?;
+            return Ok(None);
+        }
+        let mut overrides: Vec<_> =
+            super::elaboration::bind_parameter_overrides(instance, child, path)?
+                .into_iter()
+                .collect();
+        overrides.sort_by_key(|(index, _)| *index);
+        let mut values = Vec::new();
+        let mut key = Vec::new();
+        for (index, expression) in overrides {
+            let mut declaration = source.parameters[index].clone();
+            declaration.default = Some(expression);
+            let value = crate::canonical_ir::digital_lower::parameter_override_literal(
+                &declaration,
+                &parent.constants,
+                parent.time_scale,
+            )
+            .map_err(|message| {
+                semantic_error(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter `{}` of instance `{path}`: {message}",
+                        declaration.name
+                    )),
+                    declaration.default.as_ref().expect("override").span(),
+                )
+            })?;
+            let identity = match &value {
+                Expression::Digital(DigitalExpr::FourState(literal)) => {
+                    literal.value.raw.to_string()
+                }
+                Expression::Number(number) => format!("real:{:016x}", number.value.to_bits()),
+                _ => {
+                    return Err(internal_error(
+                        "closed parameter has no constant identity".into(),
+                    ));
+                }
+            };
+            key.push((index, identity));
+            values.push((index, value));
+        }
+        let key = (instance.module.clone(), key);
+        if let Some(specialized) = self.specializations.get(&key) {
+            return Ok(Some(specialized.clone()));
+        }
+        let mut source = source.clone();
+        for (index, value) in values {
+            source.parameters[index].default = Some(value);
+        }
+        validate_parameter_ranges(&source, path)?;
+        crate::parser::expand_specialized_generates(&mut source)?;
+        let mut analyzer = super::SemanticAnalyzer::new();
+        analyzer.disciplines = self.analyzed.disciplines.clone();
+        analyzer.current_default_transition = child.default_transition;
+        let mut analyzed = analyzer.analyze_module(&source, child.default_transition)?;
+        analyzed.default_discipline = child.default_discipline.clone();
+        let specialized = std::sync::Arc::new(SpecializedModule { source, analyzed });
+        self.specializations.insert(key, specialized.clone());
+        Ok(Some(specialized))
     }
 
     /// Resolve one instance's ports into elaborated names.
@@ -542,7 +617,11 @@ impl DigitalElaborator<'_> {
         }
 
         let mut signals = Vec::with_capacity(child.digital.signals.len());
-        let mut scope = Scope::default();
+        let mut scope = Scope {
+            constants: child.digital.constants.clone(),
+            time_scale: child.digital.time_scale,
+            ..Scope::default()
+        };
         for declared in &child.digital.signals {
             let binding = bindings.get(&declared.name).cloned().unwrap_or(Binding {
                 elaborated: qualify(path, &declared.name),
@@ -561,7 +640,7 @@ impl DigitalElaborator<'_> {
 }
 
 /// Whether the module has continuous-domain content to flatten.
-fn has_analog_content(module: &AnalyzedModule) -> bool {
+fn has_analog_content(module: &AnalyzedModule, source: &Module) -> bool {
     // Numeric declarations remain in the symbol table after digital ownership
     // is established. Those entries are not a second, continuous-domain body.
     let digital_names: HashSet<_> = module
@@ -580,11 +659,20 @@ fn has_analog_content(module: &AnalyzedModule) -> bool {
         .collect();
     !module.contributions.is_empty()
         || !module.body.is_empty()
-        || !module.statements.is_empty()
+        || module
+            .statements
+            .iter()
+            .enumerate()
+            .any(|(index, _)| !module.prologue_statements.contains(&index))
         || !module.branches.is_empty()
         || !module.internal_nodes.is_empty()
         || module.variables.iter().enumerate().any(|(slot, variable)| {
-            !digital_names.contains(&variable.name) && !digital_array_slots.contains(&slot)
+            !digital_names.contains(&variable.name)
+                && !digital_array_slots.contains(&slot)
+                && !source
+                    .localparams
+                    .iter()
+                    .any(|parameter| parameter.name == variable.name)
         })
 }
 
@@ -950,4 +1038,75 @@ fn semantic_error(kind: SemanticErrorKind, span: Span) -> CompileError {
 
 fn internal_error(message: String) -> CompileError {
     crate::error::CodeGenError::new(crate::error::CodeGenErrorKind::Internal(message)).into()
+}
+
+/// Instance constraints see the final typed values, including dependent defaults.
+fn validate_parameter_ranges(source: &Module, path: &str) -> CompileResult<()> {
+    use crate::ast::{BinaryExpr, BinaryOp};
+    let constants = super::DigitalConstants {
+        definitions: source
+            .parameters
+            .iter()
+            .chain(&source.localparams)
+            .cloned()
+            .collect(),
+        ..Default::default()
+    };
+    for parameter in &source.parameters {
+        let Some(range) = &parameter.range else {
+            continue;
+        };
+        let mut conditions = Vec::new();
+        for bound in &range.bounds {
+            if let Some(lower) = &bound.lower {
+                conditions.push((
+                    if bound.lower_inclusive {
+                        BinaryOp::Ge
+                    } else {
+                        BinaryOp::Gt
+                    },
+                    lower,
+                ));
+            }
+            if let Some(upper) = &bound.upper {
+                conditions.push((
+                    if bound.upper_inclusive {
+                        BinaryOp::Le
+                    } else {
+                        BinaryOp::Lt
+                    },
+                    upper,
+                ));
+            }
+        }
+        conditions.extend(range.exclude.iter().map(|value| (BinaryOp::Ne, value)));
+        for (op, right) in conditions {
+            let comparison = Expression::Binary(BinaryExpr {
+                op,
+                left: Box::new(Expression::Identifier(Identifier {
+                    name: parameter.name.clone(),
+                    span: parameter.span,
+                })),
+                right: Box::new(right.clone()),
+                span: parameter.span,
+            });
+            if !matches!(
+                crate::canonical_ir::digital_lower::selector_constant(
+                    &comparison,
+                    &constants,
+                    source.time_scale
+                ),
+                Some(crate::numeric_literal::NumericLiteralValue::Integer(1))
+            ) {
+                return Err(semantic_error(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "parameter `{}` of instance `{path}` violates its declared range or has an indeterminate range value",
+                        parameter.name
+                    )),
+                    parameter.span,
+                ));
+            }
+        }
+    }
+    Ok(())
 }

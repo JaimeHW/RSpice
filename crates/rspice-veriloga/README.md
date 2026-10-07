@@ -464,9 +464,29 @@ arrays and general unequal-width net-port connections remain open.
 This uses the existing schema 86 storage and Wasm helper ABI 20.
 Source: [VAMS-2023, 6.5.2, 7.2.2 and A.2.1.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
+Schema 87 specializes scalar numeric parameters on digital child instances.
+Named, ordered and alias bindings close in the parent's effective constant
+scope using the child's assignment type. Specialized analysis rebuilds packed
+and supported unpacked shapes, initializers, dependent defaults and localparams.
+Equal effective override sets share an analyzed template; instance storage and
+process identities remain independent. Final range and exclusion constraints
+are checked against the specialized values.
+Generate templates retain authored structure so child and external root
+specialization can rebuild conditional branches, loops and generated instances.
+Generate expressions and digital ranges now use the same typed constant
+evaluator as digital execution. Packed override values retain width, signedness
+and four-state bits. Genvar assignment conversion and substitution preserve
+signed integer semantics. Generate selectors still require a known integer;
+four-state case selection remains open.
+Array/string overrides, non-finite real overrides, the full typed external
+parameter ABI, parameter-dependent analog array layouts and general mixed HDL
+hierarchy remain open. Existing recursive-module and generate-body restrictions
+also remain. Wasm helper ABI stays at 20.
+Source: [VAMS-2023, 6.3 and 6.6](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
+
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
-shape/child-override support, and remaining mixed-host/platform qualification
+shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
 are still open.
 
 Delay-controlled nonblocking assignments capture their RHS and converted delay

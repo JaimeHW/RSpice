@@ -416,7 +416,14 @@ impl<'a> Parser<'a> {
         // reads the module the author would have had to write by hand, and
         // needs no arm for a construct that contributes no run-time behaviour
         // of its own.
+        let template = (!module.generates.is_empty()).then(|| {
+            Box::new(GenerateTemplate {
+                module: module.clone(),
+                next_process_id: self.next_process_id,
+            })
+        });
         generate::expand(&mut module, &mut self.next_process_id)?;
+        module.generate_template = template;
         Ok(module)
     }
 
@@ -4375,4 +4382,18 @@ mod tests {
                 .all(|bit| *bit == crate::four_state::FourStateBit::Zero)
         );
     }
+}
+
+/// Rebuild generated items from authored structure after parameter specialization.
+pub(crate) fn expand_specialized_generates(module: &mut Module) -> Result<(), ParseError> {
+    let Some(template) = &module.generate_template else {
+        return Ok(());
+    };
+    let mut expanded = template.module.clone();
+    expanded.parameters = module.parameters.clone();
+    let mut next_process_id = template.next_process_id;
+    generate::expand(&mut expanded, &mut next_process_id)?;
+    expanded.generate_template = Some(template.clone());
+    *module = expanded;
+    Ok(())
 }
