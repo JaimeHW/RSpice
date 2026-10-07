@@ -6,7 +6,20 @@ use rspice_core::execution::control::{
 };
 use rspice_core::{Engine, Netlist, NoAbort};
 
-const SOURCE: &str = "* expression cancellation\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1u\n.FUNC work(x) {IF(x<=0,1,work(x-1)+work(x-1))}\n";
+const SOURCE: &str = "* expression cancellation\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1u\n";
+
+fn work_functions() -> String {
+    let mut source = String::from(".FUNC f0() {1}\n");
+    for index in 1..=14 {
+        source.push_str(&format!(
+            ".FUNC f{index}() {{f{}()+f{}()}}\n",
+            index - 1,
+            index - 1
+        ));
+    }
+    source.push_str(".FUNC work(x) {f14()}\n");
+    source
+}
 
 #[test]
 fn assignments_and_loop_tests_cancel_without_executing_the_next_command() {
@@ -18,7 +31,10 @@ fn assignments_and_loop_tests_cancel_without_executing_the_next_command() {
         "repeat work(14)\nend",
     ] {
         let program = ControlProgram::parse_deck_with_abort(
-            &format!("{SOURCE}.control\n{script}\necho unreachable\n.endc\n.end\n"),
+            &format!(
+                "{SOURCE}{}.control\n{script}\necho unreachable\n.endc\n.end\n",
+                work_functions()
+            ),
             ControlLimits::default(),
             &NoAbort,
         )
@@ -39,8 +55,10 @@ fn assignments_and_loop_tests_cancel_without_executing_the_next_command() {
 #[test]
 fn command_arguments_cancel_before_publishing_changes_or_output() {
     let engine = Engine::default();
-    let mut circuit =
-        ControlCircuit::new(Netlist::parse(&format!("{SOURCE}.end\n")).unwrap()).unwrap();
+    let mut circuit = ControlCircuit::new(
+        Netlist::parse(&format!("{SOURCE}{}.end\n", work_functions())).unwrap(),
+    )
+    .unwrap();
     let variables = circuit.netlist().params.clone();
     let original_elements = format!("{:?}", circuit.netlist().elements);
     let command = |name: &str, arguments: &str| ControlCommand {

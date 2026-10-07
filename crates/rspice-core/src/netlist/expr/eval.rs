@@ -1010,6 +1010,7 @@ struct ExpressionEvaluator<'a> {
     body_cache: HashMap<String, Expr>,
     call_depth: usize,
     next_binding_id: u64,
+    evaluating_arguments: HashSet<u64>,
     numeric_args: Vec<ComplexValue>,
 }
 
@@ -1072,6 +1073,7 @@ impl<'a> ExpressionEvaluator<'a> {
             body_cache: HashMap::new(),
             call_depth: 0,
             next_binding_id: 1,
+            evaluating_arguments: HashSet::new(),
             numeric_args: Vec::new(),
         }
     }
@@ -1219,6 +1221,7 @@ impl<'a> ExpressionEvaluator<'a> {
                     param_name,
                     scope,
                 } => {
+                    self.evaluating_arguments.remove(&binding_id);
                     let value = pop_value(&mut values)?;
                     if self
                         .current_function_arg_binding_id(&function_name, &arg_name)
@@ -1270,6 +1273,15 @@ impl<'a> ExpressionEvaluator<'a> {
         if let Some((function_name, arg_name, binding)) = self.function_arg_binding(&name, &scope) {
             match binding {
                 FunctionArgBinding::Expr(arg) => {
+                    // Xyce's expression argument rebinding can point a formal
+                    // back at the very binding being evaluated. Bound this
+                    // cycle independently of function-call depth: no new call
+                    // frame is entered while following an argument reference.
+                    if !self.evaluating_arguments.insert(arg.id) {
+                        return Err(ExprError::InvalidArgument(format!(
+                            "cyclic user-function argument binding: {function_name}({arg_name})"
+                        )));
+                    }
                     frames.push(EvalFrame::ApplyFunctionArg {
                         function_name,
                         arg_name,
