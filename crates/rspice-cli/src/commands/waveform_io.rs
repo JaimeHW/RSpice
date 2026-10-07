@@ -241,7 +241,7 @@ pub(super) fn enforce_table_value_limits(
 
 fn validate_table_shape(
     path: &Path,
-    table: ExportTable,
+    mut table: ExportTable,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ExportTable, CliError> {
     if table.scale.len() < MIN_RESULT_SAMPLES {
@@ -256,15 +256,28 @@ fn validate_table_shape(
     let mut retained_values = table.scale.len();
     for column in &table.columns {
         retained_values = retained_values.saturating_add(match &column.data {
+            ColumnData::NullableReal(values) => values.len(),
             ColumnData::Real(values) => values.len(),
             ColumnData::Complex { real, imag } => real.len().saturating_add(imag.len()),
         });
     }
     enforce_table_value_limits(path, retained_values, resource_limits)?;
+    table
+        .restore_nullable_columns()
+        .map_err(|e| conversion_error(path, e))?;
     validate_values(path, &table.scale_name, "scale", &table.scale)?;
     let expected = table.scale.len();
     for column in &table.columns {
         match &column.data {
+            ColumnData::NullableReal(values) => {
+                validate_series_len(path, &column.name, "values", values.len(), expected)?;
+                if values.iter().flatten().any(|v| !v.is_finite()) {
+                    return Err(conversion_error(
+                        path,
+                        "nullable series contains a nonfinite value",
+                    ));
+                }
+            }
             ColumnData::Real(values) => {
                 validate_series_len(path, &column.name, "values", values.len(), expected)?;
                 validate_values(path, &column.name, "values", values)?;
@@ -717,7 +730,7 @@ fn parse_delimited(
     }
 
     let mut scale = Vec::new();
-    let mut series: Vec<Vec<f64>> = vec![Vec::new(); header.len().saturating_sub(1)];
+    let mut series: Vec<Vec<Option<f64>>> = vec![Vec::new(); header.len().saturating_sub(1)];
     let mut parsed_values = 0_usize;
     for (line_number, line) in lines {
         let fields = parse_delimited_record(line, separator)
@@ -762,7 +775,11 @@ fn parse_delimited(
 
         scale.push(parse(&fields[0], &header[0])?);
         for (i, field) in fields.iter().skip(1).enumerate() {
-            series[i].push(parse(field, &header[i + 1])?);
+            series[i].push(if field.trim().is_empty() {
+                None
+            } else {
+                Some(parse(field, &header[i + 1])?)
+            });
         }
     }
 
@@ -783,7 +800,20 @@ fn parse_delimited(
                 unit: None,
                 var_type: signal_var_type(&inner),
                 name: inner,
-                data: ColumnData::Complex { real: values, imag },
+                data: ColumnData::Complex {
+                    real: values
+                        .into_iter()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            conversion_error(path, "complex real samples must be present")
+                        })?,
+                    imag: imag
+                        .into_iter()
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            conversion_error(path, "complex imaginary samples must be present")
+                        })?,
+                },
             });
             continue;
         }
@@ -791,7 +821,7 @@ fn parse_delimited(
             unit: None,
             name: name.clone(),
             var_type: signal_var_type(name),
-            data: ColumnData::Real(values),
+            data: ColumnData::optional_real(values),
         });
     }
 
@@ -913,7 +943,32 @@ pub(super) fn parse_untyped_json(
                         ),
                     ));
                 }
-                ColumnData::Real(to_f64_vec(values, &name)?)
+                let values = values
+                    .as_array()
+                    .ok_or_else(|| conversion_error(path, "signal values must be an array"))?;
+                let requested = parsed_values.get().saturating_add(values.len());
+                enforce_table_value_limits(path, requested, resource_limits)?;
+                parsed_values.set(requested);
+                ColumnData::optional_real(
+                    values
+                        .iter()
+                        .map(|v| {
+                            if v.is_null() {
+                                Ok(None)
+                            } else {
+                                v.as_f64()
+                                    .filter(|n| n.is_finite())
+                                    .map(Some)
+                                    .ok_or_else(|| {
+                                        conversion_error(
+                                            path,
+                                            "signal values must be finite numbers or null",
+                                        )
+                                    })
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
             } else {
                 ColumnData::Complex {
                     real: to_f64_vec(
@@ -1072,28 +1127,8 @@ pub(super) fn result_document_table(
     }
     for signal in document.signals() {
         let name = signal.descriptor().display_name().to_string();
-        let present = |samples: &[Option<f64>]| -> Result<Vec<f64>, CliError> {
-            samples
-                .iter()
-                .map(|sample| {
-                    sample.ok_or_else(|| {
-                        conversion_error(
-                            path,
-                            format!(
-                                "series '{name}' has an absent sample, which a flat table cannot represent"
-                            ),
-                        )
-                    })
-                })
-                .collect()
-        };
         let data = match signal.values() {
-            SeriesValues::Real { samples } => {
-                if samples.iter().all(Option::is_none) {
-                    continue;
-                }
-                ColumnData::Real(present(samples)?)
-            }
+            SeriesValues::Real { samples } => ColumnData::optional_real(samples.clone()),
             SeriesValues::Complex { samples } => {
                 if samples.iter().all(Option::is_none) {
                     continue;

@@ -93,6 +93,8 @@ enum Scope {
     Signal,
     Samples,
     Sample,
+    NullableSamples,
+    NullableSample,
     Other,
     AllNumbers,
 }
@@ -103,7 +105,8 @@ impl Scope {
             (Self::AllNumbers, _) => Self::AllNumbers,
             (Self::Table, "scale") => Self::Scale,
             (Self::Table, "signals") => Self::Signals,
-            (Self::Scale, "values") | (Self::Signal, "values" | "real" | "imag") => Self::Samples,
+            (Self::Scale, "values") | (Self::Signal, "real" | "imag") => Self::Samples,
+            (Self::Signal, "values") => Self::NullableSamples,
             _ => Self::Other,
         }
     }
@@ -113,12 +116,13 @@ impl Scope {
             Self::AllNumbers => Self::AllNumbers,
             Self::Signals => Self::Signal,
             Self::Samples => Self::Sample,
+            Self::NullableSamples => Self::NullableSample,
             _ => Self::Other,
         }
     }
 
     fn non_numeric<E: de::Error>(self) -> Result<(), E> {
-        if self == Self::Sample {
+        if matches!(self, Self::Sample | Self::NullableSample) {
             Err(E::custom("non-numeric entry in a result sample array"))
         } else {
             Ok(())
@@ -137,7 +141,7 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
         // Charge a table sample before decoding or retaining it. FFTs count
         // every numeric source field, including metadata, in the visitor.
-        if self.scope == Scope::Sample {
+        if matches!(self.scope, Scope::Sample | Scope::NullableSample) {
             self.admission.admit()?;
         }
         deserializer.deserialize_any(self)
@@ -190,7 +194,9 @@ impl<'de> Visitor<'de> for Seed<'_> {
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
-        self.scope.non_numeric()?;
+        if self.scope != Scope::NullableSample {
+            self.scope.non_numeric()?;
+        }
         Ok(Value::Null)
     }
 
@@ -235,6 +241,11 @@ mod tests {
     fn numeric_admission_stops_decoding_at_the_first_excess_value() {
         let tail = "0,".repeat(100_000);
         for (scope, content, expected_kind) in [
+            (
+                Scope::Table,
+                format!(r#"{{"signals":[{{"values":[null,null,{tail}0]}}]}}"#),
+                Kind::Table,
+            ),
             (
                 Scope::Table,
                 format!(r#"{{"scale":{{"values":[0,1,{tail}0]}},"signals":[]}}"#),

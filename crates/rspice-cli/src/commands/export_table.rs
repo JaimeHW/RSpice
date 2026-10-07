@@ -23,12 +23,25 @@ use std::io::Write;
 use std::path::Path;
 
 /// Data for one exported signal column.
+#[derive(Clone)]
 pub(crate) enum ColumnData {
+    NullableReal(Vec<Option<f64>>),
     Real(Vec<f64>),
     Complex { real: Vec<f64>, imag: Vec<f64> },
 }
 
+impl ColumnData {
+    pub(crate) fn optional_real(values: Vec<Option<f64>>) -> Self {
+        if values.iter().all(Option::is_some) {
+            Self::Real(values.into_iter().flatten().collect())
+        } else {
+            Self::NullableReal(values)
+        }
+    }
+}
+
 /// One exported signal column.
+#[derive(Clone)]
 pub(crate) struct ExportColumn {
     /// Explicit unit symbol, preserving case and prefixes; None is unstated.
     pub(crate) unit: Option<String>,
@@ -40,6 +53,7 @@ pub(crate) struct ExportColumn {
 }
 
 /// A complete result table for one analysis.
+#[derive(Clone)]
 pub(crate) struct ExportTable {
     /// Explicit unit of the independent coordinate.
     pub(crate) scale_unit: Option<String>,
@@ -163,6 +177,103 @@ pub(crate) fn complex_table(
 }
 
 impl ExportTable {
+    /// Dense formats carry nullable real columns as an explicitly typed value/validity pair.
+    /// Zero padding is meaningful only with the accompanying 0/1 validity column.
+    pub(crate) fn dense_encoding(&self) -> std::borrow::Cow<'_, Self> {
+        if !self
+            .columns
+            .iter()
+            .any(|c| matches!(c.data, ColumnData::NullableReal(_)))
+        {
+            return std::borrow::Cow::Borrowed(self);
+        }
+        let mut table = self.clone();
+        let mut names: std::collections::HashSet<_> =
+            self.columns.iter().map(|c| c.name.clone()).collect();
+        table.columns = table
+            .columns
+            .into_iter()
+            .flat_map(|column| {
+                let ColumnData::NullableReal(values) = column.data else {
+                    return vec![column];
+                };
+                let base = format!("Valid({})", column.name);
+                let mut mask_name = base.clone();
+                let mut suffix = 1;
+                while !names.insert(mask_name.clone()) {
+                    mask_name = format!("{base} [{suffix}]");
+                    suffix += 1;
+                }
+                vec![
+                    ExportColumn {
+                        name: column.name,
+                        var_type: format!("nullable_real:{}", column.var_type),
+                        unit: column.unit,
+                        data: ColumnData::Real(values.iter().map(|v| v.unwrap_or(0.0)).collect()),
+                    },
+                    ExportColumn {
+                        name: mask_name,
+                        var_type: format!("nullable_validity:{}", column.var_type),
+                        unit: Some("1".into()),
+                        data: ColumnData::Real(
+                            values.iter().map(|v| f64::from(v.is_some())).collect(),
+                        ),
+                    },
+                ]
+            })
+            .collect();
+        std::borrow::Cow::Owned(table)
+    }
+
+    pub(crate) fn restore_nullable_columns(&mut self) -> Result<(), String> {
+        let mut columns = Vec::new();
+        let mut encoded = std::mem::take(&mut self.columns).into_iter();
+        while let Some(column) = encoded.next() {
+            let Some(kind) = column.var_type.strip_prefix("nullable_real:") else {
+                if column.var_type.starts_with("nullable_validity:") {
+                    return Err("nullable validity column has no preceding value column".into());
+                }
+                columns.push(column);
+                continue;
+            };
+            let name = column.name;
+            let validity = encoded
+                .next()
+                .ok_or("nullable value column has no validity column")?;
+            // Pairing is positional and explicitly typed; the mask label can
+            // carry a suffix to avoid collisions with authored signal names.
+            if validity.var_type != format!("nullable_validity:{kind}")
+                || validity.unit.as_deref() != Some("1")
+            {
+                return Err("nullable validity column does not match its value column".into());
+            }
+            let (ColumnData::Real(values), ColumnData::Real(flags)) = (column.data, validity.data)
+            else {
+                return Err("nullable dense columns must be real".into());
+            };
+            if values.len() != flags.len() {
+                return Err("nullable value/validity lengths differ".into());
+            }
+            let values = values
+                .into_iter()
+                .zip(flags)
+                .map(|(value, flag)| match flag {
+                    0.0 if value == 0.0 => Ok(None),
+                    1.0 if value.is_finite() => Ok(Some(value)),
+                    _ => Err("invalid nullable value or validity flag".to_owned()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            columns.push(ExportColumn {
+                name,
+                var_type: kind.to_owned(),
+                unit: column.unit,
+                data: ColumnData::optional_real(values),
+            });
+        }
+        self.columns = columns;
+        Ok(())
+    }
+
     pub(crate) fn is_complex(&self) -> bool {
         self.columns
             .iter()
@@ -264,6 +375,14 @@ impl ExportTable {
         filter(&mut self.scale);
         for column in &mut self.columns {
             match &mut column.data {
+                ColumnData::NullableReal(values) => {
+                    let mut index = 0;
+                    values.retain(|_| {
+                        let retained = keep.get(index).copied().unwrap_or(false);
+                        index += 1;
+                        retained
+                    });
+                }
                 ColumnData::Real(values) => filter(values),
                 ColumnData::Complex { real, imag } => {
                     filter(real);
@@ -278,6 +397,7 @@ impl ExportTable {
     /// VCD is not a table at all — it carries event timelines, which only a
     /// transient captures — so it is refused here rather than flattened.
     pub(crate) fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
+        self.validate_samples(path)?;
         if format == OutputFormat::Hdf5 {
             return crate::hdf5::write_table(path, self, None);
         }
@@ -298,6 +418,7 @@ impl ExportTable {
         path: &Path,
         format: OutputFormat,
     ) -> Result<(), CliError> {
+        self.validate_samples(path)?;
         match format {
             OutputFormat::Raw => self.write_raw(writer, path, true),
             OutputFormat::RawAscii => self.write_raw(writer, path, false),
@@ -314,9 +435,41 @@ impl ExportTable {
         }
     }
 
+    fn validate_samples(&self, path: &Path) -> Result<(), CliError> {
+        let expected = self.scale.len();
+        let valid = self.scale.iter().all(|v| v.is_finite())
+            && self.columns.iter().all(|column| match &column.data {
+                ColumnData::Real(values) => {
+                    values.len() == expected && values.iter().all(|v| v.is_finite())
+                }
+                ColumnData::NullableReal(values) => {
+                    values.len() == expected && values.iter().flatten().all(|v| v.is_finite())
+                }
+                ColumnData::Complex { real, imag } => {
+                    real.len() == expected
+                        && imag.len() == expected
+                        && real.iter().chain(imag).all(|v| v.is_finite())
+                }
+            });
+        if valid {
+            Ok(())
+        } else {
+            Err(CliError::output_error(
+                path,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "table columns must match the coordinate length and contain only finite present values",
+                ),
+            ))
+        }
+    }
+
     /// Value of `column` at row `row` as (real, imag).
     fn value_at(data: &ColumnData, row: usize) -> (f64, f64) {
         match data {
+            ColumnData::NullableReal(values) => {
+                (values.get(row).copied().flatten().unwrap_or(0.0), 0.0)
+            }
             ColumnData::Real(values) => (values.get(row).copied().unwrap_or(0.0), 0.0),
             ColumnData::Complex { real, imag } => (
                 real.get(row).copied().unwrap_or(0.0),
@@ -331,6 +484,10 @@ impl ExportTable {
         path: &Path,
         binary: bool,
     ) -> Result<(), CliError> {
+        let encoded = self.dense_encoding();
+        if let std::borrow::Cow::Owned(table) = encoded {
+            return table.write_raw(writer, path, binary);
+        }
         let complex = self.is_complex();
         let io_err = |e: std::io::Error| CliError::output_error(path, e);
 
@@ -453,7 +610,7 @@ impl ExportTable {
         write!(writer, "{}", delimited_cell(&self.scale_name, delimiter)).map_err(io_err)?;
         for column in &self.columns {
             match column.data {
-                ColumnData::Real(_) => {
+                ColumnData::NullableReal(_) | ColumnData::Real(_) => {
                     write!(
                         writer,
                         "{}{}",
@@ -482,6 +639,12 @@ impl ExportTable {
             for column in &self.columns {
                 let (re, im) = Self::value_at(&column.data, row);
                 match column.data {
+                    ColumnData::NullableReal(ref values) => {
+                        write!(writer, "{delimiter}").map_err(io_err)?;
+                        if let Some(value) = values[row] {
+                            write!(writer, "{value:.17e}").map_err(io_err)?;
+                        }
+                    }
                     ColumnData::Real(_) => {
                         write!(writer, "{}{:.17e}", delimiter, re).map_err(io_err)?;
                     }
@@ -503,6 +666,9 @@ impl ExportTable {
             .iter()
             .map(|column| {
                 let mut value = match &column.data {
+                    ColumnData::NullableReal(values) => serde_json::json!({
+                        "name": column.name, "type": column.var_type, "values": values,
+                    }),
                     ColumnData::Real(values) => serde_json::json!({
                         "name": column.name,
                         "type": column.var_type,

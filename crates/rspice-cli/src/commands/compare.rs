@@ -499,6 +499,15 @@ fn comparison_data(
     let mut values = vec![table.scale];
     for column in table.columns {
         match column.data {
+            ColumnData::NullableReal(_) => {
+                return Err(CliError::VerificationFailed {
+                    message: format!(
+                        "{} contains undefined samples in '{}'; a numeric comparison requires defined samples",
+                        path.display(),
+                        column.name
+                    ),
+                });
+            }
             ColumnData::Real(series) => {
                 variables.push(column.name);
                 variable_types.push(column.var_type);

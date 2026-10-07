@@ -9,6 +9,49 @@ use common::test_dir;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[test]
+fn nullable_real_samples_round_trip_through_all_table_formats() {
+    let dir = test_dir("nullable_columns");
+    let source = dir.join("source.json");
+    let original = serde_json::json!({
+        "analysis": "stb", "plot_name": "Nullable loop gain",
+        "scale": {"name": "frequency", "type": "frequency", "unit": "Hz", "values": [1.0, 10.0, 100.0]},
+        "signals": [
+            {"name": "loop", "type": "gain", "unit": "1", "real": [1.0,0.0,2.0], "imag": [0.0,0.0,0.0]},
+            {"name": "phase", "type": "phase", "unit": "deg", "values": [0.0,null,0.0]},
+            {"name": "absent", "type": "gain", "unit": "dB", "values": [null,null,null]},
+            {"name": "Valid(phase)", "type": "voltage", "unit": "V", "values": [7.0,8.0,9.0]}
+        ]
+    });
+    std::fs::write(&source, serde_json::to_vec(&original).unwrap()).unwrap();
+    for format in ["raw", "ascii", "hdf5", "csv", "tsv", "json"] {
+        let encoded = dir.join(format!("encoded.{format}"));
+        let decoded = dir.join(format!("decoded.{format}.json"));
+        convert(&source, &encoded, format, &[]);
+        convert(&encoded, &decoded, "json", &[]);
+        let recovered = common::read_json(&decoded);
+        assert_eq!(recovered["scale"]["values"], original["scale"]["values"]);
+        assert_eq!(
+            recovered["signals"].as_array().unwrap().len(),
+            4,
+            "{format}"
+        );
+        for (actual, expected) in recovered["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(original["signals"].as_array().unwrap())
+        {
+            for field in ["name", "values", "real", "imag"] {
+                assert_eq!(actual[field], expected[field], "{format}: {field}");
+            }
+            if !matches!(format, "csv" | "tsv") {
+                assert_eq!(actual["unit"], expected["unit"], "{format}");
+            }
+        }
+    }
+}
+
 const TRAN_DECK: &str = "* transient convert test
 v1 in 0 sin(0 1 1k)
 r1 in out 1k

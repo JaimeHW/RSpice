@@ -49,6 +49,13 @@
 //! Waveform readers may admit only the coordinate domains they can represent;
 //! the CLI also reads report/index tables.
 //!
+//! Nullable real table quantities use two adjacent real columns: `name`
+//! of type `nullable_real:<quantity>` and `Valid(name)` of type
+//! `nullable_validity:<quantity>` (unit `1`). The validity label may have a
+//! suffix to avoid collisions; pairing is positional. Validity is exactly 0 or 1;
+//! absent values are padded with zero and must not be interpreted without the
+//! validity column. This same typed pair is used in tabular RAW exports.
+//!
 //! A **spectral** section (`ac`) carries:
 //!
 //! - attributes `section_type`, `signal_count`, then, for each column,

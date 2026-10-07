@@ -573,9 +573,12 @@ pub(crate) fn table_data(
     identity: Option<Hdf5ResultIdentity>,
 ) -> Hdf5SimulationData {
     use crate::commands::export_table::ColumnData;
+    let encoded = table.dense_encoding();
+    let table = encoded.as_ref();
     let mut waveform = Hdf5WaveformSection::new(table.scale_name.clone(), table.scale.clone());
     for column in &table.columns {
         match &column.data {
+            ColumnData::NullableReal(_) => unreachable!("dense encoding removes nullable columns"),
             ColumnData::Real(values) => waveform.add_typed_signal(
                 column.name.clone(),
                 column.var_type.clone(),
