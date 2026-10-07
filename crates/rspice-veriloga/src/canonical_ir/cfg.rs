@@ -1150,6 +1150,14 @@ pub enum CfgValueKind {
         bounds: (i64, i64),
         signed: bool,
     },
+    /// Replace selected bits in a four-state value, preserving all other bits.
+    /// Bounds name the input's authored range; this pure operation has no store.
+    DigitalPackedUpdate {
+        input: ValueId,
+        bounds: (i64, i64),
+        select: super::digital::DigitalArrayWriteSelect,
+        value: ValueId,
+    },
     /// Concatenation. The first part supplies the most significant bits.
     DigitalConcat {
         parts: Vec<ValueId>,
@@ -1367,6 +1375,7 @@ impl CfgValueKind {
             | Self::DigitalShift { .. }
             | Self::DigitalPartSelect { .. }
             | Self::DigitalBitSelect { .. }
+            | Self::DigitalPackedUpdate { .. }
             | Self::DigitalConcat { .. }
             | Self::DigitalSelect { .. }
             | Self::DigitalBlockingWrite { .. }
@@ -1672,6 +1681,15 @@ impl CfgValueKind {
                 else_value,
             } => vec![*condition, *then_value, *else_value],
             Self::DigitalBitSelect { input, index, .. } => vec![*input, *index],
+            Self::DigitalPackedUpdate {
+                input,
+                select,
+                value,
+                ..
+            } => [*input, *value]
+                .into_iter()
+                .chain(select.operand())
+                .collect(),
             Self::DigitalArrayRead { index, .. } => vec![*index],
             Self::DigitalBitBlockingWrite { index, value, .. } => vec![*index, *value],
             Self::DigitalBitNonblockingWrite {
@@ -2021,6 +2039,16 @@ impl CfgValueKind {
             Self::DigitalBitSelect { input, index, .. } => {
                 *input = map(*input);
                 *index = map(*index);
+            }
+            Self::DigitalPackedUpdate {
+                input,
+                select,
+                value,
+                ..
+            } => {
+                *input = map(*input);
+                *value = map(*value);
+                select.map_operands(&mut map);
             }
             Self::DigitalArrayRead { index, .. } => *index = map(*index),
             Self::DigitalBitBlockingWrite { index, value, .. } => {

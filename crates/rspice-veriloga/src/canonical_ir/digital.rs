@@ -568,9 +568,9 @@ impl DigitalWriteSelect {
     }
 }
 
-/// Packed selection inside a runtime-selected unpacked array element.
+/// Packed selection for an array write or a pure four-state value update.
 /// Unlike a captured `DigitalWriteSelect`, a bit index here is an SSA value:
-/// it is evaluated at the write and resolved before an update is deferred.
+/// it is evaluated at the update and resolved before a store write is deferred.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalArrayWriteSelect {
     Whole,

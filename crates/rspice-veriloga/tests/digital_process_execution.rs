@@ -2782,18 +2782,6 @@ fn the_real_net_refusals_name_themselves() {
 #[test]
 fn the_remaining_process_refusals_name_themselves() {
     let cases = [
-        // A module-level `integer` that only a process writes is that
-        // process's own signal now, so the refusal that remains in the
-        // module-level family is the *initial value*: an initializer is
-        // scheduled by the domain that owns the variable, and a variable the
-        // discrete domain has taken over has no continuous-domain schedule to
-        // be initialized from.
-        (
-            "    real bias = 1.0;\n\
-             \x20   reg q;\n\
-             \x20   initial begin q = 1'b0; bias = 2.0; end",
-            "module-level",
-        ),
         // A process-local `real` lowers now — Verilog-AMS LRM 2.4 section
         // 6.5.3's own example reads a `wreal` into one. A `string` still does
         // not, and stands in its place.
@@ -2809,8 +2797,8 @@ fn the_remaining_process_refusals_name_themselves() {
         ),
         (
             "    reg q;\n\
-             \x20   initial begin : work reg [3:0] t; t[0] = 1'b1; q = t[0]; end",
-            "select on the process-local `t`",
+             \x20   initial begin : work reg [3:0] t; t[0] <= 1'b1; q = t[0]; end",
+            "nonblocking assignment to the process-local `t`",
         ),
     ];
     for (section, expected) in cases {
@@ -2883,8 +2871,8 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "unpacked array dimensions on the process-local `m`",
             "Unsupported feature: ",
         ),
-        // A process-local is an SSA value, so neither a deferred update nor a
-        // partial write has anywhere to land.
+        // Deferred local updates still require shared storage, for whole
+        // variables as well as selected bits.
         (
             "    reg q;\n\
              \x20   initial begin : work integer i; i <= 1; q = 1'b0; end",
@@ -2893,17 +2881,8 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
         ),
         (
             "    reg q;\n\
-             \x20   initial begin : work reg [3:0] t; t[0] = 1'b1; q = t[0]; end",
-            "select on the process-local `t`",
-            "Unsupported feature: ",
-        ),
-        // A module-level variable the discrete domain has taken over, whose
-        // initializer the continuous domain no longer schedules.
-        (
-            "    real bias = 1.0;\n\
-             \x20   reg q;\n\
-             \x20   initial begin q = 1'b0; bias = 2.0; end",
-            "module-level",
+             \x20   initial begin : work reg [3:0] t; t[0] <= 1'b1; q = t[0]; end",
+            "nonblocking assignment to the process-local `t`",
             "Unsupported feature: ",
         ),
         // `@*` over a statement that reads nothing would never resume.
@@ -4973,6 +4952,166 @@ fn dynamic_bit_writes_validate_source_and_artifact_types() {
         assert!(
             !error.to_string().contains("Internal error"),
             "{body}: {error}"
+        );
+    }
+}
+
+#[test]
+fn local_packed_updates_preserve_four_state_values_and_blocking_timing() {
+    let source = r#"
+module local_updates;
+ integer selector, integer_result;
+ reg [7:0] data, observed, clipped, concatenated, after_wait, looped;
+ reg [3:0] ascending_result; reg [128:0] wide_result;
+ initial begin : work
+   reg [7:0] data; reg [4:7] ascending; reg [128:0] wide;
+   integer count, i; real bit_index;
+   selector=0; data=8'bzx10zx01;
+   data[5:4]=2'b01; bit_index=1.5; data[bit_index]=1;
+   data[1'bx]=0; data[1'bz]=0; data[129'h100000000000000000000]=0;
+   data[-1]=0; data[99]=0;
+   observed=data;
+   data[9:6]=4'b1100; clipped=data;
+   data[64'h20000000000003:64'h20000000000000]=0;
+   ascending=4'bzx10; ascending[5:6]=2'b01; ascending[7]=1'bz;
+   ascending_result=ascending;
+   {data[7:6],data[1:0]}=4'bzx10; concatenated=data;
+   count=-1; count[33:30]=4'bxx00; integer_result=count;
+   wide=129'bz; wide[128:127]=2'b10; wide[64]=1'bx; wide_result=wide;
+   data[selector] = #5 1'b1; after_wait=data;
+   for(i=0;i<4;i=i+1) data[i]=i&1;
+   looped=data;
+ end
+endmodule
+module top; local_updates u1(); local_updates u2(); endmodule
+"#;
+    for (module, prefixes) in [("local_updates", vec![""]), ("top", vec!["u1.", "u2."])] {
+        let mut h = Harness::from_module(source, Some(module));
+        h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+        h.plan.validate().unwrap();
+        for (process, prefix) in prefixes.iter().enumerate() {
+            let DigitalProcessOutcome::Suspended(wait) = h.start(process) else {
+                panic!("blocking wait")
+            };
+            assert!(matches!(wait.wait(), DigitalWaitRequest::Delay(5)));
+            for (name, expected) in [
+                ("data", "xxxxxxxx"),
+                ("observed", "zx01z101"),
+                ("clipped", "0001z101"),
+                ("ascending_result", "z01z"),
+                ("concatenated", "zx01z110"),
+                ("integer_result", "00111111111111111111111111111111"),
+            ] {
+                assert_eq!(
+                    h.get(&format!("{prefix}{name}")),
+                    expected,
+                    "{module}: {name}"
+                );
+            }
+            assert_eq!(
+                h.get(&format!("{prefix}wide_result")),
+                format!("10{}x{}", "z".repeat(62), "z".repeat(64))
+            );
+            h.set(&format!("{prefix}selector"), &format!("{:032b}", 5));
+            let continuation = wait.resume_state().clone();
+            expect_finished(h.resume(process, &continuation));
+            assert_eq!(h.get(&format!("{prefix}after_wait")), "zx11z110");
+            assert_eq!(h.get(&format!("{prefix}looped")), "zx111010");
+        }
+    }
+}
+
+#[test]
+fn local_packed_updates_survive_process_reentry() {
+    let mut h = Harness::from_source(
+        "module local_reentry; reg [3:0] observed;
+         always begin : work
+           reg [3:0] remembered=4'bzxxx; integer bit=0;
+           #1; remembered[bit]=1; observed=remembered; bit=bit+1;
+         end endmodule",
+    );
+    let DigitalProcessOutcome::Suspended(mut wait) = h.start(0) else {
+        panic!("initial wait")
+    };
+    for expected in ["zxx1", "zx11", "z111", "1111"] {
+        let DigitalProcessOutcome::Suspended(next) = h.resume(0, wait.resume_state()) else {
+            panic!("next wait")
+        };
+        assert_eq!(h.get("observed"), expected);
+        wait = next;
+    }
+}
+
+#[test]
+fn local_packed_updates_validate_artifact_operands_and_selections() {
+    use rspice_veriloga::canonical_ir::{
+        CfgValueKind, CfgValueType, digital::DigitalArrayWriteSelect,
+    };
+    let h = Harness::from_source(
+        "module local_validation; reg [3:0] observed; integer index;
+         initial begin : work reg [7:4] q;
+           index=5; q=0; q[index]=1; q[6:5]=2; observed=q;
+         end endmodule",
+    );
+    for mutation in 0..6 {
+        let mut plan = h.plan.clone();
+        let function = &mut plan.processes[0].function;
+        let effect = function
+            .values
+            .iter()
+            .find(|v| v.value_type == CfgValueType::Effect)
+            .unwrap()
+            .id;
+        let node = function
+            .values
+            .iter_mut()
+            .find(|v| matches!(v.kind, CfgValueKind::DigitalPackedUpdate { .. }))
+            .unwrap();
+        let CfgValueKind::DigitalPackedUpdate {
+            input,
+            bounds,
+            select,
+            value,
+        } = &mut node.kind
+        else {
+            unreachable!()
+        };
+        let expected = match mutation {
+            0 => {
+                *bounds = (8, 4);
+                "input/output type or bounds"
+            }
+            1 => {
+                *value = *input;
+                "replacement type"
+            }
+            2 => {
+                node.value_type = CfgValueType::Real;
+                "input/output type or bounds"
+            }
+            3 => {
+                *select = DigitalArrayWriteSelect::Bit {
+                    index: effect,
+                    signed: false,
+                };
+                "numeric selector"
+            }
+            4 => {
+                *select = DigitalArrayWriteSelect::Part { msb: 5, lsb: 6 };
+                "width or direction"
+            }
+            _ => {
+                *select = DigitalArrayWriteSelect::Part {
+                    msb: i64::MAX,
+                    lsb: i64::MIN,
+                };
+                "width or direction"
+            }
+        };
+        let errors = plan.validate().unwrap_err();
+        assert!(
+            format!("{errors:?}").contains(expected),
+            "mutation {mutation}: {errors:?}"
         );
     }
 }

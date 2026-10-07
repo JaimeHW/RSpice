@@ -1475,6 +1475,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalShift { .. }
             | CfgValueKind::DigitalPartSelect { .. }
             | CfgValueKind::DigitalBitSelect { .. }
+            | CfgValueKind::DigitalPackedUpdate { .. }
             | CfgValueKind::DigitalConcat { .. }
             | CfgValueKind::DigitalSelect { .. }
             | CfgValueKind::DigitalBlockingWrite { .. }

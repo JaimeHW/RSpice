@@ -551,6 +551,8 @@ pub enum DigitalEvalError {
     UndeclaredSignal(DigitalSignalId),
     /// Authored packed indices cannot be translated to the target's storage.
     InvalidWriteTarget(DigitalSignalId),
+    /// A pure packed update has invalid width or selection metadata.
+    InvalidPackedUpdate(ValueId),
     /// The environment has no value for a declared signal.
     SignalUnavailable(DigitalSignalId),
     /// The plan does not declare an analog probe a node names.
@@ -637,6 +639,7 @@ impl std::fmt::Display for DigitalEvalError {
             Self::InvalidWriteTarget(signal) => {
                 write!(f, "invalid packed write target for signal {signal}")
             }
+            Self::InvalidPackedUpdate(value) => write!(f, "invalid packed update at value {value}"),
             Self::UnsealedPlan => write!(f, "digital plan has no compiled content identity"),
             Self::ClockUnavailable => write!(f, "digital process activation has no clock"),
             Self::InvalidClock => write!(
@@ -2506,6 +2509,40 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     .filter(|position| *position < input.width())
                     .map_or(FourStateBit::Unknown, |position| input.bit(position));
                 Ok(DigitalScalar::FourState(FourStateValue::splat(1, bit)))
+            }
+            CfgValueKind::DigitalPackedUpdate {
+                input,
+                bounds,
+                select,
+                value,
+            } => {
+                use super::digital::DigitalArrayWriteSelect;
+                let mut current = self.four_state(*input)?.into_owned();
+                let range = super::VectorBounds {
+                    msb: bounds.0,
+                    lsb: bounds.1,
+                };
+                let select = match *select {
+                    DigitalArrayWriteSelect::Whole => DigitalWriteSelect::Whole,
+                    DigitalArrayWriteSelect::Bit { index, signed } => {
+                        let Some(index) = self
+                            .selection_index(index, signed)?
+                            .filter(|index| range.contains(*index))
+                        else {
+                            return Ok(DigitalScalar::FourState(current));
+                        };
+                        DigitalWriteSelect::Bit(index)
+                    }
+                    DigitalArrayWriteSelect::Part { msb, lsb } => {
+                        DigitalWriteSelect::Part { msb, lsb }
+                    }
+                };
+                let width = select
+                    .checked_width(range)
+                    .ok_or(DigitalEvalError::InvalidPackedUpdate(id))?;
+                let replacement = self.four_state(*value)?.resized(width);
+                patch(&mut current, select.low_position(range), &replacement);
+                Ok(DigitalScalar::FourState(current))
             }
             CfgValueKind::DigitalPartSelect { input, msb, lsb } => {
                 let (input, msb, lsb) = (*input, *msb, *lsb);

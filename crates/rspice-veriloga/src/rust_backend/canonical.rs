@@ -648,6 +648,9 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalBitSelect { bounds, signed, .. } => {
                 write!(out, "digital-bit-select:{bounds:?}:{signed}")
             }
+            CfgValueKind::DigitalPackedUpdate { bounds, select, .. } => {
+                write!(out, "digital-packed-update:{bounds:?}:{select:?}")
+            }
             CfgValueKind::DigitalPartSelect { msb, lsb, .. } => {
                 write!(out, "digital-part-select:{msb}:{lsb}")
             }

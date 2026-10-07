@@ -2446,12 +2446,15 @@ module variable_sampler(p,q);
      +selected[-2][7:4]*16+selected[-2][3:0]-255
      +selected[selection_word][selection_bit]-1)/1000;
  end
- initial begin
+ initial begin : sample
+   integer local_gain;
+   local_gain=-16; local_gain[3:2]=2'b10;
    period[4]=1.537e-9; enabled=1; index=-2;
    startup_ok=(measured[index]-4*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]-4*LOAD/(1000+LOAD)>-1e-8);
    #1; index=0; selection_bit=0; index[selection_bit]=1;
-   gain[index]=-8; selection_bit=2; gain[index][selection_bit]=1; index=-1;
+   gain[index]=local_gain; selection_bit=2;
+   local_gain[selection_bit]=1; gain[index][selection_bit]=local_gain[selection_bit]; index=-1;
    selected[-1][15]=1; selection_word=-1; selection_bit=15;
    q=startup_ok && (count==-3) && (adjustment[-2]==-1)
      && count[31] && (count[3:0]==13)

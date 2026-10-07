@@ -1452,6 +1452,9 @@ fn the_deferred_constructs_now_lower() {
          \x20   initial begin : work reg signed [3:0] t; t = 4'b0000; q = t[0]; end",
         "    reg [7:0] q;\n\
          \x20   initial q = 4'sd9;",
+        // Blocking packed writes now update the local's SSA value.
+        "    reg [3:0] q;\n\
+         \x20   initial begin : work reg [3:0] t; t = 4'b0000; t[1] = 1'b1; q = t; end",
         // Section 4.1.12's arithmetic right shift, which had no token at all.
         "    reg signed [7:0] a;\n\
          \x20   reg [7:0] q;\n\
@@ -1489,11 +1492,6 @@ fn unlowered_constructs_refuse_by_name() {
             "    reg q;\n\
              \x20   initial begin : work string s; q = 1'b0; end",
             "process-local `string`",
-        ),
-        (
-            "    reg [3:0] q;\n\
-             \x20   initial begin : work reg [3:0] t; t = 4'b0000; t[1] = 1'b1; q = t; end",
-            "select on the process-local `t`",
         ),
         (
             "    reg q;\n\

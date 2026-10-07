@@ -67,10 +67,9 @@
 //!
 //! - A process-local `string`: a process computes in four-state and real
 //!   values, and a string is neither.
-//! - A nonblocking assignment to a process-local, which would need a store to
-//!   defer the update into, and a partial (bit- or part-select) write to one,
-//!   which is a read-modify-write this wave has no node for outside the signal
-//!   store.
+//! - A nonblocking assignment to a process-local, which would need shared
+//!   storage for deferred updates. Blocking bit/part writes use a pure packed
+//!   update of the local's current four-state SSA value.
 //! - A process-local `reg` whose bounds are not literal, and an array of any
 //!   kind inside a process.
 //! - `**`, a non-constant delay, and a non-constant select bound.
@@ -2213,14 +2212,53 @@ impl ProcessLowerer<'_> {
             DigitalLValue::BitSelect { name, .. } | DigitalLValue::PartSelect { name, .. }
                 if self.lookup_local(name).is_some() =>
             {
-                self.error(
-                    format!(
-                        "a select on the process-local `{name}` cannot be assigned yet: a \
-                         partial write is a read-modify-write and this wave has no node \
-                         for one outside the signal store"
-                    ),
-                    target.span(),
+                let local = self.lookup_local(name).expect("just resolved");
+                if nonblocking {
+                    self.error(
+                        format!("a nonblocking assignment to the process-local `{name}` requires shared local storage"),
+                        target.span(),
+                    );
+                    return;
+                }
+                if self.local_is_real(local) {
+                    self.error("packed assignment requires an integral local; a real has no selectable bits", target.span());
+                    return;
+                }
+                let range = self.locals[usize::from(local)].bounds;
+                let select = match target {
+                    DigitalLValue::BitSelect { index, .. } => {
+                        super::digital::DigitalArrayWriteSelect::Bit {
+                            signed: self.self_signed(index),
+                            index: self.array_index_value(block, index),
+                        }
+                    }
+                    DigitalLValue::PartSelect { msb, lsb, span, .. } => {
+                        let Some(selected) = self.part_select_bounds(msb, lsb, range, *span) else {
+                            return;
+                        };
+                        super::digital::DigitalArrayWriteSelect::Part {
+                            msb: selected.msb,
+                            lsb: selected.lsb,
+                        }
+                    }
+                    _ => unreachable!("partial local target"),
+                };
+                let width = self.lvalue_width(target);
+                let value = self.resize(block, value, width, false);
+                let input = self.read_local(block, local);
+                let updated = self.builder.push(
+                    block,
+                    CfgValueType::FourState {
+                        width: self.local_width(local),
+                    },
+                    CfgValueKind::DigitalPackedUpdate {
+                        input,
+                        bounds: (range.msb, range.lsb),
+                        select,
+                        value,
+                    },
                 );
+                self.write_local(block, local, updated);
             }
             DigitalLValue::ArraySelect(access) => {
                 let Some(array) = self.digital_array(&access.name) else {

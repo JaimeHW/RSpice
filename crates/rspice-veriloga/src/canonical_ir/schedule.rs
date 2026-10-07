@@ -1907,6 +1907,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalShift { .. }
         | CfgValueKind::DigitalPartSelect { .. }
             | CfgValueKind::DigitalBitSelect { .. }
+            | CfgValueKind::DigitalPackedUpdate { .. }
         | CfgValueKind::DigitalConcat { .. }
         | CfgValueKind::DigitalSelect { .. }
         | CfgValueKind::DigitalCaseMatch { .. }

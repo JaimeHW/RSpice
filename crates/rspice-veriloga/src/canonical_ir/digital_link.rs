@@ -610,6 +610,7 @@ fn relocate_value(
         | CfgValueKind::DigitalShift { .. }
         | CfgValueKind::DigitalPartSelect { .. }
         | CfgValueKind::DigitalBitSelect { .. }
+        | CfgValueKind::DigitalPackedUpdate { .. }
         | CfgValueKind::DigitalConcat { .. }
         | CfgValueKind::DigitalSelect { .. } => {}
         // A newly added signal-bearing value must acquire an explicit

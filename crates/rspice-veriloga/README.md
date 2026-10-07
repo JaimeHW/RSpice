@@ -393,7 +393,17 @@ direction, real-storage restrictions, RHS types and effect types at the artifact
 boundary. Public procedural/deferred update application rejects incompatible
 storage and invalid part targets before mutation, sharing checked width arithmetic
 with artifact validation. Out-of-range endpoints still clip to existing bits.
-Process-local partial writes and dynamic continuous-driver targets remain open.
+Schema 82 adds blocking bit/part assignments to process-local vectors and
+integers. A pure four-state packed update replaces selected bits in the current
+local value without converting untouched X/Z bits through arithmetic. It shares
+index conversion, part-width checks and clipping with stored writes. Locals keep
+their authored ranges, lexical scope, branch/loop merges and values across waits
+and process re-entry. Intra-assignment waits capture the RHS before suspension
+and evaluate the selector after resumption. Concatenation targets update the
+current local for each selected part.
+Nonblocking local writes, local event bindings, and dynamic continuous-driver
+targets remain open. These need shared storage/driver contracts beyond a pure
+local value update; Wasm helper ABI remains 20.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

@@ -40,18 +40,33 @@ fn packed_write_type(
             ));
         }
     }
+    packed_selection_type(
+        function,
+        signal.kind.is_real(),
+        signal.width,
+        bounds,
+        select,
+    )
+}
+
+/// Selection typing shared by stored writes and pure four-state updates.
+fn packed_selection_type(
+    function: &super::CfgFunction,
+    real: bool,
+    width: u32,
+    bounds: (i64, i64),
+    select: DigitalArrayWriteSelect,
+) -> Result<CfgValueType, Vec<IrDiagnostic>> {
     Ok(match select {
         DigitalArrayWriteSelect::Whole => {
-            if signal.kind.is_real() {
+            if real {
                 CfgValueType::Real
             } else {
-                CfgValueType::FourState {
-                    width: signal.width,
-                }
+                CfgValueType::FourState { width }
             }
         }
         DigitalArrayWriteSelect::Bit { index, .. } => {
-            if signal.kind.is_real()
+            if real
                 || !matches!(
                     function.value(index).value_type,
                     CfgValueType::Real | CfgValueType::Integer | CfgValueType::FourState { .. }
@@ -68,7 +83,7 @@ fn packed_write_type(
                 msb: bounds.0,
                 lsb: bounds.1,
             });
-            if signal.kind.is_real() || width.is_none() {
+            if real || width.is_none() {
                 return Err(error(
                     "digital packed part write has an invalid element type, width or direction",
                 ));
@@ -530,6 +545,38 @@ impl CanonicalDigitalPlan {
                             {
                                 return Err(error(
                                     "digital bit select has inconsistent input, index or declared bounds",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalPackedUpdate {
+                            input,
+                            bounds,
+                            select,
+                            value: rhs,
+                        } => {
+                            let width = bounds
+                                .0
+                                .abs_diff(bounds.1)
+                                .checked_add(1)
+                                .filter(|width| {
+                                    *width <= u64::from(crate::semantic::MAX_DIGITAL_VECTOR_WIDTH)
+                                })
+                                .ok_or_else(|| {
+                                    error("digital packed update has invalid input bounds")
+                                })? as u32;
+                            let input_type = CfgValueType::FourState { width };
+                            if function.value(*input).value_type != input_type
+                                || value.value_type != input_type
+                            {
+                                return Err(error(
+                                    "digital packed update has inconsistent input/output type or bounds",
+                                ));
+                            }
+                            let selected =
+                                packed_selection_type(function, false, width, *bounds, *select)?;
+                            if function.value(*rhs).value_type != selected {
+                                return Err(error(
+                                    "digital packed update has an incompatible replacement type",
                                 ));
                             }
                         }
