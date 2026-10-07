@@ -5402,6 +5402,7 @@ dependencies = [
  "env_filter",
  "env_logger",
  "indicatif",
+ "libc",
  "log",
  "mimalloc",
  "rayon",

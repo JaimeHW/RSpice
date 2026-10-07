@@ -11,7 +11,6 @@ use crate::cli::OutputFormat;
 use crate::cli::{CliError, InputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::hdf5::read_hdf5_sections_with_limits;
-use std::io::Read;
 use std::path::Path;
 
 mod snapshot;
@@ -179,50 +178,8 @@ pub(crate) fn read_utf8_input_limited(path: &Path, limit: usize) -> Result<Strin
     })
 }
 
-fn read_input_bytes_limited(path: &Path, limit: usize) -> Result<Vec<u8>, CliError> {
-    let file = std::fs::File::open(path).map_err(|source| CliError::InputReadError {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let metadata_bytes = usize::try_from(
-        file.metadata()
-            .map_err(|source| CliError::InputReadError {
-                path: path.to_path_buf(),
-                source,
-            })?
-            .len(),
-    )
-    .unwrap_or(usize::MAX);
-    enforce_resource_limit(
-        path,
-        rspice_core::ResourceKind::ExternalDataBytes,
-        metadata_bytes,
-        limit,
-    )?;
-
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(metadata_bytes)
-        .map_err(|error| CliError::InputReadError {
-            path: path.to_path_buf(),
-            source: std::io::Error::other(format!(
-                "unable to reserve {metadata_bytes} bytes for input: {error}"
-            )),
-        })?;
-    let read_limit = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
-    file.take(read_limit)
-        .read_to_end(&mut bytes)
-        .map_err(|source| CliError::InputReadError {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    enforce_resource_limit(
-        path,
-        rspice_core::ResourceKind::ExternalDataBytes,
-        bytes.len(),
-        limit,
-    )?;
-    Ok(bytes)
+pub(crate) fn read_input_bytes_limited(path: &Path, limit: usize) -> Result<Vec<u8>, CliError> {
+    crate::input_file::read(path, limit).map_err(|error| error.into_cli_error(path))
 }
 
 /// The fewest coordinate samples a result may have and still be a result.
@@ -375,8 +332,10 @@ fn load_rawfile(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ImportedResult, CliError> {
-    let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits)
-        .map_err(|error| raw_read_error(path, error))?;
+    let bytes = read_input_bytes_limited(path, resource_limits.max_external_data_bytes)?;
+    let file =
+        rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
+            .map_err(|error| raw_read_error(path, error))?;
     raw_result(path, file, section)
 }
 
@@ -1169,31 +1128,24 @@ fn load_hdf5(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ImportedResult, CliError> {
-    let metadata_bytes = usize::try_from(
-        std::fs::metadata(path)
-            .map_err(|source| CliError::InputReadError {
-                path: path.to_path_buf(),
-                source,
-            })?
-            .len(),
-    )
-    .unwrap_or(usize::MAX);
-    enforce_resource_limit(
-        path,
-        rspice_core::ResourceKind::ExternalDataBytes,
-        metadata_bytes,
-        resource_limits.max_external_data_bytes,
-    )?;
-    let readback =
-        read_hdf5_sections_with_limits(path, resource_limits).map_err(|error| match error {
-            crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
-                path: path.to_path_buf(),
-                source,
-            },
-            error => conversion_error(path, error),
-        })?;
+    let readback = read_hdf5_sections_with_limits(path, resource_limits)
+        .map_err(|error| hdf5_read_error(path, error))?;
 
     hdf5_result(path, readback, section)
+}
+
+fn hdf5_read_error(path: &Path, error: crate::hdf5::Hdf5Error) -> CliError {
+    match error {
+        crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
+            path: path.to_owned(),
+            source,
+        },
+        crate::hdf5::Hdf5Error::Backend(rustyhdf5::Error::Io(source)) => CliError::InputReadError {
+            path: path.to_owned(),
+            source,
+        },
+        error => conversion_error(path, error),
+    }
 }
 
 fn hdf5_result(

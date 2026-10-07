@@ -30,6 +30,7 @@ mod cli;
 mod commands;
 mod console;
 mod hdf5;
+mod input_file;
 mod observability;
 mod report;
 

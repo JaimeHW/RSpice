@@ -641,6 +641,12 @@ one `convert` reads it back from. An *empty* coordinate is not a result and is
 refused when the file is read, naming the coordinate rather than blaming a flag
 that was not given.
 
+Result inputs for `convert` and `compare` must be regular files; symlinks to
+regular files are accepted. Directories, devices, and FIFOs are rejected with
+an input I/O diagnostic. Readers enforce `max_external_data_bytes` before
+decoding and while reading, including files that grow after their size was
+checked. HDF5 decoding uses the same bounded, owned input bytes.
+
 `convert --variables` matches names without case sensitivity. A qualified name
 such as `V(out)` or `D(clk)` selects that exact signal. Bare aliases must be
 unambiguous: if both `V(out)` and `I(out)` exist, use their full names instead
