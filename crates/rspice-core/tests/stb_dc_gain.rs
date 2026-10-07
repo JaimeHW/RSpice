@@ -127,6 +127,10 @@ fn saved_dc_evidence_is_validated_and_legacy_first_samples_are_relabelled() {
     for version in 1..=13 {
         let mut legacy = original.clone();
         legacy["schemaVersion"] = version.into();
+        legacy["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("circuitPoles");
         let scalars = legacy["scalars"].as_array_mut().unwrap();
         scalars.retain(|scalar| scalar["name"] != "dc_loop_gain");
         let db = scalars
