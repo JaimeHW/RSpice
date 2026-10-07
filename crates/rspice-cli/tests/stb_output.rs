@@ -225,3 +225,55 @@ fn stb_high_start_exports_an_independent_dc_return_ratio() {
     assert!((scalar("dc_loop_gain_db")["value"].as_f64().unwrap() - 60.0).abs() < 1e-10);
     assert_eq!(document["pointCount"], 3);
 }
+
+#[test]
+fn single_point_and_truncated_sweeps_export_unobserved_margins() {
+    for points in [1, 3] {
+        let dir = test_dir("stb_unobserved");
+        let deck = dir.join("loop.sp");
+        let output_path = dir.join("result.json");
+        std::fs::write(
+            &deck,
+            SINGLE_POLE_STB.replace("dec 20 10 10meg", &format!("lin {points} 10 1000")),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "run",
+                deck.to_str().unwrap(),
+                "-o",
+                output_path.to_str().unwrap(),
+                "-f",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(stdout.contains("No unity-gain crossover"), "{stdout}");
+        assert!(stdout.contains("no gain margin to report"), "{stdout}");
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output_path).unwrap()).unwrap();
+        assert_eq!(document["pointCount"], points);
+        for name in [
+            "gain_margin_db",
+            "gain_margin_frequency",
+            "phase_margin_degrees",
+            "phase_margin_frequency",
+            "unity_gain_bandwidth",
+        ] {
+            let scalar = document["scalars"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|scalar| scalar["name"] == name)
+                .unwrap();
+            assert_eq!(scalar["value"]["representation"], "unavailable", "{name}");
+            assert_eq!(scalar["value"]["reason"], "no_crossover", "{name}");
+        }
+    }
+}

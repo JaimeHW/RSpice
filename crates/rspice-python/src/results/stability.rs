@@ -3,8 +3,8 @@
 //! `StbResult` carries the Tian loop-gain probe (`.STB`), which measures a
 //! feedback loop without breaking it. `PoleZeroResult` carries the roots of the
 //! small-signal network, and `TransferFunctionResult` the DC transfer gain with
-//! its input and output resistances. All three answer the same question from
-//! different directions: whether, and how, a circuit is stable.
+//! its input and output resistances. Measured loop margins alone do not
+//! establish closed-loop stability.
 
 use super::*;
 
@@ -519,7 +519,9 @@ impl PyPoleZeroResult {
     }
 }
 
-/// Loop-gain sweep and stability margins from Tian double-injection STB.
+type StbMarginState = (u8, Option<(f64, f64)>, Option<(f64, f64)>);
+
+/// Loop-gain sweep and measured margins from Tian double-injection STB.
 #[pyclass(name = "StbResult", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyStbResult {
@@ -528,18 +530,18 @@ pub struct PyStbResult {
     #[pyo3(get)]
     pub probe_name: String,
     #[pyo3(get)]
-    pub gain_margin_db: f64,
+    pub gain_margin_db: Option<f64>,
     #[pyo3(get)]
-    pub gain_margin_frequency: f64,
+    pub gain_margin_frequency: Option<f64>,
     #[pyo3(get)]
-    pub phase_margin_degrees: f64,
+    pub phase_margin_degrees: Option<f64>,
     #[pyo3(get)]
-    pub phase_margin_frequency: f64,
+    pub phase_margin_frequency: Option<f64>,
     dc_loop_gain: Option<rspice_core::Complex64>,
     #[pyo3(get)]
-    pub unity_gain_bandwidth: f64,
+    pub unity_gain_bandwidth: Option<f64>,
     #[pyo3(get)]
-    pub conditionally_stable: bool,
+    pub multiple_crossovers: bool,
     #[pyo3(get)]
     pub num_crossovers: usize,
     #[pyo3(get)]
@@ -547,9 +549,8 @@ pub struct PyStbResult {
     #[pyo3(get)]
     pub warnings: Vec<String>,
     assessment: String,
-    /// The core loop analysis, kept because this projection flattens its
-    /// margins into plain floats that lose the "no crossover" determination
-    /// the shared document publishes as a typed scalar.
+    /// The core loop analysis, retained for typed scalar availability,
+    /// signal descriptors, units and authored execution identity.
     evidence: Option<DocumentEvidence<rspice_core::analysis::stb::StbResult>>,
 }
 
@@ -588,17 +589,17 @@ impl PyStbResult {
             frequencies: result.frequencies.clone(),
             loop_gains: result.loop_gains.clone(),
             probe_name: result.probe_name.clone(),
-            gain_margin_db: margins.gain_margin_db,
-            gain_margin_frequency: margins.gain_margin_freq,
-            phase_margin_degrees: margins.phase_margin_deg,
-            phase_margin_frequency: margins.phase_margin_freq,
+            gain_margin_db: margins.gain_margin.map(|m| m.value),
+            gain_margin_frequency: margins.gain_margin.map(|m| m.frequency),
+            phase_margin_degrees: margins.phase_margin.map(|m| m.value),
+            phase_margin_frequency: margins.phase_margin.map(|m| m.frequency),
             dc_loop_gain: margins.dc_loop_gain,
-            unity_gain_bandwidth: margins.unity_gain_bandwidth,
-            conditionally_stable: margins.conditionally_stable,
+            unity_gain_bandwidth: margins.unity_gain_bandwidth(),
+            multiple_crossovers: margins.num_crossovers > 1,
             num_crossovers: margins.num_crossovers,
             success: result.result.success,
             warnings: result.result.warnings.clone(),
-            assessment: result.result.assessment(),
+            assessment: result.result.margin_assessment().into(),
         }
     }
 }
@@ -632,9 +633,8 @@ impl PyStbResult {
 
     /// Every analysis-owned scalar this result publishes, with its unit.
     ///
-    /// A margin the loop's response never defines — the gain margin of a loop
-    /// whose phase never reaches -180 degrees — is reported here as a typed
-    /// determination rather than as the large float the flat accessor carries.
+    /// A crossover not resolved in the sampled band leaves both its margin
+    /// and frequency unavailable, with the typed reason `no_crossover`.
     fn scalars(&self, py: Python<'_>) -> PyResult<Vec<PyResultScalar>> {
         Ok(document::scalars(&self.shared_document(py)?))
     }
@@ -687,22 +687,18 @@ impl PyStbResult {
     }
 
     #[getter]
-    fn is_stable(&self) -> bool {
-        self.gain_margin_db > 0.0 && self.phase_margin_degrees > 0.0
-    }
-
-    #[getter]
     fn assessment(&self) -> String {
         self.assessment.clone()
     }
 
     fn __repr__(&self) -> String {
+        let margin = |value: Option<f64>| value.map_or_else(|| "None".into(), |v| v.to_string());
         format!(
-            "StbResult(probe='{}', points={}, gain_margin={:.2}dB, phase_margin={:.2}deg, assessment='{}')",
+            "StbResult(probe='{}', points={}, gain_margin_db={}, phase_margin_degrees={}, assessment='{}')",
             self.probe_name,
             self.frequencies.len(),
-            self.gain_margin_db,
-            self.phase_margin_degrees,
+            margin(self.gain_margin_db),
+            margin(self.phase_margin_degrees),
             self.assessment
         )
     }
@@ -710,7 +706,7 @@ impl PyStbResult {
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (frequencies, loop_gains, probe_name, margins, flags, warnings, assessment, dc_state=None))]
+    #[pyo3(signature = (frequencies, loop_gains, probe_name, margins, flags, warnings, assessment, dc_state=None, margin_state=None))]
     fn _unpickle(
         frequencies: Vec<f64>,
         loop_gains: Vec<(f64, f64)>,
@@ -720,6 +716,7 @@ impl PyStbResult {
         mut warnings: Vec<String>,
         assessment: String,
         dc_state: Option<(u8, Option<(f64, f64)>)>,
+        margin_state: Option<StbMarginState>,
     ) -> PyResult<Self> {
         let dc_loop_gain = match dc_state {
             Some((1, value)) => value.map(|(re, im)| rspice_core::Complex64::new(re, im)),
@@ -739,19 +736,82 @@ impl PyStbResult {
                 "STB DC return ratio must be finite",
             ));
         }
-        let (conditionally_stable, num_crossovers, success) = flags;
+        use rspice_core::analysis::stb::{CrossoverMargin, StbAnalyzer, StbConfig};
+        let gains = complex_from_state(loop_gains);
+        let projected = StbAnalyzer::new(StbConfig::default())
+            .analyze(&frequencies, &gains)
+            .map_err(|error| {
+                crate::errors::value_error(format!("invalid STB pickle samples: {error}"))
+            })?;
+        let restored = match margin_state {
+            Some((1, gain, phase)) => {
+                let decode =
+                    |pair: Option<(f64, f64)>| -> PyResult<Option<CrossoverMargin>> {
+                        pair.map(|(value, frequency)| {
+                        if !value.is_finite() || !frequency.is_finite() || frequency <= 0.0 {
+                            return Err(crate::errors::value_error(
+                                "STB pickle margin requires a finite value and positive frequency",
+                            ));
+                        }
+                        if !frequencies.first().zip(frequencies.last()).is_some_and(
+                            |(&start, &stop)| (start..=stop).contains(&frequency),
+                        ) {
+                            return Err(crate::errors::value_error(
+                                "STB pickle crossover frequency is outside the sampled band",
+                            ));
+                        }
+                        Ok(CrossoverMargin { value, frequency })
+                    })
+                    .transpose()
+                    };
+                let gain_margin = decode(gain)?;
+                let phase_margin = decode(phase)?;
+                if phase_margin.is_some() != projected.margins.phase_margin.is_some()
+                    || gain_margin.is_some() != projected.margins.gain_margin.is_some()
+                    || flags.1 != projected.margins.num_crossovers
+                    || flags.0 != (flags.1 > 1)
+                {
+                    return Err(crate::errors::value_error(
+                        "STB pickle crossover observations disagree with margin availability",
+                    ));
+                }
+                rspice_core::analysis::stb::StabilityMargins {
+                    gain_margin,
+                    phase_margin,
+                    dc_loop_gain,
+                    num_crossovers: flags.1,
+                }
+            }
+            Some((version, _, _)) => {
+                return Err(crate::errors::value_error(format!(
+                    "unsupported STB margin pickle version {version}"
+                )));
+            }
+            None => {
+                warnings.push("Legacy STB margins were recomputed from retained loop samples; old stability claims were not retained".into());
+                projected.margins
+            }
+        };
+        let _ = (margins, assessment); // Legacy scalar placeholders and inferred verdict.
+        let success = flags.2 && projected.success;
+        let assessment = if success {
+            restored.assessment()
+        } else {
+            "ANALYSIS FAILED"
+        }
+        .to_owned();
         Ok(Self {
             frequencies,
-            loop_gains: complex_from_state(loop_gains),
+            loop_gains: gains,
             probe_name,
-            gain_margin_db: margins[0],
-            gain_margin_frequency: margins[1],
-            phase_margin_degrees: margins[2],
-            phase_margin_frequency: margins[3],
+            gain_margin_db: restored.gain_margin.map(|m| m.value),
+            gain_margin_frequency: restored.gain_margin.map(|m| m.frequency),
+            phase_margin_degrees: restored.phase_margin.map(|m| m.value),
+            phase_margin_frequency: restored.phase_margin.map(|m| m.frequency),
             dc_loop_gain,
-            unity_gain_bandwidth: margins[5],
-            conditionally_stable,
-            num_crossovers,
+            unity_gain_bandwidth: restored.unity_gain_bandwidth(),
+            multiple_crossovers: restored.num_crossovers > 1,
+            num_crossovers: restored.num_crossovers,
             success,
             warnings,
             assessment,
@@ -774,6 +834,7 @@ impl PyStbResult {
             Vec<String>,
             String,
             Option<(u8, Option<(f64, f64)>)>,
+            Option<StbMarginState>,
         ),
     )> {
         Ok((
@@ -783,17 +844,22 @@ impl PyStbResult {
                 complex_state(&self.loop_gains),
                 self.probe_name.clone(),
                 [
-                    self.gain_margin_db,
-                    self.gain_margin_frequency,
-                    self.phase_margin_degrees,
-                    self.phase_margin_frequency,
+                    self.gain_margin_db.unwrap_or(0.0),
+                    self.gain_margin_frequency.unwrap_or(0.0),
+                    self.phase_margin_degrees.unwrap_or(0.0),
+                    self.phase_margin_frequency.unwrap_or(0.0),
                     0.0, // Legacy DC slot; only dc_state carries qualified evidence.
-                    self.unity_gain_bandwidth,
+                    self.unity_gain_bandwidth.unwrap_or(0.0),
                 ],
-                (self.conditionally_stable, self.num_crossovers, self.success),
+                (self.multiple_crossovers, self.num_crossovers, self.success),
                 self.warnings.clone(),
                 self.assessment.clone(),
                 Some((1, self.dc_loop_gain.map(|gain| (gain.re, gain.im)))),
+                Some((
+                    1,
+                    self.gain_margin_db.zip(self.gain_margin_frequency),
+                    self.phase_margin_degrees.zip(self.phase_margin_frequency),
+                )),
             ),
         ))
     }

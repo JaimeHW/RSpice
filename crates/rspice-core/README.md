@@ -345,6 +345,19 @@ phase. A unity plateau counts as one connected crossing, while the reported
 margin considers its endpoints and any critical point inside it. These are
 sweep measurements; margins alone do not establish closed-loop stability.
 
+`StabilityMargins::gain_margin` and `phase_margin` are optional `CrossoverMargin`
+pairs, each holding a signed `value` and a positive `frequency` in Hz.
+`None` means no crossover was resolved in the sampled band. Single-point sweeps
+retain their sample and can report an exactly sampled crossover. The
+`unity_gain_bandwidth()` method derives its optional frequency from the phase
+margin; `margin_assessment()` summarizes measured margins. The former
+`is_stable()` and `conditionally_stable` APIs have been removed because neither
+positive margins nor multiple crossings alone establish circuit stability.
+Result schema 15 requires matching margin and frequency availability and
+reports multiple crossings as `multiple_unity_gain_crossovers`. Versions 1–14
+decode missing-crossover infinity placeholders as `NoCrossover` while preserving
+historical finite margin values.
+
 STB measures its DC return ratio independently at zero frequency, using the
 same linearized circuit and reusable two-experiment workspace. The requested
 positive-frequency grid is unchanged. A measured zero remains zero; an undefined

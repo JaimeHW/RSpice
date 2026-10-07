@@ -31,7 +31,9 @@ class TestStb:
 
         assert result.probe_name == "VPROBE"
         assert result.success
-        assert result.is_stable
+        assert result.gain_margin_db is None
+        assert result.gain_margin_frequency is None
+        assert result.assessment == "PARTIAL MARGIN MEASUREMENT"
         assert result.dc_gain_db == pytest.approx(60.0, abs=0.05)
         assert result.phase_margin_degrees == pytest.approx(90.0, abs=0.2)
         assert result.unity_gain_bandwidth == pytest.approx(1e6, rel=0.02)
@@ -93,3 +95,67 @@ R1 x ctrl 1k
         with pytest.raises(ValueError, match="STB DC"):
             rspice.StbResult._unpickle([], [], "VP", [0] * 6,
                                       (False, 0, True), [], "legacy", state)
+
+    @pytest.mark.parametrize("gain", [0.5, 1000.0])
+    @pytest.mark.parametrize("points", [1, 3])
+    def test_absent_margins_survive_single_point_and_truncated_sweeps(self, engine, gain, points):
+        result = engine.run_stb(
+            rspice.Netlist.parse(SINGLE_POLE_STB.replace("-1000", f"-{gain}")),
+            "VPROBE", variation="lin", points=points,
+            start_freq=10.0, stop_freq=1000.0,
+        )
+        for value in [result, pickle.loads(pickle.dumps(result))]:
+            assert value.success
+            assert len(value.frequencies) == points
+            np.testing.assert_allclose(
+                value.loop_gain, gain / (1 + 1j * value.frequencies / 1000.0), rtol=1e-10,
+            )
+            for name in ["gain_margin_db", "gain_margin_frequency", "phase_margin_degrees",
+                         "phase_margin_frequency", "unity_gain_bandwidth"]:
+                assert getattr(value, name) is None
+            assert value.num_crossovers == 0
+            assert not value.multiple_crossovers
+            assert value.assessment == "NO MARGINS MEASURED"
+        scalars = {scalar.name: scalar for scalar in result.scalars()}
+        for name in ["gain_margin_db", "gain_margin_frequency", "phase_margin_degrees",
+                     "phase_margin_frequency", "unity_gain_bandwidth"]:
+            assert scalars[name].unavailable_reason == "no_crossover"
+
+    def test_legacy_pickle_replaces_infinite_margin_and_stability_claims(self):
+        result = rspice.StbResult._unpickle(
+            [10.0, 100.0], [(0.5, -0.1), (0.4, -0.2)], "VP",
+            [float("inf"), 0, float("inf"), 0, 0, 0],
+            (False, 0, True), [], "WELL DAMPED",
+        )
+        assert result.success
+        assert result.gain_margin_db is None
+        assert result.phase_margin_degrees is None
+        assert result.assessment == "NO MARGINS MEASURED"
+
+    @pytest.mark.parametrize("flags,state", [
+        ((False, 1, True), (2, None, (90.0, 10.0))),
+        ((False, 1, True), (1, None, (float("nan"), 10.0))),
+        ((False, 1, True), (1, None, (90.0, 0.0))),
+        ((False, 1, True), (1, None, (90.0, 101.0))),
+        ((False, 1, True), (1, None, None)),
+        ((False, 1, True), (1, (1.0, 10.0), (90.0, 10.0))),
+        ((True, 2, True), (1, None, (90.0, 10.0))),
+    ])
+    def test_invalid_margin_pickle_evidence_is_rejected(self, flags, state):
+        with pytest.raises(ValueError, match="STB"):
+            rspice.StbResult._unpickle(
+                [1.0, 100.0], [(0.0, -2.0), (0.0, -0.5)], "VP", [0] * 6,
+                flags, [], "ignored", (1, None), state,
+            )
+
+    def test_measured_zero_margin_survives_pickle(self):
+        result = rspice.StbResult._unpickle(
+            [100.0], [(-1.0, 0.0)], "VP", [0] * 6,
+            (False, 1, True), [], "ignored", (1, None),
+            (1, (0.0, 100.0), (0.0, 100.0)),
+        )
+        for value in [result, pickle.loads(pickle.dumps(result))]:
+            assert value.gain_margin_db == 0.0
+            assert value.phase_margin_degrees == 0.0
+            assert value.gain_margin_frequency == value.phase_margin_frequency == 100.0
+            assert value.assessment == "NONPOSITIVE MEASURED MARGIN"

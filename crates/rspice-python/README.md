@@ -211,15 +211,23 @@ Beyond the flat accessors, every result family exposes `signals()`,
 `rspice-analysis-result` document the CLI, the browser, and the cloud
 engine-adapter publish.
 
-The difference is what they can say. A flat accessor has to return a float;
-`scalars()` reports a quantity the analysis proved has no finite value, such as
-the gain margin of a loop whose phase never reaches −180°, as `value is None`
-with an `unavailable_reason`. A signal descriptor carries canonical name, kind,
+`scalars()` attaches a unit and an `unavailable_reason` to quantities without
+a finite measurement. STB margin and crossover-frequency accessors also return
+`None` when the sampled band resolves no such crossing; the corresponding
+typed scalar reason is `no_crossover`. A finite sweep cannot establish an
+infinite margin. A signal descriptor carries canonical name, kind,
 unit, owner, and an `availability` tag (`available`, `not_projected`,
 `absent_at_coordinate`), so a channel the authored output projection did not
 retain is distinguishable from one that does not exist. `document()` names the
 authored card the result came from and, for a `.STEP` or `.TEMP` run, the
 coordinate it was solved at.
+
+STB's `assessment` summarizes measured margins; it is not a circuit stability
+verdict. `multiple_crossovers` replaces the former `conditionally_stable`
+property, and the margin-only `is_stable` property has been removed. STB pickles
+preserve paired margin availability and independent DC evidence. Older pickles
+recompute margins from retained loop samples and discard inferred stability
+claims; a legacy first AC sample is not restored as a DC measurement.
 
 A result restored from `pickle` carries this binding's own projection rather
 than the core result these are built from, and says so with

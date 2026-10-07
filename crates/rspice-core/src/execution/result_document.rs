@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 14                          this build's exact version
+//!   "schemaVersion": 15                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -226,7 +226,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 14;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 15;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -271,14 +271,18 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 14;
 /// Earlier STB documents mislabeled the first sweep sample as DC; decoding
 /// preserves it as sweep-start gain without claiming a zero-frequency result.
 ///
+/// Version 15 records unobserved STB margins as NoCrossover and requires
+/// consistent measured margin/frequency pairs. Multiple crossings are an
+/// observation, not a conditional-stability verdict.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 14] =
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 15] =
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -1933,13 +1937,11 @@ pub enum ScalarValue {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ScalarUnavailability {
-    /// The quantity diverges upward — the input impedance of an ideal voltage
-    /// source, or the gain margin of a loop whose phase never reaches -180°.
+    /// The quantity diverges upward, such as ideal-source input impedance.
     PositiveInfinity,
-    /// The quantity diverges downward, such as the phase margin of a loop
-    /// whose magnitude never falls below unity.
+    /// The quantity diverges downward, such as the logarithm of measured zero gain.
     NegativeInfinity,
-    /// The quantity is only defined at a crossover the response never makes,
+    /// The quantity is only defined at a crossover not resolved in the sampled band,
     /// so it has no value at all rather than an infinite one.
     NoCrossover,
     /// The quantity aggregates over a set — a maximum, a minimum, an extremum

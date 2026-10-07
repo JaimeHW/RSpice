@@ -2220,11 +2220,12 @@ mod loop_probe_contract_tests {
             margins.dc_gain_db().unwrap()
         );
         assert!(
-            margins.phase_margin_deg > 0.0 && margins.phase_margin_deg < 180.0,
+            margins.phase_margin.unwrap().value > 0.0
+                && margins.phase_margin.unwrap().value < 180.0,
             "a phase margin must be extracted, got {}",
-            margins.phase_margin_deg
+            margins.phase_margin.unwrap().value
         );
-        assert!(analysis.result.is_stable());
+        assert_eq!(analysis.result.margins.gain_margin, None);
     }
 }
 

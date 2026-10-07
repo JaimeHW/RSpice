@@ -769,8 +769,8 @@ fn every_runnable_family_executes_at_every_step_and_temperature_coordinate() {
 /// failing the run closed or naming a fabricated finite margin, and the
 /// scalar's numeric measurement is omitted rather than invented.
 #[test]
-fn an_unconditionally_stable_loop_records_its_unbounded_margin() {
-    let job = Job::new("stb-infinite-margin");
+fn an_unobserved_phase_crossover_records_margin_unavailability() {
+    let job = Job::new("stb-unobserved-margin");
     let response = job.execute(
         "single-pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\nR1 x ctrl 1k\n\
          C1 ctrl 0 159.154943091895n\n.stb dec 2 10 10meg probe=vprobe\n.end\n",
@@ -786,7 +786,9 @@ fn an_unconditionally_stable_loop_records_its_unbounded_margin() {
     assert!(
         matches!(
             margin.value(),
-            rspice_core::execution::result_document::ScalarValue::Unavailable { .. }
+            rspice_core::execution::result_document::ScalarValue::Unavailable {
+                reason: rspice_core::execution::result_document::ScalarUnavailability::NoCrossover
+            }
         ),
         "a loop with no phase crossover has no finite gain margin: {:?}",
         margin.value()
@@ -797,7 +799,7 @@ fn an_unconditionally_stable_loop_records_its_unbounded_margin() {
             .expect("declared measurements")
             .iter()
             .all(|entry| entry["name"] != "scalar:gain_margin_db"),
-        "an unbounded margin must not appear as a number: {response}"
+        "an unobserved margin must not appear as a number: {response}"
     );
 }
 

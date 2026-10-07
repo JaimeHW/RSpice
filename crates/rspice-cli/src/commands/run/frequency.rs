@@ -921,20 +921,20 @@ pub(super) fn run_stb(
         } else {
             crate::console::line(format_args!("  DC loop gain: unavailable"))?;
         }
-        if margins.num_crossovers == 0 {
+        if margins.phase_margin.is_none() {
             crate::console::line(format_args!(
                 "  No unity-gain crossover found in the swept band; no phase margin to report"
             ))?;
-        } else {
+        } else if let Some(margin) = margins.phase_margin {
             crate::console::line(format_args!(
                 "  Phase margin: {:.2} deg at {:.4e} Hz (unity-gain crossover)",
-                margins.phase_margin_deg, margins.phase_margin_freq
+                margin.value, margin.frequency
             ))?;
         }
-        if margins.gain_margin_freq > 0.0 && margins.gain_margin_db.is_finite() {
+        if let Some(margin) = margins.gain_margin {
             crate::console::line(format_args!(
                 "  Gain margin: {:.2} dB at {:.4e} Hz",
-                margins.gain_margin_db, margins.gain_margin_freq
+                margin.value, margin.frequency
             ))?;
         } else {
             crate::console::line(format_args!(

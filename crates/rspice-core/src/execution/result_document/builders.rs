@@ -299,8 +299,7 @@ fn real_scalar(
 
 /// One real scalar whose analysis may legitimately produce no finite value.
 ///
-/// An ideal voltage source really has unbounded input impedance, and a loop
-/// whose phase never reaches -180 degrees really has unbounded gain margin.
+/// An ideal voltage source can have unbounded input impedance.
 /// Those are determinations, so they are recorded as such. `NaN` stays a hard
 /// projection failure: it is a defect in the producing computation, not a
 /// statement about the circuit.
@@ -322,32 +321,7 @@ fn real_or_unbounded_scalar(
     }
 }
 
-/// One frequency that exists only when the response actually crosses.
-///
-/// With no crossover there is no frequency to report; publishing the margin
-/// struct's default zero would name DC as the crossing point.
-fn crossover_frequency_scalar(
-    location: &'static str,
-    name: &str,
-    display: &str,
-    crossed: bool,
-    value: Value,
-) -> Result<ResultScalar, ResultDocumentError> {
-    if crossed {
-        real_or_unbounded_scalar(location, name, display, SignalUnit::Hertz, value)
-    } else {
-        ResultScalar::new(
-            name,
-            display,
-            Some(SignalUnit::Hertz),
-            ScalarValue::Unavailable {
-                reason: ScalarUnavailability::NoCrossover,
-            },
-        )
-    }
-}
-
-/// One `.PXF` curve metric, which exists only where the curve has the feature
+/// One derived curve metric, which exists only where the curve has the feature
 /// it measures — and the two ways it can be missing are different findings.
 ///
 /// A transfer that never falls 3 dB below its peak has no -3 dB bandwidth, and
@@ -358,7 +332,7 @@ fn crossover_frequency_scalar(
 /// only the caller knows: the `None` arriving here is the same `None` either
 /// way. Both are determinations about the response, so both are recorded as
 /// such rather than reported as a zero the sweep would read as DC.
-fn pxf_metric_scalar(
+fn derived_metric_scalar(
     location: &'static str,
     name: &str,
     display: &str,
@@ -2040,42 +2014,40 @@ impl AnalysisResultDocument {
         ];
 
         let margins = &result.margins;
-        // A margin frequency exists only where the loop actually crosses.
-        // `StabilityMargins` leaves its default zero in place otherwise, and
-        // publishing that would name DC as the crossing point. The unity-gain
-        // crossing is counted directly; the -180 degree crossing is exactly
-        // the case that leaves the gain margin non-finite.
-        let swept = !result.bode_points.is_empty();
-        let unity_gain_crossed = swept && margins.num_crossovers > 0;
-        let phase_crossed = swept && margins.gain_margin_db.is_finite();
-        let scalars = vec![
-            real_or_unbounded_scalar(
+        let margin_scalar = |name, display, unit, value| {
+            derived_metric_scalar(
                 LOCATION,
+                name,
+                display,
+                unit,
+                ScalarUnavailability::NoCrossover,
+                value,
+            )
+        };
+        let scalars = vec![
+            margin_scalar(
                 "gain_margin_db",
                 "Gain margin",
                 decibel(),
-                margins.gain_margin_db,
+                margins.gain_margin.map(|m| m.value),
             )?,
-            crossover_frequency_scalar(
-                LOCATION,
+            margin_scalar(
                 "gain_margin_frequency",
                 "Gain margin frequency",
-                phase_crossed,
-                margins.gain_margin_freq,
+                SignalUnit::Hertz,
+                margins.gain_margin.map(|m| m.frequency),
             )?,
-            real_or_unbounded_scalar(
-                LOCATION,
+            margin_scalar(
                 "phase_margin_degrees",
                 "Phase margin",
                 SignalUnit::Degree,
-                margins.phase_margin_deg,
+                margins.phase_margin.map(|m| m.value),
             )?,
-            crossover_frequency_scalar(
-                LOCATION,
+            margin_scalar(
                 "phase_margin_frequency",
                 "Phase margin frequency",
-                unity_gain_crossed,
-                margins.phase_margin_freq,
+                SignalUnit::Hertz,
+                margins.phase_margin.map(|m| m.frequency),
             )?,
             ResultScalar::new(
                 "dc_loop_gain",
@@ -2100,17 +2072,16 @@ impl AnalysisResultDocument {
                     ScalarValue::Real { value: None },
                 )?,
             },
-            crossover_frequency_scalar(
-                LOCATION,
+            margin_scalar(
                 "unity_gain_bandwidth",
                 "Unity gain bandwidth",
-                unity_gain_crossed,
-                margins.unity_gain_bandwidth,
+                SignalUnit::Hertz,
+                margins.unity_gain_bandwidth(),
             )?,
             boolean_scalar(
-                "conditionally_stable",
-                "Conditionally stable",
-                margins.conditionally_stable,
+                "multiple_unity_gain_crossovers",
+                "Multiple unity-gain crossovers",
+                margins.num_crossovers > 1,
             )?,
             count_scalar(
                 "unity_gain_crossovers",
@@ -3351,7 +3322,7 @@ impl AnalysisResultDocument {
             ScalarUnavailability::EmptyDomain
         };
         let scalars = vec![
-            pxf_metric_scalar(
+            derived_metric_scalar(
                 LOCATION,
                 "peak_gain_db",
                 "Peak gain",
@@ -3359,7 +3330,7 @@ impl AnalysisResultDocument {
                 peak_absent,
                 result.peak_gain.map(|(_, gain_db)| gain_db),
             )?,
-            pxf_metric_scalar(
+            derived_metric_scalar(
                 LOCATION,
                 "peak_gain_frequency",
                 "Peak gain frequency",
@@ -3367,7 +3338,7 @@ impl AnalysisResultDocument {
                 peak_absent,
                 result.peak_gain.map(|(frequency, _)| frequency),
             )?,
-            pxf_metric_scalar(
+            derived_metric_scalar(
                 LOCATION,
                 "bandwidth_3db",
                 "-3 dB bandwidth",
@@ -3375,7 +3346,7 @@ impl AnalysisResultDocument {
                 bandwidth_absent,
                 result.bandwidth_3db,
             )?,
-            pxf_metric_scalar(
+            derived_metric_scalar(
                 LOCATION,
                 "unity_gain_frequency",
                 "Unity gain frequency",

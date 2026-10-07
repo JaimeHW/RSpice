@@ -23,9 +23,9 @@
 //!
 //! # Stability Criteria
 //!
-//! For stability (Bode criterion):
-//! - Phase margin > 0° (typically > 45° for good damping)
-//! - Gain margin > 0 dB (typically > 10 dB for robustness)
+//! Reported margins describe crossings resolved within the swept band.
+//! Closed-loop stability additionally requires qualified pole or Nyquist
+//! evidence; positive margins alone do not establish it.
 
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
@@ -274,69 +274,60 @@ impl StbConfig {
 // Stability Margins
 //=============================================================================
 
-/// Stability margins extracted from loop gain
+/// One measured margin and the positive frequency of its resolved crossover.
+/// Values are degrees for phase margins and dB for gain margins.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossoverMargin {
+    /// Signed margin in the unit stated by the owning field.
+    pub value: Value,
+    /// Measured or interpolated crossover frequency, in Hz.
+    pub frequency: Value,
+}
+
+/// Margins observed in the authored sweep. Absence of a resolved crossover
+/// does not establish an infinite margin or closed-loop stability.
 #[derive(Debug, Clone, Default)]
 pub struct StabilityMargins {
-    /// Signed gain margin nearest zero over the measured phase crossings, in dB.
-    pub gain_margin_db: Value,
-
-    /// Frequency of the negative-real-axis crossing selected for the gain margin.
-    pub gain_margin_freq: Value,
-
-    /// Signed phase margin nearest zero over the measured unity crossings, in degrees.
-    pub phase_margin_deg: Value,
-
-    /// Frequency of the unity crossing selected for the phase margin.
-    pub phase_margin_freq: Value,
-
-    /// Independently measured zero-frequency return ratio. A positive-frequency
-    /// sweep cannot supply this value. `None` means DC was not measured or
-    /// could not be evaluated; an engine evaluation failure has a warning.
+    /// Signed gain margin nearest zero among measured negative-real crossings.
+    pub gain_margin: Option<CrossoverMargin>,
+    /// Signed phase margin nearest zero among measured unity-gain crossings.
+    pub phase_margin: Option<CrossoverMargin>,
+    /// Independently measured zero-frequency return ratio. An engine failure
+    /// to evaluate DC carries a warning; standalone AC projection leaves None.
     pub dc_loop_gain: Option<Complex64>,
-
-    /// Frequency of the unity crossing selected for the phase margin (Hz).
-    pub unity_gain_bandwidth: Value,
-
-    /// Whether the loop is conditionally stable (multiple crossovers)
-    pub conditionally_stable: bool,
-
-    /// Number of unity gain crossovers
+    /// Number of resolved unity crossings; a connected plateau counts once.
     pub num_crossovers: usize,
 }
 
 impl StabilityMargins {
-    /// Magnitude of the independently measured DC return ratio, in dB.
-    /// A measured zero returns negative infinity; an unmeasured DC value is
-    /// `None`. Scaling avoids overflow for finite complex components.
+    /// DC magnitude in dB. Measured zero is negative infinity; None is unmeasured.
     pub fn dc_gain_db(&self) -> Option<Value> {
-        self.dc_loop_gain.map(|gain| {
-            let scale = gain.re.abs().max(gain.im.abs());
-            if scale == 0.0 {
-                f64::NEG_INFINITY
-            } else {
-                20.0 * (scale.log10() + (gain.re / scale).hypot(gain.im / scale).log10())
-            }
-        })
+        self.dc_loop_gain.map(loop_gain_db)
     }
 
-    /// Check if the system is stable (positive margins)
-    pub fn is_stable(&self) -> bool {
-        self.gain_margin_db > 0.0 && self.phase_margin_deg > 0.0
+    /// Frequency of the unity crossing selected for the phase margin.
+    pub fn unity_gain_bandwidth(&self) -> Option<Value> {
+        self.phase_margin.map(|margin| margin.frequency)
     }
 
-    /// Get stability assessment string
-    pub fn assessment(&self) -> String {
-        if !self.is_stable() {
-            "UNSTABLE".to_string()
-        } else if self.conditionally_stable {
-            "CONDITIONALLY STABLE".to_string()
-        } else if self.phase_margin_deg < 30.0 {
-            "MARGINALLY STABLE".to_string()
-        } else if self.phase_margin_deg >= 60.0 && self.gain_margin_db >= 12.0 {
-            "WELL DAMPED".to_string()
-        } else {
-            "STABLE".to_string()
+    /// Summary of measured margins, without a closed-loop stability claim.
+    pub fn assessment(&self) -> &'static str {
+        match (self.gain_margin, self.phase_margin) {
+            (None, None) => "NO MARGINS MEASURED",
+            (Some(gain), _) if gain.value <= 0.0 => "NONPOSITIVE MEASURED MARGIN",
+            (_, Some(phase)) if phase.value <= 0.0 => "NONPOSITIVE MEASURED MARGIN",
+            (Some(_), Some(_)) => "POSITIVE MEASURED MARGINS",
+            _ => "PARTIAL MARGIN MEASUREMENT",
         }
+    }
+}
+
+fn loop_gain_db(gain: Complex64) -> Value {
+    let scale = gain.re.abs().max(gain.im.abs());
+    if scale == 0.0 {
+        f64::NEG_INFINITY
+    } else {
+        20.0 * (scale.log10() + (gain.re / scale).hypot(gain.im / scale).log10())
     }
 }
 
@@ -513,17 +504,12 @@ impl StbResult {
         Ok(curve)
     }
 
-    /// Check if stable
-    pub fn is_stable(&self) -> bool {
-        self.success && self.margins.is_stable()
-    }
-
-    /// Get stability assessment
-    pub fn assessment(&self) -> String {
+    /// Summarize the measured margins. This is not a stability verdict.
+    pub fn margin_assessment(&self) -> &'static str {
         if self.success {
             self.margins.assessment()
         } else {
-            "ANALYSIS FAILED".into()
+            "ANALYSIS FAILED"
         }
     }
 }
@@ -697,12 +683,6 @@ impl StbAnalyzer {
         }
 
         self.config.validate()?;
-        if frequencies.len() < 2 {
-            return Err(StbAnalysisError::InvalidSample {
-                index: 0,
-                reason: "at least two frequency samples are required",
-            });
-        }
         // Unwrap one continuous path. Independently wrapping each endpoint
         // around -180 degrees invents crossings near zero phase.
         let mut previous_phase = None;
@@ -751,7 +731,7 @@ impl StbAnalyzer {
         // Extract margins
         result.margins = self.extract_margins(&result.bode_points, abort)?;
 
-        // Check for conditional stability
+        // Report multiple observed unity crossings without a stability claim
         if result.margins.num_crossovers > 1 {
             result
                 .warnings
@@ -773,32 +753,26 @@ impl StbAnalyzer {
         let mut phase_margin = None;
         let mut gain_margin = None;
         let mut count = 0;
-        let mut all_above_unity = true;
         for (index, point) in points.iter().enumerate() {
             poll_abort(abort, index)?;
-            all_above_unity &= point.magnitude_db > 0.0;
-            if point.magnitude_db == 0.0 {
+            let m1 = point.magnitude_db;
+            let p1 = point.phase_deg;
+            if m1 == 0.0 {
                 // A sampled unity plateau is one connected crossing, but
                 // its least phase margin may occur anywhere along it.
                 if index == 0 || points[index - 1].magnitude_db != 0.0 {
                     count += 1;
                 }
-                retain_binding_margin(
-                    &mut phase_margin,
-                    phase_margin_degrees(point.phase_deg),
-                    point.frequency,
-                );
+                retain_binding_margin(&mut phase_margin, phase_margin_degrees(p1), point.frequency);
             }
-            if point.phase_deg.rem_euclid(360.0) == 180.0 {
-                retain_binding_margin(&mut gain_margin, -point.magnitude_db, point.frequency);
+            if p1.rem_euclid(360.0) == 180.0 {
+                retain_binding_margin(&mut gain_margin, -m1, point.frequency);
             }
             let Some(previous) = index.checked_sub(1).map(|i| &points[i]) else {
                 continue;
             };
             let m0 = previous.magnitude_db;
-            let m1 = point.magnitude_db;
             let p0 = previous.phase_deg;
-            let p1 = point.phase_deg;
             if (m0 < 0.0 && m1 > 0.0) || (m0 > 0.0 && m1 < 0.0) {
                 count += 1;
                 let alpha = -m0 / (m1 - m0);
@@ -828,33 +802,13 @@ impl StbAnalyzer {
                 }
             }
         }
-        let mut margins = StabilityMargins {
+        let measured = |(value, frequency)| CrossoverMargin { value, frequency };
+        Ok(StabilityMargins {
             num_crossovers: count,
-            conditionally_stable: count > 1,
-            ..Default::default()
-        };
-        if let Some((value, frequency)) = phase_margin {
-            margins.phase_margin_deg = value;
-            margins.phase_margin_freq = frequency;
-            margins.unity_gain_bandwidth = frequency;
-        } else {
-            margins.phase_margin_deg = if all_above_unity {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            };
-        }
-        if let Some((value, frequency)) = gain_margin {
-            margins.gain_margin_db = value;
-            margins.gain_margin_freq = frequency;
-        } else {
-            margins.gain_margin_db = if all_above_unity {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            };
-        }
-        Ok(margins)
+            gain_margin: gain_margin.map(measured),
+            phase_margin: phase_margin.map(measured),
+            dc_loop_gain: None,
+        })
     }
 }
 
@@ -880,7 +834,9 @@ fn phase_margin_degrees(phase: Value) -> Value {
 
 fn segment_frequency(start: Value, stop: Value, alpha: Value) -> Value {
     // Interpolating log values avoids overflow/underflow in stop/start.
-    10.0_f64.powf(start.log10() + alpha * (stop.log10() - start.log10()))
+    10.0_f64
+        .powf(start.log10() + alpha * (stop.log10() - start.log10()))
+        .clamp(start, stop)
 }
 
 fn try_reserve_exact<T>(

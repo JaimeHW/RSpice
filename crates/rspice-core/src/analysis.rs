@@ -96,8 +96,8 @@ pub use sensitivity::{
     SensitivityValue,
 };
 pub use stb::{
-    BodePoint, NyquistPoint, StabilityMargins, StbAnalysisError, StbAnalyzer, StbConfig,
-    StbConfigError, StbResult, StbSweepType,
+    BodePoint, CrossoverMargin, NyquistPoint, StabilityMargins, StbAnalysisError, StbAnalyzer,
+    StbConfig, StbConfigError, StbResult, StbSweepType,
 };
 pub use temperature::{ResistorTempCoeffs, TemperatureContext};
 pub use transfer::{TransferFunctionConfig, TransferFunctionResult};

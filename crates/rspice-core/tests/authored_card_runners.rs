@@ -614,23 +614,25 @@ fn the_nyquist_switch_changes_what_is_retained_and_not_the_margins() {
         // decade puts neighbouring samples 1.2% apart, which is the whole
         // budget these two bounds spend.
         assert!(
-            (margins.phase_margin_freq - crossover).abs() <= 0.02 * crossover,
+            (margins.phase_margin.unwrap().frequency - crossover).abs() <= 0.02 * crossover,
             "crossover: got {}, want {crossover}",
-            margins.phase_margin_freq
+            margins.phase_margin.unwrap().frequency
         );
         assert!(
-            (margins.phase_margin_deg - phase_margin).abs() <= 1.0,
+            (margins.phase_margin.unwrap().value - phase_margin).abs() <= 1.0,
             "phase margin: got {}, want {phase_margin}",
-            margins.phase_margin_deg
+            margins.phase_margin.unwrap().value
         );
     }
 
     assert_eq!(
-        kept.result.margins.phase_margin_deg, dropped.result.margins.phase_margin_deg,
+        kept.result.margins.phase_margin.unwrap().value,
+        dropped.result.margins.phase_margin.unwrap().value,
         "the contour switch decides what is retained, never what is measured"
     );
     assert_eq!(
-        kept.result.margins.phase_margin_freq, dropped.result.margins.phase_margin_freq,
+        kept.result.margins.phase_margin.unwrap().frequency,
+        dropped.result.margins.phase_margin.unwrap().frequency,
         "the contour switch decides what is retained, never what is measured"
     );
     assert_eq!(

@@ -43,8 +43,8 @@ mod loop_gain;
 const STB_PRIMARY_VALUES_PER_POINT: usize = 3;
 const STB_BODE_VALUES_PER_POINT: usize = 6;
 const STB_NYQUIST_VALUES_PER_POINT: usize = 3;
-// Five scalar margins and the complex DC return ratio, including absent slots.
-const STB_MARGIN_VALUES: usize = 7;
+// Two value/frequency pairs and the complex DC return ratio, including absent slots.
+const STB_MARGIN_VALUES: usize = 6;
 
 fn stb_retained_result_value_count(
     point_count: usize,
@@ -479,7 +479,7 @@ mod tests {
                         .expect("Nyquist shape"),
                 )
             })
-            .and_then(|count| count.checked_add(7))
+            .and_then(|count| count.checked_add(6))
             .expect("retained STB result shape")
     }
 

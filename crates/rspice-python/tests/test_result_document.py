@@ -146,7 +146,7 @@ def test_every_family_publishes_the_shared_document(results):
         assert document["schema"] == "rspice-analysis-result", kind
         # Version 13 qualifies nominal sensitivity output units. Every producer
         # uses the shared version so older readers reject new guarantees.
-        assert document["schemaVersion"] == 14, kind
+        assert document["schemaVersion"] == 15, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 
@@ -223,8 +223,8 @@ def test_a_device_observable_reports_absence_rather_than_a_zero():
             assert present == (not np.isnan(value))
 
 
-def test_an_unbounded_margin_is_a_determination_not_a_number():
-    """A loop with no phase crossover has no gain margin, and says so."""
+def test_an_unobserved_crossover_leaves_the_margin_unavailable():
+    """No resolved phase crossover means no measured gain margin."""
     report = report_for(
         "* single pole loop\nE1 eo 0 ctrl 0 -1000\nVPROBE eo x 0\nR1 x ctrl 1k\n"
         "C1 ctrl 0 159.154943091895n\n.stb dec 2 10 10meg probe=vprobe\n"
@@ -233,11 +233,8 @@ def test_an_unbounded_margin_is_a_determination_not_a_number():
     margin = margins["gain_margin_db"]
     assert margin.representation == "unavailable"
     assert margin.value is None
-    assert margin.unavailable_reason in {
-        "positive_infinity",
-        "negative_infinity",
-        "no_crossover",
-    }
+    assert margin.unavailable_reason == "no_crossover"
+    assert margins["gain_margin_frequency"].unavailable_reason == "no_crossover"
 
 
 def test_each_authored_card_publishes_under_its_own_identity():

@@ -24,7 +24,7 @@ use crate::analysis::pole_zero::{PoleZeroResult, RootSetEvidence, SpectrumCertif
 use crate::analysis::pss::{PeriodicWaveform, PssResult};
 use crate::analysis::s_param::{Port, SMatrix, SParameterResult};
 use crate::analysis::sensitivity::{ElementType, Sensitivity, SensitivityResult};
-use crate::analysis::stb::{BodePoint, NyquistPoint, StabilityMargins, StbResult};
+use crate::analysis::stb::{BodePoint, CrossoverMargin, NyquistPoint, StabilityMargins, StbResult};
 use crate::analysis::transfer::TransferFunctionResult;
 use crate::circuit::{DeviceOpEntry, DeviceOpReport, OpLabel};
 use crate::engine::{Engine, PeriodicNoiseResult, SimulationConfig};
@@ -381,13 +381,15 @@ fn stability_result() -> StbResult {
         1.0e3,
     )];
     result.margins = StabilityMargins {
-        gain_margin_db: 12.0,
-        gain_margin_freq: 2.0e6,
-        phase_margin_deg: 60.0,
-        phase_margin_freq: 1.0e6,
+        gain_margin: Some(CrossoverMargin {
+            value: 12.0,
+            frequency: 2.0e6,
+        }),
+        phase_margin: Some(CrossoverMargin {
+            value: 60.0,
+            frequency: 1.0e6,
+        }),
         dc_loop_gain: Some(Complex64::new(10.0, 0.0)),
-        unity_gain_bandwidth: 1.0e6,
-        conditionally_stable: false,
         num_crossovers: 1,
     };
     result.warnings = vec!["synthetic warning".to_owned()];
@@ -2722,23 +2724,19 @@ fn a_transfer_function_nan_is_still_a_projection_failure() {
 fn a_loop_with_no_crossover_records_the_absence_rather_than_zero_hertz() {
     let mut result = stability_result();
     result.margins = StabilityMargins {
-        gain_margin_db: f64::INFINITY,
-        gain_margin_freq: 0.0,
-        phase_margin_deg: f64::INFINITY,
-        phase_margin_freq: 0.0,
+        gain_margin: None,
+        phase_margin: None,
         dc_loop_gain: Some(Complex64::new(0.01, 0.0)),
-        unity_gain_bandwidth: 0.0,
-        conditionally_stable: false,
         num_crossovers: 0,
     };
     let document = AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &result)
-        .expect("an unconditionally stable loop must publish, not fail closed")
+        .expect("a sweep without crossings must still publish")
         .build()
         .expect("document builds");
     assert_eq!(
         scalar_value_of(&document, "gain_margin_db"),
         ScalarValue::Unavailable {
-            reason: ScalarUnavailability::PositiveInfinity
+            reason: ScalarUnavailability::NoCrossover
         }
     );
     for name in [
@@ -2873,16 +2871,12 @@ fn a_pxf_curve_separates_a_missing_crossing_from_an_empty_domain() {
 }
 
 #[test]
-fn a_loop_that_never_leaves_unity_gain_records_a_negative_divergence() {
+fn a_truncated_above_unity_sweep_does_not_claim_a_negative_infinite_margin() {
     let mut result = stability_result();
     result.margins = StabilityMargins {
-        gain_margin_db: f64::NEG_INFINITY,
-        gain_margin_freq: 0.0,
-        phase_margin_deg: f64::NEG_INFINITY,
-        phase_margin_freq: 0.0,
+        gain_margin: None,
+        phase_margin: None,
         dc_loop_gain: Some(Complex64::new(1000.0, 0.0)),
-        unity_gain_bandwidth: 0.0,
-        conditionally_stable: false,
         num_crossovers: 0,
     };
     let document = AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &result)
@@ -2892,7 +2886,7 @@ fn a_loop_that_never_leaves_unity_gain_records_a_negative_divergence() {
     assert_eq!(
         scalar_value_of(&document, "phase_margin_degrees"),
         ScalarValue::Unavailable {
-            reason: ScalarUnavailability::NegativeInfinity
+            reason: ScalarUnavailability::NoCrossover
         }
     );
 }

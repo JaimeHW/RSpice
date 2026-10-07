@@ -13,9 +13,9 @@ fn stability_interpolates_across_the_phase_branch_cut() {
     let result = StbAnalyzer::new(StbConfig::default())
         .analyze(&[1.0, 100.0], &[gain(6.0, -170.0), gain(-6.0, 170.0)])
         .unwrap();
-    assert!(result.margins.phase_margin_deg.abs() < 1e-10);
-    assert!((result.margins.phase_margin_freq - 10.0).abs() < 1e-10);
-    assert!(result.margins.gain_margin_db.abs() < 1e-10);
+    assert!(result.margins.phase_margin.unwrap().value.abs() < 1e-10);
+    assert!((result.margins.phase_margin.unwrap().frequency - 10.0).abs() < 1e-10);
+    assert!(result.margins.gain_margin.unwrap().value.abs() < 1e-10);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -24,8 +24,7 @@ fn stability_does_not_invent_a_negative_real_crossing_near_zero_phase() {
     let result = StbAnalyzer::new(StbConfig::default())
         .analyze(&[1.0, 100.0], &[gain(-6.0, -10.0), gain(-6.0, 10.0)])
         .unwrap();
-    assert_eq!(result.margins.gain_margin_db, f64::INFINITY);
-    assert_eq!(result.margins.gain_margin_freq, 0.0);
+    assert_eq!(result.margins.gain_margin, None);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -33,9 +32,9 @@ fn stability_does_not_invent_a_negative_real_crossing_near_zero_phase() {
 fn stability_rejects_invalid_samples_instead_of_certifying_them() {
     let analyzer = StbAnalyzer::new(StbConfig::default());
     for bad in [
+        Complex64::new(0.0, 0.0),
         Complex64::new(f64::NAN, 0.0),
         Complex64::new(f64::INFINITY, 0.0),
-        Complex64::new(0.0, 0.0),
     ] {
         assert!(matches!(
             analyzer.analyze(&[1.0, 100.0], &[gain(6.0, 0.0), bad]),
@@ -50,8 +49,7 @@ fn stability_rejects_invalid_samples_instead_of_certifying_them() {
         );
     }
     let empty = analyzer.analyze(&[], &[]).unwrap();
-    assert!(!empty.is_stable());
-    assert_eq!(empty.assessment(), "ANALYSIS FAILED");
+    assert_eq!(empty.margin_assessment(), "ANALYSIS FAILED");
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -62,7 +60,7 @@ fn sampled_unity_crossovers_are_counted_once_including_sweep_endpoints() {
             .analyze(&[1.0, 10.0, 100.0], &gains.map(|db| gain(db, -90.0)))
             .unwrap();
         assert_eq!(result.margins.num_crossovers, 1);
-        assert!((result.margins.phase_margin_deg - 90.0).abs() < 1e-10);
+        assert!((result.margins.phase_margin.unwrap().value - 90.0).abs() < 1e-10);
     }
 }
 
@@ -81,8 +79,8 @@ fn unity_and_negative_real_plateaus_keep_the_smallest_margin() {
         )
         .unwrap();
     assert_eq!(unity.margins.num_crossovers, 1);
-    assert_eq!(unity.margins.phase_margin_deg, 0.0);
-    assert_eq!(unity.margins.phase_margin_freq, 100.0);
+    assert_eq!(unity.margins.phase_margin.unwrap().value, 0.0);
+    assert_eq!(unity.margins.phase_margin.unwrap().frequency, 100.0);
 
     // Every frequency in this segment is on the negative real axis.
     // Its closest gain margin is inside the segment, at L=-1.
@@ -93,9 +91,9 @@ fn unity_and_negative_real_plateaus_keep_the_smallest_margin() {
         )
         .unwrap();
     assert_eq!(inversion.margins.num_crossovers, 1);
-    assert_eq!(inversion.margins.gain_margin_db, 0.0);
-    assert_eq!(inversion.margins.phase_margin_deg, 0.0);
-    assert_eq!(inversion.margins.gain_margin_freq, 10.0);
+    assert_eq!(inversion.margins.gain_margin.unwrap().value, 0.0);
+    assert_eq!(inversion.margins.phase_margin.unwrap().value, 0.0);
+    assert_eq!(inversion.margins.gain_margin.unwrap().frequency, 10.0);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -113,11 +111,14 @@ fn phase_margin_uses_the_closest_crossover_and_retains_its_sign() {
         .analyze(&[1.0, 10.0, 100.0, 1000.0], &samples)
         .unwrap();
     assert_eq!(result.margins.num_crossovers, 3);
-    assert!((result.margins.phase_margin_deg + 10.0).abs() < 1e-10);
-    assert!((result.margins.phase_margin_freq / 1000f64.sqrt() / 10.0 - 1.0).abs() < 1e-12);
+    assert!((result.margins.phase_margin.unwrap().value + 10.0).abs() < 1e-10);
+    assert!(
+        (result.margins.phase_margin.unwrap().frequency / 1000f64.sqrt() / 10.0 - 1.0).abs()
+            < 1e-12
+    );
     assert_eq!(
-        result.margins.unity_gain_bandwidth,
-        result.margins.phase_margin_freq
+        result.margins.unity_gain_bandwidth().unwrap(),
+        result.margins.phase_margin.unwrap().frequency
     );
 
     let document = AnalysisResultDocument::from_stability(
@@ -166,8 +167,10 @@ fn gain_margin_searches_all_phase_crossings_even_without_unity_gain() {
             )
             .unwrap();
         assert_eq!(result.margins.num_crossovers, 0);
-        assert!((result.margins.gain_margin_db + sign * 7.0).abs() < 1e-10);
-        assert!((result.margins.gain_margin_freq / 1000f64.sqrt() - 1.0).abs() < 1e-12);
+        assert!((result.margins.gain_margin.unwrap().value + sign * 7.0).abs() < 1e-10);
+        assert!(
+            (result.margins.gain_margin.unwrap().frequency / 1000f64.sqrt() - 1.0).abs() < 1e-12
+        );
     }
 }
 
@@ -187,9 +190,9 @@ fn margins_use_each_odd_half_turn_without_losing_phase_winding() {
             ],
         )
         .unwrap();
-    assert!((result.margins.phase_margin_deg + 30.0).abs() < 1e-10);
-    assert!((result.margins.gain_margin_db + 4.0).abs() < 1e-10);
-    assert!((result.margins.gain_margin_freq / 1e4 - 1.0).abs() < 1e-12);
+    assert!((result.margins.phase_margin.unwrap().value + 30.0).abs() < 1e-10);
+    assert!((result.margins.gain_margin.unwrap().value + 4.0).abs() < 1e-10);
+    assert!((result.margins.gain_margin.unwrap().frequency / 1e4 - 1.0).abs() < 1e-12);
     assert!((result.bode_points.last().unwrap().phase_deg + 600.0).abs() < 1e-10);
 
     // A sweep starting on the positive branch must find the same critical
@@ -198,6 +201,6 @@ fn margins_use_each_odd_half_turn_without_losing_phase_winding() {
         let result = StbAnalyzer::new(StbConfig::default())
             .analyze(&[1.0, 100.0], &[gain(6.0, start), gain(-6.0, start + 40.0)])
             .unwrap();
-        assert!(result.margins.phase_margin_deg.abs() < 1e-10);
+        assert!(result.margins.phase_margin.unwrap().value.abs() < 1e-10);
     }
 }

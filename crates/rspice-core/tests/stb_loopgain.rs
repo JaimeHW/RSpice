@@ -70,24 +70,19 @@ fn single_pole_loop_gain_matches_the_closed_form() {
     // Unity crossover at fp*sqrt(A^2 - 1), phase margin 180 - atan(fu/fp).
     let fu_expected = FP * (A0 * A0 - 1.0).sqrt();
     assert!(
-        (margins.phase_margin_freq - fu_expected).abs() < 0.02 * fu_expected,
+        (margins.phase_margin.unwrap().frequency - fu_expected).abs() < 0.02 * fu_expected,
         "crossover must sit at {fu_expected:.4e} Hz, got {:.4e}",
-        margins.phase_margin_freq
+        margins.phase_margin.unwrap().frequency
     );
     let pm_expected = 180.0 - (fu_expected / FP).atan() * 180.0 / PI;
     assert!(
-        (margins.phase_margin_deg - pm_expected).abs() < 0.5,
+        (margins.phase_margin.unwrap().value - pm_expected).abs() < 0.5,
         "phase margin must be {pm_expected:.2} deg, got {:.2}",
-        margins.phase_margin_deg
+        margins.phase_margin.unwrap().value
     );
 
-    // Single pole never reaches -180 degrees: infinite gain margin.
-    assert!(
-        margins.gain_margin_db.is_infinite() && margins.gain_margin_db > 0.0,
-        "single-pole loop has infinite gain margin, got {}",
-        margins.gain_margin_db
-    );
-    assert!(analysis.result.is_stable());
+    // No negative-real crossing is observed in the finite sweep.
+    assert_eq!(margins.gain_margin, None);
 }
 
 /// Reversing the probe must not change the Tian loop gain.

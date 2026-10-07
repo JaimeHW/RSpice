@@ -921,8 +921,8 @@ fn run_stb(
 fn stb_margin_measurements(
     margins: &rspice_core::analysis::stb::StabilityMargins,
 ) -> Vec<rspice_core::MeasureResult> {
-    fn scalar(name: &str, value: f64, symbol: &str) -> rspice_core::MeasureResult {
-        if value.is_finite() {
+    fn scalar(name: &str, value: Option<f64>, symbol: &str) -> rspice_core::MeasureResult {
+        if let Some(value) = value.filter(|value| value.is_finite()) {
             frequency_measurement(name, value, symbol)
         } else {
             let mut result = rspice_core::MeasureResult::failed(
@@ -935,12 +935,28 @@ fn stb_margin_measurements(
     }
 
     vec![
-        scalar("stb_gain_margin_db", margins.gain_margin_db, "dB"),
-        scalar("stb_gain_margin_freq", margins.gain_margin_freq, "Hz"),
-        scalar("stb_phase_margin_deg", margins.phase_margin_deg, "deg"),
-        scalar("stb_phase_margin_freq", margins.phase_margin_freq, "Hz"),
+        scalar(
+            "stb_gain_margin_db",
+            margins.gain_margin.map(|m| m.value),
+            "dB",
+        ),
+        scalar(
+            "stb_gain_margin_freq",
+            margins.gain_margin.map(|m| m.frequency),
+            "Hz",
+        ),
+        scalar(
+            "stb_phase_margin_deg",
+            margins.phase_margin.map(|m| m.value),
+            "deg",
+        ),
+        scalar(
+            "stb_phase_margin_freq",
+            margins.phase_margin.map(|m| m.frequency),
+            "Hz",
+        ),
         match margins.dc_gain_db() {
-            Some(value) if value.is_finite() => scalar("stb_dc_loop_gain_db", value, "dB"),
+            Some(value) if value.is_finite() => scalar("stb_dc_loop_gain_db", Some(value), "dB"),
             value => {
                 let mut result = rspice_core::MeasureResult::failed(
                     "stb_dc_loop_gain_db",
@@ -956,17 +972,13 @@ fn stb_margin_measurements(
         },
         scalar(
             "stb_unity_gain_bandwidth",
-            margins.unity_gain_bandwidth,
+            margins.unity_gain_bandwidth(),
             "Hz",
         ),
         frequency_measurement("stb_crossovers", margins.num_crossovers as f64, "count"),
         frequency_measurement(
-            "stb_conditionally_stable",
-            if margins.conditionally_stable {
-                1.0
-            } else {
-                0.0
-            },
+            "stb_multiple_unity_gain_crossovers",
+            if margins.num_crossovers > 1 { 1.0 } else { 0.0 },
             "1",
         ),
     ]
@@ -1637,4 +1649,39 @@ fn stability_dc_measurements_preserve_zero_and_absent_evidence() {
         assert!(gain.error.as_ref().unwrap().contains(reason));
         assert_eq!(gain.units.as_ref().unwrap().value.symbol(), Some("dB"));
     }
+}
+
+#[test]
+fn stability_missing_margins_retain_availability_and_units() {
+    use crate::runner::worker_contract::WorkerSimulationResult;
+    let result = run_stb(
+        "Truncated loop\nE1 EO 0 CTRL 0 -1000\nVP EO X 0\nR1 X CTRL 1k\nC1 CTRL 0 159.154943091895n\n.end\n",
+        rspice_core::analysis::stb::StbConfig::new()
+            .with_sweep(10.0, 1000.0, 1)
+            .with_sweep_type(stb_sweep_type(FrequencySweep::Linear))
+            .with_probe("VP"),
+        None,
+        &rspice_core::NoAbort,
+    ).unwrap();
+    let worker = WorkerSimulationResult::try_from(result).unwrap();
+    let received: WorkerSimulationResult =
+        serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();
+    let retained = crate::result_conversion::convert(
+        received.into(),
+        rspice_results::analysis_type::AnalysisType::Stb,
+        "Truncated loop",
+        || 0.0,
+    );
+    for (name, unit) in [
+        ("stb_gain_margin_db", "dB"),
+        ("stb_gain_margin_freq", "Hz"),
+        ("stb_phase_margin_deg", "deg"),
+        ("stb_phase_margin_freq", "Hz"),
+        ("stb_unity_gain_bandwidth", "Hz"),
+    ] {
+        let scalars = retained.scalar_evidence(name);
+        assert_eq!(scalars.len(), 1, "{name}");
+        assert_eq!(scalars[0].value_in_unit(unit).unwrap(), None, "{name}");
+    }
+    assert_eq!(retained.validate_retained_evidence(), Ok(()));
 }
