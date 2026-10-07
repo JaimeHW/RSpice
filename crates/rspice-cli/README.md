@@ -645,7 +645,9 @@ that was not given.
 such as `V(out)` or `D(clk)` selects that exact signal. Bare aliases must be
 unambiguous: if both `V(out)` and `I(out)` exist, use their full names instead
 of `out`. The same rule applies to VCD signals sharing a short name across
-scopes. Repeat `--variables` to select multiple signals. Invalid selections
+scopes. VCD scalar aliases accept full or relative scopes with the matching
+`D(...)` or `E(...)` qualifier. Repeat `--variables` to select multiple signals.
+Invalid selections
 leave an existing destination unchanged, including in-place conversions.
 
 `--to vcd` writes an event dump rather than a table. A rawfile carrying event

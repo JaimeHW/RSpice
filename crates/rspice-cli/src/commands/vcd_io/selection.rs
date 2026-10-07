@@ -217,33 +217,51 @@ pub(super) fn signal_selection(
     if column.eq_ignore_ascii_case(want) {
         return Selection::Whole;
     }
-    if let Some(inner) = inner_name(want, DIGITAL_COLUMN_PREFIX) {
-        return bus_selection(signal, column, inner, shared_scope);
-    }
-    if inner_name(want, REAL_COLUMN_PREFIX).is_some() {
-        return Selection::No;
-    }
-    if signal_matches(signal, column, want) {
+    let want = if let Some(inner) = inner_name(want, DIGITAL_COLUMN_PREFIX) {
+        if signal.kind != VcdSignalKind::Logic {
+            return Selection::No;
+        }
+        inner
+    } else if let Some(inner) = inner_name(want, REAL_COLUMN_PREFIX) {
+        if signal.kind != VcdSignalKind::Real {
+            return Selection::No;
+        }
+        inner
+    } else {
+        want
+    };
+    if signal_references(signal, column, shared_scope)
+        .any(|reference| reference.eq_ignore_ascii_case(want))
+    {
         return Selection::Whole;
     }
     bus_selection(signal, column, want, shared_scope)
 }
 
-/// Whether one `--variables` name selects this signal by its exact spelling.
-fn signal_matches(signal: &VcdSignal, column: &str, want: &str) -> bool {
-    if column.eq_ignore_ascii_case(want) {
-        return true;
-    }
-    if inner_name(column, DIGITAL_COLUMN_PREFIX)
+/// Raw references, never quantity wrappers: a node literally named `D(clk)`
+/// answers to `D(D(clk))`, without colliding with the digital node `clk`.
+fn signal_references<'a>(
+    signal: &'a VcdSignal,
+    column: &'a str,
+    shared_scope: &'a [String],
+) -> impl Iterator<Item = String> + 'a {
+    inner_name(column, DIGITAL_COLUMN_PREFIX)
         .or_else(|| inner_name(column, REAL_COLUMN_PREFIX))
-        .is_some_and(|inner| inner.eq_ignore_ascii_case(want))
-    {
-        return true;
-    }
-    signal.variables.iter().any(|variable| {
-        variable.scoped_name().eq_ignore_ascii_case(want)
-            || variable.name.eq_ignore_ascii_case(want)
-    })
+        .map(str::to_owned)
+        .into_iter()
+        .chain(signal.variables.iter().flat_map(move |variable| {
+            let scope = variable
+                .scope
+                .strip_prefix(shared_scope)
+                .unwrap_or(&variable.scope);
+            let relative = scope
+                .iter()
+                .map(String::as_str)
+                .chain(std::iter::once(variable.name.as_str()))
+                .collect::<Vec<_>>()
+                .join(".");
+            [variable.scoped_name(), relative, variable.name.clone()]
+        }))
 }
 
 /// Whether one `--variables` name reaches this signal as a bus.
@@ -268,24 +286,8 @@ fn bus_selection(
     {
         return Selection::No;
     }
-    let references = inner_name(column, DIGITAL_COLUMN_PREFIX)
-        .map(str::to_owned)
-        .into_iter()
-        .chain(signal.variables.iter().flat_map(|variable| {
-            let scope = variable
-                .scope
-                .strip_prefix(shared_scope)
-                .unwrap_or(&variable.scope);
-            let relative = scope
-                .iter()
-                .map(String::as_str)
-                .chain(std::iter::once(variable.name.as_str()))
-                .collect::<Vec<_>>()
-                .join(".");
-            [variable.scoped_name(), relative, variable.name.clone()]
-        }));
     let mut selected = Selection::No;
-    for reference in references {
+    for reference in signal_references(signal, column, shared_scope) {
         let (base, range) = split_bus_notation(&reference);
         let (msb, lsb) = range.unwrap_or((i64::from(signal.width) - 1, 0));
         // The bus by name, or by its range in either spelling.

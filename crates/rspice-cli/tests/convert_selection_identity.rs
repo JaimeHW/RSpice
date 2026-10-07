@@ -121,3 +121,84 @@ fn ambiguous_vcd_scope_aliases_require_a_full_name() {
     assert_eq!(document.signals.len(), 1);
     assert_eq!(document.signals[0].variables[0].scope, ["left"]);
 }
+
+const SCALAR_ALIASES: &str = "$timescale 1 ns $end
+$scope module top $end
+$scope module left $end
+$var wire 1 ! clk $end
+$var wire 1 ! alias $end
+$var real 1 @ level $end
+$var real 1 @ analog_alias $end
+$upscope $end
+$scope module right $end
+$var real 1 # alias $end
+$upscope $end
+$upscope $end
+$scope module external $end
+$var wire 1 ! remote_clk $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+r2 @
+r3 #
+#5
+1!
+r4 @
+";
+
+#[test]
+fn scalar_vcd_selectors_resolve_scoped_and_relative_aliases_with_quantity() {
+    let dir = test_dir("scalar_vcd_aliases");
+    let source = dir.join("source.vcd");
+    let output = dir.join("selected.vcd");
+    std::fs::write(&source, SCALAR_ALIASES).unwrap();
+    let original = rspice_core::io::parse_vcd_file(&source).unwrap();
+    for (selector, index) in [
+        ("D(top.left.clk)", 0),
+        ("D(top.left.alias)", 0),
+        ("D(left.alias)", 0),
+        ("left.alias", 0),
+        ("D(alias)", 0),
+        ("D(external.remote_clk)", 0),
+        ("external.remote_clk", 0),
+        ("E(top.left.level)", 1),
+        ("E(top.left.analog_alias)", 1),
+        ("E(left.analog_alias)", 1),
+        ("left.analog_alias", 1),
+        ("E(alias)", 2),
+    ] {
+        let result = convert(&source, &output, "vcd", &[selector]);
+        assert!(result.status.success(), "{selector}: {result:?}");
+        let selected = rspice_core::io::parse_vcd_file(&output).unwrap();
+        assert_eq!(selected.signals.len(), 1);
+        assert_eq!(
+            selected.signals[0].variables,
+            original.signals[index].variables
+        );
+        assert_eq!(selected.signals[0].changes, original.signals[index].changes);
+        assert_eq!(selected.signals[0].kind, original.signals[index].kind);
+    }
+}
+
+#[test]
+fn scalar_vcd_quantity_mismatches_and_ambiguous_aliases_preserve_output() {
+    let dir = test_dir("scalar_vcd_alias_errors");
+    let source = dir.join("source.vcd");
+    let output = dir.join("selected.vcd");
+    std::fs::write(&source, SCALAR_ALIASES).unwrap();
+    std::fs::write(&output, "preserve output").unwrap();
+    for selector in [
+        "alias",
+        "D(left.level)",
+        "E(left.clk)",
+        "D(left.remote_clk)",
+    ] {
+        let result = convert(&source, &output, "vcd", &[selector]);
+        assert_eq!(result.status.code(), Some(2), "{selector}: {result:?}");
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "preserve output");
+        if selector == "alias" {
+            assert!(String::from_utf8_lossy(&result.stderr).contains("ambiguous"));
+        }
+    }
+}
