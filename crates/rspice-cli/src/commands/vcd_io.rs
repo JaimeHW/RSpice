@@ -192,6 +192,13 @@ pub(crate) struct LoadedVcdDocument {
 }
 
 impl LoadedVcdDocument {
+    fn from_table(path: &Path, table: &ExportTable) -> Result<Self, CliError> {
+        table_document(path, table).map(|document| Self {
+            document,
+            expanded_buses: Vec::new(),
+        })
+    }
+
     pub(crate) fn select_and_clip(
         mut self,
         requested: &[String],
@@ -250,21 +257,15 @@ pub(crate) fn load_vcd_document(
     if matches!(format, InputFormat::Raw | InputFormat::RawAscii) {
         return load_raw_document(path, resource_limits, expand_buses, section);
     }
-    if format == InputFormat::Json
-        && let Some(traces) = typed_transient_traces(path, resource_limits)?
-        && (!traces.digital_traces.is_empty() || !traces.real_traces.is_empty())
-    {
-        return traces_document(path, &traces, expand_buses);
+    if format == InputFormat::Json {
+        return load_json_document(path, resource_limits, expand_buses);
     }
 
     let table = load_table_selected(path, format, resource_limits, section)?;
-    table_document(path, &table).map(|document| LoadedVcdDocument {
-        document,
-        expanded_buses: Vec::new(),
-    })
+    LoadedVcdDocument::from_table(path, &table)
 }
 
-pub(crate) fn table_document(path: &Path, table: &ExportTable) -> Result<VcdDocument, CliError> {
+fn table_document(path: &Path, table: &ExportTable) -> Result<VcdDocument, CliError> {
     let traces = grid_event_traces(path, table)?;
     event_document(
         path,
@@ -484,10 +485,7 @@ fn load_raw_document(
         let result = waveform_io::raw_result(path, file, None)?;
         let table =
             waveform_io::validate_result(path, result, resource_limits)?.into_table(path)?;
-        return table_document(path, &table).map(|document| LoadedVcdDocument {
-            document,
-            expanded_buses: Vec::new(),
-        });
+        return LoadedVcdDocument::from_table(path, &table);
     }
     traces_document(path, &traces, expand_buses)
 }
@@ -514,23 +512,37 @@ fn traces_document(
     })
 }
 
-/// The event timelines a typed result document carries, when it is a transient.
-fn typed_transient_traces(
+/// Reuse the validated JSON document for either event or sampled-grid export.
+fn load_json_document(
     path: &Path,
     resource_limits: ResourceLimits,
-) -> Result<Option<RawEventTraces>, CliError> {
-    let content = crate::commands::waveform_io::read_utf8_input_limited(
-        path,
-        resource_limits.max_external_data_bytes,
-    )?;
-    if !crate::commands::waveform_io::has_typed_json_schema(path, &content)? {
-        return Ok(None);
-    }
-    let document =
-        crate::commands::waveform_io::parse_typed_document(path, &content, resource_limits)?;
-    let ResultPayload::Tran(payload) = document.payload() else {
-        return Ok(None);
+    expand_buses: bool,
+) -> Result<LoadedVcdDocument, CliError> {
+    let content =
+        waveform_io::read_utf8_input_limited(path, resource_limits.max_external_data_bytes)?;
+    let result = if waveform_io::has_typed_json_schema(path, &content)? {
+        let document = waveform_io::parse_typed_document(path, &content, resource_limits)?;
+        if let Some(traces) = typed_transient_traces(&document) {
+            return traces_document(path, &traces, expand_buses);
+        }
+        waveform_io::result_document_table(path, &document, resource_limits)?.into()
+    } else {
+        waveform_io::parse_untyped_json(path, &content, resource_limits)?
     };
+    let table = waveform_io::validate_result(path, result, resource_limits)?.into_table(path)?;
+    LoadedVcdDocument::from_table(path, &table)
+}
+
+/// The event timelines a typed result document carries, when it is a transient.
+fn typed_transient_traces(
+    document: &rspice_core::execution::AnalysisResultDocument,
+) -> Option<RawEventTraces> {
+    let ResultPayload::Tran(payload) = document.payload() else {
+        return None;
+    };
+    if payload.digital_traces.is_empty() && payload.real_traces.is_empty() {
+        return None;
+    }
 
     let digital_traces = payload
         .digital_traces
@@ -565,7 +577,7 @@ fn typed_transient_traces(
                 .collect(),
         })
         .collect();
-    Ok(Some(RawEventTraces {
+    Some(RawEventTraces {
         digital_traces,
         // A version-2 document says which of those conductors are one word,
         // and a version-1 document -- which had nowhere to say it -- carries
@@ -577,7 +589,7 @@ fn typed_transient_traces(
             .map(DigitalBusDeclaration::from)
             .collect(),
         real_traces,
-    }))
+    })
 }
 
 /// Event timelines recovered from a table's grid columns.

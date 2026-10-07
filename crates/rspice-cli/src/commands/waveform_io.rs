@@ -798,6 +798,15 @@ fn parse_json(
         let document = parse_typed_document(path, content, resource_limits)?;
         return result_document_table(path, &document, resource_limits).map(Into::into);
     }
+    parse_untyped_json(path, content, resource_limits)
+}
+
+/// Read the legacy table or FFT dialect after ruling out a typed result schema.
+pub(super) fn parse_untyped_json(
+    path: &Path,
+    content: &str,
+    resource_limits: rspice_core::ResourceLimits,
+) -> Result<ImportedResult, CliError> {
     let value: serde_json::Value =
         serde_json::from_str(content).map_err(|e| conversion_error(path, e))?;
     let read_unit = |object: &serde_json::Value| -> Result<Option<String>, CliError> {
@@ -978,7 +987,7 @@ fn exact_integer_sample(value: impl Into<i128>) -> Option<f64> {
 /// A document whose family carries no coordinate axis — the operating point,
 /// the transfer function — flattens onto a single-point index axis, which is
 /// what the flat writers already use for those families.
-fn result_document_table(
+pub(super) fn result_document_table(
     path: &Path,
     document: &rspice_core::execution::AnalysisResultDocument,
     resource_limits: rspice_core::ResourceLimits,

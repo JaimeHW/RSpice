@@ -1145,7 +1145,45 @@ fn a_grid_digital_column_converts_to_a_dump_one_change_at_a_time() {
         vec![(0, VcdValue::Real(0.25)), (2, VcdValue::Real(0.5)),]
     );
 
+    for format in ["json", "raw", "ascii", "hdf5", "tsv"] {
+        let intermediate = dir.join(format!("grid.{format}"));
+        convert(&input, &intermediate, format, &[]);
+        let recovered = dir.join("recovered.vcd");
+        convert(&intermediate, &recovered, "vcd", &[]);
+        let actual = rspice_core::io::parse_vcd_file(&recovered).unwrap();
+        assert_eq!(actual.timescale, document.timescale, "{format}");
+        assert_eq!(actual.signals, document.signals, "{format}");
+    }
+
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn typed_json_without_events_reports_missing_event_data() {
+    let dir = test_dir("typed_json_grid_fallback");
+    let input = simulate(&dir, TRAN_DECK, "json", "source.json");
+    let grid = dir.join("grid.csv");
+    convert(&input, &grid, "csv", &[]);
+    let destination = dir.join("protected.vcd");
+    std::fs::write(&destination, "predecessor").unwrap();
+    for source in [&input, &grid] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "convert"])
+            .arg(source)
+            .arg(&destination)
+            .args(["--to", "vcd"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("no digital or real event data"),
+            "{output:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&destination).unwrap(),
+            "predecessor"
+        );
+    }
 }
 
 /// `--variables` and `--start`/`--stop` subset a dump the way they subset a
