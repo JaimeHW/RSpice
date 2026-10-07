@@ -2092,7 +2092,13 @@ fn collect_xspice_complex_component_expression(stream: &mut TokenStream) -> Opti
         if let Some(end) = previous_end
             && token.span.start != end
         {
-            break;
+            if paren_depth == 0 {
+                break;
+            }
+            // Whitespace inside a call/group is part of the expression, not
+            // the boundary between real and imaginary components. Retain it
+            // so malformed adjacent operands cannot silently concatenate.
+            pieces.push(" ".to_string());
         }
 
         let piece = match &token.kind {
@@ -2105,6 +2111,7 @@ fn collect_xspice_complex_component_expression(stream: &mut TokenStream) -> Opti
             | TokenKind::Minus
             | TokenKind::Star
             | TokenKind::Slash
+            | TokenKind::Comma
             | TokenKind::Other(_) => xspice_complex_component_piece(token),
             TokenKind::LParen => {
                 paren_depth += 1;

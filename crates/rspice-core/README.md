@@ -455,6 +455,7 @@ at the root and inside subcircuits without consuming samples on failed retries.
 Pending instance overrides cannot be replaced by model defaults in sibling
 expressions; a self-reference may still use its enclosing or model value.
 Complex instance components resolve forward parameter and function references.
+Component functions accept comma-separated arguments and whitespace inside groups.
 Instance vectors and complex values use resolved scalar overrides; numeric
 evaluation begins only after a complete complex-literal grammar is recognized.
 Quoted vector literals reject trailing tokens instead of discarding them.
