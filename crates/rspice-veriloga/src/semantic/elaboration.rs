@@ -663,6 +663,16 @@ impl<'a> HierarchyElaborator<'a> {
                 .discrete_inputs
                 .push((variable_base + value, variable_base + validity));
         }
+        for selection in &child.discrete_selections {
+            let mut selection = selection.clone();
+            selection.value += variable_base;
+            selection.signal = scope
+                .variables
+                .get(&selection.signal)
+                .cloned()
+                .unwrap_or(selection.signal);
+            self.flattened.discrete_selections.push(selection);
+        }
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
         for &slot in &child.switch_branch_variables {

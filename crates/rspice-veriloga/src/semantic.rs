@@ -374,6 +374,7 @@ mod bounded_loop;
 mod digital;
 mod digital_elaborate;
 mod digital_walk;
+mod discrete_projection;
 mod elaboration;
 mod flow_probes;
 mod function_effects;
@@ -448,6 +449,7 @@ pub struct SemanticAnalyzer {
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
     discrete_validity: HashMap<SmolStr, SmolStr>,
+    discrete_projection: discrete_projection::ProjectionBuilder,
     /// Public parameter-array declarations. Until element lowering is wired
     /// through every backend, these names must never acquire scalar semantics.
     parameter_arrays: HashSet<SmolStr>,
@@ -516,6 +518,7 @@ impl SemanticAnalyzer {
             current_time_scale: crate::time_scale::ModuleTimeScale::default(),
             arrays: HashMap::new(),
             discrete_validity: HashMap::new(),
+            discrete_projection: Default::default(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
             task_resets: Vec::new(),
@@ -944,6 +947,7 @@ impl SemanticAnalyzer {
             symbol_table: SymbolTable::new(),
             digital: AnalyzedDigital::default(),
             discrete_inputs: Vec::new(),
+            discrete_selections: Vec::new(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
         // can recurse into their own sinks without aliasing the module
@@ -958,6 +962,7 @@ impl SemanticAnalyzer {
         self.implicit_integrators.clear();
         self.arrays.clear();
         self.discrete_validity.clear();
+        self.discrete_projection = Default::default();
         self.task_vars.clear();
         self.task_resets.clear();
 
@@ -1918,6 +1923,7 @@ impl SemanticAnalyzer {
             }
         }
 
+        self.finish_discrete_projections(&mut analyzed);
         self.finish_implicit_integrators(&mut analyzed);
         analyzed.statements = statements;
         analyzed.body = self.take_body();
@@ -6233,11 +6239,23 @@ impl SemanticAnalyzer {
 
     fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
         Ok(match expr {
-            // The refusal that keeps four-state literals and part-selects out
-            // of the continuous domain. Every analog expression is lowered
-            // here, so a discrete form written in an analog block, an analog
-            // function, a parameter default, or a contribution stops with the
-            // same diagnostic naming the construct.
+            Expression::Digital(DigitalExpr::PartSelect(select)) => self.lower_packed_analog_read(
+                &select.name,
+                None,
+                &PackedSelect::Part {
+                    msb: select.msb.clone(),
+                    lsb: select.lsb.clone(),
+                },
+                select.span,
+            )?,
+            Expression::Digital(DigitalExpr::ArraySelect(select)) => self
+                .lower_packed_analog_read(
+                    &select.name,
+                    Some(&select.index),
+                    &select.select,
+                    select.span,
+                )?,
+            // Other discrete syntax still requires its own continuous-domain contract.
             Expression::Digital(digital) => {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::UnsupportedFeature(format!(
@@ -6450,6 +6468,17 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::ArrayAccess(a) => {
+                if self
+                    .discrete_projection
+                    .is_scalar(&self.resolve_substituted_name(&a.array))
+                {
+                    return self.lower_packed_analog_read(
+                        &a.array,
+                        None,
+                        &PackedSelect::Bit(a.index.clone()),
+                        a.span,
+                    );
+                }
                 let index = self.lower_expression(&a.index)?;
                 let array_name = self.resolve_substituted_name(&a.array);
                 if self.parameter_arrays.contains(&array_name) {

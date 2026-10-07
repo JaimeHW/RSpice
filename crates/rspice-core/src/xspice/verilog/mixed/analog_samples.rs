@@ -152,8 +152,7 @@ impl AnalogModelParticipant<'_> {
                 } else {
                     exchange
                         .read_signal(signal)
-                        .and_then(|value| value.to_integer(input.signed))
-                        .map(|value| value as f64)
+                        .and_then(|value| input.four_state_value(value))
                 }
                 .filter(|value| value.is_finite());
                 input.sample(analog, value)?;

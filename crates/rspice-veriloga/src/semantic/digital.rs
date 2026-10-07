@@ -663,12 +663,21 @@ impl SemanticAnalyzer {
             instances: Vec::new(),
             constants: self.digital_constants(module),
         };
+        self.discrete_projection
+            .register_signals(&analyzed.digital.signals);
         self.bind_discrete_analog_reads(module, analyzed);
     }
 
     fn bind_discrete_analog_reads(&mut self, module: &Module, analyzed: &mut AnalyzedModule) {
         let mut writes = std::collections::HashSet::new();
         let mut reads = std::collections::HashSet::new();
+        let packed_scalars = analyzed
+            .digital
+            .signals
+            .iter()
+            .filter(|signal| signal.unpacked.is_none())
+            .map(|signal| signal.name.clone())
+            .collect();
         for block in [
             module.analog_block.as_ref(),
             module.analog_initial.as_ref(),
@@ -678,7 +687,12 @@ impl SemanticAnalyzer {
         .flatten()
         {
             for statement in &block.statements {
-                collect_analog_names(statement, &mut writes, &mut reads);
+                collect_analog_names_impl(
+                    statement,
+                    &mut writes,
+                    &mut reads,
+                    Some(&packed_scalars),
+                );
             }
         }
         for signal in &analyzed.digital.signals {
@@ -2684,6 +2698,15 @@ fn collect_analog_names(
     written: &mut std::collections::HashSet<SmolStr>,
     read: &mut std::collections::HashSet<SmolStr>,
 ) {
+    collect_analog_names_impl(statement, written, read, None);
+}
+
+fn collect_analog_names_impl(
+    statement: &AnalogStatement,
+    written: &mut std::collections::HashSet<SmolStr>,
+    read: &mut std::collections::HashSet<SmolStr>,
+    packed_scalars: Option<&std::collections::HashSet<SmolStr>>,
+) {
     enum Work<'a> {
         Statement(&'a AnalogStatement),
         Assignment(&'a AssignmentStmt),
@@ -2862,7 +2885,9 @@ fn collect_analog_names(
                 Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {}
                 Expression::Identifier(identifier) => pending.push(Work::Read(&identifier.name)),
                 Expression::ArrayAccess(access) => {
-                    pending.push(Work::Read(&access.array));
+                    if !packed_scalars.is_some_and(|names| names.contains(&access.array)) {
+                        pending.push(Work::Read(&access.array));
+                    }
                     pending.push(Work::Expression(&access.index));
                 }
                 // Probe endpoints identify topology, not same-named numeric storage.
@@ -2901,7 +2926,13 @@ fn collect_analog_names(
                     }
                 },
                 Expression::Digital(digital) => {
-                    if let Some(name) = digital.base_name() {
+                    if let Some(name) = digital.base_name()
+                        && (packed_scalars.is_none()
+                            || !matches!(
+                                digital,
+                                DigitalExpr::PartSelect(_) | DigitalExpr::ArraySelect(_)
+                            ))
+                    {
                         pending.push(Work::Read(name));
                     }
                     pending.extend(digital.children().into_iter().map(Work::Expression));

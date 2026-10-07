@@ -461,3 +461,57 @@ endmodule
         "value cells cannot masquerade as validity cells"
     );
 }
+
+#[test]
+fn packed_analog_selection_validates_grouping_and_keeps_one_word_selector() {
+    use rspice_veriloga::canonical_ir::state::{CanonicalStateFamily, CanonicalStateLayout};
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let source = r#"
+module selected(p); inout p; electrical p;
+ reg [95:0] data[-1:0]; integer index;
+ initial begin index=-1; data[-1]=96'bx; data[-1][3:0]=4'd7; end
+ analog begin
+   begin : first_scope
+     I(p)<+data[absdelay(index,1)][3:0];
+   end
+   begin : second_scope
+     I(p)<+(data[index][3:0] & 3);
+   end
+ end
+endmodule
+"#;
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    let hir = &runtime.canonical_ir.hir;
+    assert_eq!(
+        CanonicalStateLayout::from_hir(hir).family_len(CanonicalStateFamily::DelayBuffer),
+        1
+    );
+    assert_eq!(hir.discrete_selections.len(), 2);
+    for (declaration, read, diagnostic) in [
+        ("reg [95:0] value;", "value[31:0]", "31-bit grouping limit"),
+        ("reg [95:0] value;", "value", "31-bit grouping limit"),
+        (
+            "reg [0:95] value;",
+            "value[3:0]",
+            "reverses its declared range",
+        ),
+        (
+            "reg [95:0] value;",
+            "value[index]",
+            "runtime packed bit selectors",
+        ),
+        ("real value;", "value[0]", "four-state"),
+    ] {
+        let source = format!(
+            "module invalid(p); inout p; electrical p; {declaration} integer index; initial begin index=0; value=0; end analog I(p)<+{read}; endmodule"
+        );
+        let error = compiler
+            .compile_runtime(&source, None)
+            .err()
+            .expect("invalid packed read");
+        assert!(error.to_string().contains(diagnostic), "{read}: {error}");
+    }
+}

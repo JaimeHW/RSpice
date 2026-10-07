@@ -187,6 +187,23 @@ impl CanonicalIrArtifact {
                 )));
             }
         }
+        let signals: std::collections::HashMap<_, _> = self
+            .digital
+            .signals
+            .iter()
+            .map(|signal| (&signal.name, signal))
+            .collect();
+        for selection in &self.hir.discrete_selections {
+            if signals
+                .get(&selection.signal)
+                .is_none_or(|signal| signal.kind.is_real())
+            {
+                diagnostics.push(artifact_error(format!(
+                    "packed analog input `{}` must bind four-state digital storage",
+                    selection.signal
+                )));
+            }
+        }
         let mut observed = std::collections::BTreeSet::new();
         for probe in &self.digital.analog_probes {
             if let super::digital::DigitalAnalogProbeTarget::Variable { name } = &probe.target {

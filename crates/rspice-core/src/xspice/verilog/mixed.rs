@@ -1254,12 +1254,32 @@ struct DiscreteAnalogInput {
     signal: DigitalSignalId,
     variable: usize,
     validity: usize,
+    /// (least-significant storage position, width), before numeric conversion.
+    selection: Option<(i64, u32)>,
     signed: bool,
     real: bool,
     name: String,
 }
 
 impl DiscreteAnalogInput {
+    /// Shared by ordinary sampling and the circuit's Active-region exchange.
+    fn four_state_value(&self, value: &FourStateValue) -> Option<f64> {
+        if let Some((lsb, width)) = self.selection {
+            let mut selected = 0u32;
+            for bit in 0..width {
+                let position = lsb.checked_add(i64::from(bit))?;
+                let position = u32::try_from(position).ok()?;
+                match value.bit(position) {
+                    FourStateBit::Zero => {}
+                    FourStateBit::One => selected |= 1 << bit,
+                    _ => return None,
+                }
+            }
+            return Some(f64::from(selected));
+        }
+        value.to_integer(self.signed).map(|value| value as f64)
+    }
+
     fn sample(
         &self,
         analog: &mut VerilogADevice,
@@ -1466,6 +1486,12 @@ impl MixedSignalHost {
             .iter()
             .map(|signal| (signal.name.as_str(), signal))
             .collect();
+        let selections: std::collections::HashMap<_, _> = canonical_ir
+            .hir
+            .discrete_selections
+            .iter()
+            .map(|selection| (selection.value, selection))
+            .collect();
         let discrete_inputs = canonical_ir
             .hir
             .discrete_inputs
@@ -1478,16 +1504,22 @@ impl MixedSignalHost {
                     .ok_or_else(|| MixedSignalError::Compile {
                         detail: "discrete input variable is missing".into(),
                     })?;
-                let signal = signals_by_name.get(variable.name.as_str()).ok_or_else(|| {
-                    MixedSignalError::Compile {
-                        detail: format!("discrete input `{}` has no signal binding", variable.name),
-                    }
-                })?;
+                let selection = selections.get(value);
+                let signal_name = selection.map_or(variable.name.as_str(), |selection| {
+                    selection.signal.as_str()
+                });
+                let signal =
+                    signals_by_name
+                        .get(signal_name)
+                        .ok_or_else(|| MixedSignalError::Compile {
+                            detail: format!("discrete input `{signal_name}` has no signal binding"),
+                        })?;
                 Ok(DiscreteAnalogInput {
                     signal: signal.id,
                     variable: usize::from(*value),
                     validity: usize::from(*validity),
-                    signed: signal.integer,
+                    selection: selection.map(|selection| (selection.lsb, selection.width)),
+                    signed: signal.integer && selection.is_none(),
                     real: signal.kind.is_real(),
                     name: signal.name.to_string(),
                 })
@@ -4027,8 +4059,7 @@ fn read_discrete_input(state: &MixedState, input: &DiscreteAnalogInput) -> Optio
         state
             .digital
             .read(input.signal)
-            .and_then(|value| value.to_integer(input.signed))
-            .map(|value| value as f64)
+            .and_then(|value| input.four_state_value(value))
     };
     value.filter(|value| value.is_finite())
 }
@@ -4938,6 +4969,125 @@ endmodule
         begin(&mut host, 1);
         assert_eq!(stamp(&mut host), -1.25);
         assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
+    }
+
+    #[test]
+    fn packed_discrete_analog_views_preserve_selected_validity_and_rollback() {
+        let source = r#"
+module selection(p); inout p; electrical p;
+ reg [95:0] data[-1:0]; reg [0:95] ascending; reg signed [63:0] wide;
+ integer index, signed_code; reg enabled, bad; real observed;
+ initial begin
+   data[-1]=96'bx; data[-1][3:0]=4'b1010;
+   ascending=96'bz; ascending[0:3]=4'b1011;
+   wide=64'bx; wide[3:0]=4'b1110;
+   signed_code=-1; index=-1; enabled=1; bad=0;
+ end
+ analog begin
+   if (enabled) observed=data[index][3:0]+ascending[0:3]+wide[3:0]+signed_code[3:0]+wide[1.5];
+   else observed=7;
+   I(p)<+observed;
+   if (bad) I(p)<+data[index][99:96];
+ end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions {
+            enable_ams: true,
+            ..Default::default()
+        });
+        let runtime = compiler.compile_runtime(source, None).unwrap();
+        let encoded = serde_json::to_vec(&runtime.canonical_ir).unwrap();
+        let artifact: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+            serde_json::from_slice(&encoded).unwrap();
+        artifact.validate().unwrap();
+        let mut malformed = artifact.clone();
+        malformed.hir.discrete_selections[0].width = 32;
+        assert!(
+            malformed
+                .hir
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|error| error.message.contains("1..31 bits"))
+        );
+        let mut malformed = artifact.clone();
+        malformed.hir.discrete_selections[0].signal = "missing".into();
+        assert!(
+            malformed
+                .validate()
+                .unwrap_err()
+                .iter()
+                .any(|error| error.message.contains("must bind four-state"))
+        );
+        let mut host = MixedSignalHost::from_compiled(
+            "x",
+            Arc::new(runtime.model),
+            &artifact,
+            &[1],
+            SchedulerLimits::default(),
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+        host.begin_analog_analysis(2).unwrap();
+        host.start_digital_execution().unwrap();
+        let stamp = |host: &mut MixedSignalHost| {
+            while host.settle_analog_bridges(&[0.0]).unwrap() {}
+            let mut rhs = 0.0;
+            host.stamp(&[0.0], |_, _, _| {}, |_, value| rhs += value)
+                .map(|_| rhs)
+        };
+        begin(&mut host, 0);
+        assert_eq!(stamp(&mut host).unwrap(), -51.0);
+        host.accept_trial().unwrap();
+        let checkpoint = host.checkpoint().unwrap();
+        begin(&mut host, 1);
+        // Unselected bits and an unselected array cell may remain unavailable.
+        let known_low = format!("{}1010", "z".repeat(92));
+        host.force_digital(&[("data[-1]", &known_low)]).unwrap();
+        assert_eq!(stamp(&mut host).unwrap(), -51.0);
+        // Changing a selected known zero into X must invalidate the cached stamp.
+        let selected_x = format!("{}101x", "z".repeat(92));
+        host.force_digital(&[("data[-1]", &selected_x)]).unwrap();
+        let error = stamp(&mut host).unwrap_err();
+        assert!(
+            error.to_string().contains("analog read of discrete input"),
+            "{error}"
+        );
+        if host.trial_active() {
+            host.reject_trial().unwrap();
+        }
+        assert_eq!(
+            host.analog.checkpoint_state().unwrap(),
+            checkpoint.analog_checkpoint
+        );
+        host.restore(&checkpoint).unwrap();
+        begin(&mut host, 1);
+        assert_eq!(stamp(&mut host).unwrap(), -51.0);
+        host.force_digital(&[("index", &"0".repeat(32)), ("enabled", "0")])
+            .unwrap();
+        assert_eq!(stamp(&mut host).unwrap(), -7.0);
+        host.force_digital(&[("enabled", "1")]).unwrap();
+        assert!(
+            stamp(&mut host).is_err(),
+            "selected unknown neighbor must fail"
+        );
+        if host.trial_active() {
+            host.reject_trial().unwrap();
+        }
+        host.restore(&checkpoint).unwrap();
+        begin(&mut host, 1);
+        host.force_digital(&[("bad", "1")]).unwrap();
+        assert!(
+            stamp(&mut host).is_err(),
+            "selected out-of-range bits must fail"
+        );
+        if host.trial_active() {
+            host.reject_trial().unwrap();
+        }
+        host.restore(&checkpoint).unwrap();
+        begin(&mut host, 1);
+        assert_eq!(stamp(&mut host).unwrap(), -51.0);
+        host.accept_trial().unwrap();
     }
 
     #[test]

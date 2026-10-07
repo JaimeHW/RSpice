@@ -2434,11 +2434,13 @@ module variable_sampler(p,q);
  inout p; electrical p; output q; reg q=0;
  parameter real LOAD=1000;
  integer gain[2:1]='{32'bx,-2}; reg signed [7:0] adjustment[-2:-1]='{-1,8'bz}; reg startup_ok;
+ reg [95:0] selected[-2:-1]='{96'hxxxx_xxxx_xxxx_xxxx_xxxx_xxff,96'bz};
  real measured[-2:-1],period[5:4]='{9,1.537e-9}; integer count,enabled,index;
  analog begin
    measured[-2]=gain[1]*V(p); measured[-1]=-gain[1]*V(p);
    @(timer(0,period[4],0,enabled)) count=-3;
-   I(p)<+(V(p)-gain[1]+adjustment[-2]-255)/1000;
+   I(p)<+(V(p)-gain[1]+adjustment[-2]-255
+     +selected[-2][7:4]*16+selected[-2][3:0]-255)/1000;
  end
  initial begin
    period[4]=1.537e-9; enabled=1; index=-2;

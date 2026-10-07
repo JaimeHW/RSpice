@@ -320,8 +320,17 @@ capture the element, packed selection and RHS at scheduling, then merge into
 current storage when delivered. Blocking intra-assignment waits resolve both
 selectors after resumption. Linking and event dependencies retain the array,
 word selector and packed selector.
-Direct packed-element projection into analog expressions, indexed part-selects
-(`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
+Schema 74 binds fixed packed bit/part selections to dedicated numeric/validity
+inputs for analog expressions. Selection occurs on four-state storage before
+numeric conversion, so X/Z bits outside the selected range and unselected array
+cells do not invalidate an executed read. The 31-bit continuous-domain grouping
+limit applies to the selection, including selections from wider or signed parents;
+selected values are zero-extended. Runtime unpacked indices retain a single paired
+read and selector evaluation. Projection state uses existing cache, trial rejection
+and checkpoint paths. Storage/sampling scale with the distinct selected ranges and
+array cells, rather than all bits of a wide parent. Runtime packed bit selectors in
+analog expressions still require implementation.
+Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification
 are still open.

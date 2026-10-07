@@ -136,6 +136,17 @@ pub struct AnalyzedModule {
     pub digital: AnalyzedDigital,
     /// Numeric discrete inputs: (value slot, validity slot), both transactional.
     pub discrete_inputs: Vec<(usize, usize)>,
+    /// Explicit packed selection behind a numeric input; whole-value inputs omit it.
+    pub discrete_selections: Vec<AnalyzedDiscreteSelection>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnalyzedDiscreteSelection {
+    pub value: usize,
+    pub signal: SmolStr,
+    /// Least-significant selected position in digital storage (may be outside it).
+    pub lsb: i64,
+    pub width: u32,
 }
 
 /// Identity of one analog-block site that *both* lowerings of the module

@@ -9923,6 +9923,7 @@ mod tests {
             symbol_table: SymbolTable::new(),
             digital: Default::default(),
             discrete_inputs: Vec::new(),
+            discrete_selections: Vec::new(),
         };
         let metadata = CanonicalMetadata::for_source("fixture", module_name);
         HirModel::from_analyzed_module(&metadata, &analyzed)

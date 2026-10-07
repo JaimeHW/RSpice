@@ -756,6 +756,15 @@ impl ExecutedSite {
     }
 }
 
+/// Fixed packed selection applied to four-state storage before analog conversion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HirDiscreteSelection {
+    pub value: VariableId,
+    pub signal: SmolStr,
+    pub lsb: i64,
+    pub width: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirModel {
     pub module_id: ModuleId,
@@ -777,6 +786,8 @@ pub struct HirModel {
     /// Value/validity state slot pairs for numeric discrete reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discrete_inputs: Vec<[VariableId; 2]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discrete_selections: Vec<HirDiscreteSelection>,
     /// Sorted names whose values must be published during ordinary analog
     /// evaluation for discrete-domain readers. They are not electrical unknowns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1045,6 +1056,16 @@ impl HirModel {
                 .collect(),
             ground_nodes: module.ground_nodes.clone(),
             digital_observations: Vec::new(),
+            discrete_selections: module
+                .discrete_selections
+                .iter()
+                .map(|selection| HirDiscreteSelection {
+                    value: VariableId::from(selection.value),
+                    signal: selection.signal.clone(),
+                    lsb: selection.lsb,
+                    width: selection.width,
+                })
+                .collect(),
             discrete_inputs: module
                 .discrete_inputs
                 .iter()
@@ -1148,6 +1169,23 @@ impl HirModel {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
                 "discrete input value/validity pairs must use distinct numeric state slots",
+            ));
+        }
+        let input_values: HashSet<_> = self.discrete_inputs.iter().map(|pair| pair[0]).collect();
+        let mut selected = HashSet::new();
+        if self.discrete_selections.iter().any(|selection| {
+            !input_values.contains(&selection.value)
+                || !selected.insert(selection.value)
+                || selection.signal.is_empty()
+                || !(1..=31).contains(&selection.width)
+                || self
+                    .variables
+                    .get(usize::from(selection.value))
+                    .is_none_or(|variable| variable.value_type != CanonicalValueType::Integer)
+        }) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "packed discrete selections must name unique integer input slots and 1..31 bits",
             ));
         }
         validate_dense_array_ids(&mut diagnostics, &self.arrays);
