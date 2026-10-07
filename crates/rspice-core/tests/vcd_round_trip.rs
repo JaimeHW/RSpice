@@ -277,8 +277,84 @@ fn multiplication_roundoff_does_not_move_long_timeline_events() {
             &[],
             &[]
         ),
-        Err(EventProjectionError::UnrepresentableTime { .. })
+        Err(EventProjectionError::TimescaleRange)
     ));
+}
+
+#[test]
+fn coarse_timescales_retain_long_scalar_bus_and_real_histories() {
+    let last_tick = u64::MAX - 65_535;
+    for (time, scale, expected_tick) in [
+        (86_400.0, "100 s", 864),
+        (86_401.0, "1 s", 86_401),
+        (86_400.5, "100 ms", 864_005),
+        (last_tick as f64 * 100.0, "100 s", last_tick),
+    ] {
+        let bus = DigitalBusDeclaration::new(
+            "bus",
+            1,
+            0,
+            vec!["a".to_owned(), "b".to_owned()],
+            DigitalBusSource::Import,
+        )
+        .unwrap();
+        let document = event_vcd_document(
+            "tran",
+            &[
+                digital_trace("a", &[0.0, time]),
+                digital_trace("b", &[0.0, time]),
+                digital_trace("scalar", &[0.0, time]),
+            ],
+            &[RealTrace {
+                node_name: "real".to_owned(),
+                points: vec![
+                    RealTracePoint {
+                        time: 0.0,
+                        value: 0.0,
+                    },
+                    RealTracePoint { time, value: 1.0 },
+                ],
+            }],
+            &[bus],
+        )
+        .expect("coarse periods admit timestamps beyond 64-bit femtoseconds");
+        assert_eq!(document.timescale.to_string(), scale);
+        assert_eq!(document.signals.len(), 3);
+        for signal in &document.signals {
+            assert_eq!(signal.changes[1].tick, expected_tick);
+        }
+        assert_eq!(round_trip(&document), document);
+    }
+}
+
+#[test]
+fn unsupported_range_and_resolution_are_distinguished() {
+    for time in [(u64::MAX as f64) * 100.0, 1e22, f64::MAX] {
+        assert!(matches!(
+            event_vcd_document("tran", &[digital_trace("clk", &[time])], &[], &[]),
+            Err(EventProjectionError::UnrepresentableTime { .. })
+        ));
+    }
+    // Neither the small event nor the distant event is invalid on its own.
+    // One document cannot combine this duration with one-femtosecond resolution.
+    for (digital, real) in [
+        (vec![digital_trace("clk", &[0.0, 1e-15, 86_400.0])], vec![]),
+        (
+            vec![digital_trace("clk", &[1e-15])],
+            vec![RealTrace {
+                node_name: "late".to_owned(),
+                points: vec![RealTracePoint {
+                    time: 86_400.0,
+                    value: 1.0,
+                }],
+            }],
+        ),
+    ] {
+        assert_eq!(
+            event_vcd_document("tran", &digital, &real, &[]).unwrap_err(),
+            EventProjectionError::TimescaleRange
+        );
+    }
 }
 
 proptest! {
@@ -300,6 +376,20 @@ proptest! {
         let numerator = u128::from(significand) * 1_000_000_000_000_000;
         let projected = u128::from(tick) << shift;
         prop_assert!(projected.abs_diff(numerator) <= (1_u128 << (shift - 1)));
+    }
+
+    #[test]
+    fn long_integer_second_histories_retain_their_full_time(
+        integer in 0_u64..(1_u64 << 63)
+    ) {
+        let time = integer as f64;
+        let document = event_vcd_document("tran", &[digital_trace("clk", &[time])], &[], &[])
+            .expect("integer seconds fit at one second or a coarser period");
+        let tick = document.signals[0].changes[0].tick;
+        prop_assert_eq!(
+            u128::from(tick) * u128::from(document.timescale.femtoseconds()),
+            (time as u128) * 1_000_000_000_000_000
+        );
     }
 }
 

@@ -452,6 +452,9 @@ rather than quantised. VCD has four bit states and no drive strength, so the
 level survives and the XSPICE strength band does not. Floating-point roundoff
 is tolerated only when distinct recorded times stay distinct on the tick grid;
 an export that would merge event times is refused, even across separate signals.
+Long runs use the full 64-bit tick range at the chosen period. A combination of
+duration and event spacing that cannot share an exact timescale is refused;
+the converter does not wrap the timeline or silently coarsen its resolution.
 
 A **declared digital bus**, today a vector discrete boundary port of a mixed
 Verilog-AMS module, is written as one `$var wire N` named `bus [msb:lsb]`, with

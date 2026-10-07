@@ -161,6 +161,54 @@ fn close_events_on_long_timelines_keep_distinct_ticks() {
 }
 
 #[test]
+fn long_duration_waveforms_use_the_available_vcd_tick_range() {
+    let dir = test_dir("vcd_multi_day_timeline");
+    let input = dir.join("source.json");
+    let output = dir.join("events.vcd");
+    for (times, scale, expected) in [
+        ([0.0, 86_400.0, 172_800.0], "100 s", [0, 864, 1728]),
+        ([0.0, 86_401.0, 86_402.0], "1 s", [0, 86_401, 86_402]),
+        ([0.0, 86_400.5, 86_401.0], "100 ms", [0, 864_005, 864_010]),
+    ] {
+        table(&input, "time", None, &times, &[0.0, 1.0, 0.0]);
+        let converted = convert(&input, &output, "vcd", &[]);
+        assert!(converted.status.success(), "{times:?}: {converted:?}");
+        let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+        assert_eq!(document.timescale.to_string(), scale);
+        assert_eq!(
+            document.signals[0]
+                .changes
+                .iter()
+                .map(|change| change.tick)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn incompatible_timeline_range_and_resolution_preserve_the_destination() {
+    let dir = test_dir("vcd_timeline_range_and_resolution");
+    let input = dir.join("source.json");
+    let output = dir.join("events.vcd");
+    table(
+        &input,
+        "time",
+        None,
+        &[0.0, 1e-15, 86_400.0],
+        &[0.0, 1.0, 0.0],
+    );
+    std::fs::write(&output, "predecessor").unwrap();
+    let converted = convert(&input, &output, "vcd", &[]);
+    assert_eq!(converted.status.code(), Some(1), "{converted:?}");
+    assert!(
+        String::from_utf8_lossy(&converted.stderr).contains("64-bit tick range"),
+        "{converted:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+}
+
+#[test]
 fn distinct_event_times_must_not_merge_even_across_signals() {
     let dir = test_dir("vcd_distinct_time_collision");
     let input = dir.join("source.json");

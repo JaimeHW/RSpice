@@ -43,6 +43,10 @@ use std::collections::{BTreeSet, HashMap};
 /// Femtoseconds in one second: the finest tick VCD's `$timescale` can name.
 const FEMTOSECONDS_PER_SECOND: f64 = 1e15;
 
+/// The largest timestamp at VCD's coarsest (100 second) tick period.
+/// Intermediate femtoseconds need more than 64 bits even for a one-day run.
+const MAX_EVENT_FEMTOSECONDS: u128 = u64::MAX as u128 * VcdTimescale::ALL[0].femtoseconds() as u128;
+
 /// Width a `real` variable conventionally declares.
 const REAL_VARIABLE_WIDTH: u32 = 64;
 
@@ -89,8 +93,12 @@ pub enum EventProjectionError {
         /// The different time already assigned to this tick, in seconds.
         other_time: Value,
         /// The conflicting position in whole femtoseconds.
-        tick: u64,
+        tick: u128,
     },
+
+    /// No one VCD timescale can retain both the event spacing and full duration.
+    #[error("no VCD timescale can retain every event time within its 64-bit tick range")]
+    TimescaleRange,
 
     /// The integer VCD time would lose precision in an event history.
     #[error(
@@ -104,8 +112,8 @@ pub enum EventProjectionError {
         tick: u64,
     },
 
-    /// The time is negative, not finite, or past the last tick a `u64` can
-    /// address.
+    /// The time is negative, not finite, or past the last tick addressable
+    /// even at the coarsest VCD timescale.
     #[error("node '{node}' has an event at {time} s, which is outside the range VCD can address")]
     UnrepresentableTime {
         /// The node whose event time was rejected.
@@ -297,6 +305,10 @@ pub fn digital_value_from_vcd_bit(bit: VcdBit) -> DigitalValue {
 /// edge, and an event dump that moves edges is worse than no dump.
 /// Relative floating-point roundoff is tolerated only when it does not merge
 /// distinct recorded times, including times belonging to different signals.
+/// The chosen period must also keep every tick within `u64`; otherwise the
+/// combination of duration and event spacing is refused as
+/// [`EventProjectionError::TimescaleRange`]. Intermediate femtoseconds use
+/// `u128`, so long runs can use the full range of coarser tick periods.
 ///
 /// With no positive event time there is nothing to choose between the scales,
 /// and the finest is used.
@@ -381,8 +393,8 @@ pub fn event_vcd_document(
     }
 
     drop(event_times);
-    let timescale = choose_timescale(pending.iter().flat_map(|signal| &signal.points));
-    let period = timescale.femtoseconds();
+    let timescale = choose_timescale(pending.iter().flat_map(|signal| &signal.points))?;
+    let period = u128::from(timescale.femtoseconds());
     let mut document = VcdDocument::new(timescale);
     document.version = VCD_WRITER_VERSION.to_string();
     document.signals = pending
@@ -399,7 +411,8 @@ pub fn event_vcd_document(
                 .points
                 .into_iter()
                 .map(|(femtoseconds, value)| VcdChange {
-                    tick: femtoseconds / period,
+                    // The timescale admits every quotient to the u64 range.
+                    tick: (femtoseconds / period) as u64,
                     value,
                 })
                 .collect(),
@@ -414,7 +427,7 @@ struct PendingSignal {
     name: String,
     kind: VcdSignalKind,
     width: u32,
-    points: Vec<(u64, VcdValue)>,
+    points: Vec<(u128, VcdValue)>,
 }
 
 /// The `$var` reference a bus is declared under: `name [msb:lsb]`.
@@ -431,7 +444,7 @@ fn bus_reference(bus: &DigitalBusDeclaration) -> String {
 fn bus_signal(
     bus: &DigitalBusDeclaration,
     digital_traces: &[DigitalTrace],
-    event_times: &mut HashMap<u64, Value>,
+    event_times: &mut HashMap<u128, Value>,
 ) -> Result<PendingSignal, EventProjectionError> {
     let reference = bus_reference(bus);
     let name = checked_node_name(&reference)?;
@@ -773,8 +786,8 @@ fn event_femtoseconds(
     node: &str,
     time: Value,
     previous: &mut Option<Value>,
-    event_times: &mut HashMap<u64, Value>,
-) -> Result<u64, EventProjectionError> {
+    event_times: &mut HashMap<u128, Value>,
+) -> Result<u128, EventProjectionError> {
     if previous.is_some_and(|earlier| time < earlier) {
         return Err(EventProjectionError::UnorderedTime {
             node: node.to_string(),
@@ -790,7 +803,7 @@ fn event_femtoseconds(
         });
     }
     let scaled = time * FEMTOSECONDS_PER_SECOND;
-    if scaled > u64::MAX as f64 {
+    if scaled > MAX_EVENT_FEMTOSECONDS as f64 {
         return Err(EventProjectionError::UnrepresentableTime {
             node: node.to_string(),
             time,
@@ -811,12 +824,18 @@ fn event_femtoseconds(
             time,
         });
     }
-    let tick = u64::try_from(integral as i128 + correction as i128).map_err(|_| {
+    let tick = u128::try_from(integral as i128 + correction as i128).map_err(|_| {
         EventProjectionError::UnrepresentableTime {
             node: node.to_string(),
             time,
         }
     })?;
+    if tick > MAX_EVENT_FEMTOSECONDS {
+        return Err(EventProjectionError::UnrepresentableTime {
+            node: node.to_string(),
+            time,
+        });
+    }
     if let Some(other_time) = event_times.insert(tick, time)
         && other_time != time
     {
@@ -830,23 +849,25 @@ fn event_femtoseconds(
     Ok(tick)
 }
 
-fn choose_timescale<'a>(points: impl Iterator<Item = &'a (u64, VcdValue)> + Clone) -> VcdTimescale {
+fn choose_timescale<'a>(
+    points: impl Iterator<Item = &'a (u128, VcdValue)> + Clone,
+) -> Result<VcdTimescale, EventProjectionError> {
     let finest = VcdTimescale {
         magnitude: VcdMagnitude::One,
         unit: VcdTimeUnit::Femtoseconds,
     };
     if points.clone().all(|(femtoseconds, _)| *femtoseconds == 0) {
-        return finest;
+        return Ok(finest);
     }
     VcdTimescale::ALL
         .into_iter()
         .find(|candidate| {
-            let period = candidate.femtoseconds();
-            points
-                .clone()
-                .all(|(femtoseconds, _)| femtoseconds % period == 0)
+            let period = u128::from(candidate.femtoseconds());
+            points.clone().all(|(femtoseconds, _)| {
+                femtoseconds % period == 0 && femtoseconds / period <= u128::from(u64::MAX)
+            })
         })
-        .unwrap_or(finest)
+        .ok_or(EventProjectionError::TimescaleRange)
 }
 
 #[cfg(test)]
