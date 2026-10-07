@@ -386,11 +386,54 @@ pub(crate) fn raw_read_error(path: &Path, error: rspice_core::io::RawParseError)
     }
 }
 
+fn raw_operating_point(
+    header: &rspice_core::io::ltspice_raw::RawFileHeader,
+    coordinate_first: bool,
+) -> bool {
+    !coordinate_first
+        && matches!(
+            header.plotname.trim().to_ascii_lowercase().as_str(),
+            "dc op" | "operating point" | "dc operating point"
+        )
+}
+
+/// All table coordinates are real. Validate every plot before selection so
+/// discarded imaginary axis values cannot disappear during conversion or bless.
+/// Legacy operating points have an implicit ordinal axis: their first variable
+/// is a signal, whose imaginary values remain part of the result.
+pub(crate) fn validate_raw_coordinates(
+    path: &Path,
+    file: &rspice_core::io::ltspice_raw::RawFile,
+) -> Result<(), CliError> {
+    for plot in &file.plots {
+        if let Some(first) = plot.waveforms.first()
+            && let Some(imaginary) = &first.y_imag
+            && let Some(index) = imaginary.iter().position(|value| *value != 0.0)
+        {
+            let coordinate_first =
+                rspice_core::io::ltspice_raw::raw_table_has_coordinate(&plot.header)
+                    .map_err(|error| raw_read_error(path, error))?;
+            if raw_operating_point(&plot.header, coordinate_first) {
+                continue;
+            }
+            return Err(conversion_error(
+                path,
+                format!(
+                    "RAW plot '{}': independent coordinate '{}' has a nonzero imaginary component at point {index}; table coordinates must be real",
+                    plot.header.plotname, first.name
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn raw_result(
     path: &Path,
     file: rspice_core::io::ltspice_raw::RawFile,
     section: Option<&str>,
 ) -> Result<ImportedResult, CliError> {
+    validate_raw_coordinates(path, &file)?;
     rspice_core::execution::decode_event_plots(&file)
         .map_err(|error| conversion_error(path, error))?;
     let mut fft_plots = decode_raw_fft_plots(path, &file)?;
@@ -414,11 +457,7 @@ pub(super) fn raw_result(
 
     let coordinate_first = rspice_core::io::ltspice_raw::raw_table_has_coordinate(&data.header)
         .map_err(|error| conversion_error(path, error))?;
-    let operating_point = !coordinate_first
-        && matches!(
-            data.header.plotname.trim().to_ascii_lowercase().as_str(),
-            "dc op" | "operating point" | "dc operating point"
-        );
+    let operating_point = raw_operating_point(&data.header, coordinate_first);
     let mut waveforms = data.waveforms.into_iter().peekable();
     let Some(first) = waveforms.peek() else {
         return Err(conversion_error(path, "rawfile contains no variables"));

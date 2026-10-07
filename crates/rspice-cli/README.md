@@ -670,6 +670,9 @@ event signals until their next transition. It never extrapolates or resamples
 between differently declared coordinate units.
 
 RAW and HDF5 inputs are validated in full before any section is selected.
+RAW table coordinates must be real: complex-encoded axes may have zero imaginary
+components, but nonzero imaginary coordinates are rejected instead of discarded.
+Legacy RAW operating points retain their complex first signal on an ordinal axis.
 When they contain multiple results, `compare` and tabular `convert` require
 `--section NAME_OR_INDEX`: an exact RAW plot name or HDF5 group name, or a
 one-based index from the available-section list in the diagnostic. This

@@ -459,6 +459,7 @@ fn load_raw_document(
     let mut file =
         rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
             .map_err(|error| waveform_io::raw_read_error(path, error))?;
+    waveform_io::validate_raw_coordinates(path, &file)?;
     waveform_io::decode_raw_fft_plots(path, &file)?;
     let mut traces = rspice_core::execution::decode_event_plots(&file)
         .map_err(|error| conversion_error(path, error))?;
