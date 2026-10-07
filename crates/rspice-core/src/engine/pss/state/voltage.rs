@@ -200,6 +200,7 @@ impl PssVoltageConstraints {
                 .saturating_add(terms.saturating_mul(2)),
             self.max_values,
         )
+        .map_err(Into::into)
     }
 
     fn max_terms(&self) -> usize {
@@ -297,6 +298,7 @@ impl InitialChargeRates {
                 .saturating_add(words),
             self.max_values,
         )
+        .map_err(Into::into)
     }
 
     /// Map dQ/dv into independent voltage rates. The companion RHS is never
@@ -564,7 +566,7 @@ mod tests {
             ..ResourceLimits::default()
         };
         assert!(matches!(
-            PssVoltageConstraintBuilder::new(4, limits),
+            PssVoltageConstraintBuilder::new(4, limits).map_err(SimulationError::from),
             Err(SimulationError::ResourceLimit(_))
         ));
         let limits = ResourceLimits {

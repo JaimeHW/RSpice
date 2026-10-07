@@ -158,6 +158,7 @@ impl NonlinearForcing {
                 .saturating_add(32_768),
             available,
         )
+        .map_err(Into::into)
     }
 
     pub(super) fn initialize(

@@ -1,5 +1,6 @@
 use super::*;
 use crate::NoAbort;
+use crate::engine::SimulationError;
 use crate::resource::ResourceLimits;
 
 type Symbol = (usize, usize);
@@ -20,7 +21,7 @@ fn row(terms: &[(usize, Value)], source: Option<Symbol>) -> ExactRow<Symbol> {
 }
 
 fn close(size: usize, rows: Vec<ExactRow<Symbol>>) -> ExactElimination<Symbol> {
-    close_descriptor(
+    close_descriptor::<_, SimulationError>(
         size,
         rows,
         ResourceLimits::default(),
@@ -128,7 +129,7 @@ fn differentiation_combines_symbols_with_a_shared_derivative() {
     clamp
         .values
         .insert((1, 0), integer_coefficient(2.0).unwrap());
-    let closure = close_descriptor(
+    let closure = close_descriptor::<_, SimulationError>(
         2,
         vec![row(&[(3, 1.0), (2, 1.0)], None), clamp],
         ResourceLimits::default(),
@@ -151,7 +152,7 @@ fn forcing_only_constraints_remain_the_analysis_owners_explicit_decision() {
         ]
     };
     let mut observed = Vec::new();
-    let closure = close_descriptor(
+    let closure = close_descriptor::<_, SimulationError>(
         1,
         rows(),
         ResourceLimits::default(),
@@ -170,7 +171,7 @@ fn forcing_only_constraints_remain_the_analysis_owners_explicit_decision() {
     assert_eq!(observed.len(), 1);
     assert_eq!(observed[0].len(), 2);
     assert!(
-        close_descriptor(
+        close_descriptor::<_, SimulationError>(
             1,
             rows(),
             ResourceLimits::default(),
@@ -198,7 +199,7 @@ fn descriptor_closure_rejects_invalid_coordinates_and_preserves_typed_failures()
         }
     }
     let run = |size, rows, limits, abort: &dyn AbortSignal| {
-        close_descriptor(
+        close_descriptor::<_, SimulationError>(
             size,
             rows,
             limits,
@@ -243,7 +244,7 @@ fn descriptor_closure_rejects_invalid_coordinates_and_preserves_typed_failures()
         ));
         assert_eq!(abort.polls.load(Ordering::Relaxed), limit);
     }
-    let failure = close_descriptor(
+    let failure = close_descriptor::<_, SimulationError>(
         1,
         vec![row(&[(1, 1.0)], Some((0, 0)))],
         ResourceLimits::default(),

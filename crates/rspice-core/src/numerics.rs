@@ -10,6 +10,7 @@
 //! an assembled matrix rather than defining one.
 
 pub(crate) mod eigenspectrum;
+pub(crate) mod exact_constraints;
 pub(crate) mod krylov;
 mod power_law;
 pub(crate) mod scaled_noise;

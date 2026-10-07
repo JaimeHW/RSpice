@@ -5,7 +5,7 @@
 //! exposing hidden constraints without a sampled Jacobian or a rank cutoff.
 use super::*;
 
-pub(in crate::engine) enum ConstraintDisposition {
+pub(crate) enum ConstraintDisposition {
     /// The analysis owner evaluates this original constitutive equation.
     RetainAtOwner,
     /// A different constitutive/state formulation must own the descriptor.
@@ -20,35 +20,35 @@ pub(in crate::engine) enum ConstraintDisposition {
 /// `retained_words` reserves caller-owned storage, including the pending-row
 /// vector's headers/capacity. Row coefficients and both reducers are charged
 /// here. The returned reducer retains that reservation through its limit.
-pub(in crate::engine) fn close_descriptor<K: Ord + Copy>(
+pub(crate) fn close_descriptor<K: Ord + Copy, E: From<ConstraintError>>(
     size: usize,
     mut rows: Vec<ExactRow<K>>,
     limits: crate::resource::ResourceLimits,
     retained_words: usize,
     abort: &dyn AbortSignal,
-    differentiated: impl Fn(K) -> Result<K, SimulationError>,
-    mut remainder: impl FnMut(ExactRow<K>) -> Result<ConstraintDisposition, SimulationError>,
-) -> Result<Option<ExactElimination<K>>, SimulationError> {
+    differentiated: impl Fn(K) -> Result<K, E>,
+    mut remainder: impl FnMut(ExactRow<K>) -> Result<ConstraintDisposition, E>,
+) -> Result<Option<ExactElimination<K>>, E> {
     if abort.is_aborted() {
-        return Err(SimulationError::Aborted);
+        return Err(ConstraintError::Aborted.into());
     }
-    let invalid = || SimulationError::Circuit("invalid exact descriptor coordinates".to_owned());
+    let invalid = || ConstraintError::Invalid("invalid exact descriptor coordinates".to_owned());
     let columns = size
         .checked_mul(2)
         .and_then(|value| value.checked_add(1))
         .ok_or_else(invalid)?;
     if size == 0 {
-        return Err(invalid());
+        return Err(invalid().into());
     }
     let mut pending_words = 0usize;
     for row in &rows {
         if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+            return Err(ConstraintError::Aborted.into());
         }
         if row.query.sign() != Sign::NoSign
             || row.nodes.keys().any(|&node| node == 0 || node >= columns)
         {
-            return Err(invalid());
+            return Err(invalid().into());
         }
         pending_words = pending_words.saturating_add(row.words());
     }
@@ -64,7 +64,7 @@ pub(in crate::engine) fn close_descriptor<K: Ord + Copy>(
     let mut algebraic = ExactElimination::<K>::new(size + 1, limits)?;
     while let Some(row) = rows.pop() {
         if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+            return Err(ConstraintError::Aborted.into());
         }
         pending_words -= row.words();
         dynamic.limits.max_result_values = limits.max_result_values.saturating_sub(
@@ -99,7 +99,7 @@ pub(in crate::engine) fn close_descriptor<K: Ord + Copy>(
         };
         for (&source, value) in &row.values {
             if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
+                return Err(ConstraintError::Aborted.into());
             }
             // Different symbols may share a derivative. Preserve their
             // combined equation instead of overwriting an earlier term.
