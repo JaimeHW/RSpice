@@ -169,6 +169,31 @@ fn timeout_interrupts_forward_and_scoped_expression_resolution() {
     }
 }
 
+#[test]
+fn timeout_interrupts_runtime_model_expressions_during_construction() {
+    let functions = work_functions();
+    let dir = common::test_dir("construction-model-expression-timeout");
+    for (index, body) in [
+        ".MODEL rm R(RSH={TEMP+work(26)})\nR2 out 0 rm L=1 W=1",
+        ".MODEL cm C(CJ={TEMP+work(26)})\nC1 out 0 cm L=1 W=1",
+        ".MODEL lm L(L={TEMP+work(26)})\nL1 aux 0 1m lm\nR2 out aux 1k",
+        ".MODEL dd D(IS={TEMP*0+work(26)*1p})\nD1 out 0 dd",
+        ".MODEL qm NPN(IS={TEMP*0+work(26)*1p})\nQ1 out out 0 qm",
+        ".MODEL mm NMOS(LEVEL=1 KP={TEMP*0+work(26)*1p})\nM1 out out 0 0 mm L=1u W=1u",
+        ".MODEL jm NJF(BETA={TEMP*0+work(26)*1p})\nJ1 out 0 0 jm",
+        ".MODEL amp gain(GAIN={TEMP+work(26)})\nA1 out aux amp",
+        ".MODEL lut pwl(X_ARRAY=[0 1] Y_ARRAY=[0 {TEMP+work(26)}])\nA1 out aux lut",
+        ".MODEL zm NMF(BETA={TEMP*0+work(26)*1p})\nZ1 out 0 0 zm",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let deck = dir.join(format!("model-{index}.cir"));
+        std::fs::write(&deck, format!("* model construction deadline\n{functions}V1 out 0 .2\nR1 out 0 1k\n{body}\n.OP\n.END\n")).unwrap();
+        assert_times_out(&deck, body, true);
+    }
+}
+
 fn assert_times_out(deck: &std::path::Path, source: &str, execution_started: bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "--error-format", "json", "run"])
