@@ -461,15 +461,6 @@ impl PreparedExpression {
         });
     }
 
-    pub(crate) fn resume_with(
-        &mut self,
-        ctx: &ParamContext,
-        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
-    ) -> Result<PreparedProgress, ExprError> {
-        self.resume_using::<_, true, Infallible>(ctx, resolver, &mut || ControlFlow::Continue(()))
-            .map(uninterrupted)
-    }
-
     pub(crate) fn resume_with_abort(
         &mut self,
         ctx: &ParamContext,

@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::netlist::expr::{
-    ParameterEnvironment, ParameterResolutionError, ParameterResolver, PreparedExpression,
-    PreparedProgress, parse_expression,
+    ExpressionEvaluationError, ParameterEnvironment, ParameterResolutionError, ParameterResolver,
+    PreparedExpression, PreparedProgress,
 };
 use crate::netlist::parser::scopes::{LexicalScopes, ScopeEnvironment};
 
@@ -108,11 +108,10 @@ impl TemperatureOptionSink<'_> {
             // Probe on an isolated stream; immediate values are evaluated on
             // the live stream exactly once. Forward expressions draw only when
             // all required declaration scopes close, in their authored order.
-            match eval_expression(&expression, &params.isolated_random_clone()) {
+            match stream.numeric_expression(&expression, &params.isolated_random_clone()) {
                 Err(crate::netlist::expr::ExprError::UndefinedParam(_)) => {
-                    let parsed = parse_expression(&expression)
-                        .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
-                    let prepared = PreparedExpression::compile(&parsed, params)
+                    let prepared = stream
+                        .prepare_numeric_expression(&expression, params)
                         .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
                     let mut bound_values = HashMap::new();
                     prepared.visit_runtime_parameters(|name| {

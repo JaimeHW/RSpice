@@ -173,9 +173,11 @@ impl AnalysisCardPlan {
                     }
                     Card::Pending(pending) => {
                         let bound = pending.binding.context(params);
-                        ParsedAnalysisCard::parse(
+                        let cancellation = NumericParseAbort::new(abort);
+                        let mut stream = pending.binding.stream.clone().with_abort(&cancellation);
+                        let parsed = ParsedAnalysisCard::parse(
                             &pending.command,
-                            &mut pending.binding.stream.clone(),
+                            &mut stream,
                             AnalysisCardContext {
                                 line_num: entry.line,
                                 logical_line: &pending.logical_line,
@@ -186,8 +188,8 @@ impl AnalysisCardPlan {
                                 current_noise,
                             },
                         )
-                        .map_err(|error| located_error(error, entry.line, &entry.origin))?
-                        .expect("saved analysis head")
+                        .map_err(|error| located_error(error, entry.line, &entry.origin));
+                        cancellation.finish(parsed)?.expect("saved analysis head")
                     }
                 })
             })();

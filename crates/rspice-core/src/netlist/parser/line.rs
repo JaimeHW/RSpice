@@ -575,10 +575,12 @@ pub(super) fn parse_line(
     measurements: &mut Vec<MeasureStatement>,
     context: ParseLineContext<'_>,
 ) -> Result<(), ParseWithAbortError> {
+    let cancellation = NumericParseAbort::new(context.abort);
+    let abort: &dyn AbortSignal = &cancellation;
     let defer_simple_param_refs =
         defer_simple_param_refs || params.expression_references_spectre_statistics(line);
     let ParseLineContext {
-        abort,
+        abort: _,
         analysis_cards,
         startup_cards,
         scopes,
@@ -612,7 +614,7 @@ pub(super) fn parse_line(
 
     // Tokenize the line
     let tokens = tokenize(line).map_err(|e| lex_to_parse_error(e, line_num))?;
-    let mut stream = TokenStream::new(tokens);
+    let mut stream = TokenStream::new(tokens).with_abort(abort);
 
     // Skip leading whitespace/newlines
     stream.skip_newlines();
@@ -638,9 +640,9 @@ pub(super) fn parse_line(
     let parameter_direction =
         parameter_direction.filter(|_| !defer_simple_param_refs || first_char == '.');
 
-    match first_char {
+    let parsed = match first_char {
         '.' => {
-            return parse_command(
+            let parsed = parse_command(
                 &mut stream,
                 line_num,
                 ParseCommandContext {
@@ -679,6 +681,7 @@ pub(super) fn parse_line(
                 },
                 abort,
             );
+            return cancellation.finish(parsed);
         }
         'R' => parse_resistor(
             &mut stream,
@@ -846,8 +849,8 @@ pub(super) fn parse_line(
             line: line_num,
             message: format!("Unknown element type: {}", first_char),
         }),
-    }
-    .map_err(ParseWithAbortError::from)
+    };
+    cancellation.finish(parsed)
 }
 
 fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &ParamContext) {

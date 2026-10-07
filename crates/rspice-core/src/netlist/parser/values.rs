@@ -1982,15 +1982,9 @@ pub(super) fn expect_value_capturing_direction(
         }
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
-            let value = if direction.is_some() {
-                evaluate_complex_value_capturing_direction(&expr, params, direction.as_deref_mut())
-                    .and_then(|value| stream.numeric_value(value))
-                    .map_err(|e| ParseError::InvalidValue(e.to_string()))?
-            } else {
-                stream
-                    .numeric_expression(&expr, params)
-                    .map_err(|e| ParseError::InvalidValue(e.to_string()))?
-            };
+            let value = stream
+                .numeric_expression_capturing_direction(&expr, params, direction.as_deref_mut())
+                .map_err(|e| ParseError::InvalidValue(e.to_string()))?;
             stream.advance();
             if let Some(direction) = direction {
                 *direction = std::mem::replace(direction, Ok(0.0.into())).map(|value| value * sign);
@@ -2247,13 +2241,8 @@ fn try_value_unsigned(stream: &mut TokenStream, params: &ParamContext) -> Option
             // A failed optional value is still an authored operand. Leave it
             // for the caller's error/forward-binding path instead of silently
             // treating it as an omitted field.
-            let value = if stream.binding_numeric_values() {
-                let expression = expr.clone();
-                stream.numeric_expression(&expression, params)
-            } else {
-                eval_expression(expr, params)
-            }
-            .ok()?;
+            let expression = expr.clone();
+            let value = stream.numeric_expression(&expression, params).ok()?;
             stream.advance();
             Some(value)
         }

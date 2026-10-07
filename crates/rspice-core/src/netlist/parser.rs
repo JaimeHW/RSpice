@@ -61,7 +61,7 @@ mod scopes;
 mod startup_cards;
 mod stream;
 mod temperature;
-use stream::TokenStream;
+use stream::{NumericParseAbort, TokenStream};
 
 use temperature::{
     ParserTemperatures, TemperatureDirective, TemperaturePassError, apply_replayed_temperature,
@@ -132,14 +132,17 @@ fn options_overlay(
     control_command: bool,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationOptions, ParseWithAbortError> {
+    let cancellation = NumericParseAbort::new(abort);
+    let abort: &dyn AbortSignal = &cancellation;
     ensure_parse_not_aborted(abort)?;
     let mut stream = TokenStream::new(tokenize(arguments).map_err(|error| ParseError::Syntax {
         line,
         message: error.to_string(),
-    })?);
+    })?)
+    .with_abort(abort);
     let mut candidate = current.clone();
     let mut diagnostics = Vec::new();
-    commands::parse_options_command(
+    let parsed = commands::parse_options_command(
         &mut stream,
         line,
         params,
@@ -150,7 +153,8 @@ fn options_overlay(
         None,
         control_command,
         None,
-    )?;
+    );
+    cancellation.finish(parsed)?;
     ensure_parse_not_aborted(abort)?;
     // An options overlay has no parser-diagnostic publication channel. Refuse
     // unsupported settings instead of silently discarding their diagnostics.

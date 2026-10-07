@@ -75,6 +75,7 @@ fn command_arguments_cancel_before_publishing_changes_or_output() {
         )
         .unwrap();
     for (name, arguments) in [
+        ("option", "abstol=1n reltol={work(14)}"),
         ("set", "num_threads=work(14)"),
         ("alter", "R1 work(14)"),
         ("alter", "@V1[sin] [ 0 work(14) 1 ]"),
@@ -86,10 +87,14 @@ fn command_arguments_cancel_before_publishing_changes_or_output() {
         let error = circuit
             .execute(&engine, &command(name, arguments), &variables, &abort)
             .unwrap_err();
-        assert!(
-            matches!(error, ControlExecutionError::Command(ref error) if error.kind == ControlErrorKind::Aborted),
-            "{name} {arguments}: {error}"
-        );
+        let cancelled = match &error {
+            ControlExecutionError::Command(error) => error.kind == ControlErrorKind::Aborted,
+            ControlExecutionError::Simulation { source, .. } => {
+                matches!(source, rspice_core::SimulationError::Aborted)
+            }
+            ControlExecutionError::Configuration { .. } => false,
+        };
+        assert!(cancelled, "{name} {arguments}: {error}");
         assert_eq!(abort.count(), 129);
         assert_eq!(abort.polls_after_abort(), 0);
         assert_eq!(
@@ -97,5 +102,6 @@ fn command_arguments_cancel_before_publishing_changes_or_output() {
             original_elements
         );
         assert_eq!(circuit.settings().maximum_parallel_workers, None);
+        assert_eq!(circuit.netlist().options.abstol, None);
     }
 }

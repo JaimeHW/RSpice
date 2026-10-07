@@ -6,7 +6,7 @@ use crate::netlist::expr::{ParameterEnvironment, ParameterResolutionError, Param
 #[derive(Debug)]
 pub(super) struct CardBinding {
     pub(super) scope: usize,
-    pub(super) stream: TokenStream,
+    pub(super) stream: TokenStream<'static>,
     values: Vec<(String, crate::ComplexValue)>,
     strings: Vec<(String, String)>,
     functions: Vec<crate::netlist::expr::FunctionDef>,
@@ -28,7 +28,7 @@ impl CardBinding {
         }
         Self {
             scope,
-            stream,
+            stream: stream.with_abort(&NoAbort),
             values,
             strings: params.all_string_params(),
             functions: params.all_functions(),
@@ -89,15 +89,18 @@ impl CardBinding {
         abort: &dyn AbortSignal,
         parse: &mut impl FnMut(&mut TokenStream, &ParamContext) -> Result<T, ParseError>,
     ) -> Result<(T, ParameterResolver), ParseWithAbortError> {
+        let cancellation = NumericParseAbort::new(abort);
+        let abort: &dyn AbortSignal = &cancellation;
         let bound = self.context(environment.parameters(self.scope));
         let mut resolver = ParameterResolver::default();
-        let mut stream = self.stream.clone();
+        let mut stream = self.stream.clone().with_abort(abort);
         stream.begin_numeric_binding();
         loop {
             ensure_parse_not_aborted(abort)?;
-            match parse(&mut stream, &bound) {
+            match cancellation.finish(parse(&mut stream, &bound)) {
                 Ok(card) => return Ok((card, resolver)),
-                Err(error) => {
+                Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
+                Err(ParseWithAbortError::Parse(error)) => {
                     let Some(name) = stream.missing_numeric_parameter().map(str::to_owned) else {
                         return Err(located_error(error, line, origin).into());
                     };

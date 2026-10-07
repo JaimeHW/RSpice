@@ -84,15 +84,23 @@ impl PendingTemperatureOption {
         let value = loop {
             ensure_parse_not_aborted(abort)?;
             match expression
-                .resume_with(params, &mut |name| {
-                    Ok(self
-                        .bound_values
-                        .get(name)
-                        .copied()
-                        .or_else(|| resolver.scoped_value(scope, name, environment)))
-                })
-                .map_err(|error| self.error(error.to_string()))?
-            {
+                .resume_with_abort(
+                    params,
+                    &mut |name| {
+                        Ok(self
+                            .bound_values
+                            .get(name)
+                            .copied()
+                            .or_else(|| resolver.scoped_value(scope, name, environment)))
+                    },
+                    abort,
+                )
+                .map_err(|error| match error {
+                    ExpressionEvaluationError::Aborted => ParseWithAbortError::Aborted,
+                    ExpressionEvaluationError::Expression(error) => {
+                        self.error(error.to_string()).into()
+                    }
+                })? {
                 PreparedProgress::Complete(value) => break value,
                 PreparedProgress::MissingParameter(name) => {
                     match resolver.resolve_binding(scope, &name, environment, abort) {

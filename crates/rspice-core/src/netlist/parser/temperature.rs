@@ -471,8 +471,18 @@ mod tests {
                 nominal,
             ),
         ] {
+            let completion_abort = crate::abort_signal::CountingAbort::new(usize::MAX);
+            super::super::parse_netlist_with_options_and_abort(
+                source,
+                NetlistParseOptions::default(),
+                &completion_abort,
+            )
+            .expect("the reference parse completes");
             let mut completed = false;
-            for limit in 0..1024 {
+            // Expression parsing and evaluation have their own polling. Use
+            // the complete run's count so every boundary remains covered when
+            // cancellation reaches an additional part of a replayed group.
+            for limit in 0..=completion_abort.count() {
                 let abort = crate::abort_signal::CountingAbort::new(limit);
                 let result = super::super::parse_netlist_with_options_and_abort(
                     source,
