@@ -58,7 +58,11 @@ use rspice_core::analysis::harmonic_balance::{
 // from legacy operating-point, FFT and event carriers that share display titles.
 // PRINT retains nonfinite scalar determinations and their order for CLI/WASM.
 // One opaque metadata writer serves CLI FFT RAW publication via inert Options.
-const MAX_PUBLIC_ITEMS: usize = 5554;
+// Bounded continuous measurement entry points and their relocated re-exports
+// serve CLI run/basic.rs (DC/TRAN), run/frequency.rs (AC/NOISE), and the core
+// transient post-processor. Reconciled their seven added source declarations
+// against the prior five-item gap; the actual census is now 5,556, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5556;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
