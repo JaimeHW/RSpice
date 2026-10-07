@@ -58,6 +58,126 @@ fn parse_value(spelling: &str) -> FourStateValue {
 }
 
 #[test]
+fn unpacked_arrays_execute_typed_elements_and_assignment_timing() {
+    let mut h = Harness::from_source(
+        r#"
+module arrays;
+ reg signed [7:0] memory[-2:-1]; integer codes[3:4], index;
+ real levels[4:3], sample; reg signed [15:0] widened; reg ok;
+ initial begin
+   memory[-2]=-7; memory[-1]=10; codes[3]=-3; codes[4]=5;
+   levels[3]=1.25; levels[4]=-2.5;
+   widened=memory[-2]; sample=levels[3.5];
+   ok=(memory[-2]<0) && (codes[3]<0) && (levels[4]<0);
+   index=-2; memory[index] <= #5 8'h4a;
+   index=-1; memory[index] = #7 8'h23;
+ end
+endmodule
+"#,
+    );
+    let DigitalProcessOutcome::Suspended(wait) = h.start(0) else {
+        panic!("blocking delay")
+    };
+    assert_eq!(h.get("widened"), "1111111111111001");
+    assert_eq!(h.get_real("sample"), -2.5);
+    assert_eq!(h.get("ok"), "1");
+    assert_eq!(h.store.deferred.len(), 1);
+    assert_eq!(h.store.deferred[0].target.signal, h.signal("memory[-2]"));
+    // IEEE 1364 9.2.1 evaluates the blocking target when the process resumes.
+    h.set("index", &format!("{:032b}", -2i32 as u32));
+    expect_finished(h.resume(0, wait.resume_state()));
+    assert_eq!(h.get("memory[-2]"), "00100011");
+    assert_eq!(h.get("memory[-1]"), "00001010");
+    // The NBA target and value were captured before that change of address.
+    let update = h.store.deferred.pop().unwrap();
+    apply_deferred(&h.plan, &mut h.store, &update).unwrap();
+    assert_eq!(h.get("memory[-2]"), "01001010");
+    assert_eq!(h.get("memory[-1]"), "00001010");
+}
+
+#[test]
+fn unpacked_arrays_keep_instance_initializers_and_all_cell_dependencies() {
+    use rspice_veriloga::canonical_ir::digital::DigitalInitialValue;
+    let source = r#"
+module child(out);
+ output [7:0] out; wire [7:0] out;
+ parameter integer VALUE=-3;
+ reg signed [7:0] memory[2:1]='{VALUE,8'h12};
+ integer index=1, codes[-2:-1]='{VALUE,5}; real levels[4:3]='{1.25,2.5};
+ assign out=memory[index];
+ initial begin codes[-2]=VALUE; levels[4]=VALUE; #1 index=2; end
+endmodule
+module top;
+ parameter integer VALUE=19;
+ wire [7:0] a,b;
+ child u1(a);
+ child u2(b);
+endmodule
+"#;
+    let h = Harness::from_module(source, Some("top"));
+    let initial = |name: &str| {
+        h.plan
+            .signal(h.signal(name))
+            .unwrap()
+            .initial_value
+            .as_ref()
+            .unwrap()
+    };
+    assert_eq!(
+        initial("u1.memory[2]"),
+        &DigitalInitialValue::FourState(FourStateValue::from_u64(8, 253))
+    );
+    assert_eq!(
+        initial("u2.memory[2]"),
+        &DigitalInitialValue::FourState(FourStateValue::from_u64(8, 253))
+    );
+    assert_eq!(
+        initial("u1.memory[1]"),
+        &DigitalInitialValue::FourState(FourStateValue::from_u64(8, 18))
+    );
+    assert_eq!(initial("u1.levels[4]"), &DigitalInitialValue::Real(1.25));
+    assert_eq!(initial("u1.levels[3]"), &DigitalInitialValue::Real(2.5));
+    assert_eq!(h.plan.arrays.len(), 6);
+    for prefix in ["u1", "u2"] {
+        let cells = [
+            h.signal(&format!("{prefix}.memory[1]")),
+            h.signal(&format!("{prefix}.memory[2]")),
+        ];
+        let index = h.signal(&format!("{prefix}.index"));
+        assert!(h.plan.processes.iter().any(|process| {
+            process.static_sensitivity.as_ref().is_some_and(|s| {
+                cells
+                    .iter()
+                    .chain([&index])
+                    .all(|signal| s.terms.iter().any(|term| term.signal == *signal))
+            })
+        }));
+    }
+    h.plan.validate().unwrap();
+}
+
+#[test]
+fn unpacked_arrays_refuse_unlowered_shapes_and_whole_array_values() {
+    for body in [
+        "reg [7:0] a[1:2], b; initial b=a;",
+        "reg [7:0] a[1:2]; initial a=1;",
+        "real a[1:2], b; initial begin a[1]=0; b=a; end",
+        "reg a[1:2][1:2]; initial a[1]=0;",
+        "reg [7:0] a[1:2]='{1}; initial a[1]=0;",
+        "reg [7:0] a[1:2]; initial a[1:2]=0;",
+        "reg [7:0] a[1:2]; initial @(a);",
+    ] {
+        let source = format!("module refused; {body} endmodule");
+        assert!(
+            VerilogACompiler::new(CompilerOptions::default())
+                .compile_canonical_ir_module(&source, None)
+                .is_err(),
+            "accepted {body}"
+        );
+    }
+}
+
+#[test]
 fn digital_parameters_are_values_in_arithmetic_selects_and_local_scopes() {
     let mut harness = Harness::from_source(
         "module parameters;

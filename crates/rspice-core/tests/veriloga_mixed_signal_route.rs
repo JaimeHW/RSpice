@@ -2433,19 +2433,19 @@ fn analog_variable_reads_share_the_candidate_with_spice_loads_and_digital_inputs
 module variable_sampler(p,q);
  inout p; electrical p; output q; reg q=0;
  parameter real LOAD=1000;
- integer gain=-2; reg signed [7:0] adjustment=-1; reg startup_ok;
- real measured[-2:-1],period; integer count,enabled,index;
+ integer gain[2:1]='{7,-2}; reg signed [7:0] adjustment[-2:-1]='{-1,3}; reg startup_ok;
+ real measured[-2:-1],period[5:4]='{9,1.537e-9}; integer count,enabled,index;
  analog begin
-   measured[-2]=gain*V(p); measured[-1]=-gain*V(p);
-   @(timer(0,period,0,enabled)) count=-3;
-   I(p)<+(V(p)-gain+adjustment-255)/1000;
+   measured[-2]=gain[1]*V(p); measured[-1]=-gain[1]*V(p);
+   @(timer(0,period[4],0,enabled)) count=-3;
+   I(p)<+(V(p)-gain[1]+adjustment[-2]-255)/1000;
  end
  initial begin
-   period=1.537e-9; enabled=1; index=-2;
+   period[4]=1.537e-9; enabled=1; index=-2;
    startup_ok=(measured[index]-4*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]-4*LOAD/(1000+LOAD)>-1e-8);
-   #1; gain=-4; index=-1;
-   q=startup_ok && (count==-3) && (adjustment==-1)
+   #1; index=1; gain[index]=-4; index=-1;
+   q=startup_ok && (count==-3) && (adjustment[-2]==-1)
      && (measured[index]+16*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]+16*LOAD/(1000+LOAD)>-1e-8);
  end

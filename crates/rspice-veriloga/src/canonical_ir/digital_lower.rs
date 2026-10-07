@@ -341,10 +341,12 @@ fn lower_with_analog_variables(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut signals = lower_signals(&digital.signals);
-    let mut elaborated: HashMap<SmolStr, DigitalSignalId> = signals
+    let (mut signals, mut arrays, root_signal_ids) = lower_signals(&digital.signals);
+    let mut elaborated: HashMap<SmolStr, DigitalSignalId> = digital
+        .signals
         .iter()
-        .map(|signal| (signal.name.clone(), signal.id))
+        .zip(&root_signal_ids)
+        .map(|(signal, id)| (signal.name.clone(), *id))
         .collect();
     let mut frame_signal_ids: Vec<Vec<DigitalSignalId>> =
         Vec::with_capacity(digital.instances.len());
@@ -354,8 +356,12 @@ fn lower_with_analog_variables(
             let id = match elaborated.get(&signal.name) {
                 Some(existing) => *existing,
                 None => {
-                    let id = DigitalSignalId::from(signals.len());
-                    signals.push(lower_signal(&signal.declared, id, signal.name.clone()));
+                    let id = append_signal(
+                        &signal.declared,
+                        signal.name.clone(),
+                        &mut signals,
+                        &mut arrays,
+                    );
                     elaborated.insert(signal.name.clone(), id);
                     id
                 }
@@ -365,9 +371,14 @@ fn lower_with_analog_variables(
         frame_signal_ids.push(ids);
     }
 
-    for (declared, signal) in digital.signals.iter().zip(&mut signals) {
-        signal.initial_value =
-            constants::initializer(declared, &module_constants, digital.time_scale)?;
+    for (declared, id) in digital.signals.iter().zip(&root_signal_ids) {
+        initialize_signal(
+            declared,
+            *id,
+            &module_constants,
+            digital.time_scale,
+            &mut signals,
+        )?;
     }
     for ((instance, ids), constants) in digital
         .instances
@@ -377,8 +388,13 @@ fn lower_with_analog_variables(
     {
         for (declared, id) in instance.signals.iter().zip(ids) {
             if declared.declared.initializer.is_some() {
-                signals[usize::from(*id)].initial_value =
-                    constants::initializer(&declared.declared, constants, instance.time_scale)?;
+                initialize_signal(
+                    &declared.declared,
+                    *id,
+                    constants,
+                    instance.time_scale,
+                    &mut signals,
+                )?;
             }
         }
     }
@@ -391,8 +407,8 @@ fn lower_with_analog_variables(
     let module_scope: HashMap<&str, DigitalSignalId> = digital
         .signals
         .iter()
-        .zip(&signals)
-        .map(|(analyzed, signal)| (analyzed.name.as_str(), signal.id))
+        .zip(&root_signal_ids)
+        .map(|(analyzed, id)| (analyzed.name.as_str(), *id))
         .collect();
     let frame_scopes: Vec<HashMap<&str, DigitalSignalId>> = digital
         .instances
@@ -439,6 +455,10 @@ fn lower_with_analog_variables(
     // it belongs to neither scope: this pass wrote it, in elaborated names, and
     // the only expressions in one are a name and a select whose bounds are
     // already literals.
+    let array_storage: HashMap<_, _> = arrays
+        .iter()
+        .map(|array| (array.storage.base, array.storage))
+        .collect();
     let no_constants = ResolvedConstants::default();
     let no_analog_variables = HashMap::new();
 
@@ -454,6 +474,7 @@ fn lower_with_analog_variables(
             process,
             allocate(),
             &signals,
+            &array_storage,
             &module_scope,
             &module_constants,
             analog_variables,
@@ -468,6 +489,7 @@ fn lower_with_analog_variables(
         match lower_continuous_assign(
             assignment,
             &signals,
+            &array_storage,
             &module_scope,
             &module_constants,
             analog_variables,
@@ -491,6 +513,7 @@ fn lower_with_analog_variables(
                 process,
                 allocate(),
                 &signals,
+                &array_storage,
                 scope,
                 constants,
                 &no_analog_variables,
@@ -505,6 +528,7 @@ fn lower_with_analog_variables(
             match lower_continuous_assign(
                 assignment,
                 &signals,
+                &array_storage,
                 scope,
                 constants,
                 &no_analog_variables,
@@ -521,6 +545,7 @@ fn lower_with_analog_variables(
             match lower_continuous_assign(
                 assignment,
                 &signals,
+                &array_storage,
                 &elaborated_scope,
                 &no_constants,
                 &no_analog_variables,
@@ -543,7 +568,7 @@ fn lower_with_analog_variables(
     CanonicalDigitalPlan {
         timing,
         content_identity: [0; 32],
-        arrays: Vec::new(),
+        arrays,
         signals,
         processes,
         drivers,
@@ -638,6 +663,7 @@ fn reject_overdriven_real_nets(
 fn lower_continuous_assign(
     assignment: &crate::semantic::AnalyzedContinuousAssign,
     signals: &[DigitalSignal],
+    arrays: &HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
     index: &HashMap<&str, DigitalSignalId>,
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
@@ -650,6 +676,7 @@ fn lower_continuous_assign(
         constant_expression: false,
         time_scale,
         signals,
+        arrays,
         index,
         constants,
         analog_variables,
@@ -691,7 +718,7 @@ fn lower_continuous_assign(
     collect_expression_reads(&assignment.assignment.value, &mut reads);
     let terms: Vec<DigitalSensitivityTerm> = reads
         .into_iter()
-        .filter_map(|name| index.get(name.as_str()).copied())
+        .flat_map(|name| lowerer.read_dependencies(&name))
         .map(|signal| DigitalSensitivityTerm { signal, edge: None })
         .collect();
 
@@ -743,14 +770,68 @@ fn lower_continuous_assign(
     })
 }
 
-fn lower_signals(analyzed: &[AnalyzedDigitalSignal]) -> Vec<DigitalSignal> {
-    analyzed
+fn lower_signals(
+    declarations: &[AnalyzedDigitalSignal],
+) -> (
+    Vec<DigitalSignal>,
+    Vec<super::digital::DigitalArray>,
+    Vec<DigitalSignalId>,
+) {
+    let mut signals = Vec::new();
+    let mut arrays = Vec::new();
+    let ids = declarations
         .iter()
+        .map(|signal| append_signal(signal, signal.name.clone(), &mut signals, &mut arrays))
+        .collect();
+    (signals, arrays, ids)
+}
+
+fn append_signal(
+    signal: &AnalyzedDigitalSignal,
+    name: SmolStr,
+    signals: &mut Vec<DigitalSignal>,
+    arrays: &mut Vec<super::digital::DigitalArray>,
+) -> DigitalSignalId {
+    let base = DigitalSignalId::from(signals.len());
+    if let Some(bounds) = signal.unpacked {
+        let storage = super::digital::DigitalArrayRef {
+            base,
+            lower: bounds.msb.min(bounds.lsb),
+            len: bounds.width(),
+        };
+        for offset in 0..storage.len {
+            let id = DigitalSignalId::from(signals.len());
+            signals.push(lower_signal(
+                signal,
+                id,
+                format!("{name}[{}]", storage.lower + i64::from(offset)).into(),
+            ));
+        }
+        arrays.push(super::digital::DigitalArray {
+            name,
+            bounds: (bounds.msb, bounds.lsb),
+            storage,
+        });
+    } else {
+        signals.push(lower_signal(signal, base, name));
+    }
+    base
+}
+
+fn initialize_signal(
+    declared: &AnalyzedDigitalSignal,
+    base: DigitalSignalId,
+    constants: &ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    signals: &mut [DigitalSignal],
+) -> Result<(), Vec<DigitalLoweringDiagnostic>> {
+    for (offset, value) in constants::initializers(declared, constants, time_scale)?
+        .into_iter()
         .enumerate()
-        .map(|(position, signal)| {
-            lower_signal(signal, DigitalSignalId::from(position), signal.name.clone())
-        })
-        .collect()
+    {
+        signals[usize::from(base) + offset].initial_value = value;
+    }
+    Ok(())
 }
 
 /// One declaration, under the identity and name the elaborated scope gives it.
@@ -806,6 +887,7 @@ fn lower_process(
     process: &AnalyzedDigitalProcess,
     id: DigitalProcessId,
     signals: &[DigitalSignal],
+    arrays: &HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
     index: &HashMap<&str, DigitalSignalId>,
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
@@ -816,6 +898,7 @@ fn lower_process(
         constant_expression: false,
         time_scale,
         signals,
+        arrays,
         index,
         constants,
         analog_variables,
@@ -1111,6 +1194,7 @@ struct ProcessLowerer<'a> {
     constant_expression: bool,
     time_scale: crate::time_scale::ModuleTimeScale,
     signals: &'a [DigitalSignal],
+    arrays: &'a HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
     index: &'a HashMap<&'a str, DigitalSignalId>,
     /// The elaboration-time constants a name in this body may denote.
     ///
@@ -2112,6 +2196,36 @@ impl ProcessLowerer<'_> {
                     target.span(),
                 );
             }
+            // IEEE 1364 9.2.1/9.2.2: blocking targets are evaluated after
+            // the intra-assignment wait; NBA targets are captured at scheduling.
+            DigitalLValue::BitSelect { name, index, .. } if self.digital_array(name).is_some() => {
+                let array = self.digital_array(name).expect("resolved discrete array");
+                let signed = self.self_signed(index);
+                let index = self.array_index_value(block, index);
+                let value = if self.real_signal(array.base) {
+                    value
+                } else {
+                    self.resize(block, value, self.width_of(array.base), false)
+                };
+                let kind = if nonblocking {
+                    CfgValueKind::DigitalArrayNonblockingWrite {
+                        array,
+                        index,
+                        signed,
+                        value,
+                        region: DigitalSchedulingRegion::NonBlockingAssign,
+                        wait,
+                    }
+                } else {
+                    CfgValueKind::DigitalArrayBlockingWrite {
+                        array,
+                        index,
+                        signed,
+                        value,
+                    }
+                };
+                self.builder.push(block, CfgValueType::Effect, kind);
+            }
             _ => {
                 let Some(resolved) = self.write_target(target) else {
                     return;
@@ -2318,7 +2432,9 @@ impl ProcessLowerer<'_> {
                     .get(name.as_str())
                     .map_or(1, |signal| self.width_of(*signal)),
             },
-            DigitalLValue::BitSelect { .. } => 1,
+            DigitalLValue::BitSelect { name, .. } => self
+                .digital_array(name)
+                .map_or(1, |array| self.width_of(array.base)),
             DigitalLValue::PartSelect { msb, lsb, .. } => {
                 match (self.constant(msb), self.constant(lsb)) {
                     (Some(msb), Some(lsb)) => msb.abs_diff(lsb) as u32 + 1,
@@ -2422,7 +2538,9 @@ impl ProcessLowerer<'_> {
         };
         if terms.iter().all(|term| {
             signal_name(&term.signal).is_some_and(|name| {
-                self.lookup_local(name).is_none() && self.index.contains_key(name)
+                self.lookup_local(name).is_none()
+                    && self.index.contains_key(name)
+                    && self.digital_array(name).is_none()
             })
         }) {
             return DigitalWait::Event(self.sensitivity_terms(
@@ -2522,7 +2640,7 @@ impl ProcessLowerer<'_> {
                 }
                 reads
                     .into_iter()
-                    .filter_map(|name| self.index.get(name.as_str()).copied())
+                    .flat_map(|name| self.read_dependencies(&name))
                     .map(|signal| DigitalSensitivityTerm { signal, edge: None })
                     .collect()
             }
@@ -2647,13 +2765,73 @@ impl ProcessLowerer<'_> {
             // `$bitstoreal` is: it is a crossing, not a computation over what
             // is on this side of it.
             Expression::ArrayAccess(access) => {
-                self.analog_array(&access.array)
-                    .is_some_and(|(quantity, _, _)| {
-                        quantity == super::digital::DigitalAnalogQuantity::RealVariable
-                    })
+                self.digital_array(&access.array)
+                    .is_some_and(|array| self.real_signal(array.base))
+                    || self
+                        .analog_array(&access.array)
+                        .is_some_and(|(quantity, _, _)| {
+                            quantity == super::digital::DigitalAnalogQuantity::RealVariable
+                        })
             }
             Expression::BranchAccess(_) => true,
             _ => false,
+        }
+    }
+
+    fn digital_array(&self, name: &str) -> Option<super::digital::DigitalArrayRef> {
+        if self.lookup_local(name).is_some() {
+            return None;
+        }
+        self.index
+            .get(name)
+            .and_then(|id| self.arrays.get(id))
+            .copied()
+    }
+
+    fn read_dependencies(&self, name: &str) -> Vec<DigitalSignalId> {
+        if let Some(array) = self.digital_array(name) {
+            array
+                .cell_range()
+                .expect("validated array shape")
+                .map(DigitalSignalId::new)
+                .collect()
+        } else {
+            self.index.get(name).copied().into_iter().collect()
+        }
+    }
+
+    fn digital_array_read(
+        &mut self,
+        block: BlockId,
+        access: &crate::ast::ArrayAccessExpr,
+    ) -> ValueId {
+        let array = self
+            .digital_array(&access.array)
+            .expect("resolved discrete array");
+        let index = self.array_index_value(block, &access.index);
+        let value_type = if self.real_signal(array.base) {
+            CfgValueType::Real
+        } else {
+            CfgValueType::FourState {
+                width: self.width_of(array.base),
+            }
+        };
+        self.builder.push(
+            block,
+            value_type,
+            CfgValueKind::DigitalArrayRead {
+                array,
+                index,
+                signed: self.self_signed(&access.index),
+            },
+        )
+    }
+
+    fn array_index_value(&mut self, block: BlockId, index: &Expression) -> ValueId {
+        if self.is_real_expression(index) {
+            self.real_expression(block, index)
+        } else {
+            self.expression(block, index)
         }
     }
 
@@ -2667,6 +2845,9 @@ impl ProcessLowerer<'_> {
                     .get(name.as_str())
                     .is_some_and(|signal| self.real_signal(*signal)),
             },
+            DigitalLValue::BitSelect { name, .. } => self
+                .digital_array(name)
+                .is_some_and(|array| self.real_signal(array.base)),
             // A select names bits, and a real has none. The refusal is the
             // analyzer's; reporting `false` here sends the target down the
             // four-state path, which is where that refusal already lives.
@@ -2898,10 +3079,23 @@ impl ProcessLowerer<'_> {
                 self.real_constant(number.value)
             }
             Expression::BranchAccess(access) => self.analog_probe(block, access),
+            Expression::ArrayAccess(access) if self.digital_array(&access.array).is_some() => {
+                self.digital_array_read(block, access)
+            }
             Expression::ArrayAccess(access) if self.analog_array(&access.array).is_some() => {
                 self.analog_array_read(block, access)
             }
             Expression::Identifier(identifier) => {
+                if self.digital_array(&identifier.name).is_some() {
+                    self.error(
+                        format!(
+                            "unpacked array `{}` requires an element index",
+                            identifier.name
+                        ),
+                        identifier.span,
+                    );
+                    return self.real_constant(0.0);
+                }
                 if let Some(local) = self.lookup_local(&identifier.name) {
                     if self.local_is_real(local) {
                         return self.read_local(block, local);
@@ -3498,6 +3692,9 @@ impl ProcessLowerer<'_> {
                 self.named_value(block, &identifier.name, identifier.span)
             }
             Expression::ArrayAccess(access) => {
+                if self.digital_array(&access.array).is_some() {
+                    return self.digital_array_read(block, access);
+                }
                 if self.analog_array(&access.array).is_some() {
                     return self.analog_array_read(block, access);
                 }
@@ -3668,10 +3865,13 @@ impl ProcessLowerer<'_> {
             },
             // Rules (d), (e) and (f).
             Expression::ArrayAccess(access) => {
-                self.analog_array(&access.array)
-                    .is_some_and(|(quantity, _, _)| {
-                        quantity == super::digital::DigitalAnalogQuantity::IntegerVariable
-                    })
+                self.digital_array(&access.array)
+                    .is_some_and(|array| self.signed_signal(array.base))
+                    || self
+                        .analog_array(&access.array)
+                        .is_some_and(|(quantity, _, _)| {
+                            quantity == super::digital::DigitalAnalogQuantity::IntegerVariable
+                        })
             }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(_))
             | Expression::ArrayLiteral(_) => false,
@@ -3797,7 +3997,9 @@ impl ProcessLowerer<'_> {
                 ),
             },
             Expression::ArrayAccess(access) => {
-                if self.analog_array(&access.array).is_some() {
+                if let Some(array) = self.digital_array(&access.array) {
+                    self.width_of(array.base)
+                } else if self.analog_array(&access.array).is_some() {
                     32
                 } else {
                     1
@@ -4300,6 +4502,13 @@ impl ProcessLowerer<'_> {
     }
 
     fn named_value(&mut self, block: BlockId, name: &str, span: Span) -> ValueId {
+        if self.digital_array(name).is_some() {
+            self.error(
+                format!("unpacked array `{name}` requires an element index"),
+                span,
+            );
+            return self.unknown(1);
+        }
         // A process-local shadows a module signal of the same name, per IEEE
         // 1364-2005 section 9.8.1, so the innermost region is asked first.
         if let Some(local) = self.lookup_local(name) {

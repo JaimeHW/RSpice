@@ -369,6 +369,8 @@ pub struct AnalyzedDigitalSignal {
     /// Packed range. `None` is a one-bit scalar, and is the only shape a real
     /// net has — see [`Self::width`].
     pub range: Option<VectorBounds>,
+    /// Unpacked element bounds, distinct from each element's packed range.
+    pub unpacked: Option<VectorBounds>,
     /// Declared width in bits.
     ///
     /// Zero for a `wreal`, which has no bit width at all: Verilog-AMS LRM 2.4
@@ -703,6 +705,53 @@ impl SemanticAnalyzer {
             } else {
                 super::ValueType::Integer
             };
+            if let Some(bounds) = signal.unpacked {
+                let layout = if let Some(layout) = analyzed.arrays.get(&signal.name) {
+                    layout.clone()
+                } else {
+                    let layout = super::AnalyzedArray {
+                        base: analyzed.variables.len(),
+                        lower: bounds.msb.min(bounds.lsb),
+                        len: bounds.width() as usize,
+                    };
+                    for offset in 0..layout.len {
+                        analyzed.variables.push(super::AnalyzedVariable {
+                            name: format!("{}[{}]", signal.name, layout.lower + offset as i64)
+                                .into(),
+                            var_type: if is_real {
+                                VarType::Real
+                            } else {
+                                VarType::Integer
+                            },
+                            value_type,
+                            is_state: true,
+                            retains_input: false,
+                            is_event_controlled: true,
+                        });
+                    }
+                    analyzed.arrays.insert(signal.name.clone(), layout.clone());
+                    self.arrays.insert(signal.name.clone(), layout.clone());
+                    if let Err(error) = self.define_symbol(Symbol {
+                        name: signal.name.clone(),
+                        kind: SymbolKind::Variable,
+                        value_type,
+                        span: signal.span,
+                        attrs: Default::default(),
+                    }) {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(error.to_string()),
+                            signal.span,
+                        );
+                    }
+                    layout
+                };
+                for slot in layout.base..layout.base + layout.len {
+                    analyzed.variables[slot].is_state = true;
+                    analyzed.variables[slot].is_event_controlled = true;
+                    analyzed.event_state_variables.push(slot);
+                }
+                continue;
+            }
             let slot = if let Some(slot) = analyzed
                 .variables
                 .iter()
@@ -908,21 +957,14 @@ impl SemanticAnalyzer {
                     );
                     continue;
                 }
-                if !item.dimensions.is_empty() {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "`{}` is an array of `{}`, and a process writes it; an array has \
-                             no discrete-domain signal form yet",
-                            item.name,
-                            kind.keyword()
-                        )),
-                        item.span,
-                    );
+                let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+                if !item.dimensions.is_empty() && unpacked.is_none() {
                     continue;
                 }
                 seen.insert(item.name.clone(), item.span);
                 signals.push(AnalyzedDigitalSignal {
                     initializer: item.init.clone(),
+                    unpacked,
                     name: item.name.clone(),
                     class: DigitalSignalClass::Variable(kind),
                     signedness,
@@ -1077,6 +1119,7 @@ impl SemanticAnalyzer {
                 seen.insert(name.clone(), declaration.span);
                 signals.push(AnalyzedDigitalSignal {
                     initializer: None,
+                    unpacked: None,
                     name: name.clone(),
                     class: DigitalSignalClass::Net(DigitalNetKind::Wire),
                     signedness: declaration.signedness,
@@ -1127,17 +1170,18 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Unpacked (memory) dimensions parse but have no wave-1 shape
-        // resolution, so they are refused rather than silently flattened.
-        if !item.dimensions.is_empty() {
+        if !item.dimensions.is_empty() && (!class.is_variable() || redeclares_port) {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "unpacked array dimensions on `{}` are not supported yet; declare a \
-                     packed vector instead",
+                    "unpacked net/port array `{}` requires array connection elaboration",
                     item.name
                 )),
                 item.span,
             );
+            return;
+        }
+        let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+        if !item.dimensions.is_empty() && unpacked.is_none() {
             return;
         }
 
@@ -1149,6 +1193,7 @@ impl SemanticAnalyzer {
                 .then(|| item.init.clone())
                 .flatten(),
             name: item.name.clone(),
+            unpacked,
             class,
             signedness,
             range,
@@ -1161,6 +1206,30 @@ impl SemanticAnalyzer {
             redeclares_port,
             span: item.span,
         });
+    }
+
+    fn resolve_unpacked_range(
+        &mut self,
+        dimensions: &[ArrayDimension],
+        name: &str,
+    ) -> Option<VectorBounds> {
+        if dimensions.is_empty() {
+            return None;
+        }
+        let [dimension] = dimensions else {
+            self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
+                "multidimensional discrete array `{name}` requires multidimensional storage lowering"
+            )), dimensions[0].span);
+            return None;
+        };
+        self.resolve_vector_range(
+            Some(&VectorRange {
+                msb: dimension.start.clone(),
+                lsb: dimension.end.clone(),
+                span: dimension.span,
+            }),
+            &format!("unpacked array {name}"),
+        )
     }
 
     /// Resolve a packed range to constant bounds.
@@ -1586,6 +1655,13 @@ impl SemanticAnalyzer {
             }
             DigitalLValue::Identifier { name, span } => {
                 self.check_assignable(name, *span, signals, index, procedural);
+                if let Resolution::Digital(position) = self.resolve_digital_name(name, index)
+                    && signals[position].unpacked.is_some()
+                {
+                    self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
+                        "whole-array assignment to `{name}` requires array-valued assignment lowering"
+                    )), *span);
+                }
             }
             DigitalLValue::BitSelect {
                 name,
@@ -1711,6 +1787,19 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
         bound: SelectBound,
     ) -> Option<(VectorBounds, i64)> {
+        if let Resolution::Digital(position) = self.resolve_digital_name(name, index)
+            && signals[position].unpacked.is_some()
+        {
+            if matches!(bound, SelectBound::Part) {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "slice of unpacked array `{name}` requires whole-array value lowering"
+                    )),
+                    expression.span(),
+                );
+            }
+            return None;
+        }
         let (range, kind) = match self.resolve_digital_name(name, index) {
             Resolution::Digital(position) if signals[position].class.is_real() => {
                 // Verilog-AMS LRM 2.4 section 3.7 makes a `wreal` a real-valued

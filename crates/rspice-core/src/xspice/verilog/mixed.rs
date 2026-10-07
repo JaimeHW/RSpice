@@ -4861,20 +4861,21 @@ endmodule
         let source = r#"
 module shared(p);
  inout p; electrical p;
- real state=0.25; integer bias=-2; reg [4:0] packed=17;
+ real state[4:3]='{9,0.25}; integer bias[2:1]='{7,-2}; reg [4:0] packed[-1:-2]='{9,17};
  real observed[-2:-1], sample; integer codes[2:1], index;
  reg sample_ok;
  initial begin
+   index=3; state[index]<=#1 1.25;
    index=-2; sample=observed[index];
    sample_ok=(sample==0.25) && (codes[1]<0) && (codes[2]==5);
-   #1 state=1.25; bias=-3; packed=18; index=-1;
-   sample=observed[index];
-   sample_ok=(sample==-1.25) && (observed[-1.5]==1.25);
+   #1 bias[1]=-3; packed[-2]=18; index=-1;
+   @(state[3]); sample=observed[index];
+   sample_ok=(sample==-1.25) && (observed[-1.5]==1.25) && (state[4]==9);
  end
  analog begin
-   observed[-2]=state; observed[-1]=-state;
+   observed[-2]=state[3]; observed[-1]=-state[3];
    codes[1]=-3; codes[2]=5;
-   I(p)<+state+bias+packed-15;
+   I(p)<+state[3]+bias[1]+packed[-2]-15;
  end
 endmodule
 "#;

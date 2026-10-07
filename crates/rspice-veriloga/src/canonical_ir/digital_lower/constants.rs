@@ -162,11 +162,13 @@ fn resolve_one(
     };
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
+    let empty_arrays = HashMap::new();
     let mut probes = Vec::new();
     let mut lowerer = ProcessLowerer {
         constant_expression: true,
         time_scale,
         signals: &[],
+        arrays: &empty_arrays,
         index: &empty_index,
         constants: resolved,
         analog_variables: &empty_analog,
@@ -252,6 +254,56 @@ fn resolve_one(
     Ok(())
 }
 
+/// Produce one initial value per storage cell, in increasing logical-index order.
+pub(super) fn initializers(
+    signal: &AnalyzedDigitalSignal,
+    constants: &ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Result<Vec<Option<super::super::digital::DigitalInitialValue>>, Vec<DigitalLoweringDiagnostic>>
+{
+    let Some(bounds) = signal.unpacked else {
+        return Ok(vec![initializer(signal, constants, time_scale)?]);
+    };
+    let len = bounds.width() as usize;
+    let Some(expression) = &signal.initializer else {
+        return Ok(vec![None; len]);
+    };
+    let refuse = |detail: String| {
+        vec![DigitalLoweringDiagnostic::refusal(
+            format!("declaration initializer of `{}`: {detail}", signal.name),
+            signal.span.into(),
+        )]
+    };
+    let Expression::ArrayLiteral(literal) = expression else {
+        return Err(refuse("requires an array literal".into()));
+    };
+    if literal.first_replication().is_some() {
+        return Err(refuse(
+            "replicated array initialization requires element-pattern expansion".into(),
+        ));
+    }
+    if literal.elements.len() != len {
+        return Err(refuse(format!(
+            "requires {len} elements, found {}",
+            literal.elements.len()
+        )));
+    }
+    let mut element = signal.clone();
+    element.unpacked = None;
+    let mut values = Vec::with_capacity(len);
+    for value in &literal.elements {
+        let ArrayLiteralElement::Value(value) = value else {
+            unreachable!("replication rejected");
+        };
+        element.initializer = Some(value.clone());
+        values.push(initializer(&element, constants, time_scale)?);
+    }
+    if bounds.msb > bounds.lsb {
+        values.reverse();
+    }
+    Ok(values)
+}
+
 /// Module variable declarations require constant expressions (VAMS-2023 A.2.2).
 /// Use the same typed expression evaluator as parameters, with the declared
 /// assignment type, so rounding, overflow and four-state bits are preserved.
@@ -272,11 +324,13 @@ pub(super) fn initializer(
     };
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
+    let empty_arrays = HashMap::new();
     let mut probes = Vec::new();
     let mut lowerer = ProcessLowerer {
         constant_expression: true,
         time_scale,
         signals: &[],
+        arrays: &empty_arrays,
         index: &empty_index,
         constants,
         analog_variables: &empty_analog,

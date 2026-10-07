@@ -569,15 +569,22 @@ fn has_analog_content(module: &AnalyzedModule) -> bool {
         .iter()
         .map(|signal| &signal.name)
         .collect();
+    let digital_array_slots: HashSet<usize> = module
+        .digital
+        .signals
+        .iter()
+        .filter(|signal| signal.unpacked.is_some())
+        .filter_map(|signal| module.arrays.get(&signal.name))
+        .flat_map(|array| array.base..array.base + array.len)
+        .collect();
     !module.contributions.is_empty()
         || !module.body.is_empty()
         || !module.statements.is_empty()
         || !module.branches.is_empty()
         || !module.internal_nodes.is_empty()
-        || module
-            .variables
-            .iter()
-            .any(|variable| !digital_names.contains(&variable.name))
+        || module.variables.iter().enumerate().any(|(slot, variable)| {
+            !digital_names.contains(&variable.name) && !digital_array_slots.contains(&slot)
+        })
 }
 
 /// Match an instance's connections to the child's ports.

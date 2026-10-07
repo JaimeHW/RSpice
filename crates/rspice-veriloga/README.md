@@ -251,7 +251,8 @@ rollback and checkpoint restoration. Custom digital stores must initialize from
 `DigitalSignal::initial_value` when present. Packed initializers retain signed
 extension, truncation, ascending ranges and X/Z values. This follows the
 VAMS-2023 pre-simulation contract (8.2), including when a variable has no process
-writer. Unpacked discrete arrays remain unsupported.
+writer. One-dimensional unpacked variable arrays use the same ownership and
+initial-storage contract.
 
 Digital processes can read elements of one-dimensional analog-owned `real` and
 `integer` arrays using constant or runtime indices. Reads retain the element
@@ -260,7 +261,7 @@ analog evaluation's published storage and sampling barrier; resumption preserves
 the chosen index and does not replay earlier digital writes. Real indices use
 the shared nearest-integer conversion. Unknown, unrepresentable, and out-of-range
 indices produce an explicit diagnostic, consistent with the current analog array
-runtime. Digitally owned arrays and multidimensional arrays still require work.
+runtime. Multidimensional array storage still requires work.
 Canonical schema 67 versions this indexed-read contract.
 Schema 68 requires finite integral declaration bounds, preserves integer-valued
 constant indices without floating-point narrowing, and checks extents before
@@ -277,10 +278,24 @@ all possible cells, then reevaluate the selected value. Array shape, cell type,
 name, ownership and non-overlap are validated at the artifact boundary. Unknown
 or out-of-range four-state reads produce X; invalid writes have no effect.
 Invalid real-array reads currently diagnose instead of inventing a sample; their
-language-level invalid-value contract remains to be qualified. This foundation
-does not yet enable source-level digital array declarations. Declaration/instance
-lowering, initializers, digital-to-analog array bindings, multidimensional shapes
-and mixed-host checkpoint qualification remain outstanding MS06 work.
+language-level invalid-value contract remains to be qualified.
+
+Source lowering connects one-dimensional module-level `reg`, digitally owned
+`integer`, and digitally owned `real` arrays to that contract. Element accesses
+retain packed width, signedness and real type. Literal initializer lists use the
+declaring module's constant scope and authored element order, including descending
+ranges. Numeric projections bind digitally owned elements read by analog code
+to the existing discrete-state inputs. Implicit sensitivities and continuous
+assignments subscribe to every possible element and the index expression's inputs.
+Blocking intra-assignment controls evaluate the target index after resumption;
+nonblocking writes capture it when the update is scheduled (IEEE 1364 9.2.1/9.2.2).
+Analog sampling currently converts every projected array cell eagerly. An X/Z
+value in an unselected cell can therefore reject an otherwise valid selected
+read. Selected-read validity and dependency tracking remain required MS06 work;
+initialize every projected cell to a known finite value under the current policy.
+Unpacked net/port arrays, whole-array values and slices, replicated initializer
+patterns, multidimensional shapes, full parameter-dependent shape/child-override
+support, and remaining mixed-host/platform qualification are still open.
 
 Delay-controlled nonblocking assignments capture their RHS and converted delay
 at encounter, then continue immediately. Positive delays retain every update
