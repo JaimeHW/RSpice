@@ -26,6 +26,60 @@ c1 out 0 1n
 ";
 
 #[test]
+fn raw_tables_preserve_exact_labels_without_declaration_collisions() {
+    let dir = test_dir("raw_exact_labels");
+    let source = dir.join("source.json");
+    let mut signals: Vec<_> = ["a b", "ab", "a%20b", "a\tb", "  ", "", "V(α\u{a0}b)"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            serde_json::json!({
+                "name": name, "type": "custom\ntype", "unit": "mV",
+                "values": [index as f64, index as f64 + 0.5],
+            })
+        })
+        .collect();
+    signals.push(
+        serde_json::json!({"name": " complex ", "type": "", "real": [1.0,2.0], "imag": [3.0,4.0]}),
+    );
+    let original = serde_json::json!({
+        "analysis": "mixed", "plot_name": " plot\r\nVariables:\nname ",
+        "scale": {"name": " time\r\naxis ", "type": "elapsed\ttime", "unit": "ms", "values": [0.0,1.0]},
+        "signals": signals,
+    });
+    std::fs::write(&source, serde_json::to_vec(&original).unwrap()).unwrap();
+    for format in ["raw", "ascii"] {
+        let encoded = dir.join(format!("labels.{format}"));
+        let decoded = dir.join(format!("labels.{format}.json"));
+        convert(&source, &encoded, format, &[]);
+        convert(&encoded, &decoded, "json", &[]);
+        let recovered = common::read_json(&decoded);
+        for field in ["plot_name", "scale", "signals"] {
+            assert_eq!(recovered[field], original[field], "{format}: {field}");
+        }
+
+        // A reader that ignores RSpice metadata must still see separate columns.
+        let bytes = std::fs::read(&encoded).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        let declarations: Vec<_> = text
+            .lines()
+            .skip_while(|line| *line != "Variables:")
+            .skip(1)
+            .take_while(|line| *line != "Binary:" && *line != "Values:")
+            .map(|line| line.split_whitespace().collect::<Vec<_>>())
+            .collect();
+        assert_eq!(declarations.len(), 9);
+        assert!(declarations.iter().all(|parts| parts.len() == 3));
+        let names: std::collections::HashSet<_> =
+            declarations.iter().map(|parts| parts[1]).collect();
+        assert_eq!(names.len(), declarations.len());
+        assert!(names.contains("a%20b"));
+        assert!(names.contains("ab"));
+        assert!(names.contains("a%2520b"));
+    }
+}
+
+#[test]
 fn mixed_real_and_complex_raw_columns_keep_their_original_representation() {
     let dir = test_dir("mixed_raw_types");
     let source = dir.join("source.json");

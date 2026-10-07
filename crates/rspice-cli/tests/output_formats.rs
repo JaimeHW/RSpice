@@ -630,8 +630,8 @@ fn spaced_print_operands_round_trip_through_raw_formats() {
         let csv = std::fs::read_to_string(&converted).expect("read converted CSV");
         assert_eq!(
             csv.lines().next(),
-            Some("time,I(V1),V(out),{V(out)+1},V(out)"),
-            "rawfile declarations must compact authored probe whitespace"
+            Some("time,I ( V1 ),V ( out ),{V(out)+1},V(out)"),
+            "RAW metadata must preserve authored probe spelling"
         );
     }
     let _ = std::fs::remove_dir_all(&dir);

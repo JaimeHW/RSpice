@@ -631,6 +631,12 @@ and coordinate units. Comparison requires matching units, including the case
 of SI prefixes (`mV` differs from `MV`); it does not perform unit conversion.
 Legacy files without unit metadata use their declared quantity types when
 available. CSV/TSV retain numbers and column names only.
+RAW tables preserve exact plot titles, scale names, signal names and variable
+types in versioned RSpice metadata when those labels need escaping. Their header
+declarations escape whitespace, control characters and literal percent signs so
+distinct names remain distinct for readers that ignore that metadata. Ordinary
+labels retain their existing declarations.
+
 Quoted CSV/TSV fields preserve delimiters, escaped quotes, surrounding whitespace
 and embedded line endings. Waveform tables, operating-point reports and FFT
 tables share these rules; malformed quotes are rejected, with data-row errors
