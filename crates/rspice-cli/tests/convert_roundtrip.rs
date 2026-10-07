@@ -26,6 +26,34 @@ c1 out 0 1n
 ";
 
 #[test]
+fn empty_coordinate_labels_do_not_discard_the_first_delimited_sample() {
+    let dir = test_dir("empty_delimited_coordinate_label");
+    let source = dir.join("source.json");
+    for values in [vec![1.0], vec![0.0, 1.0, 2.0]] {
+        let expected = serde_json::json!({
+            "analysis": "converted", "plot_name": "Converted Data",
+            "scale": {"name": "", "type": "value", "values": values},
+            "signals": [],
+        });
+        for format in ["csv", "tsv"] {
+            std::fs::write(&source, serde_json::to_vec(&expected).unwrap()).unwrap();
+            let encoded = dir.join(format!("table.{format}"));
+            // Repeat the cycle: neither the header nor a coordinate may drift.
+            for _ in 0..2 {
+                convert(&source, &encoded, format, &[]);
+                assert!(
+                    std::fs::read_to_string(&encoded)
+                        .unwrap()
+                        .starts_with("\"\"\n")
+                );
+                convert(&encoded, &source, "json", &[]);
+                assert_eq!(common::read_json(&source), expected, "{format}");
+            }
+        }
+    }
+}
+
+#[test]
 fn raw_tables_preserve_exact_labels_without_declaration_collisions() {
     let dir = test_dir("raw_exact_labels");
     let source = dir.join("source.json");

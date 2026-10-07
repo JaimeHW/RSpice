@@ -660,7 +660,7 @@ RAW readers do not execute them as a `Command:`. Older RSpice `Command:` metadat
 remains readable. Incomplete, reordered, conflicting or malformed chunks are
 rejected before conversion or comparison can replace an existing artifact.
 
-Quoted CSV/TSV fields preserve delimiters, escaped quotes, surrounding whitespace
+Quoted CSV/TSV fields preserve empty labels, delimiters, escaped quotes, surrounding whitespace
 and embedded line endings. Waveform tables, operating-point reports and FFT
 tables share these rules; malformed quotes are rejected, with data-row errors
 located by physical source line. A UTF-8 byte-order mark at the start of a file

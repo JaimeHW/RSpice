@@ -574,8 +574,10 @@ fn raw_token(value: &str) -> std::borrow::Cow<'_, str> {
 }
 
 pub(crate) fn delimited_cell(value: &str, delimiter: char) -> String {
-    // Quote authored leading U+FEFF so it cannot become a file-level signature.
-    if value.starts_with('\u{feff}')
+    // An empty single-column header must remain a record. Quote authored
+    // leading U+FEFF too so it cannot become a file-level signature.
+    if value.is_empty()
+        || value.starts_with('\u{feff}')
         || value.contains(delimiter)
         || value.contains('"')
         || value.contains('\n')
