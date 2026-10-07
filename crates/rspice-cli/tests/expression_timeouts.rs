@@ -280,6 +280,27 @@ fn timeout_interrupts_thermal_material_updates_after_heating() {
     assert_times_out(&deck, body, true);
 }
 
+#[test]
+fn timeout_interrupts_deferred_bare_vector_evaluation() {
+    let functions = work_functions();
+    let directory = common::test_dir("bare-vector-expression-timeout");
+    for scoped in [false, true] {
+        let mut body = "A1 [in] print_param_types real_array=[late {work(26)}]".to_owned();
+        if scoped {
+            body = format!(".SUBCKT cell in\n{body}\n.ENDS\nX1 in cell");
+        }
+        let deck = directory.join(format!("bare-{scoped}.cir"));
+        std::fs::write(
+            &deck,
+            format!(
+                "* bare vector deadline\n{functions}V1 in 0 1\n{body}\n.PARAM late=0\n.OP\n.END\n"
+            ),
+        )
+        .unwrap();
+        assert_times_out(&deck, &body, !scoped);
+    }
+}
+
 fn assert_times_out(deck: &std::path::Path, source: &str, execution_started: bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "--error-format", "json", "run"])
