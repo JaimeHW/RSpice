@@ -17,13 +17,9 @@ pub(in crate::netlist::parser) fn parse_options_command(
     mut temperature_options: Option<temperature::TemperatureOptionSink<'_>>,
 ) -> Result<(), ParseError> {
     let mut option_package: Option<String> = None;
-    let expect_value = |stream: &mut TokenStream, line_num, params: &ParamContext| {
-        if control_command {
-            expect_control_real_value(stream, line_num, params)
-        } else {
-            super::expect_value(stream, line_num, params)
-        }
-    };
+    if control_command {
+        stream.require_real_numeric_values();
+    }
 
     while !stream.is_eof() {
         skip_commas(stream);

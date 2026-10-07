@@ -1900,14 +1900,22 @@ pub(super) fn evaluate_value_capturing_direction(
     params: &ParamContext,
     direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
 ) -> Result<Value, crate::netlist::expr::ExprError> {
+    evaluate_complex_value_capturing_direction(expression, params, direction).map(|value| value.re)
+}
+
+fn evaluate_complex_value_capturing_direction(
+    expression: &str,
+    params: &ParamContext,
+    direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
+) -> Result<crate::ComplexValue, crate::netlist::expr::ExprError> {
     if let Some(direction) = direction {
         let (value, tangent) = params.evaluate_parameter_binding(expression)?;
         *direction = tangent
             .unwrap_or_else(|| Ok(crate::netlist::expr::ComplexDirection::zero()))
             .map(|tangent| tangent.re);
-        Ok(value.re)
+        Ok(value)
     } else {
-        eval_expression(expression, params)
+        crate::netlist::expr::eval_expression_complex(expression, params)
     }
 }
 
@@ -1917,30 +1925,6 @@ pub(super) fn expect_value(
     params: &ParamContext,
 ) -> Result<Value, ParseError> {
     expect_value_with_direction(stream, line_num, params, None)
-}
-
-/// Control options use complex scalar variables but require real quantities.
-/// Preserve ordinary card/direction semantics while sharing the value grammar.
-pub(super) fn expect_control_real_value(
-    stream: &mut TokenStream,
-    line_num: usize,
-    params: &ParamContext,
-) -> Result<Value, ParseError> {
-    read_value(stream, line_num, params, None, true)
-}
-
-fn control_real_value(value: crate::ComplexValue) -> Result<Value, ParseError> {
-    if !value.re.is_finite() || !value.im.is_finite() {
-        return Err(ParseError::InvalidValue(
-            "control option is nonfinite".into(),
-        ));
-    }
-    if !crate::netlist::expr::is_real(value) {
-        return Err(ParseError::InvalidValue(
-            "control option requires a real value; use real(), imag() or mag() explicitly".into(),
-        ));
-    }
-    Ok(value.re)
 }
 
 pub(super) fn expect_value_with_direction(
@@ -1966,18 +1950,9 @@ pub(super) fn expect_value_capturing_direction(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-    direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
-) -> Result<Value, ParseError> {
-    read_value(stream, line_num, params, direction, false)
-}
-
-fn read_value(
-    stream: &mut TokenStream,
-    line_num: usize,
-    params: &ParamContext,
     mut direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
-    require_real: bool,
 ) -> Result<Value, ParseError> {
+    let require_real = stream.requires_real_values();
     if let Some(direction) = direction.as_deref_mut() {
         *direction = Ok(0.0.into());
     }
@@ -1998,28 +1973,18 @@ fn read_value(
 
     match &stream.peek().kind {
         TokenKind::Number(v) => {
-            let v = if require_real {
-                // The control expression grammar gives a trailing `j` an
-                // imaginary meaning, even though the deck lexer accepts it
-                // as a numeric unit suffix. Do not erase that distinction.
-                let value =
-                    crate::netlist::expr::eval_expression_complex(&stream.peek().lexeme, params)
-                        .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
-                control_real_value(value)?
-            } else {
-                *v
-            } * sign;
+            let v = stream
+                .numeric_literal(&stream.peek().lexeme, *v, params)
+                .map_err(|error| ParseError::InvalidValue(error.to_string()))?
+                * sign;
             stream.advance();
             Ok(v)
         }
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
-            let value = if require_real {
-                let value = crate::netlist::expr::eval_expression_complex(&expr, params)
-                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
-                control_real_value(value)?
-            } else if direction.is_some() {
-                evaluate_value_capturing_direction(&expr, params, direction.as_deref_mut())
+            let value = if direction.is_some() {
+                evaluate_complex_value_capturing_direction(&expr, params, direction.as_deref_mut())
+                    .and_then(|value| stream.numeric_value(value))
                     .map_err(|e| ParseError::InvalidValue(e.to_string()))?
             } else {
                 stream
@@ -2035,7 +2000,11 @@ fn read_value(
         TokenKind::Ident(s) => {
             // Could be a parameter reference
             let value = if require_real {
-                params.get_complex(s).map(control_real_value).transpose()?
+                params
+                    .get_complex(s)
+                    .map(|value| stream.numeric_value(value))
+                    .transpose()
+                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?
             } else {
                 params.get(s)
             };
@@ -2051,13 +2020,9 @@ fn read_value(
                 stream.advance();
                 Ok(v * sign)
             } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
-                let v = if require_real {
-                    let value = crate::netlist::expr::eval_expression_complex(s, params)
-                        .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
-                    control_real_value(value)?
-                } else {
-                    v
-                };
+                let v = stream
+                    .numeric_literal(s, v, params)
+                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
                 stream.advance();
                 Ok(v * sign)
             } else if stream.binding_numeric_values() {
@@ -2133,10 +2098,24 @@ pub(super) fn expect_u64_value(
     let literal = match &stream.peek_n(offset).kind {
         TokenKind::Number(_) => true,
         TokenKind::Ident(name) => params.get(name).is_none() && parse_spice_value(name).is_ok(),
-        TokenKind::Expression(expression) => parse_spice_value(expression.trim()).is_ok(),
+        TokenKind::Expression(expression) => {
+            crate::netlist::lexer::parse_spice_value_complete(expression.trim()).is_ok()
+        }
         _ => false,
     };
     if literal {
+        if stream.requires_real_values() {
+            let token = stream.peek_n(offset);
+            let spelling = match &token.kind {
+                TokenKind::Expression(expression) => expression.trim(),
+                _ => token.lexeme.as_str(),
+            };
+            let value = parse_spice_value(spelling)
+                .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+            stream
+                .numeric_literal(spelling, value, params)
+                .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+        }
         return expect_u64_literal(stream, line_num, field);
     }
     let value = expect_value(stream, line_num, params)?;
@@ -2214,6 +2193,30 @@ pub(super) fn parse_boolean_literal(raw: &str) -> Option<Value> {
 }
 
 fn try_value_unsigned(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
+    if stream.requires_real_values() {
+        if stream.has_optional_numeric_failure() {
+            return None;
+        }
+        let candidate = token_is_value_like(&stream.peek().kind, params)
+            || (stream.binding_numeric_values()
+                && matches!(&stream.peek().kind, TokenKind::Ident(name)
+                    if params.has_parameter_binding(name) || params.get_global_expression(name).is_some()));
+        if !candidate {
+            return None;
+        }
+        let checkpoint = stream.checkpoint();
+        match expect_value(stream, stream.peek().span.line, params) {
+            Ok(value) => return Some(value),
+            Err(error) => {
+                // Absence and invalid authored values are different. Retain
+                // the failure for the card owner, without replaying a random
+                // expression when another optional slot probes this token.
+                stream.remember_optional_numeric_failure(error);
+                stream.restore_checkpoint(checkpoint);
+                return None;
+            }
+        }
+    }
     match &stream.peek().kind {
         TokenKind::Number(v) => {
             let v = *v;

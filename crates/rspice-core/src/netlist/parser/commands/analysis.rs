@@ -139,6 +139,26 @@ impl ParsedAnalysisCard {
         stream: &mut TokenStream,
         context: AnalysisCardContext<'_>,
     ) -> Result<Self, ParseError> {
+        // Only numeric operand readers apply this policy; names and output
+        // expressions retain their own grammar. The flag survives deferred
+        // binding and staged retries through TokenStream's owned state.
+        stream.require_real_numeric_values();
+        let result = Self::read_fields(head, command, stream, context);
+        if matches!(result, Err(ParseError::ResourceLimit(_))) {
+            return result;
+        }
+        if let Some(error) = stream.take_optional_numeric_failure() {
+            return Err(error);
+        }
+        result
+    }
+
+    fn read_fields(
+        head: AnalysisHead,
+        command: &str,
+        stream: &mut TokenStream,
+        context: AnalysisCardContext<'_>,
+    ) -> Result<Self, ParseError> {
         let AnalysisCardContext {
             line_num,
             logical_line,

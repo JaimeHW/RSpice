@@ -523,6 +523,14 @@ Nonfinite components are rejected before scalar assignment or publication.
 SDK hosts implementing `ControlScalarEvaluator::evaluate_scalar` must now return
 `ComplexValue`; real hosts can construct it with `ComplexValue::from(value)`.
 
+Analysis-card numeric operands require finite real values in both direct and
+control execution. Required fields, optional fields and deferred parameter
+bindings all apply the same check. Complex parameter arithmetic is still valid
+when its result is real, or when an explicit `real()`, `imag()` or `mag()`
+projection is used. Probe and table names are unaffected. Monte Carlo integer
+fields retain exact 64-bit literal values; numeric expressions are evaluated
+before their integer domain is checked.
+
 `ControlCircuit` executes `ac DATA=<table>` and `noise ... DATA=<table>` through
 the shared compact table runners. `ControlAnalysisResult::AcTable` and
 `NoiseTable` retain authored columns, canonical targets, accepted row coordinates,

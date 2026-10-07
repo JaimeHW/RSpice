@@ -75,6 +75,50 @@ fn complex_control_options_fail_before_result_publication() {
 }
 
 #[test]
+fn complex_analysis_fields_fail_in_direct_and_control_runs_before_publication() {
+    let dir = test_dir("analysis-complex-fields");
+    for (index, command) in [
+        "ac lin 3 1 {2+1j}",
+        "tran 1u 1m {1u+1j}",
+        "dc V1 0 {2+1j} .1",
+    ]
+    .iter()
+    .enumerate()
+    {
+        for control in [false, true] {
+            let stem = format!("invalid-{index}-{control}");
+            let deck = dir.join(format!("{stem}.cir"));
+            let cards = if control {
+                format!(".control\n{command}\n.endc")
+            } else {
+                format!(".{command}")
+            };
+            std::fs::write(
+                &deck,
+                format!("numeric fields\nV1 in 0 1 AC 1\nR1 in 0 1k\n{cards}\n.end\n"),
+            )
+            .unwrap();
+            let result = run(&deck, &dir.join(format!("{stem}.csv")), &[]);
+            assert!(!result.status.success(), "{cards}");
+            assert!(!dir.join(format!("{stem}.csv")).exists());
+            for family in ["ac", "tran", "dc"] {
+                assert!(!dir.join(format!("{stem}.{family}-001.csv")).exists());
+            }
+        }
+    }
+    let valid = dir.join("projected.cir");
+    std::fs::write(&valid, "projected frequency\nV1 in 0 1 AC 1\nR1 in 0 1k\n.control\nac lin 3 1 {real(2+1j)}\n.endc\n.end\n").unwrap();
+    passed(&run(&valid, &dir.join("projected.csv"), &[]));
+    let csv = std::fs::read_to_string(dir.join("projected.ac-001.csv")).unwrap();
+    let frequencies = csv
+        .lines()
+        .skip(1)
+        .map(|line| line.split(',').next().unwrap().parse::<f64>().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(frequencies, [1.0, 1.5, 2.0]);
+}
+
+#[test]
 fn event_flux_tolerance_cli_and_control_settings_validate_before_publication() {
     let dir = test_dir("control-event-flux");
     let deck = dir.join("flux.cir");

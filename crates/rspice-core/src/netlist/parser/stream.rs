@@ -1,8 +1,8 @@
 //! Parser tokens with optional, resumable numeric reads for deferred cards.
 use super::*;
 use crate::netlist::expr::{
-    ExprError, PreparedExpression, PreparedProgress, normalize_xyce_expression_result,
-    parse_expression,
+    ExprError, PreparedExpression, PreparedProgress, eval_expression_complex,
+    normalize_xyce_expression_result, parse_expression,
 };
 use std::ops::{Deref, DerefMut};
 
@@ -10,6 +10,8 @@ use std::ops::{Deref, DerefMut};
 pub(super) struct TokenStream {
     tokens: crate::netlist::lexer::TokenStream,
     bindings: Option<Box<NumericBindings>>,
+    require_real_values: bool,
+    optional_numeric_failure: Option<Box<str>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -30,6 +32,56 @@ impl TokenStream {
         Self {
             tokens: crate::netlist::lexer::TokenStream::new(tokens),
             bindings: None,
+            require_real_values: false,
+            optional_numeric_failure: None,
+        }
+    }
+
+    pub(super) fn require_real_numeric_values(&mut self) {
+        self.require_real_values = true;
+        self.optional_numeric_failure = None;
+    }
+
+    pub(super) fn has_optional_numeric_failure(&self) -> bool {
+        self.optional_numeric_failure.is_some()
+    }
+
+    pub(super) fn remember_optional_numeric_failure(&mut self, error: ParseError) {
+        let message = match error {
+            ParseError::InvalidValue(message) => message,
+            error => error.to_string(),
+        };
+        self.optional_numeric_failure = Some(message.into_boxed_str());
+    }
+
+    pub(super) fn take_optional_numeric_failure(&mut self) -> Option<ParseError> {
+        self.optional_numeric_failure
+            .take()
+            .map(|message| ParseError::InvalidValue(message.into()))
+    }
+
+    pub(super) fn requires_real_values(&self) -> bool {
+        self.require_real_values
+    }
+
+    pub(super) fn numeric_value(&self, value: crate::ComplexValue) -> Result<Value, ExprError> {
+        project_numeric(value, self.require_real_values)
+    }
+
+    pub(super) fn numeric_literal(
+        &self,
+        spelling: &str,
+        value: Value,
+        params: &ParamContext,
+    ) -> Result<Value, ExprError> {
+        // Check the lexer's value before dialect normalization could turn
+        // literal overflow into a finite expression sentinel. A numeric `j`
+        // suffix must also survive the lexer's real-valued token payload.
+        self.numeric_value(value.into())?;
+        if self.require_real_values && spelling.bytes().any(|byte| matches!(byte, b'j' | b'J')) {
+            self.numeric_value(eval_expression_complex(spelling, params)?)
+        } else {
+            Ok(value)
         }
     }
 
@@ -65,8 +117,9 @@ impl TokenStream {
         params: &ParamContext,
     ) -> Result<Value, ExprError> {
         let key = self.peek().span.start;
+        let require_real = self.require_real_values;
         let Some(bindings) = &mut self.bindings else {
-            return eval_expression(expression, params);
+            return project_numeric(eval_expression_complex(expression, params)?, require_real);
         };
         // A grammar can probe optional operands after one failed read. Do not
         // evaluate later operands ahead of that dependency's random draws.
@@ -95,17 +148,35 @@ impl TokenStream {
                     return Err(ExprError::UndefinedParam(name));
                 }
                 Ok(PreparedProgress::Complete(value)) => {
-                    Ok(if params.expression_dialect() == ExpressionDialect::Xyce {
-                        normalize_xyce_expression_result(value).re
+                    let value = if params.expression_dialect() == ExpressionDialect::Xyce {
+                        normalize_xyce_expression_result(value)
                     } else {
-                        value.re
-                    })
+                        value
+                    };
+                    project_numeric(value, require_real)
                 }
                 Err(error) => Err(error),
             };
         *operand = Operand::Complete(result.clone());
         result
     }
+}
+
+fn project_numeric(value: crate::ComplexValue, require_real: bool) -> Result<Value, ExprError> {
+    if require_real {
+        if !value.re.is_finite() || !value.im.is_finite() {
+            return Err(ExprError::InvalidArgument(
+                "numeric field is nonfinite".into(),
+            ));
+        }
+        if !crate::netlist::expr::is_real(value) {
+            return Err(ExprError::InvalidArgument(
+                "numeric field requires a real value; use real(), imag() or mag() explicitly"
+                    .into(),
+            ));
+        }
+    }
+    Ok(value.re)
 }
 
 impl Deref for TokenStream {
