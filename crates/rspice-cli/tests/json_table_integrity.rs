@@ -238,3 +238,107 @@ fn repeated_json_fields_cannot_discard_samples_or_change_signal_identity() {
         assert!(!missing.exists());
     }
 }
+
+#[test]
+fn malformed_optional_json_metadata_cannot_disable_quantity_checks() {
+    let directory = test_dir("malformed_json_metadata");
+    let input = directory.join("input.json");
+    let golden = directory.join("golden.json");
+    let original = serde_json::to_vec(&source()).unwrap();
+    std::fs::write(&golden, &original).unwrap();
+    for (pointer, field) in [
+        ("/analysis", "analysis"),
+        ("/plot_name", "plot_name"),
+        ("/scale/name", "scale.name"),
+        ("/scale/type", "scale.type"),
+        ("/signals/1/type", "signal.type"),
+    ] {
+        for invalid in [
+            serde_json::json!(42),
+            serde_json::json!(true),
+            serde_json::json!(["current"]),
+            serde_json::json!({"type": "current"}),
+        ] {
+            let mut value = source();
+            *value.pointer_mut(pointer).unwrap() = invalid;
+            std::fs::write(&input, serde_json::to_vec(&value).unwrap()).unwrap();
+            let check = |output: Output| {
+                assert_eq!(output.status.code(), Some(1), "{field}: {output:?}");
+                let message = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    message.contains(field) && message.contains("must be a string"),
+                    "{message}"
+                );
+            };
+            for format in ["json", "csv", "tsv", "raw", "ascii", "hdf5", "vcd"] {
+                let output = directory.join(format!("protected.{format}"));
+                std::fs::write(&output, "predecessor").unwrap();
+                check(cli(&[
+                    "convert",
+                    input.to_str().unwrap(),
+                    output.to_str().unwrap(),
+                    "--to",
+                    format,
+                    "--variables",
+                    "D(clk)",
+                ]));
+                assert_eq!(std::fs::read_to_string(output).unwrap(), "predecessor");
+            }
+            for bless in [false, true] {
+                let mut args = vec!["compare", input.to_str().unwrap(), golden.to_str().unwrap()];
+                if bless {
+                    args.push("--bless");
+                }
+                check(cli(&args));
+                assert_eq!(std::fs::read(&golden).unwrap(), original);
+            }
+            let missing = directory.join("missing.json");
+            check(cli(&[
+                "compare",
+                input.to_str().unwrap(),
+                missing.to_str().unwrap(),
+                "--bless",
+            ]));
+            assert!(!missing.exists());
+        }
+    }
+}
+
+#[test]
+fn unstated_legacy_json_metadata_keeps_existing_defaults_and_type_inference() {
+    let directory = test_dir("unstated_json_metadata");
+    let input = directory.join("input.json");
+    let output = directory.join("output.json");
+    for null in [false, true] {
+        let mut value = serde_json::json!({
+            "scale": {"values": [0, 1]},
+            "signals": [{"name": "I(V1)", "values": [-1, 2]}],
+        });
+        if null {
+            value["analysis"] = serde_json::Value::Null;
+            value["plot_name"] = serde_json::Value::Null;
+            value["scale"]["name"] = serde_json::Value::Null;
+            value["scale"]["type"] = serde_json::Value::Null;
+            value["signals"][0]["type"] = serde_json::Value::Null;
+        }
+        std::fs::write(&input, serde_json::to_vec(&value).unwrap()).unwrap();
+        let result = cli(&[
+            "convert",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+            "--to",
+            "json",
+        ]);
+        assert!(result.status.success(), "{result:?}");
+        let actual = read_json(&output);
+        assert_eq!(actual["analysis"], "converted");
+        assert_eq!(actual["plot_name"], "Converted Data");
+        assert_eq!(actual["scale"]["name"], "scale");
+        assert_eq!(actual["scale"]["type"], "value");
+        assert_eq!(actual["signals"][0]["type"], "current");
+        assert_eq!(
+            actual["signals"][0]["values"],
+            serde_json::json!([-1.0, 2.0])
+        );
+    }
+}

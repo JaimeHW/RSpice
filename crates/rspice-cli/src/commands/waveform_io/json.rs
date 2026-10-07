@@ -7,6 +7,23 @@ pub(super) fn parse(content: &str) -> Result<Value, serde_json::Error> {
     serde_json::from_str::<UniqueValue>(content).map(|value| value.0)
 }
 
+/// Missing or null legacy metadata is unstated; other non-text values are
+/// malformed declarations and must not silently opt out of quantity checks.
+pub(super) fn optional_text<'a>(
+    path: &std::path::Path,
+    value: Option<&'a Value>,
+    field: &str,
+) -> Result<Option<&'a str>, crate::cli::CliError> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value)),
+        _ => Err(super::conversion_error(
+            path,
+            format!("'{field}' must be a string or null"),
+        )),
+    }
+}
+
 struct UniqueValue(Value);
 
 impl<'de> Deserialize<'de> for UniqueValue {

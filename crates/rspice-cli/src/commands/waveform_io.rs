@@ -833,7 +833,8 @@ pub(super) fn parse_untyped_json(
             )),
         }
     };
-    if value.get("analysis").and_then(serde_json::Value::as_str) == Some("fft") {
+    let analysis = json::optional_text(path, value.get("analysis"), "analysis")?;
+    if analysis == Some("fft") {
         return crate::commands::run::FftBundle::from_json(path, value, resource_limits)
             .map(ImportedResult::Fft);
     }
@@ -864,9 +865,7 @@ pub(super) fn parse_untyped_json(
                 "scale must use real 'values'; 'real' and 'imag' coordinate fields are not supported",
             ));
         }
-        let scale_name = scale_obj
-            .get("name")
-            .and_then(|v| v.as_str())
+        let scale_name = json::optional_text(path, scale_obj.get("name"), "scale.name")?
             .unwrap_or("scale")
             .to_string();
         let scale = to_f64_vec(
@@ -915,9 +914,7 @@ pub(super) fn parse_untyped_json(
             };
             columns.push(ExportColumn {
                 unit: read_unit(signal)?,
-                var_type: signal
-                    .get("type")
-                    .and_then(serde_json::Value::as_str)
+                var_type: json::optional_text(path, signal.get("type"), "signal.type")?
                     .map(str::to_owned)
                     .unwrap_or_else(|| signal_var_type(&name)),
                 name,
@@ -927,19 +924,11 @@ pub(super) fn parse_untyped_json(
 
         return Ok(ExportTable {
             scale_unit: read_unit(scale_obj)?,
-            analysis: value
-                .get("analysis")
-                .and_then(|v| v.as_str())
-                .unwrap_or("converted")
-                .to_string(),
-            plot_name: value
-                .get("plot_name")
-                .and_then(serde_json::Value::as_str)
+            analysis: analysis.unwrap_or("converted").to_string(),
+            plot_name: json::optional_text(path, value.get("plot_name"), "plot_name")?
                 .unwrap_or("Converted Data")
                 .to_owned(),
-            scale_type: scale_obj
-                .get("type")
-                .and_then(serde_json::Value::as_str)
+            scale_type: json::optional_text(path, scale_obj.get("type"), "scale.type")?
                 .map(str::to_owned)
                 .unwrap_or_else(|| scale_var_type(&scale_name)),
             scale_name,

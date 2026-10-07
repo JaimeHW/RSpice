@@ -668,6 +668,8 @@ is accepted; quoted field contents remain unchanged.
 Legacy table and FFT JSON objects must use unique field names. Repeated fields,
 including escaped spellings of the same key, fail with a source line and column
 before selection, conversion, comparison or golden-file promotion.
+Optional table labels and quantity types accept strings or null; malformed
+declarations are rejected instead of falling back to inferred quantities.
 `--interpolate` resamples analog signals linearly and holds digital and real
 event signals until their next transition. It never extrapolates or resamples
 between differently declared coordinate units.
