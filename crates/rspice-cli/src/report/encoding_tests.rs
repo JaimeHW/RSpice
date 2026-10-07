@@ -2,6 +2,50 @@ use super::tests::report_with_measurement;
 use super::*;
 
 #[test]
+fn measurement_csv_preserves_every_numeric_field_exactly() {
+    for value in [
+        1.0_f64.next_up(),
+        -1.2345678901234567,
+        f64::MIN_POSITIVE,
+        f64::from_bits(1),
+        f64::MAX,
+        -0.0,
+    ] {
+        let mut report = report_with_measurement(Some(value));
+        let measurement = &mut report.measurements[0];
+        measurement.raw_value = Some(value);
+        measurement.expected = Some(value);
+        measurement.tolerance = Some(value);
+        measurement.failure_limit = Some(value);
+        measurement.event_axis = Some(value);
+        measurement.trigger_axis = Some(value);
+        measurement.target_axis = Some(value);
+        let mut bytes = Vec::new();
+        write_measurement_csv(&mut bytes, Path::new("measurements.csv"), &[report]).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        let (header, row) = text.trim_end().split_once('\n').unwrap();
+        let fields: std::collections::HashMap<_, _> =
+            header.split(',').zip(row.split(',')).collect();
+        for field in [
+            "value",
+            "raw_value",
+            "expected",
+            "tolerance",
+            "failure_limit",
+            "event_axis",
+            "trigger_axis",
+            "target_axis",
+        ] {
+            assert_eq!(
+                fields[field].parse::<f64>().unwrap().to_bits(),
+                value.to_bits(),
+                "{field}: {text}"
+            );
+        }
+    }
+}
+
+#[test]
 fn junit_preserves_legal_whitespace_in_names_and_diagnostics() {
     let text = "quotes ' \" & < >\t\r\nΩ 😀";
     let mut report = report_with_measurement(None);

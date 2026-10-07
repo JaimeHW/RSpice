@@ -5,6 +5,38 @@ use common::test_dir;
 use std::process::Command;
 
 #[test]
+fn measurement_csv_and_json_agree_at_adjacent_floating_point_values() {
+    let directory = test_dir("measurement_csv_precision");
+    let deck = directory.join("precision.cir");
+    std::fs::write(&deck, "Report precision\nV1 n 0 1\nR1 n 0 1k\n.dc V1 1 2 1\n.meas dc value param='1.0000000000000002'\n.end\n").unwrap();
+    let csv = directory.join("measurements.csv");
+    let json = directory.join("measurements.json");
+    for (format, path) in [("csv", &csv), ("json", &json)] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "run"])
+            .arg(&deck)
+            .args(["--meas-format", format, "--meas-file"])
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    let csv = std::fs::read_to_string(csv).unwrap();
+    let (header, row) = csv.trim_end().split_once('\n').unwrap();
+    let fields: std::collections::HashMap<_, _> = header.split(',').zip(row.split(',')).collect();
+    let json = common::read_json(&json);
+    for field in ["value", "raw_value"] {
+        let expected = json["measurements"][0][field].as_f64().unwrap();
+        assert_eq!(expected, 1.0_f64.next_up());
+        assert_eq!(
+            fields[field].parse::<f64>().unwrap().to_bits(),
+            expected.to_bits(),
+            "{csv}"
+        );
+    }
+}
+
+#[test]
 fn failed_runs_with_tap_directive_text_in_the_filename_stay_failures() {
     let directory = test_dir("tap_directive_filename");
     let deck = directory.join("check # TODO ignored.cir");

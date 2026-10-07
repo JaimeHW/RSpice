@@ -505,34 +505,36 @@ fn write_measurement_csv<W: Write + ?Sized>(
                     "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                     csv_escape(&report.netlist),
                     csv_escape(&meas.name),
-                    meas.value.map(|v| format!("{:.9e}", v)).unwrap_or_default(),
+                    meas.value
+                        .map(|v| format!("{:.17e}", v))
+                        .unwrap_or_default(),
                     meas.expected
-                        .map(|v| format!("{:.9e}", v))
+                        .map(|v| format!("{:.17e}", v))
                         .unwrap_or_default(),
                     meas.tolerance
-                        .map(|v| format!("{:.9e}", v))
+                        .map(|v| format!("{:.17e}", v))
                         .unwrap_or_default(),
                     meas.passed,
                     csv_escape(meas.error.as_deref().unwrap_or("")),
                     csv_escape(&report.name),
                     meas.raw_value
-                        .map(|v| format!("{:.9e}", v))
+                        .map(|v| format!("{:.17e}", v))
                         .unwrap_or_default(),
                     meas.failure_limit
-                        .map(|v| format!("{:.9e}", v))
+                        .map(|v| format!("{:.17e}", v))
                         .unwrap_or_default(),
                     meas.failure_limit_exceeded,
                     meas.record_index
                         .map(|value| value.to_string())
                         .unwrap_or_default(),
                     meas.event_axis
-                        .map(|value| format!("{value:.9e}"))
+                        .map(|value| format!("{value:.17e}"))
                         .unwrap_or_default(),
                     meas.trigger_axis
-                        .map(|value| format!("{value:.9e}"))
+                        .map(|value| format!("{value:.17e}"))
                         .unwrap_or_default(),
                     meas.target_axis
-                        .map(|value| format!("{value:.9e}"))
+                        .map(|value| format!("{value:.17e}"))
                         .unwrap_or_default(),
                     csv_escape(meas.aggregate_policy.as_deref().unwrap_or("")),
                 ),
@@ -696,7 +698,10 @@ mod tests {
             ),
             "{csv}"
         );
-        assert!(csv.contains(",5.000000000e0,4.000000000e0,true"), "{csv}");
+        assert!(
+            csv.contains(",5.00000000000000000e0,4.00000000000000000e0,true"),
+            "{csv}"
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -799,12 +804,12 @@ mod tests {
         assert_eq!(rows.len(), 2, "{csv}");
         assert_eq!(rows[0]["name"], "crossings");
         assert_eq!(rows[0]["record_index"], "0");
-        assert_eq!(rows[0]["value"], "5.000000000e-1");
+        assert_eq!(rows[0]["value"], "5.00000000000000000e-1");
         assert_eq!(rows[0]["passed"], "true");
         assert_eq!(rows[0]["aggregate_policy"], "all_records_must_pass");
         assert_eq!(rows[1]["record_index"], "1");
-        assert_eq!(rows[1]["raw_value"], "1.500000000e0");
-        assert_eq!(rows[1]["failure_limit"], "1.000000000e0");
+        assert_eq!(rows[1]["raw_value"], "1.50000000000000000e0");
+        assert_eq!(rows[1]["failure_limit"], "1.00000000000000000e0");
         assert_eq!(rows[1]["failure_limit_exceeded"], "true");
         assert_eq!(rows[1]["passed"], "false");
         assert_eq!(rows[1]["aggregate_policy"], "all_records_must_pass");

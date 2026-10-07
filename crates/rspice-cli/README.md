@@ -309,7 +309,8 @@ instead of being replaced by a single aggregate failure.
 
 Continuous rows are serialized additively. JSON and CSV retain `record_index`,
 raw value, threshold, per-record verdict, event or trigger/target coordinates,
-and `aggregate_policy=all_records_must_pass`. JUnit and TAP emit one named case
+and `aggregate_policy=all_records_must_pass`. Measurement CSV retains enough
+digits to recover every stored finite `f64` value exactly. JUnit and TAP emit one named case
 per row (`name[record N]`) and include the same contract metadata in their
 diagnostics. `--allow-failed-meas` changes only the process exit code; it does
 not change or remove any verdict.
