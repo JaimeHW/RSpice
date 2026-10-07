@@ -633,6 +633,14 @@ Advanced analyses, all flat under `analysis/`:
 | S-parameters | `s_param.rs`, `s_param/` |
 | `.MEAS` evaluation | `measure.rs`, `measure_signals.rs`, `measurements/` |
 
+Transfer-function results retain `gain_unit`: voltage/current gain is in ohms,
+current/voltage gain is in siemens, and equal-quantity gains are dimensionless.
+The engine determines these units from the elaborated input source and output
+probe, including hierarchical sources. Typed documents preserve that unit.
+SDK migration: `TransferFunctionResult::new` now takes
+the explicit `SignalUnit` immediately after `gain`; struct literals must supply
+`gain_unit`. Do not infer a source's quantity from its hierarchical name.
+
 How each analysis is reached (netlist card, CLI flag, or engine API only)
 varies. The [CLI README](../rspice-cli/README.md) documents the netlist-card
 and flag surface; anything not listed there is engine-API only.

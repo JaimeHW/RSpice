@@ -706,7 +706,14 @@ fn document_for(kind: AnalysisResultKind) -> AnalysisResultDocument {
         ),
         AnalysisResultKind::TransferFunction => AnalysisResultDocument::from_transfer_function(
             instance(AnalysisKind::TransferFunction),
-            &TransferFunctionResult::new("V(out)", "V1", 0.5, 1.0e3, 50.0),
+            &TransferFunctionResult::new(
+                "V(out)",
+                "V1",
+                0.5,
+                SignalUnit::Dimensionless,
+                1.0e3,
+                50.0,
+            ),
         ),
         AnalysisResultKind::Stability => {
             AnalysisResultDocument::from_stability(instance(AnalysisKind::Stb), &stability_result())
@@ -2668,7 +2675,14 @@ fn scalar_value_of(document: &AnalysisResultDocument, name: &str) -> ScalarValue
 fn an_ideal_source_publishes_unbounded_input_impedance_instead_of_failing() {
     let document = AnalysisResultDocument::from_transfer_function(
         instance(AnalysisKind::TransferFunction),
-        &TransferFunctionResult::new("V(out)", "V1", 0.5, f64::INFINITY, 50.0),
+        &TransferFunctionResult::new(
+            "V(out)",
+            "V1",
+            0.5,
+            SignalUnit::Dimensionless,
+            f64::INFINITY,
+            50.0,
+        ),
     )
     .expect("an unbounded input impedance is a determination, not a projection failure")
     .build()
@@ -2689,7 +2703,14 @@ fn an_ideal_source_publishes_unbounded_input_impedance_instead_of_failing() {
 fn a_transfer_function_nan_is_still_a_projection_failure() {
     AnalysisResultDocument::from_transfer_function(
         instance(AnalysisKind::TransferFunction),
-        &TransferFunctionResult::new("V(out)", "V1", f64::NAN, 1.0e3, 50.0),
+        &TransferFunctionResult::new(
+            "V(out)",
+            "V1",
+            f64::NAN,
+            SignalUnit::Dimensionless,
+            1.0e3,
+            50.0,
+        ),
     )
     .expect_err("NaN is a defect in the producing computation, not a determination");
 }

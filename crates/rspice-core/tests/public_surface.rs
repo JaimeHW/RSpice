@@ -53,7 +53,8 @@ use rspice_core::analysis::harmonic_balance::{
 // Two bounded/cancellable table projection entry points serve CLI/WASM
 // callers without forcing the default numerical budget on their output.
 // One text-provenance writer lets CLI RAW exports preserve exact table labels.
-const MAX_PUBLIC_ITEMS: usize = 5545;
+// Transfer gain units are retained for typed documents and control consumers.
+const MAX_PUBLIC_ITEMS: usize = 5546;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

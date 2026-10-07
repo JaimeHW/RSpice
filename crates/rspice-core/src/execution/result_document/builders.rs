@@ -1822,7 +1822,7 @@ impl AnalysisResultDocument {
                 LOCATION,
                 "transfer_gain",
                 "Transfer gain",
-                SignalUnit::Dimensionless,
+                result.gain_unit.clone(),
                 result.gain,
             )?,
             // An ideal voltage source presents unbounded input impedance and

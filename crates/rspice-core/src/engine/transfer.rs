@@ -220,6 +220,11 @@ impl Engine {
             &probe_label,
             input_source,
             gain,
+            match (voltage_input.is_some(), output_is_current) {
+                (true, true) => crate::signal_unit::SignalUnit::Siemens,
+                (false, false) => crate::signal_unit::SignalUnit::Ohm,
+                _ => crate::signal_unit::SignalUnit::Dimensionless,
+            },
             input_impedance,
             output_impedance,
         ))

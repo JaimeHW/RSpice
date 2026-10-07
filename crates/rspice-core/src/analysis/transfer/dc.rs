@@ -9,6 +9,8 @@ pub struct TransferFunctionResult {
     pub input: String,
     /// Transfer gain (output/input ratio)
     pub gain: Value,
+    /// Physical output/input unit, determined from the elaborated source/probe.
+    pub gain_unit: crate::signal_unit::SignalUnit,
     /// Input impedance in Ohms
     pub input_impedance: Value,
     /// Output impedance in Ohms (Thevenin equivalent)
@@ -16,18 +18,26 @@ pub struct TransferFunctionResult {
 }
 
 impl TransferFunctionResult {
-    /// Create a new transfer function result
-    pub fn new(output: &str, input: &str, gain: Value, zin: Value, zout: Value) -> Self {
+    /// Create a result with its known gain unit; source names do not determine units.
+    pub fn new(
+        output: &str,
+        input: &str,
+        gain: Value,
+        gain_unit: crate::signal_unit::SignalUnit,
+        zin: Value,
+        zout: Value,
+    ) -> Self {
         Self {
             output: output.to_string(),
             input: input.to_string(),
             gain,
+            gain_unit,
             input_impedance: zin,
             output_impedance: zout,
         }
     }
 
-    /// Get gain in decibels
+    /// Gain in decibels relative to one unit of `gain_unit`.
     pub fn gain_db(&self) -> Value {
         20.0 * self.gain.abs().log10()
     }
