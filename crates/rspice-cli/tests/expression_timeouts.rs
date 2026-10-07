@@ -84,6 +84,36 @@ fn timeout_interrupts_numeric_cards_and_forward_reference_retries() {
     }
 }
 
+#[test]
+fn timeout_interrupts_conditionals_and_eager_element_expressions() {
+    let functions = work_functions();
+    let dir = common::test_dir("eager-element-expression-timeout");
+    for (index, body) in [
+        ".IF {work(26)}\nR2 out 0 1k\n.ENDIF",
+        ".IF 0\n.ELSEIF {work(26)}\nR2 out 0 1k\n.ENDIF",
+        ".SUBCKT cell a\n.IF {work(26)}\nR2 a 0 1k\n.ENDIF\n.ENDS\nX1 out cell",
+        ".MODEL dd D(IS={work(26)})\nD1 out 0 dd",
+        ".MODEL buffer d_buffer(rise_delay=work(26)+0)",
+        "R2 out 0 1k TEMP={work(26)}",
+        "R2 out 0 1k TEMP=work(26)+0",
+        "C1 out 0 {work(26)}",
+        "C1 out 0 1u {work(26)}",
+        "V2 a 0 SIN(0 1 1 {work(26)})\nR2 a 0 1k",
+        "I2 out 0 PULSE(0 1 {work(26)})",
+        ".SUBCKT cell a PARAMS: value={work(26)}\nR2 a 0 {value}\n.ENDS\nX1 out cell",
+        ".SUBCKT cell a PARAMS: value={later+work(26)} later=1\nR2 a 0 {value}\n.ENDS\nX1 out cell",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let deck = dir.join(format!("eager-{index}.cir"));
+        std::fs::write(&deck, format!(
+            "* eager expression deadline\n{functions}V1 out 0 1\nR1 out 0 1k\n{body}\n.OP\n.END\n"
+        )).unwrap();
+        assert_times_out(&deck, body, false);
+    }
+}
+
 fn assert_times_out(deck: &std::path::Path, source: &str, execution_started: bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "--error-format", "json", "run"])
