@@ -6,6 +6,73 @@ use rspice_core::{Engine, Netlist, NoAbort};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn unexported_behavioral_dynamics_cannot_claim_a_qualified_spectrum() {
+    use rspice_core::config::ExpressionDialect;
+    use rspice_core::engine::{SimulationConfig, SpiceDialect};
+    use rspice_core::netlist::NetlistParseOptions;
+    let engine = Engine::new_with_resolved_config(
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce),
+    );
+    let mut incorrectly_admitted = Vec::new();
+    for device in [
+        "B1 out 0 I={1m*(1+FREQ)*V(out)}",
+        "B1 out 0 I={1m*SDT(V(out))}",
+        "B1 out 0 I={1m*(1+TIME)*V(out)}",
+        "B1 aux 0 V={(1+HERTZ)*V(out)}\nR2 aux out 1k",
+        "B1 aux 0 V={SDT(V(out))}\nR2 aux out 1k",
+        "C1 out 0 C={1u*(1+FREQ)}",
+        "C1 out 0 C={1u*(1+SDT(V(out)))}",
+        "C1 out 0 C={1u*(1+TIME)}",
+        ".FUNC gain(x) {(1+FREQ)*x}\nB1 out 0 I={1m*gain(V(out))}",
+        ".FUNC rate(x) {SDT(x)}\nB1 out 0 I={1m*rate(V(out))}",
+    ] {
+        let netlist = Netlist::parse_with_options(
+            &format!("Unexported state\nR1 out 0 1k\n{device}\n.pz out 0 out 0 cur pol\n.end\n"),
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        match engine.run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort) {
+            Err(rspice_core::SimulationError::UnsupportedCapability(_)) => {}
+            result => incorrectly_admitted.push(format!("{device}: {result:?}")),
+        }
+    }
+    assert!(
+        incorrectly_admitted.is_empty(),
+        "{}",
+        incorrectly_admitted.join("\n")
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn descriptor_admission_keeps_static_laws_and_independent_forcing() {
+    for source in [
+        "B1 out 0 I={1m*V(out)}",
+        "B1 out 0 I={sin(TIME)+FREQ}",
+        "V1 FREQ 0 0\nB1 out 0 I={1m*V(FREQ)}",
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Memoryless descriptor\nR1 out 0 1k\nC1 out 0 1u\n{source}\n.pz out 0 out 0 cur pol\n.end\n"
+        )).unwrap();
+        let result = Engine::default()
+            .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+            .unwrap();
+        assert_eq!(result.poles.len(), 1, "{source}: {result:?}");
+        let expected = if source == "B1 out 0 I={1m*V(out)}" {
+            -2000.0
+        } else {
+            -1000.0
+        };
+        assert!((result.poles[0].re / expected - 1.0).abs() < 1e-10);
+        assert!(result.pole_evidence.is_qualified());
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn sparse_certificates_retain_the_original_algebraic_multiplicity() {
     let netlist = Netlist::parse(
         "RC descriptor\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.pz in 0 out 0 vol pz\n.end\n",

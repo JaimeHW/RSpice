@@ -590,6 +590,14 @@ impl BehavioralVoltageSource {
         self.frequency_dependent
     }
 
+    pub(crate) fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
+        expression_descriptor_gap(
+            &self.ast,
+            self.program.sdt_count,
+            self.is_solution_dependent(),
+        )
+    }
+
     pub fn set_gmin(&mut self, gmin: Value) {
         self.invalidate_cached_exact_constraint();
         self.gmin = gmin;
@@ -1034,6 +1042,25 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
                 .iter()
                 .any(expression_excludes_voltage_output_from_transient_lte)
         }
+    }
+}
+
+/// A frozen expression Jacobian is a descriptor only if its constitutive law
+/// is autonomous and all private states have an explicit matrix coordinate.
+/// Independent memoryless forcing does not enter the homogeneous operator.
+pub(crate) fn expression_descriptor_gap(
+    expr: &Expr,
+    integral_count: usize,
+    constitutive: bool,
+) -> Option<&'static str> {
+    if integral_count != 0 {
+        Some("SDT integral state has no small-signal descriptor coordinate")
+    } else if constitutive && expression_depends_on_frequency(expr) {
+        Some("frequency-dependent constitutive expression has no qualified rational descriptor")
+    } else if constitutive && !periodicity::memoryless_equation(expr) {
+        Some("time-dependent constitutive expression has no autonomous descriptor")
+    } else {
+        None
     }
 }
 
@@ -2319,6 +2346,14 @@ impl BehavioralCurrentSource {
     #[inline]
     pub(crate) fn is_frequency_dependent(&self) -> bool {
         self.frequency_dependent
+    }
+
+    pub(crate) fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
+        expression_descriptor_gap(
+            &self.ast,
+            self.program.sdt_count,
+            self.is_solution_dependent(),
+        )
     }
 
     pub fn set_gmin(&mut self, gmin: Value) {

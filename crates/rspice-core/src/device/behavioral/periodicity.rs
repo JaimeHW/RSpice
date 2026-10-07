@@ -156,7 +156,7 @@ fn instantaneous_solution_dependence(expr: &Expr) -> bool {
 // A phase-independent constitutive law can be sampled on either a single
 // periodic time grid or a quasiperiodic torus. Explicit clocks and integrals
 // need their own forcing/state contract rather than evaluation at time zero.
-fn memoryless_equation(expr: &Expr) -> bool {
+pub(crate) fn memoryless_equation(expr: &Expr) -> bool {
     match expr {
         Expr::Time => false,
         Expr::Unary { operand, .. } => memoryless_equation(operand),

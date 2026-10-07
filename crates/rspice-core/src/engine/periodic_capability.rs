@@ -400,7 +400,9 @@ pub(crate) const fn periodic_capability_descriptor(
         },
         F::Capacitor => PeriodicCapabilityDescriptor {
             residual_jacobian: Inapplicable,
-            dynamic_state: Complete,
+            dynamic_state: Restricted(
+                "autonomous constitutive expressions with all private states exported in G+sC",
+            ),
             small_signal: Restricted(
                 "constant or expression capacitance with explicit integral coordinates; \
                  live-frequency response requires additional equations",
@@ -657,7 +659,9 @@ pub(crate) const fn periodic_capability_descriptor(
             residual_jacobian: Restricted(
                 "behavioral equations and explicit integral states with certified periodic forcing",
             ),
-            dynamic_state: Complete,
+            dynamic_state: Restricted(
+                "autonomous constitutive expressions with all private states exported in G+sC",
+            ),
             small_signal: Restricted(
                 "behavioral equations and explicit integral states with certified periodic forcing",
             ),
@@ -1515,6 +1519,35 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                 format!("{}: {missing}", family.label()),
             )),
             Restricted(condition) => match family {
+                F::BehavioralSource => {
+                    for (name, gap) in
+                        circuit
+                            .behavioral_sources
+                            .voltage_sources
+                            .iter()
+                            .map(|source| (&source.name, source.dynamic_state_descriptor_gap()))
+                            .chain(circuit.behavioral_sources.current_sources.iter().map(
+                                |source| (&source.name, source.dynamic_state_descriptor_gap()),
+                            ))
+                    {
+                        if let Some(reason) = gap {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                format!("behavioral source '{name}': {reason}"),
+                            ));
+                        }
+                    }
+                }
+                F::Capacitor => {
+                    for expression in circuit.capacitors.value_expressions.iter().flatten() {
+                        if let Some(reason) = expression.dynamic_state_descriptor_gap() {
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                format!("capacitor '{}': {reason}", expression.name),
+                            ));
+                        }
+                    }
+                }
                 F::Bjt => {
                     for bjt in &circuit.bjts.devices {
                         if bjt.legacy_excess_phase_delay() != 0.0 {

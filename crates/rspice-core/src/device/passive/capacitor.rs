@@ -65,6 +65,14 @@ pub struct SolutionDependentCapacitor {
 }
 
 impl SolutionDependentCapacitor {
+    pub(crate) fn dynamic_state_descriptor_gap(&self) -> Option<&'static str> {
+        crate::device::behavioral::expression_descriptor_gap(
+            &self.ast,
+            self.program.sdt_count,
+            true,
+        )
+    }
+
     /// Compile a solution-dependent capacitor value expression.
     pub fn new(name: String, expression: &str) -> Result<Self, String> {
         Self::new_with_source_path_and_limits(
