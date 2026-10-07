@@ -429,6 +429,55 @@ fn resolve_instance_or_model_param(
     })
 }
 
+/// Resolve a native card for this instance while retaining selector policies.
+/// Borrow numeric cards directly; an expression-bearing card is private to the
+/// instance so temperature overrides cannot freeze its siblings' parameters.
+pub(super) fn resolve_native_model_card<'a>(
+    netlist: &ModelResolution<'_>,
+    model: Option<&'a crate::netlist::ModelDef>,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<Option<std::borrow::Cow<'a, crate::netlist::ModelDef>>, SimulationError> {
+    let Some(model) = model else {
+        return Ok(None);
+    };
+    if model.expr_params.is_empty() {
+        return Ok(Some(std::borrow::Cow::Borrowed(model)));
+    }
+    let (context, _, _) =
+        resolve_passive_eval_context(netlist, Some(model), instance_params, temperature_kelvin)?;
+    let mut resolved = model.clone();
+    resolved
+        .expr_params
+        .retain(|(name, _)| name.eq_ignore_ascii_case("LEVEL"));
+    for (name, expression) in &model.expr_params {
+        if name.eq_ignore_ascii_case("LEVEL") {
+            continue;
+        }
+        let value = context
+            .model_expression(name, expression)
+            .map_err(|error| {
+                map_model_expression_error(error, |error| {
+                    format!(
+                        "Model '{}' parameter '{}' could not be resolved: {}",
+                        model.name, name, error
+                    )
+                })
+            })?;
+        if !value.re.is_finite() || !value.im.is_finite() || value.im != 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Model '{}' parameter '{}' must resolve to a finite real value, got {}",
+                model.name, name, value
+            )));
+        }
+        resolved
+            .params
+            .retain(|(key, _)| !key.eq_ignore_ascii_case(name));
+        resolved.params.push((name.clone(), value.re));
+    }
+    Ok(Some(std::borrow::Cow::Owned(resolved)))
+}
+
 fn canonical_supported_model_param<'a>(name: &str, supported: &'a [&'a str]) -> Option<&'a str> {
     supported
         .iter()

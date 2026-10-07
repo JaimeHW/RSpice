@@ -895,12 +895,12 @@ fn vbic_level11_rejects_unresolved_native_model_params() {
     let message = run(&deck).expect_err("unresolved VBIC model parameter must fail closed");
 
     assert!(
-        message.contains("VBIC") && message.contains("IS"),
-        "error should identify the unresolved VBIC model parameter: {message}"
+        message.contains("QMOD") && message.contains("IS") && message.contains("IS_NATIVE"),
+        "error should identify the model, parameter, and missing binding: {message}"
     );
     assert!(
-        message.contains("unresolved") && message.contains("finite numeric literal"),
-        "error should explain native VBIC model parameters must be numeric: {message}"
+        message.contains("could not be resolved"),
+        "error should explain why the model expression cannot be evaluated: {message}"
     );
 }
 
@@ -2005,30 +2005,29 @@ fn vbic13_specific_parameters_reject_fail_closed_when_not_inert_or_not_native_vb
 }
 
 #[test]
-fn vbic13_specific_parameters_reject_when_not_finite_numeric_literals() {
-    for extra in [
-        "VBBE={VBREAK}",
-        "IBBE={IBBE_SCALE}",
-        "VBBE=\"active\"",
-        "NBBE=\"1\"",
-        "VBBE={1/0}",
-        "VBBE=2 NBBE=5 IBBE=1e-9 WBE={SPLIT}",
-        "VBBE=2 NBBE=5 IBBE=1e-9 WBE=\"0.5\"",
+fn vbic13_specific_parameters_reject_invalid_scalar_values() {
+    for (extra, parameter) in [
+        ("VBBE={VBREAK}", "VBBE"),
+        ("IBBE={IBBE_SCALE}", "IBBE"),
+        ("VBBE=\"active\"", "VBBE"),
+        ("NBBE=\"1\"", "NBBE"),
+        ("VBBE={1/0}", "VBBE"),
+        ("VBBE=2 NBBE=5 IBBE=1e-9 WBE={SPLIT}", "WBE"),
+        ("VBBE=2 NBBE=5 IBBE=1e-9 WBE=\"0.5\"", "WBE"),
     ] {
         let deck = op_deck(&format!(
             ".model qmod NPN (LEVEL=11 IS=1e-16 IBEI=1e-18 IBCI=1e-18 {extra})"
         ));
-        let message =
-            run(&deck).expect_err("VBIC13 params must be finite numeric literals to be accepted");
+        let message = run(&deck).expect_err("VBIC13 parameters must resolve to finite real values");
         assert!(
-            message.contains("VBIC13") || message.contains("VBIC 1.3"),
-            "error names the VBIC13 family: {message}"
+            message.to_ascii_uppercase().contains("QMOD") && message.contains(parameter),
+            "error names the model and invalid parameter: {message}"
         );
         assert!(
             message.contains("finite")
                 || message.contains("numeric")
-                || message.contains("unresolved"),
-            "error explains finite numeric requirement: {message}"
+                || message.contains("could not be resolved"),
+            "error explains the invalid scalar value: {message}"
         );
     }
 }

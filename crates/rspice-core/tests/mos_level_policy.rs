@@ -1134,10 +1134,11 @@ fn level9_deferred_bsim3_signature_fails_closed_instead_of_mos9() {
     let message =
         run(&deck).expect_err("deferred BSIM3-shaped LEVEL=9 card must not fall through to MOS9");
     assert!(
-        message.contains("native BSIM3")
-            && message.contains("VERSION=bsim_version")
-            && message.contains("finite numeric literals"),
-        "deferred VERSION should fail closed through the BSIM3 selector path: {message}"
+        message.contains("NMOD")
+            && message.contains("VERSION")
+            && message.contains("BSIM_VERSION")
+            && message.contains("could not be resolved"),
+        "unresolved VERSION should identify its model and missing binding: {message}"
     );
 }
 

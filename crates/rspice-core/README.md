@@ -411,6 +411,14 @@ Ordinary bindings still shadow globals without replacing their namespace.
 Available-parameter materialization uses the same complex numeric resolver, so
 model expressions such as `IMG(global_value)` retain their imaginary input.
 
+Native diode, BJT, MOS, JFET, and MESFET scalar model expressions resolve at
+construction using the instance's `TEMP`/`DTEMP` and the model's `TNOM`.
+Resolved values must be finite and real; missing bindings fail with a model and
+parameter diagnostic. Existing numeric `LEVEL` selector rules still apply.
+Temperature-dependent model vectors also remain deferred. Cancellable builds
+check the caller's abort signal inside scalar and vector model evaluation,
+including XSPICE model resolution and generated bridge construction.
+
 Independent-source specifications containing function calls are probed using an
 isolated random stream before live evaluation. Failed forward-binding attempts
 and deferral classification consume no live draws, including when a sampled

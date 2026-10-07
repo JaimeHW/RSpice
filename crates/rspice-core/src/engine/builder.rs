@@ -6326,6 +6326,14 @@ impl Engine {
                         continue;
                     }
 
+                    let resolved_model = resolve_native_model_card(
+                        netlist,
+                        selected_diode_model,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    let selected_diode_model = resolved_model.as_deref();
+
                     let anode = circuit.get_or_create_node(&element.nodes[0]);
                     let cathode = circuit.get_or_create_node(&element.nodes[1]);
                     // Model cards start from ngspice's defaults: parameters a
@@ -6668,6 +6676,14 @@ impl Engine {
                         ));
                     }
 
+                    let resolved_model = resolve_native_model_card(
+                        netlist,
+                        model_def,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    let model_def = resolved_model.as_deref();
+
                     let resolved_bjt_type = if let Some(device_model) = model_def {
                         resolve_bjt_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(
@@ -6973,6 +6989,14 @@ impl Engine {
                     )? {
                         continue;
                     }
+
+                    let resolved_model = resolve_native_model_card(
+                        netlist,
+                        model_def,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    let model_def = resolved_model.as_deref();
 
                     let params_map = model_def
                         .map(|device_model| model_params_upper_map(&device_model.params))
@@ -7714,6 +7738,14 @@ impl Engine {
                         }
                     };
 
+                    let resolved_model = resolve_native_model_card(
+                        netlist,
+                        model_def,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    let model_def = resolved_model.as_deref();
+
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
                         let params_map = model_params_upper_map(&device_model.params);
@@ -7973,6 +8005,14 @@ impl Engine {
                         .iter()
                         .position(|m| m.name.eq_ignore_ascii_case(model))
                         .unwrap_or(usize::MAX);
+                    let resolved_model = resolve_native_model_card(
+                        netlist,
+                        model_def,
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    let model_def = resolved_model.as_deref();
+
                     let params_map = model_def
                         .map(|device_model| model_params_upper_map(&device_model.params))
                         .or_else(|| foundation_model.map(|card| card.params.clone()));
