@@ -459,6 +459,16 @@ impl Hdf5Measurement {
             value,
         }
     }
+
+    fn validate(&self) -> Result<()> {
+        if !self.value.is_finite() {
+            return Err(Hdf5Error::InvalidSchema(format!(
+                "measurement '{}' has a non-finite value",
+                self.name
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Identity one HDF5 document publishes under.
@@ -533,6 +543,9 @@ impl Hdf5SimulationData {
         }
         if let Some(fft) = &self.fft {
             fft.validate()?;
+        }
+        for measurement in &self.measurements {
+            measurement.validate()?;
         }
         Ok(())
     }
@@ -1617,7 +1630,9 @@ fn read_measurements(file: &Hdf5File) -> Result<Vec<Hdf5Measurement>> {
         let prefix = format!("measurement_{index:04}");
         let name = read_required_string_attr(&attrs, &format!("{prefix}_name"))?;
         let value = read_required_f64_attr(&attrs, &format!("{prefix}_value"))?;
-        measurements.push(Hdf5Measurement::new(name, value));
+        let measurement = Hdf5Measurement::new(name, value);
+        measurement.validate()?;
+        measurements.push(measurement);
     }
     Ok(measurements)
 }

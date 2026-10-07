@@ -86,7 +86,7 @@ fn dataset_shape_is_admitted_before_reading_its_values() {
     }
 }
 
-fn container(input: &std::path::Path, multiple: bool) {
+fn container(input: &std::path::Path, multiple: bool, measurements: [f64; 2]) {
     let mut file = FileBuilder::new();
     file.set_attr("schema_version", AttrValue::String("1".into()));
     let sections = if multiple {
@@ -106,14 +106,14 @@ fn container(input: &std::path::Path, multiple: bool) {
     }
     let mut group = file.create_group("measurements");
     group.set_attr("measurement_count", AttrValue::I64(2));
-    for index in 0..2 {
+    for (index, value) in measurements.into_iter().enumerate() {
         group.set_attr(
             &format!("measurement_{index:04}_name"),
             AttrValue::String(format!("m{index}")),
         );
         group.set_attr(
             &format!("measurement_{index:04}_value"),
-            AttrValue::F64(index as f64),
+            AttrValue::F64(value),
         );
     }
     file.add_group(group.finish());
@@ -124,9 +124,9 @@ fn container(input: &std::path::Path, multiple: bool) {
 fn selecting_or_blessing_cannot_bypass_container_value_limits() {
     let dir = test_dir("hdf_container_values");
     let multi = dir.join("container.h5");
-    container(&multi, true);
+    container(&multi, true, [0.0, 1.0]);
     let single = dir.join("single.h5");
-    container(&single, false);
+    container(&single, false, [0.0, 1.0]);
     let config = dir.join("limits.toml");
     for budget in ["max_external_data_values", "max_result_values"] {
         // Eight dataset samples and two measurement values are retained, even
@@ -182,6 +182,55 @@ fn selecting_or_blessing_cannot_bypass_container_value_limits() {
                     assert_eq!(std::fs::read(&destination).unwrap(), original);
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn nonfinite_measurements_cannot_be_converted_compared_or_blessed() {
+    let dir = test_dir("hdf_nonfinite_measurements");
+    let input = dir.join("source.h5");
+    let golden = dir.join("golden.h5");
+    let destination = dir.join("converted.csv");
+    container(&golden, false, [0.0, 1.0]);
+    let original = std::fs::read(&golden).unwrap();
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        container(&input, false, [value, 1.0]);
+        for operation in ["convert", "compare", "bless"] {
+            std::fs::write(&destination, "predecessor").unwrap();
+            let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            command.args(["--quiet", "--error-format", "json"]);
+            if operation == "convert" {
+                command
+                    .arg("convert")
+                    .arg(&input)
+                    .arg(&destination)
+                    .args(["--to", "csv"]);
+            } else {
+                command.arg("compare").arg(&input).arg(&golden);
+                if operation == "bless" {
+                    command.arg("--bless");
+                }
+            }
+            let output = command.output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "{value} {operation}: {output:?}"
+            );
+            let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+            let message = error["error"]["message"].as_str().unwrap();
+            assert!(
+                message.contains("measurement")
+                    && message.contains("m0")
+                    && message.contains("non-finite"),
+                "{message}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&destination).unwrap(),
+                "predecessor"
+            );
+            assert_eq!(std::fs::read(&golden).unwrap(), original);
         }
     }
 }

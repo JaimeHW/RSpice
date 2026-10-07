@@ -88,6 +88,27 @@ fn backend_serialization_failure_preserves_old_or_absent_destination() {
 }
 
 #[test]
+fn nonfinite_measurement_writes_preserve_existing_artifacts() {
+    let directory = TestDirectory::new("nonfinite-measurement");
+    let destination = directory.0.join("result.h5");
+    std::fs::write(&destination, b"complete predecessor").unwrap();
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let data = Hdf5SimulationData {
+            measurements: vec![Hdf5Measurement::new("delay", value)],
+            ..Hdf5SimulationData::default()
+        };
+        let error = write_hdf5(&destination, &data).unwrap_err();
+        assert!(matches!(error, Hdf5Error::InvalidSchema(_)));
+        assert!(error.to_string().contains("measurement 'delay'"));
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"complete predecessor"
+        );
+        assert_only_destination_remains(&directory.0, &destination, true);
+    }
+}
+
+#[test]
 fn successful_hdf5_write_atomically_replaces_existing_bytes() {
     let directory = TestDirectory::new("success");
     let destination = directory.0.join("result.h5");
