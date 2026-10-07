@@ -253,31 +253,7 @@ impl PoleZeroAnalyzer {
         abort: &dyn AbortSignal,
     ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
         ensure_pole_zero_not_aborted(abort)?;
-        let (g_rows, g_cols) = self.g_matrix.dims();
-        let (c_rows, c_cols) = self.c_matrix.dims();
-        if g_rows == 0
-            || g_rows != g_cols
-            || c_rows != c_cols
-            || g_rows != c_rows
-            || self.g_matrix.data.iter().any(|row| row.len() != g_cols)
-            || self.c_matrix.data.iter().any(|row| row.len() != c_cols)
-            || self
-                .g_matrix
-                .data
-                .iter()
-                .flatten()
-                .any(|value| !value.is_finite())
-            || self
-                .c_matrix
-                .data
-                .iter()
-                .flatten()
-                .any(|value| !value.is_finite())
-        {
-            return Err(PoleZeroAnalysisError::InvalidSystem(
-                "G and C must be finite square matrices with equal dimensions".to_string(),
-            ));
-        }
+        self.validate_descriptor_with_abort(abort)?;
         let mut result = PoleZeroResult::new(
             &format!("node{}", config.input_pos),
             &format!("node{}", config.output_pos),

@@ -255,6 +255,39 @@ pub enum StabilityVerdict {
     Indeterminate,
 }
 
+/// Complete natural modes of a descriptor, independent of transfer-function ports.
+/// Poles are in rad/s. The evidence distinguishes a proven empty spectrum from
+/// missing or approximate numerical evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoleSpectrum {
+    /// Every finite natural pole, in canonical magnitude/conjugate-pair order.
+    pub poles: Vec<Complex64>,
+    /// Numerical qualification and finite/infinite mode accounting.
+    pub evidence: RootSetEvidence,
+}
+
+impl PoleSpectrum {
+    /// Classify asymptotic stability only from a complete, qualified pole set.
+    pub fn stability_verdict(&self) -> StabilityVerdict {
+        pole_stability_verdict(&self.poles, &self.evidence)
+    }
+}
+
+fn pole_stability_verdict(poles: &[Complex64], evidence: &RootSetEvidence) -> StabilityVerdict {
+    if !evidence.is_consistent_with(poles)
+        || !evidence.is_qualified()
+        || poles
+            .iter()
+            .any(|pole| !pole.re.is_finite() || !pole.im.is_finite())
+    {
+        StabilityVerdict::Indeterminate
+    } else if poles.iter().all(|pole| pole.re < 0.0) {
+        StabilityVerdict::Stable
+    } else {
+        StabilityVerdict::Unstable
+    }
+}
+
 //=============================================================================
 // Pole-Zero Result
 //=============================================================================
@@ -326,22 +359,7 @@ impl PoleZeroResult {
 
     /// Return a three-valued stability verdict from qualified pole evidence.
     pub fn stability_verdict(&self) -> StabilityVerdict {
-        if !self.pole_evidence.is_consistent_with(&self.poles) || !self.pole_evidence.is_qualified()
-        {
-            return StabilityVerdict::Indeterminate;
-        }
-        if self
-            .poles
-            .iter()
-            .any(|pole| !pole.re.is_finite() || !pole.im.is_finite())
-        {
-            return StabilityVerdict::Indeterminate;
-        }
-        if self.poles.iter().all(|pole| pole.re < 0.0) {
-            StabilityVerdict::Stable
-        } else {
-            StabilityVerdict::Unstable
-        }
+        pole_stability_verdict(&self.poles, &self.pole_evidence)
     }
 
     /// Check whether qualified pole evidence proves asymptotic stability.
@@ -622,7 +640,8 @@ pub struct PoleZeroAnalyzer {
 }
 
 impl PoleZeroAnalyzer {
-    pub(crate) fn with_resource_limits(mut self, limits: crate::resource::ResourceLimits) -> Self {
+    /// Bound descriptor order and numerical workspace before extraction.
+    pub fn with_resource_limits(mut self, limits: crate::resource::ResourceLimits) -> Self {
         self.limits = limits;
         self
     }

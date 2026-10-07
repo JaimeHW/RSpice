@@ -801,6 +801,13 @@ SDK migration: `TransferFunctionResult::new` now takes
 the explicit `SignalUnit` immediately after `gain`; struct literals must supply
 `gain_unit`. Do not infer a source's quantity from its hierarchical name.
 
+`PoleZeroAnalyzer::pole_spectrum()` and `pole_spectrum_with_abort()` extract
+the complete natural-mode spectrum without choosing transfer ports or calculating
+gains. `PoleSpectrum` retains poles in rad/s and their numerical evidence; its
+stability classification shares the pole-zero result's qualification rules.
+This includes modes invisible at a selected output and systems whose transfer
+gain overflows. `with_resource_limits()` bounds descriptor order and workspace.
+
 Computed pole-zero results populate `hf_gain` with the finite high-frequency
 limit, including zero and static gains. Exact descriptor equations combine
 the selected input and output before classifying improper transfers; `None`

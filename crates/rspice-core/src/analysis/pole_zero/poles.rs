@@ -15,15 +15,95 @@ impl PoleZeroAnalyzer {
         }
     }
 
-    /// Find poles using companion matrix method
-    ///
-    /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
-    /// For singular C, use generalized eigenvalue: G·x = -s·C·x
+    /// Extract every natural pole without selecting ports, calculating zeros,
+    /// or requiring a representable transfer gain.
+    pub fn pole_spectrum(&self) -> Result<PoleSpectrum, PoleZeroAnalysisError> {
+        self.pole_spectrum_with_abort(&NoAbort)
+    }
+
+    /// Cancellable form of [`Self::pole_spectrum`], using the same descriptor
+    /// closure and eigenspectrum qualification as pole-zero analysis.
+    pub fn pole_spectrum_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<PoleSpectrum, PoleZeroAnalysisError> {
+        self.validate_descriptor_with_abort(abort)?;
+        let spectrum = self.compute_pole_spectrum(abort)?;
+        ensure_pole_zero_not_aborted(abort)?;
+        let mut poles = spectrum.finite;
+        PoleZeroResult::sort_by_magnitude_canonical(&mut poles);
+        Ok(PoleSpectrum {
+            poles,
+            evidence: spectrum.evidence,
+        })
+    }
+
+    pub(super) fn validate_descriptor_with_abort(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), PoleZeroAnalysisError> {
+        ensure_pole_zero_not_aborted(abort)?;
+        let n = self.num_nodes;
+        if n == 0 || self.g_matrix.dims() != (n, n) || self.c_matrix.dims() != (n, n) {
+            return Err(PoleZeroAnalysisError::InvalidSystem(
+                "G and C must be finite square matrices with equal dimensions".into(),
+            ));
+        }
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::MatrixUnknowns,
+            n,
+            self.limits.max_matrix_unknowns,
+        )?;
+        // Match the engine's dense PZ admission floor. Exact descriptor closure
+        // separately accounts for its live coefficient workspace while it grows.
+        let workspace = n
+            .checked_mul(8)
+            .and_then(|v| v.checked_add(1))
+            .and_then(|v| n.checked_mul(v))
+            .ok_or(PoleZeroAnalysisError::ResourceLimit(
+                crate::resource::ResourceLimitError {
+                    resource: crate::resource::ResourceKind::ResultValues,
+                    requested: usize::MAX,
+                    limit: self.limits.max_result_values,
+                },
+            ))?;
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ResultValues,
+            workspace,
+            self.limits.max_result_values,
+        )?;
+        for matrix in [&self.g_matrix, &self.c_matrix] {
+            for row in &matrix.data {
+                ensure_pole_zero_not_aborted(abort)?;
+                if row.len() != n || row.iter().any(|value| !value.is_finite()) {
+                    return Err(PoleZeroAnalysisError::InvalidSystem(
+                        "G and C must be finite square matrices with equal dimensions".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::analysis::pole_zero) fn find_poles(
         &self,
         config: &PoleZeroConfig,
         abort: &dyn AbortSignal,
     ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
+        let spectrum = self.compute_pole_spectrum(abort)?;
+        self.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
+        Ok(spectrum)
+    }
+
+    /// Extract the descriptor's complete natural-mode spectrum.
+    ///
+    /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
+    /// For singular C, use generalized eigenvalue: G·x = -s·C·x
+    fn compute_pole_spectrum(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
+        ensure_pole_zero_not_aborted(abort)?;
         let n = self.num_nodes;
         if n == 0 {
             return ComputedSpectrum::exact(Vec::new(), 0, 0);
@@ -43,7 +123,6 @@ impl PoleZeroAnalyzer {
                     });
                 }
                 let poles = vec![Complex64::new(pole, 0.0)];
-                self.ensure_roots_within_frequency_limit(&poles, config, "pole")?;
                 return ComputedSpectrum::exact(poles, 1, 0);
             }
             if g != 0.0 {
@@ -62,7 +141,6 @@ impl PoleZeroAnalyzer {
             && state_space.a.rows == n
         {
             let mut spectrum = self.eigenvalues_from_matrix(&state_space.a)?;
-            self.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
             spectrum
                 .finite
                 .sort_by(|a, b| a.norm().total_cmp(&b.norm()));
@@ -71,7 +149,6 @@ impl PoleZeroAnalyzer {
 
         // Singular descriptors require generalized finite/infinite accounting.
         let mut spectrum = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort)?;
-        self.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
         spectrum
             .finite
             .sort_by(|a, b| a.norm().total_cmp(&b.norm()));
