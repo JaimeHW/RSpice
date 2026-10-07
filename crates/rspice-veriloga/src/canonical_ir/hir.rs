@@ -207,6 +207,8 @@ pub enum HirExprKind {
     },
     ArrayAccess {
         array: SmolStr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        discrete_validity: Option<SmolStr>,
         index: ExprId,
     },
     ArrayLiteral {
@@ -671,9 +673,17 @@ fn same_expression_kind(left: &HirExprKind, right: &HirExprKind) -> bool {
             left == right
         }
         (
-            HirExprKind::ArrayAccess { array: left, .. },
-            HirExprKind::ArrayAccess { array: right, .. },
-        ) => left == right,
+            HirExprKind::ArrayAccess {
+                array: left,
+                discrete_validity: left_validity,
+                ..
+            },
+            HirExprKind::ArrayAccess {
+                array: right,
+                discrete_validity: right_validity,
+                ..
+            },
+        ) => left == right && left_validity == right_validity,
         (HirExprKind::Binary { op: left, .. }, HirExprKind::Binary { op: right, .. }) => {
             left == right
         }
@@ -1169,6 +1179,7 @@ impl HirModel {
         let known_nodes = self.known_node_names();
         let declared_branches = self.declared_branch_names();
         let value_symbols = self.known_value_symbol_names();
+        let discrete_inputs: HashSet<_> = self.discrete_inputs.iter().copied().collect();
 
         for (expected, expression) in self.expressions.iter().enumerate() {
             let expected = u32::try_from(expected).expect("HIR expression count exceeds u32::MAX");
@@ -1188,6 +1199,7 @@ impl HirModel {
                 &known_nodes,
                 &declared_branches,
                 &value_symbols,
+                &discrete_inputs,
             );
         }
     }
@@ -1199,6 +1211,7 @@ impl HirModel {
         known_nodes: &HashSet<SmolStr>,
         declared_branches: &HashSet<SmolStr>,
         value_symbols: &HashSet<SmolStr>,
+        discrete_inputs: &HashSet<[VariableId; 2]>,
     ) {
         match &expression.kind {
             HirExprKind::NullArgument
@@ -1246,9 +1259,44 @@ impl HirModel {
                 self.validate_expression_child(diagnostics, expression, "then_expr", *then_expr);
                 self.validate_expression_child(diagnostics, expression, "else_expr", *else_expr);
             }
-            HirExprKind::ArrayAccess { array, index } => {
+            HirExprKind::ArrayAccess {
+                array,
+                index,
+                discrete_validity,
+            } => {
                 self.validate_expression_child(diagnostics, expression, "index", *index);
                 self.validate_array_access_target(diagnostics, expression, array, value_symbols);
+                if let Some(validity) = discrete_validity {
+                    let value = self.arrays.iter().find(|a| a.name == *array);
+                    let valid = self.arrays.iter().find(|a| a.name == *validity);
+                    let paired = value.zip(valid).is_some_and(|(value, valid)| {
+                        value.lower == valid.lower
+                            && value.len == valid.len
+                            && [value, valid].into_iter().all(|array| {
+                                usize::from(array.base)
+                                    .checked_add(array.len as usize)
+                                    .is_some_and(|end| end <= self.variables.len())
+                            })
+                            && (0..value.len).all(|offset| {
+                                value
+                                    .base
+                                    .index()
+                                    .checked_add(offset)
+                                    .zip(valid.base.index().checked_add(offset))
+                                    .is_some_and(|(value, valid)| {
+                                        discrete_inputs.contains(&[
+                                            VariableId::from(value as usize),
+                                            VariableId::from(valid as usize),
+                                        ])
+                                    })
+                            })
+                    });
+                    if !paired {
+                        diagnostics.push(IrDiagnostic::error(CompilerPhase::HirValidation,
+                            "indexed discrete read requires equally shaped declared value/validity pairs",
+                            expression.span));
+                    }
+                }
             }
             HirExprKind::ArrayLiteral { elements, .. } => {
                 self.validate_expression_child_list(diagnostics, expression, "element", elements);
@@ -2892,6 +2940,7 @@ impl HirLowerer {
             Expression::BranchAccess(access) => self.lower_branch_access_kind(access),
             Expression::ArrayAccess(array) => HirExprKind::ArrayAccess {
                 array: array.array.clone(),
+                discrete_validity: array.discrete_validity.clone(),
                 index: self.lower_expr(&array.index).id,
             },
             Expression::ArrayLiteral(array) => HirExprKind::ArrayLiteral {

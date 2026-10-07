@@ -183,16 +183,22 @@ impl MetadataDependencies<'_> {
                         self.live.variables.insert(*variable);
                     }
                 }
-                HirExprKind::ArrayAccess { array, .. } => {
-                    if let Some(array) = self
-                        .hir
-                        .arrays
-                        .iter()
-                        .find(|candidate| candidate.name == *array)
-                    {
-                        self.live.variables.extend((0..array.len).map(|offset| {
-                            VariableId::from(usize::from(array.base) + offset as usize)
-                        }));
+                HirExprKind::ArrayAccess {
+                    array,
+                    discrete_validity,
+                    ..
+                } => {
+                    for name in std::iter::once(array).chain(discrete_validity.iter()) {
+                        if let Some(array) = self
+                            .hir
+                            .arrays
+                            .iter()
+                            .find(|candidate| candidate.name == *name)
+                        {
+                            self.live.variables.extend((0..array.len).map(|offset| {
+                                VariableId::from(usize::from(array.base) + offset as usize)
+                            }));
+                        }
                     }
                 }
                 _ => {}

@@ -449,6 +449,29 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
                     .ok_or(PostfixRefusal::RuntimeError(name))?;
                 *stack.last_mut().ok_or(PostfixRefusal::Malformed(name))? = value;
             }
+            NativeOp::LoadDiscreteVariableDyn {
+                base,
+                validity_base,
+                len,
+                lower,
+            } => {
+                let raw = Self::top(stack, name)?.real();
+                let value_slot = checked_array_slot(raw, base, len, lower)
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                let valid_slot = checked_array_slot(raw, validity_base, len, lower)
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                let value = *self
+                    .variables
+                    .get(value_slot)
+                    .ok_or(PostfixRefusal::RuntimeError(name))?;
+                let valid = *self
+                    .variables
+                    .get(valid_slot)
+                    .ok_or(PostfixRefusal::RuntimeError(name))?;
+                rspice_veriloga_runtime::checked_discrete_value(valid.real(), value.real())
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                *stack.last_mut().ok_or(PostfixRefusal::Malformed(name))? = value;
+            }
             NativeOp::LoadBranchUnknown(index) => {
                 let value = self.read(self.point.branch_unknowns, index, name)?;
                 stack.push(S::from_f64(value));

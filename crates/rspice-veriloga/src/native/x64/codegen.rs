@@ -1193,6 +1193,14 @@ impl FunctionCompiler {
                                 source,
                             );
                         }
+                        NativeOp::LoadDiscreteVariableDyn { .. } => {
+                            return Err(JitError::Encoding {
+                                model: MODEL.into(),
+                                detail:
+                                    "paired discrete read reached encoding before SSA expansion"
+                                        .into(),
+                            });
+                        }
                         NativeOp::LoadVariableDyn { base, len, lower } => {
                             self.emit_dynamic_variable_load(base, len, lower)?;
                         }

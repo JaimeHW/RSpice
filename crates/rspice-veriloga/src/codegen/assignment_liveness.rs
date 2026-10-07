@@ -106,6 +106,20 @@ fn mark_program_variable_reads_changed(
     for instruction in &program.instructions {
         match *instruction {
             Instruction::PushVariable(index) => mark_variable_live(index, live, changed),
+            Instruction::PushDiscreteVariableDyn {
+                base,
+                validity_base,
+                len,
+                ..
+            } => {
+                for base in [base, validity_base] {
+                    if let Some(end) = base.checked_add(len) {
+                        for index in base..end.min(live.len()) {
+                            mark_variable_live(index, live, changed);
+                        }
+                    }
+                }
+            }
             Instruction::PushVariableDyn { base, len, .. } => {
                 if let Some(end) = base.checked_add(len) {
                     for index in base..end.min(live.len()) {

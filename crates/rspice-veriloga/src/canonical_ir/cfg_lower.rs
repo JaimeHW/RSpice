@@ -791,8 +791,13 @@ fn hir_expr_is_instance_static(
             then_expr,
             else_expr,
         } => recurse(*condition) && recurse(*then_expr) && recurse(*else_expr),
-        HirExprKind::ArrayAccess { array, index } => {
-            recurse(*index)
+        HirExprKind::ArrayAccess {
+            array,
+            index,
+            discrete_validity,
+        } => {
+            discrete_validity.is_none()
+                && recurse(*index)
                 && hir
                     .arrays
                     .iter()
@@ -2286,7 +2291,13 @@ impl<'a> CfgLowerer<'a> {
         )
     }
 
-    fn array_read(&mut self, name: &str, index: ExprId, span: SourceSpanRef) -> ValueId {
+    fn array_read(
+        &mut self,
+        name: &str,
+        validity: Option<&str>,
+        index: ExprId,
+        span: SourceSpanRef,
+    ) -> ValueId {
         let Some(array) = self
             .hir
             .arrays
@@ -2297,7 +2308,23 @@ impl<'a> CfgLowerer<'a> {
             self.unsupported(span, format!("unknown array '{name}'"));
             return self.real_constant(0.0);
         };
+        // One source read owns one selector evaluation, including operator sites.
         let offset = self.array_offset(&array, index);
+        let value = self.array_read_offset(&array, offset);
+        if let Some(validity) = validity {
+            let Some(validity) = self.hir.arrays.iter().find(|a| a.name == validity).cloned()
+            else {
+                self.unsupported(span, "missing discrete validity array".into());
+                return value;
+            };
+            let valid = self.array_read_offset(&validity, offset);
+            self.binary(CfgBinaryOp::DiscreteValue, valid, value)
+        } else {
+            value
+        }
+    }
+
+    fn array_read_offset(&mut self, array: &super::hir::HirArray, offset: ValueId) -> ValueId {
         let mut result = self.real_constant(0.0);
         for member in 0..array.len {
             let variable = VariableId::from(usize::from(array.base) + member as usize);
@@ -2320,7 +2347,11 @@ impl<'a> CfgLowerer<'a> {
         match &expression.kind {
             HirExprKind::Number { value, .. } => self.real_constant(*value),
             HirExprKind::Identifier { name } => self.identifier(name, span),
-            HirExprKind::ArrayAccess { array, index } => self.array_read(array, *index, span),
+            HirExprKind::ArrayAccess {
+                array,
+                index,
+                discrete_validity,
+            } => self.array_read(array, discrete_validity.as_deref(), *index, span),
             HirExprKind::Binary { op, left, right } => self.binary_expr(op, *left, *right, span),
             HirExprKind::Unary { op, operand } => self.unary_expr(op, *operand, span),
             HirExprKind::Conditional {

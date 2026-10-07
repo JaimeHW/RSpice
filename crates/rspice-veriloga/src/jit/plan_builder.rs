@@ -4653,6 +4653,20 @@ fn mark_native_program_variable_reads(program: &NativeProgram, live: &mut [bool]
                     live[*index] = true;
                 }
             }
+            NativeOp::LoadDiscreteVariableDyn {
+                base,
+                validity_base,
+                len,
+                ..
+            } => {
+                for base in [*base, *validity_base] {
+                    let end = base.saturating_add(*len).min(live.len());
+                    live.iter_mut()
+                        .take(end)
+                        .skip(base)
+                        .for_each(|slot| *slot = true);
+                }
+            }
             NativeOp::LoadVariableDyn { base, len, .. } => {
                 let end = base.saturating_add(*len).min(live.len());
                 for slot in live.iter_mut().take(end).skip(*base) {

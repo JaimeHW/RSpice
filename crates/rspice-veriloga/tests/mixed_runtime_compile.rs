@@ -363,3 +363,101 @@ endmodule
     sample(&mut device, "enabled", Some(0.0));
     assert_eq!(stamp(&mut device).unwrap(), -3.0);
 }
+
+#[test]
+fn discrete_array_selector_keeps_one_operator_site_and_portable_value() {
+    use rspice_veriloga::canonical_ir::state::{CanonicalStateFamily, CanonicalStateLayout};
+    use rspice_veriloga::vm::{Vm, VmContext};
+    let source = r#"
+module delayed_selector(p); inout p; electrical p;
+ reg [7:0] data[0:1]; integer index;
+ initial begin index=0; data[0]=7; end
+ analog I(p)<+data[absdelay(index, 1)];
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    let hir = &runtime.canonical_ir.hir;
+    let layout = CanonicalStateLayout::from_hir(hir);
+    assert_eq!(
+        layout.family_len(CanonicalStateFamily::DelayBuffer),
+        1,
+        "one authored selector must own exactly one delay history"
+    );
+    let mut context = VmContext::new(runtime.model.num_terminals);
+    context.variables.resize(runtime.model.num_variables, 0.0);
+    context.allocate_delay_buffers(1);
+    let sample = |context: &mut VmContext, name: &str, value: Option<f64>| {
+        let pair = hir
+            .discrete_inputs
+            .iter()
+            .find(|pair| hir.variables[usize::from(pair[0])].name == name)
+            .unwrap();
+        context.variables[usize::from(pair[0])] = value.unwrap_or(0.0);
+        context.variables[usize::from(pair[1])] = f64::from(u8::from(value.is_some()));
+    };
+    sample(&mut context, "index", Some(0.0));
+    sample(&mut context, "data[0]", Some(7.0));
+    sample(&mut context, "data[1]", None);
+    let program = &runtime.model.stamp_programs[0].value_program;
+    assert_eq!(Vm::new(&mut context).execute(program).unwrap(), 7.0);
+    sample(&mut context, "index", Some(1.0));
+    assert!(
+        Vm::new(&mut context)
+            .execute(program)
+            .unwrap_err()
+            .to_string()
+            .contains("analog read of discrete input")
+    );
+    sample(&mut context, "data[1]", Some(3.0));
+    assert_eq!(Vm::new(&mut context).execute(program).unwrap(), 3.0);
+
+    #[cfg(feature = "native")]
+    {
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "x",
+            runtime.model.clone(),
+            &runtime.canonical_ir,
+            &[1],
+        )
+        .unwrap();
+        for pair in &hir.discrete_inputs {
+            for slot in pair {
+                let slot = usize::from(*slot);
+                device
+                    .sample_discrete_state(slot, context.variables[slot])
+                    .unwrap();
+            }
+        }
+        let mut rhs = 0.0;
+        device
+            .try_stamp(&[0.0], |_, _, _| {}, |_, value| rhs += value)
+            .unwrap();
+        assert_eq!(rhs, -3.0);
+    }
+
+    let mut malformed = hir.clone();
+    let access = malformed
+        .expressions
+        .iter_mut()
+        .find_map(|expr| {
+            if let rspice_veriloga::canonical_ir::hir::HirExprKind::ArrayAccess {
+                discrete_validity: Some(name),
+                ..
+            } = &mut expr.kind
+            {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    *access = "data".into();
+    assert!(
+        malformed.validate().is_err(),
+        "value cells cannot masquerade as validity cells"
+    );
+}

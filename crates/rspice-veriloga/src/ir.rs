@@ -1897,7 +1897,8 @@ impl DeviceIR {
             Node::VarIndexed { payload, index } => {
                 let read = *arena.indexed(payload);
                 let array = arena.name(read.array);
-                recurse(index)
+                read.discrete_validity.is_none()
+                    && recurse(index)
                     && ((0..read.len).map(|offset| read.lower + offset as i64))
                         .all(|k| static_vars.contains(format!("{array}[{k}]").as_str()))
             }
@@ -2202,8 +2203,11 @@ pub mod autodiff {
                 out.insert(arena.name(name).clone());
             }
             Node::VarIndexed { payload, .. } => {
-                let array = arena.indexed(payload).array;
-                out.insert(arena.name(array).clone());
+                let read = arena.indexed(payload);
+                out.insert(arena.name(read.array).clone());
+                if let Some((validity, _)) = read.discrete_validity {
+                    out.insert(arena.name(validity).clone());
+                }
             }
             _ => {}
         });
@@ -2775,6 +2779,9 @@ pub mod autodiff {
                         order,
                         pending,
                     );
+                    if let Some((validity, _)) = self.arena.indexed(payload).discrete_validity {
+                        self.require(self.arena.name(validity).clone(), 0, pending);
+                    }
                     self.expression(index, 0, pending);
                 }
                 Node::Ddx { expr, .. } => self.expression(expr, order + 1, pending),
@@ -4474,6 +4481,7 @@ pub mod autodiff {
                         let shadow = ShadowContext::shadow_name(&array, wrt);
                         let interned = arena.intern(&shadow);
                         let payload = arena.push_indexed(IndexedRead {
+                            discrete_validity: None,
                             array: interned,
                             base: shadow_base,
                             len: read.len,
@@ -5787,6 +5795,7 @@ pub mod autodiff {
             let index = noise(arena, 1);
             let array = arena.intern("samples");
             let payload = arena.push_indexed(arena::IndexedRead {
+                discrete_validity: None,
                 array,
                 base: 0,
                 len: 4,

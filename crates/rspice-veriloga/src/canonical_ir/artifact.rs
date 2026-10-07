@@ -1187,11 +1187,18 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
                 enc_str(name)
             )
         }
-        HirExprKind::ArrayAccess { array, index } => {
+        HirExprKind::ArrayAccess {
+            array,
+            index,
+            discrete_validity,
+        } => {
             format!(
-                "array_access array:{} index:{}",
+                "array_access array:{} index:{}{}",
                 enc_str(array),
-                index.index()
+                index.index(),
+                discrete_validity
+                    .as_ref()
+                    .map_or_else(String::new, |name| format!(" validity:{}", enc_str(name)))
             )
         }
         HirExprKind::ArrayLiteral {

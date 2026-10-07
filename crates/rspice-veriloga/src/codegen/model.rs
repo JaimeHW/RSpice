@@ -742,6 +742,13 @@ pub enum Instruction {
         len: usize,
         lower: i64,
     },
+    /// Evaluate one selected numeric discrete cell and its availability together.
+    PushDiscreteVariableDyn {
+        base: usize,
+        validity_base: usize,
+        len: usize,
+        lower: i64,
+    },
     /// Push temperature
     PushTemperature,
     /// Push thermal voltage

@@ -719,6 +719,7 @@ impl SelectBounds<'_> {
     fn expression(&self, elaborated: &str, span: Span) -> Expression {
         match self {
             Self::Bit(index) => Expression::ArrayAccess(ArrayAccessExpr {
+                discrete_validity: None,
                 array: SmolStr::from(elaborated),
                 index: Box::new((*index).clone()),
                 span,

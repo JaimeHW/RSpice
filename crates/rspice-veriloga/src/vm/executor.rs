@@ -428,6 +428,31 @@ impl<'a> Vm<'a> {
                     .ok_or(VmError::InvalidInstruction("missing dynamic variable slot"))?;
                 self.stack.push(v);
             }
+            Instruction::PushDiscreteVariableDyn {
+                base,
+                validity_base,
+                len,
+                lower,
+            } => {
+                let raw = self
+                    .stack
+                    .pop()
+                    .ok_or(VmError::StackUnderflow("PushDiscreteVariableDyn"))?;
+                let value_slot = Self::array_slot(raw, *base, *len, *lower)?;
+                let valid_slot = Self::array_slot(raw, *validity_base, *len, *lower)?;
+                let value = self
+                    .context
+                    .variables
+                    .get(value_slot)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing discrete value slot"))?;
+                let valid = self.context.variables.get(valid_slot).copied().ok_or(
+                    VmError::InvalidInstruction("missing discrete validity slot"),
+                )?;
+                let value = rspice_veriloga_runtime::checked_discrete_value(valid, value)
+                    .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                self.stack.push(value);
+            }
             Instruction::PushTime => {
                 self.stack.push(self.context.time);
             }

@@ -8403,6 +8403,16 @@ impl VerilogADevice {
                     Instruction::PushVariable(slot) => {
                         out.insert(*slot);
                     }
+                    Instruction::PushDiscreteVariableDyn {
+                        base,
+                        validity_base,
+                        len,
+                        ..
+                    } => {
+                        for base in [*base, *validity_base] {
+                            out.extend(base..base.saturating_add(*len));
+                        }
+                    }
                     Instruction::PushVariableDyn { base, len, .. } => {
                         out.extend(*base..base.saturating_add(*len));
                     }
@@ -8813,7 +8823,9 @@ impl VerilogADevice {
                 program.instructions.iter().any(|instruction| {
                     matches!(
                         instruction,
-                        Instruction::PushVariable(_) | Instruction::PushVariableDyn { .. }
+                        Instruction::PushVariable(_)
+                            | Instruction::PushVariableDyn { .. }
+                            | Instruction::PushDiscreteVariableDyn { .. }
                     )
                 })
             }) {

@@ -689,7 +689,26 @@ impl<'a> ExprConverter<'a> {
                 };
                 let index = self.convert(arena, &access.index)?;
                 let array = arena.intern(&access.array);
+                let discrete_validity = access
+                    .discrete_validity
+                    .as_ref()
+                    .map(|name| {
+                        let (validity_base, validity_lower, validity_len) =
+                            self.ctx.array(name).ok_or_else(|| {
+                                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                                    "missing discrete validity array '{name}'"
+                                )))
+                            })?;
+                        if (lower, len) != (validity_lower, validity_len) {
+                            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                                "discrete value and validity array shapes differ".into(),
+                            )));
+                        }
+                        Ok((arena.intern(name), validity_base))
+                    })
+                    .transpose()?;
                 let payload = arena.push_indexed(IndexedRead {
+                    discrete_validity,
                     array,
                     base,
                     len,

@@ -117,6 +117,17 @@ pub(crate) fn shareable_batch_ranges(
 fn program_reads_any_variable(program: &NativeProgram, variables: &HashSet<usize>) -> bool {
     program.ops().iter().any(|op| match *op {
         NativeOp::LoadVariable(index) => variables.contains(&index),
+        NativeOp::LoadDiscreteVariableDyn {
+            base,
+            validity_base,
+            len,
+            ..
+        } => [base, validity_base].into_iter().any(|base| {
+            let end = base.checked_add(len);
+            variables
+                .iter()
+                .any(|index| *index >= base && end.is_none_or(|end| *index < end))
+        }),
         NativeOp::LoadVariableDyn { base, len, .. } => {
             let end = base.checked_add(len);
             variables

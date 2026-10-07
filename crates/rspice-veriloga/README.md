@@ -289,7 +289,10 @@ to the existing discrete-state inputs. Implicit sensitivities and continuous
 assignments subscribe to every possible element and the index expression's inputs.
 Blocking intra-assignment controls evaluate the target index after resumption;
 nonblocking writes capture it when the update is scheduled (IEEE 1364 9.2.1/9.2.2).
-Schema 70 pairs each numeric discrete input with a finite validity state lane.
+Schema 71 pairs each numeric discrete input with a finite validity state lane.
+An indexed read carries one selector for its value and validity arrays, preserving
+one evaluation and one stateful-operator site. The VM reads both selected cells;
+canonical and native SSA lowering share the selector before checking availability.
 Unavailable values can remain in unselected elements or untaken analog branches;
 the executed numeric read performs the check. Both lanes participate in mixed
 sampling, cached-stamp identity, trial rejection and checkpoint state. Custom

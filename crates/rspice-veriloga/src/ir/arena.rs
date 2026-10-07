@@ -142,6 +142,8 @@ impl TableId {
 /// The array read a [`Node::VarIndexed`] performs, less its index expression.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct IndexedRead {
+    /// Availability array name/base sharing the numeric read's selector.
+    pub discrete_validity: Option<(NameId, usize)>,
     /// Array name, for shadow naming.
     pub array: NameId,
     /// First element's variable index.
@@ -1766,6 +1768,7 @@ mod tests {
         let indexed = {
             let array = arena.intern("a");
             arena.push_indexed(IndexedRead {
+                discrete_validity: None,
                 array,
                 base: 0,
                 len: 2,

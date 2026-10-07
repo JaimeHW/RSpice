@@ -5198,6 +5198,7 @@ impl SemanticAnalyzer {
     ) -> CompileResult<()> {
         let layout = self.arrays.get(&array_name).cloned().expect("checked");
         let fallback = Expression::ArrayAccess(ArrayAccessExpr {
+            discrete_validity: None,
             array: array_name.clone(),
             index: Box::new(index.clone()),
             span,
@@ -5679,6 +5680,7 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::ArrayAccess(access) => Expression::ArrayAccess(ArrayAccessExpr {
+                discrete_validity: access.discrete_validity.clone(),
                 array: access.array.clone(),
                 index: Box::new(self.materialize_output_function_calls(
                     &access.index,
@@ -6479,6 +6481,7 @@ impl SemanticAnalyzer {
                     }))
                 } else {
                     self.checked_discrete_read(Expression::ArrayAccess(ArrayAccessExpr {
+                        discrete_validity: None,
                         array: array_name,
                         index: Box::new(index),
                         span: a.span,

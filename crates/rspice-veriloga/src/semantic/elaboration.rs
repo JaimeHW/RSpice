@@ -1616,6 +1616,13 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
             }
         }
         Expression::ArrayAccess(access) => Expression::ArrayAccess(ArrayAccessExpr {
+            discrete_validity: access.discrete_validity.as_ref().map(|name| {
+                scope
+                    .arrays
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone())
+            }),
             array: scope
                 .arrays
                 .get(&access.array)

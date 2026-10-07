@@ -932,6 +932,34 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                         ))?;
                 self.stack.push(value);
             }
+            Instruction::PushDiscreteVariableDyn {
+                base,
+                validity_base,
+                len,
+                lower,
+            } => {
+                let raw = self.pop_real("PushDiscreteVariableDyn")?;
+                let value_slot = Self::array_slot(raw, *base, *len, *lower)?;
+                let valid_slot = Self::array_slot(raw, *validity_base, *len, *lower)?;
+                let value = self
+                    .variables
+                    .get(value_slot)
+                    .copied()
+                    .ok_or(VmError::InvalidInstruction("missing discrete value slot"))?;
+                let valid =
+                    self.variables
+                        .get(valid_slot)
+                        .copied()
+                        .ok_or(VmError::InvalidInstruction(
+                            "missing discrete validity slot",
+                        ))?;
+                rspice_veriloga_runtime::checked_discrete_value(
+                    valid.binary64().re,
+                    value.binary64().re,
+                )
+                .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                self.stack.push(value);
+            }
             Instruction::PushTemperature => {
                 self.stack.push(V::new(self.context.temperature, 0.0));
             }

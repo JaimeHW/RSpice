@@ -141,6 +141,14 @@ pub(crate) enum NativeOp {
         len: usize,
         lower: i64,
     },
+    /// Expanded into two reads of one SSA selector and a validity check before
+    /// target encoding. This is never a target-specific helper operation.
+    LoadDiscreteVariableDyn {
+        base: usize,
+        validity_base: usize,
+        len: usize,
+        lower: i64,
+    },
     LoadBranchUnknown(usize),
     LoadTemperature,
     LoadThermalVoltage,
@@ -1568,6 +1576,35 @@ impl NativeProgram {
                     ops.push(NativeOp::LoadVariable(*index));
                     push_stack(&mut depth, &mut max_stack_depth);
                 }
+                Instruction::PushDiscreteVariableDyn {
+                    base,
+                    validity_base,
+                    len,
+                    lower,
+                } => {
+                    for first in [base, validity_base] {
+                        validate_range(
+                            model.clone(),
+                            "discrete input array range",
+                            *first,
+                            *len,
+                            limits.variable_count,
+                        )?;
+                    }
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    ops.push(NativeOp::LoadDiscreteVariableDyn {
+                        base: *base,
+                        validity_base: *validity_base,
+                        len: *len,
+                        lower: *lower,
+                    });
+                }
                 Instruction::PushVariableDyn { base, len, lower } => {
                     validate_range(
                         model.clone(),
@@ -2848,9 +2885,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         match &expression.kind {
             HirExprKind::Number { value, .. } => self.push(NativeOp::Const(*value)),
             HirExprKind::Identifier { name } => self.lower_identifier(name.as_str()),
-            HirExprKind::ArrayAccess { array, index } => {
-                self.lower_array_access(array.as_str(), *index)
-            }
+            HirExprKind::ArrayAccess {
+                array,
+                index,
+                discrete_validity,
+            } => self.lower_array_access(array.as_str(), discrete_validity.as_deref(), *index),
             HirExprKind::BranchAccess {
                 kind: access,
                 pos,
@@ -3154,7 +3193,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Call { name, args } => {
                 self.lower_call_derivative(expression.id, name.as_str(), args.as_slice(), wrt)
             }
-            HirExprKind::ArrayAccess { array, index } => {
+            HirExprKind::ArrayAccess { array, index, .. } => {
                 self.lower_array_access_derivative(array.as_str(), *index, wrt)
             }
             HirExprKind::AnalogOperator { op } => {
@@ -3220,7 +3259,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 first,
                 second,
             ),
-            HirExprKind::ArrayAccess { array, index } => {
+            HirExprKind::ArrayAccess { array, index, .. } => {
                 self.lower_array_access_second_derivative(array.as_str(), *index, first, second)
             }
             HirExprKind::AnalogOperator { op } => {
@@ -7299,7 +7338,12 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         }
     }
 
-    fn lower_array_access(&mut self, array: &str, index: ExprId) -> JitResult<()> {
+    fn lower_array_access(
+        &mut self,
+        array: &str,
+        validity: Option<&str>,
+        index: ExprId,
+    ) -> JitResult<()> {
         let Some((base, len, lower)) = self.resolve_array_variable_range(array)? else {
             return Err(self.unsupported(format!("array access {array}")));
         };
@@ -7311,6 +7355,30 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.limits.variable_count,
         )?;
         self.lower(index)?;
+        if let Some(validity) = validity {
+            let Some((validity_base, validity_len, validity_lower)) =
+                self.resolve_array_variable_range(validity)?
+            else {
+                return Err(self.unsupported("missing discrete validity array"));
+            };
+            if (len, lower) != (validity_len, validity_lower) {
+                return Err(self.unsupported("discrete value and validity array shapes differ"));
+            }
+            validate_range(
+                self.model.clone(),
+                "canonical validity array range",
+                validity_base,
+                len,
+                self.limits.variable_count,
+            )?;
+            self.ops.push(NativeOp::LoadDiscreteVariableDyn {
+                base,
+                validity_base,
+                len,
+                lower,
+            });
+            return Ok(());
+        }
         if lower_constant_dynamic_variable_read(&mut self.ops, base, len, lower) {
             return Ok(());
         }
@@ -8250,6 +8318,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::LoadInternalVoltage(_) => "LoadInternalVoltage",
         NativeOp::LoadVariable(_) => "LoadVariable",
         NativeOp::LoadVariableDyn { .. } => "LoadVariableDyn",
+        NativeOp::LoadDiscreteVariableDyn { .. } => "LoadDiscreteVariableDyn",
         NativeOp::LoadBranchUnknown(_) => "LoadBranchUnknown",
         NativeOp::LoadTemperature => "LoadTemperature",
         NativeOp::LoadThermalVoltage => "LoadThermalVoltage",
@@ -9243,6 +9312,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::LoadEvaluationState(_) => (0, 1),
 
         NativeOp::LoadVariableDyn { .. }
+        | NativeOp::LoadDiscreteVariableDyn { .. }
         | NativeOp::CheckedArrayIndex { .. }
         | NativeOp::AddConst(_)
         | NativeOp::SubConst(_)
@@ -9443,6 +9513,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::PushInternalVoltage(_) => "PushInternalVoltage",
         Instruction::PushVariable(_) => "PushVariable",
         Instruction::PushVariableDyn { .. } => "PushVariableDyn",
+        Instruction::PushDiscreteVariableDyn { .. } => "PushDiscreteVariableDyn",
         Instruction::PushTemperature => "PushTemperature",
         Instruction::PushVt => "PushVt",
         Instruction::PushTime => "PushTime",

@@ -1308,6 +1308,8 @@ pub struct CallExpr {
 #[derive(Debug, Clone)]
 pub struct ArrayAccessExpr {
     pub array: SmolStr,
+    /// Paired availability array for a numeric discrete read; shares this index.
+    pub discrete_validity: Option<SmolStr>,
     pub index: Box<Expression>,
     pub span: Span,
 }

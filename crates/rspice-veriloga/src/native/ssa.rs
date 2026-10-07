@@ -2248,56 +2248,30 @@ impl ProgramLowerer {
                         .into(),
                     })?;
             let operands = stack.split_off(operand_start).into_boxed_slice();
-            let operand_expressions = operands
-                .iter()
-                .map(|operand| {
-                    self.value_expressions
-                        .get(operand.index())
-                        .copied()
-                        .ok_or_else(|| JitError::Verifier {
-                            model: MODEL.into(),
-                            detail: format!(
-                                "SSA expression identity is missing for operand {}",
-                                operand.index()
-                            )
-                            .into(),
-                        })
-                })
-                .collect::<JitResult<Vec<_>>>()?
-                .into_boxed_slice();
-            if matches!(op, NativeOp::IfElse)
-                && let [_, then_value, else_value] = operands.as_ref()
-                && then_value == else_value
+            let result = if let NativeOp::LoadDiscreteVariableDyn {
+                base,
+                validity_base,
+                len,
+                lower,
+            } = op
             {
-                stack.push(*then_value);
-                observed_maximum_depth = observed_maximum_depth.max(stack.len());
-                continue;
-            }
-            let effects = Effects::for_op(op);
-            let expression = if effects.permits_result_sharing() {
-                let expression = self.expressions.intern(op, operand_expressions)?;
-                if let Some(result) = self.reusable_values.get(&expression).copied() {
-                    stack.push(result);
-                    observed_maximum_depth = observed_maximum_depth.max(stack.len());
-                    continue;
-                }
-                expression
+                let selector = operands[0];
+                let valid = self.emit(
+                    NativeOp::LoadVariableDyn {
+                        base: validity_base,
+                        len,
+                        lower,
+                    },
+                    Box::new([selector]),
+                )?;
+                let value = self.emit(
+                    NativeOp::LoadVariableDyn { base, len, lower },
+                    Box::new([selector]),
+                )?;
+                self.emit(NativeOp::DiscreteValue, Box::new([valid, value]))?
             } else {
-                self.reusable_values.clear();
-                self.expressions.unique(op, operand_expressions)?
+                self.emit(op, operands)?
             };
-            let result = ValueId::new(self.instructions.len())?;
-            self.instructions.push(Instruction {
-                result,
-                value_type: ValueType::F64,
-                op,
-                operands,
-                effects,
-            });
-            self.value_expressions.push(expression);
-            if effects.permits_result_sharing() {
-                self.reusable_values.insert(expression, result);
-            }
             stack.push(result);
             observed_maximum_depth = observed_maximum_depth.max(stack.len());
         }
@@ -2323,6 +2297,56 @@ impl ProgramLowerer {
             });
         }
         Ok((*result, observed_maximum_depth))
+    }
+
+    fn emit(&mut self, op: NativeOp, operands: Box<[ValueId]>) -> JitResult<ValueId> {
+        let operand_expressions = operands
+            .iter()
+            .map(|operand| {
+                self.value_expressions
+                    .get(operand.index())
+                    .copied()
+                    .ok_or_else(|| JitError::Verifier {
+                        model: MODEL.into(),
+                        detail: format!(
+                            "SSA expression identity is missing for operand {}",
+                            operand.index()
+                        )
+                        .into(),
+                    })
+            })
+            .collect::<JitResult<Vec<_>>>()?
+            .into_boxed_slice();
+        if matches!(op, NativeOp::IfElse)
+            && let [_, then_value, else_value] = operands.as_ref()
+            && then_value == else_value
+        {
+            return Ok(*then_value);
+        }
+        let effects = Effects::for_op(op);
+        let expression = if effects.permits_result_sharing() {
+            let expression = self.expressions.intern(op, operand_expressions)?;
+            if let Some(result) = self.reusable_values.get(&expression).copied() {
+                return Ok(result);
+            }
+            expression
+        } else {
+            self.reusable_values.clear();
+            self.expressions.unique(op, operand_expressions)?
+        };
+        let result = ValueId::new(self.instructions.len())?;
+        self.instructions.push(Instruction {
+            result,
+            value_type: ValueType::F64,
+            op,
+            operands,
+            effects,
+        });
+        self.value_expressions.push(expression);
+        if effects.permits_result_sharing() {
+            self.reusable_values.insert(expression, result);
+        }
+        Ok(result)
     }
 
     fn finish(self, result: ValueId, maximum_stack_depth: usize) -> JitResult<Program> {
@@ -3725,6 +3749,7 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::SumProductsDiv(_)
             | NativeOp::CheckedValue
             | NativeOp::DiscreteValue
+            | NativeOp::LoadDiscreteVariableDyn { .. }
             | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
@@ -3934,6 +3959,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::LoadCurrent(_)
             | NativeOp::LoadPriorCurrent(_)
             | NativeOp::LoadVariableDyn { .. }
+            | NativeOp::LoadDiscreteVariableDyn { .. }
             | NativeOp::TableLookup(_)
             | NativeOp::TableDerivative(_)
             | NativeOp::TableDerivativeApply(_)

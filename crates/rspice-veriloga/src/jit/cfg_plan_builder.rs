@@ -793,7 +793,9 @@ fn noise_magnitude_source(plan: &NativeModelPlan, entry: CfgPlanEntry) -> NoiseM
     if program.ops().iter().any(|op| {
         matches!(
             op,
-            NativeOp::LoadVariable(_) | NativeOp::LoadVariableDyn { .. }
+            NativeOp::LoadVariable(_)
+                | NativeOp::LoadVariableDyn { .. }
+                | NativeOp::LoadDiscreteVariableDyn { .. }
         )
     }) {
         NoiseMagnitude::Exit

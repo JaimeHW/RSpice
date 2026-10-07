@@ -900,22 +900,19 @@ impl SemanticAnalyzer {
         }
     }
 
-    pub(super) fn checked_discrete_read(&self, value: Expression) -> Expression {
+    pub(super) fn checked_discrete_read(&self, mut value: Expression) -> Expression {
+        if let Expression::ArrayAccess(access) = &mut value {
+            if let Some(validity) = self.discrete_validity.get(&access.array) {
+                access.discrete_validity = Some(validity.clone());
+            }
+            return value;
+        }
         let validity = match &value {
             Expression::Identifier(identifier) => {
                 self.discrete_validity.get(&identifier.name).map(|name| {
                     Expression::Identifier(Identifier {
                         name: name.clone(),
                         span: identifier.span,
-                    })
-                })
-            }
-            Expression::ArrayAccess(access) => {
-                self.discrete_validity.get(&access.array).map(|name| {
-                    Expression::ArrayAccess(ArrayAccessExpr {
-                        array: name.clone(),
-                        index: access.index.clone(),
-                        span: access.span,
                     })
                 })
             }

@@ -1298,10 +1298,18 @@ impl CodeGenerator {
                 Node::VarIndexed { payload, index } => {
                     self.emit_expr(arena, index, emit_ctx, program)?;
                     let read = arena.indexed(payload);
-                    program.instructions.push(Instruction::PushVariableDyn {
-                        base: read.base,
-                        len: read.len,
-                        lower: read.lower,
+                    program.instructions.push(match read.discrete_validity {
+                        Some((_, validity_base)) => Instruction::PushDiscreteVariableDyn {
+                            base: read.base,
+                            validity_base,
+                            len: read.len,
+                            lower: read.lower,
+                        },
+                        None => Instruction::PushVariableDyn {
+                            base: read.base,
+                            len: read.len,
+                            lower: read.lower,
+                        },
                     });
                 }
                 Node::Voltage(p, n) => {

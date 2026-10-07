@@ -2829,6 +2829,7 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(TokenKind::RBracket)?;
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
+                        discrete_validity: None,
                         array: name.into(),
                         index: Box::new(index),
                         span: start.extend(self.previous_span()),

@@ -352,3 +352,40 @@ fn helper_failures_abort_before_later_state_and_variable_writes() {
         assert_eq!(prelude, [94.0], "no state write may follow a failed helper");
     }
 }
+
+#[test]
+fn discrete_array_read_evaluates_one_selector_before_both_lanes() {
+    let assignments = [assignment(
+        7,
+        vec![
+            NativeOp::LoadVariable(0),
+            NativeOp::Const(1.0),
+            NativeOp::Add,
+            NativeOp::StoreVariable(0),
+            NativeOp::LoadDiscreteVariableDyn {
+                base: 1,
+                validity_base: 4,
+                len: 3,
+                lower: 0,
+            },
+        ],
+    )];
+    let mut variables = [0.0, 5.0, 7.0, 9.0, 1.0, 1.0, 0.0, 99.0];
+    let context = execute(&assignments, &mut variables);
+    assert!(context.take_runtime_error().is_none());
+    assert_eq!(
+        variables[0], 1.0,
+        "the selector's publication executes once"
+    );
+    assert_eq!(variables[7], 7.0, "both lanes select the same known cell");
+    variables[0] = 0.0;
+    variables[5] = 0.0;
+    variables[7] = 99.0;
+    let context = execute(&assignments, &mut variables);
+    assert!(context.take_runtime_error().is_some());
+    assert_eq!(variables[0], 1.0);
+    assert_eq!(
+        variables[7], 99.0,
+        "an unavailable selected value is not published"
+    );
+}
