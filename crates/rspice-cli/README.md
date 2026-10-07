@@ -314,6 +314,10 @@ per row (`name[record N]`) and include the same contract metadata in their
 diagnostics. `--allow-failed-meas` changes only the process exit code; it does
 not change or remove any verdict.
 
+TAP report names escape directive markers and line breaks so authored text
+cannot change a test's verdict or add test records. YAML diagnostics preserve
+the original messages, including quotes and control characters.
+
 **A failed measurement fails the run with exit code 3**, whether from a missed
 `GOAL`, an unevaluated statement, or a measurement whose analysis never ran.
 Pass `--allow-failed-meas` to restore exit 0. Results containing NaN or Inf are

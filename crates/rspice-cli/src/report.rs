@@ -11,6 +11,12 @@ use std::fmt;
 use std::io::Write;
 use std::path::Path;
 
+mod encoding;
+use encoding::{tap_description, tap_yaml_scalar};
+
+#[cfg(test)]
+mod encoding_tests;
+
 /// Simulation result for reporting
 #[derive(Debug, Clone)]
 pub struct SimulationReport {
@@ -239,22 +245,26 @@ fn write_tap_report<W: Write + ?Sized>(
             write_line(
                 writer,
                 path,
-                format_args!("not ok {} - {}", test_num, report.name),
+                format_args!("not ok {} - {}", test_num, tap_description(&report.name)),
             )?;
             write_line(writer, path, format_args!("  ---"))?;
-            write_line(writer, path, format_args!("  message: '{}'", message))?;
+            write_line(
+                writer,
+                path,
+                format_args!("  message: {}", tap_yaml_scalar(&message)),
+            )?;
             write_line(writer, path, format_args!("  ..."))?;
         } else {
             write_line(
                 writer,
                 path,
-                format_args!("ok {} - {}", test_num, report.name),
+                format_args!("ok {} - {}", test_num, tap_description(&report.name)),
             )?;
         }
 
         for meas in &report.measurements {
             test_num += 1;
-            let display_name = measurement_display_name(meas);
+            let display_name = tap_description(&measurement_display_name(meas));
             if meas.passed {
                 let value_str = meas
                     .value
@@ -266,7 +276,11 @@ fn write_tap_report<W: Write + ?Sized>(
                     format_args!("ok {} - {}{}", test_num, display_name, value_str),
                 )?;
                 if let Some(diagnostics) = continuous_measurement_diagnostics(meas) {
-                    write_line(writer, path, format_args!("  # {diagnostics}"))?;
+                    write_line(
+                        writer,
+                        path,
+                        format_args!("  # {}", tap_description(&diagnostics)),
+                    )?;
                 }
             } else {
                 write_line(
@@ -276,7 +290,11 @@ fn write_tap_report<W: Write + ?Sized>(
                 )?;
                 let diagnostics = measurement_failure_diagnostics(meas);
                 write_line(writer, path, format_args!("  ---"))?;
-                write_line(writer, path, format_args!("  message: '{}'", diagnostics))?;
+                write_line(
+                    writer,
+                    path,
+                    format_args!("  message: {}", tap_yaml_scalar(&diagnostics)),
+                )?;
                 write_line(writer, path, format_args!("  ..."))?;
             }
         }
@@ -576,7 +594,7 @@ mod tests {
         assert_eq!(format_spice_exponent(1.5e123), "1.500000e+123");
     }
 
-    fn report_with_measurement(value: Option<f64>) -> SimulationReport {
+    pub(super) fn report_with_measurement(value: Option<f64>) -> SimulationReport {
         SimulationReport {
             name: "rc".into(),
             netlist: "rc.sp".into(),
