@@ -313,6 +313,12 @@ instead of being replaced by a single aggregate failure.
 measurements, including ordinary sweeps, `.DATA` frequency tables, and analyses
 launched by `.CONTROL` commands.
 
+For frequency tables, scalar and continuous measurements use the resolved
+parameters from each accepted row, including complex values and dependent
+parameters used by user functions. Final `PARAM` expressions use the last
+accepted row and retain named measurement results as their higher-priority
+bindings. The compact parameter snapshots count toward the result-value budget.
+
 Continuous rows are serialized additively. Measurement JSON, CSV, and
 `--summary` JSON retain `record_index`, raw value, threshold, per-record verdict,
 event or trigger/target coordinates, and

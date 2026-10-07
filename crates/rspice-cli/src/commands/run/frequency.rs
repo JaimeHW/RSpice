@@ -702,27 +702,43 @@ fn finish_ac(
         }
     }
 
-    let measurements = rspice_core::analysis::evaluate_ac_measurements_with_abort(
-        ctx.netlist,
-        results,
-        &crate::abort::ProcessAbort,
-    )
+    let measurements = match coordinates {
+        Some(table) => rspice_core::analysis::evaluate_ac_table_measurements_with_abort(
+            ctx.netlist,
+            table,
+            &crate::abort::ProcessAbort,
+        ),
+        None => rspice_core::analysis::evaluate_ac_measurements_with_abort(
+            ctx.netlist,
+            results,
+            &crate::abort::ProcessAbort,
+        ),
+    }
     .map_err(|source| CliError::CoreSimulationError {
         source,
         analysis: Some("AC measurement projection".to_string()),
     })?;
     ctx.record_measurements("AC", measurements)?;
-    let continuous_measurements =
-        rspice_core::analysis::evaluate_ac_continuous_measurements_with_limits_and_abort(
+    let continuous_measurements = match coordinates {
+        Some(table) => {
+            rspice_core::analysis::evaluate_ac_table_continuous_measurements_with_limits_and_abort(
+                ctx.netlist,
+                table,
+                &ctx.engine.config().resource_limits,
+                &crate::abort::ProcessAbort,
+            )
+        }
+        None => rspice_core::analysis::evaluate_ac_continuous_measurements_with_limits_and_abort(
             ctx.netlist,
             results,
             &ctx.engine.config().resource_limits,
             &crate::abort::ProcessAbort,
-        )
-        .map_err(|source| CliError::CoreSimulationError {
-            source,
-            analysis: Some("AC continuous measurement projection".to_string()),
-        })?;
+        ),
+    }
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("AC continuous measurement projection".to_string()),
+    })?;
     super::shared::record_continuous_measurements(ctx, "AC_CONT", continuous_measurements)?;
 
     if !ctx.quiet {
@@ -1212,23 +1228,31 @@ fn finish_noise_projected(
         }
     }
 
-    let measurements = rspice_core::analysis::evaluate_noise_measurements_with_abort(
-        ctx.netlist,
-        results,
-        &crate::abort::ProcessAbort,
-    )
+    let measurements = match coordinates {
+        Some(table) => rspice_core::analysis::evaluate_noise_table_measurements_with_abort(
+            ctx.netlist,
+            table,
+            &crate::abort::ProcessAbort,
+        ),
+        None => rspice_core::analysis::evaluate_noise_measurements_with_abort(
+            ctx.netlist,
+            results,
+            &crate::abort::ProcessAbort,
+        ),
+    }
     .map_err(|source| CliError::CoreSimulationError {
         source,
         analysis: Some("Noise measurement projection".to_string()),
     })?;
     ctx.record_measurements("NOISE", measurements)?;
-    let continuous_measurements =
-        rspice_core::analysis::evaluate_noise_continuous_measurements_with_limits_and_abort(
-            ctx.netlist,
-            results,
-            &ctx.engine.config().resource_limits,
-            &crate::abort::ProcessAbort,
-        )
+    let continuous_measurements = match coordinates {
+        Some(table) => rspice_core::analysis::evaluate_noise_table_continuous_measurements_with_limits_and_abort(
+            ctx.netlist, table, &ctx.engine.config().resource_limits, &crate::abort::ProcessAbort,
+        ),
+        None => rspice_core::analysis::evaluate_noise_continuous_measurements_with_limits_and_abort(
+            ctx.netlist, results, &ctx.engine.config().resource_limits, &crate::abort::ProcessAbort,
+        ),
+    }
         .map_err(|source| CliError::CoreSimulationError {
             source,
             analysis: Some("NOISE continuous measurement projection".to_string()),
