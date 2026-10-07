@@ -19,6 +19,55 @@ pub(super) fn declaration_order(module: &Module) -> Vec<(bool, usize)> {
     order
 }
 
+/// Infer the native scalar storage category from the same final assignment
+/// values used by digital lowering. Only signed 32-bit values select Integer:
+/// a numerically small packed value must not lose its width or signedness.
+/// Wider/unsigned packed values retain the existing separate packed/numeric
+/// handling until the analog ABI has a general integral type.
+pub(super) fn numeric_parameter_types(module: &Module) -> (Vec<ParamType>, Vec<ParamType>) {
+    let mut public: Vec<_> = module
+        .parameters
+        .iter()
+        .map(|value| value.param_type)
+        .collect();
+    let mut local: Vec<_> = module
+        .localparams
+        .iter()
+        .map(|value| value.param_type)
+        .collect();
+    if module
+        .parameters
+        .iter()
+        .chain(&module.localparams)
+        .all(|parameter| parameter.type_is_explicit)
+    {
+        return (public, local);
+    }
+    let order = declaration_order(module);
+    let declarations: Vec<_> = order
+        .iter()
+        .map(|&(is_local, index)| {
+            if is_local {
+                &module.localparams[index]
+            } else {
+                &module.parameters[index]
+            }
+        })
+        .collect();
+    let inferred = crate::canonical_ir::digital_lower::native_parameter_types(
+        &declarations,
+        module.time_scale,
+    );
+    for ((is_local, index), param_type) in order.into_iter().zip(inferred) {
+        if is_local {
+            local[index] = param_type;
+        } else {
+            public[index] = param_type;
+        }
+    }
+    (public, local)
+}
+
 impl SemanticAnalyzer {
     pub(super) fn prepare_localparam_default(
         &mut self,

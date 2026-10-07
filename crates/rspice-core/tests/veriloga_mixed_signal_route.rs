@@ -2920,3 +2920,58 @@ endmodule
         assert!((value - 0.5).abs() < 1e-8, "{value}");
     }
 }
+
+#[test]
+fn implicit_parameter_types_drive_both_halves_of_loaded_mixed_instances() {
+    let model = ModelFile::new(
+        "inferred_parameters",
+        r#"
+`timescale 1ns/1ps
+module inferred_parameters(p,q);
+ inout p; electrical p; output reg q=0;
+ parameter P=5;
+ parameter Q=P/2;
+ localparam L=P/2;
+ parameter RESULT=Q+L;
+ parameter real EXPECTED=4;
+ initial #1 q=(RESULT==EXPECTED);
+ analog I(p)<+(V(p)-(RESULT+(L-Q))*q)/1000;
+endmodule
+"#,
+    );
+    // The absent override retains P's integer default. The scalar SPICE
+    // override API supplies a real: the same value 5 then changes division.
+    let deck = format!(
+        "* inferred parameter types\n.param vcc=1\n\
+         Xa pa qa inferred_parameters\n\
+         Xb pb qb inferred_parameters P=5.0 EXPECTED=5\n\
+         Rpa pa 0 1k\nRqa qa 0 1k\nRpb pb 0 1k\nRqb qb 0 1k\n\
+         .va \"{}\" inferred_parameters module=inferred_parameters\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, settled) in [("pa", 2.0), ("pb", 2.5)] {
+        let values = waveform(&result, node);
+        for (&time, &value) in result.time.iter().zip(&values) {
+            if time < 0.9e-9 {
+                assert!(value.abs() < 1e-8, "{node} at {time}: {value}");
+            } else if time > 1.1e-9 {
+                assert!((value - settled).abs() < 1e-8, "{node} at {time}: {value}");
+            }
+        }
+        assert!((values.last().unwrap() - settled).abs() < 1e-8);
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(
+            events[0].value.state,
+            rspice_core::xspice::DigitalState::Zero
+        );
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+    }
+}

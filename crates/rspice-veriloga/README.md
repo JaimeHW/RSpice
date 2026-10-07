@@ -626,6 +626,15 @@ previously defined parameters, and section 3.4.5 applies the parameter rules
 to locals. Earlier notes listing forward exact defaults as missing standard
 functionality were incorrect. See the [VAMS-2023 reference](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
+Schema 98 infers native scalar parameter types from the shared typed constant
+evaluator after source overrides. Untyped signed 32-bit parameters and locals
+now use integer arithmetic and storage in the analog half, matching the digital
+half; real overrides select real arithmetic on re-elaboration. Inference does
+not replace live numeric dependencies with constants. Numeric updates still
+recompute dependent defaults and local prologues. Wider and unsigned packed
+values are never narrowed to signed 32-bit merely because their value is small.
+General packed analog typing/lowering and typed deck transport remain open.
+
 General packed operations over mutable numeric parameters, non-scalar
 overrides, and typed range constraints remain open.
 Exact parameters whose overrides change their numeric/elaboration

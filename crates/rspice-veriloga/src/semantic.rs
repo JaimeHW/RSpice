@@ -1315,11 +1315,14 @@ impl SemanticAnalyzer {
         if self.errors.len() > errors_before {
             return Err(self.errors.remove(errors_before).into());
         }
+        let (parameter_types, localparam_types) = parameter_defaults::numeric_parameter_types(module);
         let mut localparam_defaults = vec![None; module.localparams.len()];
         let mut local_defaults = parameter_defaults::LocalDefaults::default();
         for (local, parameter_index) in declarations {
             if local {
-                let localparam = &module.localparams[parameter_index];
+                let mut localparam = module.localparams[parameter_index].clone();
+                localparam.param_type = localparam_types[parameter_index];
+                let localparam = &localparam;
                 let default = self.prepare_localparam_default(localparam, module)?;
                 if localparam.param_type == ParamType::String {
                     local_defaults.insert_string(localparam.name.clone());
@@ -1355,6 +1358,7 @@ impl SemanticAnalyzer {
             }
             let original = &module.parameters[parameter_index];
             let mut expanded = original.clone();
+            expanded.param_type = parameter_types[parameter_index];
             expanded.default = original
                 .default
                 .as_ref()
@@ -1771,8 +1775,13 @@ impl SemanticAnalyzer {
         // Phase 9: Lower localparams to computed variables. Their values may
         // depend on parameters, so they are evaluated at runtime before any
         // analog-block assignment, in declaration order.
-        for (localparam, default) in module.localparams.iter().zip(&localparam_defaults) {
-            let value_type = match localparam.param_type {
+        for ((localparam, default), param_type) in module
+            .localparams
+            .iter()
+            .zip(&localparam_defaults)
+            .zip(&localparam_types)
+        {
+            let value_type = match param_type {
                 ParamType::Real => ValueType::Real,
                 ParamType::Integer => ValueType::Integer,
                 ParamType::String => ValueType::String,
@@ -1820,7 +1829,7 @@ impl SemanticAnalyzer {
             let var_index = analyzed.variables.len();
             analyzed.variables.push(AnalyzedVariable {
                 name: localparam.name.clone(),
-                var_type: match localparam.param_type {
+                var_type: match param_type {
                     ParamType::Real => VarType::Real,
                     ParamType::Integer => VarType::Integer,
                     ParamType::String => VarType::String,

@@ -208,6 +208,48 @@ pub(super) fn resolve<'a>(
     Ok(resolved)
 }
 
+/// Infer native scalar storage using one shared declaration-order evaluation.
+/// The caller has validated ordering. Failed/unsupported values poison only
+/// their dependents, and must not reveal a same-named built-in constant.
+pub(super) fn native_parameter_types(
+    declarations: &[&ParameterDecl],
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Vec<ParamType> {
+    let mut resolved = ResolvedConstants::default();
+    let mut unavailable = HashSet::new();
+    let mut result = Vec::with_capacity(declarations.len());
+    for declaration in declarations {
+        let mut reads = BTreeSet::new();
+        if let Some(expression) = &declaration.default {
+            collect_expression_reads(expression, &mut reads);
+        }
+        let can_resolve = declaration.dimensions.is_empty()
+            && declaration.param_type != ParamType::String
+            && !reads.iter().any(|name| unavailable.contains(name.as_str()));
+        let resolved_value = can_resolve
+            && resolve_one(&declaration.name, declaration, &mut resolved, time_scale).is_ok();
+        if !resolved_value {
+            unavailable.insert(declaration.name.clone());
+        }
+        let inferred = if resolved_value
+            && resolved
+                .bits
+                .get(&declaration.name)
+                .is_some_and(|(value, signed)| value.width() == 32 && *signed)
+        {
+            ParamType::Integer
+        } else {
+            ParamType::Real
+        };
+        result.push(if declaration.type_is_explicit {
+            declaration.param_type
+        } else {
+            inferred
+        });
+    }
+    result
+}
+
 fn resolve_one(
     name: &str,
     declaration: &ParameterDecl,

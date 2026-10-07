@@ -872,3 +872,74 @@ endmodule
         .to_string();
     assert!(error.contains("instance parameter"), "{error}");
 }
+
+#[test]
+fn implicit_native_parameter_types_agree_across_domains_and_specializations() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module inferred(p);
+ inout p; electrical p;
+ parameter P=5;
+ parameter Q=P/2;
+ localparam L=P/2;
+ parameter RESULT=Q+L;
+ real sample=RESULT;
+ initial sample=RESULT;
+ analog I(p)<+RESULT+(L-Q);
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    let verify = |report: &rspice_veriloga::RuntimeCompileReport, expected: f64, integer: bool| {
+        assert_eq!(
+            initial(report, "sample"),
+            DigitalInitialValue::Real(expected)
+        );
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "inferred",
+            report.model.clone(),
+            &report.canonical_ir,
+            &[1],
+        )
+        .unwrap();
+        assert_eq!(device.try_evaluate().unwrap()[0], expected);
+        report.validate_integrity().unwrap();
+        assert!(
+            report
+                .model
+                .parameters
+                .iter()
+                .all(|parameter| parameter.is_integer == integer)
+        );
+        device
+    };
+    let mut device = verify(&original, 4.0, true);
+    device.try_set_parameter("P", 7.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 6.0);
+    for (override_value, expected, integer) in [
+        (ScalarParameterValue::Real(5.0), 5.0, false),
+        (ScalarParameterValue::Integer(7), 6.0, true),
+        (ScalarParameterValue::Integer(-5), -4.0, true),
+    ] {
+        let specialized = compiler
+            .specialize_mixed_runtime_typed(
+                &original.canonical_ir,
+                &[("P", override_value)],
+                &NoPipelineControl,
+            )
+            .unwrap();
+        verify(&specialized, expected, integer);
+        let restored = compiler
+            .specialize_mixed_runtime_typed(
+                &specialized.canonical_ir,
+                &[("P", ScalarParameterValue::Integer(5))],
+                &NoPipelineControl,
+            )
+            .unwrap();
+        verify(&restored, 4.0, true);
+    }
+}
