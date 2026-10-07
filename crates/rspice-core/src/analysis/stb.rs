@@ -289,8 +289,10 @@ pub struct StabilityMargins {
     /// Frequency at which |L| = 0 dB (unity gain crossover)
     pub phase_margin_freq: Value,
 
-    /// DC loop gain in dB
-    pub dc_gain_db: Value,
+    /// Independently measured zero-frequency return ratio. A positive-frequency
+    /// sweep cannot supply this value. `None` means DC was not measured or
+    /// could not be evaluated; an engine evaluation failure has a warning.
+    pub dc_loop_gain: Option<Complex64>,
 
     /// Unity gain bandwidth (Hz)
     pub unity_gain_bandwidth: Value,
@@ -303,6 +305,20 @@ pub struct StabilityMargins {
 }
 
 impl StabilityMargins {
+    /// Magnitude of the independently measured DC return ratio, in dB.
+    /// A measured zero returns negative infinity; an unmeasured DC value is
+    /// `None`. Scaling avoids overflow for finite complex components.
+    pub fn dc_gain_db(&self) -> Option<Value> {
+        self.dc_loop_gain.map(|gain| {
+            let scale = gain.re.abs().max(gain.im.abs());
+            if scale == 0.0 {
+                f64::NEG_INFINITY
+            } else {
+                20.0 * (scale.log10() + (gain.re / scale).hypot(gain.im / scale).log10())
+            }
+        })
+    }
+
     /// Check if the system is stable (positive margins)
     pub fn is_stable(&self) -> bool {
         self.gain_margin_db > 0.0 && self.phase_margin_deg > 0.0
@@ -450,9 +466,8 @@ impl StbResult {
                 "STB Nyquist result",
             )?;
         }
-        // A valid projection emits at most the multiple-crossover warning.
-        // Empty and mismatched inputs also emit exactly one diagnostic.
-        try_reserve_exact(&mut result.warnings, 1, "STB warning list")?;
+        // Reserve for a multiple-crossover warning and an unavailable DC solve.
+        try_reserve_exact(&mut result.warnings, 2, "STB warning list")?;
         Ok(result)
     }
 
@@ -759,9 +774,6 @@ impl StbAnalyzer {
         if points.is_empty() {
             return Ok(margins);
         }
-
-        // DC gain (lowest frequency point)
-        margins.dc_gain_db = points[0].magnitude_db;
 
         // Find unity gain crossover(s) - where magnitude crosses 0 dB
         let crossovers = self.find_zero_crossings(points, |p| p.magnitude_db, abort)?;

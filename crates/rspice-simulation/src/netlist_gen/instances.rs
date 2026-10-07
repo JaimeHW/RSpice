@@ -2215,9 +2215,9 @@ mod loop_probe_contract_tests {
 
         let margins = &analysis.result.margins;
         assert!(
-            (margins.dc_gain_db - 60.0).abs() < 0.05,
+            (margins.dc_gain_db().unwrap() - 60.0).abs() < 0.05,
             "DC loop gain must be 60 dB, got {}",
-            margins.dc_gain_db
+            margins.dc_gain_db().unwrap()
         );
         assert!(
             margins.phase_margin_deg > 0.0 && margins.phase_margin_deg < 180.0,

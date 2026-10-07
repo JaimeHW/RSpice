@@ -535,8 +535,7 @@ pub struct PyStbResult {
     pub phase_margin_degrees: f64,
     #[pyo3(get)]
     pub phase_margin_frequency: f64,
-    #[pyo3(get)]
-    pub dc_gain_db: f64,
+    dc_loop_gain: Option<rspice_core::Complex64>,
     #[pyo3(get)]
     pub unity_gain_bandwidth: f64,
     #[pyo3(get)]
@@ -593,7 +592,7 @@ impl PyStbResult {
             gain_margin_frequency: margins.gain_margin_freq,
             phase_margin_degrees: margins.phase_margin_deg,
             phase_margin_frequency: margins.phase_margin_freq,
-            dc_gain_db: margins.dc_gain_db,
+            dc_loop_gain: margins.dc_loop_gain,
             unity_gain_bandwidth: margins.unity_gain_bandwidth,
             conditionally_stable: margins.conditionally_stable,
             num_crossovers: margins.num_crossovers,
@@ -606,6 +605,22 @@ impl PyStbResult {
 
 #[pymethods]
 impl PyStbResult {
+    /// Independently measured zero-frequency return ratio, or None.
+    #[getter]
+    fn dc_loop_gain(&self) -> Option<PyComplexValue> {
+        self.dc_loop_gain.as_ref().map(PyComplexValue::from_core)
+    }
+
+    /// DC magnitude in dB; None if unmeasured, -inf for a measured zero.
+    #[getter]
+    fn dc_gain_db(&self) -> Option<f64> {
+        rspice_core::analysis::stb::StabilityMargins {
+            dc_loop_gain: self.dc_loop_gain,
+            ..Default::default()
+        }
+        .dc_gain_db()
+    }
+
     /// Typed inventory of every signal in this result's shared document.
     ///
     /// The descriptors are the ones the CLI, the WASM build and the engine
@@ -695,17 +710,37 @@ impl PyStbResult {
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (frequencies, loop_gains, probe_name, margins, flags, warnings, assessment, dc_state=None))]
     fn _unpickle(
         frequencies: Vec<f64>,
         loop_gains: Vec<(f64, f64)>,
         probe_name: String,
         margins: [f64; 6],
         flags: (bool, usize, bool),
-        warnings: Vec<String>,
+        mut warnings: Vec<String>,
         assessment: String,
-    ) -> Self {
+        dc_state: Option<(u8, Option<(f64, f64)>)>,
+    ) -> PyResult<Self> {
+        let dc_loop_gain = match dc_state {
+            Some((1, value)) => value.map(|(re, im)| rspice_core::Complex64::new(re, im)),
+            Some((version, _)) => {
+                return Err(crate::errors::value_error(format!(
+                    "unsupported STB DC pickle version {version}"
+                )));
+            }
+            None => {
+                warnings
+                    .push("Legacy STB pickle did not record an independent DC measurement".into());
+                None
+            }
+        };
+        if dc_loop_gain.is_some_and(|gain| !gain.re.is_finite() || !gain.im.is_finite()) {
+            return Err(crate::errors::value_error(
+                "STB DC return ratio must be finite",
+            ));
+        }
         let (conditionally_stable, num_crossovers, success) = flags;
-        Self {
+        Ok(Self {
             frequencies,
             loop_gains: complex_from_state(loop_gains),
             probe_name,
@@ -713,7 +748,7 @@ impl PyStbResult {
             gain_margin_frequency: margins[1],
             phase_margin_degrees: margins[2],
             phase_margin_frequency: margins[3],
-            dc_gain_db: margins[4],
+            dc_loop_gain,
             unity_gain_bandwidth: margins[5],
             conditionally_stable,
             num_crossovers,
@@ -721,7 +756,7 @@ impl PyStbResult {
             warnings,
             assessment,
             evidence: None,
-        }
+        })
     }
 
     #[allow(clippy::type_complexity)]
@@ -738,6 +773,7 @@ impl PyStbResult {
             (bool, usize, bool),
             Vec<String>,
             String,
+            Option<(u8, Option<(f64, f64)>)>,
         ),
     )> {
         Ok((
@@ -751,12 +787,13 @@ impl PyStbResult {
                     self.gain_margin_frequency,
                     self.phase_margin_degrees,
                     self.phase_margin_frequency,
-                    self.dc_gain_db,
+                    0.0, // Legacy DC slot; only dc_state carries qualified evidence.
                     self.unity_gain_bandwidth,
                 ],
                 (self.conditionally_stable, self.num_crossovers, self.success),
                 self.warnings.clone(),
                 self.assessment.clone(),
+                Some((1, self.dc_loop_gain.map(|gain| (gain.re, gain.im)))),
             ),
         ))
     }

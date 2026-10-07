@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 13                          this build's exact version
+//!   "schemaVersion": 14                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -176,6 +176,7 @@ mod frequency_table;
 mod numeric_count;
 mod payload;
 mod quasi_periodic;
+mod stability;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -225,7 +226,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 13;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 14;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -266,14 +267,18 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 13;
 /// Earlier sensitivity documents used dimensionless/unspecified placeholders;
 /// decoding keeps their numbers and marks placeholder output units unspecified.
 ///
+/// Version 14 requires independently measured STB DC return-ratio evidence.
+/// Earlier STB documents mislabeled the first sweep sample as DC; decoding
+/// preserves it as sweep-start gain without claiming a zero-frequency result.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 13] =
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 14] =
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -692,6 +697,7 @@ impl AnalysisResultDocument {
         quasi_periodic::validate_primary(self, limits, abort)?;
         self.validate_current_impulses()?;
         frequency_table::validate(self, abort)?;
+        stability::validate(self, abort)?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
             self.validate_sensitivity_units(abort)?;
             self.validate_sensitivity_availability(payload, abort)?;
@@ -1112,6 +1118,7 @@ impl AnalysisResultDocument {
         let mut document: Self = serde_json::from_str(json)
             .map_err(|error| ResultDocumentError::Json(error.to_string()))?;
         document.normalize_legacy_sensitivity_units(abort)?;
+        stability::normalize_legacy(&mut document, abort)?;
         document.validate_with_limits_and_abort(limits, abort)?;
         Ok(document)
     }

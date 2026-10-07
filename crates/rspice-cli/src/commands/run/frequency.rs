@@ -916,10 +916,14 @@ pub(super) fn run_stb(
             stb.frequencies.len(),
             stb.probe_name
         ))?;
+        if let Some(gain) = margins.dc_gain_db() {
+            crate::console::line(format_args!("  DC loop gain: {gain:.2} dB"))?;
+        } else {
+            crate::console::line(format_args!("  DC loop gain: unavailable"))?;
+        }
         if margins.num_crossovers == 0 {
             crate::console::line(format_args!(
-                "  Loop gain never crosses unity ({:.1} dB at DC); no phase margin to report",
-                margins.dc_gain_db
+                "  No unity-gain crossover found in the swept band; no phase margin to report"
             ))?;
         } else {
             crate::console::line(format_args!(

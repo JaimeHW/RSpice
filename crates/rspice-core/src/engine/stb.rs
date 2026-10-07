@@ -43,7 +43,8 @@ mod loop_gain;
 const STB_PRIMARY_VALUES_PER_POINT: usize = 3;
 const STB_BODE_VALUES_PER_POINT: usize = 6;
 const STB_NYQUIST_VALUES_PER_POINT: usize = 3;
-const STB_MARGIN_VALUES: usize = 6;
+// Five scalar margins and the complex DC return ratio, including absent slots.
+const STB_MARGIN_VALUES: usize = 7;
 
 fn stb_retained_result_value_count(
     point_count: usize,
@@ -283,7 +284,7 @@ impl Engine {
             "STB batched solution",
         )?;
 
-        for (frequency_index, &freq) in frequencies.iter().enumerate() {
+        let mut evaluate = |freq: Value| -> Result<Complex64, SimulationError> {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -308,7 +309,7 @@ impl Engine {
                 .map_err(SimulationError::Solver)?;
             let sol_v = &batched_solution[..size];
             let sol_i = &batched_solution[size..];
-            let t = loop_gain::extract(
+            loop_gain::extract(
                 &ac_matrix,
                 sol_v,
                 sol_i,
@@ -316,8 +317,30 @@ impl Engine {
                 node_neg - 1,
                 br - 1,
                 abort,
-            )?;
-            loop_gains.push(t);
+            )
+        };
+        // DC is a separate experiment at zero frequency. A pole or an
+        // undefined frequency-dependent expression may prevent this optional
+        // measurement while leaving every requested sweep point valid.
+        let mut dc_warning = None;
+        let dc_loop_gain = match evaluate(0.0) {
+            Ok(gain) => Some(gain),
+            Err(error @ SimulationError::Circuit(_))
+            | Err(
+                error @ SimulationError::Solver(
+                    rspice_matrix::SolverError::SingularMatrix
+                    | rspice_matrix::SolverError::Overflow
+                    | rspice_matrix::SolverError::InaccurateSolution(_)
+                    | rspice_matrix::SolverError::PivotGrowth,
+                ),
+            ) => {
+                dc_warning = Some(format!("DC loop gain could not be measured: {error}"));
+                None
+            }
+            Err(error) => return Err(error),
+        };
+        for (frequency_index, &freq) in frequencies.iter().enumerate() {
+            loop_gains.push(evaluate(freq)?);
             progress
                 .report(0.35 + 0.6 * (frequency_index + 1) as f64 / frequencies.len() as f64)?;
         }
@@ -328,7 +351,7 @@ impl Engine {
 
         let analyzer = StbAnalyzer::new(config);
         let projection = progress.stage(0.95, 0.99);
-        let result = analyzer
+        let mut result = analyzer
             .analyze_preallocated_with_abort(
                 &frequencies,
                 &loop_gains,
@@ -336,6 +359,10 @@ impl Engine {
                 &projection,
             )
             .map_err(map_stb_analysis_error)?;
+        result.margins.dc_loop_gain = dc_loop_gain;
+        if let Some(warning) = dc_warning {
+            result.warnings.push(warning);
+        }
 
         progress.complete(StbAnalysisResult {
             frequencies,
@@ -452,7 +479,7 @@ mod tests {
                         .expect("Nyquist shape"),
                 )
             })
-            .and_then(|count| count.checked_add(6))
+            .and_then(|count| count.checked_add(7))
             .expect("retained STB result shape")
     }
 

@@ -2077,13 +2077,29 @@ impl AnalysisResultDocument {
                 unity_gain_crossed,
                 margins.phase_margin_freq,
             )?,
-            real_or_unbounded_scalar(
-                LOCATION,
-                "dc_loop_gain_db",
-                "DC loop gain",
-                decibel(),
-                margins.dc_gain_db,
+            ResultScalar::new(
+                "dc_loop_gain",
+                "DC return ratio",
+                Some(SignalUnit::Dimensionless),
+                ScalarValue::Complex {
+                    value: margins.dc_loop_gain.map(Into::into),
+                },
             )?,
+            match margins.dc_gain_db() {
+                Some(value) => real_or_unbounded_scalar(
+                    LOCATION,
+                    "dc_loop_gain_db",
+                    "DC loop gain",
+                    decibel(),
+                    value,
+                )?,
+                None => ResultScalar::new(
+                    "dc_loop_gain_db",
+                    "DC loop gain",
+                    Some(decibel()),
+                    ScalarValue::Real { value: None },
+                )?,
+            },
             crossover_frequency_scalar(
                 LOCATION,
                 "unity_gain_bandwidth",

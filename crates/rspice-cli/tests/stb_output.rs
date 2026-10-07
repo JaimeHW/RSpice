@@ -138,3 +138,46 @@ c1 ctrl 0 1u
         "error names the probe problem:\n{combined}"
     );
 }
+
+#[test]
+fn stb_high_start_exports_an_independent_dc_return_ratio() {
+    let dir = test_dir("stb_dc");
+    let deck = dir.join("high_start.sp");
+    let output_path = dir.join("result.json");
+    std::fs::write(
+        &deck,
+        SINGLE_POLE_STB.replace("dec 20 10 10meg", "lin 3 100k 10meg"),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            output_path.to_str().unwrap(),
+            "-f",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("DC loop gain: 60.00 dB"));
+    let document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output_path).unwrap()).unwrap();
+    let scalar = |name: &str| {
+        document["scalars"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|scalar| scalar["name"] == name)
+            .unwrap()["value"]
+            .clone()
+    };
+    assert!((scalar("dc_loop_gain")["value"]["real"].as_f64().unwrap() - 1000.0).abs() < 1e-8);
+    assert!((scalar("dc_loop_gain_db")["value"].as_f64().unwrap() - 60.0).abs() < 1e-10);
+    assert_eq!(document["pointCount"], 3);
+}

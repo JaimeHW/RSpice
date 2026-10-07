@@ -939,7 +939,21 @@ fn stb_margin_measurements(
         scalar("stb_gain_margin_freq", margins.gain_margin_freq, "Hz"),
         scalar("stb_phase_margin_deg", margins.phase_margin_deg, "deg"),
         scalar("stb_phase_margin_freq", margins.phase_margin_freq, "Hz"),
-        scalar("stb_dc_loop_gain_db", margins.dc_gain_db, "dB"),
+        match margins.dc_gain_db() {
+            Some(value) if value.is_finite() => scalar("stb_dc_loop_gain_db", value, "dB"),
+            value => {
+                let mut result = rspice_core::MeasureResult::failed(
+                    "stb_dc_loop_gain_db",
+                    if value == Some(f64::NEG_INFINITY) {
+                        "DC loop gain is zero; its magnitude in dB is negative infinity"
+                    } else {
+                        "DC loop gain was not measured"
+                    },
+                );
+                result.units = Some(frequency_measurement_units("dB"));
+                result
+            }
+        },
         scalar(
             "stb_unity_gain_bandwidth",
             margins.unity_gain_bandwidth,
@@ -1532,7 +1546,7 @@ fn stability_margin_units_survive_execution_and_retention() {
     let result = run_stb(
         "Margin units\nE1 EO 0 CTRL 0 -1000\nVPROBE EO X 0\nR1 X CTRL 1k\nC1 CTRL 0 159.154943091895n\n.end\n",
         rspice_core::analysis::stb::StbConfig::new()
-            .with_sweep(10.0, 1e7, 10)
+            .with_sweep(1e5, 1e7, 10)
             .with_sweep_type(stb_sweep_type(FrequencySweep::Decade))
             .with_probe("VPROBE")
             .with_nyquist(true),
@@ -1548,6 +1562,11 @@ fn stability_margin_units_survive_execution_and_retention() {
     else {
         panic!("STB frequency result");
     };
+    let dc_gain = measurements
+        .iter()
+        .find(|m| m.name == "stb_dc_loop_gain_db")
+        .unwrap();
+    assert!((dc_gain.value_in_unit("dB").unwrap().unwrap() - 60.0).abs() < 1e-10);
     let phase = measurements
         .iter()
         .find(|m| m.name == "stb_phase_margin_deg")
@@ -1594,4 +1613,28 @@ fn stability_margin_units_survive_execution_and_retention() {
     let phase = retained.scalar_evidence("stb_phase_margin_deg");
     assert!((phase[0].value_in_unit("rad").unwrap().unwrap() - degrees.to_radians()).abs() < 1e-12);
     assert_eq!(retained.validate_retained_evidence(), Ok(()));
+}
+
+#[test]
+fn stability_dc_measurements_preserve_zero_and_absent_evidence() {
+    for (dc_loop_gain, reason) in [
+        (None, "not measured"),
+        (
+            Some(rspice_core::Complex64::new(0.0, 0.0)),
+            "negative infinity",
+        ),
+    ] {
+        let margins = rspice_core::analysis::stb::StabilityMargins {
+            dc_loop_gain,
+            ..Default::default()
+        };
+        let measurements = stb_margin_measurements(&margins);
+        let gain = measurements
+            .iter()
+            .find(|value| value.name == "stb_dc_loop_gain_db")
+            .unwrap();
+        assert_eq!(gain.value, None);
+        assert!(gain.error.as_ref().unwrap().contains(reason));
+        assert_eq!(gain.units.as_ref().unwrap().value.symbol(), Some("dB"));
+    }
 }

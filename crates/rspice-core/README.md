@@ -337,6 +337,17 @@ STB progress covers circuit construction, bias, the frequency sweep and margin
 projection. It reaches completion once, after the result is constructed, and
 observes cancellation requested by that final callback before returning it.
 
+STB measures its DC return ratio independently at zero frequency, using the
+same linearized circuit and reusable two-experiment workspace. The requested
+positive-frequency grid is unchanged. A measured zero remains zero; an undefined
+DC solve retains a diagnostic and does not discard valid AC results. Rust exposes
+`StabilityMargins::dc_loop_gain` as an optional complex value and `dc_gain_db()`
+as an optional magnitude. A standalone positive-frequency projection cannot
+supply a DC measurement. Result schema 14 validates the DC magnitude against its
+return ratio; versions 1–13 preserve their mislabeled DC numbers as sweep-start
+gain. Python preserves the new DC evidence in pickles and leaves legacy DC
+measurements unavailable.
+
 STB result and workspace reservations also retain their allocator cause in
 `StbAnalysisError::Allocation { object, requested, source }` or
 `SimulationError::Allocation { object, source }`. Callers can inspect the

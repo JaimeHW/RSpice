@@ -62,9 +62,9 @@ fn single_pole_loop_gain_matches_the_closed_form() {
 
     // DC gain: 60 dB.
     assert!(
-        (margins.dc_gain_db - 60.0).abs() < 0.05,
+        (margins.dc_gain_db().unwrap() - 60.0).abs() < 0.05,
         "DC loop gain must be 60 dB, got {}",
-        margins.dc_gain_db
+        margins.dc_gain_db().unwrap()
     );
 
     // Unity crossover at fp*sqrt(A^2 - 1), phase margin 180 - atan(fu/fp).

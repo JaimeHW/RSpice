@@ -146,7 +146,7 @@ def test_every_family_publishes_the_shared_document(results):
         assert document["schema"] == "rspice-analysis-result", kind
         # Version 13 qualifies nominal sensitivity output units. Every producer
         # uses the shared version so older readers reject new guarantees.
-        assert document["schemaVersion"] == 13, kind
+        assert document["schemaVersion"] == 14, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 
