@@ -667,7 +667,7 @@ fn parse_delimited(
     separator: char,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
-    let mut lines = delimited_records(content, separator);
+    let mut lines = delimited_records(content, separator).peekable();
     let header = parse_delimited_record(
         lines
             .next()
@@ -679,14 +679,29 @@ fn parse_delimited(
     if header.is_empty() {
         return Err(conversion_error(path, "missing header row"));
     }
-    if crate::commands::run::FftBundle::is_delimited(&header) {
-        return crate::commands::run::FftBundle::from_delimited(
-            path,
-            content,
-            separator,
-            resource_limits,
-        )
-        .map(ImportedResult::Fft);
+    if crate::commands::run::FftBundle::has_delimited_header_prefix(&header) {
+        // Header names alone do not declare a typed report. Ordinary numeric
+        // tables may use these names, including the complete FFT header.
+        let first = lines
+            .peek()
+            .map(|(line, record)| {
+                parse_delimited_record(record, separator)
+                    .map_err(|message| conversion_error(path, format!("row {line}: {message}")))
+            })
+            .transpose()?;
+        let numeric_analysis = first
+            .as_ref()
+            .and_then(|fields| fields.get(1))
+            .is_some_and(|field| field.trim().parse::<f64>().is_ok());
+        if !numeric_analysis {
+            return crate::commands::run::FftBundle::from_delimited(
+                path,
+                content,
+                separator,
+                resource_limits,
+            )
+            .map(ImportedResult::Fft);
+        }
     }
     enforce_resource_limit(
         path,

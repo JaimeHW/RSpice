@@ -118,8 +118,9 @@ impl Fields {
 }
 
 impl FftBundle {
-    pub(crate) fn is_delimited(header: &[String]) -> bool {
-        // A damaged typed header still takes the typed decoder and is refused.
+    pub(crate) fn has_delimited_header_prefix(header: &[String]) -> bool {
+        // Combined with a nonnumeric analysis field, a damaged typed header
+        // still takes the typed decoder and is refused.
         header
             .first()
             .is_some_and(|field| field == "schema_version")

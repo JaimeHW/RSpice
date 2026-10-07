@@ -666,6 +666,8 @@ tables share these rules; malformed quotes are rejected, with data-row errors
 located by physical source line. A UTF-8 byte-order mark at the start of a file
 is accepted; quoted field contents remain unchanged. Blank, separator-free lines
 are skipped; empty fields in data rows remain subject to numeric validation.
+Numeric tables may use FFT envelope column names such as `schema_version` and
+`analysis`; FFT report detection also checks the nonnumeric analysis field.
 Legacy table and FFT JSON objects must use unique field names. Repeated fields,
 including escaped spellings of the same key, fail with a source line and column
 before selection, conversion, comparison or golden-file promotion.

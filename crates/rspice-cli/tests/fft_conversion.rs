@@ -51,6 +51,114 @@ fn source(directory: &Path) -> PathBuf {
 }
 
 #[test]
+fn numeric_tables_can_use_fft_envelope_column_names() {
+    let directory = test_dir("numeric_fft_header_names");
+    let fft = source(&directory);
+    let fft_csv = directory.join("fft.csv");
+    assert!(convert(&fft, &fft_csv, "json", "csv", &[]).status.success());
+    let text = std::fs::read_to_string(&fft_csv).unwrap();
+    let full_header: Vec<_> = text.lines().next().unwrap().split(',').collect();
+    let numeric = directory.join("numeric.json");
+    for names in [&full_header[..2], full_header.as_slice()] {
+        let expected = serde_json::json!({
+            "analysis": "converted", "plot_name": "Converted Data",
+            "scale": {"name": names[0], "type": "value", "values": [0.0, 1.0]},
+            "signals": names[1..].iter().enumerate().map(|(index, name)| {
+                serde_json::json!({"name": name, "type": "value", "values": [index as f64 + 2.0, index as f64 + 3.0]})
+            }).collect::<Vec<_>>()
+        });
+        std::fs::write(&numeric, serde_json::to_vec(&expected).unwrap()).unwrap();
+        for format in ["csv", "tsv"] {
+            let encoded = directory.join(format!("numeric-{}.{format}", names.len()));
+            let recovered = directory.join("recovered.json");
+            assert!(
+                convert(&numeric, &encoded, "json", format, &[])
+                    .status
+                    .success()
+            );
+            let output = convert(&encoded, &recovered, format, "json", &[]);
+            assert!(output.status.success(), "{format}: {output:?}");
+            let actual = read_json(&recovered);
+            assert_eq!(actual["scale"]["name"], expected["scale"]["name"]);
+            assert_eq!(actual["scale"]["values"], expected["scale"]["values"]);
+            assert_eq!(actual["signals"], expected["signals"]);
+
+            let output = cli(&[
+                "compare",
+                encoded.to_str().unwrap(),
+                numeric.to_str().unwrap(),
+            ]);
+            assert!(output.status.success(), "{output:?}");
+            let golden = directory.join(format!("golden-{}.{format}", names.len()));
+            let output = cli(&[
+                "compare",
+                encoded.to_str().unwrap(),
+                golden.to_str().unwrap(),
+                "--bless",
+            ]);
+            assert!(output.status.success(), "{output:?}");
+            assert_eq!(
+                std::fs::read(&golden).unwrap(),
+                std::fs::read(&encoded).unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn damaged_fft_envelopes_cannot_fall_back_to_numeric_tables() {
+    let directory = test_dir("damaged_fft_delimited_envelopes");
+    let fft = source(&directory);
+    for (format, separator) in [("csv", ','), ("tsv", '\t')] {
+        let golden = directory.join(format!("valid.{format}"));
+        assert!(convert(&fft, &golden, "json", format, &[]).status.success());
+        let original = std::fs::read_to_string(&golden).unwrap();
+        let (header, records) = original.split_once('\n').unwrap();
+        let cases = [
+            format!("schema_version{separator}analysis\n2{separator}fft\n"),
+            format!(
+                "{header}\n{}",
+                records.replacen("fft", "unknown-analysis", 1)
+            ),
+            format!(
+                "{header}\n999{separator}{}",
+                records.split_once(separator).unwrap().1
+            ),
+        ];
+        for (index, content) in cases.iter().enumerate() {
+            let invalid = directory.join(format!("damaged-{index}.{format}"));
+            std::fs::write(&invalid, content).unwrap();
+            let protected = directory.join("protected.json");
+            std::fs::write(&protected, "predecessor").unwrap();
+            let output = convert(&invalid, &protected, format, "json", &[]);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("FFT"),
+                "{output:?}"
+            );
+            assert_eq!(std::fs::read_to_string(&protected).unwrap(), "predecessor");
+            let output = cli(&[
+                "compare",
+                invalid.to_str().unwrap(),
+                golden.to_str().unwrap(),
+                "--bless",
+            ]);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert_eq!(std::fs::read_to_string(&golden).unwrap(), original);
+            let missing = directory.join(format!("missing-{index}.{format}"));
+            let output = cli(&[
+                "compare",
+                invalid.to_str().unwrap(),
+                missing.to_str().unwrap(),
+                "--bless",
+            ]);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(!missing.exists());
+        }
+    }
+}
+
+#[test]
 fn fft_json_rejects_repeated_coefficients_before_conversion_or_blessing() {
     let directory = test_dir("fft_duplicate_json_fields");
     let input = source(&directory);
