@@ -7147,8 +7147,10 @@ mod tests {
         .unwrap();
         let axis: Vec<_> = (0..10_001).map(|row| row as Value).collect();
         let result = tran_waveform(axis.clone(), axis);
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 10_000;
+        let mut limits = ResourceLimits {
+            max_result_values: 10_000,
+            ..ResourceLimits::default()
+        };
         assert!(
             matches!(evaluate_tran_continuous_measurements_with_limits_and_abort(&netlist, &result, &limits, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.resource == ResourceKind::ResultValues && error.requested == 10_001)
         );
@@ -7181,8 +7183,10 @@ mod tests {
     fn continuous_ac_and_noise_projection_limits_precede_series_allocation() {
         use crate::abort_signal::CountingAbort;
         let netlist = Netlist::parse("* sweep projection\n.MEAS AC_CONT a FIND TIME AT=1.5\n.MEAS NOISE_CONT n FIND TIME AT=1.5\n.END\n").unwrap();
-        let mut limits = ResourceLimits::default();
-        limits.max_result_values = 13;
+        let mut limits = ResourceLimits {
+            max_result_values: 13,
+            ..ResourceLimits::default()
+        };
         let point = |frequency| AcResult {
             frequency,
             node_names: vec!["out".into()],

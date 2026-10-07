@@ -66,7 +66,7 @@ fn public_event_decoder_rejects_partial_columns_and_nonfinite_times() {
             6 => {
                 plot.waveforms[0].y_imag = Some(vec![0.0, 1.0]);
             }
-            _ => unreachable!(),
+            _ => panic!("unexpected fixture mutation {mutation}"),
         }
         assert!(
             matches!(
