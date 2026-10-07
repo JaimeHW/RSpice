@@ -1418,3 +1418,68 @@ fn typed_event_json_honors_value_limits_before_selection_or_publication() {
         assert!(output.status.success(), "{resource}: {output:?}");
     }
 }
+
+#[test]
+fn typed_json_schema_cannot_be_bypassed_by_legacy_table_fields() {
+    let dir = test_dir("typed_schema_dispatch");
+    let source = simulate(&dir, XSPICE_EVENT_DECK, "json", "source.json");
+    let mut value: serde_json::Value = common::read_json(&source);
+    value["scale"] = serde_json::json!({"name":"time", "values":[0.0]});
+    value["signals"] = serde_json::json!([]);
+    value["schemaVersion"] = serde_json::json!(999);
+    std::fs::write(&source, serde_json::to_vec(&value).unwrap()).unwrap();
+    let destination = dir.join("destination.csv");
+    std::fs::write(&destination, "preserve output").unwrap();
+    for operation in ["csv", "vcd", "compare", "bless"] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+        command.arg("--quiet");
+        if matches!(operation, "compare" | "bless") {
+            command.arg("compare").arg(&source).arg(&destination);
+            if operation == "bless" {
+                command.arg("--bless");
+            }
+        } else {
+            command
+                .arg("convert")
+                .arg(&source)
+                .arg(&destination)
+                .args(["--to", operation]);
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success(), "{operation}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("999"),
+            "{operation}: {output:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&destination).unwrap(),
+            "preserve output"
+        );
+    }
+}
+
+#[test]
+fn legacy_json_accepts_unrelated_schema_metadata() {
+    let dir = test_dir("legacy_schema_metadata");
+    let source = dir.join("source.json");
+    let output = dir.join("converted.json");
+    for schema in [
+        serde_json::json!(1),
+        serde_json::json!("custom"),
+        serde_json::Value::Null,
+    ] {
+        let table = serde_json::json!({
+            "schema":schema, "analysis":"custom",
+            "scale":{"name":"time", "values":[0.0,1.0]},
+            "signals":[{"name":"V(out)", "values":[2.0,3.0]}]
+        });
+        std::fs::write(&source, serde_json::to_vec(&table).unwrap()).unwrap();
+        convert(&source, &output, "json", &[]);
+        let actual = common::read_json(&output);
+        assert_eq!(actual["scale"]["values"], table["scale"]["values"]);
+        assert_eq!(
+            actual["signals"][0]["values"],
+            table["signals"][0]["values"]
+        );
+    }
+}

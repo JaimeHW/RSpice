@@ -501,11 +501,7 @@ fn typed_transient_traces(
         path,
         resource_limits.max_external_data_bytes,
     )?;
-    let value: serde_json::Value =
-        serde_json::from_str(&content).map_err(|error| conversion_error(path, error))?;
-    if value.get("schema").and_then(serde_json::Value::as_str)
-        != Some(rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA)
-    {
+    if !crate::commands::waveform_io::has_typed_json_schema(path, &content)? {
         return Ok(None);
     }
     let document =

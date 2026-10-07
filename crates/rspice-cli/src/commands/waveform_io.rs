@@ -759,6 +759,12 @@ fn parse_json(
     content: &str,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
+    // A declared typed schema owns the whole document. Legacy-shaped extra
+    // fields must not bypass its version, payload or resource validation.
+    if has_typed_json_schema(path, content)? {
+        let document = parse_typed_document(path, content, resource_limits)?;
+        return result_document_table(path, &document, resource_limits).map(Into::into);
+    }
     let value: serde_json::Value =
         serde_json::from_str(content).map_err(|e| conversion_error(path, e))?;
     let read_unit = |object: &serde_json::Value| -> Result<Option<String>, CliError> {
@@ -880,21 +886,23 @@ fn parse_json(
         .into());
     }
 
-    // A `run` artifact is a shared typed result document. Flatten its axis and
-    // series into the same table so `convert` and `compare` read what `run`
-    // wrote. A series the document declares as not retained has no samples and
-    // becomes no column, rather than a column of zeros.
-    if value.get("schema").and_then(serde_json::Value::as_str)
-        == Some(rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA)
-    {
-        let document = parse_typed_document(path, content, resource_limits)?;
-        return result_document_table(path, &document, resource_limits).map(Into::into);
-    }
-
     Err(conversion_error(
         path,
         "unrecognized JSON schema: expected a typed result document, or 'scale' and 'signals'",
     ))
+}
+
+/// Inspect only the schema discriminator, without retaining a second copy of
+/// the document's potentially large numeric arrays in a generic JSON tree.
+pub(crate) fn has_typed_json_schema(path: &Path, content: &str) -> Result<bool, CliError> {
+    #[derive(serde::Deserialize)]
+    struct Header {
+        schema: Option<serde_json::Value>,
+    }
+    let header: Header =
+        serde_json::from_str(content).map_err(|error| conversion_error(path, error))?;
+    Ok(header.schema.as_ref().and_then(serde_json::Value::as_str)
+        == Some(rspice_core::execution::ANALYSIS_RESULT_DOCUMENT_SCHEMA))
 }
 
 /// Decode all retained evidence under the caller's policy before projecting it.
