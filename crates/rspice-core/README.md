@@ -477,10 +477,18 @@ declarations can trigger a fresh pass; every active decision must then evaluate
 successfully. Inactive `.DATA` blocks neither evaluate rows nor publish tables,
 and their continuations remain attached to their original logical card.
 
-General dependency planning remains incomplete. Other eager parameter error
-classes, subcircuit-header defaults and other earlier card failures can still
-prevent discovery. These cases and broader statistical/runtime binding
-qualification remain in the implementation plan.
+Subcircuit headers retain default-expression failures after exhausting forward
+progress among their defaults. Unresolved defaults stay symbolic, with no
+numeric fallback. Later temperature declarations can trigger a fresh pass;
+selected defaults must then validate even when unused or overridden by an
+instance. Formal ownership, per-instance expressions, duplicate-selection
+policy and isolated default sampling remain intact. A dependent undefined name
+does not hide another default's concrete domain error.
+
+General dependency planning remains incomplete. Root `.IC`/`.NODESET` voltage
+hints, other earlier card failures and eager parameter error classes can still
+prevent temperature discovery. These cases and broader statistical/runtime
+binding qualification remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
