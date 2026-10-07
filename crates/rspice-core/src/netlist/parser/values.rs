@@ -1919,6 +1919,30 @@ pub(super) fn expect_value(
     expect_value_with_direction(stream, line_num, params, None)
 }
 
+/// Control options use complex scalar variables but require real quantities.
+/// Preserve ordinary card/direction semantics while sharing the value grammar.
+pub(super) fn expect_control_real_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<Value, ParseError> {
+    read_value(stream, line_num, params, None, true)
+}
+
+fn control_real_value(value: crate::ComplexValue) -> Result<Value, ParseError> {
+    if !value.re.is_finite() || !value.im.is_finite() {
+        return Err(ParseError::InvalidValue(
+            "control option is nonfinite".into(),
+        ));
+    }
+    if !crate::netlist::expr::is_real(value) {
+        return Err(ParseError::InvalidValue(
+            "control option requires a real value; use real(), imag() or mag() explicitly".into(),
+        ));
+    }
+    Ok(value.re)
+}
+
 pub(super) fn expect_value_with_direction(
     stream: &mut TokenStream,
     line_num: usize,
@@ -1942,7 +1966,17 @@ pub(super) fn expect_value_capturing_direction(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
+) -> Result<Value, ParseError> {
+    read_value(stream, line_num, params, direction, false)
+}
+
+fn read_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
     mut direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
+    require_real: bool,
 ) -> Result<Value, ParseError> {
     if let Some(direction) = direction.as_deref_mut() {
         *direction = Ok(0.0.into());
@@ -1964,18 +1998,34 @@ pub(super) fn expect_value_capturing_direction(
 
     match &stream.peek().kind {
         TokenKind::Number(v) => {
-            let v = *v * sign;
+            let v = if require_real {
+                // The control expression grammar gives a trailing `j` an
+                // imaginary meaning, even though the deck lexer accepts it
+                // as a numeric unit suffix. Do not erase that distinction.
+                let value =
+                    crate::netlist::expr::eval_expression_complex(&stream.peek().lexeme, params)
+                        .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+                control_real_value(value)?
+            } else {
+                *v
+            } * sign;
             stream.advance();
             Ok(v)
         }
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
-            let value = if direction.is_some() {
+            let value = if require_real {
+                let value = crate::netlist::expr::eval_expression_complex(&expr, params)
+                    .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+                control_real_value(value)?
+            } else if direction.is_some() {
                 evaluate_value_capturing_direction(&expr, params, direction.as_deref_mut())
+                    .map_err(|e| ParseError::InvalidValue(e.to_string()))?
             } else {
-                stream.numeric_expression(&expr, params)
-            }
-            .map_err(|e| ParseError::InvalidValue(e.to_string()))?;
+                stream
+                    .numeric_expression(&expr, params)
+                    .map_err(|e| ParseError::InvalidValue(e.to_string()))?
+            };
             stream.advance();
             if let Some(direction) = direction {
                 *direction = std::mem::replace(direction, Ok(0.0.into())).map(|value| value * sign);
@@ -1984,7 +2034,12 @@ pub(super) fn expect_value_capturing_direction(
         }
         TokenKind::Ident(s) => {
             // Could be a parameter reference
-            if let Some(v) = params.get(s) {
+            let value = if require_real {
+                params.get_complex(s).map(control_real_value).transpose()?
+            } else {
+                params.get(s)
+            };
+            if let Some(v) = value {
                 if let Some(direction) = direction {
                     *direction = params
                         .parameter_direction(s)
@@ -1996,6 +2051,13 @@ pub(super) fn expect_value_capturing_direction(
                 stream.advance();
                 Ok(v * sign)
             } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
+                let v = if require_real {
+                    let value = crate::netlist::expr::eval_expression_complex(s, params)
+                        .map_err(|error| ParseError::InvalidValue(error.to_string()))?;
+                    control_real_value(value)?
+                } else {
+                    v
+                };
                 stream.advance();
                 Ok(v * sign)
             } else if stream.binding_numeric_values() {

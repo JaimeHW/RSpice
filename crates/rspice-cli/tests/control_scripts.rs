@@ -31,6 +31,50 @@ fn document(path: &Path) -> serde_json::Value {
 }
 
 #[test]
+fn complex_control_scalars_reach_print_publication_without_projection() {
+    let dir = test_dir("control-complex-scalars");
+    let deck = dir.join("complex.cir");
+    std::fs::write(
+        &deck,
+        "complex control\nV1 in 0 1\nR1 in 0 1k\n.control\n\
+         let z = 2-3j\nif 1e-300j\nop\nend\nprint z 2*$&z\n.endc\n.end\n",
+    )
+    .unwrap();
+    passed(&run(&deck, &dir.join("result.csv"), &[]));
+    assert!(dir.join("result.op-001.csv").is_file());
+    let print = document(&dir.join("result.control-001.json"));
+    assert_eq!(print["traces"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        print["traces"][0]["y"]["samples"],
+        serde_json::json!([[2.0, -3.0]])
+    );
+    assert_eq!(
+        print["traces"][1]["y"]["samples"],
+        serde_json::json!([[4.0, -6.0]])
+    );
+}
+
+#[test]
+fn complex_control_options_fail_before_result_publication() {
+    let dir = test_dir("control-complex-refusal");
+    for (index, command) in ["set num_threads=z", "option reltol=0.02 abstol={z}"]
+        .iter()
+        .enumerate()
+    {
+        let deck = dir.join(format!("invalid-{index}.cir"));
+        std::fs::write(
+            &deck,
+            format!("complex control\nV1 in 0 1\nR1 in 0 1k\n.control\nlet z = 2+1e-300j\n{command}\nop\n.endc\n.end\n"),
+        ).unwrap();
+        let result = run(&deck, &dir.join(format!("result-{index}.csv")), &[]);
+        assert!(!result.status.success());
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(error.contains("real value"), "{error}");
+        assert!(!dir.join(format!("result-{index}.op-001.csv")).exists());
+    }
+}
+
+#[test]
 fn event_flux_tolerance_cli_and_control_settings_validate_before_publication() {
     let dir = test_dir("control-event-flux");
     let deck = dir.join("flux.cir");

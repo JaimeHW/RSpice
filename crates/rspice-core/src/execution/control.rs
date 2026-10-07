@@ -4,12 +4,12 @@
 //! in source order. The caller executes that command before requesting another.
 //! Analysis, plotting and file commands are never silently discarded here.
 
-use crate::Value;
 use crate::abort_signal::AbortSignal;
 pub use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
 };
-use crate::netlist::expr::{ParamContext, eval_expression};
+use crate::netlist::expr::{ParamContext, eval_expression_complex, is_real};
+use crate::{ComplexValue, Value};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy)]
@@ -46,8 +46,8 @@ impl ControlScalarEvaluator for ParameterScalarEvaluator {
         expression: &str,
         variables: &ParamContext,
         line: usize,
-    ) -> Result<Value, ControlError> {
-        eval_expression(expression, variables).map_err(|error| {
+    ) -> Result<ComplexValue, ControlError> {
+        eval_expression_complex(expression, variables).map_err(|error| {
             ControlError::new(line, ControlErrorKind::Expression, error.to_string())
         })
     }
@@ -394,10 +394,10 @@ impl ControlSession<'_> {
         expression: &str,
         line: usize,
         evaluator: &mut dyn ControlScalarEvaluator,
-    ) -> Result<Value, ControlError> {
+    ) -> Result<ComplexValue, ControlError> {
         let expression = self.substitute(expression, line)?;
         let value = evaluator.evaluate_scalar(&expression, &self.variables, line)?;
-        if value.is_finite() {
+        if value.re.is_finite() && value.im.is_finite() {
             Ok(value)
         } else {
             Err(ControlError::new(
@@ -429,7 +429,7 @@ impl ControlSession<'_> {
             match &instruction.op {
                 Op::Let { name, expression } => {
                     let value = self.scalar(expression, line, evaluator)?;
-                    self.variables.set(name, value);
+                    self.variables.set_complex(name, value);
                     self.pc += 1;
                 }
                 Op::If {
@@ -437,7 +437,7 @@ impl ControlSession<'_> {
                     alternative,
                     ..
                 } => {
-                    self.pc = if self.scalar(condition, line, evaluator)? != 0.0 {
+                    self.pc = if self.scalar(condition, line, evaluator)? != ComplexValue::ZERO {
                         self.pc + 1
                     } else {
                         alternative + 1
@@ -447,7 +447,7 @@ impl ControlSession<'_> {
                 Op::Loop { kind, end } => {
                     match kind {
                         LoopKind::While(condition) => {
-                            if self.scalar(condition, line, evaluator)? == 0.0 {
+                            if self.scalar(condition, line, evaluator)? == ComplexValue::ZERO {
                                 if self
                                     .loops
                                     .last()
@@ -477,13 +477,17 @@ impl ControlSession<'_> {
                         }),
                         LoopKind::Repeat(expression) => {
                             let count = self.scalar(expression, line, evaluator)?;
-                            if count < 0.0 || count.fract() != 0.0 || count >= usize::MAX as f64 {
+                            if !is_real(count)
+                                || count.re < 0.0
+                                || count.re.fract() != 0.0
+                                || count.re >= usize::MAX as Value
+                            {
                                 return Err(syntax(
                                     line,
-                                    "repeat count must be a representable nonnegative integer",
+                                    "repeat count must be a real, representable nonnegative integer",
                                 ));
                             }
-                            if count == 0.0 {
+                            if count.re == 0.0 {
                                 self.pc = end + 1;
                                 continue;
                             }
@@ -491,7 +495,7 @@ impl ControlSession<'_> {
                                 opening: self.pc,
                                 end: *end,
                                 state: LoopState::Repeat {
-                                    remaining: count as usize,
+                                    remaining: count.re as usize,
                                 },
                             });
                         }
@@ -529,7 +533,8 @@ impl ControlSession<'_> {
                             continue;
                         }
                         if let LoopKind::Dowhile(condition) = kind {
-                            if self.scalar(condition, start.line, evaluator)? != 0.0 {
+                            if self.scalar(condition, start.line, evaluator)? != ComplexValue::ZERO
+                            {
                                 self.pc = opening + 1;
                                 continue;
                             }
@@ -632,17 +637,23 @@ impl ControlSession<'_> {
                 )?;
                 output.push_str(value);
             } else {
-                let value = eval_expression(&name, &self.variables).map_err(|error| {
+                let value = eval_expression_complex(&name, &self.variables).map_err(|error| {
                     ControlError::new(line, ControlErrorKind::Expression, error.to_string())
                 })?;
-                if !value.is_finite() {
+                if !value.re.is_finite() || !value.im.is_finite() {
                     return Err(ControlError::new(
                         line,
                         ControlErrorKind::Expression,
                         format!("variable '{name}' is nonfinite"),
                     ));
                 }
-                output.push_str(&format!("{value:.17e}"));
+                if is_real(value) {
+                    output.push_str(&format!("{:.17e}", value.re));
+                } else {
+                    // Group the entire value so surrounding multiplication,
+                    // negation and powers keep the authored precedence.
+                    output.push_str(&format!("({:.17e}{:+.17e}j)", value.re, value.im));
+                }
             }
             check_limit(
                 output.len(),

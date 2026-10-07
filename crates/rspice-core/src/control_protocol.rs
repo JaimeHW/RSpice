@@ -4,7 +4,7 @@
 //! consumes them. Keeping the vocabulary below both sides prevents either one
 //! from owning an interface the other must reach upward to use.
 
-use crate::Value;
+use crate::ComplexValue;
 use crate::netlist::expr::ParamContext;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,11 +50,13 @@ pub struct ControlCommand {
 }
 
 /// Hosts may extend scalar evaluation with values from completed datasets.
+/// Values must retain both components; real-only consumers validate them at
+/// their command boundary rather than projecting an expression's real part.
 pub trait ControlScalarEvaluator {
     fn evaluate_scalar(
         &mut self,
         expression: &str,
         variables: &ParamContext,
         line: usize,
-    ) -> Result<Value, ControlError>;
+    ) -> Result<ComplexValue, ControlError>;
 }

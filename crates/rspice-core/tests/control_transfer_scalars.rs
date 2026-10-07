@@ -4,8 +4,8 @@ use rspice_core::engine::ControlCircuit;
 use rspice_core::execution::control::{
     ControlCommand, ControlErrorKind, ControlLimits, ControlProgram, ControlScalarEvaluator,
 };
-use rspice_core::netlist::expr::{ParamContext, eval_expression};
-use rspice_core::{Engine, Netlist, NoAbort};
+use rspice_core::netlist::expr::{ParamContext, eval_expression_complex};
+use rspice_core::{ComplexValue, Engine, Netlist, NoAbort};
 
 fn circuit(source: &str, probe: &str) -> ControlCircuit {
     let netlist = Netlist::parse(source).unwrap();
@@ -73,7 +73,7 @@ fn unbounded_transfer_reads_fail_only_when_evaluated_and_respect_function_scope(
         ] {
             assert_eq!(
                 circuit.evaluate_scalar(expression, &variables, 11).unwrap(),
-                expected,
+                ComplexValue::from(expected),
                 "{dialect:?}: {expression}"
             );
         }
@@ -107,7 +107,13 @@ fn transfer_bindings_preserve_expression_dialects_and_random_evaluation_order() 
         variables.define_function("scaled", vec!["x".into()], "x*tf1.transfer_function");
         assert_eq!(
             circuit.evaluate_scalar("scaled(2)", &variables, 8).unwrap(),
-            6000.0
+            ComplexValue::from(6000.0)
+        );
+        assert_eq!(
+            circuit
+                .evaluate_scalar("scaled(1j)", &variables, 8)
+                .unwrap(),
+            ComplexValue::new(0.0, 3000.0)
         );
         let mut reference = ParamContext::new();
         reference.set_expression_dialect(dialect);
@@ -117,10 +123,12 @@ fn transfer_bindings_preserve_expression_dialects_and_random_evaluation_order() 
             "if(0,aunif(0,1),aunif(0,1))",
             "aunif(0,1)+2*aunif(0,1)",
             "if(1,5,unavailable)",
+            "if(1j,2+3j,unavailable)",
+            "aunif(0,1)+1j*aunif(0,1)",
         ] {
             assert_eq!(
                 circuit.evaluate_scalar(expression, &variables, 8).unwrap(),
-                eval_expression(expression, &reference).unwrap(),
+                eval_expression_complex(expression, &reference).unwrap(),
                 "{dialect:?}: {expression}"
             );
         }

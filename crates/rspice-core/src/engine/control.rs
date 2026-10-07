@@ -9,11 +9,11 @@ use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
 };
 use crate::netlist::expr::{
-    ParamContext, eval_expression, evaluate_complex_with, parse_expression,
+    ParamContext, eval_expression_complex, evaluate_complex_with, is_real, parse_expression,
 };
 use crate::netlist::{AnalysisCommand, Netlist};
 use crate::resource::{ResourceKind, ResourceLimitError};
-use crate::{AbortSignal, Value};
+use crate::{AbortSignal, ComplexValue, Value};
 use std::collections::BTreeMap;
 
 mod analysis;
@@ -529,14 +529,13 @@ impl ControlScalarEvaluator for ControlCircuit {
         expression: &str,
         variables: &ParamContext,
         line: usize,
-    ) -> Result<Value, ControlError> {
+    ) -> Result<ComplexValue, ControlError> {
         parse_expression(expression)
             .and_then(|expression| {
                 evaluate_complex_with(&expression, variables, &mut |name| {
                     presentation::resolve_transfer_scalar(self, name)
                 })
             })
-            .map(|value| value.re)
             .map_err(|error| {
                 ControlError::new(line, ControlErrorKind::Expression, error.to_string())
             })
@@ -544,17 +543,23 @@ impl ControlScalarEvaluator for ControlCircuit {
 }
 
 fn scalar(expression: &str, variables: &ParamContext, line: usize) -> Result<Value, ControlError> {
-    let value = eval_expression(expression, variables).map_err(|error| {
+    let value = eval_expression_complex(expression, variables).map_err(|error| {
         ControlError::new(line, ControlErrorKind::Expression, error.to_string())
     })?;
-    if value.is_finite() {
-        Ok(value)
-    } else {
+    if !value.re.is_finite() || !value.im.is_finite() {
         Err(ControlError::new(
             line,
             ControlErrorKind::Expression,
-            "alter value is nonfinite",
+            "command value is nonfinite",
         ))
+    } else if !is_real(value) {
+        Err(ControlError::new(
+            line,
+            ControlErrorKind::Expression,
+            "command requires a real value; use real(), imag() or mag() explicitly",
+        ))
+    } else {
+        Ok(value.re)
     }
 }
 

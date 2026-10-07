@@ -514,6 +514,15 @@ eager parameter error classes can still prevent temperature discovery. Further
 physical-override combinations, statistical/runtime binding, general graph and
 binding complexity, and broader resource qualification remain in the plan.
 
+Control scalar evaluation preserves both real and imaginary components through
+`let`, `$name`/`$&name` substitution and print samples. Conditions are true when
+either component is nonzero, including subnormal values. Repeat counts, circuit
+alterations, thread counts, plot limits and numeric control options require real
+values; use `real()`, `imag()` or `mag()` to request a projection explicitly.
+Nonfinite components are rejected before scalar assignment or publication.
+SDK hosts implementing `ControlScalarEvaluator::evaluate_scalar` must now return
+`ComplexValue`; real hosts can construct it with `ComplexValue::from(value)`.
+
 `ControlCircuit` executes `ac DATA=<table>` and `noise ... DATA=<table>` through
 the shared compact table runners. `ControlAnalysisResult::AcTable` and
 `NoiseTable` retain authored columns, canonical targets, accepted row coordinates,
