@@ -418,9 +418,28 @@ pub(in crate::netlist) fn parse_source_spec_text_with_direction(
     params: &ParamContext,
     direction: Option<&std::cell::RefCell<[Derivative; 3]>>,
 ) -> Result<SourceSpec, ParseError> {
+    finish_non_aborting_parse(parse_source_spec_text_with_direction_and_abort(
+        raw, line_num, params, direction, &NoAbort,
+    ))
+}
+
+pub(in crate::netlist) fn parse_source_spec_text_with_direction_and_abort(
+    raw: &str,
+    line_num: usize,
+    params: &ParamContext,
+    direction: Option<&std::cell::RefCell<[Derivative; 3]>>,
+    abort: &dyn AbortSignal,
+) -> Result<SourceSpec, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let tokens = tokenize(raw).map_err(|err| lex_to_parse_error(err, line_num))?;
-    let mut stream = TokenStream::new(tokens);
-    parse_source_spec_with_direction(&mut stream, line_num, params, direction)
+    let abort = NumericParseAbort::new(abort);
+    let mut stream = TokenStream::new(tokens).with_abort(&abort);
+    abort.finish(parse_source_spec_with_direction(
+        &mut stream,
+        line_num,
+        params,
+        direction,
+    ))
 }
 
 /// Resolve a source once in its lexical scope and retain mapped scalar values

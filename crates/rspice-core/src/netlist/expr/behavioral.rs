@@ -772,20 +772,36 @@ pub(crate) fn finalize_parameter_expressions_with_abort(
 /// quantity remain symbolic. Values are written back to their original
 /// ordinary/global namespace so ordinary-parameter shadowing remains intact.
 pub fn materialize_available_parameter_expressions(params: &mut ParamContext) -> usize {
+    materialize_available_parameter_expressions_with_abort(params, &NoAbort)
+        .expect("NoAbort cannot cancel parameter materialization")
+}
+
+pub(crate) fn materialize_available_parameter_expressions_with_abort(
+    params: &mut ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<usize, ParameterResolutionError> {
     let mut resolved = 0usize;
     let mut resolver = ParameterResolver::default();
 
     let mut ordinary = params.all_parameter_expressions();
     ordinary.sort_by(|left, right| left.0.cmp(&right.0));
     for (name, expression) in ordinary {
-        let Ok(prepared) = prepare_behavioral_expression(&name, params) else {
-            continue;
+        let prepared = match prepare_behavioral_expression_with_abort(&name, params, abort) {
+            Ok(prepared) => prepared,
+            Err(BehavioralPreparationError::Aborted) => {
+                return Err(ParameterResolutionError::Aborted);
+            }
+            Err(BehavioralPreparationError::Semantic(_)) => continue,
         };
         if behavioral_expression_references_runtime_quantity(&prepared) {
             continue;
         }
-        let Ok(value) = resolver.resolve(&name, &expression, params, &NoAbort) else {
-            continue;
+        let value = match resolver.resolve(&name, &expression, params, abort) {
+            Ok(value) => value,
+            Err(ParameterResolutionError::Aborted) => {
+                return Err(ParameterResolutionError::Aborted);
+            }
+            Err(_) => continue,
         };
         params.set_complex(&name, value);
         resolved += 1;
@@ -799,20 +815,28 @@ pub fn materialize_available_parameter_expressions(params: &mut ParamContext) ->
         } else {
             name.as_str()
         };
-        let Ok(prepared) = prepare_behavioral_expression(root, params) else {
-            continue;
+        let prepared = match prepare_behavioral_expression_with_abort(root, params, abort) {
+            Ok(prepared) => prepared,
+            Err(BehavioralPreparationError::Aborted) => {
+                return Err(ParameterResolutionError::Aborted);
+            }
+            Err(BehavioralPreparationError::Semantic(_)) => continue,
         };
         if behavioral_expression_references_runtime_quantity(&prepared) {
             continue;
         }
-        let Ok(value) = resolver.resolve_global(&name, &expression, params, &NoAbort) else {
-            continue;
+        let value = match resolver.resolve_global(&name, &expression, params, abort) {
+            Ok(value) => value,
+            Err(ParameterResolutionError::Aborted) => {
+                return Err(ParameterResolutionError::Aborted);
+            }
+            Err(_) => continue,
         };
         params.set_global_complex(&name, value);
         resolved += 1;
     }
 
-    resolved
+    Ok(resolved)
 }
 
 fn validate_parameter_expression_definitions(

@@ -10,7 +10,6 @@ use crate::config::ExpressionDialect;
 use super::data_table::data_table_parameter_name_is_valid;
 use super::expr::{
     behavioral_expression_references_runtime_quantity, eval_expression,
-    prepare_behavioral_expression,
 };
 use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, parse_spice_value, tokenize};
@@ -200,7 +199,7 @@ use scoping::*;
 pub use source_specs::{independent_source_file_dependency, parse_source_spec_text};
 pub(super) use source_specs::{
     map_source_spec_values, normalize_deferred_source_file_path,
-    parse_source_spec_text_with_direction,
+    parse_source_spec_text_with_direction, parse_source_spec_text_with_direction_and_abort,
 };
 use state::*;
 use tlines::*;
@@ -3228,7 +3227,10 @@ fn resolve_top_level_deferred_source_specs_with_abort(
 ) -> Result<(), ParseWithAbortError> {
     for (index, element) in elements.iter_mut().enumerate() {
         poll_parse_abort(abort, index)?;
-        let source_error = |error: ParseError| -> ParseWithAbortError {
+        let source_error = |error: ParseWithAbortError| -> ParseWithAbortError {
+            let ParseWithAbortError::Parse(error) = error else {
+                return error;
+            };
             match origins.get(&element.name) {
                 Some(origin) => ParseError::Syntax {
                     line: origin.line,
@@ -3243,7 +3245,7 @@ fn resolve_top_level_deferred_source_specs_with_abort(
                 if !params.expression_references_spectre_statistics(raw_spec) =>
             {
                 Some(
-                    resolve_top_level_source_kind(&element.name, raw_spec, params, true)
+                    resolve_top_level_source_kind(&element.name, raw_spec, params, true, abort)
                         .map_err(source_error)?,
                 )
             }
@@ -3251,7 +3253,7 @@ fn resolve_top_level_deferred_source_specs_with_abort(
                 if !params.expression_references_spectre_statistics(raw_spec) =>
             {
                 Some(
-                    resolve_top_level_source_kind(&element.name, raw_spec, params, false)
+                    resolve_top_level_source_kind(&element.name, raw_spec, params, false, abort)
                         .map_err(source_error)?,
                 )
             }
@@ -3388,28 +3390,39 @@ fn resolve_top_level_source_kind(
     raw_spec: &str,
     params: &ParamContext,
     voltage_source: bool,
-) -> Result<ElementKind, ParseError> {
-    match parse_source_spec_text(raw_spec, 0, params) {
+    abort: &dyn AbortSignal,
+) -> Result<ElementKind, ParseWithAbortError> {
+    match parse_source_spec_text_with_direction_and_abort(raw_spec, 0, params, None, abort) {
         Ok(spec) if voltage_source => Ok(ElementKind::VoltageSource(spec)),
         Ok(spec) => Ok(ElementKind::CurrentSource(spec)),
-        Err(source_error) => {
+        Err(ParseWithAbortError::Aborted) => Err(ParseWithAbortError::Aborted),
+        Err(ParseWithAbortError::Parse(source_error)) => {
             let Some(expression) = grouped_source_expression(raw_spec) else {
                 return Err(top_level_source_resolution_error(
                     element_name,
                     raw_spec,
                     source_error,
-                ));
+                )
+                .into());
             };
             // A failed constant value remains an error; only runtime quantities
             // justify converting an independent source to a behavioral source.
-            if !prepare_behavioral_expression(expression, params)
-                .is_ok_and(|prepared| behavioral_expression_references_runtime_quantity(&prepared))
-            {
+            let runtime = match super::expr::prepare_behavioral_expression_with_abort(
+                expression, params, abort,
+            ) {
+                Ok(prepared) => behavioral_expression_references_runtime_quantity(&prepared),
+                Err(super::expr::BehavioralPreparationError::Aborted) => {
+                    return Err(ParseWithAbortError::Aborted);
+                }
+                Err(super::expr::BehavioralPreparationError::Semantic(_)) => false,
+            };
+            if !runtime {
                 return Err(top_level_source_resolution_error(
                     element_name,
                     raw_spec,
                     source_error,
-                ));
+                )
+                .into());
             }
             if voltage_source {
                 Ok(ElementKind::BehavioralVoltage {
@@ -4047,7 +4060,11 @@ fn resolve_static_model_expression_params_with_abort(
     ensure_parse_not_aborted(abort)?;
 
     let mut context = state.params.clone();
-    crate::netlist::expr::materialize_available_parameter_expressions(&mut context);
+    crate::netlist::expr::materialize_available_parameter_expressions_with_abort(
+        &mut context,
+        abort,
+    )
+    .map_err(|_| ParseWithAbortError::Aborted)?;
 
     for (index, model) in state.models.iter_mut().enumerate() {
         poll_parse_abort(abort, index)?;
@@ -4075,7 +4092,8 @@ fn resolve_static_model_expression_params_with_abort(
             let mut unresolved = Vec::with_capacity(deferred.len());
             let mut progressed = false;
 
-            for (name, expression) in deferred {
+            for (parameter_index, (name, expression)) in deferred.into_iter().enumerate() {
+                poll_parse_abort(abort, parameter_index)?;
                 // Analysis/runtime quantities (TEMP, TIME, VT, GMIN, and
                 // circuit probes) must remain deferred.  Evaluating them
                 // against the parser's nominal context would silently freeze
@@ -4089,11 +4107,20 @@ fn resolve_static_model_expression_params_with_abort(
                     unresolved.push((name, expression));
                     continue;
                 }
-                match crate::netlist::expr::eval_expression(&expression, &context) {
+                match crate::netlist::expr::eval_expression_complex_with_abort(
+                    &expression,
+                    &context,
+                    abort,
+                )
+                .map(|value| value.re)
+                {
                     Ok(value) if value.is_finite() => {
                         context.set(&name, value);
                         model.params.push((name, value));
                         progressed = true;
+                    }
+                    Err(super::expr::ExpressionEvaluationError::Aborted) => {
+                        return Err(ParseWithAbortError::Aborted);
                     }
                     _ => unresolved.push((name, expression)),
                 }
