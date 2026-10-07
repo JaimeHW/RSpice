@@ -2,6 +2,71 @@ use super::tests::report_with_measurement;
 use super::*;
 
 #[test]
+fn junit_preserves_legal_whitespace_in_names_and_diagnostics() {
+    let text = "quotes ' \" & < >\t\r\nΩ 😀";
+    let mut report = report_with_measurement(None);
+    report.name = text.into();
+    report.netlist = text.into();
+    report.measurements[0].name = text.into();
+    report.measurements[0].error = Some(text.into());
+    let mut bytes = Vec::new();
+    write_junit_report(&mut bytes, Path::new("report.xml"), &[report]).unwrap();
+    let xml = String::from_utf8(bytes).unwrap();
+    let document = roxmltree::Document::parse(&xml).unwrap();
+    let suite = document
+        .descendants()
+        .find(|node| node.has_tag_name("testsuite"))
+        .unwrap();
+    assert_eq!(suite.attribute("name"), Some(text));
+    let case = document
+        .descendants()
+        .filter(|node| node.has_tag_name("testcase"))
+        .nth(1)
+        .unwrap();
+    assert_eq!(case.attribute("name"), Some(text));
+    assert_eq!(case.attribute("classname"), Some(text));
+    assert_eq!(
+        case.children()
+            .find(|node| node.has_tag_name("failure"))
+            .unwrap()
+            .text(),
+        Some(text)
+    );
+}
+
+#[test]
+fn junit_forbidden_characters_cannot_make_the_report_unreadable() {
+    let mut report = report_with_measurement(None);
+    let forbidden = "bad\0\u{1}\u{b}\u{1f}\u{fffe}\u{ffff}text";
+    report.name = forbidden.into();
+    report.netlist = forbidden.into();
+    report.passed = false;
+    report.error = Some(forbidden.into());
+    report.measurements[0].name = forbidden.into();
+    report.measurements[0].error = Some(forbidden.into());
+    let mut bytes = Vec::new();
+    write_junit_report(&mut bytes, Path::new("report.xml"), &[report]).unwrap();
+    let xml = String::from_utf8(bytes).unwrap();
+    let document = roxmltree::Document::parse(&xml).unwrap();
+    let suite = document
+        .descendants()
+        .find(|node| node.has_tag_name("testsuite"))
+        .unwrap();
+    assert_eq!(suite.attribute("failures"), Some("2"));
+    assert_eq!(
+        suite.attribute("name"),
+        Some(r"bad\u{0}\u{1}\u{b}\u{1f}\u{fffe}\u{ffff}text")
+    );
+    assert_eq!(
+        document
+            .descendants()
+            .filter(|node| node.has_tag_name("failure"))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn tap_names_cannot_introduce_directives_or_extra_results() {
     let mut report = report_with_measurement(Some(1.0));
     report.name = "deck # TODO ignored\r\nnot ok 9 - injected".into();

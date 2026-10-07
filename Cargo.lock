@@ -5406,6 +5406,7 @@ dependencies = [
  "log",
  "mimalloc",
  "rayon",
+ "roxmltree",
  "rspice-core",
  "rspice-formats",
  "rspice-output",

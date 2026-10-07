@@ -317,6 +317,8 @@ not change or remove any verdict.
 TAP report names escape directive markers and line breaks so authored text
 cannot change a test's verdict or add test records. YAML diagnostics preserve
 the original messages, including quotes and control characters.
+JUnit reports preserve tabs and line endings through XML character references;
+characters forbidden by XML 1.0 are displayed as Unicode escapes.
 
 **A failed measurement fails the run with exit code 3**, whether from a missed
 `GOAL`, an unevaluated statement, or a measurement whose analysis never ran.

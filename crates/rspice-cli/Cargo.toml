@@ -53,3 +53,6 @@ windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+roxmltree = "0.21.1"

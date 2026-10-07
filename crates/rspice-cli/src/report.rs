@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::Path;
 
 mod encoding;
-use encoding::{tap_description, tap_yaml_scalar};
+use encoding::{tap_description, tap_yaml_scalar, xml_escape};
 
 #[cfg(test)]
 mod encoding_tests;
@@ -570,15 +570,6 @@ fn write_line<W: Write + ?Sized>(
     writer
         .write_all(b"\n")
         .map_err(|e| CliError::output_error(path, e))
-}
-
-/// Escape XML special characters
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
 }
 
 #[cfg(test)]
