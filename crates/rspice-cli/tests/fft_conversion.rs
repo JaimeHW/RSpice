@@ -84,6 +84,49 @@ fn fft_json_rejects_repeated_coefficients_before_conversion_or_blessing() {
     }
 }
 
+#[test]
+fn fft_tsv_cannot_skip_a_record_whose_fields_are_all_empty() {
+    let directory = test_dir("fft_empty_tsv_record");
+    let json = source(&directory);
+    let input = directory.join("input.tsv");
+    let golden = directory.join("golden.tsv");
+    let result = convert(&json, &golden, "json", "tsv", &[]);
+    assert!(result.status.success(), "{result:?}");
+    let original = std::fs::read_to_string(&golden).unwrap();
+    let (header, rows) = original.split_once('\n').unwrap();
+    let empty_row = "\t".repeat(header.split('\t').count() - 1);
+    std::fs::write(&input, format!("{header}\n{empty_row}\n{rows}")).unwrap();
+    let check = |output: Output| {
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("schema_version"),
+            "{output:?}"
+        );
+    };
+    for format in ["json", "csv", "tsv", "raw", "ascii", "hdf5"] {
+        let output = directory.join(format!("protected.{format}"));
+        std::fs::write(&output, "predecessor").unwrap();
+        check(convert(&input, &output, "tsv", format, &[]));
+        assert_eq!(std::fs::read_to_string(output).unwrap(), "predecessor");
+    }
+    for bless in [false, true] {
+        let mut args = vec!["compare", input.to_str().unwrap(), golden.to_str().unwrap()];
+        if bless {
+            args.push("--bless");
+        }
+        check(cli(&args));
+        assert_eq!(std::fs::read_to_string(&golden).unwrap(), original);
+    }
+    let missing = directory.join("missing.tsv");
+    check(cli(&[
+        "compare",
+        input.to_str().unwrap(),
+        missing.to_str().unwrap(),
+        "--bless",
+    ]));
+    assert!(!missing.exists());
+}
+
 /// Replace only FFT provenance, preserving the exact ASCII or binary payload.
 fn rewrite_raw_metadata(
     bytes: &[u8],

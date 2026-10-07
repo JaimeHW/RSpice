@@ -133,7 +133,7 @@ impl FftBundle {
         limits: rspice_core::ResourceLimits,
     ) -> Result<Self, CliError> {
         let err = |message| conversion_error(path, message);
-        let mut rows = delimited_records(content);
+        let mut rows = delimited_records(content, separator);
         let header = parse_delimited_record(
             rows.next().ok_or_else(|| err("empty FFT table".into()))?.1,
             separator,

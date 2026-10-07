@@ -3,7 +3,7 @@
 /// Borrow complete records, retaining embedded line endings and physical lines.
 /// Quote syntax is checked by `parse_record`; escaped pairs leave quote state
 /// unchanged here, so their contents cannot split a logical record.
-pub(crate) fn records(content: &str) -> impl Iterator<Item = (usize, &str)> {
+pub(crate) fn records(content: &str, separator: char) -> impl Iterator<Item = (usize, &str)> {
     // A UTF-8 signature is transport metadata only at the start of the file.
     // Keep U+FEFF inside quoted fields and in all subsequent records intact.
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
@@ -40,7 +40,10 @@ pub(crate) fn records(content: &str) -> impl Iterator<Item = (usize, &str)> {
             None
         }
     })
-    .filter(|(_, record)| !record.trim().is_empty())
+    // In TSV a tab is both whitespace and a field separator. A record made
+    // only of separators still contains fields; skipping it can discard a
+    // header or conceal a row whose numeric samples are missing.
+    .filter(move |(_, record)| !record.trim().is_empty() || record.contains(separator))
 }
 
 pub(crate) fn parse_record(line: &str, separator: char) -> Result<Vec<String>, String> {

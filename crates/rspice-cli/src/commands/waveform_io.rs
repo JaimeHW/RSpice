@@ -584,7 +584,7 @@ fn load_operating_point_report(
         return Ok(None);
     }
 
-    let mut rows = delimited_records(content).skip(1).peekable();
+    let mut rows = delimited_records(content, separator).skip(1).peekable();
     let Some(&(line_number, first)) = rows.peek() else {
         return Ok(None);
     };
@@ -666,7 +666,7 @@ fn parse_delimited(
     separator: char,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
-    let mut lines = delimited_records(content);
+    let mut lines = delimited_records(content, separator);
     let header = parse_delimited_record(
         lines
             .next()
