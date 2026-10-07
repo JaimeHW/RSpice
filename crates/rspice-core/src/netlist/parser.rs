@@ -4358,8 +4358,11 @@ fn process_line_gated(
             capture.has_uncaptured_dependencies = true;
         }
         return state
-            .apply_conditional_directive(directive, line_num, origin)
-            .map_err(map_current_error);
+            .apply_conditional_directive(directive, line_num, origin, abort)
+            .map_err(|error| match error {
+                ParseWithAbortError::Aborted => ParseWithAbortError::Aborted,
+                ParseWithAbortError::Parse(error) => map_current_error(error),
+            });
     }
     if state.conditionals_suppress() {
         return Ok(());

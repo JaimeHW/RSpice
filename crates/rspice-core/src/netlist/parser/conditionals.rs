@@ -105,12 +105,13 @@ impl ParseState {
         directive: ConditionalDirective<'_>,
         line_num: usize,
         origin: &NetlistSourceLocation,
-    ) -> Result<(), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
         match directive {
             ConditionalDirective::If(condition) => {
                 let parent_active = !self.conditionals_suppress();
                 let decision = if parent_active {
-                    self.condition_decision(condition, line_num, origin)?
+                    self.condition_decision(condition, line_num, origin, abort)?
                 } else {
                     Some(false)
                 };
@@ -140,12 +141,13 @@ impl ParseState {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: ".elseif after .else".to_string(),
-                    });
+                    }
+                    .into());
                 }
                 if frame.branch_taken || frame.unresolved || !parent_active {
                     frame.active = false;
                 } else {
-                    let decision = self.condition_decision(condition, line_num, origin)?;
+                    let decision = self.condition_decision(condition, line_num, origin, abort)?;
                     let frame = self
                         .conditional_stack
                         .last_mut()
@@ -172,7 +174,8 @@ impl ParseState {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: "duplicate .else".to_string(),
-                    });
+                    }
+                    .into());
                 }
                 frame.else_seen = true;
                 frame.active = parent_active && !frame.branch_taken && !frame.unresolved;
@@ -195,17 +198,26 @@ impl ParseState {
         condition: &str,
         line_num: usize,
         origin: &NetlistSourceLocation,
-    ) -> Result<Option<bool>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<bool>, ParseWithAbortError> {
         let text = condition.trim();
         if text.is_empty() {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: ".if/.elseif requires a condition expression".to_string(),
-            });
+            }
+            .into());
         }
-        match eval_expression(text, self.condition_scope()) {
-            Ok(value) => Ok(Some(value != 0.0)),
-            Err(error) => {
+        match crate::netlist::expr::eval_expression_complex_with_abort(
+            text,
+            self.condition_scope(),
+            abort,
+        ) {
+            Ok(value) => Ok(Some(value.re != 0.0)),
+            Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
+                Err(ParseWithAbortError::Aborted)
+            }
+            Err(crate::netlist::expr::ExpressionEvaluationError::Expression(error)) => {
                 self.temperature_options.retain_card_error(
                     ParseError::Syntax {
                         line: line_num,
