@@ -2,6 +2,28 @@
 use super::*;
 use crate::analysis::TransferFunctionResult;
 use crate::execution::result_document::{ResultScalar, ScalarUnavailability, ScalarValue};
+use crate::netlist::expr::ExprError;
+
+pub(in crate::engine::control) fn resolve_scalar(
+    circuit: &ControlCircuit,
+    name: &str,
+) -> Result<Option<ComplexValue>, ExprError> {
+    let Ok((dataset, raw)) = circuit.qualified(name, 0) else {
+        return Ok(None);
+    };
+    let Some(selected) = select(dataset, raw) else {
+        return Ok(None);
+    };
+    let value = selected.sample(0).ok_or_else(|| {
+        ExprError::InvalidArgument(format!("transfer-function scalar '{name}' is unavailable"))
+    })?;
+    if !value.re.is_finite() || !value.im.is_finite() {
+        return Err(ExprError::InvalidArgument(format!(
+            "transfer-function scalar '{name}' is unbounded"
+        )));
+    }
+    Ok(Some(value))
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum TransferColumn {

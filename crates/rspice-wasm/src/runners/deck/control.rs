@@ -319,6 +319,23 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn transfer_scalar_assignments_drive_subsequent_analyses() {
+        let deck = run_authored_deck_document_detailed("TF\nI1 0 out 0\nR1 out 0 3k\n.control\ntf V(out) I1\nlet resistance = tf1.transfer_function*2\nif resistance > 5000\nalter R1 $resistance\ntf V(out) I1\nend\nprint tf1.transfer_function tf2.transfer_function\n.endc\n.end\n").unwrap();
+        assert_eq!(deck.control_datasets, ["tf1", "tf2"]);
+        let rspice_core::engine::ControlPresentationKind::Print(traces) =
+            &deck.control_presentations[0].kind
+        else {
+            panic!("print");
+        };
+        assert_eq!(traces.len(), 2);
+        for (trace, expected) in traces.iter().zip([3000.0, 6000.0]) {
+            assert!((trace.y.samples[0].re - expected).abs() < 1e-7);
+            assert_eq!(trace.y.unit, SignalUnit::Ohm);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn transfer_function_cancellation_and_failed_probes_publish_no_deck() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         struct CancelAfter {

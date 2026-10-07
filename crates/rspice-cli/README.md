@@ -111,6 +111,9 @@ impedances print as `inf`/`-inf` and retain typed scalar determinations in versi
 control-presentation JSON. Its `scalars[].position` preserves authored ordering
 among scalar entries and finite traces; ordinary finite presentations remain
 version 1. Plotting requires finite samples.
+`let`, `if` and loop conditions can read finite TF scalars, for example
+`let resistance = tf1.input_impedance`. Reading an infinite impedance in a scalar
+expression reports an error; an unselected `if` branch remains unevaluated.
 An explicit command-line analysis mode continues to supersede authored cards.
 
 Frequency tables retain authored row order, including repeated or decreasing

@@ -22,7 +22,17 @@ pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
 
 /// Evaluate an expression with the given context, preserving complex values.
 pub fn evaluate_complex(expr: &Expr, ctx: &ParamContext) -> Result<ComplexValue, ExprError> {
-    let value = evaluate_complex_raw(expr, ctx)?;
+    evaluate_complex_with(expr, ctx, &mut |_| Ok(None))
+}
+
+/// Resolve host scalars at the actual parameter read, preserving lazy branches,
+/// user-function argument scope, random draws and dialect normalization.
+pub(crate) fn evaluate_complex_with(
+    expr: &Expr,
+    ctx: &ParamContext,
+    resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+) -> Result<ComplexValue, ExprError> {
+    let value = ExpressionEvaluator::new(ctx).evaluate_with(expr, resolver)?;
     Ok(if ctx.expression_dialect() == ExpressionDialect::Xyce {
         normalize_xyce_expression_result(value)
     } else {
@@ -923,6 +933,14 @@ impl<'a> ExpressionEvaluator<'a> {
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Result<ComplexValue, ExprError> {
+        self.evaluate_with(expr, &mut |_| Ok(None))
+    }
+
+    fn evaluate_with(
+        &mut self,
+        expr: &Expr,
+        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+    ) -> Result<ComplexValue, ExprError> {
         let mut frames = vec![EvalFrame::Eval(expr.clone(), EvalScope::global())];
         let mut values = Vec::<EvaluatedValue>::new();
 
@@ -939,7 +957,7 @@ impl<'a> ExpressionEvaluator<'a> {
                         )));
                     }
                     Expr::Param(name) => {
-                        self.push_param_eval(&mut frames, &mut values, name, scope)?
+                        self.push_param_eval(&mut frames, &mut values, name, scope, resolver)?
                     }
                     Expr::UnaryOp { op, operand } => {
                         frames.push(EvalFrame::ApplyUnary(op));
@@ -1077,6 +1095,7 @@ impl<'a> ExpressionEvaluator<'a> {
         values: &mut Vec<EvaluatedValue>,
         name: String,
         scope: EvalScope,
+        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
     ) -> Result<(), ExprError> {
         if let Some((function_name, arg_name, binding)) = self.function_arg_binding(&name, &scope) {
             match binding {
@@ -1097,11 +1116,14 @@ impl<'a> ExpressionEvaluator<'a> {
             return Ok(());
         }
 
-        values.push(EvaluatedValue::runtime(
+        let value = if let Some(value) = resolver(&name)? {
+            value
+        } else {
             self.ctx
                 .get_complex(&name)
-                .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?,
-        ));
+                .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?
+        };
+        values.push(EvaluatedValue::runtime(value));
         Ok(())
     }
 

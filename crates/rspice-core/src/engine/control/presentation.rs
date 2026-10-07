@@ -9,6 +9,7 @@ use crate::netlist::expr::{
     parse_control_expression_prefix_with_abort,
 };
 use crate::signal_unit::SignalUnit;
+pub(super) use transfer::resolve_scalar as resolve_transfer_scalar;
 
 /// A canonical vector identity. Dataset names remain stable for the session.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

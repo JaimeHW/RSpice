@@ -8,7 +8,9 @@ use crate::analysis::transient::TransientResult;
 use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
 };
-use crate::netlist::expr::{ParamContext, eval_expression};
+use crate::netlist::expr::{
+    ParamContext, eval_expression, evaluate_complex_with, parse_expression,
+};
 use crate::netlist::{AnalysisCommand, Netlist};
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{AbortSignal, Value};
@@ -528,9 +530,16 @@ impl ControlScalarEvaluator for ControlCircuit {
         variables: &ParamContext,
         line: usize,
     ) -> Result<Value, ControlError> {
-        eval_expression(expression, variables).map_err(|error| {
-            ControlError::new(line, ControlErrorKind::Expression, error.to_string())
-        })
+        parse_expression(expression)
+            .and_then(|expression| {
+                evaluate_complex_with(&expression, variables, &mut |name| {
+                    presentation::resolve_transfer_scalar(self, name)
+                })
+            })
+            .map(|value| value.re)
+            .map_err(|error| {
+                ControlError::new(line, ControlErrorKind::Expression, error.to_string())
+            })
     }
 }
 

@@ -556,6 +556,11 @@ among scalar entries and vector traces. They are never converted into finite
 plot samples. Hosts must publish these scalar determinations as well as `kind`.
 Failed or cancelled analyses publish no dataset and consume no ordinal; the
 three retained transfer values count against the cumulative result allowance.
+Control scalar assignments and conditions can read these parameter-style names,
+including `let gain = tf1.transfer_function`. Reads use the same lazy expression
+evaluation and user-function scoping as ordinary parameters. An active read of
+an infinite impedance returns an expression error, rather than a finite overflow
+sentinel; an unselected `if` branch does not read it.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

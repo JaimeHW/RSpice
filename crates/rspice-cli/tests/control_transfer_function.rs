@@ -169,6 +169,20 @@ fn unbounded_control_print_keeps_typed_evidence_and_authored_order() {
 }
 
 #[test]
+fn transfer_scalar_assignments_drive_subsequent_analyses() {
+    let directory = common::test_dir("tf-scalar-workflow");
+    let input = directory.join("scalar.cir");
+    std::fs::write(&input, "TF\nI1 0 out 0\nR1 out 0 3k\n.control\ntf V(out) I1\nlet resistance = tf1.transfer_function*2\nif resistance > 5000\nalter R1 $resistance\ntf V(out) I1\nend\n.endc\n.end\n").unwrap();
+    success(run(&input, &directory.join("scalar.json"), "json"));
+    let wire: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(directory.join("scalar.tf-002.json")).unwrap(),
+    )
+    .unwrap();
+    let gain = wire["scalars"][0]["value"]["value"].as_f64().unwrap();
+    assert!((gain - 6000.0).abs() < 1e-7, "{wire}");
+}
+
+#[test]
 fn failed_transfer_after_an_ordinary_analysis_rolls_back_output() {
     let directory = common::test_dir("tf-control-rollback");
     let input = directory.join("failed.cir");
