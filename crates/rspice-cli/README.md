@@ -449,7 +449,9 @@ analysis grid. The `$timescale` is the coarsest period that keeps every event
 time an exact integer tick, so a run whose edges land on nanoseconds is written
 `1 ns`; a time that is not a whole number of femtoseconds is refused by name
 rather than quantised. VCD has four bit states and no drive strength, so the
-level survives and the XSPICE strength band does not.
+level survives and the XSPICE strength band does not. Floating-point roundoff
+is tolerated only when distinct recorded times stay distinct on the tick grid;
+an export that would merge event times is refused, even across separate signals.
 
 A **declared digital bus**, today a vector discrete boundary port of a mixed
 Verilog-AMS module, is written as one `$var wire N` named `bus [msb:lsb]`, with

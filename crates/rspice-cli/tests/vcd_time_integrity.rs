@@ -161,6 +161,42 @@ fn close_events_on_long_timelines_keep_distinct_ticks() {
 }
 
 #[test]
+fn distinct_event_times_must_not_merge_even_across_signals() {
+    let dir = test_dir("vcd_distinct_time_collision");
+    let input = dir.join("source.json");
+    let output = dir.join("events.vcd");
+    let first = 1e-9_f64;
+    let next = first.next_up();
+    for signals in [
+        serde_json::json!([
+            {"name": "D(a)", "type": "digital", "values": [0.0, 1.0, 0.0]}
+        ]),
+        serde_json::json!([
+            {"name": "D(a)", "type": "digital", "values": [0.0, 1.0, 1.0]},
+            {"name": "D(b)", "type": "digital", "values": [0.0, 0.0, 1.0]}
+        ]),
+    ] {
+        std::fs::write(
+            &input,
+            serde_json::json!({
+                "scale": {"name": "time", "type": "time", "values": [0.0, first, next]},
+                "signals": signals,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(&output, "predecessor").unwrap();
+        let converted = convert(&input, &output, "vcd", &[]);
+        assert_eq!(converted.status.code(), Some(1), "{converted:?}");
+        assert!(
+            String::from_utf8_lossy(&converted.stderr).contains("distinct event times"),
+            "{converted:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+    }
+}
+
+#[test]
 fn vcd_clipping_uses_seconds_after_converting_the_declared_time_unit() {
     let dir = test_dir("vcd_scaled_time_clipping");
     let input = dir.join("source.json");

@@ -38,7 +38,7 @@ use crate::io::vcd::{
     is_writable_variable_name,
 };
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 /// Femtoseconds in one second: the finest tick VCD's `$timescale` can name.
 const FEMTOSECONDS_PER_SECOND: f64 = 1e15;
@@ -74,6 +74,22 @@ pub enum EventProjectionError {
         node: String,
         /// The rejected time, in seconds.
         time: Value,
+    },
+
+    /// Distinct recorded times would become simultaneous on the tick grid.
+    #[error(
+        "node '{node}' has an event at {time} s that shares femtosecond tick {tick} with \
+         an event at {other_time} s; VCD export would merge distinct event times"
+    )]
+    TimeCollision {
+        /// The node whose event time was rejected.
+        node: String,
+        /// The rejected time, in seconds.
+        time: Value,
+        /// The different time already assigned to this tick, in seconds.
+        other_time: Value,
+        /// The conflicting position in whole femtoseconds.
+        tick: u64,
     },
 
     /// The time is negative, not finite, or past the last tick a `u64` can
@@ -267,6 +283,8 @@ pub fn digital_value_from_vcd_bit(bit: VcdBit) -> DigitalValue {
 /// exact tick at any scale and is refused as
 /// [`EventProjectionError::InexactTime`]: quantising it silently would move an
 /// edge, and an event dump that moves edges is worse than no dump.
+/// Relative floating-point roundoff is tolerated only when it does not merge
+/// distinct recorded times, including times belonging to different signals.
 ///
 /// With no positive event time there is nothing to choose between the scales,
 /// and the finest is used.
@@ -287,9 +305,10 @@ pub fn event_vcd_document(
     )?;
 
     let mut pending: Vec<PendingSignal> = Vec::new();
+    let mut event_times = HashMap::new();
     let mut claimed: BTreeSet<String> = BTreeSet::new();
     for bus in digital_buses {
-        pending.push(bus_signal(bus, digital_traces)?);
+        pending.push(bus_signal(bus, digital_traces, &mut event_times)?);
         claimed.extend(
             bus.members
                 .iter()
@@ -305,7 +324,12 @@ pub fn event_vcd_document(
         let mut points = Vec::new();
         let mut previous: Option<Value> = None;
         for point in &trace.points {
-            let femtoseconds = event_femtoseconds(&trace.node_name, point.time, &mut previous)?;
+            let femtoseconds = event_femtoseconds(
+                &trace.node_name,
+                point.time,
+                &mut previous,
+                &mut event_times,
+            )?;
             points.push((
                 femtoseconds,
                 VcdValue::Logic(vec![digital_value_to_vcd_bit(point.value)]),
@@ -322,7 +346,12 @@ pub fn event_vcd_document(
         let mut points = Vec::new();
         let mut previous: Option<Value> = None;
         for point in &trace.points {
-            let femtoseconds = event_femtoseconds(&trace.node_name, point.time, &mut previous)?;
+            let femtoseconds = event_femtoseconds(
+                &trace.node_name,
+                point.time,
+                &mut previous,
+                &mut event_times,
+            )?;
             if !point.value.is_finite() {
                 return Err(EventProjectionError::NonFiniteValue {
                     node: trace.node_name.clone(),
@@ -339,6 +368,7 @@ pub fn event_vcd_document(
         });
     }
 
+    drop(event_times);
     let timescale = choose_timescale(pending.iter().flat_map(|signal| &signal.points));
     let period = timescale.femtoseconds();
     let mut document = VcdDocument::new(timescale);
@@ -389,6 +419,7 @@ fn bus_reference(bus: &DigitalBusDeclaration) -> String {
 fn bus_signal(
     bus: &DigitalBusDeclaration,
     digital_traces: &[DigitalTrace],
+    event_times: &mut HashMap<u64, Value>,
 ) -> Result<PendingSignal, EventProjectionError> {
     let reference = bus_reference(bus);
     let name = checked_node_name(&reference)?;
@@ -408,7 +439,7 @@ fn bus_signal(
             })?;
         let mut previous: Option<Value> = None;
         for point in &trace.points {
-            event_femtoseconds(&trace.node_name, point.time, &mut previous)?;
+            event_femtoseconds(&trace.node_name, point.time, &mut previous, event_times)?;
         }
         histories.push(
             trace
@@ -430,7 +461,7 @@ fn bus_signal(
         source,
     })?;
     for (time, codes) in events {
-        let femtoseconds = event_femtoseconds(&reference, time, &mut previous)?;
+        let femtoseconds = event_femtoseconds(&reference, time, &mut previous, event_times)?;
         let bits = codes
             .into_iter()
             // Every code here is `event_code` of a value read two statements
@@ -720,6 +751,7 @@ fn event_femtoseconds(
     node: &str,
     time: Value,
     previous: &mut Option<Value>,
+    event_times: &mut HashMap<u64, Value>,
 ) -> Result<u64, EventProjectionError> {
     if previous.is_some_and(|earlier| time < earlier) {
         return Err(EventProjectionError::UnorderedTime {
@@ -757,12 +789,23 @@ fn event_femtoseconds(
             time,
         });
     }
-    u64::try_from(integral as i128 + correction as i128).map_err(|_| {
+    let tick = u64::try_from(integral as i128 + correction as i128).map_err(|_| {
         EventProjectionError::UnrepresentableTime {
             node: node.to_string(),
             time,
         }
-    })
+    })?;
+    if let Some(other_time) = event_times.insert(tick, time)
+        && other_time != time
+    {
+        return Err(EventProjectionError::TimeCollision {
+            node: node.to_string(),
+            time,
+            other_time,
+            tick,
+        });
+    }
+    Ok(tick)
 }
 
 fn choose_timescale<'a>(points: impl Iterator<Item = &'a (u64, VcdValue)> + Clone) -> VcdTimescale {

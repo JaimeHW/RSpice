@@ -11,7 +11,10 @@
 
 use proptest::prelude::*;
 
-use rspice_core::engine::{DigitalTrace, DigitalTracePoint};
+use rspice_core::engine::{
+    DigitalBusDeclaration, DigitalBusSource, DigitalTrace, DigitalTracePoint, RealTrace,
+    RealTracePoint,
+};
 use rspice_core::execution::{EventProjectionError, event_vcd_document};
 use rspice_core::io::{
     VcdBit, VcdChange, VcdDocument, VcdMagnitude, VcdSignal, VcdSignalKind, VcdTimeUnit,
@@ -276,4 +279,82 @@ fn multiplication_roundoff_does_not_move_long_timeline_events() {
         ),
         Err(EventProjectionError::UnrepresentableTime { .. })
     ));
+}
+
+#[test]
+fn distinct_recorded_times_cannot_become_simultaneous() {
+    let first = 1e-9_f64;
+    let next = first.next_up();
+    let bus = DigitalBusDeclaration::new(
+        "bus",
+        1,
+        0,
+        vec!["a".to_owned(), "b".to_owned()],
+        DigitalBusSource::Import,
+    )
+    .unwrap();
+    let cases = [
+        event_vcd_document("tran", &[digital_trace("a", &[first, next])], &[], &[]),
+        event_vcd_document(
+            "tran",
+            &[digital_trace("a", &[first]), digital_trace("b", &[next])],
+            &[],
+            &[],
+        ),
+        event_vcd_document(
+            "tran",
+            &[digital_trace("a", &[first]), digital_trace("b", &[next])],
+            &[],
+            &[bus],
+        ),
+        event_vcd_document(
+            "tran",
+            &[digital_trace("a", &[first])],
+            &[RealTrace {
+                node_name: "real".to_owned(),
+                points: vec![RealTracePoint {
+                    time: next,
+                    value: 1.0,
+                }],
+            }],
+            &[],
+        ),
+    ];
+    for result in cases {
+        assert!(
+            matches!(result, Err(EventProjectionError::TimeCollision { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn identical_times_keep_delta_changes_and_cross_signal_simultaneity() {
+    let document = event_vcd_document(
+        "tran",
+        &[
+            digital_trace("a", &[0.0, 1e-9, 1e-9, 2e-9]),
+            digital_trace("b", &[-0.0, 1e-9]),
+        ],
+        &[RealTrace {
+            node_name: "real".to_owned(),
+            points: vec![RealTracePoint {
+                time: 1e-9,
+                value: 1.0,
+            }],
+        }],
+        &[],
+    )
+    .expect("identical times are deliberately simultaneous");
+    assert_eq!(document.timescale.to_string(), "1 ns");
+    assert_eq!(
+        document.signals[0]
+            .changes
+            .iter()
+            .map(|change| change.tick)
+            .collect::<Vec<_>>(),
+        [0, 1, 1, 2]
+    );
+    assert_eq!(document.signals[1].changes[1].tick, 1);
+    assert_eq!(document.signals[2].changes[0].tick, 1);
 }
