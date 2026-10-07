@@ -1,9 +1,36 @@
 //! Preserve packed constant calculations at a real conversion boundary.
 //!
-//! Parameter references remain symbolic. Only closed operands are evaluated,
-//! and only where a known real operand already requires real conversion.
+//! Numeric parameter references remain symbolic. Immutable exact parameters
+//! can close a default or a packed operand at a known real conversion boundary.
 
 use super::*;
+
+/// Only values that have no numeric parameter slot may participate here.
+/// Numeric parameters stay symbolic even if their current defaults are known.
+#[derive(Default)]
+pub(super) struct ExactParameterConstants {
+    names: HashSet<SmolStr>,
+    source: DigitalConstants,
+}
+
+impl ExactParameterConstants {
+    pub(super) fn source(&self) -> &DigitalConstants {
+        &self.source
+    }
+
+    pub(super) fn retain(&mut self, declaration: &ParameterDecl, default: Option<&Expression>) {
+        let Some(value @ Expression::Digital(DigitalExpr::FourState(_))) = default else {
+            return;
+        };
+        if !declaration.dimensions.is_empty() || declaration.param_type == ParamType::String {
+            return;
+        }
+        let mut declaration = declaration.clone();
+        declaration.default = Some(value.clone());
+        self.names.insert(declaration.name.clone());
+        self.source.definitions.push(declaration);
+    }
+}
 
 enum RealShape {
     Known(bool),
@@ -11,6 +38,24 @@ enum RealShape {
 }
 
 impl SemanticAnalyzer {
+    /// A default may close over immutable elaboration parameters, but must not
+    /// capture a numeric parameter whose runtime value can still be changed.
+    pub(super) fn parameter_operand_is_closed(&self, expression: &Expression) -> bool {
+        let mut closed = true;
+        flow_probes::visit_expression(expression, &mut |value| {
+            let name = match value {
+                Expression::Identifier(value) => Some(&value.name),
+                Expression::ArrayAccess(value) => Some(&value.array),
+                Expression::Digital(value) => value.base_name(),
+                _ => None,
+            };
+            if let Some(name) = name {
+                closed &= self.exact_parameter_constants.names.contains(name);
+            }
+        });
+        closed
+    }
+
     pub(super) fn fold_real_parameter_operands(
         &self,
         parameter: &ParameterDecl,
@@ -19,7 +64,9 @@ impl SemanticAnalyzer {
     ) -> Option<Expression> {
         let mut packed = false;
         flow_probes::visit_expression(expression, &mut |value| {
-            packed |= matches!(value, Expression::Digital(_) | Expression::ArrayLiteral(_))
+            packed |= matches!(value, Expression::Identifier(value)
+                if self.exact_parameter_constants.names.contains(&value.name))
+                || matches!(value, Expression::Digital(_) | Expression::ArrayLiteral(_))
                 || matches!(value, Expression::Number(value) if value.raw.contains('\''));
         });
         if !packed {
@@ -128,14 +175,12 @@ impl SemanticAnalyzer {
         parameter: &ParameterDecl,
         operand: &mut Expression,
     ) -> bool {
-        let mut closed = true;
+        let closed = self.parameter_operand_is_closed(operand);
         let mut packed = false;
         flow_probes::visit_expression(operand, &mut |value| {
-            closed &= !matches!(
-                value,
-                Expression::Identifier(_) | Expression::ArrayAccess(_)
-            ) && !matches!(value, Expression::Digital(value) if value.base_name().is_some());
-            packed |= matches!(value, Expression::Digital(_) | Expression::ArrayLiteral(_))
+            packed |= matches!(value, Expression::Identifier(value)
+                if self.exact_parameter_constants.names.contains(&value.name))
+                || matches!(value, Expression::Digital(_) | Expression::ArrayLiteral(_))
                 || matches!(value, Expression::Number(value) if value.raw.contains('\''));
         });
         if !closed || !packed {
@@ -150,7 +195,7 @@ impl SemanticAnalyzer {
         // perform the real conversion already required by the parent operator.
         let Ok(value) = crate::canonical_ir::digital_lower::parameter_override_literal(
             &declaration,
-            &DigitalConstants::default(),
+            self.exact_parameter_constants.source(),
             self.current_time_scale,
         ) else {
             return false;

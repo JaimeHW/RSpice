@@ -2834,13 +2834,17 @@ fn exact_packed_parameters_drive_loaded_mixed_instances() {
 `timescale 1ns/1ps
 module exact_packed(p,q);
  inout p; electrical p; output reg q=0;
- parameter PATTERN=129'h10000000000000000000000000000000xz;
+ parameter PATTERN=129'h1_00000000_00000000_00000000_000000xz;
+ parameter COPY=PATTERN;
+ parameter MASKED=COPY & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
  parameter COUNT=64'h20000000000001;
  parameter real GAIN=2;
+ parameter real RESULT=GAIN+(COPY[15:8]+8'd255+8'd1);
  aliasparam STRENGTH=GAIN;
- analog I(p)<+(V(p)-GAIN*q)/1000;
- initial #1 q=(PATTERN===129'h10000000000000000000000000000000xz)
-              &&(COUNT===64'h20000000000001);
+ analog I(p)<+(V(p)-RESULT*q)/1000;
+ initial #1 q=(COPY===129'h1_00000000_00000000_00000000_000000xz)
+              &&(MASKED===129'h1_00000000_00000000_00000000_00000000)
+              &&(COUNT===64'h20000000000001)&&(RESULT==GAIN);
 endmodule
 "#,
     );

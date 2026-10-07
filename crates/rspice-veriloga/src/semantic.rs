@@ -441,6 +441,8 @@ pub struct SemanticAnalyzer {
     /// instances may override parameters, so these must never influence
     /// generated code)
     param_consts: HashMap<SmolStr, ConstantValue>,
+    /// Exact values without numeric runtime slots; changes require re-elaboration.
+    exact_parameter_constants: parameter_constants::ExactParameterConstants,
     /// Values that cannot vary per instance (localparams derived purely
     /// from literals). Safe for loop unrolling and code folding.
     invariant_consts: HashMap<SmolStr, ConstantValue>,
@@ -522,6 +524,7 @@ impl SemanticAnalyzer {
             next_analog_site: 0,
             in_analog_initial: false,
             param_consts: HashMap::new(),
+            exact_parameter_constants: Default::default(),
             invariant_consts: HashMap::new(),
             digital_selector_constants: Default::default(),
             inline_depth: 0,
@@ -622,6 +625,7 @@ impl SemanticAnalyzer {
                 self.local_counter = 0;
                 self.next_analog_site = 0;
                 self.param_consts.clear();
+                self.exact_parameter_constants = Default::default();
                 self.invariant_consts.clear();
                 self.digital_selector_constants = Default::default();
                 self.inline_depth = 0;
@@ -1381,6 +1385,8 @@ impl SemanticAnalyzer {
                     self.normalize_scalar_parameter_default(param, expression, module)
                 })
                 .transpose()?;
+            self.exact_parameter_constants
+                .retain(param, normalized_default.as_ref());
             let declared_default_value = normalized_default
                 .as_ref()
                 .and_then(|expression| self.eval_const_value(expression));
@@ -1388,11 +1394,10 @@ impl SemanticAnalyzer {
                 .and_then(|value| Self::constant_for_declared_type(value, param.param_type))
                 .map(ConstantValue::as_f64);
 
-            // A default that references other parameters must stay
-            // symbolic: instance overrides of those parameters change it,
-            // so it is evaluated per instance at setup time.
-            let default_depends_on_parameters = param
-                .default
+            // Remaining references name runtime dependencies. Exact values
+            // with no numeric slots can already have closed this expression;
+            // those change only through source specialization.
+            let default_depends_on_parameters = normalized_default
                 .as_ref()
                 .is_some_and(|expression| Self::references_identifiers(expression, &param_names));
             let default = if is_parameter_array || default_depends_on_parameters {
@@ -6148,32 +6153,23 @@ impl SemanticAnalyzer {
 
     /// Fold a closed numeric scalar default in its declared assignment context,
     /// using exactly the evaluator used for digital constants and child overrides.
-    /// Identifiers stay symbolic: a dependent default must still respond to
-    /// instance/model overrides at setup time.
+    /// Numeric parameter identifiers stay symbolic so defaults respond to
+    /// runtime updates. Exact parameters without numeric slots are immutable
+    /// until source specialization and may close a dependent expression.
     fn normalize_scalar_parameter_default(
         &self,
         parameter: &ParameterDecl,
         expression: &Expression,
         module: &Module,
     ) -> CompileResult<Expression> {
-        let mut closed = parameter.param_type != ParamType::String;
-        flow_probes::visit_expression(expression, &mut |expression| {
-            // A selected parameter is still a dependency, even when the AST
-            // stores its base name directly instead of an Identifier child.
-            if matches!(
-                expression,
-                Expression::Identifier(_) | Expression::ArrayAccess(_)
-            ) || matches!(expression, Expression::Digital(value) if value.base_name().is_some())
-            {
-                closed = false;
-            }
-        });
+        let closed = parameter.param_type != ParamType::String
+            && self.parameter_operand_is_closed(expression);
         // Operators, concatenations, replications and selectors share an
         // explicit lowering stack, including nested constant selector bounds.
         if closed
             && let Ok(value) = crate::canonical_ir::digital_lower::parameter_override_literal(
                 parameter,
-                &DigitalConstants::default(),
+                self.exact_parameter_constants.source(),
                 self.current_time_scale,
             )
         {

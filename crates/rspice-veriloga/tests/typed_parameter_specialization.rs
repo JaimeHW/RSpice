@@ -33,7 +33,7 @@ fn wide_values_survive_specialization_serialization_and_linking() {
         "module packed(q); parameter PATTERN=1'b0; parameter real GAIN=2; \
          aliasparam BITS=PATTERN; aliasparam STRENGTH=GAIN; output reg [128:0] q=PATTERN; endmodule", None
     ).unwrap();
-    let pattern = bits("129'h10000000000000000000000000000000xz");
+    let pattern = bits("129'h1_00000000_00000000_00000000_000000xz");
     let specialized = compiler
         .specialize_mixed_runtime_typed(
             &runtime.canonical_ir,
@@ -239,7 +239,6 @@ fn packed_values_never_fall_through_to_numeric_slots_or_builtins() {
     for body in [
         "analog I(p)<+P;",
         "analog I(p)<+$param_given(P);",
-        "parameter real OTHER=P; analog I(p)<+OTHER;",
         "parameter real OTHER=1 from [P:inf]; analog I(p)<+OTHER;",
     ] {
         let source = format!(
@@ -264,4 +263,124 @@ fn packed_values_never_fall_through_to_numeric_slots_or_builtins() {
         .unwrap_err()
         .to_string();
     assert!(error.contains("typed range validation"), "{error}");
+}
+
+#[test]
+fn dependent_exact_parameters_preserve_chains_selections_and_numeric_updates() {
+    let compiler = compiler();
+    let source = r#"
+module dependent(p,q);
+ inout p; electrical p;
+ parameter PATTERN=129'h1000000000000000000000000000101xz;
+ parameter COPY=PATTERN;
+ parameter MASKED=COPY & 129'h1_ffffffff_ffffffff_ffffffff_ffffff00;
+ parameter LOW=COPY[15:8];
+ parameter real NEXT=LOW+1;
+ parameter real BASE=2.5;
+ parameter real RESULT=BASE+(COPY[15:8]+8'd255);
+ output reg [128:0] q=MASKED;
+ analog I(p)<+RESULT+NEXT;
+endmodule
+"#;
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    runtime.validate_integrity().unwrap();
+    assert_eq!(
+        initial(&runtime, "q"),
+        DigitalInitialValue::FourState(bits("129'h100000000000000000000000000010100"))
+    );
+    assert_eq!(
+        runtime
+            .abi
+            .elaboration_parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        ["PATTERN", "COPY", "MASKED"]
+    );
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "x",
+        runtime.model.clone(),
+        &runtime.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    // The packed sum wraps at 8 bits before BASE's real addition.
+    assert_eq!(device.try_evaluate().unwrap()[0], 4.5);
+    device.try_set_parameter("BASE", 10.5).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 12.5);
+    device.try_set_parameter("LOW", 4.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 15.5);
+    let specialized = compiler
+        .specialize_mixed_runtime_typed(
+            &runtime.canonical_ir,
+            &[(
+                "PATTERN",
+                ScalarParameterValue::Bits {
+                    value: bits("129'h1000000000000000000000000000102xz"),
+                    signed: false,
+                },
+            )],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert_eq!(
+        initial(&specialized, "q"),
+        DigitalInitialValue::FourState(bits("129'h100000000000000000000000000010200"))
+    );
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "y",
+        specialized.model,
+        &specialized.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 6.5);
+}
+
+#[test]
+fn exact_parameter_conversion_is_explicit_and_scoped_to_one_module() {
+    let compiler = compiler();
+    let report = compiler
+        .compile_runtime(
+            "module rounded(p,q); inout p; electrical p; parameter P=64'h20000000000001; \
+         parameter real R=P; output reg [63:0] q=P; analog I(p)<+R; endmodule",
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        initial(&report, "q"),
+        DigitalInitialValue::FourState(bits("64'h20000000000001"))
+    );
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "rounded",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 9_007_199_254_740_992.0);
+    device.try_set_parameter("R", 1.5).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 1.5);
+    let report = compiler
+        .compile_runtime(
+            "module first(q); parameter P=64'h20000000000001; output reg [63:0] q=P; endmodule \
+         module second(p,q); inout p; electrical p; parameter real P=1.0; \
+         parameter real R=P+1.0; output reg q=0; analog I(p)<+R; endmodule",
+            Some("second"),
+        )
+        .unwrap();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "second",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 2.0);
+    device.try_set_parameter("P", 4.0).unwrap();
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 5.0);
 }

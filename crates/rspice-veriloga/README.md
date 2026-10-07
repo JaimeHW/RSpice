@@ -570,12 +570,32 @@ identity, source re-specialization and circuit-wide linking preserve their
 exact values and aliases; numeric parameters keep dense independent slots.
 Changing an elaboration value requires source specialization.
 
-Analog uses, numeric parameter dependencies and range constraints involving
-these packed values receive an explicit diagnostic until typed analog
-parameter expressions and range validation are implemented. General dependent
-packed defaults, string/array override APIs, and typed SPICE-deck/UI parameter
-transport remain open. This is a compiler API and exact elaboration increment,
-not completion of the full typed external ABI. Wasm helper ABI remains 20.
+Direct analog uses, unresolved numeric parameter dependencies and range
+constraints involving these packed values receive an explicit diagnostic until
+their typed conversion/evaluation is implemented. String/array override APIs
+and typed SPICE-deck/UI parameter transport remain open. This is a compiler
+API and exact elaboration increment, not completion of the full typed external
+ABI. Wasm helper ABI remains 20.
+
+Schema 95 closes defaults over earlier immutable exact parameters. Copies,
+bitwise operations, selections and other supported typed constant expressions
+preserve packed width, signedness and X/Z values across dependency chains.
+A packed operand that depends only on those values can also be evaluated at
+a known real conversion boundary. An explicit real declaration converts a
+known wide integer to binary64 at that boundary; its original digital value
+remains exact.
+
+Parameters with numeric runtime slots remain symbolic, including numeric
+parameters produced by an exact constant calculation. Dependent defaults
+therefore still recompute after numeric updates. Changing an exact parent
+re-elaborates its dependent defaults from the retained source. The exact
+constant environment is reset for each module.
+
+General packed operations over mutable numeric parameters, forward exact
+dependencies, non-scalar overrides, and typed range constraints remain open.
+Exact parameters whose overrides change their numeric/elaboration
+classification still require the corresponding general parameter typing work;
+this pass does not freeze numeric slots to hide that gap.
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
