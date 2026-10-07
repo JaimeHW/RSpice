@@ -650,7 +650,8 @@ Typed JSON imports validate the declared schema, version, and full retained
 payload before selecting or converting data. Value budgets include event
 histories and other retained evidence omitted from the selected output.
 For tables, `max_result_values` counts coordinate values and both components
-of complex samples.
+of complex samples. HDF5 readers admit the combined dataset and measurement
+value count before decoding any section, including sections not selected.
 
 `convert --variables` matches names without case sensitivity. A qualified name
 such as `V(out)` or `D(clk)` selects that exact signal. Bare aliases must be

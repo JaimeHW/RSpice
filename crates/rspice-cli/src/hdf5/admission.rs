@@ -37,6 +37,12 @@ pub(super) fn validate(file: &File, limits: ResourceLimits) -> Result<()> {
                 count,
                 limits.max_external_data_values,
             )?;
+            // Measurement samples live in attributes instead of datasets, but
+            // remain part of the same retained document as every section.
+            if group_name == "measurements" && name == "measurement_count" {
+                values = values.saturating_add(count);
+                admit_values(values, limits)?;
+            }
             // Every retained signal/series/result/measurement requires at
             // least one named attribute or dataset. Reject invented counts
             // before reserving vectors for records that do not exist.
@@ -80,17 +86,22 @@ pub(super) fn validate(file: &File, limits: ResourceLimits) -> Result<()> {
                 })
                 .unwrap_or(usize::MAX);
             values = values.saturating_add(count);
-            admit(
-                ResourceKind::ExternalDataValues,
-                values,
-                limits.max_external_data_values,
-            )?;
-            admit(
-                ResourceKind::ExternalDataBytes,
-                values.saturating_mul(size_of::<f64>()),
-                limits.max_external_data_bytes,
-            )?;
+            admit_values(values, limits)?;
         }
     }
     Ok(())
+}
+
+fn admit_values(values: usize, limits: ResourceLimits) -> Result<()> {
+    admit(
+        ResourceKind::ExternalDataValues,
+        values,
+        limits.max_external_data_values,
+    )?;
+    admit(ResourceKind::ResultValues, values, limits.max_result_values)?;
+    admit(
+        ResourceKind::ExternalDataBytes,
+        values.saturating_mul(size_of::<f64>()),
+        limits.max_external_data_bytes,
+    )
 }
