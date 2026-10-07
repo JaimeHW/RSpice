@@ -305,7 +305,11 @@ fn checked_ac_retained_capacity(
     sweep_limit: Value,
     delta: Value,
 ) -> Result<usize, FrequencyGridError> {
-    if delta == 0.0 || delta == 1.0 {
+    let single_point = match variation {
+        FreqVariation::Lin => delta == 0.0,
+        FreqVariation::Dec | FreqVariation::Oct => delta == 1.0,
+    };
+    if single_point {
         return Ok(1);
     }
     let first_step = match variation {

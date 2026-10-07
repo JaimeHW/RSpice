@@ -9,6 +9,66 @@ use rspice_core::analysis::{FrequencyGridError, PacConfig};
 use rspice_core::netlist::FreqVariation;
 use rspice_core::{ResourceKind, SimulationError, SimulationErrorCategory, SimulationErrorCode};
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn linear_unit_steps_retain_every_frequency_in_bounded_and_unbounded_grids() {
+    use rspice_core::analysis::ac::{
+        try_ac_sweep_frequencies_bounded_with_abort, try_ac_sweep_frequencies_with_abort,
+        try_ac_sweep_point_count_bounded_with_abort,
+    };
+    for start in [0.0, 1.0, 10.0] {
+        for points in [3, 5, 257] {
+            let stop = start + (points - 1) as f64;
+            let expected = (0..points).map(|i| start + i as f64).collect::<Vec<_>>();
+            let unbounded = try_ac_sweep_frequencies_with_abort(
+                FreqVariation::Lin,
+                points,
+                start,
+                stop,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+            let bounded = try_ac_sweep_frequencies_bounded_with_abort(
+                FreqVariation::Lin,
+                points,
+                start,
+                stop,
+                points,
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+            assert_eq!(unbounded, expected);
+            assert_eq!(bounded, expected);
+            assert_eq!(
+                try_ac_sweep_point_count_bounded_with_abort(
+                    FreqVariation::Lin,
+                    points,
+                    start,
+                    stop,
+                    points,
+                    &rspice_core::NoAbort,
+                )
+                .unwrap(),
+                points
+            );
+            assert_eq!(
+                try_ac_sweep_frequencies_bounded_with_abort(
+                    FreqVariation::Lin,
+                    points,
+                    start,
+                    stop,
+                    points - 1,
+                    &rspice_core::NoAbort,
+                ),
+                Err(FrequencyGridError::LimitExceeded {
+                    requested: points,
+                    limit: points - 1
+                })
+            );
+        }
+    }
+}
+
 fn assert_allocator_cause(error: FrequencyGridError, requested: usize) {
     let FrequencyGridError::Allocation {
         requested: actual, ..

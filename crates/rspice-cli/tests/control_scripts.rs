@@ -125,6 +125,37 @@ fn invalid_analysis_numeric_fields_fail_before_direct_or_control_publication() {
 }
 
 #[test]
+fn linear_unit_step_sweeps_publish_every_frequency_through_all_routes() {
+    let dir = test_dir("ac-unit-step");
+    for (route, cards) in [
+        ("direct", ".ac lin 3 1 3"),
+        ("explicit", ".control\nac lin 3 1 3\n.endc"),
+        ("run", ".ac lin 3 1 3\n.control\nrun\n.endc"),
+    ] {
+        let deck = dir.join(format!("{route}.cir"));
+        let output = dir.join(format!("{route}.csv"));
+        std::fs::write(
+            &deck,
+            format!("unit step\nV1 in 0 1 AC 1\nR1 in 0 1k\n{cards}\n.end\n"),
+        )
+        .unwrap();
+        passed(&run(&deck, &output, &[]));
+        let published = if route == "direct" {
+            output
+        } else {
+            dir.join(format!("{route}.ac-001.csv"))
+        };
+        let csv = std::fs::read_to_string(published).unwrap();
+        let frequencies = csv
+            .lines()
+            .skip(1)
+            .map(|line| line.split(',').next().unwrap().parse::<f64>().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(frequencies, [1.0, 2.0, 3.0], "{route}");
+    }
+}
+
+#[test]
 fn event_flux_tolerance_cli_and_control_settings_validate_before_publication() {
     let dir = test_dir("control-event-flux");
     let deck = dir.join("flux.cir");

@@ -684,6 +684,7 @@ jobs:
           --test pole_zero_high_frequency
           --test control_complex_scalars --test control_transfer_scalars
           --test analysis_numeric_fields --test forward_analyses
+          --test frequency_grid_errors
       - name: Test UI clocks in a browser window
         env:
           WASM_BINDGEN_USE_BROWSER: '1'
