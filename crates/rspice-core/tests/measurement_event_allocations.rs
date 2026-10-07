@@ -65,3 +65,37 @@ fn first_and_reverse_indexed_crossings_do_not_allocate_per_input_event() {
         );
     }
 }
+
+#[test]
+fn rejected_streams_and_unpaired_delays_do_not_buffer_all_candidates() {
+    use rspice_core::abort_signal::NoAbort;
+    use rspice_core::{ResourceLimits, SimulationError};
+
+    let axis: Vec<_> = (0..100_001).map(|index| index as f64).collect();
+    let signal: Vec<_> = (0..axis.len())
+        .map(|index| if index % 2 == 0 { -1.0 } else { 1.0 })
+        .collect();
+    let signals = HashMap::from([("V(out)".to_string(), signal.as_slice())]);
+    let mut limits = ResourceLimits::default();
+    limits.max_result_values = 6;
+    let events = engine("* bounded events\n.MEAS TRAN_CONT events WHEN V(out)=0 CROSS=1\n.END\n");
+    let (result, bytes) = allocations::measured(|| {
+        events.evaluate_continuous_with_limits_and_abort(&axis, &signals, &[], &limits, &NoAbort)
+    });
+    assert!(matches!(result, Err(SimulationError::ResourceLimit(limit)) if limit.requested == 9));
+    assert!(
+        bytes < 128 * 1024,
+        "rejected stream allocated {bytes} bytes"
+    );
+
+    let delay = engine(
+        "* unpaired delay\n.MEAS TRAN_CONT delay TRIG V(out) VAL=0 CROSS=1 TARG V(out) VAL=2 CROSS=1\n.END\n",
+    );
+    let (result, bytes) = allocations::measured(|| {
+        delay.evaluate_continuous_with_limits_and_abort(&axis, &signals, &[], &limits, &NoAbort)
+    });
+    let results = result.unwrap();
+    assert!(results[0].failure.is_some());
+    assert_eq!(results[0].failure_metadata.unwrap().trigger_axis, Some(0.5));
+    assert!(bytes < 128 * 1024, "unpaired delay allocated {bytes} bytes");
+}

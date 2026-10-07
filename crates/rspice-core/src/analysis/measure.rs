@@ -21,6 +21,8 @@ use crate::netlist::canonical_symbol;
 use crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
 use std::collections::HashMap;
 
+pub(crate) mod continuous;
+
 /// The waveform a `.MEASURE` statement is evaluated over: the independent axis
 /// it walks, the dependent signals it can name, and the index at which each
 /// stepped segment begins. Every evaluator needs the axis and the signals
@@ -437,19 +439,6 @@ pub struct ContinuousMeasureFailureMetadata {
 }
 
 impl ContinuousMeasureResult {
-    fn success(name: &str, records: Vec<ContinuousMeasureRecord>) -> Self {
-        let result = Self {
-            name: name.to_string(),
-            records,
-            failure: None,
-            failure_metadata: None,
-        };
-        match result.validate_invariants() {
-            Ok(()) => result,
-            Err(error) => Self::failed(name, error),
-        }
-    }
-
     fn failed(name: &str, failure: impl Into<String>) -> Self {
         Self {
             name: name.to_string(),
@@ -473,18 +462,6 @@ impl ContinuousMeasureResult {
                 trigger_axis,
                 target_axis,
             }),
-        }
-    }
-
-    fn check_contract(mut self, statement: &MeasureStatement) -> Self {
-        if self.failure.is_none() {
-            for record in &mut self.records {
-                *record = record.check_fail_value(statement.fail_value);
-            }
-        }
-        match self.validate_invariants() {
-            Ok(()) => self,
-            Err(error) => Self::failed(&statement.name, error),
         }
     }
 
@@ -619,9 +596,20 @@ fn canonical_measure_signal_index_key(name: &str) -> String {
 fn index_measure_signals<'a>(
     signals: &HashMap<String, &'a [Value]>,
 ) -> HashMap<String, &'a [Value]> {
-    let mut indexed = signals.clone();
+    // NoAbort cannot return the only error produced by this indexing helper.
+    index_measure_signals_with_abort(signals, &crate::abort_signal::NoAbort)
+        .expect("NoAbort never cancels signal indexing")
+}
+
+fn index_measure_signals_with_abort<'a>(
+    signals: &HashMap<String, &'a [Value]>,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<HashMap<String, &'a [Value]>, crate::SimulationError> {
+    let mut indexed = HashMap::new();
     let mut canonical = HashMap::<String, (&'a [Value], bool)>::with_capacity(signals.len());
-    for (name, waveform) in signals {
+    for (index, (name, waveform)) in signals.iter().enumerate() {
+        continuous::poll(abort, index)?;
+        indexed.insert(name.clone(), *waveform);
         if name.starts_with(CANONICAL_MEASURE_SIGNAL_INDEX_PREFIX) {
             continue;
         }
@@ -636,7 +624,8 @@ fn index_measure_signals<'a>(
             })
             .or_insert((*waveform, false));
     }
-    for (name, (waveform, ambiguous)) in canonical {
+    for (index, (name, (waveform, ambiguous))) in canonical.into_iter().enumerate() {
+        continuous::poll(abort, index)?;
         if !ambiguous {
             indexed.insert(
                 format!("{CANONICAL_MEASURE_SIGNAL_INDEX_PREFIX}{name}"),
@@ -644,7 +633,7 @@ fn index_measure_signals<'a>(
             );
         }
     }
-    indexed
+    Ok(indexed)
 }
 
 fn strictly_monotonic_direction(axis: &[Value]) -> Result<bool, String> {
@@ -862,187 +851,6 @@ impl MeasureEngine {
             segment_starts,
         } = data;
         self.evaluate_with_signal_maps(time, &[signals], segment_starts, params)
-    }
-
-    /// Evaluate vector-valued Xyce continuous point-event measurements.
-    ///
-    /// Unlike an ordinary measurement, a positive RISE/FALL/CROSS occurrence
-    /// is a starting index: the selected event and every later qualifying
-    /// event are emitted.  A negative occurrence selects exactly one event
-    /// counting backward from the end.  This method deliberately accepts only
-    /// the four point-event forms supported by Xyce's `*_CONT` modes.
-    pub fn evaluate_continuous(
-        &self,
-        axis: &[Value],
-        signals: &HashMap<String, &[Value]>,
-        segment_starts: &[usize],
-    ) -> Vec<ContinuousMeasureResult> {
-        if axis.is_empty() {
-            return self
-                .measurements
-                .iter()
-                .map(|statement| {
-                    ContinuousMeasureResult::failed(&statement.name, "measurement axis is empty")
-                })
-                .collect();
-        }
-        if let Some(index) = axis.iter().position(|value| !value.is_finite()) {
-            return self
-                .measurements
-                .iter()
-                .map(|statement| {
-                    ContinuousMeasureResult::failed(
-                        &statement.name,
-                        format!("measurement axis contains non-finite sample at index {index}"),
-                    )
-                })
-                .collect();
-        }
-        if let Some((name, signal)) = signals
-            .iter()
-            .find(|(_, signal)| signal.len() != axis.len())
-        {
-            return self
-                .measurements
-                .iter()
-                .map(|statement| {
-                    ContinuousMeasureResult::failed(
-                        &statement.name,
-                        format!(
-                            "signal '{name}' has {} samples but measurement axis has {}",
-                            signal.len(),
-                            axis.len()
-                        ),
-                    )
-                })
-                .collect();
-        }
-        if segment_starts.iter().enumerate().any(|(index, start)| {
-            *start == 0 || *start >= axis.len() || index > 0 && *start <= segment_starts[index - 1]
-        }) {
-            return self
-                .measurements
-                .iter()
-                .map(|statement| {
-                    ContinuousMeasureResult::failed(
-                        &statement.name,
-                        "measurement segment starts are invalid or unordered",
-                    )
-                })
-                .collect();
-        }
-        let indexed_signals = index_measure_signals(signals);
-
-        self.measurements
-            .iter()
-            .map(|statement| {
-                if !matches!(
-                    statement.analysis.to_ascii_uppercase().as_str(),
-                    "TRAN_CONT" | "DC_CONT" | "AC_CONT" | "NOISE_CONT"
-                ) {
-                    return ContinuousMeasureResult::failed(
-                        &statement.name,
-                        format!(
-                            "continuous evaluation requires TRAN_CONT, DC_CONT, AC_CONT, or NOISE_CONT, got {}",
-                            statement.analysis
-                        ),
-                    );
-                }
-                self.evaluate_continuous_one(statement, MeasureData { axis, signals: &indexed_signals, segment_starts })
-                    .check_contract(statement)
-            })
-            .collect()
-    }
-
-    fn evaluate_continuous_one(
-        &self,
-        statement: &MeasureStatement,
-        data: MeasureData<'_, '_>,
-    ) -> ContinuousMeasureResult {
-        match &statement.measure_type {
-            MeasureType::When {
-                condition,
-                from,
-                to,
-                td,
-                minval,
-            } => continuous_when(
-                &statement.name,
-                &statement.analysis,
-                condition,
-                MeasureWindow {
-                    from: *from,
-                    to: *to,
-                    td: *td,
-                    minval: *minval,
-                },
-                data,
-            ),
-            MeasureType::Find {
-                signal,
-                at,
-                when,
-                from,
-                to,
-                td,
-                minval,
-            } => continuous_find(
-                &statement.name,
-                &statement.analysis,
-                signal,
-                MeasureLocator {
-                    at: *at,
-                    when: when.as_ref(),
-                },
-                MeasureWindow {
-                    from: *from,
-                    to: *to,
-                    td: *td,
-                    minval: *minval,
-                },
-                data,
-            ),
-            MeasureType::Derivative {
-                signal,
-                at,
-                when,
-                from,
-                to,
-                td,
-                minval,
-            } => continuous_derivative(
-                &statement.name,
-                &statement.analysis,
-                signal,
-                MeasureLocator {
-                    at: *at,
-                    when: when.as_ref(),
-                },
-                MeasureWindow {
-                    from: *from,
-                    to: *to,
-                    td: *td,
-                    minval: *minval,
-                },
-                data,
-            ),
-            MeasureType::Delay {
-                trig, targ, minval, ..
-            } => {
-                if trig.frac_max.is_some() || targ.frac_max.is_some() {
-                    ContinuousMeasureResult::failed(
-                        &statement.name,
-                        "FRAC_MAX is supported only by scalar TRAN TRIG/TARG",
-                    )
-                } else {
-                    continuous_delay(&statement.name, trig, targ, *minval, data)
-                }
-            }
-            _ => ContinuousMeasureResult::failed(
-                &statement.name,
-                "continuous measures support only WHEN, FIND, DERIV, and TRIG/TARG",
-            ),
-        }
     }
 
     /// Evaluate each statement against its own signal view. Continuous Xyce
@@ -3191,37 +2999,6 @@ fn first_measure_condition_event(
 
 type MeasureEvent = (usize, Value, Value, bool);
 
-fn continuous_condition_events(
-    condition: &WhenCondition,
-    minval: Value,
-    data: MeasureData<'_, '_>,
-    lower: Value,
-    upper: Value,
-    segment_starts: &[usize],
-) -> Result<Vec<MeasureEvent>, String> {
-    let MeasureData { axis, signals, .. } = data;
-    let left = lookup_signal(signals, &condition.left)
-        .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
-    let right = resolve_measure_operand(&condition.right, signals)?;
-    let candidates =
-        measurement_condition_candidates(left, right, axis.len(), segment_starts, minval);
-    Ok(select_continuous_measure_condition_occurrences(
-        candidates.filter_map(|(segment, crossing)| {
-            let event_axis =
-                axis[segment] + crossing.fraction * (axis[segment + 1] - axis[segment]);
-            point_event_axis_in_window(event_axis, lower, upper, minval).then_some((
-                segment,
-                crossing.fraction,
-                event_axis,
-                crossing.current_within_minval,
-                crossing.direction,
-            ))
-        }),
-        condition.occurrence.edge,
-        condition.occurrence.number,
-    ))
-}
-
 pub(crate) fn point_event_axis_in_window(
     axis: Value,
     lower: Value,
@@ -3242,270 +3019,6 @@ pub(crate) fn point_event_axis_in_window(
     // comparison. IEEE NaN therefore remains in-window and is retained as a
     // computed event location by both raw getters and terminal results.
     !(axis < lower - lower_tolerance || axis > upper + upper_tolerance)
-}
-
-fn continuous_when(
-    name: &str,
-    analysis: &str,
-    condition: &WhenCondition,
-    window: MeasureWindow,
-    data: MeasureData<'_, '_>,
-) -> ContinuousMeasureResult {
-    let MeasureWindow {
-        from,
-        to,
-        td,
-        minval,
-    } = window;
-    let MeasureData {
-        axis,
-        segment_starts,
-        ..
-    } = data;
-    let (lower, upper) =
-        MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
-    match continuous_condition_events(condition, minval, data, lower, upper, segment_starts) {
-        Ok(events) if !events.is_empty() => ContinuousMeasureResult::success(
-            name,
-            events
-                .into_iter()
-                .map(|(_, _, event_axis, _)| ContinuousMeasureRecord::point(event_axis, event_axis))
-                .collect(),
-        ),
-        Ok(_) => ContinuousMeasureResult::failed(
-            name,
-            "WHEN condition not found in the measurement window",
-        ),
-        Err(error) => ContinuousMeasureResult::failed(name, error),
-    }
-}
-
-fn continuous_find(
-    name: &str,
-    analysis: &str,
-    signal_name: &str,
-    locator: MeasureLocator<'_>,
-    window: MeasureWindow,
-    data: MeasureData<'_, '_>,
-) -> ContinuousMeasureResult {
-    let MeasureLocator { at, when } = locator;
-    let MeasureWindow {
-        from,
-        to,
-        td,
-        minval,
-    } = window;
-    let MeasureData {
-        axis,
-        signals,
-        segment_starts,
-    } = data;
-    let Some(signal) = lookup_signal(signals, signal_name) else {
-        return ContinuousMeasureResult::failed(name, format!("Signal '{signal_name}' not found"));
-    };
-    let (lower, upper) =
-        MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
-    if let Some(target) = at {
-        if !MeasureEngine::axis_in_measurement_window_with_minval(target, lower, upper, minval) {
-            return ContinuousMeasureResult::failed(
-                name,
-                "AT point is outside the measurement window",
-            );
-        }
-        return match find_at_accepted_points(axis, signal, target, minval, segment_starts) {
-            Ok(Some(value)) => ContinuousMeasureResult::success(
-                name,
-                vec![ContinuousMeasureRecord::point(value, target)],
-            ),
-            Ok(None) => ContinuousMeasureResult::failed(name, "Time point not in simulation range"),
-            Err(error) => ContinuousMeasureResult::failed(name, error),
-        };
-    }
-    let Some(condition) = when else {
-        return ContinuousMeasureResult::failed(name, "FIND requires AT= or WHEN condition");
-    };
-    match continuous_condition_events(condition, minval, data, lower, upper, segment_starts) {
-        Ok(events) if !events.is_empty() => ContinuousMeasureResult::success(
-            name,
-            events
-                .into_iter()
-                .map(|(segment, fraction, event_axis, current_within_minval)| {
-                    let value = if current_within_minval {
-                        signal[segment + 1]
-                    } else {
-                        interpolate_extended_real(signal[segment], signal[segment + 1], fraction)
-                    };
-                    ContinuousMeasureRecord::point(value, event_axis)
-                })
-                .collect(),
-        ),
-        Ok(_) => ContinuousMeasureResult::failed(
-            name,
-            "WHEN condition not found in the measurement window",
-        ),
-        Err(error) => ContinuousMeasureResult::failed(name, error),
-    }
-}
-
-fn continuous_derivative(
-    name: &str,
-    analysis: &str,
-    signal_name: &str,
-    locator: MeasureLocator<'_>,
-    window: MeasureWindow,
-    data: MeasureData<'_, '_>,
-) -> ContinuousMeasureResult {
-    let MeasureLocator { at, when } = locator;
-    let MeasureWindow {
-        from,
-        to,
-        td,
-        minval,
-    } = window;
-    let MeasureData {
-        axis,
-        signals,
-        segment_starts,
-    } = data;
-    let Some(signal) = lookup_signal(signals, signal_name) else {
-        return ContinuousMeasureResult::failed(name, format!("Signal '{signal_name}' not found"));
-    };
-    let (lower, upper) =
-        MeasureEngine::point_measurement_window_bounds(axis, analysis, from, to, td);
-    let make_record = |segment: usize, event_axis: Value| {
-        let value = accepted_row_secant_slope(
-            axis[segment],
-            signal[segment],
-            axis[segment + 1],
-            signal[segment + 1],
-        );
-        ContinuousMeasureRecord::point(value, event_axis)
-    };
-    if let Some(target) = at {
-        if !MeasureEngine::axis_in_measurement_window_with_minval(target, lower, upper, minval) {
-            return ContinuousMeasureResult::failed(
-                name,
-                "AT point is outside the measurement window",
-            );
-        }
-        return match derivative_at_accepted_points(axis, signal, target, minval, segment_starts) {
-            Ok(Some(slope)) => ContinuousMeasureResult::success(
-                name,
-                vec![ContinuousMeasureRecord::point(slope, target)],
-            ),
-            Ok(None) => ContinuousMeasureResult::failed(name, "Time point not in simulation range"),
-            Err(error) => ContinuousMeasureResult::failed(name, error),
-        };
-    }
-    let Some(condition) = when else {
-        return ContinuousMeasureResult::failed(
-            name,
-            "DERIV requires AT=time or WHEN signal=value",
-        );
-    };
-    match continuous_condition_events(condition, minval, data, lower, upper, segment_starts) {
-        Ok(events) if !events.is_empty() => {
-            let records = events
-                .into_iter()
-                .map(|(segment, _, event_axis, _)| make_record(segment, event_axis))
-                .collect::<Vec<_>>();
-            ContinuousMeasureResult::success(name, records)
-        }
-        Ok(_) => ContinuousMeasureResult::failed(
-            name,
-            "WHEN condition never met in the measurement window",
-        ),
-        Err(error) => ContinuousMeasureResult::failed(name, error),
-    }
-}
-
-fn continuous_delay_clause_events(
-    clause: &TrigSpec,
-    effective_td: Option<Value>,
-    minval: Value,
-    data: MeasureData<'_, '_>,
-) -> Result<Vec<Value>, String> {
-    let MeasureData {
-        axis,
-        signals,
-        segment_starts,
-    } = data;
-    match &clause.event {
-        // Xyce treats AT as an exact clause result. TD gates conditional
-        // events but does not override a valid explicit AT location.
-        TriggerEvent::At(target) => Ok((target.is_finite()
-            && delay_at_is_reached(axis, *target, segment_starts, minval))
-        .then_some(*target)
-        .into_iter()
-        .collect()),
-        TriggerEvent::When(condition) => {
-            if condition.occurrence.number < 0 {
-                return Err(
-                    "negative RISE/FALL/CROSS qualifiers are invalid for continuous TRIG/TARG"
-                        .to_string(),
-                );
-            }
-            let left = lookup_signal(signals, &condition.left)
-                .ok_or_else(|| format!("When signal '{}' not found", condition.left))?;
-            let right = resolve_measure_operand(&condition.right, signals)?;
-            let mut tracker = DelayConditionTracker::new_continuous(
-                condition.occurrence.edge,
-                condition.occurrence.number,
-                clause.occurrence_explicit,
-                minval,
-            );
-            let mut events = Vec::new();
-            for row in 0..axis.len() {
-                if segment_starts.binary_search(&row).is_ok() {
-                    tracker.reset_segment();
-                }
-                let Some(right_value) = right.value_at(row) else {
-                    return Ok(Vec::new());
-                };
-                if let Some(event_axis) =
-                    tracker.update_with_td(axis[row], left[row], right_value, effective_td)
-                {
-                    events.push(event_axis);
-                }
-            }
-            Ok(events)
-        }
-    }
-}
-
-fn continuous_delay(
-    name: &str,
-    trig: &TrigSpec,
-    targ: &TrigSpec,
-    minval: Value,
-    data: MeasureData<'_, '_>,
-) -> ContinuousMeasureResult {
-    let target_td = targ.td.or(trig.td);
-    let triggers = match continuous_delay_clause_events(trig, trig.td, minval, data) {
-        Ok(events) => events,
-        Err(error) => return ContinuousMeasureResult::failed(name, error),
-    };
-    let targets = match continuous_delay_clause_events(targ, target_td, minval, data) {
-        Ok(events) => events,
-        Err(error) => return ContinuousMeasureResult::failed(name, error),
-    };
-    let partial_trigger = triggers.first().copied();
-    let partial_target = targets.first().copied();
-    let records = triggers
-        .into_iter()
-        .zip(targets)
-        .map(|(trigger, target)| ContinuousMeasureRecord::delay(trigger, target))
-        .collect::<Vec<_>>();
-    if records.is_empty() {
-        ContinuousMeasureResult::failed_delay(
-            name,
-            partial_trigger,
-            partial_target,
-            "trigger/target event pair not found",
-        )
-    } else {
-        ContinuousMeasureResult::success(name, records)
-    }
 }
 
 type MeasureConditionCandidate = (usize, Value, Value, bool, MeasureConditionDirection);
@@ -3542,32 +3055,6 @@ fn select_measure_condition_occurrence(
         }
     }
     None
-}
-
-fn select_continuous_measure_condition_occurrences(
-    events: impl DoubleEndedIterator<Item = MeasureConditionCandidate>,
-    edge: EdgeType,
-    number: isize,
-) -> Vec<MeasureEvent> {
-    if number < 0 {
-        return select_measure_condition_occurrence(events, edge, number)
-            .into_iter()
-            .collect();
-    }
-    let requested = number.max(1) as usize;
-    let mut count = 0usize;
-    let mut selected = Vec::new();
-    for event in events {
-        count += match edge {
-            EdgeType::Cross => 1,
-            EdgeType::Rise => usize::from(event.4 == MeasureConditionDirection::Rise),
-            EdgeType::Fall => usize::from(event.4 != MeasureConditionDirection::Rise),
-        };
-        if count >= requested && edge_matches_measure_condition(edge, event.4) {
-            selected.push((event.0, event.1, event.2, event.3));
-        }
-    }
-    selected
 }
 
 /// Return every qualifying `WHEN left=right` crossing interval in traversal
