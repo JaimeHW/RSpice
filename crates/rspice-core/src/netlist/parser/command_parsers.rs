@@ -895,7 +895,7 @@ pub(super) fn parse_sp_command(
         }
     };
 
-    let points = expect_value(stream, line_num, params)? as usize;
+    let points = expect_positive_usize_value(stream, line_num, params, ".SP point count")?;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
     let do_noise = if at_card_end(stream) || at_keyword(stream) {
@@ -1334,7 +1334,7 @@ pub(super) fn parse_disto_command(
         }
     };
 
-    let points = expect_value(stream, line_num, params)? as usize;
+    let points = expect_positive_usize_value(stream, line_num, params, ".DISTO point count")?;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
     let f2_over_f1 = if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -1393,7 +1393,7 @@ pub(super) fn parse_noise_command(
         }
     };
 
-    let points = expect_value(stream, line_num, params)? as usize;
+    let points = expect_positive_usize_value(stream, line_num, params, ".NOISE point count")?;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
     let _summary_interval = try_value(stream, params);
@@ -1564,7 +1564,7 @@ pub(super) fn parse_sens_command(
             }
         };
 
-        let points = expect_value(stream, line_num, params)? as usize;
+        let points = expect_positive_usize_value(stream, line_num, params, ".SENS AC point count")?;
         let start_freq = expect_value(stream, line_num, params)?;
         let stop_freq = expect_value(stream, line_num, params)?;
 

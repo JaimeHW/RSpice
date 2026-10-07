@@ -102,7 +102,7 @@ pub(super) fn card_count(
         _ => "a whole number",
     };
     let value = card_number(stream, line, params, card, field, expected, |value| {
-        value >= 0.0 && value.fract() == 0.0 && value <= usize::MAX as Value
+        value >= 0.0 && value.fract() == 0.0 && value < 2.0_f64.powi(usize::BITS as i32)
     })?;
     let count = value as usize;
     if count < minimum {

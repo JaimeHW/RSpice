@@ -530,6 +530,11 @@ when its result is real, or when an explicit `real()`, `imag()` or `mag()`
 projection is used. Probe and table names are unaffected. Monte Carlo integer
 fields retain exact 64-bit literal values; numeric expressions are evaluated
 before their integer domain is checked.
+AC, noise, SP, distortion and AC sensitivity point counts require positive
+integers within the target platform's `usize` range. Literal counts preserve
+their full precision; fractional and oversized values are rejected before a
+cast can truncate or saturate them. Periodic count fields likewise exclude the
+first integer beyond the platform range.
 
 `ControlCircuit` executes `ac DATA=<table>` and `noise ... DATA=<table>` through
 the shared compact table runners. `ControlAnalysisResult::AcTable` and

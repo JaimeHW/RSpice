@@ -147,3 +147,57 @@ fn scoped_resumption_keeps_complex_values_until_numeric_admission() {
         assert!(Netlist::parse(&source).is_err(), "{source}");
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn frequency_point_counts_reject_fractional_negative_and_unrepresentable_values() {
+    for template in [
+        ".AC LIN COUNT 1 10",
+        ".NOISE V(in) V1 LIN COUNT 1 10",
+        ".SP LIN COUNT 1 10 PORT1=(in)",
+        ".DISTO LIN COUNT 1 10",
+        ".SENS V(in) AC LIN COUNT 1 10",
+    ] {
+        Netlist::parse(&deck(&template.replace("COUNT", "3"))).unwrap();
+        for count in [
+            "0".to_owned(),
+            "-1".into(),
+            "3.5".into(),
+            "{3.5}".into(),
+            "1e100".into(),
+            format!("{}", 1u128 << usize::BITS),
+        ] {
+            let card = template.replace("COUNT", &count);
+            assert!(Netlist::parse(&deck(&card)).is_err(), "{card}");
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn frequency_count_integer_literals_keep_their_full_platform_precision() {
+    for count in [usize::MAX - 1, usize::MAX] {
+        for spelling in [count.to_string(), format!("{{{count}}}")] {
+            let netlist = Netlist::parse(&deck(&format!(".AC LIN {spelling} 1 10"))).unwrap();
+            let AnalysisCommand::Ac { points, .. } = netlist.analyses[0] else {
+                panic!("AC")
+            };
+            assert_eq!(points, count, "{spelling}");
+        }
+    }
+    let netlist = Netlist::parse(&deck(".AC LIN {1+count} 1 10\n.param count=2")).unwrap();
+    assert!(matches!(
+        netlist.analyses[0],
+        AnalysisCommand::Ac { points: 3, .. }
+    ));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn periodic_count_bounds_exclude_the_first_unrepresentable_integer() {
+    for template in [".PSS FUND=1k POINTS=COUNT", ".HB 1k HARMS=COUNT"] {
+        Netlist::parse(&deck(&template.replace("COUNT", "32"))).unwrap();
+        let card = template.replace("COUNT", &format!("{}", 1u128 << usize::BITS));
+        assert!(Netlist::parse(&deck(&card)).is_err(), "{card}");
+    }
+}

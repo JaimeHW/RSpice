@@ -330,7 +330,10 @@ fn card_odd_count(
 ) -> Result<usize, ParseError> {
     const EXPECTED: &str = "an odd whole number >= 3";
     let value = card_number(stream, line, params, CARD, field, EXPECTED, |value| {
-        value >= 3.0 && value.fract() == 0.0 && value <= usize::MAX as Value && value % 2.0 == 1.0
+        value >= 3.0
+            && value.fract() == 0.0
+            && value < 2.0_f64.powi(usize::BITS as i32)
+            && value % 2.0 == 1.0
     })?;
     Ok(value as usize)
 }

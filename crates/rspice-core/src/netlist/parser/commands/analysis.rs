@@ -245,7 +245,8 @@ impl ParsedAnalysisCard {
                             });
                         }
                     };
-                    let points = expect_value(stream, line_num, params)? as usize;
+                    let points =
+                        expect_positive_usize_value(stream, line_num, params, ".AC point count")?;
                     let start_freq = expect_value(stream, line_num, params)?;
                     let stop_freq = expect_value(stream, line_num, params)?;
 

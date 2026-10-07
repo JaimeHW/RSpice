@@ -75,12 +75,15 @@ fn complex_control_options_fail_before_result_publication() {
 }
 
 #[test]
-fn complex_analysis_fields_fail_in_direct_and_control_runs_before_publication() {
+fn invalid_analysis_numeric_fields_fail_before_direct_or_control_publication() {
     let dir = test_dir("analysis-complex-fields");
     for (index, command) in [
         "ac lin 3 1 {2+1j}",
         "tran 1u 1m {1u+1j}",
         "dc V1 0 {2+1j} .1",
+        "ac lin 3.5 1 10",
+        "ac lin 1e100 1 10",
+        "ac lin 0 1 10",
     ]
     .iter()
     .enumerate()
@@ -100,6 +103,9 @@ fn complex_analysis_fields_fail_in_direct_and_control_runs_before_publication() 
             .unwrap();
             let result = run(&deck, &dir.join(format!("{stem}.csv")), &[]);
             assert!(!result.status.success(), "{cards}");
+            let error = String::from_utf8_lossy(&result.stderr);
+            let expected = if index < 3 { "real value" } else { "integer" };
+            assert!(error.contains(expected), "{cards}: {error}");
             assert!(!dir.join(format!("{stem}.csv")).exists());
             for family in ["ac", "tran", "dc"] {
                 assert!(!dir.join(format!("{stem}.{family}-001.csv")).exists());

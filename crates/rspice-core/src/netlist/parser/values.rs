@@ -2131,6 +2131,26 @@ pub(super) fn expect_u64_value(
     Ok(value as u64)
 }
 
+/// Keep exact literal spelling until the target platform's range is checked.
+/// A floating-point cast would truncate fractions and saturate large values.
+pub(super) fn expect_positive_usize_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    field: &str,
+) -> Result<usize, ParseError> {
+    let value = expect_u64_value(stream, line_num, params, field)?;
+    usize::try_from(value)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{field} requires a positive integer representable as usize, found {value}"
+            ),
+        })
+}
+
 pub(super) fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
     skip_commas(stream);
     try_value_unsigned(stream, params)
