@@ -926,6 +926,12 @@ max_parallel_workers = 64               # cap batch/analysis worker fan-out
 max_batch_runs = 10000
 ```
 
+The configured `convergence_mode` supplies the base convergence policy for
+`run`, `check`, and `health`. Authored `.OPTIONS` convergence controls override
+that base in `run` and `check`. An explicit `run --convergence MODE` takes
+precedence over the deck's stepping and damping controls; numeric tolerances
+retain their own configuration, deck, and command-line precedence.
+
 The same resource policy is applied consistently to `run`, `check`, and `info`,
 including stdin, include expansion, `.ALTER`/`.DATA` materialization, derived
 corner and S-parameter decks, circuit construction, and result retention. The

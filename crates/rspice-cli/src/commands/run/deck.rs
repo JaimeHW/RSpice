@@ -510,11 +510,12 @@ pub(super) fn build_observed_engine(
 fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
     let base = config.core_simulation_config();
 
-    let convergence_mode = args
+    // Configured presets belong to the base layer. Only an explicit CLI
+    // selection may replace convergence controls authored in the deck.
+    let convergence_preset = args
         .convergence
         .as_deref()
-        .unwrap_or(&config.simulation.convergence_mode);
-    let convergence_preset = ConvergencePreset::from_mode_name(convergence_mode);
+        .and_then(ConvergencePreset::from_mode_name);
 
     let integration_method = args.integration_method.as_deref().map(|method| {
         use rspice_core::numerics::integration::IntegrationMethod;
@@ -573,4 +574,96 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
     };
 
     resolve_simulation_config(&base, Some(&netlist.options), &overrides)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::{Cli, Commands};
+    use clap::Parser;
+    use rspice_core::config::DampingStrategy;
+
+    fn run_args(extra: &[&str]) -> RunArgs {
+        let cli = Cli::try_parse_from(
+            ["rspice", "run", "policy.cir"]
+                .into_iter()
+                .chain(extra.iter().copied()),
+        )
+        .expect("valid run arguments");
+        let Commands::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        args
+    }
+
+    #[test]
+    fn convergence_policy_preserves_authored_deck_options_without_a_cli_preset() {
+        let args = run_args(&[]);
+        let netlist = Netlist::parse(
+            "Convergence policy\nV1 in 0 1\nR1 in 0 1k\n\
+             .options gminstepping=0 sourcestepping=1 pseudotransient=0 arclength=1 damping=bankrose\n\
+             .op\n.end\n",
+        ).expect("valid deck");
+        for mode in ["default", "fast", "robust"] {
+            let mut config = Config::default();
+            config.simulation.convergence_mode = mode.into();
+            let engine = build_engine(&args, &config, &netlist).expect("valid run engine");
+            let policy = &engine.config().convergence_config;
+            assert!(!policy.gmin_stepping, "{mode}");
+            assert!(policy.source_stepping, "{mode}");
+            assert!(!policy.pseudo_transient, "{mode}");
+            assert!(policy.arc_length, "{mode}");
+            assert_eq!(policy.damping_strategy, DampingStrategy::BankRose, "{mode}");
+        }
+    }
+
+    #[test]
+    fn convergence_policy_explicit_cli_presets_outrank_the_deck_and_config() {
+        let netlist = Netlist::parse(
+            "Convergence policy\nV1 in 0 1\nR1 in 0 1k\n\
+             .options gminstepping=0 sourcestepping=1 pseudotransient=0 arclength=1 damping=bankrose\n\
+             + reltol=6e-5 abstol=7e-14 vntol=8e-7 chgtol=9e-15\n.op\n.end\n",
+        ).expect("valid deck");
+        let mut config = Config::default();
+        config.simulation.convergence_mode = "fast".into();
+        config.simulation.residual_reltol = 4e-5;
+        for (mode, stepping, arc_length, damping) in [
+            ("fast", false, false, DampingStrategy::None),
+            ("default", true, false, DampingStrategy::VoltageLimiting),
+            ("robust", true, true, DampingStrategy::Combined),
+        ] {
+            let args = run_args(&["--convergence", mode, "--reltol", "2e-4"]);
+            let engine = build_engine(&args, &config, &netlist).expect("valid run engine");
+            let policy = &engine.config().convergence_config;
+            assert_eq!(policy.gmin_stepping, stepping, "{mode}");
+            assert_eq!(policy.source_stepping, stepping, "{mode}");
+            assert_eq!(policy.pseudo_transient, stepping, "{mode}");
+            assert_eq!(policy.arc_length, arc_length, "{mode}");
+            assert_eq!(policy.damping_strategy, damping, "{mode}");
+            assert_eq!(policy.voltage_reltol, 2e-4);
+            assert_eq!(policy.voltage_abstol, 8e-7);
+            assert_eq!(policy.current_abstol, 7e-14);
+            assert_eq!(policy.charge_abstol, 9e-15);
+            assert_eq!(policy.residual_reltol, 6e-5);
+        }
+    }
+
+    #[test]
+    fn convergence_policy_deck_changes_preserve_other_configured_preset_fields() {
+        let args = run_args(&[]);
+        let netlist = Netlist::parse(
+            "Convergence policy\nV1 in 0 1\nR1 in 0 1k\n\
+             .options gminstepping=1\n.op\n.end\n",
+        )
+        .expect("valid deck");
+        let mut config = Config::default();
+        config.simulation.convergence_mode = "fast".into();
+        let engine = build_engine(&args, &config, &netlist).expect("valid run engine");
+        let policy = &engine.config().convergence_config;
+        assert!(policy.gmin_stepping);
+        assert!(!policy.source_stepping);
+        assert!(!policy.pseudo_transient);
+        assert!(!policy.arc_length);
+        assert_eq!(policy.damping_strategy, DampingStrategy::None);
+    }
 }

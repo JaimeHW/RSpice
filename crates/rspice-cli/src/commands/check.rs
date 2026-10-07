@@ -211,9 +211,6 @@ fn validation_engine(
             .netlist_options
             .spice_dialect
             .map(crate::cli::SpiceDialectArg::simulation_dialect),
-        convergence_preset: rspice_core::ConvergencePreset::from_mode_name(
-            &config.simulation.convergence_mode,
-        ),
         ..Default::default()
     };
     let simulation_config = rspice_core::resolve_simulation_config(
@@ -742,6 +739,38 @@ fn output_text(result: &ValidationResult, quiet: bool) -> Result<(), CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn convergence_policy_check_honors_the_decks_overrides_of_configured_defaults() {
+        let netlist = Netlist::parse(
+            "Convergence policy\nV1 in 0 1\nR1 in 0 1k\n\
+             .options gminstepping=0 sourcestepping=1 pseudotransient=0 arclength=1 damping=bankrose\n\
+             .op\n.end\n",
+        ).expect("valid deck");
+        let args = CheckArgs {
+            input: "policy.cir".into(),
+            netlist_options: Default::default(),
+            connectivity: true,
+            models: true,
+            strict: false,
+            json: false,
+        };
+        for mode in ["default", "fast", "robust"] {
+            let mut config = Config::default();
+            config.simulation.convergence_mode = mode.into();
+            let engine = validation_engine(&netlist, &args, &config).expect("valid check engine");
+            let policy = &engine.config().convergence_config;
+            assert!(!policy.gmin_stepping, "{mode}");
+            assert!(policy.source_stepping, "{mode}");
+            assert!(!policy.pseudo_transient, "{mode}");
+            assert!(policy.arc_length, "{mode}");
+            assert_eq!(
+                policy.damping_strategy,
+                rspice_core::config::DampingStrategy::BankRose,
+                "{mode}"
+            );
+        }
+    }
 
     #[test]
     fn undefined_mutual_inductor_fails_before_topology_checks() {
