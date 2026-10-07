@@ -64,13 +64,7 @@ impl ResultSnapshot {
         let result = match &self.source {
             Source::Hdf5(file) => {
                 let readback = crate::hdf5::read_hdf5_sections_from_file_with_limits(file, limits)
-                    .map_err(|error| match error {
-                        crate::hdf5::Hdf5Error::ResourceLimit(source) => CliError::ResourceLimit {
-                            path: path.to_owned(),
-                            source,
-                        },
-                        error => conversion_error(path, error),
-                    })?;
+                    .map_err(|error| hdf5_read_error(path, error))?;
                 hdf5_result(path, readback, section)?
             }
             Source::Bytes(bytes) => match format {

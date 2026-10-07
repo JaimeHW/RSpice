@@ -769,13 +769,18 @@ pub fn read_hdf5_sections_with_limits(
     path: &Path,
     limits: rspice_core::ResourceLimits,
 ) -> Result<Hdf5Readback> {
-    let bytes = std::fs::metadata(path).map_err(rustyhdf5::Error::Io)?.len();
-    admission::admit(
-        rspice_core::ResourceKind::ExternalDataBytes,
-        usize::try_from(bytes).unwrap_or(usize::MAX),
-        limits.max_external_data_bytes,
-    )?;
-    let file = Hdf5File::open(path)?;
+    let bytes =
+        crate::input_file::read(path, limits.max_external_data_bytes).map_err(
+            |error| match error {
+                crate::input_file::ReadError::Io(error) => {
+                    Hdf5Error::Backend(rustyhdf5::Error::Io(error))
+                }
+                crate::input_file::ReadError::ResourceLimit(error) => {
+                    Hdf5Error::ResourceLimit(error)
+                }
+            },
+        )?;
+    let file = Hdf5File::from_bytes(bytes)?;
     read_hdf5_sections_from_file_with_limits(&file, limits)
 }
 

@@ -78,34 +78,40 @@ fn result_readers_preserve_limit_diagnostics_and_destinations() {
 }
 
 #[test]
-fn raw_io_failures_keep_the_source_path_and_io_exit_status() {
-    let dir = test_dir("raw_input_io");
-    let source = dir.join("directory.raw");
-    std::fs::create_dir(&source).unwrap();
-    for operation in ["compare", "bless", "table", "vcd"] {
-        let extension = if operation == "table" { "csv" } else { "raw" };
-        let destination = dir.join(format!("{operation}.{extension}"));
-        let original = b"preserve destination";
-        std::fs::write(&destination, original).unwrap();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
-        command.args(["--quiet", "--error-format", "json"]);
-        if matches!(operation, "compare" | "bless") {
-            command.arg("compare").arg(&source).arg(&destination);
-            if operation == "bless" {
-                command.arg("--bless");
+fn result_io_failures_keep_the_source_path_and_io_exit_status() {
+    let dir = test_dir("result_input_io");
+    for format in ["raw", "vcd", "csv", "tsv", "json", "h5", "s1p"] {
+        let source = dir.join(format!("directory.{format}"));
+        std::fs::create_dir(&source).unwrap();
+        for operation in ["compare", "bless", "table", "vcd"] {
+            let extension = if operation == "table" { "csv" } else { format };
+            let destination = dir.join(format!("{operation}.{extension}"));
+            let original = b"preserve destination";
+            std::fs::write(&destination, original).unwrap();
+            let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            command.args(["--quiet", "--error-format", "json"]);
+            if matches!(operation, "compare" | "bless") {
+                command.arg("compare").arg(&source).arg(&destination);
+                if operation == "bless" {
+                    command.arg("--bless");
+                }
+            } else {
+                command
+                    .arg("convert")
+                    .arg(&source)
+                    .arg(&destination)
+                    .args(["--to", if operation == "vcd" { "vcd" } else { "csv" }]);
             }
-        } else {
-            command
-                .arg("convert")
-                .arg(&source)
-                .arg(&destination)
-                .args(["--to", if operation == "vcd" { "vcd" } else { "csv" }]);
+            let output = command.output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(74),
+                "{format}, {operation}: {output:?}"
+            );
+            let report: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(report["error"]["code"], "input_read_error", "{report}");
+            assert_eq!(report["error"]["path"], source.to_str().unwrap());
+            assert_eq!(std::fs::read(&destination).unwrap(), original);
         }
-        let output = command.output().unwrap();
-        assert_eq!(output.status.code(), Some(74), "{operation}: {output:?}");
-        let report: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-        assert_eq!(report["error"]["code"], "input_read_error", "{report}");
-        assert_eq!(report["error"]["path"], source.to_str().unwrap());
-        assert_eq!(std::fs::read(&destination).unwrap(), original);
     }
 }

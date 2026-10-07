@@ -157,7 +157,11 @@ pub(crate) fn write_vcd_artifact(path: &Path, document: &VcdDocument) -> Result<
 
 /// Parse a dump, naming the file in any failure.
 fn parse_vcd(path: &Path, resource_limits: ResourceLimits) -> Result<VcdDocument, CliError> {
-    rspice_core::io::parse_vcd_file_with_limits(path, resource_limits)
+    let bytes = crate::commands::waveform_io::read_input_bytes_limited(
+        path,
+        resource_limits.max_external_data_bytes,
+    )?;
+    rspice_core::io::vcd::parse_vcd_bytes_with_limits(&bytes, resource_limits)
         .map_err(|error| read_error(path, error))
 }
 
@@ -443,8 +447,15 @@ fn event_traces_of(
 ) -> Result<Option<LoadedVcdDocument>, CliError> {
     let traces = match format {
         InputFormat::Raw | InputFormat::RawAscii => {
-            let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits)
-                .map_err(|error| crate::commands::waveform_io::raw_read_error(path, error))?;
+            let bytes = crate::commands::waveform_io::read_input_bytes_limited(
+                path,
+                resource_limits.max_external_data_bytes,
+            )?;
+            let file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(
+                &bytes,
+                resource_limits,
+            )
+            .map_err(|error| crate::commands::waveform_io::raw_read_error(path, error))?;
             rspice_core::execution::decode_event_plots(&file)
                 .map_err(|error| conversion_error(path, error))?
         }

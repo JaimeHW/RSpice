@@ -44,6 +44,10 @@ rspice-core = { workspace = true, features = ["veriloga-native"] }
 [target.'cfg(not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows))))'.dependencies]
 rspice-core = { workspace = true, features = ["veriloga"] }
 
+[target.'cfg(unix)'.dependencies]
+# Reject FIFO replacements without blocking while opening result inputs.
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
