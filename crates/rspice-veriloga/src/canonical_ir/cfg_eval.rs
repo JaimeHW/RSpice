@@ -1445,6 +1445,8 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::IntegerConstant(_)
             | CfgValueKind::DigitalArrayRead { .. }
             | CfgValueKind::DigitalArrayBlockingWrite { .. }
+            | CfgValueKind::DigitalBitBlockingWrite { .. }
+            | CfgValueKind::DigitalBitNonblockingWrite { .. }
             | CfgValueKind::DigitalArrayNonblockingWrite { .. }
             | CfgValueKind::DigitalSignalRead { .. }
             | CfgValueKind::DigitalRealSignalRead { .. }

@@ -558,7 +558,14 @@ fn relocate_value(
                 relocate_wait(wait, map);
             }
         }
-        CfgValueKind::DigitalSignalRead { signal }
+        CfgValueKind::DigitalBitNonblockingWrite { signal, wait, .. } => {
+            *signal = map.signals[usize::from(*signal)];
+            if let Some(wait) = wait {
+                relocate_wait(wait, map);
+            }
+        }
+        CfgValueKind::DigitalBitBlockingWrite { signal, .. }
+        | CfgValueKind::DigitalSignalRead { signal }
         | CfgValueKind::DigitalRealSignalRead { signal } => {
             *signal = map.signals[usize::from(*signal)];
         }

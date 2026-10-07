@@ -1872,6 +1872,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::IntegerConstant(_)
         | CfgValueKind::DigitalArrayRead { .. }
             | CfgValueKind::DigitalArrayBlockingWrite { .. }
+            | CfgValueKind::DigitalBitBlockingWrite { .. }
+            | CfgValueKind::DigitalBitNonblockingWrite { .. }
             | CfgValueKind::DigitalArrayNonblockingWrite { .. }
             | CfgValueKind::DigitalSignalRead { .. }
         | CfgValueKind::DigitalRealSignalRead { .. }

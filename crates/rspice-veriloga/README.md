@@ -376,8 +376,17 @@ vectors and integers. Missing read bits produce X and writes affect only the
 overlapping bits, using the same runtime operations as packed arrays. Declared
 direction, constant part bounds and the width limit remain enforced. Direct
 and linked instances preserve this behavior through deferred updates.
-Constant/runtime bit-selector conversion and selections of un-ranged scalar
-declarations still need reconciliation; dynamic scalar bit writes remain open.
+Schema 80 adds runtime-selected procedural bit writes to module-level vectors
+and integers. Blocking intra-assignment controls evaluate the target after the
+wait; nonblocking writes capture the bit and RHS when scheduled, then merge the
+bit into current storage when delivered. Constant and runtime bit selectors
+share numeric conversion and invalid-index behavior. In digital contexts,
+packed selections of un-ranged scalar declarations and scalar array elements
+are rejected; the separate analog-read path still needs the same scalar check.
+Authored bounds travel with scalar bit and array writes so hierarchy linking
+preserves ascending and nonzero ranges while normalizing storage. These writes
+reuse the existing update and scheduling paths; Wasm helper ABI 20 is unchanged.
+Process-local partial writes and dynamic continuous-driver targets remain open.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

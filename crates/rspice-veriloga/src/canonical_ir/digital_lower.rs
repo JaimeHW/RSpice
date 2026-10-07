@@ -2232,6 +2232,7 @@ impl ProcessLowerer<'_> {
                 };
                 let signed = self.self_signed(&access.index);
                 let index = self.array_index_value(block, &access.index);
+                let range = self.signals[usize::from(array.base)].declared_range();
                 let select = match &access.select {
                     crate::ast::PackedSelect::Bit(bit) => {
                         super::digital::DigitalArrayWriteSelect::Bit {
@@ -2240,7 +2241,6 @@ impl ProcessLowerer<'_> {
                         }
                     }
                     crate::ast::PackedSelect::Part { msb, lsb } => {
-                        let range = self.signals[usize::from(array.base)].declared_range();
                         let Some(selected) = self.part_select_bounds(msb, lsb, range, access.span)
                         else {
                             return;
@@ -2256,6 +2256,7 @@ impl ProcessLowerer<'_> {
                 let kind = if nonblocking {
                     CfgValueKind::DigitalArrayNonblockingWrite {
                         array,
+                        bounds: (range.msb, range.lsb),
                         index,
                         signed,
                         select,
@@ -2266,6 +2267,7 @@ impl ProcessLowerer<'_> {
                 } else {
                     CfgValueKind::DigitalArrayBlockingWrite {
                         array,
+                        bounds: (range.msb, range.lsb),
                         index,
                         signed,
                         select,
@@ -2278,6 +2280,7 @@ impl ProcessLowerer<'_> {
             // the intra-assignment wait; NBA targets are captured at scheduling.
             DigitalLValue::BitSelect { name, index, .. } if self.digital_array(name).is_some() => {
                 let array = self.digital_array(name).expect("resolved discrete array");
+                let range = self.signals[usize::from(array.base)].declared_range();
                 let signed = self.self_signed(index);
                 let index = self.array_index_value(block, index);
                 let value = if self.real_signal(array.base) {
@@ -2289,6 +2292,7 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::DigitalArrayNonblockingWrite {
                         select: super::digital::DigitalArrayWriteSelect::Whole,
                         array,
+                        bounds: (range.msb, range.lsb),
                         index,
                         signed,
                         value,
@@ -2299,8 +2303,43 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::DigitalArrayBlockingWrite {
                         select: super::digital::DigitalArrayWriteSelect::Whole,
                         array,
+                        bounds: (range.msb, range.lsb),
                         index,
                         signed,
+                        value,
+                    }
+                };
+                self.builder.push(block, CfgValueType::Effect, kind);
+            }
+            DigitalLValue::BitSelect { name, index, span } => {
+                let Some(&signal) = self.index.get(name.as_str()) else {
+                    self.error(
+                        "a procedural bit write requires digital variable storage",
+                        *span,
+                    );
+                    return;
+                };
+                let range = self.signals[usize::from(signal)].declared_range();
+                let signed = self.self_signed(index);
+                let index = self.array_index_value(block, index);
+                let value = self.resize(block, value, 1, false);
+                let bounds = (range.msb, range.lsb);
+                let kind = if nonblocking {
+                    CfgValueKind::DigitalBitNonblockingWrite {
+                        signal,
+                        index,
+                        signed,
+                        bounds,
+                        value,
+                        region: DigitalSchedulingRegion::NonBlockingAssign,
+                        wait,
+                    }
+                } else {
+                    CfgValueKind::DigitalBitBlockingWrite {
+                        signal,
+                        index,
+                        signed,
+                        bounds,
                         value,
                     }
                 };

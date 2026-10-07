@@ -569,11 +569,18 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalArrayRead { array, signed, .. } => {
                 write!(out, "digital-array-read:{array:?}:{signed}")
             }
-            CfgValueKind::DigitalArrayBlockingWrite { array, signed, select, .. } => {
-                write!(out, "digital-array-blocking-write:{array:?}:{signed}:{select:?}")
+            CfgValueKind::DigitalBitBlockingWrite { signal, signed, bounds, .. } => {
+                write!(out, "digital-bit-blocking-write:{signal}:{signed}:{bounds:?}")
+            }
+            CfgValueKind::DigitalBitNonblockingWrite { signal, signed, bounds, region, wait, .. } => {
+                write!(out, "digital-bit-nonblocking-write:{signal}:{signed}:{bounds:?}:{region:?}:{wait:?}")
+            }
+            CfgValueKind::DigitalArrayBlockingWrite { array, signed, select, bounds, .. } => {
+                write!(out, "digital-array-blocking-write:{array:?}:{signed}:{select:?}:{bounds:?}")
             }
             CfgValueKind::DigitalArrayNonblockingWrite {
                 array,
+                bounds,
                 signed,
                 select,
                 region,
@@ -582,7 +589,7 @@ fn kernel_region_metrics(
             } => {
                 write!(
                     out,
-                    "digital-array-nonblocking-write:{array:?}:{signed}:{select:?}:{region:?}:{wait:?}"
+                    "digital-array-nonblocking-write:{array:?}:{signed}:{select:?}:{bounds:?}:{region:?}:{wait:?}"
                 )
             }
             CfgValueKind::DigitalSignalRead { signal } => {

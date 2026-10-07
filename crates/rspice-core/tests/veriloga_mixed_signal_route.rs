@@ -2450,7 +2450,8 @@ module variable_sampler(p,q);
    period[4]=1.537e-9; enabled=1; index=-2;
    startup_ok=(measured[index]-4*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]-4*LOAD/(1000+LOAD)>-1e-8);
-   #1; index=1; gain[index]=-4; index=-1;
+   #1; index=0; selection_bit=0; index[selection_bit]=1;
+   gain[index]=-8; selection_bit=2; gain[index][selection_bit]=1; index=-1;
    selected[-1][15]=1; selection_word=-1; selection_bit=15;
    q=startup_ok && (count==-3) && (adjustment[-2]==-1)
      && count[31] && (count[3:0]==13)

@@ -559,27 +559,14 @@ enum Resolution {
     Undeclared,
 }
 
-/// What a select's position has to be known by, which is not the same question
-/// on both sides of an assignment.
-///
-/// The lowering answers it three different ways, and this is the analyzer's
-/// copy of that answer — held here so a construct the lowering cannot build is
-/// refused where a user construct is refused from, naming the construct and
-/// the offset it was written at, instead of arriving as an internal
-/// canonical-IR failure that reads like a broken compiler.
+/// Whether a selector can be evaluated at runtime in this source position.
 #[derive(Clone, Copy)]
 enum SelectBound {
-    /// A bit select being *read*. `q[i]` on the right-hand side lowers to a
-    /// node that takes its position as a value, so a run-time index is a
-    /// program this backend runs rather than one it refuses.
-    Read,
-    /// A bit select being *written*. The lowered write names the bits it
-    /// replaces, so the position is part of the instruction and has to be
-    /// known when the CFG is built.
-    Written,
-    /// Either bound of a part select, read or written. IEEE 1364-2005 section
-    /// 4.2.1 makes them constant expressions: the width of a part select is
-    /// its type, and a type is not computed at run time.
+    /// Bit reads and procedural writes carry a runtime numeric selector.
+    RuntimeBit,
+    /// A continuous driver's target is currently fixed during elaboration.
+    FixedBit,
+    /// Constant part bounds determine the selected width and direction.
     Part,
 }
 
@@ -1825,7 +1812,12 @@ impl SemanticAnalyzer {
                 span,
             } => {
                 if self.check_assignable(name, *span, signals, index, procedural) {
-                    self.check_bit_index(name, bit, signals, index, SelectBound::Written);
+                    let bound = if procedural {
+                        SelectBound::RuntimeBit
+                    } else {
+                        SelectBound::FixedBit
+                    };
+                    self.check_bit_index(name, bit, signals, index, bound);
                 }
                 self.check_digital_expression(bit, signals, index);
             }
@@ -1895,7 +1887,17 @@ impl SemanticAnalyzer {
             Resolution::Digital(position)
                 if signals[position].unpacked.is_some() && !signals[position].class.is_real() =>
             {
-                signals[position].range.unwrap_or(VectorBounds::SCALAR)
+                let Some(range) = signals[position].range else {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "packed selection of `{}` requires vector or integer elements; scalar elements have no selectable bits",
+                            select.name
+                        )),
+                        select.span,
+                    );
+                    return;
+                };
+                range
             }
             Resolution::Analog(SymbolKind::Variable)
                 if self.arrays.contains_key(&select.name)
@@ -2065,7 +2067,7 @@ impl SemanticAnalyzer {
             }
             return None;
         }
-        let (range, kind) = match self.resolve_digital_name(name, index) {
+        let range = match self.resolve_digital_name(name, index) {
             Resolution::Digital(position) if signals[position].class.is_real() => {
                 // Verilog-AMS LRM 2.4 section 3.7 makes a `wreal` a real-valued
                 // connection. It has no bit representation to index into, and
@@ -2082,7 +2084,7 @@ impl SemanticAnalyzer {
                 );
                 return None;
             }
-            Resolution::Digital(position) => (signals[position].range, None),
+            Resolution::Digital(position) => signals[position].range,
             Resolution::ProcessLocal(local) => {
                 if !local.kind.is_selectable() {
                     self.record_error_at(
@@ -2100,7 +2102,7 @@ impl SemanticAnalyzer {
                     ProcessLocalKind::Integer => Some(INTEGER_BOUNDS),
                     _ => None,
                 });
-                (range, Some(local.kind))
+                range
             }
             Resolution::Analog(SymbolKind::Variable) => {
                 if !self
@@ -2116,15 +2118,24 @@ impl SemanticAnalyzer {
                     );
                     return None;
                 }
-                (Some(INTEGER_BOUNDS), None)
+                Some(INTEGER_BOUNDS)
             }
             Resolution::Analog(_) | Resolution::Undeclared => return None,
         };
-        // A bit select being read carries its position as a value, so a
-        // non-constant one is a program rather than a refusal. Everywhere else
-        // the position is part of the instruction the lowering builds, and a
-        // run-time one has to be refused — here, where the construct and the
-        // offset it was written at are still in hand.
+        let Some(range) = range else {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "packed selection of `{name}` requires a vector or integer; a scalar has no selectable bits"
+                )),
+                expression.span(),
+            );
+            return None;
+        };
+        // Numeric bit selectors share runtime conversion for constants and
+        // variables, including rounded reals and X/Z or out-of-range values.
+        if matches!(bound, SelectBound::RuntimeBit) {
+            return None;
+        }
         let Some(value) = self.digital_selector_value(expression, index) else {
             self.refuse_run_time_select_bound(name, expression, bound);
             return None;
@@ -2140,35 +2151,9 @@ impl SemanticAnalyzer {
             );
             return None;
         };
-        let inside = match range {
-            Some(bounds) => bounds.contains(selected),
-            // A scalar signal has exactly one bit, numbered zero.
-            None => selected == 0,
-        };
-        // IEEE 1364-2005 5.2.1 defines out-of-range vector reads as X and
-        // writes as clipped to the declared range. Constancy does not change
-        // that behavior: keep the authored index for lowering and the runtime.
-        // Scalar declarations retain their existing separate validation.
-        if !inside && range.is_none() {
-            let declared = range.map_or_else(
-                || {
-                    kind.map_or_else(
-                        || "a scalar (1 bit)".to_string(),
-                        |kind| format!("a scalar `{}` (1 bit)", kind.keyword()),
-                    )
-                },
-                VectorBounds::spelling,
-            );
-            self.record_error_at(
-                SemanticErrorKind::IndexOutOfBounds(format!(
-                    "bit {selected} of `{name}`, which is declared {declared}"
-                )),
-                expression.span(),
-            );
-            return None;
-        }
-        // A scalar has one bit numbered zero, which is what `[0:0]` names.
-        Some((range.unwrap_or(VectorBounds::SCALAR), selected))
+        // Out-of-range vector parts retain their authored indices for clipped
+        // execution. Direction and width are checked by the caller.
+        Some((range, selected))
     }
 
     /// Refuse a select position the lowering has to know and this one does not.
@@ -2187,11 +2172,10 @@ impl SemanticAnalyzer {
         bound: SelectBound,
     ) {
         let kind = match bound {
-            SelectBound::Read => return,
-            SelectBound::Written => SemanticErrorKind::UnsupportedFeature(format!(
-                "a bit select on the left-hand side must have constant bounds: writing one bit \
-                 of `{name}` at a position computed at run time is a read-modify-write this \
-                 lowering has no node for, so select a constant bit or assign all of `{name}`"
+            SelectBound::RuntimeBit => return,
+            SelectBound::FixedBit => SemanticErrorKind::UnsupportedFeature(format!(
+                "a continuous bit driver of `{name}` must have constant bounds; \
+                 dynamic continuous targets require driver-selection lowering"
             )),
             SelectBound::Part => SemanticErrorKind::InvalidExpression(format!(
                 "a part select of `{name}` must have constant bounds; IEEE 1364-2005 section \
@@ -2354,7 +2338,7 @@ impl SemanticAnalyzer {
                         &access.index,
                         signals,
                         index,
-                        SelectBound::Read,
+                        SelectBound::RuntimeBit,
                     );
                 }
                 self.check_digital_expression(&access.index, signals, index);

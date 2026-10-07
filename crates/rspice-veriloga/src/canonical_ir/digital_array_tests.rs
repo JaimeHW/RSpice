@@ -152,6 +152,7 @@ fn fixture(lower: i64, real: bool, real_index: bool) -> CanonicalDigitalPlan {
         entry,
         CfgValueType::Effect,
         CfgValueKind::DigitalArrayBlockingWrite {
+            bounds: if real { (0, 0) } else { (7, 0) },
             select: super::digital::DigitalArrayWriteSelect::Whole,
             array,
             index,
@@ -184,6 +185,7 @@ fn fixture(lower: i64, real: bool, real_index: bool) -> CanonicalDigitalPlan {
         entry,
         CfgValueType::Effect,
         CfgValueKind::DigitalArrayNonblockingWrite {
+            bounds: if real { (0, 0) } else { (7, 0) },
             select: super::digital::DigitalArrayWriteSelect::Whole,
             array,
             index,

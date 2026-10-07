@@ -1164,9 +1164,30 @@ pub enum CfgValueKind {
         then_value: ValueId,
         else_value: ValueId,
     },
+    /// A procedural bit write whose selector is evaluated at this instruction.
+    /// Bounds retain authored bit names when linked storage is normalized.
+    DigitalBitBlockingWrite {
+        signal: DigitalSignalId,
+        index: ValueId,
+        signed: bool,
+        bounds: (i64, i64),
+        value: ValueId,
+    },
+    /// Capture a selected bit and RHS before scheduling a deferred update.
+    DigitalBitNonblockingWrite {
+        signal: DigitalSignalId,
+        index: ValueId,
+        signed: bool,
+        bounds: (i64, i64),
+        value: ValueId,
+        region: DigitalSchedulingRegion,
+        wait: Option<DigitalWait>,
+    },
     /// Write one unpacked variable element at the index evaluated here.
     DigitalArrayBlockingWrite {
         array: super::digital::DigitalArrayRef,
+        /// Authored packed element bounds, retained across hierarchy linking.
+        bounds: (i64, i64),
         index: ValueId,
         signed: bool,
         select: super::digital::DigitalArrayWriteSelect,
@@ -1175,6 +1196,8 @@ pub enum CfgValueKind {
     /// Capture both the selected scalar cell and RHS when scheduling the update.
     DigitalArrayNonblockingWrite {
         array: super::digital::DigitalArrayRef,
+        /// Authored packed element bounds, retained across hierarchy linking.
+        bounds: (i64, i64),
         index: ValueId,
         signed: bool,
         select: super::digital::DigitalArrayWriteSelect,
@@ -1314,6 +1337,8 @@ impl CfgValueKind {
             | Self::IntegerConstant(_)
             | Self::DigitalArrayRead { .. }
             | Self::DigitalArrayBlockingWrite { .. }
+            | Self::DigitalBitBlockingWrite { .. }
+            | Self::DigitalBitNonblockingWrite { .. }
             | Self::DigitalArrayNonblockingWrite { .. }
             | Self::DigitalSignalRead { .. }
             | Self::DigitalRealSignalRead { .. }
@@ -1648,6 +1673,13 @@ impl CfgValueKind {
             } => vec![*condition, *then_value, *else_value],
             Self::DigitalBitSelect { input, index, .. } => vec![*input, *index],
             Self::DigitalArrayRead { index, .. } => vec![*index],
+            Self::DigitalBitBlockingWrite { index, value, .. } => vec![*index, *value],
+            Self::DigitalBitNonblockingWrite {
+                index, value, wait, ..
+            } => [*index, *value]
+                .into_iter()
+                .chain(wait.iter().flat_map(DigitalWait::operands))
+                .collect(),
             Self::DigitalArrayBlockingWrite {
                 index,
                 select,
@@ -1991,6 +2023,19 @@ impl CfgValueKind {
                 *index = map(*index);
             }
             Self::DigitalArrayRead { index, .. } => *index = map(*index),
+            Self::DigitalBitBlockingWrite { index, value, .. } => {
+                *index = map(*index);
+                *value = map(*value);
+            }
+            Self::DigitalBitNonblockingWrite {
+                index, value, wait, ..
+            } => {
+                *index = map(*index);
+                *value = map(*value);
+                if let Some(wait) = wait {
+                    wait.map_operands(&mut map);
+                }
+            }
             Self::DigitalArrayBlockingWrite {
                 index,
                 select,

@@ -549,6 +549,8 @@ pub enum DigitalEvalError {
     EffectValueRead(ValueId),
     /// The plan does not declare a signal a node names.
     UndeclaredSignal(DigitalSignalId),
+    /// Authored packed indices cannot be translated to the target's storage.
+    InvalidWriteTarget(DigitalSignalId),
     /// The environment has no value for a declared signal.
     SignalUnavailable(DigitalSignalId),
     /// The plan does not declare an analog probe a node names.
@@ -632,6 +634,9 @@ impl std::fmt::Display for DigitalEvalError {
                 f,
                 "process {id} is not a member of the supplied digital plan"
             ),
+            Self::InvalidWriteTarget(signal) => {
+                write!(f, "invalid packed write target for signal {signal}")
+            }
             Self::UnsealedPlan => write!(f, "digital plan has no compiled content identity"),
             Self::ClockUnavailable => write!(f, "digital process activation has no clock"),
             Self::InvalidClock => write!(
@@ -1778,27 +1783,73 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         Ok(index)
     }
 
+    fn packed_write_target(
+        &self,
+        signal: DigitalSignalId,
+        bounds: (i64, i64),
+        select: super::digital::DigitalArrayWriteSelect,
+    ) -> Result<Option<DigitalWriteTarget>, DigitalEvalError> {
+        use super::digital::DigitalArrayWriteSelect;
+        let declaration = self.signal(signal)?;
+        let authored = super::VectorBounds {
+            msb: bounds.0,
+            lsb: bounds.1,
+        };
+        let actual = declaration.declared_range();
+        let position = |index: i64| {
+            if authored.msb >= authored.lsb {
+                i128::from(index) - i128::from(authored.lsb)
+            } else {
+                i128::from(authored.lsb) - i128::from(index)
+            }
+        };
+        let translate = |index: i64| {
+            let offset = position(index);
+            let index = if actual.msb >= actual.lsb {
+                i128::from(actual.lsb) + offset
+            } else {
+                i128::from(actual.lsb) - offset
+            };
+            i64::try_from(index).map_err(|_| DigitalEvalError::InvalidWriteTarget(signal))
+        };
+        let select = match select {
+            DigitalArrayWriteSelect::Whole => DigitalWriteSelect::Whole,
+            DigitalArrayWriteSelect::Bit { index, signed } => {
+                let Some(index) = self
+                    .selection_index(index, signed)?
+                    .filter(|index| authored.contains(*index))
+                else {
+                    return Ok(None);
+                };
+                DigitalWriteSelect::Bit(translate(index)?)
+            }
+            DigitalArrayWriteSelect::Part { msb, lsb } => {
+                let left = position(msb);
+                let right = position(lsb);
+                if left.max(right) < 0 || left.min(right) >= i128::from(declaration.width) {
+                    return Ok(None);
+                }
+                DigitalWriteSelect::Part {
+                    msb: translate(msb)?,
+                    lsb: translate(lsb)?,
+                }
+            }
+        };
+        Ok(Some(DigitalWriteTarget { signal, select }))
+    }
+
     fn array_write_target(
         &self,
         array: super::digital::DigitalArrayRef,
         index: ValueId,
         signed: bool,
+        bounds: (i64, i64),
         select: super::digital::DigitalArrayWriteSelect,
     ) -> Result<Option<DigitalWriteTarget>, DigitalEvalError> {
-        use super::digital::DigitalArrayWriteSelect;
-        let select = match select {
-            DigitalArrayWriteSelect::Whole => Some(DigitalWriteSelect::Whole),
-            DigitalArrayWriteSelect::Bit { index, signed } => self
-                .selection_index(index, signed)?
-                .map(DigitalWriteSelect::Bit),
-            DigitalArrayWriteSelect::Part { msb, lsb } => {
-                Some(DigitalWriteSelect::Part { msb, lsb })
-            }
-        };
-        let signal = self.array_element(array, index, signed)?;
-        Ok(signal
-            .zip(select)
-            .map(|(signal, select)| DigitalWriteTarget { signal, select }))
+        match self.array_element(array, index, signed)? {
+            Some(signal) => self.packed_write_target(signal, bounds, select),
+            None => Ok(None),
+        }
     }
 
     fn blocking_write(
@@ -2092,18 +2143,59 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     Ok(DigitalScalar::FourState(value))
                 }
             }
+            CfgValueKind::DigitalBitBlockingWrite {
+                signal,
+                index,
+                signed,
+                bounds,
+                value,
+            } => {
+                let select = super::digital::DigitalArrayWriteSelect::Bit {
+                    index: *index,
+                    signed: *signed,
+                };
+                match self.packed_write_target(*signal, *bounds, select)? {
+                    Some(target) => self.blocking_write(&target, *value),
+                    None => Ok(DigitalScalar::Effect),
+                }
+            }
+            CfgValueKind::DigitalBitNonblockingWrite {
+                signal,
+                index,
+                signed,
+                bounds,
+                value,
+                region,
+                wait,
+            } => {
+                // Delay/event operands are evaluated even for an ignored target.
+                let wait = match wait {
+                    Some(wait) => self.capture_wait(wait)?,
+                    None => None,
+                };
+                let select = super::digital::DigitalArrayWriteSelect::Bit {
+                    index: *index,
+                    signed: *signed,
+                };
+                match self.packed_write_target(*signal, *bounds, select)? {
+                    Some(target) => self.nonblocking_write(&target, *value, *region, wait),
+                    None => Ok(DigitalScalar::Effect),
+                }
+            }
             CfgValueKind::DigitalArrayBlockingWrite {
                 array,
+                bounds,
                 index,
                 signed,
                 select,
                 value,
-            } => match self.array_write_target(*array, *index, *signed, *select)? {
+            } => match self.array_write_target(*array, *index, *signed, *bounds, *select)? {
                 Some(target) => self.blocking_write(&target, *value),
                 None => Ok(DigitalScalar::Effect),
             },
             CfgValueKind::DigitalArrayNonblockingWrite {
                 array,
+                bounds,
                 index,
                 signed,
                 select,
@@ -2116,7 +2208,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     Some(wait) => self.capture_wait(wait)?,
                     None => None,
                 };
-                match self.array_write_target(*array, *index, *signed, *select)? {
+                match self.array_write_target(*array, *index, *signed, *bounds, *select)? {
                     Some(target) => self.nonblocking_write(&target, *value, *region, wait),
                     None => Ok(DigitalScalar::Effect),
                 }

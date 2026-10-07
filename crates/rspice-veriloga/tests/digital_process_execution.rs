@@ -2848,8 +2848,8 @@ fn the_remaining_process_refusals_name_themselves() {
 /// behind on.
 ///
 /// One row per construct that was found to reach a refusal. Two of them are
-/// answered by the analyzer before the lowering sees them — an unpacked array
-/// and a run-time select bound — and stay here anyway, because the subject is
+/// answered by the analyzer before the lowering sees them and stay here anyway,
+/// because the subject is
 /// what the author is told rather than which pass says it. Every row is a
 /// program the front end already refused, so the set is also the pin that no
 /// refused program quietly started compiling.
@@ -2906,14 +2906,6 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "module-level",
             "Unsupported feature: ",
         ),
-        // A select whose bound is only known at run time. The analyzer owns
-        // this one now; the lowering's constant fold stands behind it.
-        (
-            "    reg [3:0] q;\n\
-             \x20   initial begin : work integer i; i = 0; q[i] = 1'b1; end",
-            "must have constant bounds",
-            "Unsupported feature: ",
-        ),
         // `@*` over a statement that reads nothing would never resume.
         (
             "    reg q;\n\
@@ -2952,28 +2944,14 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
     }
 }
 
-/// A run-time select position is refused by the analyzer, not by an invariant.
-///
-/// `q[i] = 1'b0` is legal Verilog — IEEE 1364-2005 section 4.2.1 admits a
-/// variable bit select on the left-hand side — and this lowering has no
-/// read-modify-write node for one. That is a limitation of this compiler, so
-/// it is reported the way a user construct is reported: a semantic error that
-/// names what was written and carries the offset it was written at. It used to
-/// reach `digital_lower`'s constant fold instead and come back as "Internal
-/// error: canonical IR validation failed", which tells an author that the
-/// compiler is broken rather than that their program is not supported yet.
-///
-/// The last case is the boundary the refusal must not cross: a bit select
-/// being *read* lowers to a node that takes its position as a value, so a
-/// run-time position there is a program rather than a refusal.
+/// Fixed part widths still require constant bounds. Dynamic bit reads and
+/// procedural writes carry their selectors as runtime values.
 #[test]
-fn a_run_time_select_bound_is_refused_by_the_analyzer() {
+fn runtime_part_bounds_and_continuous_bit_targets_are_refused() {
     for (section, expected) in [
         (
-            "    reg [3:0] q;\n\
-         \x20   integer i;\n\
-         \x20   initial for (i = 0; i < 4; i = i + 1) q[i] = 1'b0;",
-            "a bit select on the left-hand side must have constant bounds",
+            "wire [3:0] q; integer i; assign q[i]=1'b0;",
+            "continuous bit driver",
         ),
         (
             "    reg [3:0] q;\n\
@@ -4850,6 +4828,152 @@ fn runtime_delays_convert_unknown_signed_and_wide_values_without_clamping() {
             start(&h.plan, &h.plan.processes[0], &mut h.store),
             Err(DigitalEvalError::InvalidDelay { .. })
         ));
+    }
+}
+
+#[test]
+fn dynamic_bit_writes_capture_targets_and_preserve_linked_ranges() {
+    let source = r#"
+module writes;
+ reg [7:4] descending; reg [4:7] ascending;
+ reg [7:4] memory[-1:0]; reg [4:7] ascending_memory[-1:0];
+ integer index, word; real real_index; reg equal_reads;
+ initial begin
+   descending=0; ascending=0; memory[-1]=0; ascending_memory[-1]=0;
+   index=6; real_index=5.5;
+   descending[index]=1; ascending[index]=1;
+   descending[5.5]=0; descending[real_index]=1;
+   equal_reads=(descending[5.5]===descending[real_index]);
+   descending[-1]=1; descending[1'bx]=1; descending[1'bz]<=#5 1;
+   descending[96'h10000000000000000]=1; descending[1e30]=1;
+   index=5; memory[-1][index]=1; memory[-1][9:6]=4'b0011;
+   ascending_memory[-1][2:5]=4'b0110; ascending_memory[-1][index]=1;
+   index=4; word=-1;
+   descending[index]<=#5 1; ascending[index]<=#5 1;
+   memory[word][index]<=#5 1;
+   descending=4'b1000; index=5; word=0;
+   descending[index]=#7 1;
+ end
+endmodule
+module top; writes u1(); writes u2(); endmodule
+"#;
+    for (module, prefixes) in [("writes", vec![""]), ("top", vec!["u1.", "u2."])] {
+        let mut h = Harness::from_module(source, Some(module));
+        h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+        h.plan.validate().unwrap();
+        let mut waits = Vec::new();
+        for process in 0..h.plan.processes.len() {
+            let DigitalProcessOutcome::Suspended(wait) = h.start(process) else {
+                panic!("blocking intra-assignment delay");
+            };
+            assert!(matches!(wait.wait(), DigitalWaitRequest::Delay(7)));
+            waits.push(wait);
+        }
+        assert_eq!(h.store.deferred.len(), prefixes.len() * 3);
+        for prefix in &prefixes {
+            assert_eq!(h.get(&format!("{prefix}descending")), "1000");
+            assert_eq!(h.get(&format!("{prefix}ascending")), "0010");
+            assert_eq!(h.get(&format!("{prefix}memory[-1]")), "1110");
+            assert_eq!(h.get(&format!("{prefix}ascending_memory[-1]")), "1100");
+            assert_eq!(h.get(&format!("{prefix}equal_reads")), "1");
+            h.set(&format!("{prefix}index"), &format!("{:032b}", 6));
+        }
+        for (process, wait) in waits.into_iter().enumerate() {
+            expect_finished(h.resume(process, wait.resume_state()));
+        }
+        for prefix in &prefixes {
+            assert_eq!(
+                h.get(&format!("{prefix}descending")),
+                "1100",
+                "blocking target is evaluated after the wait"
+            );
+        }
+        for update in std::mem::take(&mut h.store.deferred) {
+            assert!(matches!(update.wait, Some(DigitalWaitRequest::Delay(5))));
+            apply_deferred(&h.plan, &mut h.store, &update).unwrap();
+        }
+        for prefix in &prefixes {
+            assert_eq!(h.get(&format!("{prefix}descending")), "1101");
+            assert_eq!(h.get(&format!("{prefix}ascending")), "1010");
+            assert_eq!(h.get(&format!("{prefix}memory[-1]")), "1111");
+        }
+    }
+}
+
+#[test]
+fn dynamic_bit_writes_validate_source_and_artifact_types() {
+    use rspice_veriloga::canonical_ir::{CfgValueKind, CfgValueType};
+    let source = "module writes; reg [7:4] q; integer index; initial begin index=5; q[index]<=1; end endmodule";
+    let h = Harness::from_source(source);
+    for mutation in 0..4 {
+        let mut plan = h.plan.clone();
+        let node = plan.processes[0]
+            .function
+            .values
+            .iter_mut()
+            .find(|node| matches!(node.kind, CfgValueKind::DigitalBitNonblockingWrite { .. }))
+            .unwrap();
+        let CfgValueKind::DigitalBitNonblockingWrite {
+            signal,
+            index,
+            bounds,
+            region,
+            ..
+        } = &mut node.kind
+        else {
+            unreachable!()
+        };
+        let expected = match mutation {
+            0 => {
+                *bounds = (8, 0);
+                "bounds"
+            }
+            1 => {
+                *region = DigitalSchedulingRegion::Active;
+                "scheduling region"
+            }
+            2 => {
+                *index = node.id;
+                "numeric selector"
+            }
+            _ => {
+                let _ = signal;
+                node.value_type = CfgValueType::Real;
+                "effect or value type"
+            }
+        };
+        let error = plan.validate().unwrap_err();
+        assert!(format!("{error:?}").contains(expected), "{error:?}");
+    }
+    for (body, expected) in [
+        ("reg q; initial q[0]=1;", "scalar has no selectable bits"),
+        (
+            "reg q, seen; initial seen=q[0];",
+            "scalar has no selectable bits",
+        ),
+        (
+            "reg q[0:1]; initial q[0][0]=1;",
+            "scalar elements have no selectable bits",
+        ),
+        ("real q; initial q[0]=1;", "no bits"),
+        (
+            "reg [7:4] q; integer i; initial q[i:4]=1;",
+            "constant bounds",
+        ),
+        (
+            "wire [7:4] q; integer i; assign q[i]=1;",
+            "continuous bit driver",
+        ),
+    ] {
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(&format!("module bad; {body} endmodule"))
+            .err()
+            .expect("invalid or unsupported select");
+        assert!(error.to_string().contains(expected), "{body}: {error}");
+        assert!(
+            !error.to_string().contains("Internal error"),
+            "{body}: {error}"
+        );
     }
 }
 
