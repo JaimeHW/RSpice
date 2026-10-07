@@ -864,9 +864,17 @@ impl TokenStream {
 
 /// Collect a single expression made from source-contiguous value tokens.
 ///
-/// SPICE vector lists use whitespace to separate entries, so this keeps
-/// adjacent operators and operands together while stopping at token gaps.
+/// SPICE vector lists use whitespace to separate entries outside calls/groups.
 pub(crate) fn collect_contiguous_expression(stream: &mut TokenStream) -> Option<String> {
+    collect_delimited_expression(stream, None)
+}
+
+/// Optionally stop at a closing delimiter outside parentheses, as required by
+/// XSPICE complex pairs. Whitespace inside a group remains part of the expression.
+pub(crate) fn collect_delimited_expression(
+    stream: &mut TokenStream,
+    terminator: Option<char>,
+) -> Option<String> {
     let mut pieces = Vec::new();
     let mut previous_end = None;
     let mut paren_depth = 0usize;
@@ -877,10 +885,16 @@ pub(crate) fn collect_contiguous_expression(stream: &mut TokenStream) -> Option<
         if let Some(end) = previous_end
             && token.span.start != end
         {
-            break;
+            if paren_depth == 0 {
+                break;
+            }
+            // Preserve gaps so malformed operands such as `(1 2)` do not
+            // silently turn into a different valid number.
+            pieces.push(" ".to_owned());
         }
 
         let piece = match &token.kind {
+            TokenKind::Other(value) if paren_depth == 0 && Some(*value) == terminator => break,
             TokenKind::Comma if paren_depth > 0 => token.lexeme.clone(),
             TokenKind::Ident(_)
             | TokenKind::Number(_)
@@ -935,6 +949,46 @@ fn contiguous_expression_piece(token: &Token) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expression_entries_allow_group_whitespace_without_merging_adjacent_values() {
+        let mut stream = TokenStream::new(tokenize("min(1, max(2, 3)) 4").unwrap());
+        let expression = collect_contiguous_expression(&mut stream).unwrap();
+        assert_eq!(crate::netlist::expr::eval_simple(&expression).unwrap(), 1.0);
+        assert_eq!(
+            collect_contiguous_expression(&mut stream).as_deref(),
+            Some("4")
+        );
+
+        let mut stream = TokenStream::new(tokenize("max(1 2) 3").unwrap());
+        let expression = collect_contiguous_expression(&mut stream).unwrap();
+        assert!(crate::netlist::expr::parse_expression(&expression).is_err());
+        assert_eq!(
+            collect_contiguous_expression(&mut stream).as_deref(),
+            Some("3")
+        );
+    }
+
+    #[test]
+    fn expression_delimiters_do_not_end_nested_comparisons() {
+        let mut stream = TokenStream::new(tokenize("(min(1, 2) > 0)> 5").unwrap());
+        let expression = collect_delimited_expression(&mut stream, Some('>')).unwrap();
+        assert_eq!(crate::netlist::expr::eval_simple(&expression).unwrap(), 1.0);
+        assert!(matches!(stream.peek().kind, TokenKind::Other('>')));
+        stream.advance();
+        assert_eq!(
+            collect_contiguous_expression(&mut stream).as_deref(),
+            Some("5")
+        );
+    }
+
+    #[test]
+    fn unclosed_expression_groups_leave_the_stream_unconsumed() {
+        let mut stream = TokenStream::new(tokenize("min(1, 2").unwrap());
+        let position = stream.checkpoint();
+        assert!(collect_contiguous_expression(&mut stream).is_none());
+        assert_eq!(stream.checkpoint(), position);
+    }
 
     fn expression_tokens(input: &str) -> Vec<String> {
         tokenize(input)
