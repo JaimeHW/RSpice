@@ -2790,16 +2790,6 @@ fn the_remaining_process_refusals_name_themselves() {
              \x20   initial begin : work string s; q = 1'b0; end",
             "process-local `string`",
         ),
-        (
-            "    reg q;\n\
-             \x20   initial begin : work integer i; i <= 1; q = 1'b0; end",
-            "nonblocking assignment to the process-local `i`",
-        ),
-        (
-            "    reg q;\n\
-             \x20   initial begin : work reg [3:0] t; t[0] <= 1'b1; q = t[0]; end",
-            "nonblocking assignment to the process-local `t`",
-        ),
     ];
     for (section, expected) in cases {
         let error = VerilogACompiler::new(CompilerOptions::default())
@@ -2869,20 +2859,6 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "    reg q;\n\
              \x20   initial begin : work reg [1:0] m [0:3]; q = 1'b0; end",
             "unpacked array dimensions on the process-local `m`",
-            "Unsupported feature: ",
-        ),
-        // Deferred local updates still require shared storage, for whole
-        // variables as well as selected bits.
-        (
-            "    reg q;\n\
-             \x20   initial begin : work integer i; i <= 1; q = 1'b0; end",
-            "nonblocking assignment to the process-local `i`",
-            "Unsupported feature: ",
-        ),
-        (
-            "    reg q;\n\
-             \x20   initial begin : work reg [3:0] t; t[0] <= 1'b1; q = t[0]; end",
-            "nonblocking assignment to the process-local `t`",
             "Unsupported feature: ",
         ),
         // `@*` over a statement that reads nothing would never resume.
@@ -4956,6 +4932,261 @@ fn dynamic_bit_writes_validate_source_and_artifact_types() {
     }
 }
 
+fn addressable_local(plan: &CanonicalDigitalPlan, process: usize, name: &str) -> DigitalSignalId {
+    plan.signals
+        .iter()
+        .find(|signal| {
+            signal
+                .local
+                .as_ref()
+                .is_some_and(|local| usize::from(local.process) == process && local.name == name)
+        })
+        .unwrap_or_else(|| panic!("missing local {process}:{name}"))
+        .id
+}
+
+#[test]
+fn local_storage_defers_typed_partial_updates_and_observes_events() {
+    let mut h = Harness::from_source(
+        r#"
+module stored;
+ reg [3:0] observed; real real_result; integer integer_result,index;
+ initial begin : work
+   reg [7:4] q=4'bzxxx; real saved=0; integer count=0;
+   index=4; q[index]<=#2 1; index=6; q[7:6]<=#3 2'b10;
+   saved<=#4 1.5; count<=#5 2; q[5]=1;
+   @(q) observed=q;
+   @(saved+count) real_result=saved;
+   @(count) integer_result=count;
+ end
+endmodule"#,
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    let q = addressable_local(&h.plan, 0, "q");
+    let saved = addressable_local(&h.plan, 0, "saved");
+    let count = addressable_local(&h.plan, 0, "count");
+    let DigitalProcessOutcome::Suspended(first) = h.start(0) else {
+        panic!("q event")
+    };
+    let DigitalWaitRequest::Event(terms) = first.wait() else {
+        panic!("direct local event")
+    };
+    assert_eq!(terms[0].signal, q);
+    assert_eq!(h.store.values[usize::from(q)].spelling(), "zx1x");
+    let updates = std::mem::take(&mut h.store.deferred);
+    assert_eq!(updates.len(), 4);
+    for (update, delay) in updates.iter().zip([2, 3, 4, 5]) {
+        assert!(matches!(update.wait,Some(DigitalWaitRequest::Delay(t)) if t==delay));
+    }
+    let old = h.store.values[usize::from(q)].clone();
+    apply_deferred(&h.plan, &mut h.store, &updates[0]).unwrap();
+    assert!(any_term_is_satisfied(
+        terms,
+        q,
+        &old,
+        &h.store.values[usize::from(q)]
+    ));
+    let DigitalProcessOutcome::Suspended(second) = h.resume(0, first.resume_state()) else {
+        panic!("computed event")
+    };
+    assert_eq!(
+        h.get("observed"),
+        "zx11",
+        "NBA captured bit 4 before index changed"
+    );
+    let (DigitalWaitRequest::Expressions(mut event), resume) = second.into_parts() else {
+        panic!("computed local event")
+    };
+    let mut scratch = rspice_veriloga::canonical_ir::digital_eval::DigitalEvalScratch::new();
+    apply_deferred(&h.plan, &mut h.store, &updates[1]).unwrap();
+    assert!(
+        !event
+            .observe(&h.plan, q, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    assert_eq!(h.store.values[usize::from(q)].spelling(), "1011");
+    apply_deferred(&h.plan, &mut h.store, &updates[2]).unwrap();
+    assert!(
+        event
+            .observe(&h.plan, saved, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    let DigitalProcessOutcome::Suspended(third) = h.resume(0, &resume) else {
+        panic!("integer event")
+    };
+    assert_eq!(h.store.reals[usize::from(h.signal("real_result"))], 1.5);
+    let old = h.store.values[usize::from(count)].clone();
+    apply_deferred(&h.plan, &mut h.store, &updates[3]).unwrap();
+    let DigitalWaitRequest::Event(terms) = third.wait() else {
+        panic!("direct integer event")
+    };
+    assert!(any_term_is_satisfied(
+        terms,
+        count,
+        &old,
+        &h.store.values[usize::from(count)]
+    ));
+    expect_finished(h.resume(0, third.resume_state()));
+    assert_eq!(h.get("integer_result"), format!("{:032b}", 2));
+}
+
+#[test]
+fn local_storage_implicit_events_resolve_nested_shadows_and_reentry() {
+    let mut h = Harness::from_source(
+        r#"
+module scoped; reg [3:0] t,observed; reg enable;
+ always begin : outer_scope
+   reg [3:0] t=7;
+   @* begin : inner_scope
+     reg [3:0] t=0;
+     t<=#2 t+1; observed=t+enable;
+   end
+ end
+endmodule"#,
+    );
+    let local = addressable_local(&h.plan, 0, "t");
+    assert_eq!(
+        h.plan.signals.iter().filter(|s| s.local.is_some()).count(),
+        1,
+        "only the inner t needs shared storage"
+    );
+    h.set("enable", "0");
+    let DigitalProcessOutcome::Suspended(first) = h.start(0) else {
+        panic!("implicit event")
+    };
+    let DigitalWaitRequest::Event(terms) = first.wait() else {
+        panic!("implicit terms")
+    };
+    let watched: Vec<_> = terms.iter().map(|t| t.signal).collect();
+    assert!(watched.contains(&local));
+    assert!(watched.contains(&h.signal("enable")));
+    assert!(!watched.contains(&h.signal("t")));
+    h.set("enable", "1");
+    let DigitalProcessOutcome::Suspended(second) = h.resume(0, first.resume_state()) else {
+        panic!("reentry wait")
+    };
+    assert_eq!(h.get("observed"), "0001");
+    let update = h.store.deferred.remove(0);
+    apply_deferred(&h.plan, &mut h.store, &update).unwrap();
+    let DigitalProcessOutcome::Suspended(_) = h.resume(0, second.resume_state()) else {
+        panic!("next wait")
+    };
+    assert_eq!(
+        h.get("observed"),
+        "0010",
+        "inner static initializer did not reset storage"
+    );
+    assert_eq!(h.store.values[usize::from(local)].spelling(), "0001");
+}
+
+#[test]
+fn local_storage_event_edges_obey_lexical_types() {
+    for source in [
+        "module bad; initial begin : work real saved; @(posedge saved); end endmodule",
+        "module bad; initial begin : work reg saved; reg saved; end endmodule",
+    ] {
+        let errors = VerilogACompiler::new(CompilerOptions::default())
+            .compile(source)
+            .unwrap_err();
+        let message = format!("{errors:?}");
+        assert!(
+            message.contains("real storage has no bits") || message.contains("DuplicateSymbol"),
+            "{message}"
+        );
+    }
+    let mut h = Harness::from_source(
+        "module scoped; real saved; initial saved=1.0; \
+         initial begin : work reg saved=0; @(posedge saved); end endmodule",
+    );
+    let local = addressable_local(&h.plan, 1, "saved");
+    let DigitalProcessOutcome::Suspended(wait) = h.start(1) else {
+        panic!("local edge wait")
+    };
+    let DigitalWaitRequest::Event(terms) = wait.wait() else {
+        panic!("direct local event")
+    };
+    assert_eq!(terms.len(), 1);
+    assert_eq!(terms[0].signal, local);
+    assert_eq!(terms[0].edge, Some(DigitalEdge::Posedge));
+
+    let mut real = Harness::from_source(
+        "module real_event; initial begin : work real saved; @(saved); end endmodule",
+    )
+    .plan;
+    let process = &mut real.processes[0];
+    for block in &mut process.function.blocks {
+        if let rspice_veriloga::canonical_ir::CfgTerminator::Wait {
+            wait: rspice_veriloga::canonical_ir::DigitalWait::Event(terms),
+            ..
+        } = &mut block.terminator
+        {
+            terms[0].edge = Some(DigitalEdge::Posedge);
+        }
+    }
+    let errors = real.validate().unwrap_err();
+    assert!(format!("{errors:?}").contains("edge sensitivity requires integral storage"));
+}
+
+#[test]
+fn local_storage_links_lifetimes_and_checks_declaration_identity() {
+    use rspice_veriloga::canonical_ir::digital_link::{DigitalLinkInstance, link_digital_plans};
+    let source = "module stored; initial begin : work reg [4:7] q=0; q[5]<=#3 1; end endmodule";
+    let base = Harness::from_source(source);
+    let linked = link_digital_plans(
+        &[
+            DigitalLinkInstance {
+                name: "b",
+                plan: &base.plan,
+                ports: &[],
+            },
+            DigitalLinkInstance {
+                name: "a",
+                plan: &base.plan,
+                ports: &[],
+            },
+        ],
+        &[],
+        &rspice_veriloga::NoPipelineControl,
+    )
+    .unwrap();
+    let mut h = base;
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&linked.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    h.store.values = h
+        .plan
+        .signals
+        .iter()
+        .map(|s| FourStateValue::splat(s.width, FourStateBit::Unknown))
+        .collect();
+    h.store.reals = vec![0.0; h.plan.signals.len()];
+    for process in 0..2 {
+        expect_finished(h.start(process));
+    }
+    let updates = std::mem::take(&mut h.store.deferred);
+    assert_eq!(updates.len(), 2);
+    assert_ne!(updates[0].target.signal, updates[1].target.signal);
+    for (process, update) in updates.iter().enumerate() {
+        let local = addressable_local(&h.plan, process, "q");
+        assert_eq!(update.target.signal, local);
+        apply_deferred(&h.plan, &mut h.store, update).unwrap();
+        assert_eq!(
+            h.store.values[usize::from(local)].spelling(),
+            "0100",
+            "the local remains addressable after its process returns"
+        );
+    }
+    let mut invalid = h.plan.clone();
+    let first = invalid.signals[0].local.clone();
+    invalid.signals[1].local = first;
+    let errors = invalid.validate().unwrap_err();
+    assert!(format!("{errors:?}").contains("unique declaration"));
+    let mut invalid = h.plan.clone();
+    invalid.signals[0].local.as_mut().unwrap().process = 999usize.into();
+    let errors = invalid.validate().unwrap_err();
+    assert!(format!("{errors:?}").contains("owning process"));
+}
+
 #[test]
 fn local_packed_updates_preserve_four_state_values_and_blocking_timing() {
     let source = r#"
@@ -5649,10 +5880,13 @@ fn computed_event_expressions_track_result_edges_and_dynamic_indices() {
             .unwrap();
     }
     let source = "module local_event; initial begin : scope real saved; saved=0.0; @($realtobits(saved)); end endmodule";
-    let error = VerilogACompiler::default()
+    let artifact = VerilogACompiler::default()
         .compile_canonical_ir_module(source, None)
-        .unwrap_err();
-    assert!(error.to_string().contains("process-local"), "{error}");
+        .unwrap();
+    assert_eq!(
+        artifact.digital.signals.iter().filter(|signal| signal.local.is_some()).count(),
+        1
+    );
 }
 
 #[test]

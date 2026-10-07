@@ -375,9 +375,20 @@ pub struct DigitalArray {
     pub storage: DigitalArrayRef,
 }
 
+/// A static lexical declaration whose value needs scheduler-visible storage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalLocalStorage {
+    pub process: DigitalProcessId,
+    pub declaration: super::ids::DigitalLocalId,
+    pub name: SmolStr,
+}
+
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DigitalSignal {
+    /// Lexical identity for addressable process-local storage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<DigitalLocalStorage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_value: Option<DigitalInitialValue>,
     pub id: DigitalSignalId,

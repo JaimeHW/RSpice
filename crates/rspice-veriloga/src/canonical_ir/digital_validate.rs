@@ -213,6 +213,7 @@ impl CanonicalDigitalPlan {
             }
         }
         let mut names = HashSet::new();
+        let mut local_declarations = HashSet::new();
         for (index, signal) in self.signals.iter().enumerate() {
             if usize::from(signal.id) != index
                 || signal.name.is_empty()
@@ -221,6 +222,17 @@ impl CanonicalDigitalPlan {
                 return Err(error(
                     "digital signals must have dense IDs and unique nonempty names",
                 ));
+            }
+            if let Some(local) = &signal.local {
+                if !signal.procedurally_assignable
+                    || local.name.is_empty()
+                    || self.process(local.process).is_none()
+                    || !local_declarations.insert((local.process, local.declaration))
+                {
+                    return Err(error(
+                        "digital local storage requires a unique declaration and valid owning process",
+                    ));
+                }
             }
             let valid_width = if signal.kind.is_real() {
                 signal.width == 0 && signal.bounds.is_none()
@@ -293,6 +305,11 @@ impl CanonicalDigitalPlan {
                 let cell = self
                     .signal(super::ids::DigitalSignalId::new(slot))
                     .ok_or_else(|| error("digital array exceeds declared signal storage"))?;
+                if cell.local.is_some() {
+                    return Err(error(
+                        "digital local storage cannot alias module array elements",
+                    ));
+                }
                 let occupied = &mut array_cells[slot as usize];
                 let index = array.storage.lower + i64::from(slot - array.storage.base.index());
                 if *occupied
@@ -375,6 +392,11 @@ impl CanonicalDigitalPlan {
         let check_terms = |terms: &[DigitalSensitivityTerm]| {
             if terms.iter().any(|term| self.signal(term.signal).is_none()) {
                 Err(error("digital sensitivity names an undeclared signal"))
+            } else if terms
+                .iter()
+                .any(|term| term.edge.is_some() && self.signal(term.signal).unwrap().kind.is_real())
+            {
+                Err(error("digital edge sensitivity requires integral storage"))
             } else {
                 Ok(())
             }

@@ -68,6 +68,7 @@ impl DigitalEnvironment for Store {
 
 fn signal(index: u32, name: String, real: bool, width: u32) -> DigitalSignal {
     DigitalSignal {
+        local: None,
         initial_value: None,
         id: id(index),
         name: name.into(),

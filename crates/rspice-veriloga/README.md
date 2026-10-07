@@ -401,9 +401,17 @@ their authored ranges, lexical scope, branch/loop merges and values across waits
 and process re-entry. Intra-assignment waits capture the RHS before suspension
 and evaluate the selector after resumption. Concatenation targets update the
 current local for each selected part.
-Nonblocking local writes, local event bindings, and dynamic continuous-driver
-targets remain open. These need shared storage/driver contracts beyond a pure
-local value update; Wasm helper ABI remains 20.
+Schema 83 assigns shared storage to static locals that receive nonblocking
+writes or participate in direct, computed, or implicit event controls. These
+locals use existing typed signal reads, writes, subscriptions and deferred
+updates. Other locals retain SSA storage. Local declaration identity, nested
+lexical shadowing and static lifetime survive process restart, completion and
+instance linking. Deferred bit targets capture their selector at scheduling
+and merge into current storage when delivered. Real locals accept value-change
+events; edge events require integral values. Artifact validation rejects
+invalid local ownership, duplicate declaration identities, module-array aliases
+and real edge subscriptions. Dynamic continuous-driver targets, local arrays
+and hierarchical local references remain open; Wasm helper ABI remains 20.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

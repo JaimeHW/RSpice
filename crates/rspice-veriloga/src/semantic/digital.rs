@@ -1526,16 +1526,20 @@ impl SemanticAnalyzer {
             // threshold crossing would be an invented rule, and the value
             // change the standard *does* define is what a bare term already
             // asks for.
-            if term.edge.is_some()
-                && index
-                    .get(&name)
-                    .is_some_and(|position| signals[*position].class.is_real())
-            {
-                let keyword = signals[index[&name]].class.keyword();
+            let real_kind = match self.resolve_digital_name(&name, index) {
+                Resolution::ProcessLocal(local) if local.kind == ProcessLocalKind::Real => {
+                    Some("real")
+                }
+                Resolution::Digital(position) if signals[position].class.is_real() => {
+                    Some(signals[position].class.keyword())
+                }
+                _ => None,
+            };
+            if let Some(keyword) = real_kind.filter(|_| term.edge.is_some()) {
                 self.record_error_at(
                     SemanticErrorKind::InvalidExpression(format!(
                         "`{}` on `{name}`, which is a `{keyword}`; IEEE 1364-2005 section 9.7.2 \
-                         classifies an edge from a bit transition and a real net has no bits, so \
+                         classifies an edge from a bit transition and real storage has no bits, so \
                          write `@({name})` for the value-change event Verilog-AMS LRM 2.4 \
                          section 3.7 gives one",
                         match term.edge {
@@ -1643,10 +1647,9 @@ impl SemanticAnalyzer {
 
     /// Resolve the declarations of one `begin`/`end` block into a scope.
     ///
-    /// IEEE 1364-2005 section 9.8.1 gives the block its own declarative
-    /// region. A name declared here shadows a module signal of the same name
-    /// rather than colliding with it; a name declared twice in one region, or
-    /// in a region already inside another that declares it, is the collision.
+    /// VAMS-2023 section 6.8 gives each named block its own scope. A name
+    /// shadows outer local and module declarations; only a second declaration
+    /// in the same scope is a collision.
     fn collect_process_locals(&mut self, block: &DigitalBlock) -> Vec<AnalyzedProcessLocal> {
         let mut scope: Vec<AnalyzedProcessLocal> = Vec::new();
 
@@ -1717,10 +1720,7 @@ impl SemanticAnalyzer {
         scope: &mut Vec<AnalyzedProcessLocal>,
         local: AnalyzedProcessLocal,
     ) {
-        let existing = scope
-            .iter()
-            .chain(self.digital_scopes.iter().flatten())
-            .find(|entry| entry.name == local.name);
+        let existing = scope.iter().find(|entry| entry.name == local.name);
         if let Some(existing) = existing {
             self.record_error_at(
                 SemanticErrorKind::DuplicateSymbol {

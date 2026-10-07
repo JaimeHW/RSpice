@@ -1155,6 +1155,7 @@ mod tests {
 
     fn signal(index: usize, name: &str, width: u32, reg: bool) -> DigitalSignal {
         DigitalSignal {
+            local: None,
             initial_value: None,
             id: DigitalSignalId::from(index),
             name: name.into(),
@@ -1172,6 +1173,7 @@ mod tests {
     /// because Verilog-AMS LRM 2.4 section 3.7 gives one no bits.
     fn real_signal(index: usize, name: &str, resolution: DigitalRealResolution) -> DigitalSignal {
         DigitalSignal {
+            local: None,
             initial_value: None,
             id: DigitalSignalId::from(index),
             name: name.into(),

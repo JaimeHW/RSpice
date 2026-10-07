@@ -1455,6 +1455,9 @@ fn the_deferred_constructs_now_lower() {
         // Blocking packed writes now update the local's SSA value.
         "    reg [3:0] q;\n\
          \x20   initial begin : work reg [3:0] t; t = 4'b0000; t[1] = 1'b1; q = t; end",
+        // Deferred local updates use addressable static storage.
+        "    reg q;\n\
+         \x20   initial begin : work integer i; i <= 0; q = 1'b0; end",
         // Section 4.1.12's arithmetic right shift, which had no token at all.
         "    reg signed [7:0] a;\n\
          \x20   reg [7:0] q;\n\
@@ -1492,11 +1495,6 @@ fn unlowered_constructs_refuse_by_name() {
             "    reg q;\n\
              \x20   initial begin : work string s; q = 1'b0; end",
             "process-local `string`",
-        ),
-        (
-            "    reg q;\n\
-             \x20   initial begin : work integer i; i <= 0; q = 1'b0; end",
-            "nonblocking assignment to the process-local `i`",
         ),
     ];
     for (section, expected) in cases {

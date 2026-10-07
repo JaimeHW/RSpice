@@ -16,29 +16,23 @@
 //! and a value carried across the suspension in a register would see what it
 //! held when the process went to sleep.
 //!
-//! A variable declared *inside* the process is the opposite case, and the two
-//! must not be confused. It belongs to the process, nothing else can observe
-//! it, and it is an ordinary SSA variable: merged at joins by a block
-//! parameter, carried across a suspension by a resume argument. Static locals
-//! initialize once at process startup and survive both suspension and process
-//! re-entry. Lexical scope controls visibility independently of that lifetime.
+//! Static locals with deferred writes or event subscriptions use the same
+//! signal store and scheduling operations as module variables. Declaration
+//! identity and lexical scope remain separate from their storage identity;
+//! linking relocates the owning process and storage together.
 //!
-//! Everything crossing a `Wait` crosses as a resume argument: every static
-//! local, any additional in-scope temporary, and the right-hand side of an
-//! intra-assignment timing control
-//! (`q = #5 d`, section 9.2.2), whose value is read before the suspension and
-//! written after it. Nothing else survives — the interpreter starts a
-//! resumption with an empty value table, which is what proves the lowering
-//! routed the state through the terminator rather than assuming a register
-//! kept it.
+//! Other locals stay in SSA: joins use block parameters, suspension uses resume
+//! arguments. Blocking packed updates replace selected bits in the current SSA
+//! value. All static locals initialize once at process startup and survive
+//! suspension and process re-entry.
 //!
-//! That machinery is typed rather than four-state. A process-local `real`
-//! (IEEE 1364-2005 section 3.9) is an SSA variable of type
-//! [`CfgValueType::Real`], merged at joins by a real-typed block parameter and
-//! carried across a suspension by a real-typed resume argument, exactly as a
-//! `reg` is by a four-state one. Its unwritten value is `0.0` and not `x`:
-//! section 3.9 gives a `real` an initial value of zero, and it has no `x` to
-//! start at, which is why it needs its own answer rather than section 4.2.2's.
+//! Temporaries, SSA locals and captured blocking-assignment RHS values cross a
+//! `Wait` as resume arguments. Stored locals are read again after resumption,
+//! so deferred updates cannot be hidden by a stale carried value.
+//!
+//! This machinery is typed. Process-local `real` values use real storage or
+//! real-typed SSA parameters, with initial value `0.0`; integral locals preserve
+//! four-state bits and their declared width.
 //!
 //! # Numeric variable ownership
 //!
@@ -67,9 +61,6 @@
 //!
 //! - A process-local `string`: a process computes in four-state and real
 //!   values, and a string is neither.
-//! - A nonblocking assignment to a process-local, which would need shared
-//!   storage for deferred updates. Blocking bit/part writes use a pure packed
-//!   update of the local's current four-state SSA value.
 //! - A process-local `reg` whose bounds are not literal, and an array of any
 //!   kind inside a process.
 //! - `**`, a non-constant delay, and a non-constant select bound.
@@ -99,6 +90,7 @@
 //! twice.
 
 mod constants;
+mod local_storage;
 use constants::ResolvedConstants;
 
 use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
@@ -436,9 +428,13 @@ fn lower_with_analog_variables(
     // The scope an implicit port driver resolves in. It names both sides of a
     // connection, which live in two different instances, so it is the only one
     // keyed by elaborated name.
-    let elaborated_scope: HashMap<&str, DigitalSignalId> = signals
+    let elaborated_names: Vec<_> = signals
         .iter()
-        .map(|signal| (signal.name.as_str(), signal.id))
+        .map(|signal| (signal.name.clone(), signal.id))
+        .collect();
+    let elaborated_scope: HashMap<&str, DigitalSignalId> = elaborated_names
+        .iter()
+        .map(|(name, id)| (name.as_str(), *id))
         .collect();
 
     // ------------------------------------------------------------------
@@ -483,7 +479,7 @@ fn lower_with_analog_variables(
         match lower_process(
             process,
             allocate(),
-            &signals,
+            &mut signals,
             &array_storage,
             &module_scope,
             &module_constants,
@@ -498,7 +494,7 @@ fn lower_with_analog_variables(
     for assignment in &digital.continuous_assigns {
         match lower_continuous_assign(
             assignment,
-            &signals,
+            &mut signals,
             &array_storage,
             &module_scope,
             &module_constants,
@@ -522,7 +518,7 @@ fn lower_with_analog_variables(
             match lower_process(
                 process,
                 allocate(),
-                &signals,
+                &mut signals,
                 &array_storage,
                 scope,
                 constants,
@@ -537,7 +533,7 @@ fn lower_with_analog_variables(
         for assignment in &instance.continuous_assigns {
             match lower_continuous_assign(
                 assignment,
-                &signals,
+                &mut signals,
                 &array_storage,
                 scope,
                 constants,
@@ -554,7 +550,7 @@ fn lower_with_analog_variables(
         for assignment in &instance.port_drivers {
             match lower_continuous_assign(
                 assignment,
-                &signals,
+                &mut signals,
                 &array_storage,
                 &elaborated_scope,
                 &no_constants,
@@ -672,7 +668,7 @@ fn reject_overdriven_real_nets(
 /// for it would have nothing to do.
 fn lower_continuous_assign(
     assignment: &crate::semantic::AnalyzedContinuousAssign,
-    signals: &[DigitalSignal],
+    signals: &mut Vec<DigitalSignal>,
     arrays: &HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
     index: &HashMap<&str, DigitalSignalId>,
     constants: &ResolvedConstants,
@@ -855,6 +851,7 @@ fn lower_signal(
     name: SmolStr,
 ) -> DigitalSignal {
     DigitalSignal {
+        local: None,
         initial_value: None,
         id,
         name,
@@ -896,7 +893,7 @@ fn lower_signal(
 fn lower_process(
     process: &AnalyzedDigitalProcess,
     id: DigitalProcessId,
-    signals: &[DigitalSignal],
+    signals: &mut Vec<DigitalSignal>,
     arrays: &HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
     index: &HashMap<&str, DigitalSignalId>,
     constants: &ResolvedConstants,
@@ -929,6 +926,7 @@ fn lower_process(
     let entry = lowerer.builder.create_block();
     lowerer.initialize_static_locals(entry, &process.body);
     lowerer.static_local_count = lowerer.locals.len();
+    lowerer.prepare_local_storage(entry, id, &process.body);
     // Declaration initialization belongs to process startup. The restart edge
     // must enter the body after it, preserving named-block variables (IEEE
     // 1364-2005 section 9.8.1) even when a wait precedes their lexical scope.
@@ -1036,6 +1034,10 @@ struct ProcessLocal {
     /// `None` for a counter the lowering invented, which no source name can
     /// reach and which therefore cannot be shadowed or read by mistake.
     name: Option<SmolStr>,
+    /// Allocated only for deferred updates or event observation.
+    shared: Option<DigitalSignalId>,
+    integer: bool,
+    packed: bool,
     /// Whether the variable holds a real rather than four-state bits.
     ///
     /// A `real` declared inside a process (IEEE 1364-2005 section 3.9.1), which
@@ -1203,7 +1205,7 @@ struct ProcessLowerer<'a> {
     /// Closed parameter expressions may use pure analog math intrinsics.
     constant_expression: bool,
     time_scale: crate::time_scale::ModuleTimeScale,
-    signals: &'a [DigitalSignal],
+    signals: &'a mut Vec<DigitalSignal>,
     arrays: &'a HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
     index: &'a HashMap<&'a str, DigitalSignalId>,
     /// The elaboration-time constants a name in this body may denote.
@@ -1287,6 +1289,18 @@ impl ProcessLowerer<'_> {
         })
     }
 
+    fn resolved_signal(&self, name: &str) -> Option<DigitalSignalId> {
+        match self.lookup_local(name) {
+            Some(local) => self.locals[usize::from(local)].shared,
+            None => self.index.get(name).copied(),
+        }
+    }
+
+    fn ssa_local(&self, name: &str) -> Option<DigitalLocalId> {
+        self.lookup_local(name)
+            .filter(|local| self.locals[usize::from(*local)].shared.is_none())
+    }
+
     fn local_width(&self, id: DigitalLocalId) -> u32 {
         self.locals[usize::from(id)].width
     }
@@ -1353,6 +1367,9 @@ impl ProcessLowerer<'_> {
         let width = bounds.width();
         self.locals.push(ProcessLocal {
             name,
+            shared: None,
+            integer: false,
+            packed: true,
             real: false,
             width,
             bounds,
@@ -1400,6 +1417,9 @@ impl ProcessLowerer<'_> {
         let id = DigitalLocalId::from(self.locals.len());
         self.locals.push(ProcessLocal {
             name,
+            shared: None,
+            integer: false,
+            packed: false,
             real: true,
             width: 0,
             bounds: VectorBounds::SCALAR,
@@ -1422,6 +1442,22 @@ impl ProcessLowerer<'_> {
     /// miss is a lowering bug rather than a program error, and it reports as
     /// one instead of producing a value nothing defined.
     fn read_local(&mut self, block: BlockId, id: DigitalLocalId) -> ValueId {
+        if let Some(signal) = self.locals[usize::from(id)].shared {
+            let (ty, kind) = if self.local_is_real(id) {
+                (
+                    CfgValueType::Real,
+                    CfgValueKind::DigitalRealSignalRead { signal },
+                )
+            } else {
+                (
+                    CfgValueType::FourState {
+                        width: self.local_width(id),
+                    },
+                    CfgValueKind::DigitalSignalRead { signal },
+                )
+            };
+            return self.builder.push(block, ty, kind);
+        }
         let variable = CfgVariable::DigitalLocal(id);
         match self.builder.read_variable(variable, block) {
             Some(value) => value,
@@ -1452,6 +1488,25 @@ impl ProcessLowerer<'_> {
     /// to the target's width by [`Self::assigned_value`] before it gets here,
     /// so a narrower value arriving at this point is an unsigned one.
     fn write_local(&mut self, block: BlockId, id: DigitalLocalId, value: ValueId) {
+        if let Some(signal) = self.locals[usize::from(id)].shared {
+            let value = if self.local_is_real(id) {
+                value
+            } else {
+                self.resize(block, value, self.local_width(id), false)
+            };
+            self.builder.push(
+                block,
+                CfgValueType::Effect,
+                CfgValueKind::DigitalBlockingWrite {
+                    target: DigitalWriteTarget {
+                        signal,
+                        select: DigitalWriteSelect::Whole,
+                    },
+                    value,
+                },
+            );
+            return;
+        }
         // A real local has no width to resize to: section 5.2.1's rule is
         // about bits, and the value arriving here has none.
         if self.local_is_real(id) {
@@ -1617,7 +1672,7 @@ impl ProcessLowerer<'_> {
                 //
                 // Section 3.9 also numbers its bits [31:0], which is what makes
                 // `i[31]` the sign bit rather than a read off the end.
-                self.declare_local(
+                let local = self.declare_local(
                     block,
                     Some(item.name.clone()),
                     INTEGER_BOUNDS,
@@ -1625,6 +1680,7 @@ impl ProcessLowerer<'_> {
                     item.span,
                     initial,
                 );
+                self.locals[usize::from(local)].integer = true;
             }
         }
 
@@ -1660,7 +1716,7 @@ impl ProcessLowerer<'_> {
                     .init
                     .as_ref()
                     .map(|init| self.assigned_value(block, init, width));
-                self.declare_local(
+                let local = self.declare_local(
                     block,
                     Some(item.name.clone()),
                     bounds,
@@ -1668,6 +1724,7 @@ impl ProcessLowerer<'_> {
                     item.span,
                     initial,
                 );
+                self.locals[usize::from(local)].packed = declaration.range.is_some();
             }
         }
     }
@@ -2191,10 +2248,10 @@ impl ProcessLowerer<'_> {
                     self.write_with_wait(block, element, slice, nonblocking, wait.clone());
                 }
             }
-            // A process-local is an SSA variable, not a signal: writing one is
-            // a definition in the current block rather than a node in the
-            // instruction stream.
-            DigitalLValue::Identifier { name, .. } if self.lookup_local(name).is_some() => {
+            // Unobserved blocking-only locals remain SSA definitions. Deferred
+            // or observed locals were promoted before lowering and use the
+            // stored-write paths below.
+            DigitalLValue::Identifier { name, .. } if self.ssa_local(name).is_some() => {
                 let local = self.lookup_local(name).expect("just resolved");
                 if nonblocking {
                     self.error(
@@ -2210,7 +2267,7 @@ impl ProcessLowerer<'_> {
                 self.write_local(block, local, value);
             }
             DigitalLValue::BitSelect { name, .. } | DigitalLValue::PartSelect { name, .. }
-                if self.lookup_local(name).is_some() =>
+                if self.ssa_local(name).is_some() =>
             {
                 let local = self.lookup_local(name).expect("just resolved");
                 if nonblocking {
@@ -2350,7 +2407,7 @@ impl ProcessLowerer<'_> {
                 self.builder.push(block, CfgValueType::Effect, kind);
             }
             DigitalLValue::BitSelect { name, index, span } => {
-                let Some(&signal) = self.index.get(name.as_str()) else {
+                let Some(signal) = self.resolved_signal(name) else {
                     self.error(
                         "a procedural bit write requires digital variable storage",
                         *span,
@@ -2575,11 +2632,8 @@ impl ProcessLowerer<'_> {
             }
             DigitalLValue::Concat { .. } => unreachable!("a concatenation is split before here"),
         };
-        match self.index.get(name.as_str()) {
-            Some(signal) => Some(DigitalWriteTarget {
-                signal: *signal,
-                select,
-            }),
+        match self.resolved_signal(name) {
+            Some(signal) => Some(DigitalWriteTarget { signal, select }),
             None => {
                 self.error(
                     format!(
@@ -2668,6 +2722,9 @@ impl ProcessLowerer<'_> {
             )
             .collect();
         for local in carried_locals {
+            if self.locals[usize::from(local)].shared.is_some() {
+                continue;
+            }
             self.builder
                 .carry_variable(CfgVariable::DigitalLocal(local), block, resume);
         }
@@ -2705,9 +2762,7 @@ impl ProcessLowerer<'_> {
         };
         if terms.iter().all(|term| {
             signal_name(&term.signal).is_some_and(|name| {
-                self.lookup_local(name).is_none()
-                    && self.index.contains_key(name)
-                    && self.digital_array(name).is_none()
+                self.resolved_signal(name).is_some() && self.digital_array(name).is_none()
             })
         }) {
             return DigitalWait::Event(self.sensitivity_terms(
@@ -2719,7 +2774,7 @@ impl ProcessLowerer<'_> {
         let expressions = terms.iter().map(|term| {
             let mut reads = BTreeSet::new();
             collect_expression_reads(&term.signal, &mut reads);
-            if reads.iter().any(|name| self.lookup_local(name).is_some()) {
+            if reads.iter().any(|name| self.ssa_local(name).is_some()) {
                 self.error(
                     "event expressions reading process-local storage require shared local event bindings",
                     term.span,
@@ -2777,7 +2832,7 @@ impl ProcessLowerer<'_> {
                 .iter()
                 .filter_map(|term| {
                     let Some(signal) = signal_name(&term.signal)
-                        .and_then(|name| self.index.get(name)).copied() else {
+                        .and_then(|name| self.resolved_signal(name)) else {
                         self.error(
                             "event expression has no executable signal dependency: computed and selected event expressions require lowering",
                             term.signal.span(),
@@ -2794,20 +2849,16 @@ impl ProcessLowerer<'_> {
                 })
                 .collect(),
             crate::ast::Sensitivity::Implicit => {
-                let mut reads = BTreeSet::new();
-                if let Some(statement) = guarded {
-                    collect_reads(statement, &mut reads);
-                }
-                if reads.is_empty() {
+                let terms = guarded.map(|statement| self.scoped_read_dependencies(statement))
+                    .unwrap_or_default();
+                if terms.is_empty() {
                     self.error(
                         "`@*` names no signal: the statement it guards reads none, \
                          so the process could never resume",
                         span,
                     );
                 }
-                reads
-                    .into_iter()
-                    .flat_map(|name| self.read_dependencies(&name))
+                terms.into_iter()
                     .map(|signal| DigitalSensitivityTerm { signal, edge: None })
                     .collect()
             }
@@ -2956,6 +3007,9 @@ impl ProcessLowerer<'_> {
     }
 
     fn read_dependencies(&self, name: &str) -> Vec<DigitalSignalId> {
+        if let Some(local) = self.lookup_local(name) {
+            return self.locals[usize::from(local)].shared.into_iter().collect();
+        }
         if let Some(array) = self.digital_array(name) {
             array
                 .cell_range()
@@ -4971,86 +5025,6 @@ fn signal_name(expression: &Expression) -> Option<&str> {
     match expression {
         Expression::Identifier(identifier) => Some(identifier.name.as_str()),
         _ => None,
-    }
-}
-
-/// Every signal name a statement reads, for `@*`.
-///
-/// IEEE 1364-2005 section 9.7.5: the implicit list is what the statement
-/// reads, and a name that is only written does not appear. That asymmetry is
-/// the whole reason the rule exists — an assignment target that triggered its
-/// own process would never settle.
-fn collect_reads(statement: &DigitalStatement, reads: &mut BTreeSet<String>) {
-    match statement {
-        DigitalStatement::Null(_) => {}
-        DigitalStatement::Block(block) => {
-            for statement in &block.statements {
-                collect_reads(statement, reads);
-            }
-        }
-        DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign) => {
-            collect_expression_reads(&assign.value, reads);
-            match &assign.timing {
-                Some(TimingControl::Delay(delay)) => collect_expression_reads(&delay.value, reads),
-                Some(TimingControl::Event(event)) => {
-                    if let Some(count) = &event.repeat {
-                        collect_expression_reads(count, reads);
-                    }
-                }
-                None => {}
-            }
-            // A select's *index* is read even though the target is written.
-            collect_lvalue_index_reads(&assign.target, reads);
-        }
-        DigitalStatement::Conditional(conditional) => {
-            collect_expression_reads(&conditional.condition, reads);
-            collect_reads(&conditional.then_branch, reads);
-            if let Some(branch) = &conditional.else_branch {
-                collect_reads(branch, reads);
-            }
-        }
-        DigitalStatement::Case(case) => {
-            collect_expression_reads(&case.selector, reads);
-            for item in &case.items {
-                for label in &item.labels {
-                    collect_expression_reads(label, reads);
-                }
-                collect_reads(&item.statement, reads);
-            }
-            if let Some(default) = &case.default {
-                collect_reads(default, reads);
-            }
-        }
-        DigitalStatement::For(statement) => {
-            collect_expression_reads(&statement.condition, reads);
-            collect_reads(
-                &DigitalStatement::BlockingAssign((*statement.init).clone()),
-                reads,
-            );
-            collect_reads(
-                &DigitalStatement::BlockingAssign((*statement.update).clone()),
-                reads,
-            );
-            collect_reads(&statement.body, reads);
-        }
-        DigitalStatement::While(statement) => {
-            collect_expression_reads(&statement.condition, reads);
-            collect_reads(&statement.body, reads);
-        }
-        DigitalStatement::Repeat(statement) => {
-            collect_expression_reads(&statement.count, reads);
-            collect_reads(&statement.body, reads);
-        }
-        DigitalStatement::Forever(statement) => collect_reads(&statement.body, reads),
-        DigitalStatement::Timing(timing) => {
-            // IEEE 1364-2005, 9.7.5 excludes event expressions, not delays.
-            if let TimingControl::Delay(delay) = &timing.control {
-                collect_expression_reads(&delay.value, reads);
-            }
-            if let Some(statement) = &timing.statement {
-                collect_reads(statement, reads);
-            }
-        }
     }
 }
 

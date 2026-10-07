@@ -193,7 +193,12 @@ pub fn link_digital_plans(
         }
         let mut port_names = BTreeMap::new();
         for port in instance.ports {
-            if port.name.is_empty() || instance.plan.signal(port.signal).is_none() {
+            if port.name.is_empty()
+                || instance
+                    .plan
+                    .signal(port.signal)
+                    .is_none_or(|signal| signal.local.is_some())
+            {
                 return Err(error(format!(
                     "digital instance '{}' has invalid port '{}'",
                     instance.name, port.name
@@ -383,6 +388,14 @@ pub fn link_digital_plans(
                 .map
                 .processes
                 .push(DigitalProcessId::new(index(count, "process")?));
+        }
+        for source_signal in &source.signals {
+            if let Some(local) = &source_signal.local {
+                let signal = layout.map.signals[usize::from(source_signal.id)];
+                let mut local = local.clone();
+                local.process = layout.map.processes[usize::from(local.process)];
+                plan.signals[usize::from(signal)].local = Some(local);
+            }
         }
         let mut drivers = BTreeMap::new();
         for driver in &source.drivers {

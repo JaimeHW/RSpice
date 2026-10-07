@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 83 gives observed and deferred process locals shared signal storage.
 /// Version 82 adds pure four-state packed updates for process-local writes.
 /// Version 81 validates analog packed shapes and fixed write targets/types.
 /// Version 80 captures dynamic bit writes and authored packed write bounds.
@@ -84,7 +85,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 82;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 83;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
