@@ -842,6 +842,7 @@ pub(super) fn parse_line(
                 elements,
                 params,
                 defer_simple_param_refs,
+                abort,
             )
         }
         'U' => parse_pspice_u_device(line, line_num, elements, params, defer_simple_param_refs),

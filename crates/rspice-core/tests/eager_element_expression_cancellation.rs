@@ -14,6 +14,12 @@ fn model_device_source_and_subcircuit_expressions_honor_cancellation() {
     for body in [
         ".MODEL dd D(IS={f18()})\nD1 out 0 dd",
         ".MODEL buffer d_buffer(rise_delay=f18()+0)",
+        "A1 out aux gain gain={f18()}",
+        "A1 out aux gain gain=f18()+0",
+        "A1 [out] print_param_types real_array=[0 {f18()}]",
+        "A1 [out] print_param_types complex=<f18() 1>",
+        "A1 [out] print_param_types complex=<1 f18()>",
+        "A1 [out] print_param_types complex_array=[<1 f18()>]",
         "R2 out 0 1k TEMP={f18()}",
         "R2 out 0 1k TEMP=f18()+0",
         "C1 out 0 {f18()}",

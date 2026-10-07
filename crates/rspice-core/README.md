@@ -446,7 +446,10 @@ eager and forward expressions, scoped model cards, temperature-dependent fields,
 real vectors, and thermal material updates. Complex intermediate calculations
 remain supported; use `RE()`, `IMG()`, or `MAG()` to select a real result.
 XSPICE complex pairs retain both components, and each component must itself be
-real.
+real. XSPICE instance overrides and scoped physical scalar fields use the same
+validation. Eager XSPICE instance expressions observe parser cancellation;
+forward-reference probes do not advance the live statistical stream.
+
 Model fields do not replace enclosing `.PARAM` or `.GLOBAL_PARAM` bindings while
 resolving expressions, including forward references and runtime expressions.
 Model fields supply otherwise unbound names within their own card. Temperature

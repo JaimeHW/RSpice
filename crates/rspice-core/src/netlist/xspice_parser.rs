@@ -42,23 +42,65 @@ use super::lexer::{
 };
 use super::{Element, ElementKind, ParamContext, ParseError, XspiceDigitalNode, XspicePort, expr};
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 
 //=============================================================================
 // Main Parser Entry Point
 //=============================================================================
 
+struct XspiceParseContext<'a> {
+    params: &'a ParamContext,
+    abort: &'a dyn AbortSignal,
+}
+
+impl std::ops::Deref for XspiceParseContext<'_> {
+    type Target = ParamContext;
+    fn deref(&self) -> &Self::Target {
+        self.params
+    }
+}
+
+impl XspiceParseContext<'_> {
+    fn evaluate(&self, expression: &str) -> Result<crate::ComplexValue, expr::ExprError> {
+        expr::eval_expression_complex_with_probe_and_abort(expression, self.params, self.abort)
+            .map_err(|error| match error {
+                expr::ExpressionEvaluationError::Expression(error) => error,
+                expr::ExpressionEvaluationError::Aborted => {
+                    expr::ExprError::InvalidArgument("XSPICE numeric parsing cancelled".into())
+                }
+            })
+    }
+
+    fn check_abort(&self) -> Result<(), ParseError> {
+        if self.abort.is_aborted() {
+            Err(ParseError::InvalidValue(
+                "XSPICE numeric parsing cancelled".into(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Parse an XSPICE A-device element
 ///
-/// Called when the parser encounters a line starting with 'A'.
-/// The stream should be positioned AFTER the element name has been consumed.
-pub fn parse_xspice(
+/// Called with the deck parser's latched abort signal. The enclosing line
+/// restores typed cancellation even when an optional grammar probe deferred it.
+/// The stream starts after the element name.
+pub(crate) fn parse_xspice(
     stream: &mut TokenStream,
     line_num: usize,
     name: String,
     elements: &mut Vec<Element>,
     netlist_params: &ParamContext,
     defer_simple_param_refs: bool,
+    abort: &dyn AbortSignal,
 ) -> Result<(), ParseError> {
+    let context = XspiceParseContext {
+        params: netlist_params,
+        abort,
+    };
+    let netlist_params = &context;
     // Collect all ports and potential model name in order
     // We use a strategy where all identifiers are added as ports,
     // and at the end we take the last analog port as the model name
@@ -73,6 +115,7 @@ pub fn parse_xspice(
     let mut real_vector_expr_params = Vec::new();
 
     loop {
+        netlist_params.check_abort()?;
         skip_xspice_mif_token_separators(stream);
 
         if ports
@@ -996,10 +1039,10 @@ fn real_instance_value(
 fn numeric_instance_literal(
     spelling: &str,
     value: Value,
-    params: &ParamContext,
+    params: &XspiceParseContext<'_>,
 ) -> Result<crate::ComplexValue, expr::ExprError> {
     if spelling.contains(['j', 'J']) {
-        expr::eval_expression_complex(spelling, params)
+        params.evaluate(spelling)
     } else {
         Ok(value.into())
     }
@@ -1010,9 +1053,10 @@ fn parse_param_value(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
+    netlist_params.check_abort()?;
     let sign = match &stream.peek().kind {
         TokenKind::Plus => Some(1.0),
         TokenKind::Minus => Some(-1.0),
@@ -1065,7 +1109,7 @@ fn parse_unsigned_param_value(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
     match &stream.peek().kind {
@@ -1107,7 +1151,7 @@ fn parse_scalar_param_token_value(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
     match &stream.peek().kind {
@@ -1139,18 +1183,22 @@ fn parse_scalar_param_token_value(
                     Ok(XspiceParamValue::Deferred(expr_text))
                 }
             } else {
-                match expr::eval_expression_complex(&expr_text, netlist_params) {
+                match netlist_params.evaluate(&expr_text) {
                     Ok(value) => Ok(XspiceParamValue::Resolved(value)),
                     Err(_) => {
                         if let Some(value) = netlist_params.get_string(&expr_text) {
-                            let parsed =
-                                parse_string_backed_param_value(param_name, value, line_num)?
-                                    .unwrap_or_else(|| {
-                                        xspice_string_value_from_param_preference(
-                                            param_name,
-                                            value.to_string(),
-                                        )
-                                    });
+                            let parsed = parse_string_backed_param_value(
+                                param_name,
+                                value,
+                                line_num,
+                                netlist_params.abort,
+                            )?
+                            .unwrap_or_else(|| {
+                                xspice_string_value_from_param_preference(
+                                    param_name,
+                                    value.to_string(),
+                                )
+                            });
                             Ok(parsed)
                         } else if xspice_param_prefers_string_vector(param_name) {
                             Ok(XspiceParamValue::StringVectorDeferred(expr_text))
@@ -1166,8 +1214,13 @@ fn parse_scalar_param_token_value(
         TokenKind::StringLit(value) => {
             let value = value.clone();
             stream.advance();
-            let parsed = parse_string_backed_param_value(param_name, &value, line_num)?
-                .unwrap_or_else(|| xspice_string_value_from_param_preference(param_name, value));
+            let parsed = parse_string_backed_param_value(
+                param_name,
+                &value,
+                line_num,
+                netlist_params.abort,
+            )?
+            .unwrap_or_else(|| xspice_string_value_from_param_preference(param_name, value));
             Ok(parsed)
         }
         TokenKind::Other('<') => {
@@ -1205,8 +1258,13 @@ fn parse_scalar_param_token_value(
                     if defer_simple_param_refs {
                         Ok(XspiceParamValue::StringDeferred(raw))
                     } else {
-                        let parsed = parse_string_backed_param_value(param_name, value, line_num)?
-                            .unwrap_or_else(|| XspiceParamValue::String(value.to_string()));
+                        let parsed = parse_string_backed_param_value(
+                            param_name,
+                            value,
+                            line_num,
+                            netlist_params.abort,
+                        )?
+                        .unwrap_or_else(|| XspiceParamValue::String(value.to_string()));
                         Ok(parsed)
                     }
                 } else if let Some(value) = parse_boolean_literal(&raw) {
@@ -1232,13 +1290,15 @@ fn parse_scalar_param_token_value(
                             Ok(XspiceParamValue::StringDeferred(raw))
                         }
                     } else {
-                        let parsed = parse_string_backed_param_value(param_name, value, line_num)?
-                            .unwrap_or_else(|| {
-                                xspice_string_value_from_param_preference(
-                                    param_name,
-                                    value.to_string(),
-                                )
-                            });
+                        let parsed = parse_string_backed_param_value(
+                            param_name,
+                            value,
+                            line_num,
+                            netlist_params.abort,
+                        )?
+                        .unwrap_or_else(|| {
+                            xspice_string_value_from_param_preference(param_name, value.to_string())
+                        });
                         Ok(parsed)
                     }
                 } else {
@@ -1276,7 +1336,7 @@ fn parse_scalar_param_token_value(
 
 fn try_scalar_expression_param(
     stream: &mut TokenStream,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Option<XspiceParamValue> {
     let first = stream.peek().clone();
@@ -1295,9 +1355,7 @@ fn try_scalar_expression_param(
     if let Some(value) = parse_boolean_literal(&expr) {
         return Some(XspiceParamValue::Resolved(value.into()));
     }
-    if !defer_simple_param_refs
-        && let Ok(value) = expr::eval_expression_complex(&expr, netlist_params)
-    {
+    if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr) {
         return Some(XspiceParamValue::Resolved(value));
     }
     Some(XspiceParamValue::Deferred(expr))
@@ -1442,7 +1500,7 @@ fn parse_vector_param_value(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
     if vector_param_should_parse_as_string(
@@ -1472,7 +1530,7 @@ fn parse_vector_param_value(
 fn vector_param_should_parse_as_string(
     stream: &TokenStream,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> bool {
     if xspice_param_prefers_string_vector(param_name) {
@@ -1502,6 +1560,7 @@ fn parse_string_backed_param_value(
     param_name: &str,
     value: &str,
     line_num: usize,
+    abort: &dyn AbortSignal,
 ) -> Result<Option<XspiceParamValue>, ParseError> {
     if !value.trim_start().starts_with('[')
         || (xspice_param_prefers_string(param_name)
@@ -1519,7 +1578,10 @@ fn parse_string_backed_param_value(
         &mut stream,
         line_num,
         param_name,
-        &ParamContext::new(),
+        &XspiceParseContext {
+            params: &ParamContext::new(),
+            abort,
+        },
         false,
     )
     .map(Some)
@@ -1539,7 +1601,10 @@ pub(crate) fn parse_xspice_string_vector_literal(
         &mut stream,
         line_num,
         param_name,
-        &ParamContext::new(),
+        &XspiceParseContext {
+            params: &ParamContext::new(),
+            abort: &NoAbort,
+        },
         false,
     )? {
         XspiceParamValue::StringVector(values) => values,
@@ -1572,7 +1637,7 @@ fn parse_real_vector_param(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
     if !stream.consume(&TokenKind::LBracket) {
@@ -1635,9 +1700,10 @@ fn parse_real_vector_entry(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceVectorEntry, ParseError> {
+    netlist_params.check_abort()?;
     let sign = match &stream.peek().kind {
         TokenKind::Plus => {
             stream.advance();
@@ -1674,9 +1740,7 @@ fn parse_real_vector_entry(
     if let Some(value) = parse_boolean_literal(&expr_text) {
         return Ok(XspiceVectorEntry::Resolved(sign * value));
     }
-    if !defer_simple_param_refs
-        && let Ok(value) = expr::eval_expression_complex(&expr_text, netlist_params)
-    {
+    if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr_text) {
         return Ok(XspiceVectorEntry::Resolved(
             sign * real_instance_value(value, line_num, param_name)?,
         ));
@@ -1688,7 +1752,7 @@ fn parse_string_vector_param(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
     if !stream.consume(&TokenKind::LBracket) {
@@ -1700,6 +1764,7 @@ fn parse_string_vector_param(
 
     let mut entries = Vec::new();
     loop {
+        netlist_params.check_abort()?;
         skip_vector_commas(stream);
 
         match &stream.peek().kind {
@@ -1823,7 +1888,7 @@ fn parse_xspice_complex_literal(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceComplexLiteral, ParseError> {
     if !stream.consume(&TokenKind::Other('<')) {
@@ -1881,10 +1946,11 @@ fn parse_xspice_complex_component(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
-    netlist_params: &ParamContext,
+    netlist_params: &XspiceParseContext<'_>,
     component: &str,
     defer_simple_param_refs: bool,
 ) -> Result<XspiceComplexComponent, ParseError> {
+    netlist_params.check_abort()?;
     skip_vector_commas(stream);
 
     let sign = match &stream.peek().kind {
@@ -1917,9 +1983,7 @@ fn parse_xspice_complex_component(
     if let Some(value) = parse_boolean_literal(&expr_text) {
         return Ok(XspiceComplexComponent::Resolved(sign * value));
     }
-    if !defer_simple_param_refs
-        && let Ok(value) = expr::eval_expression_complex(&expr_text, netlist_params)
-    {
+    if !defer_simple_param_refs && let Ok(value) = netlist_params.evaluate(&expr_text) {
         return Ok(XspiceComplexComponent::Resolved(
             sign * real_instance_value(value, line_num, param_name)?,
         ));
