@@ -18,6 +18,16 @@ fn high_gain_single_pole_preserves_small_return_difference_in_both_orientations(
                 .with_probe("Vprobe");
             match Engine::default().run_stb(&netlist, config) {
                 Ok(result) => {
+                    let dc = result
+                        .result
+                        .margins
+                        .dc_loop_gain
+                        .expect("finite DC loop gain");
+                    assert!((dc / gain - ComplexValue::new(1.0, 0.0)).norm() < 2e-8);
+                    assert!(
+                        (result.result.margins.dc_gain_db().unwrap() - 20.0 * gain.log10()).abs()
+                            < 2e-7
+                    );
                     for (&frequency, &actual) in result.frequencies.iter().zip(&result.loop_gains) {
                         let expected = gain / ComplexValue::new(1.0, frequency / 1000.0);
                         let expected_scaled = expected / gain;
@@ -49,6 +59,8 @@ fn high_gain_loaded_break_preserves_the_analytic_return_ratio() {
                 .with_sweep_type(StbSweepType::Linear)
                 .with_probe("VP");
             let result = Engine::default().run_stb(&netlist, config).unwrap();
+            let dc = result.result.margins.dc_loop_gain.unwrap();
+            assert!((dc / gain - ComplexValue::new(1.0 / 3.0, 0.0)).norm() < 2e-8);
             for (&frequency, &actual) in result.frequencies.iter().zip(&result.loop_gains) {
                 let zg = 1e4 / ComplexValue::new(1.0, std::f64::consts::TAU * frequency * 1e-4);
                 let expected = gain * zg / (2e4 + zg);
@@ -78,6 +90,9 @@ fn probe_controlled_source_terms_remain_in_the_kcl_complement() {
             .with_sweep_type(StbSweepType::Linear)
             .with_probe("VP");
         let result = Engine::default().run_stb(&netlist, config).unwrap();
+        let dc = result.result.margins.dc_loop_gain.unwrap();
+        let expected_dc = (gain + 3.0) / (3.0 * gain + 1.0);
+        assert!((dc - expected_dc).norm() < expected_dc * 2e-8);
         for (&frequency, &actual) in result.frequencies.iter().zip(&result.loop_gains) {
             let z = ComplexValue::new(1.0, frequency / 1000.0);
             let expected = (gain + 3.0 * z) / (3.0 * gain + z);
