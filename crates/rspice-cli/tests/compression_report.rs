@@ -93,14 +93,14 @@ fn a_compressed_run_reports_its_worst_error_beside_the_ratio() {
 /// A deck whose transient carries every post-process family, so one run
 /// exercises `.MEASURE`, `.FOUR`, and `.FFT` against the same trajectory.
 ///
-/// The `.tran` step is far finer than the tolerance requires, so `--compress`
-/// genuinely discards samples: a post-process evaluated on the published
-/// waveform instead of the accepted one would move.
+/// Adaptive integration accepts intervals smaller than the authored maximum,
+/// leaving samples that compression can actually discard without violating
+/// the maximum retained interval.
 const POST_PROCESS_DECK: &str = "* compressed post-process equivalence fixture\n\
      V1 in 0 SIN(0 1 1k)\n\
      R1 in out 1k\n\
      C1 out 0 100n\n\
-     .tran 200n 3m\n\
+     .tran 100u 3m\n\
      .four 1k v(out)\n\
      .fft v(out)\n\
      .meas tran vmax MAX v(out)\n\
@@ -189,7 +189,7 @@ fn post_process_artifacts_are_byte_identical_with_and_without_compression() {
     let compressed = run_post_process_deck(
         &directory,
         "compressed",
-        &["--compress", "--compress-tol", "1e-4"],
+        &["--compress", "--compress-tol", "0.1"],
     );
 
     assert_eq!(
@@ -207,8 +207,15 @@ fn post_process_artifacts_are_byte_identical_with_and_without_compression() {
         "no transient waveform artifact was published: {:?}",
         plain.keys().collect::<Vec<_>>()
     );
-    assert_ne!(
-        plain[waveform], compressed[waveform],
+    let point_count = |bytes: &[u8]| {
+        let document: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        document["axes"][0]["values"]["values"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    assert!(
+        point_count(&compressed[waveform]) < point_count(&plain[waveform]),
         "the compressed run retained every sample, so this fixture proves nothing"
     );
 
