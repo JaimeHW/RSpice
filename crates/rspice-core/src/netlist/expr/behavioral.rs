@@ -411,9 +411,7 @@ pub(crate) fn expand_output_user_functions_with_abort(
     let expanded = {
         let mut expander =
             FunctionExpander::new_preserving_parameters(params, &mut probe_protector, abort);
-        expander
-            .expand_expr(&parsed, 0)
-            .map_err(BehavioralPreparationError::Semantic)?
+        expander.expand_expr(&parsed, 0)?
     };
     if abort.is_aborted() {
         return Err(BehavioralPreparationError::Aborted);
@@ -523,11 +521,7 @@ fn prepare_behavioral_expression_impl(
     let expanded = {
         let mut expander = FunctionExpander::new(params, &mut probe_protector, abort);
         expander.preserved_parameters = preserved_parameters;
-        match expander.expand_expr(&parsed, 0) {
-            Ok(expanded) => expanded,
-            Err(_) if abort.is_aborted() => return Err(BehavioralPreparationError::Aborted),
-            Err(error) => return Err(BehavioralPreparationError::Semantic(error)),
-        }
+        expander.expand_expr(&parsed, 0)?
     };
     if abort.is_aborted() {
         return Err(BehavioralPreparationError::Aborted);
@@ -1166,7 +1160,11 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
         expander
     }
 
-    fn expand_expr(&mut self, expr: &NetExpr, named_depth: usize) -> Result<NetExpr, String> {
+    fn expand_expr(
+        &mut self,
+        expr: &NetExpr,
+        named_depth: usize,
+    ) -> Result<NetExpr, BehavioralPreparationError> {
         enum Task {
             Expand(NetExpr, usize),
             FinishUnary(UnaryOpKind, usize),
@@ -1184,7 +1182,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
 
         while let Some(task) = tasks.pop() {
             if expanded_nodes.is_multiple_of(64) && self.abort.is_aborted() {
-                return Err("behavioral expression preparation was cancelled".to_string());
+                return Err(BehavioralPreparationError::Aborted);
             }
             match task {
                 Task::Expand(expr, depth) => {
@@ -1192,14 +1190,16 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                         return Err(format!(
                             "Behavioral expression exceeded named dependency expansion depth (>{})",
                             MAX_NAMED_EXPANSION_DEPTH
-                        ));
+                        )
+                        .into());
                     }
                     expanded_nodes += 1;
                     if expanded_nodes > MAX_EXPANDED_EXPRESSION_NODES {
                         return Err(format!(
                             "Behavioral expression expansion exceeded {} nodes",
                             MAX_EXPANDED_EXPRESSION_NODES
-                        ));
+                        )
+                        .into());
                     }
                     match expr {
                         NetExpr::Number(value) => values.push(NetExpr::Number(value)),
@@ -1267,7 +1267,8 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                         "Detected cyclic {} dependency: {}",
                                         cycle_kind.directive(),
                                         cycle.join(" -> ")
-                                    ));
+                                    )
+                                    .into());
                                 }
                                 let parsed = if let Some(cached) =
                                     self.parameter_body_cache.get(&key)
@@ -1276,22 +1277,12 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                 } else {
                                     let protected = self
                                         .probe_protector
-                                        .protect_with_abort(expression, self.abort)
-                                        .map_err(|error| match error {
-                                            BehavioralPreparationError::Aborted => {
-                                                "behavioral expression preparation was cancelled"
-                                                    .to_string()
-                                            }
-                                            BehavioralPreparationError::Semantic(error) => error,
-                                        })?;
+                                        .protect_with_abort(expression, self.abort)?;
                                     let parsed =
                                         match parse_net_expr_with_abort(&protected, self.abort) {
                                             Ok(parsed) => parsed,
                                             Err(NetExpressionParseWithAbortError::Aborted) => {
-                                                return Err(
-                                                "behavioral expression preparation was cancelled"
-                                                    .to_string(),
-                                            );
+                                                return Err(BehavioralPreparationError::Aborted);
                                             }
                                             Err(NetExpressionParseWithAbortError::Parse(error)) => {
                                                 return Err(format!(
@@ -1300,7 +1291,8 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                                                     name,
                                                     expression,
                                                     error
-                                                ));
+                                                )
+                                                .into());
                                             }
                                         };
                                     self.parameter_body_cache
@@ -1386,7 +1378,9 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                 }
                 Task::ApplyFunction(name, arg_count, depth) => {
                     if values.len() < arg_count {
-                        return Err("Internal behavioral argument stack underflow".to_string());
+                        return Err("Internal behavioral argument stack underflow"
+                            .to_string()
+                            .into());
                     }
                     let expanded_args = values.split_off(values.len() - arg_count);
                     let Some(func_def) = self.params.get_function(&name) else {
@@ -1411,48 +1405,37 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                             name,
                             func_def.args.len(),
                             expanded_args.len()
-                        ));
+                        )
+                        .into());
                     }
                     let func_name = func_def.name.clone();
                     if self.call_stack.iter().any(|active| active == &func_name) {
                         return Err(format!(
                             "Detected recursive .FUNC expansion for '{}'",
                             func_name
-                        ));
+                        )
+                        .into());
                     }
                     let body_ast = if let Some(cached) = self.body_cache.get(&func_name) {
                         cached.clone()
                     } else {
                         let expanded_body =
-                            expand_spice_poly_expression(&func_def.body, self.abort).map_err(
-                                |error| match error {
-                                    BehavioralPreparationError::Aborted => {
-                                        "behavioral expression preparation was cancelled".to_owned()
-                                    }
-                                    BehavioralPreparationError::Semantic(message) => message,
-                                },
-                            )?;
+                            expand_spice_poly_expression(&func_def.body, self.abort)?;
                         let protected_body = self
                             .probe_protector
-                            .protect_with_abort(&expanded_body, self.abort)
-                            .map_err(|error| match error {
-                                BehavioralPreparationError::Aborted => {
-                                    "behavioral expression preparation was cancelled".to_string()
-                                }
-                                BehavioralPreparationError::Semantic(error) => error,
-                            })?;
+                            .protect_with_abort(&expanded_body, self.abort)?;
                         let parsed_body =
                             match parse_net_expr_with_abort(&protected_body, self.abort) {
                                 Ok(parsed) => parsed,
                                 Err(NetExpressionParseWithAbortError::Aborted) => {
-                                    return Err("behavioral expression preparation was cancelled"
-                                        .to_string());
+                                    return Err(BehavioralPreparationError::Aborted);
                                 }
                                 Err(NetExpressionParseWithAbortError::Parse(error)) => {
                                     return Err(format!(
                                         "Failed to parse .FUNC {} body '{}': {}",
                                         func_name, func_def.body, error
-                                    ));
+                                    )
+                                    .into());
                                 }
                             };
                         self.body_cache
@@ -1497,11 +1480,14 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             return Err(format!(
                 "Internal behavioral expansion produced {} results",
                 values.len()
-            ));
+            )
+            .into());
         }
-        values
-            .pop()
-            .ok_or_else(|| "Internal behavioral expansion produced no result".to_string())
+        values.pop().ok_or_else(|| {
+            BehavioralPreparationError::Semantic(
+                "Internal behavioral expansion produced no result".to_string(),
+            )
+        })
     }
 }
 
@@ -1960,18 +1946,19 @@ fn ensure_function_substitution_fits(
     args: &HashMap<String, NetExpr>,
     remaining_nodes: usize,
     abort: &dyn AbortSignal,
-) -> Result<(), String> {
+) -> Result<(), BehavioralPreparationError> {
     let mut pending = vec![(expr, 1, true)];
     let mut visited = 0usize;
     while let Some((node, depth, substitute)) = pending.pop() {
         if visited.is_multiple_of(64) && abort.is_aborted() {
-            return Err("behavioral expression preparation was cancelled".to_owned());
+            return Err(BehavioralPreparationError::Aborted);
         }
         if depth > crate::resource::MAX_EXPRESSION_TREE_DEPTH {
             return Err(format!(
                 "Expression tree exceeds the stack safety limit of {}",
                 crate::resource::MAX_EXPRESSION_TREE_DEPTH,
-            ));
+            )
+            .into());
         }
         if substitute
             && let NetExpr::Param(name) = node
@@ -1986,7 +1973,8 @@ fn ensure_function_substitution_fits(
             return Err(format!(
                 "Behavioral expression expansion exceeded {} nodes",
                 MAX_EXPANDED_EXPRESSION_NODES,
-            ));
+            )
+            .into());
         }
         visited += 1;
         match node {
@@ -2002,7 +1990,8 @@ fn ensure_function_substitution_fits(
                     return Err(format!(
                         "Behavioral expression expansion exceeded {} nodes",
                         MAX_EXPANDED_EXPRESSION_NODES,
-                    ));
+                    )
+                    .into());
                 }
                 pending.extend(args.iter().map(|arg| (arg, depth + 1, substitute)));
             }
@@ -2137,4 +2126,49 @@ fn serialize_expr(expr: &NetExpr) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+
+    #[test]
+    fn expansion_propagates_cancellation_without_repolling_or_semantic_fallback() {
+        let mut params = ParamContext::new();
+        params.define_function("F", vec!["X".into()], "X+1");
+        params.define_function("G", vec!["X".into()], "F(X)+F(X)");
+        params.define_parameter_expression("A", "G(2)", None);
+        for source in ["G(3)", "A+G(3)"] {
+            for output in [false, true] {
+                let mut completed = false;
+                for limit in 0..1024 {
+                    let abort = crate::abort_signal::CountingAbort::new(limit);
+                    let result = if output {
+                        expand_output_user_functions_with_abort(
+                            source,
+                            &params,
+                            &HashSet::new(),
+                            &abort,
+                        )
+                    } else {
+                        prepare_behavioral_expression_with_abort(source, &params, &abort)
+                    };
+                    assert_eq!(
+                        abort.polls_after_abort(),
+                        0,
+                        "{source}, output={output}, poll limit {limit}"
+                    );
+                    match result {
+                        Err(BehavioralPreparationError::Aborted) => {}
+                        Ok(_) => {
+                            completed = true;
+                            break;
+                        }
+                        error => panic!("{source}, output={output}, poll limit {limit}: {error:?}"),
+                    }
+                }
+                assert!(completed);
+            }
+        }
+    }
 }
