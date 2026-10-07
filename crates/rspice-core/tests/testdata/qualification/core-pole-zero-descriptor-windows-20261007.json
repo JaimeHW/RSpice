@@ -162,6 +162,27 @@
       "test_target_passed_counts": [
         3
       ]
+    },
+    {
+      "log": "target/core-qualification/pz-descriptor-integrated-native.log",
+      "log_sha256": "c07c77e67394fde87b8292d8576d68cd1778b53bb29b302f0fc03267f4beaef9",
+      "command": "cargo test --locked -p rspice-core -j 1 --test pole_zero_public_contract --test pole_zero_descriptor_rank",
+      "source_revision": "e0281b3fb42a31fb959a09d3c1de58bdd1eac7de",
+      "source_state": "committed_source_after_concurrent_mixed_integration",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        7,
+        4
+      ]
+    },
+    {
+      "log": "target/core-qualification/pz-descriptor-integrated-wasm-check.log",
+      "log_sha256": "ca6f804c03348c6722246f86eebd630b4ec3f2afbdae48de109e44024c9ef735",
+      "command": "cargo check --locked -p rspice-core -j 1 --target wasm32-unknown-unknown --no-default-features --features wasm,veriloga-wasm-jit",
+      "source_revision": "e0281b3fb42a31fb959a09d3c1de58bdd1eac7de",
+      "source_state": "committed_source_after_concurrent_mixed_integration",
+      "outcome": "passed",
+      "test_target_passed_counts": []
     }
   ],
   "workspace_format": {
@@ -227,5 +248,10 @@
       "pole_zero_descriptor_rank"
     ],
     "validation": "Existing folded-command indentation, target files, feature selection and worker environment checked. Local optimized Chrome execution is recorded separately; the configured Firefox CI run has not been observed in this batch."
+  },
+  "post_qualification_integration": {
+    "source_revision": "e0281b3fb42a31fb959a09d3c1de58bdd1eac7de",
+    "concurrent_commit": "917422a5a16615d22e303c981f12f3def28866fc",
+    "scope": "PZ implementation files are unchanged. After integrating the concurrent mixed-signal/runtime change, both PZ integration targets passed natively and the core WASM/JIT configuration compiled. Optimized browser execution, broad unit/CLI checks and strict lint/format results above remain evidence for their stated earlier revision."
   }
 }
