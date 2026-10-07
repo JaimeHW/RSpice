@@ -826,23 +826,7 @@ impl Harness {
     fn resolve_drivers(&mut self) {
         let drives: Vec<DigitalDrive> = self.store.driven.values().cloned().collect();
         for drive in drives {
-            let count = self.plan.drivers_of(drive.driver.signal).count();
-            assert_eq!(
-                count, 1,
-                "multi-driver resolution belongs to the kernel; signal {:?} has {count} drivers",
-                drive.driver.signal
-            );
-            apply_deferred(
-                &self.plan,
-                &mut self.store,
-                &DigitalDeferredUpdate {
-                    target: drive.target.clone(),
-                    value: DigitalUpdate::FourState(drive.value.clone()),
-                    region: DigitalSchedulingRegion::Active,
-                    wait: None,
-                },
-            )
-            .expect("a drive must apply");
+            publish_single_driver(&self.plan, &mut self.store, &drive);
         }
     }
 
@@ -881,6 +865,29 @@ impl Harness {
             self.store.reals[usize::from(drive.driver.signal)] = drive.value;
         }
     }
+}
+
+/// The compiler fixtures only support one driver per net. Publish that
+/// contribution over Z; a net drive is never a procedural/deferred variable
+/// write. Multi-driver resolution is exercised by the core's real store.
+fn publish_single_driver(plan: &CanonicalDigitalPlan, store: &mut Store, drive: &DigitalDrive) {
+    let signal = plan.signal(drive.driver.signal).unwrap();
+    assert!(!signal.procedurally_assignable && !signal.kind.is_real());
+    assert_eq!(
+        plan.drivers_of(signal.id).count(),
+        1,
+        "multi-driver resolution belongs to the kernel"
+    );
+    assert_eq!(drive.target.signal, signal.id);
+    let low = i128::from(drive.target.select.low_position(signal.declared_range()));
+    let mut contribution = FourStateValue::splat(signal.width, FourStateBit::HighImpedance);
+    for bit in 0..signal.width {
+        let offset = i128::from(bit) - low;
+        if (0..i128::from(drive.value.width())).contains(&offset) {
+            contribution.set_bit(bit, drive.value.bit(offset as u32));
+        }
+    }
+    store.values[usize::from(signal.id)] = contribution;
 }
 
 fn expect_finished(outcome: DigitalProcessOutcome) {
@@ -2909,6 +2916,10 @@ fn runtime_part_bounds_and_continuous_bit_targets_are_refused() {
             "continuous bit driver",
         ),
         (
+            "wire [3:0] q; reg selector; assign {q[selector],q[0]}=2'b10;",
+            "continuous bit driver",
+        ),
+        (
             "    reg [3:0] q;\n\
          \x20   integer i;\n\
          \x20   initial begin i = 1; q[i:0] = 2'b01; end",
@@ -2927,7 +2938,7 @@ fn runtime_part_bounds_and_continuous_bit_targets_are_refused() {
             .expect_err("a run-time select position must be refused");
         let rendered = error.to_string();
         assert!(
-            rendered.starts_with("Semantic error"),
+            rendered.starts_with("Semantic error") && rendered.contains("Invalid expression:"),
             "a user construct must be refused by the analyzer: {rendered}"
         );
         assert!(
@@ -2944,6 +2955,24 @@ fn runtime_part_bounds_and_continuous_bit_targets_are_refused() {
          \x20   initial begin i = 1; seen = q[i]; end",
         ))
         .expect("a bit select read at a run-time position still lowers");
+
+    let mut h = Harness::from_source(
+        "module constant_targets; parameter integer P=4; reg data; \
+         wire [7:4] high,low; wire [4:7] ascending; \
+         assign {high[P+3],low[P],ascending[P]}={data,~data,data}; endmodule",
+    );
+    h.set("data", "0");
+    let first = expect_suspended(h.start(0));
+    h.resolve_drivers();
+    assert_eq!(h.get("high"), "0zzz");
+    assert_eq!(h.get("low"), "zzz1");
+    assert_eq!(h.get("ascending"), "0zzz");
+    h.set("data", "1");
+    expect_suspended(h.resume(0, first.resume_state()));
+    h.resolve_drivers();
+    assert_eq!(h.get("high"), "1zzz");
+    assert_eq!(h.get("low"), "zzz0");
+    assert_eq!(h.get("ascending"), "1zzz");
 }
 
 // ===========================================================================
@@ -4110,23 +4139,7 @@ impl Design {
     fn resolve_drivers(&mut self) {
         let drives: Vec<DigitalDrive> = self.store.driven.values().cloned().collect();
         for drive in drives {
-            let count = self.plan.drivers_of(drive.driver.signal).count();
-            assert_eq!(
-                count, 1,
-                "multi-driver resolution belongs to the kernel; signal {:?} has {count} drivers",
-                drive.driver.signal
-            );
-            apply_deferred(
-                &self.plan,
-                &mut self.store,
-                &DigitalDeferredUpdate {
-                    target: drive.target.clone(),
-                    value: DigitalUpdate::FourState(drive.value.clone()),
-                    region: DigitalSchedulingRegion::Active,
-                    wait: None,
-                },
-            )
-            .expect("a drive must apply");
+            publish_single_driver(&self.plan, &mut self.store, &drive);
         }
         // The real half of the same stand-in, held to the same one-driver rule
         // for the same reason (Verilog-AMS LRM 2.4 section 6.5.3).

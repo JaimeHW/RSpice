@@ -410,8 +410,11 @@ instance linking. Deferred bit targets capture their selector at scheduling
 and merge into current storage when delivered. Real locals accept value-change
 events; edge events require integral values. Artifact validation rejects
 invalid local ownership, duplicate declaration identities, module-array aliases
-and real edge subscriptions. Dynamic continuous-driver targets, local arrays
-and hierarchical local references remain open; Wasm helper ABI remains 20.
+and real edge subscriptions. Local arrays and hierarchical local references
+remain open; Wasm helper ABI remains 20. Continuous net-assignment selectors must
+be constant under VAMS-2023 A.8.5; runtime selectors are language errors, rather
+than a missing dynamic-driver execution path. Parameter-based constant selectors
+are supported. Runtime bit reads and procedural bit writes remain supported.
 Schema 84 prepares every declaration in a block with its typed default before
 lowering any local initializer. Self references and forward references bind to
 the local declaration, with the same types and lexical shadowing as ordinary

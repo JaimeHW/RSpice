@@ -2155,15 +2155,9 @@ impl SemanticAnalyzer {
         Some((range, selected))
     }
 
-    /// Refuse a select position the lowering has to know and this one does not.
-    ///
-    /// Both of these are user constructs — one legal Verilog the compiler does
-    /// not build yet, one the standard does not admit at all — so both are
-    /// reported the way a user construct is reported: a semantic error that
-    /// names what was written and carries its offset. The same two shapes
-    /// reach `digital_lower`'s constant fold as well, and that check stays
-    /// where it is: once this pass refuses them it is an invariant of the
-    /// lowering rather than a message anybody reads.
+    /// Diagnose runtime expressions in positions whose language grammar requires
+    /// constants: continuous net targets and fixed-bound part selects.
+    /// Variable bit reads and procedural bit writes admit runtime expressions.
     fn refuse_run_time_select_bound(
         &mut self,
         name: &SmolStr,
@@ -2172,9 +2166,10 @@ impl SemanticAnalyzer {
     ) {
         let kind = match bound {
             SelectBound::RuntimeBit => return,
-            SelectBound::FixedBit => SemanticErrorKind::UnsupportedFeature(format!(
-                "a continuous bit driver of `{name}` must have constant bounds; \
-                 dynamic continuous targets require driver-selection lowering"
+            SelectBound::FixedBit => SemanticErrorKind::InvalidExpression(format!(
+                "a continuous bit driver of `{name}` requires a constant selector; \
+                 Verilog-AMS 2023 section A.8.5 requires constant expressions \
+                 in a continuous assignment's net target"
             )),
             SelectBound::Part => SemanticErrorKind::InvalidExpression(format!(
                 "a part select of `{name}` must have constant bounds; IEEE 1364-2005 section \
