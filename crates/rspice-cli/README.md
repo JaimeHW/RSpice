@@ -623,6 +623,9 @@ For example, `convert mixed.raw grid.csv --to csv --section "Transient Analysis"
 selects the sampled grid of a mixed-signal result. `convert mixed.raw events.vcd
 --to vcd` preserves its complete event timelines. RAW numeric admission limits
 cover all plots together, including plots outside the selection.
+With `--to vcd --section`, a RAW event or bus plot keeps its event encoding and
+bus declaration; an ordinary analysis plot uses its sampled `D(node)`/`E(node)`
+columns. Bus expansion, variable selection, and clipping apply in either case.
 
 Touchstone `.sNp` and `.ts` inputs are auto-detected; `convert --from touchstone`
 selects the parser for another extension. RI, magnitude/angle and dB/angle

@@ -22,7 +22,8 @@ use super::*;
 ///
 /// The returned notes are informational; an unknown name is still refused.
 #[must_use = "the notes say where a selection was widened past what was asked"]
-pub(crate) fn select_and_clip(
+#[cfg(test)]
+pub(super) fn select_and_clip(
     document: &mut VcdDocument,
     requested: &[String],
     start: Option<f64>,

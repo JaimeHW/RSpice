@@ -265,13 +265,15 @@ fn raw_event_exports_validate_companion_fft_metadata() {
             .unwrap();
         bytes[offset..offset + needle.len()].copy_from_slice(b"\"analysis_id\":\"fft-999\"");
         std::fs::write(&input, bytes).unwrap();
-        let invalid = convert(&input, &output, format, "vcd", &[]);
-        assert_eq!(invalid.status.code(), Some(1), "{format}: {invalid:?}");
-        assert!(
-            String::from_utf8_lossy(&invalid.stderr).contains("FFT"),
-            "{invalid:?}"
-        );
-        assert_eq!(std::fs::read(&output).unwrap(), original);
+        for extra in [&[][..], &["--section", "1"][..]] {
+            let invalid = convert(&input, &output, format, "vcd", extra);
+            assert_eq!(invalid.status.code(), Some(1), "{format}: {invalid:?}");
+            assert!(
+                String::from_utf8_lossy(&invalid.stderr).contains("FFT"),
+                "{invalid:?}"
+            );
+            assert_eq!(std::fs::read(&output).unwrap(), original);
+        }
     }
 }
 

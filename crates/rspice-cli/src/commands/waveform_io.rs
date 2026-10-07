@@ -22,6 +22,18 @@ pub(crate) enum ImportedResult {
     Fft(crate::commands::run::FftBundle),
 }
 
+impl ImportedResult {
+    pub(super) fn into_table(self, path: &Path) -> Result<ExportTable, CliError> {
+        match self {
+            Self::Table(table) => Ok(table),
+            Self::Fft(_) => Err(conversion_error(
+                path,
+                "typed transient FFT artifacts cannot be flattened to a waveform table; use convert to retain the complete FFT document",
+            )),
+        }
+    }
+}
+
 impl From<ExportTable> for ImportedResult {
     fn from(table: ExportTable) -> Self {
         Self::Table(table)
@@ -65,6 +77,7 @@ pub(crate) fn supports_sections(format: InputFormat) -> bool {
 }
 
 /// Load a result file into a table.
+#[cfg(test)]
 pub(crate) fn load_table(
     path: &Path,
     format: impl Into<InputFormat>,
@@ -80,22 +93,14 @@ pub(crate) fn load_table_selected(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ExportTable, CliError> {
-    match load_result_selected(path, format, resource_limits, section)? {
-        ImportedResult::Table(table) => Ok(table),
-        ImportedResult::Fft(_) => Err(conversion_error(
-            path,
-            "typed transient FFT artifacts cannot be flattened for waveform comparison; use convert to retain the complete FFT document",
-        )),
-    }
+    load_result_selected(path, format, resource_limits, section)?.into_table(path)
 }
 
-pub(crate) fn load_result_selected(
+pub(super) fn validate_section_selector(
     path: &Path,
-    format: impl Into<InputFormat>,
-    resource_limits: rspice_core::ResourceLimits,
+    format: InputFormat,
     section: Option<&str>,
-) -> Result<ImportedResult, CliError> {
-    let format = format.into();
+) -> Result<(), CliError> {
     if section.is_some() && !supports_sections(format) {
         return Err(CliError::InvalidArgument {
             message: format!(
@@ -107,6 +112,17 @@ pub(crate) fn load_result_selected(
             ),
         });
     }
+    Ok(())
+}
+
+pub(crate) fn load_result_selected(
+    path: &Path,
+    format: impl Into<InputFormat>,
+    resource_limits: rspice_core::ResourceLimits,
+    section: Option<&str>,
+) -> Result<ImportedResult, CliError> {
+    let format = format.into();
+    validate_section_selector(path, format, section)?;
     let result = match format {
         InputFormat::Raw | InputFormat::RawAscii => load_rawfile(path, resource_limits, section),
         InputFormat::Csv => load_delimited(path, ',', resource_limits),
@@ -121,7 +137,7 @@ pub(crate) fn load_result_selected(
     validate_result(path, result, resource_limits)
 }
 
-fn validate_result(
+pub(super) fn validate_result(
     path: &Path,
     result: ImportedResult,
     resource_limits: rspice_core::ResourceLimits,
@@ -368,7 +384,7 @@ pub(crate) fn raw_read_error(path: &Path, error: rspice_core::io::RawParseError)
     }
 }
 
-fn raw_result(
+pub(super) fn raw_result(
     path: &Path,
     file: rspice_core::io::ltspice_raw::RawFile,
     section: Option<&str>,

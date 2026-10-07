@@ -39,11 +39,14 @@ use rspice_core::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::cli::{CliError, InputFormat, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::commands::publish;
-use crate::commands::waveform_io::{conversion_error, enforce_resource_limit, load_table};
+use crate::commands::waveform_io::{
+    self, conversion_error, enforce_resource_limit, load_table_selected,
+};
 
 mod clipping;
 mod selection;
-pub(crate) use selection::select_and_clip;
+#[cfg(test)]
+use selection::select_and_clip;
 #[cfg(test)]
 use selection::{Selection, signal_selection};
 
@@ -227,7 +230,9 @@ pub(crate) fn load_vcd_document(
     format: InputFormat,
     resource_limits: ResourceLimits,
     expand_buses: bool,
+    section: Option<&str>,
 ) -> Result<LoadedVcdDocument, CliError> {
+    waveform_io::validate_section_selector(path, format, section)?;
     if format == InputFormat::Vcd {
         // Reading and rewriting normalises the file: canonical identifier
         // codes, one declaration order, the writer's layout.
@@ -242,11 +247,17 @@ pub(crate) fn load_vcd_document(
         });
     }
 
-    if let Some(document) = event_traces_of(path, format, resource_limits, expand_buses)? {
-        return Ok(document);
+    if matches!(format, InputFormat::Raw | InputFormat::RawAscii) {
+        return load_raw_document(path, resource_limits, expand_buses, section);
+    }
+    if format == InputFormat::Json
+        && let Some(traces) = typed_transient_traces(path, resource_limits)?
+        && (!traces.digital_traces.is_empty() || !traces.real_traces.is_empty())
+    {
+        return traces_document(path, &traces, expand_buses);
     }
 
-    let table = load_table(path, format, resource_limits)?;
+    let table = load_table_selected(path, format, resource_limits, section)?;
     table_document(path, &table).map(|document| LoadedVcdDocument {
         document,
         expanded_buses: Vec::new(),
@@ -435,47 +446,57 @@ fn variable_reference(signal: &VcdSignal) -> String {
         .map_or_else(|| signal.identifier.clone(), VcdVariable::scoped_name)
 }
 
-/// The event timelines a source carries in full, when it carries any.
-///
-/// `Ok(None)` means the source has no event section at all, not that it failed
-/// to read: the caller then falls back to the grid columns.
-fn event_traces_of(
+/// Read and validate the complete RAW container before choosing any event plot.
+/// A sampled-grid fallback consumes these same parsed bytes.
+fn load_raw_document(
     path: &Path,
-    format: InputFormat,
     resource_limits: ResourceLimits,
     expand_buses: bool,
-) -> Result<Option<LoadedVcdDocument>, CliError> {
-    let traces = match format {
-        InputFormat::Raw | InputFormat::RawAscii => {
-            let bytes = crate::commands::waveform_io::read_input_bytes_limited(
-                path,
-                resource_limits.max_external_data_bytes,
-            )?;
-            let file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(
-                &bytes,
-                resource_limits,
-            )
-            .map_err(|error| crate::commands::waveform_io::raw_read_error(path, error))?;
-            crate::commands::waveform_io::decode_raw_fft_plots(path, &file)?;
-            rspice_core::execution::decode_event_plots(&file)
-                .map_err(|error| conversion_error(path, error))?
-        }
-        InputFormat::Json => match typed_transient_traces(path, resource_limits)? {
-            Some(traces) => traces,
-            None => return Ok(None),
-        },
-        InputFormat::Touchstone
-        | InputFormat::Csv
-        | InputFormat::Tsv
-        | InputFormat::Hdf5
-        | InputFormat::Vcd => {
-            return Ok(None);
-        }
-    };
-
-    if traces.digital_traces.is_empty() && traces.real_traces.is_empty() {
-        return Ok(None);
+    section: Option<&str>,
+) -> Result<LoadedVcdDocument, CliError> {
+    let bytes =
+        waveform_io::read_input_bytes_limited(path, resource_limits.max_external_data_bytes)?;
+    let mut file =
+        rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
+            .map_err(|error| waveform_io::raw_read_error(path, error))?;
+    waveform_io::decode_raw_fft_plots(path, &file)?;
+    let mut traces = rspice_core::execution::decode_event_plots(&file)
+        .map_err(|error| conversion_error(path, error))?;
+    if section.is_some() {
+        let names: Vec<_> = file
+            .plots
+            .iter()
+            .map(|plot| plot.header.plotname.as_str())
+            .collect();
+        let index = waveform_io::select_section(path, &names, section)?;
+        let plot = file
+            .plots
+            .into_iter()
+            .nth(index)
+            .expect("selected existing plot");
+        file.plots = vec![plot];
+        // Drop the full decoded timelines before materializing the selection.
+        drop(traces);
+        traces = rspice_core::execution::decode_event_plots(&file)
+            .map_err(|error| conversion_error(path, error))?;
     }
+    if traces.digital_traces.is_empty() && traces.real_traces.is_empty() {
+        let result = waveform_io::raw_result(path, file, None)?;
+        let table =
+            waveform_io::validate_result(path, result, resource_limits)?.into_table(path)?;
+        return table_document(path, &table).map(|document| LoadedVcdDocument {
+            document,
+            expanded_buses: Vec::new(),
+        });
+    }
+    traces_document(path, &traces, expand_buses)
+}
+
+fn traces_document(
+    path: &Path,
+    traces: &RawEventTraces,
+    expand_buses: bool,
+) -> Result<LoadedVcdDocument, CliError> {
     let declared: &[DigitalBusDeclaration] = if expand_buses {
         &[]
     } else {
@@ -487,10 +508,10 @@ fn event_traces_of(
     } else {
         Vec::new()
     };
-    Ok(Some(LoadedVcdDocument {
+    Ok(LoadedVcdDocument {
         document,
         expanded_buses,
-    }))
+    })
 }
 
 /// The event timelines a typed result document carries, when it is a transient.

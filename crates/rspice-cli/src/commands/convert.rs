@@ -46,12 +46,13 @@ pub fn execute(
         vcd_io::expand_buses_needs_vcd("--expand-buses", args.to)?;
     }
 
-    if args.to == OutputFormat::Vcd && args.section.is_none() {
+    if args.to == OutputFormat::Vcd {
         let loaded = vcd_io::load_vcd_document(
             &args.input,
             from_format,
             config.resources.limits(),
             args.expand_buses,
+            args.section.as_deref(),
         )?;
         let (document, notes) = loaded.select_and_clip(&args.variables, args.start, args.stop)?;
         // Not gated on `--quiet`: the selection is wider than what was asked
@@ -95,25 +96,14 @@ pub fn execute(
     };
 
     table.select_variables(&args.variables)?;
-    match args.to {
-        OutputFormat::Vcd => {
-            // Project before clipping so a selected container section retains
-            // the same held state as an ordinary event-document conversion.
-            let mut document = vcd_io::table_document(&args.input, &table)?;
-            let _notes = vcd_io::select_and_clip(&mut document, &[], args.start, args.stop)?;
-            vcd_io::write_vcd_artifact(&args.output, &document)?;
-        }
-        format => {
-            table.clip_scale_range(args.start, args.stop);
-            // Input admission already refused empty tables.
-            if table.scale.len() < crate::commands::waveform_io::MIN_RESULT_SAMPLES {
-                return Err(CliError::ConversionError {
-                    message: "no data points remain after applying --start/--stop".to_string(),
-                });
-            }
-            table.write(&args.output, format)?;
-        }
+    table.clip_scale_range(args.start, args.stop);
+    // Input admission already refused empty tables.
+    if table.scale.len() < crate::commands::waveform_io::MIN_RESULT_SAMPLES {
+        return Err(CliError::ConversionError {
+            message: "no data points remain after applying --start/--stop".to_string(),
+        });
     }
+    table.write(&args.output, args.to)?;
 
     if !quiet {
         crate::console::line(format_args!(

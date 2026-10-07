@@ -1039,6 +1039,51 @@ fn event_plots_reach_a_table_through_a_dump_with_only_the_drive_band_lost() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn selecting_a_raw_event_plot_preserves_every_xspice_state() {
+    let dir = test_dir("raw_event_section");
+    let event = dir.join("event.raw");
+    let mut text = "Title: States\nPlotname: Digital Events (rspice-digital-events/1)\nFlags: real double\nNo. Variables: 2\nNo. Points: 13\nVariables:\n0 time time\n1 D(clk) digital\nValues:\n".to_string();
+    for code in 0..13 {
+        text.push_str(&format!("{code} {code}e-9 {code}\n"));
+    }
+    std::fs::write(&event, &text).unwrap();
+    let expected = dir.join("expected.vcd");
+    convert(&event, &expected, "vcd", &[]);
+    let expected = rspice_core::io::parse_vcd_file(&expected).unwrap();
+    assert_eq!(expected.signals[0].changes.len(), 13);
+    let multi = dir.join("multi.raw");
+    std::fs::write(&multi, format!("Title: Grid\nPlotname: Transient Analysis\nFlags: real double\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0 1\n{text}")).unwrap();
+    for section in ["2", "Digital Events (rspice-digital-events/1)"] {
+        let selected = dir.join("selected.vcd");
+        convert(&multi, &selected, "vcd", &["--section", section]);
+        let actual = rspice_core::io::parse_vcd_file(&selected).unwrap();
+        assert_eq!(actual.timescale, expected.timescale);
+        assert_eq!(actual.signals, expected.signals);
+    }
+}
+
+#[test]
+fn selecting_a_raw_bus_plot_keeps_its_declaration_and_expansion() {
+    let dir = test_dir("raw_bus_section");
+    let raw = simulate(&dir, &bus_deck(&dir), "raw", "bus.raw");
+    for expand in [false, true] {
+        let expected = dir.join("expected.vcd");
+        let selected = dir.join("selected.vcd");
+        let mut args = vec!["--variables", "x1.count"];
+        if expand {
+            args.push("--expand-buses");
+        }
+        convert(&raw, &expected, "vcd", &args);
+        args.extend(["--section", "Digital Bus (rspice-digital-bus/1)"]);
+        convert(&raw, &selected, "vcd", &args);
+        let expected = rspice_core::io::parse_vcd_file(&expected).unwrap();
+        let actual = rspice_core::io::parse_vcd_file(&selected).unwrap();
+        assert_eq!(actual.timescale, expected.timescale);
+        assert_eq!(actual.signals, expected.signals);
+    }
+}
+
 /// A source with no event section converts from the grid columns instead, and
 /// says what that costs.
 #[test]
