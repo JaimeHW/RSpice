@@ -260,13 +260,64 @@ impl TokenStream<'_> {
         let Some(direction) = direction else {
             return self.numeric_expression(expression, params);
         };
+        self.numeric_value(self.evaluate_complex_capturing_direction(
+            expression,
+            params,
+            Some(direction),
+        )?)
+    }
+
+    pub(super) fn evaluate_expression(
+        &self,
+        expression: &str,
+        params: &ParamContext,
+    ) -> Result<Value, ExprError> {
+        self.evaluate_value_capturing_direction(expression, params, None)
+    }
+
+    pub(super) fn evaluate_value_capturing_direction(
+        &self,
+        expression: &str,
+        params: &ParamContext,
+        direction: Option<&mut Result<Derivative, ExprError>>,
+    ) -> Result<Value, ExprError> {
+        self.evaluate_complex_capturing_direction(expression, params, direction)
+            .map(|value| value.re)
+    }
+
+    fn evaluate_complex_capturing_direction(
+        &self,
+        expression: &str,
+        params: &ParamContext,
+        direction: Option<&mut Result<Derivative, ExprError>>,
+    ) -> Result<crate::ComplexValue, ExprError> {
+        let Some(direction) = direction else {
+            return eval_expression_complex_with_abort(expression, params, self.abort)
+                .map_err(numeric_expression_error);
+        };
         let (value, tangent) = params
             .evaluate_parameter_binding_with_abort(expression, self.abort)
             .map_err(numeric_expression_error)?;
         *direction = tangent
             .unwrap_or_else(|| Ok(crate::netlist::expr::ComplexDirection::zero()))
             .map(|tangent| tangent.re);
-        self.numeric_value(value)
+        Ok(value)
+    }
+
+    pub(super) fn prepare_behavioral_expression(
+        &self,
+        expression: &str,
+        params: &ParamContext,
+    ) -> Result<String, String> {
+        crate::netlist::expr::prepare_behavioral_expression_with_abort(
+            expression, params, self.abort,
+        )
+        .map_err(|error| match error {
+            crate::netlist::expr::BehavioralPreparationError::Semantic(error) => error,
+            crate::netlist::expr::BehavioralPreparationError::Aborted => {
+                "numeric parsing cancelled".into()
+            }
+        })
     }
 
     pub(super) fn prepare_numeric_expression(

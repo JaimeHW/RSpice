@@ -763,13 +763,17 @@ fn parse_passive_tail(
                 if defer_simple_param_refs {
                     tail.value_expr = Some(expr);
                 } else {
-                    match evaluate_value_capturing_direction(&expr, params, tail.direction.as_mut())
-                    {
+                    match stream.evaluate_value_capturing_direction(
+                        &expr,
+                        params,
+                        tail.direction.as_mut(),
+                    ) {
                         Ok(value) => tail.value = Some(value),
                         Err(error) => {
                             tail.direction = None;
-                            match prepare_behavioral_expression(&expr, params) {
-                                Ok(prepared) => match eval_expression(&prepared, params) {
+                            match stream.prepare_behavioral_expression(&expr, params) {
+                                Ok(prepared) => match stream.evaluate_expression(&prepared, params)
+                                {
                                     Ok(value) => tail.value = Some(value),
                                     // Parameter and user-function expansion has
                                     // already succeeded.  Preserve that prepared
@@ -1022,16 +1026,20 @@ fn parse_passive_tail(
                     tail.value = None;
                 } else {
                     tail.direction = capture_direction.then(|| Ok(0.0.into()));
-                    match evaluate_value_capturing_direction(&expr, params, tail.direction.as_mut())
-                    {
+                    match stream.evaluate_value_capturing_direction(
+                        &expr,
+                        params,
+                        tail.direction.as_mut(),
+                    ) {
                         Ok(value) => {
                             tail.value = Some(value);
                             tail.value_expr = None;
                         }
                         Err(error) => {
                             tail.direction = None;
-                            match prepare_behavioral_expression(&expr, params) {
-                                Ok(prepared) => match eval_expression(&prepared, params) {
+                            match stream.prepare_behavioral_expression(&expr, params) {
+                                Ok(prepared) => match stream.evaluate_expression(&prepared, params)
+                                {
                                     Ok(value) => {
                                         tail.value = Some(value);
                                         tail.value_expr = None;
@@ -1252,7 +1260,7 @@ pub(super) fn parse_voltage_source(
             source_spec
         }
         Err(err)
-            if source_spec_error_can_defer(&err, &raw_spec, params)
+            if source_spec_error_can_defer(&err, &raw_spec, params, stream)
                 && !raw_spec.trim().is_empty() =>
         {
             stream.collect_line();
@@ -1332,7 +1340,7 @@ pub(super) fn parse_current_source(
             source_spec
         }
         Err(err)
-            if source_spec_error_can_defer(&err, &raw_spec, params)
+            if source_spec_error_can_defer(&err, &raw_spec, params, stream)
                 && !raw_spec.trim().is_empty() =>
         {
             stream.collect_line();
@@ -4944,7 +4952,7 @@ fn take_ic_value(
             if !defer_simple_param_refs
                 && !params.expression_references_spectre_statistics(&expression) =>
         {
-            match eval_expression(&expression, params) {
+            match stream.evaluate_expression(&expression, params) {
                 Ok(value) => DeferrableValue::Resolved(value),
                 Err(_) => DeferrableValue::Deferred(expression),
             }
@@ -6135,7 +6143,7 @@ pub(super) fn parse_coupled_tlines(
                     *stream = parsed;
                     return Ok(());
                 }
-                Err(error) if source_spec_error_can_defer(&error, &source, params) => {}
+                Err(error) if source_spec_error_can_defer(&error, &source, params, stream) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -7564,7 +7572,7 @@ fn expect_chebyshev_value(
             if defer_scoped_values {
                 ParametricValue::Expression(expression)
             } else {
-                match eval_expression(&expression, params) {
+                match stream.evaluate_expression(&expression, params) {
                     Ok(value) => ParametricValue::Resolved(value),
                     Err(_) => ParametricValue::Expression(expression),
                 }
@@ -8328,7 +8336,9 @@ fn expect_deferrable_controlled_source_value(
     match take_deferrable_value(stream, params, true) {
         Some(DeferrableValue::Resolved(value)) => Ok((value, None)),
         Some(DeferrableValue::Deferred(expr)) => {
-            let value = eval_expression(&expr, params).unwrap_or(Value::NAN);
+            let value = stream
+                .evaluate_expression(&expr, params)
+                .unwrap_or(Value::NAN);
             Ok((value, Some(expr)))
         }
         None => Err(ParseError::Syntax {
@@ -8672,7 +8682,8 @@ pub(super) fn parse_subckt_def(
     line: &str,
     line_num: usize,
     params_ctx: &ParamContext,
-) -> Result<(SubcircuitDef, Option<ParseError>), ParseError> {
+    abort: &dyn AbortSignal,
+) -> Result<(SubcircuitDef, Option<ParseError>), ParseWithAbortError> {
     let expression_dialect = params_ctx.expression_dialect();
     let (fields, parenthesized_port_count) = split_subckt_definition_fields(
         line,
@@ -8683,7 +8694,8 @@ pub(super) fn parse_subckt_def(
         return Err(ParseError::Syntax {
             line: line_num,
             message: ".SUBCKT requires a subcircuit name".to_string(),
-        });
+        }
+        .into());
     }
 
     let name = fields[1].clone();
@@ -8691,7 +8703,8 @@ pub(super) fn parse_subckt_def(
         return Err(ParseError::Syntax {
             line: line_num,
             message: ".SUBCKT name cannot contain parentheses in Xyce syntax".to_string(),
-        });
+        }
+        .into());
     }
     let mut ports = Vec::new();
 
@@ -8706,7 +8719,8 @@ pub(super) fn parse_subckt_def(
                     line: line_num,
                     message: "parenthesized .SUBCKT formal-port list may contain only ports"
                         .to_string(),
-                });
+                }
+                .into());
             }
             ports.push(field.to_ascii_uppercase());
         }
@@ -8722,7 +8736,8 @@ pub(super) fn parse_subckt_def(
                 message: format!(
                     "unexpected token '{field}' after parenthesized .SUBCKT formal-port list"
                 ),
-            });
+            }
+            .into());
         }
     } else {
         while idx < fields.len() {
@@ -8745,7 +8760,8 @@ pub(super) fn parse_subckt_def(
                     message:
                         "parentheses around .SUBCKT formal ports must form one balanced outer pair"
                             .to_string(),
-                });
+                }
+                .into());
             }
             ports.push(field.to_ascii_uppercase());
             idx += 1;
@@ -8775,7 +8791,8 @@ pub(super) fn parse_subckt_def(
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!("Expected value after subcircuit parameter '{}='", field),
-                });
+                }
+                .into());
             };
             let assignment = Some((field.clone(), raw_value.clone()));
             idx += 3;
@@ -8790,7 +8807,8 @@ pub(super) fn parse_subckt_def(
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: "Expected parameter name before '=' in .SUBCKT".to_string(),
-                });
+                }
+                .into());
             }
             assignments.push((param_name, raw_value));
             continue;
@@ -8802,7 +8820,7 @@ pub(super) fn parse_subckt_def(
         expr_params,
         string_params,
         provisional_error,
-    } = resolve_subckt_default_params(assignments, params_ctx, line_num);
+    } = resolve_subckt_default_params(assignments, params_ctx, line_num, abort)?;
 
     let definition = SubcircuitDef {
         name,
@@ -9016,7 +9034,8 @@ fn resolve_subckt_default_params(
     assignments: Vec<(String, String)>,
     params_ctx: &ParamContext,
     line_num: usize,
-) -> ResolvedSubcktDefaults {
+    abort: &dyn AbortSignal,
+) -> Result<ResolvedSubcktDefaults, ParseWithAbortError> {
     let mut eval_ctx = params_ctx.isolated_random_clone();
     let mut resolved = ResolvedSubcktDefaults::default();
     let mut pending = authoritative_subckt_default_assignments(
@@ -9030,6 +9049,7 @@ fn resolve_subckt_default_params(
         let mut first_error = None;
 
         for (param_name, raw_value) in pending {
+            ensure_parse_not_aborted(abort)?;
             if let Some(value) = parse_string_field_value(&raw_value, &eval_ctx) {
                 eval_ctx.set_string(&param_name, value.clone());
                 resolved.string_params.push((param_name, value));
@@ -9037,7 +9057,7 @@ fn resolve_subckt_default_params(
                 continue;
             }
 
-            match parse_numeric_field_value(&raw_value, &eval_ctx, line_num) {
+            match parse_numeric_field_value_with_abort(&raw_value, &eval_ctx, line_num, abort) {
                 Ok(value) => {
                     eval_ctx.set(&param_name, value);
                     if parse_spice_value(raw_value.trim()).is_err() {
@@ -9051,7 +9071,8 @@ fn resolve_subckt_default_params(
                     resolved.params.push((param_name, value));
                     progress = true;
                 }
-                Err(err) => {
+                Err(ParseWithAbortError::Aborted) => return Err(ParseWithAbortError::Aborted),
+                Err(ParseWithAbortError::Parse(err)) => {
                     if !parameter_error_can_defer(&err) {
                         first_error.get_or_insert(err);
                     }
@@ -9077,7 +9098,7 @@ fn resolve_subckt_default_params(
         pending = unresolved;
     }
 
-    resolved
+    Ok(resolved)
 }
 
 fn authoritative_subckt_default_assignments(
@@ -9110,23 +9131,33 @@ pub(super) fn parameter_error_can_defer(err: &ParseError) -> bool {
     matches!(err, ParseError::InvalidValue(message) if message.contains("Undefined parameter"))
 }
 
-fn source_spec_error_can_defer(err: &ParseError, raw_spec: &str, params: &ParamContext) -> bool {
+fn source_spec_error_can_defer(
+    err: &ParseError,
+    raw_spec: &str,
+    params: &ParamContext,
+    stream: &TokenStream,
+) -> bool {
     parameter_error_can_defer(err)
         // A name in a numeric position can also be a source keyword, e.g.
         // `DC=DC`. The grammar, not a keyword scan, identifies that binding.
         || matches!(err, ParseError::Syntax { message, .. }
             if message.contains("Undefined parameter")
                 || message.contains("Expected value, found identifier '"))
-        || raw_source_spec_has_unresolved_parameter(raw_spec, params)
+        || raw_source_spec_has_unresolved_parameter(raw_spec, params, stream)
 }
 
-fn raw_source_spec_has_unresolved_parameter(raw_spec: &str, params: &ParamContext) -> bool {
+fn raw_source_spec_has_unresolved_parameter(
+    raw_spec: &str,
+    params: &ParamContext,
+    stream: &TokenStream,
+) -> bool {
     let Ok(tokens) = tokenize(raw_spec) else {
         return false;
     };
 
     tokens.into_iter().any(|token| match token.kind {
-        TokenKind::Expression(expr) => eval_expression(&expr, &params.isolated_random_clone())
+        TokenKind::Expression(expr) => stream
+            .evaluate_expression(&expr, &params.isolated_random_clone())
             .is_err_and(|err| err.to_string().contains("Undefined parameter")),
         TokenKind::Ident(name) => source_ident_could_be_later_parameter(&name, params),
         _ => false,

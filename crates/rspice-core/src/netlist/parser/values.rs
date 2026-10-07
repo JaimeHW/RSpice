@@ -192,6 +192,18 @@ pub(super) fn parse_numeric_field_value(
     params: &ParamContext,
     line_num: usize,
 ) -> Result<Value, ParseError> {
+    finish_non_aborting_parse(parse_numeric_field_value_with_abort(
+        raw_value, params, line_num, &NoAbort,
+    ))
+}
+
+pub(super) fn parse_numeric_field_value_with_abort(
+    raw_value: &str,
+    params: &ParamContext,
+    line_num: usize,
+    abort: &dyn AbortSignal,
+) -> Result<Value, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let expr = strip_wrapping_expression_delimiters(raw_value);
     if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(expr) {
         return Ok(value);
@@ -199,8 +211,16 @@ pub(super) fn parse_numeric_field_value(
     if let Some(value) = params.get(expr) {
         return Ok(value);
     }
-    eval_expression(expr, params)
-        .map_err(|e| ParseError::InvalidValue(format!("line {}: {}", line_num, e)))
+    crate::netlist::expr::eval_expression_complex_with_abort(expr, params, abort)
+        .map(|value| value.re)
+        .map_err(|error| match error {
+            crate::netlist::expr::ExpressionEvaluationError::Aborted => {
+                ParseWithAbortError::Aborted
+            }
+            crate::netlist::expr::ExpressionEvaluationError::Expression(error) => {
+                ParseError::InvalidValue(format!("line {line_num}: {error}")).into()
+            }
+        })
 }
 
 pub(super) fn parse_parametric_field_value(
@@ -513,7 +533,7 @@ pub(super) fn parse_model_params(
                                 || params.expression_references_spectre_statistics(&expr)
                             {
                                 expr_params.push((name, expr));
-                            } else if let Ok(value) = eval_expression(&expr, params) {
+                            } else if let Ok(value) = stream.evaluate_expression(&expr, params) {
                                 numeric_params.push((name, value));
                             } else if let Some(value) = params.get_string(&expr) {
                                 push_model_string_value(
@@ -784,7 +804,7 @@ fn try_xspice_model_scalar_expression(
         return Some(ParsedModelScalarExpression::Deferred(expr));
     }
 
-    match eval_expression(&expr, params) {
+    match stream.evaluate_expression(&expr, params) {
         Ok(value) => Some(ParsedModelScalarExpression::Resolved(value)),
         Err(_) => Some(ParsedModelScalarExpression::Deferred(expr)),
     }
@@ -1350,7 +1370,7 @@ fn parse_model_complex_component(
         )));
     }
 
-    let value = eval_expression(&expr, params).map_err(|err| {
+    let value = stream.evaluate_expression(&expr, params).map_err(|err| {
         ParseError::InvalidValue(format!(
             "line {}: complex model parameter '{}' {} expression '{}' could not be resolved: {}",
             line_num, name, component, expr, err
@@ -1560,7 +1580,7 @@ fn parse_model_real_vector_entry(
     } else if defer_expression_params {
         ParsedModelRealVectorEntry::Deferred(signed_expr(expr))
     } else {
-        let value = eval_expression(&expr, params).map_err(|err| {
+        let value = stream.evaluate_expression(&expr, params).map_err(|err| {
             ParseError::InvalidValue(format!(
                 "line {}: model parameter vector '{}' expression '{}' could not be resolved: {}",
                 line_num, name, expr, err
@@ -1893,30 +1913,6 @@ fn punctuation_node_name(token: &crate::netlist::lexer::Token) -> Option<String>
         _ => return None,
     };
     Some(name.to_string())
-}
-
-pub(super) fn evaluate_value_capturing_direction(
-    expression: &str,
-    params: &ParamContext,
-    direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
-) -> Result<Value, crate::netlist::expr::ExprError> {
-    evaluate_complex_value_capturing_direction(expression, params, direction).map(|value| value.re)
-}
-
-fn evaluate_complex_value_capturing_direction(
-    expression: &str,
-    params: &ParamContext,
-    direction: Option<&mut Result<Derivative, crate::netlist::expr::ExprError>>,
-) -> Result<crate::ComplexValue, crate::netlist::expr::ExprError> {
-    if let Some(direction) = direction {
-        let (value, tangent) = params.evaluate_parameter_binding(expression)?;
-        *direction = tangent
-            .unwrap_or_else(|| Ok(crate::netlist::expr::ComplexDirection::zero()))
-            .map(|tangent| tangent.re);
-        Ok(value)
-    } else {
-        crate::netlist::expr::eval_expression_complex(expression, params)
-    }
 }
 
 pub(super) fn expect_value(
@@ -2367,8 +2363,11 @@ pub(super) fn take_deferrable_value_with_direction(
     {
         let expression = take_value_expression_string(stream, params)?;
         return Some(
-            match evaluate_value_capturing_direction(&expression, params, direction.as_deref_mut())
-            {
+            match stream.evaluate_value_capturing_direction(
+                &expression,
+                params,
+                direction.as_deref_mut(),
+            ) {
                 Ok(value) => DeferrableValue::Resolved(value),
                 Err(_) => {
                     if let Some(direction) = direction {
@@ -2376,10 +2375,10 @@ pub(super) fn take_deferrable_value_with_direction(
                             "Parameter derivative is unavailable after behavioral expansion".into(),
                         ));
                     }
-                    let prepared =
-                        super::super::expr::prepare_behavioral_expression(&expression, params)
-                            .ok()?;
-                    match eval_expression(&prepared, params) {
+                    let prepared = stream
+                        .prepare_behavioral_expression(&expression, params)
+                        .ok()?;
+                    match stream.evaluate_expression(&prepared, params) {
                         Ok(value) => DeferrableValue::Resolved(value),
                         Err(_) => DeferrableValue::Deferred(expression),
                     }
@@ -2484,7 +2483,7 @@ fn take_contiguous_instance_expression(
         return Some(DeferrableValue::Deferred(expr));
     }
     Some(
-        match evaluate_value_capturing_direction(&expr, params, direction) {
+        match stream.evaluate_value_capturing_direction(&expr, params, direction) {
             Ok(value) => DeferrableValue::Resolved(value),
             Err(_) => DeferrableValue::Deferred(expr),
         },

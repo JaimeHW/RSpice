@@ -229,7 +229,7 @@ pub(super) fn process_line_with_abort(
     // Check for .SUBCKT start
     if head.eq_ignore_ascii_case(".subckt") {
         let (subckt, provisional_error) =
-            parse_subckt_def(line, line_num, state.condition_scope())?;
+            parse_subckt_def(line, line_num, state.condition_scope(), abort)?;
         if let Some(error) = provisional_error {
             state
                 .temperature_options
