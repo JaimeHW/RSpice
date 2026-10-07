@@ -764,6 +764,9 @@ pub struct HirModel {
     pub ports: Vec<HirPort>,
     pub parameters: Vec<HirParameter>,
     pub variables: Vec<HirVariable>,
+    /// Value/validity state slot pairs for numeric discrete reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discrete_inputs: Vec<[VariableId; 2]>,
     /// Sorted names whose values must be published during ordinary analog
     /// evaluation for discrete-domain readers. They are not electrical unknowns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1032,6 +1035,11 @@ impl HirModel {
                 .collect(),
             ground_nodes: module.ground_nodes.clone(),
             digital_observations: Vec::new(),
+            discrete_inputs: module
+                .discrete_inputs
+                .iter()
+                .map(|&(value, validity)| [VariableId::from(value), VariableId::from(validity)])
+                .collect(),
         }
     }
 
@@ -1112,6 +1120,24 @@ impl HirModel {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
                 "switch-branch variables must be sorted, unique real event-state slots",
+            ));
+        }
+        let mut input_slots = std::collections::HashSet::new();
+        if self.discrete_inputs.iter().any(|pair| {
+            pair.iter().any(|id| {
+                !input_slots.insert(*id)
+                    || self.variables.get(usize::from(*id)).is_none_or(|variable| {
+                        !variable.is_state
+                            || !matches!(
+                                variable.value_type,
+                                CanonicalValueType::Integer | CanonicalValueType::Real
+                            )
+                    })
+            })
+        }) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "discrete input value/validity pairs must use distinct numeric state slots",
             ));
         }
         validate_dense_array_ids(&mut diagnostics, &self.arrays);
@@ -3139,7 +3165,7 @@ fn exact_retained_replication_count(expression: &Expression) -> Option<i64> {
             let left = evaluate(&binary.left)?;
             let right = evaluate(&binary.right)?;
             match binary.op {
-                BinaryOp::CheckedValue => None,
+                BinaryOp::CheckedValue | BinaryOp::DiscreteValue => None,
                 BinaryOp::IntAdd
                 | BinaryOp::IntSub
                 | BinaryOp::IntMul

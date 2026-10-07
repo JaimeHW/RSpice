@@ -5569,6 +5569,7 @@ fn bindings() -> EmitBindings {
         integer_result: "ctx.integer_result".into(),
         array_index: "ctx.checked_array_index".into(),
         checked_value: "ctx.checked_derivative_value".into(),
+        discrete_value: "ctx.checked_discrete_value".into(),
         analysis: "ctx.analysis".into(),
         simparam_required: "ctx.simparam_required".into(),
         simparam_present: "ctx.has_simparam".into(),

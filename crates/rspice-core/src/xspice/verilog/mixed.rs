@@ -950,7 +950,7 @@ struct TrialVectors {
     /// Ordinary published variables and reporting scalars need their pre-trial
     /// image for exact readback and checkpoint rollback.
     analog_evaluation: VerilogAEvaluationSnapshot,
-    discrete_inputs: Vec<f64>,
+    discrete_inputs: Vec<[f64; 2]>,
     transition_times: Vec<Option<f64>>,
     sampled_adc_voltages: Vec<f64>,
     probe_values: Vec<Option<f64>>,
@@ -1253,9 +1253,33 @@ pub struct MixedSignalHost {
 struct DiscreteAnalogInput {
     signal: DigitalSignalId,
     variable: usize,
+    validity: usize,
     signed: bool,
     real: bool,
     name: String,
+}
+
+impl DiscreteAnalogInput {
+    fn sample(
+        &self,
+        analog: &mut VerilogADevice,
+        sampled: Option<f64>,
+    ) -> Result<bool, MixedSignalError> {
+        let lanes = [
+            sampled.unwrap_or(0.0),
+            f64::from(u8::from(sampled.is_some())),
+        ];
+        let mut changed = false;
+        for (slot, value) in [self.variable, self.validity].into_iter().zip(lanes) {
+            if analog.discrete_state_value(slot).map(f64::to_bits) != Some(value.to_bits()) {
+                analog
+                    .sample_discrete_state(slot, value)
+                    .map_err(analog_error)?;
+                changed = true;
+            }
+        }
+        Ok(changed)
+    }
 }
 
 /// An exclusive reservation of one validated mixed candidate. A failed later
@@ -1436,26 +1460,39 @@ impl MixedSignalHost {
         }
 
         let analog_probes = wire_analog_probes(canonical_ir, &analog)?;
-        let discrete_inputs: Vec<_> = canonical_ir
-            .hir
-            .variables
+        let signals_by_name: std::collections::HashMap<_, _> = canonical_ir
+            .digital
+            .signals
             .iter()
-            .filter(|variable| variable.is_state)
-            .filter_map(|variable| {
-                canonical_ir
-                    .digital
-                    .signals
-                    .iter()
-                    .find(|signal| signal.name == variable.name)
-                    .map(|signal| DiscreteAnalogInput {
-                        signal: signal.id,
-                        variable: usize::from(variable.id),
-                        signed: signal.integer,
-                        real: signal.kind.is_real(),
-                        name: signal.name.to_string(),
-                    })
-            })
+            .map(|signal| (signal.name.as_str(), signal))
             .collect();
+        let discrete_inputs = canonical_ir
+            .hir
+            .discrete_inputs
+            .iter()
+            .map(|[value, validity]| {
+                let variable = canonical_ir
+                    .hir
+                    .variables
+                    .get(usize::from(*value))
+                    .ok_or_else(|| MixedSignalError::Compile {
+                        detail: "discrete input variable is missing".into(),
+                    })?;
+                let signal = signals_by_name.get(variable.name.as_str()).ok_or_else(|| {
+                    MixedSignalError::Compile {
+                        detail: format!("discrete input `{}` has no signal binding", variable.name),
+                    }
+                })?;
+                Ok(DiscreteAnalogInput {
+                    signal: signal.id,
+                    variable: usize::from(*value),
+                    validity: usize::from(*validity),
+                    signed: signal.integer,
+                    real: signal.kind.is_real(),
+                    name: signal.name.to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>, MixedSignalError>>()?;
         let max_circuit_node = analog_solver_nodes(&analog).max().unwrap_or(0);
 
         let resolution = TimeResolution::new(canonical_ir.digital.timing.precision_exponent)
@@ -2366,9 +2403,11 @@ impl MixedSignalHost {
         vectors
             .discrete_inputs
             .extend(self.discrete_inputs.iter().map(|input| {
-                self.analog
-                    .discrete_state_value(input.variable)
-                    .expect("canonical discrete input is a state variable")
+                [input.variable, input.validity].map(|slot| {
+                    self.analog
+                        .discrete_state_value(slot)
+                        .expect("canonical discrete input is a state variable")
+                })
             }));
         vectors
             .transition_times
@@ -2495,26 +2534,8 @@ impl MixedSignalHost {
     fn sample_discrete_inputs(&mut self) -> Result<bool, MixedSignalError> {
         let mut changed = false;
         for input in &self.discrete_inputs {
-            let value = read_discrete_input(&self.state, input).ok_or_else(|| {
-                MixedSignalError::InvalidBridge {
-                    detail: format!(
-                        "analog read of discrete signal `{}` has an X, Z, or non-finite value",
-                        input.name
-                    ),
-                }
-            })?;
-            if self
-                .analog
-                .discrete_state_value(input.variable)
-                .map(f64::to_bits)
-                != Some(value.to_bits())
-            {
-                self.analog
-                    .make_mut()
-                    .sample_discrete_state(input.variable, value)
-                    .map_err(analog_error)?;
-                changed = true;
-            }
+            let sampled = read_discrete_input(&self.state, input);
+            changed |= input.sample(self.analog.make_mut(), sampled)?;
         }
         Ok(changed)
     }
@@ -3283,10 +3304,9 @@ impl MixedSignalHost {
             .iter()
             .zip(&trial.vectors.discrete_inputs)
         {
-            let _ = self
-                .analog
-                .make_mut()
-                .sample_discrete_state(input.variable, *value);
+            for (slot, lane) in [input.variable, input.validity].into_iter().zip(*value) {
+                let _ = self.analog.make_mut().sample_discrete_state(slot, lane);
+            }
         }
         let _ = self.undo_analog_inputs(trial.analog_inputs);
         let _ = self
@@ -3997,10 +4017,9 @@ fn dac_bits_differ(
 ///
 /// The one reader of that question, so what the dating rule compares and what
 /// [`MixedSignalHost::sample_discrete_inputs`] hands the analog device cannot
-/// disagree about a value. `None` is not a value the analog half can be given
-/// at all: `sample_discrete_inputs` refuses the run by name when it is next
-/// asked for one, which is why the comparison below can treat it as just
-/// another reading.
+/// disagree about a value. `None` is sampled as an unavailable validity lane;
+/// only an executed analog read diagnoses it. Unselected/untaken reads do not
+/// invent a numeric value or reject a trial.
 fn read_discrete_input(state: &MixedState, input: &DiscreteAnalogInput) -> Option<f64> {
     let value = if state.digital.is_real(input.signal) {
         state.digital.read_real(input.signal)
@@ -4861,7 +4880,7 @@ endmodule
         let source = r#"
 module shared(p);
  inout p; electrical p;
- real state[4:3]='{9,0.25}; integer bias[2:1]='{7,-2}; reg [4:0] packed[-1:-2]='{9,17};
+ real state[4:3]='{9,0.25}; integer bias[2:1]='{32'bx,-2}; reg [4:0] packed[-1:-2]='{5'bz,17};
  real observed[-2:-1], sample; integer codes[2:1], index;
  reg sample_ok;
  initial begin
@@ -4898,8 +4917,13 @@ endmodule
         assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
         host.reject_trial().unwrap();
         assert_eq!(
-            host.analog
-                .discrete_state_value(host.discrete_inputs[0].variable),
+            host.analog.discrete_state_value(
+                host.discrete_inputs
+                    .iter()
+                    .find(|input| input.name == "state[3]")
+                    .unwrap()
+                    .variable
+            ),
             Some(0.25)
         );
         assert_eq!(
@@ -4914,6 +4938,59 @@ endmodule
         begin(&mut host, 1);
         assert_eq!(stamp(&mut host), -1.25);
         assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
+    }
+
+    #[test]
+    fn discrete_value_validity_rejects_selected_unknown_and_restores_both_lanes() {
+        let source = r#"
+module selection(p); inout p; electrical p;
+ reg [7:0] data[0:1]; integer index; real observed; reg sampled;
+ initial begin index=0; data[0]=0; #1 sampled=(observed==0); end
+ analog begin observed=data[index]; I(p)<+observed; end
+endmodule
+"#;
+        let mut host =
+            MixedSignalHost::compile(source, None, "x", &[1], SchedulerLimits::default()).unwrap();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0]);
+        let checkpoint = host.checkpoint().unwrap();
+        let state = &checkpoint.analog_checkpoint;
+        let decoded = VerilogADeviceCheckpoint::from_words(
+            state.instance_name.clone(),
+            state.model_name.clone(),
+            state.source_digest.clone(),
+            state.shape_identity.clone(),
+            &state.to_words(),
+        )
+        .unwrap();
+        assert_eq!(decoded, *state);
+        let restored = checkpoint.clone();
+        begin(&mut host, 1);
+        while host.settle_analog_bridges(&[0.0]).unwrap() {}
+        assert_eq!(host.read_digital("sampled").unwrap(), "1");
+        host.force_digital(&[("data[0]", "xxxxxxxx")]).unwrap();
+        while host.settle_analog_bridges(&[0.0]).unwrap() {}
+        let error = host.stamp(&[0.0], |_, _, _| {}, |_, _| {}).unwrap_err();
+        assert!(
+            error.to_string().contains("analog read of discrete input"),
+            "{error}"
+        );
+        if host.trial_active() {
+            host.reject_trial().unwrap();
+        }
+        assert_eq!(
+            host.analog.checkpoint_state().unwrap(),
+            checkpoint.analog_checkpoint
+        );
+        host.restore(&restored).unwrap();
+        begin(&mut host, 1);
+        while host.settle_analog_bridges(&[0.0]).unwrap() {}
+        let mut rhs = 0.0;
+        host.stamp(&[0.0], |_, _, _| {}, |_, value| rhs += value)
+            .unwrap();
+        assert_eq!(rhs, 0.0);
+        assert_eq!(host.read_digital("data[0]").unwrap(), "00000000");
+        host.accept_trial().unwrap();
     }
 
     #[test]

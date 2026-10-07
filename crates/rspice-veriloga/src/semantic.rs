@@ -447,6 +447,7 @@ pub struct SemanticAnalyzer {
     current_time_scale: crate::time_scale::ModuleTimeScale,
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
+    discrete_validity: HashMap<SmolStr, SmolStr>,
     /// Public parameter-array declarations. Until element lowering is wired
     /// through every backend, these names must never acquire scalar semantics.
     parameter_arrays: HashSet<SmolStr>,
@@ -514,6 +515,7 @@ impl SemanticAnalyzer {
             current_default_transition: Self::SIMULATOR_DEFAULT_TRANSITION,
             current_time_scale: crate::time_scale::ModuleTimeScale::default(),
             arrays: HashMap::new(),
+            discrete_validity: HashMap::new(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
             task_resets: Vec::new(),
@@ -941,6 +943,7 @@ impl SemanticAnalyzer {
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
             digital: AnalyzedDigital::default(),
+            discrete_inputs: Vec::new(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
         // can recurse into their own sinks without aliasing the module
@@ -954,6 +957,7 @@ impl SemanticAnalyzer {
         self.in_analog_initial = false;
         self.implicit_integrators.clear();
         self.arrays.clear();
+        self.discrete_validity.clear();
         self.task_vars.clear();
         self.task_resets.clear();
 
@@ -6252,10 +6256,11 @@ impl SemanticAnalyzer {
                         id.span,
                     )));
                 }
-                match self.lookup_substitution(&id.name) {
+                let resolved = match self.lookup_substitution(&id.name) {
                     Some(subst) => subst,
                     None => expr.clone(),
-                }
+                };
+                self.checked_discrete_read(resolved)
             }
             Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {
                 expr.clone()
@@ -6468,16 +6473,16 @@ impl SemanticAnalyzer {
                 // variable; everything else stays a runtime indexed access
                 if let Some(k) = self.constant_array_index(&index, &array_name)? {
                     self.check_array_bounds(&array_name, &layout, k, a.span)?;
-                    Expression::Identifier(Identifier {
+                    self.checked_discrete_read(Expression::Identifier(Identifier {
                         name: SmolStr::from(format!("{array_name}[{k}]")),
                         span: a.span,
-                    })
+                    }))
                 } else {
-                    Expression::ArrayAccess(ArrayAccessExpr {
+                    self.checked_discrete_read(Expression::ArrayAccess(ArrayAccessExpr {
                         array: array_name,
                         index: Box::new(index),
                         span: a.span,
-                    })
+                    }))
                 }
             }
             Expression::ArrayLiteral(a) => {
@@ -7819,6 +7824,7 @@ impl SemanticAnalyzer {
                     let left: ValueType = types.pop().expect("left operand type was inferred");
                     match binary.op {
                         BinaryOp::CheckedValue => ValueType::Real,
+                        BinaryOp::DiscreteValue => right,
                         BinaryOp::IntAdd
                         | BinaryOp::IntSub
                         | BinaryOp::IntMul
@@ -8253,7 +8259,7 @@ impl SemanticAnalyzer {
                 let l = eval(&b.left)?;
                 let r = eval(&b.right)?;
                 Some(match b.op {
-                    BinaryOp::CheckedValue => return None,
+                    BinaryOp::CheckedValue | BinaryOp::DiscreteValue => return None,
                     BinaryOp::IntAdd
                     | BinaryOp::IntSub
                     | BinaryOp::IntMul

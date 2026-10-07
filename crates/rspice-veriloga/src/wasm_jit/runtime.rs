@@ -28,6 +28,7 @@ pub(super) enum HelperError {
     InvalidIntegerOperation,
     InvalidOperandLayout,
     InvalidDerivative(&'static str),
+    InvalidDiscreteValue(&'static str),
     StatefulRuntimeUnavailable,
     StatefulRuntimeFailed,
 }
@@ -198,6 +199,8 @@ pub(super) fn evaluate_helper_with_session(
                 .ok_or(HelperError::InvalidOperandLayout)?;
             evaluate_sum_products_div(aux0, aux1, aux2, &operands[..count])
         }
+        341 => rspice_veriloga_runtime::checked_discrete_value(operands[0], operands[1])
+            .map_err(HelperError::InvalidDiscreteValue),
         340 => rspice_veriloga_runtime::checked_derivative_value(operands[0], operands[1])
             .map_err(HelperError::InvalidDerivative),
         300 => real_to_integer(operands[0])

@@ -141,6 +141,7 @@ pub struct EmitBindings {
     pub array_index: String,
     /// Checked derivative callback; the owner retains operand or derivative failures.
     pub checked_value: String,
+    pub discrete_value: String,
 }
 
 impl Default for EmitBindings {
@@ -160,6 +161,7 @@ impl Default for EmitBindings {
             integer_result: "integer_result".into(),
             array_index: "checked_array_index".into(),
             checked_value: "checked_derivative_value".into(),
+            discrete_value: "checked_discrete_value".into(),
             ddt: "ddt".into(),
             ddt_derivative: "ddt_derivative".into(),
             ddt_slots: HashMap::new(),
@@ -2258,6 +2260,16 @@ impl Emitter<'_> {
                 self.numeric_operand(*left),
                 self.numeric_operand(*right)
             ),
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::DiscreteValue,
+                left,
+                right,
+            } => format!(
+                "{}({}, {})",
+                bindings.discrete_value,
+                self.numeric_operand(*left),
+                self.numeric_operand(*right)
+            ),
             CfgValueKind::Binary { op, left, right } => self.binary_expression(*op, *left, *right),
             CfgValueKind::SumProductsDiv { terms, divisor } => {
                 let pairs = terms
@@ -2761,6 +2773,7 @@ fn unary(op: CfgUnaryOp, input: &str) -> String {
 fn binary(op: CfgBinaryOp, left: &str, right: &str) -> String {
     match op {
         CfgBinaryOp::CheckedValue => format!("checked_derivative_value({left}, {right})"),
+        CfgBinaryOp::DiscreteValue => format!("checked_discrete_value({left}, {right})"),
         CfgBinaryOp::Add => format!("{left}+ {right}"),
         CfgBinaryOp::Sub => format!("{left}- {right}"),
         CfgBinaryOp::Mul => format!("{left}* {right}"),

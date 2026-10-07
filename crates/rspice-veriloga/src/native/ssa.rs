@@ -3724,6 +3724,7 @@ fn op_may_call(op: NativeOp) -> bool {
             | NativeOp::ProductRatio
             | NativeOp::SumProductsDiv(_)
             | NativeOp::CheckedValue
+            | NativeOp::DiscreteValue
             | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)
@@ -3965,6 +3966,7 @@ fn op_may_fail(op: NativeOp) -> bool {
             | NativeOp::DdtDerivativeState(_)
             | NativeOp::IdtModDerivativeState(_)
             | NativeOp::CheckedValue
+            | NativeOp::DiscreteValue
             | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::IntegerBinary(_)

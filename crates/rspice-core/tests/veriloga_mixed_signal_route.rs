@@ -2433,7 +2433,7 @@ fn analog_variable_reads_share_the_candidate_with_spice_loads_and_digital_inputs
 module variable_sampler(p,q);
  inout p; electrical p; output q; reg q=0;
  parameter real LOAD=1000;
- integer gain[2:1]='{7,-2}; reg signed [7:0] adjustment[-2:-1]='{-1,3}; reg startup_ok;
+ integer gain[2:1]='{32'bx,-2}; reg signed [7:0] adjustment[-2:-1]='{-1,8'bz}; reg startup_ok;
  real measured[-2:-1],period[5:4]='{9,1.537e-9}; integer count,enabled,index;
  analog begin
    measured[-2]=gain[1]*V(p); measured[-1]=-gain[1]*V(p);

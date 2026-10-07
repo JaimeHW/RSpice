@@ -497,6 +497,12 @@ impl<'a, S: CfgScalar> PlanWalk<'a, S> {
             NativeOp::Sub => Self::binary(stack, name, S::sub)?,
             NativeOp::Mul => Self::binary(stack, name, S::mul)?,
             NativeOp::Div => Self::binary(stack, name, S::div)?,
+            NativeOp::DiscreteValue => {
+                let (validity, value) = Self::two(stack, name)?;
+                rspice_veriloga_runtime::checked_discrete_value(validity.real(), value.real())
+                    .map_err(|_| PostfixRefusal::RuntimeError(name))?;
+                stack.push(value);
+            }
             NativeOp::CheckedValue => {
                 let (primal, derivative) = Self::two(stack, name)?;
                 rspice_veriloga_runtime::checked_derivative_value(primal.real(), derivative.real())

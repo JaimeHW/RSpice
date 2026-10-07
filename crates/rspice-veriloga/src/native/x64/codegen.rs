@@ -1286,6 +1286,10 @@ impl FunctionCompiler {
                             self.emit_checked_array_index(len, lower)?
                         }
                         NativeOp::IntegerCast => self.emit_integer_cast()?,
+                        NativeOp::DiscreteValue => self.emit_checked_binary(
+                            0,
+                            crate::native::abi::rspice_discrete_value_native,
+                        )?,
                         NativeOp::CheckedValue => self.emit_checked_binary(
                             0,
                             crate::native::abi::rspice_checked_value_native,

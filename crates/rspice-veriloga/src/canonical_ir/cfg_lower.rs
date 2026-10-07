@@ -4130,6 +4130,7 @@ fn binary_op(op: &str) -> Option<CfgBinaryOp> {
         "And" => CfgBinaryOp::And,
         "Or" => CfgBinaryOp::Or,
         "CheckedValue" => CfgBinaryOp::CheckedValue,
+        "DiscreteValue" => CfgBinaryOp::DiscreteValue,
         _ => return None,
     })
 }

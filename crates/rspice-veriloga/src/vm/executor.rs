@@ -488,6 +488,13 @@ impl<'a> Vm<'a> {
             Instruction::IntegerArithmetic(op) => {
                 self.integer_binary_op(IntegerBinaryOperation::Arithmetic(*op))?
             }
+            Instruction::DiscreteValue => {
+                let value = self.pop()?;
+                let validity = self.pop()?;
+                let value = rspice_veriloga_runtime::checked_discrete_value(validity, value)
+                    .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                self.stack.push(value);
+            }
             Instruction::CheckedValue => {
                 let derivative = self.pop()?;
                 let primal = self.pop()?;

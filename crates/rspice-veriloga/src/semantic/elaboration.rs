@@ -653,6 +653,16 @@ impl<'a> HierarchyElaborator<'a> {
                     .ok_or_else(|| internal_error("hierarchy event-state index overflow".into()))?,
             );
         }
+        for &(value, validity) in &child.discrete_inputs {
+            if value >= child.variables.len() || validity >= child.variables.len() {
+                return Err(internal_error(
+                    "invalid child discrete input storage".into(),
+                ));
+            }
+            self.flattened
+                .discrete_inputs
+                .push((variable_base + value, variable_base + validity));
+        }
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
         for &slot in &child.switch_branch_variables {

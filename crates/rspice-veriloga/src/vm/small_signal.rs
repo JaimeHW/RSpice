@@ -970,6 +970,16 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 IntegerBinaryOperation::Arithmetic(*op),
                 "integer arithmetic",
             )?,
+            Instruction::DiscreteValue => {
+                let value = self.pop("discrete value")?;
+                let validity = self.pop("discrete validity")?;
+                rspice_veriloga_runtime::checked_discrete_value(
+                    validity.binary64().re,
+                    value.binary64().re,
+                )
+                .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
+                self.stack.push(value);
+            }
             Instruction::CheckedValue => {
                 let derivative = self.pop("ddx")?;
                 let primal = self.pop("ddx")?;

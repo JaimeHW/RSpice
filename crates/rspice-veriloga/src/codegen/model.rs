@@ -933,6 +933,8 @@ pub enum Instruction {
     /// Validate the primal and derivative, retaining failures through comparisons.
     /// Stack: `[primal, derivative] -> [derivative]`.
     CheckedValue,
+    /// Validate the left discrete-input validity flag and return the right numeric value.
+    DiscreteValue,
     /// A named limiter's previous Newton iterate, seeded from the oriented
     /// proposal before the limiter has produced a candidate.
     /// Stack: `[oriented proposed] -> [previous]`.

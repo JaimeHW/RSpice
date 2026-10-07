@@ -1658,7 +1658,7 @@ impl<'a> ScalarDdxBuilder<'a> {
         let d_left = self.derivative(left, lane);
         let d_right = self.derivative(right, lane);
         match op {
-            CfgBinaryOp::CheckedValue => d_right,
+            CfgBinaryOp::CheckedValue | CfgBinaryOp::DiscreteValue => d_right,
             CfgBinaryOp::Add => match (d_left, d_right) {
                 (Some(a), Some(b)) => Some(self.push_binary(CfgBinaryOp::Add, a, b)),
                 (Some(only), None) | (None, Some(only)) => Some(only),
@@ -3014,7 +3014,7 @@ impl<'a> AdBuilder<'a> {
         let d_left = self.derivatives[usize::from(left)];
         let d_right = self.derivatives[usize::from(right)];
         match op {
-            CfgBinaryOp::CheckedValue => d_right,
+            CfgBinaryOp::CheckedValue | CfgBinaryOp::DiscreteValue => d_right,
             CfgBinaryOp::Add => match (d_left, d_right) {
                 (Some(d_left), Some(d_right)) => {
                     Some(self.lane_binary(CfgBinaryOp::Add, d_left, d_right, target))

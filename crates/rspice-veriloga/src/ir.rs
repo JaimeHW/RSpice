@@ -2356,7 +2356,7 @@ pub mod autodiff {
             | Node::PortConnected(_)
             | Node::Analysis(_) => 0,
             Node::Binary(op, left, right) => match op {
-                BinaryOp::CheckedValue => recurse(right),
+                BinaryOp::CheckedValue | BinaryOp::DiscreteValue => recurse(right),
                 BinaryOp::Add
                 | BinaryOp::Sub
                 | BinaryOp::Mul
@@ -3369,7 +3369,7 @@ pub mod autodiff {
                 }
             }
             Node::Binary(op, left, right) => match op {
-                BinaryOp::CheckedValue => collect!(right),
+                BinaryOp::CheckedValue | BinaryOp::DiscreteValue => collect!(right),
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mod => {
                     collect!(left);
                     collect!(right);
@@ -4563,7 +4563,7 @@ pub mod autodiff {
                             }
                         }
                     }
-                    BinaryOp::CheckedValue => dr,
+                    BinaryOp::CheckedValue | BinaryOp::DiscreteValue => dr,
                     BinaryOp::Mod => {
                         // The integer quotient is locally constant even when
                         // both real operands vary: d(l % r) = dl - trunc(l/r)*dr.

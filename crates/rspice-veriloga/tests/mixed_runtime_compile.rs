@@ -291,3 +291,75 @@ endmodule
         assert_eq!(device.variable("count"), Some(-3.0));
     }
 }
+
+#[cfg(feature = "native")]
+#[test]
+fn discrete_value_validity_is_checked_only_at_executed_selected_reads() {
+    use rspice_veriloga::device::VerilogADevice;
+    let source = r#"
+module selected(p); inout p; electrical p;
+ reg [7:0] data[-1:0]; integer index; reg enabled;
+ initial begin index=-1; enabled=0; data[-1]=5; end
+ analog begin
+   if (enabled) I(p)<+(data[index]>0 ? 2 : 1);
+   else I(p)<+3;
+ end
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    let hir = &runtime.canonical_ir.hir;
+    assert_eq!(hir.discrete_inputs.len(), 4);
+    let encoded = serde_json::to_vec(&runtime.canonical_ir).unwrap();
+    let restored: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+        serde_json::from_slice(&encoded).unwrap();
+    restored.validate().unwrap();
+    let mut malformed = hir.clone();
+    malformed.discrete_inputs[0][1] = malformed.discrete_inputs[0][0];
+    assert!(malformed.validate().is_err());
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("x", runtime.model, &runtime.canonical_ir, &[1])
+            .unwrap();
+    let sample = |device: &mut VerilogADevice, name: &str, value: Option<f64>| {
+        let [numeric, valid] = *hir
+            .discrete_inputs
+            .iter()
+            .find(|pair| hir.variables[usize::from(pair[0])].name == name)
+            .unwrap();
+        device
+            .sample_discrete_state(usize::from(numeric), value.unwrap_or(0.0))
+            .unwrap();
+        device
+            .sample_discrete_state(usize::from(valid), f64::from(u8::from(value.is_some())))
+            .unwrap();
+    };
+    let stamp = |device: &mut VerilogADevice| {
+        let mut rhs = 0.0;
+        device
+            .try_stamp(&[0.0], |_, _, _| {}, |_, value| rhs += value)
+            .map(|_| rhs)
+    };
+    sample(&mut device, "enabled", Some(0.0));
+    sample(&mut device, "index", Some(-1.0));
+    sample(&mut device, "data[-1]", None);
+    sample(&mut device, "data[0]", None);
+    assert_eq!(stamp(&mut device).unwrap(), -3.0);
+    sample(&mut device, "data[-1]", Some(5.0));
+    sample(&mut device, "enabled", Some(1.0));
+    assert_eq!(stamp(&mut device).unwrap(), -2.0);
+    sample(&mut device, "index", Some(0.0));
+    let error = stamp(&mut device).unwrap_err();
+    assert!(
+        error.to_string().contains("analog read of discrete input"),
+        "{error}"
+    );
+    sample(&mut device, "data[0]", Some(0.0));
+    assert_eq!(stamp(&mut device).unwrap(), -1.0);
+    sample(&mut device, "data[0]", None);
+    assert!(stamp(&mut device).is_err());
+    sample(&mut device, "enabled", Some(0.0));
+    assert_eq!(stamp(&mut device).unwrap(), -3.0);
+}

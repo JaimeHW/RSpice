@@ -297,6 +297,15 @@ impl Optimizer {
                 self.constant(*right)?,
             )
             .ok()?,
+            CfgValueKind::Binary {
+                op: CfgBinaryOp::DiscreteValue,
+                left,
+                right,
+            } => rspice_veriloga_runtime::checked_discrete_value(
+                self.constant(*left)?,
+                self.constant(*right)?,
+            )
+            .ok()?,
             CfgValueKind::SumProductsDiv { terms, divisor } => {
                 let pairs = terms
                     .iter()
@@ -504,7 +513,9 @@ impl Optimizer {
                 CfgBinaryOp::Pow => self.constant(right).is_some_and(|exponent| {
                     exponent.is_finite() && (exponent.fract() != 0.0 || exponent % 2.0 == 0.0)
                 }),
-                CfgBinaryOp::CheckedValue => self.nonnegative_or_nan(right, remaining),
+                CfgBinaryOp::CheckedValue | CfgBinaryOp::DiscreteValue => {
+                    self.nonnegative_or_nan(right, remaining)
+                }
                 // A denominator known only to be nonnegative can be -0;
                 // a positive numerator divided by it produces -infinity.
                 CfgBinaryOp::Div
@@ -750,6 +761,10 @@ impl Optimizer {
                 if matches!(
                     self.values[usize::from(instruction.result)].kind,
                     CfgValueKind::ArrayIndex { .. }
+                        | CfgValueKind::Binary {
+                            op: CfgBinaryOp::DiscreteValue,
+                            ..
+                        }
                 ) {
                     mark(instruction.result, &mut live, &mut worklist);
                 }

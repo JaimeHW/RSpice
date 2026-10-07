@@ -613,6 +613,7 @@ pub(super) fn grouped_noise_extension(
         integer_result: "ctx.integer_result".into(),
         array_index: "ctx.checked_array_index".into(),
         checked_value: "ctx.checked_derivative_value".into(),
+        discrete_value: "ctx.checked_discrete_value".into(),
         analysis: "ctx.analysis".into(),
         simparam_required: "ctx.simparam_required".into(),
         simparam_present: "ctx.has_simparam".into(),
@@ -1138,7 +1139,8 @@ fn validate_noise_routing(
                             | CfgBinaryOp::Max
                             | CfgBinaryOp::Hypot
                             | CfgBinaryOp::Atan2
-                            | CfgBinaryOp::CheckedValue,
+                            | CfgBinaryOp::CheckedValue
+                            | CfgBinaryOp::DiscreteValue,
                         ..
                     }
                     | CfgValueKind::SumProductsDiv { .. }

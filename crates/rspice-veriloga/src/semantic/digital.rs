@@ -799,8 +799,132 @@ impl SemanticAnalyzer {
             analyzed.variables[slot].is_event_controlled = true;
             analyzed.event_state_variables.push(slot);
         }
+        self.bind_discrete_validity(analyzed);
         analyzed.event_state_variables.sort_unstable();
         analyzed.event_state_variables.dedup();
+    }
+
+    /// Paired finite state lanes preserve availability without feeding a fake
+    /// numeric value to analog expressions or putting NaNs in checkpoints.
+    fn bind_discrete_validity(&mut self, analyzed: &mut AnalyzedModule) {
+        let slots: HashMap<_, _> = analyzed
+            .variables
+            .iter()
+            .enumerate()
+            .map(|(slot, variable)| (variable.name.clone(), slot))
+            .collect();
+        for signal in &analyzed.digital.signals {
+            let layout = if let Some(bounds) = signal.unpacked {
+                let Some(array) = analyzed.arrays.get(&signal.name) else {
+                    continue;
+                };
+                if !analyzed.variables[array.base].is_event_controlled {
+                    continue;
+                }
+                super::AnalyzedArray {
+                    base: array.base,
+                    lower: bounds.msb.min(bounds.lsb),
+                    len: array.len,
+                }
+            } else {
+                let Some(&slot) = slots.get(&signal.name) else {
+                    continue;
+                };
+                if !analyzed.variables[slot].is_event_controlled {
+                    continue;
+                }
+                super::AnalyzedArray {
+                    base: slot,
+                    lower: 0,
+                    len: 1,
+                }
+            };
+            let validity_base = analyzed.variables.len();
+            let mut suffix = validity_base;
+            let validity_name: SmolStr = loop {
+                let name: SmolStr = format!("__rspice_discrete_valid_{suffix}").into();
+                if self.symbols.lookup(&name).is_none()
+                    && !analyzed
+                        .digital
+                        .signals
+                        .iter()
+                        .any(|candidate| candidate.name == name)
+                {
+                    break name;
+                }
+                suffix += 1;
+            };
+            self.discrete_validity
+                .insert(signal.name.clone(), validity_name.clone());
+            if signal.unpacked.is_some() {
+                let validity_layout = super::AnalyzedArray {
+                    base: validity_base,
+                    lower: layout.lower,
+                    len: layout.len,
+                };
+                self.arrays
+                    .insert(validity_name.clone(), validity_layout.clone());
+                analyzed
+                    .arrays
+                    .insert(validity_name.clone(), validity_layout);
+            }
+            self.define_symbol(Symbol {
+                name: validity_name.clone(),
+                kind: SymbolKind::Variable,
+                value_type: super::ValueType::Integer,
+                span: signal.span,
+                attrs: Default::default(),
+            })
+            .expect("fresh validity symbol");
+            for offset in 0..layout.len {
+                let value_slot = layout.base + offset;
+                let validity_slot = validity_base + offset;
+                let name: SmolStr = if signal.unpacked.is_some() {
+                    format!("{validity_name}[{}]", layout.lower + offset as i64).into()
+                } else {
+                    validity_name.clone()
+                };
+                self.discrete_validity
+                    .insert(analyzed.variables[value_slot].name.clone(), name.clone());
+                analyzed.variables.push(super::AnalyzedVariable {
+                    name,
+                    var_type: VarType::Integer,
+                    value_type: super::ValueType::Integer,
+                    is_state: true,
+                    retains_input: false,
+                    is_event_controlled: true,
+                });
+                analyzed.event_state_variables.push(validity_slot);
+                analyzed.discrete_inputs.push((value_slot, validity_slot));
+            }
+        }
+    }
+
+    pub(super) fn checked_discrete_read(&self, value: Expression) -> Expression {
+        let validity = match &value {
+            Expression::Identifier(identifier) => {
+                self.discrete_validity.get(&identifier.name).map(|name| {
+                    Expression::Identifier(Identifier {
+                        name: name.clone(),
+                        span: identifier.span,
+                    })
+                })
+            }
+            Expression::ArrayAccess(access) => {
+                self.discrete_validity.get(&access.array).map(|name| {
+                    Expression::ArrayAccess(ArrayAccessExpr {
+                        array: name.clone(),
+                        index: access.index.clone(),
+                        span: access.span,
+                    })
+                })
+            }
+            _ => None,
+        };
+        match validity {
+            Some(validity) => Self::binary_expr(BinaryOp::DiscreteValue, validity, value),
+            None => value,
+        }
     }
 
     // ------------------------------------------------------------------

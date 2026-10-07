@@ -1743,6 +1743,12 @@ impl FunctionCompiler {
                 }
             }
             NativeOp::IntegerCast => self.emit_integer_cast(prepared)?,
+            NativeOp::DiscreteValue => self.emit_operand_context_helper(
+                prepared,
+                2,
+                0,
+                crate::native::abi::rspice_discrete_value_native as *const () as usize,
+            )?,
             NativeOp::CheckedValue => self.emit_operand_context_helper(
                 prepared,
                 2,

@@ -6,7 +6,7 @@ use super::*;
 pub(super) struct PreparedAnalogStamp {
     valid: bool,
     solution: Vec<(usize, u64)>,
-    inputs: Vec<u64>,
+    inputs: Vec<[u64; 2]>,
     matrix: Vec<(usize, usize, f64)>,
     rhs: Vec<(usize, f64)>,
     #[cfg(test)]
@@ -51,10 +51,12 @@ impl PreparedAnalogStamp {
                 .iter()
                 .all(|(node, bits)| node_voltage(solution, *node).to_bits() == *bits)
             && inputs.iter().zip(&self.inputs).all(|(input, bits)| {
-                analog
-                    .discrete_state_value(input.variable)
-                    .map(f64::to_bits)
-                    == Some(*bits)
+                [input.variable, input.validity]
+                    .into_iter()
+                    .zip(*bits)
+                    .all(|(slot, bits)| {
+                        analog.discrete_state_value(slot).map(f64::to_bits) == Some(bits)
+                    })
             })
         {
             return Ok(());
@@ -75,12 +77,16 @@ impl PreparedAnalogStamp {
         );
         self.inputs.clear();
         for input in inputs {
-            let value = analog.discrete_state_value(input.variable).ok_or_else(|| {
-                MixedSignalError::InvalidBridge {
-                    detail: format!("analog input `{}` lost its state slot", input.name),
-                }
-            })?;
-            self.inputs.push(value.to_bits());
+            let mut lanes = [0; 2];
+            for (slot, bits) in [input.variable, input.validity].into_iter().zip(&mut lanes) {
+                *bits = analog
+                    .discrete_state_value(slot)
+                    .ok_or_else(|| MixedSignalError::InvalidBridge {
+                        detail: format!("analog input `{}` lost its state slot", input.name),
+                    })?
+                    .to_bits();
+            }
+            self.inputs.push(lanes);
         }
         self.valid = true;
         #[cfg(test)]
@@ -149,22 +155,8 @@ impl AnalogModelParticipant<'_> {
                         .and_then(|value| value.to_integer(input.signed))
                         .map(|value| value as f64)
                 }
-                .filter(|value| value.is_finite())
-                .ok_or_else(|| MixedSignalError::InvalidBridge {
-                    detail: format!(
-                        "analog read of discrete signal `{}` has an X, Z, or non-finite value",
-                        input.name
-                    ),
-                })?;
-                if analog
-                    .discrete_state_value(input.variable)
-                    .map(f64::to_bits)
-                    != Some(value.to_bits())
-                {
-                    analog
-                        .sample_discrete_state(input.variable, value)
-                        .map_err(analog_error)?;
-                }
+                .filter(|value| value.is_finite());
+                input.sample(analog, value)?;
             }
             // Whatever this refuses is wrapped into a `DigitalRunError` two
             // lines below and ends the run, so wording it as a rejectable

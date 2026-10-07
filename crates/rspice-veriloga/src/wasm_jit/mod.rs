@@ -59,7 +59,8 @@ use wasmparser::{Encoding, ExternalKind, Imports, Operator, Parser, Payload, Typ
 /// Version 17 adds storage-independent checked array-index helper opcode 3.
 /// Version 18 adds exact mixed input/timing transport-delay actions.
 /// Version 19 adds a table derivative payload action.
-pub const WASM_JIT_ABI_VERSION: u32 = 19;
+/// Version 20 adds selected discrete-value validity helper opcode 341.
+pub const WASM_JIT_ABI_VERSION: u32 = 20;
 
 /// Version of the deterministic encoder. It participates in cache identity
 /// independently of the ABI because code layout may change without changing

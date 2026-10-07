@@ -1392,6 +1392,7 @@ fn unary_op(op: CfgUnaryOp) -> Option<NativeOp> {
 fn binary_op(op: CfgBinaryOp) -> NativeOp {
     match op {
         CfgBinaryOp::CheckedValue => NativeOp::CheckedValue,
+        CfgBinaryOp::DiscreteValue => NativeOp::DiscreteValue,
         CfgBinaryOp::Add => NativeOp::Add,
         CfgBinaryOp::Sub => NativeOp::Sub,
         CfgBinaryOp::Mul => NativeOp::Mul,
@@ -1923,6 +1924,7 @@ mod tests {
     fn empty_state() -> CfgStateAllocation {
         let hir = HirModel {
             digital_observations: Vec::new(),
+            discrete_inputs: Vec::new(),
             switch_branch_variables: Vec::new(),
             module_id: crate::canonical_ir::ModuleId::from(0usize),
             module_name: "cfg-program-test".into(),

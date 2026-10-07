@@ -289,10 +289,17 @@ to the existing discrete-state inputs. Implicit sensitivities and continuous
 assignments subscribe to every possible element and the index expression's inputs.
 Blocking intra-assignment controls evaluate the target index after resumption;
 nonblocking writes capture it when the update is scheduled (IEEE 1364 9.2.1/9.2.2).
-Analog sampling currently converts every projected array cell eagerly. An X/Z
-value in an unselected cell can therefore reject an otherwise valid selected
-read. Selected-read validity and dependency tracking remain required MS06 work;
-initialize every projected cell to a known finite value under the current policy.
+Schema 70 pairs each numeric discrete input with a finite validity state lane.
+Unavailable values can remain in unselected elements or untaken analog branches;
+the executed numeric read performs the check. Both lanes participate in mixed
+sampling, cached-stamp identity, trial rejection and checkpoint state. Custom
+hosts must populate the value/validity slot pairs in `hir.discrete_inputs` using
+validity 1 for a known finite value, or validity 0 and a zero placeholder for an
+unavailable value. The placeholder cannot be consumed by a checked read.
+The shared checked operation is lowered by the VM, native, generated-Rust and
+Wasm paths (Wasm helper ABI 20). Full shipping-platform execution remains to be
+qualified. Non-finite real inputs still use the current rejection policy when
+read; language-complete propagation of special real values remains open.
 Unpacked net/port arrays, whole-array values and slices, replicated initializer
 patterns, multidimensional shapes, full parameter-dependent shape/child-override
 support, and remaining mixed-host/platform qualification are still open.

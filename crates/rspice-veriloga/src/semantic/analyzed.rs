@@ -134,6 +134,8 @@ pub struct AnalyzedModule {
     /// backend boundary, by name — see
     /// [`crate::semantic::AnalyzedDigital::first_construct`].
     pub digital: AnalyzedDigital,
+    /// Numeric discrete inputs: (value slot, validity slot), both transactional.
+    pub discrete_inputs: Vec<(usize, usize)>,
 }
 
 /// Identity of one analog-block site that *both* lowerings of the module

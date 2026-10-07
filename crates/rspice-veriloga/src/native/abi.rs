@@ -287,6 +287,32 @@ pub unsafe extern "C" fn rspice_checked_value_native(
     }
 }
 
+/// Validate the two scalar lanes of a discrete numeric read.
+///
+/// # Safety
+/// `operands` contains two readable f64 values and `ctx` is a live exclusively
+/// dispatched frame, as for the other operand helpers.
+#[unsafe(export_name = "rspice_discrete_value_native")]
+pub unsafe extern "C" fn rspice_discrete_value_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    _descriptor: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_context_error_ptr(ctx, "discrete read received null operands");
+        return 0.0;
+    }
+    // SAFETY: generated call sites supply both scalar operands.
+    let (validity, value) = unsafe { (*operands, *operands.add(1)) };
+    match rspice_veriloga_runtime::checked_discrete_value(validity, value) {
+        Ok(value) => value,
+        Err(reason) => {
+            set_native_context_error_ptr(ctx, reason);
+            0.0
+        }
+    }
+}
+
 pub(crate) fn integer_binary_descriptor(operation: IntegerBinaryOperation) -> usize {
     INTEGER_BINARY_DESCRIPTOR_BASE + integer_operation_code(operation)
 }

@@ -1364,6 +1364,7 @@ impl CodeGenerator {
                             op.integer_arithmetic().expect("integer operation"),
                         ),
                         BinaryOp::CheckedValue => Instruction::CheckedValue,
+                        BinaryOp::DiscreteValue => Instruction::DiscreteValue,
                         BinaryOp::Add => Instruction::Add,
                         BinaryOp::Sub => Instruction::Sub,
                         BinaryOp::Mul => Instruction::Mul,

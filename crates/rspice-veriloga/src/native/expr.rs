@@ -178,6 +178,8 @@ pub(crate) enum NativeOp {
     /// Range-protected sum of `terms` products divided by the final operand.
     SumProductsDiv(usize),
     CheckedValue,
+    /// Validate the left discrete-input validity flag and return the right numeric value.
+    DiscreteValue,
     CheckedArrayIndex {
         len: usize,
         lower: i64,
@@ -1677,6 +1679,11 @@ impl NativeProgram {
                         continue;
                     }
                     ops.push(NativeOp::BinaryMath(BinaryMathOp::Pow));
+                }
+                Instruction::DiscreteValue => {
+                    pop_binary_stack(model.clone(), entry_kind, "DiscreteValue", depth)?;
+                    depth -= 1;
+                    ops.push(NativeOp::DiscreteValue);
                 }
                 Instruction::CheckedValue => {
                     pop_binary_stack(model.clone(), entry_kind, "CheckedValue", depth)?;
@@ -3252,7 +3259,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::Binary { op, left, right } => match op.as_str() {
                 // The checked primal is not part of the returned value, so it
                 // cannot contribute a slope either.
-                "CheckedValue" => self.expr_derivative_is_zero(*right, wrt),
+                "CheckedValue" | "DiscreteValue" => self.expr_derivative_is_zero(*right, wrt),
                 "Add" | "Sub" | "Mul" | "Div" | "Mod" => Ok(self
                     .expr_derivative_is_zero(*left, wrt)?
                     && self.expr_derivative_is_zero(*right, wrt)?),
@@ -3309,7 +3316,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 _ => Ok(false),
             },
             HirExprKind::Binary { op, left, right } => match op.as_str() {
-                "CheckedValue" => self.expr_second_derivative_is_zero(*right, first, second),
+                "CheckedValue" | "DiscreteValue" => {
+                    self.expr_second_derivative_is_zero(*right, first, second)
+                }
                 "Add" | "Sub" | "Mod" => Ok(self
                     .expr_second_derivative_is_zero(*left, first, second)?
                     && self.expr_second_derivative_is_zero(*right, first, second)?),
@@ -4013,7 +4022,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             // the bytecode autodiff (`ir.rs`, `BinaryOp::CheckedValue => dr`)
             // and the canonical AD (`canonical_ir/ad.rs`,
             // `CfgBinaryOp::CheckedValue => d_right`).
-            "CheckedValue" => self.lower_derivative(right, wrt),
+            "CheckedValue" | "DiscreteValue" => self.lower_derivative(right, wrt),
             "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
             | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor" | "Shl"
             | "Shr" => self.push(NativeOp::Const(0.0)),
@@ -4108,7 +4117,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     this.lower_second_derivative(id, first, second)
                 })
             }
-            "CheckedValue" => self.lower_second_derivative(right, first, second),
+            "CheckedValue" | "DiscreteValue" => self.lower_second_derivative(right, first, second),
             "IntAdd" | "IntSub" | "IntMul" | "IntDiv" | "IntMod" | "IntPow" | "Eq" | "Ne"
             | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or" | "BitAnd" | "BitOr" | "BitXor" | "Shl"
             | "Shr" => self.push(NativeOp::Const(0.0)),
@@ -7684,6 +7693,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.lower(right)?;
         match op {
             "CheckedValue" => self.append_checked_value(),
+            "DiscreteValue" => {
+                self.pop_binary("discrete value")?;
+                self.ops.push(NativeOp::DiscreteValue);
+                Ok(())
+            }
             "Add" | "Sub" | "Mul" | "Div" => self.append_arithmetic(op),
             "Pow" | "Mod" => self.append_binary_math(op),
             "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" => self.append_compare(op),
@@ -8200,6 +8214,7 @@ fn is_parameter_default_op(op: &NativeOp) -> bool {
             | NativeOp::CheckedArrayIndex { .. }
             | NativeOp::IntegerCast
             | NativeOp::CheckedValue
+            | NativeOp::DiscreteValue
             | NativeOp::IntegerBinary(_)
             | NativeOp::IntegerShiftConst(_, _)
             | NativeOp::IntegerBinaryConst(_, _)
@@ -8270,6 +8285,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::ProductRatio => "ProductRatio",
         NativeOp::SumProductsDiv(_) => "SumProductsDiv",
         NativeOp::CheckedValue => "CheckedValue",
+        NativeOp::DiscreteValue => "DiscreteValue",
         NativeOp::CheckedArrayIndex { .. } => "CheckedArrayIndex",
         NativeOp::IntegerCast => "IntegerCast",
         NativeOp::IntegerBinary(_) => "IntegerBinary",
@@ -9271,6 +9287,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::Extremum(_)
         | NativeOp::BinaryMath(_)
         | NativeOp::CheckedValue
+        | NativeOp::DiscreteValue
         | NativeOp::IntegerBinary(_)
         | NativeOp::TableDerivativeApply(_)
         | NativeOp::LimiterStore(_)
@@ -9447,6 +9464,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::BitOr => "BitOr",
         Instruction::BitXor => "BitXor",
         Instruction::CheckedValue => "CheckedValue",
+        Instruction::DiscreteValue => "DiscreteValue",
         Instruction::IntegerArithmetic(_) => "IntegerArithmetic",
         Instruction::Neg => "Neg",
         Instruction::Abs => "Abs",
@@ -9829,6 +9847,7 @@ mod tests {
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
             digital: Default::default(),
+            discrete_inputs: Vec::new(),
         };
         let metadata = CanonicalMetadata::for_source("fixture", module_name);
         HirModel::from_analyzed_module(&metadata, &analyzed)

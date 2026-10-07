@@ -1232,6 +1232,8 @@ pub enum BinaryOp {
     Shr,
     /// Internal AD operation: validate the left primal and return the right derivative.
     CheckedValue,
+    /// Validate the left discrete-input validity flag and return the right numeric value.
+    DiscreteValue,
 }
 
 impl BinaryOp {

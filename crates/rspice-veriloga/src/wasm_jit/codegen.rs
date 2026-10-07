@@ -2248,6 +2248,7 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
             descriptor.aux0 = index_i32(terms)?;
         }
         NativeOp::CheckedValue => descriptor.opcode = 340,
+        NativeOp::DiscreteValue => descriptor.opcode = 341,
         NativeOp::CheckedArrayIndex { len, lower } => {
             descriptor.opcode = 3;
             descriptor.aux1 = index_i32(len)?;

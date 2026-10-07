@@ -230,6 +230,11 @@ impl Algebra {
                     }
                     BinaryOp::Pow | BinaryOp::Mod => lowerer.append_binary_math(&name),
                     BinaryOp::CheckedValue => lowerer.append_checked_value(),
+                    BinaryOp::DiscreteValue => {
+                        lowerer.pop_binary("discrete value")?;
+                        lowerer.ops.push(NativeOp::DiscreteValue);
+                        Ok(())
+                    }
                     BinaryOp::Eq
                     | BinaryOp::Ne
                     | BinaryOp::Lt
@@ -652,6 +657,7 @@ fn binary_operator(name: &str) -> Option<BinaryOp> {
         "Shl" => BinaryOp::Shl,
         "Shr" => BinaryOp::Shr,
         "CheckedValue" => BinaryOp::CheckedValue,
+        "DiscreteValue" => BinaryOp::DiscreteValue,
         _ => return None,
     })
 }

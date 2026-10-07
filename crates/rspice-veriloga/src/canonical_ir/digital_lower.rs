@@ -3899,6 +3899,7 @@ impl ProcessLowerer<'_> {
             },
             Expression::Binary(binary) => match binary.op {
                 BinaryOp::CheckedValue
+                | BinaryOp::DiscreteValue
                 | BinaryOp::IntAdd
                 | BinaryOp::IntSub
                 | BinaryOp::IntMul
@@ -4021,6 +4022,7 @@ impl ProcessLowerer<'_> {
             },
             Expression::Binary(binary) => match binary.op {
                 BinaryOp::CheckedValue
+                | BinaryOp::DiscreteValue
                 | BinaryOp::IntAdd
                 | BinaryOp::IntSub
                 | BinaryOp::IntMul
@@ -4369,6 +4371,7 @@ impl ProcessLowerer<'_> {
         }
         let kind = match binary.op {
             BinaryOp::CheckedValue
+            | BinaryOp::DiscreteValue
             | BinaryOp::IntAdd
             | BinaryOp::IntSub
             | BinaryOp::IntMul

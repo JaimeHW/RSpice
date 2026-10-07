@@ -178,6 +178,8 @@ pub enum CfgBinaryOp {
     Or,
     /// Validate the left primal and return the right symbolic derivative.
     CheckedValue,
+    /// Validate the left discrete-input validity flag and return the right numeric value.
+    DiscreteValue,
 }
 
 /// Independent solver quantity named by a `ddx` probe.
