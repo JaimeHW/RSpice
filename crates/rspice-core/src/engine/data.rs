@@ -114,6 +114,11 @@ impl FrequencyDataOverridePlan {
         if column.eq_ignore_ascii_case("FREQ") || column.eq_ignore_ascii_case("HERTZ") {
             return Ok(FrequencyDataTarget::Frequency);
         }
+        // TEMP is a physical row coordinate even when the parser is using its
+        // implicit default and has no authored parameter/option binding for it.
+        if column.eq_ignore_ascii_case("TEMP") {
+            return Ok(FrequencyDataTarget::Parameter("TEMP".into()));
+        }
         if netlist.params.has_any_parameter_binding(column) {
             return Ok(FrequencyDataTarget::Parameter(column.to_ascii_uppercase()));
         }

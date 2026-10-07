@@ -47,6 +47,27 @@ fn check(engine: &Engine, netlist: &Netlist, temperatures: &[f64], fallback: f64
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn temperature_coordinates_do_not_require_an_authored_temperature_binding() {
+    let netlist = deck("FREQ TEMP", "100 27\n10 127\n100 -23", "");
+    assert_eq!(netlist.options.temp, None);
+    assert_eq!(netlist.params.get("TEMP"), Some(27.0));
+    let base = Engine::default();
+    check(&base, &netlist, &[27.0, 127.0, -23.0], 999.0);
+    check(
+        &base.resolved_for_netlist(&netlist),
+        &netlist,
+        &[27.0, 127.0, -23.0],
+        999.0,
+    );
+    let (rows, _) = base.run_ac_data(&netlist, "points").unwrap();
+    for (row, temperature) in rows.iter().zip([27.0, 127.0, -23.0]) {
+        assert_eq!(row.options.temp, Some(temperature));
+        assert_eq!(row.params.get("TEMP"), Some(temperature));
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn explicit_temperature_coordinates_override_the_resolved_run_temperature() {
     let netlist = deck("FREQ TEMP", "100 27\n10 127\n100 -23", ".options temp=27");
     let base = Engine::default();
