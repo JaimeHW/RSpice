@@ -8,6 +8,68 @@ use common::test_dir;
 use std::process::Command;
 
 #[test]
+fn stb_json_retains_hidden_circuit_modes_and_unsupported_spectrum_evidence() {
+    use rspice_core::analysis::pole_zero::StabilityVerdict;
+    use rspice_core::execution::{AnalysisResultDocument, ResultPayload};
+    let dir = test_dir("stb_circuit_modes");
+    for (case, extra, verdict) in [
+        (
+            "hidden",
+            "Ghidden hidden 0 hidden 0 -1\nChidden hidden 0 1",
+            StabilityVerdict::Unstable,
+        ),
+        (
+            "unsupported",
+            "B1 ctrl 0 I={FREQ*1p*V(ctrl)}",
+            StabilityVerdict::Indeterminate,
+        ),
+    ] {
+        let deck = dir.join(format!("{case}.sp"));
+        let output_path = dir.join(format!("{case}.json"));
+        std::fs::write(
+            &deck,
+            SINGLE_POLE_STB
+                .replace(".end", &format!("{extra}\n.end"))
+                .replace("dec 20 10 10meg", "lin 3 10 1000"),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "run",
+                deck.to_str().unwrap(),
+                "-o",
+                output_path.to_str().unwrap(),
+                "-f",
+                "json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let json = std::fs::read_to_string(output_path).unwrap();
+        let document = AnalysisResultDocument::from_json(&json).unwrap();
+        let ResultPayload::Stb(payload) = document.payload() else {
+            panic!()
+        };
+        assert_eq!(payload.circuit_poles.stability_verdict(), verdict);
+        if let Some(spectrum) = payload.circuit_poles.spectrum() {
+            assert_eq!(spectrum.poles.len(), 2);
+            assert!(spectrum.poles.iter().any(|p| (p.re - 1.0).abs() < 1e-10));
+        } else {
+            assert!(matches!(
+                payload.circuit_poles,
+                rspice_core::analysis::stb::CircuitPoleEvidence::Unavailable {
+                    cause: rspice_core::analysis::stb::CircuitPoleFailure::Unsupported { .. }
+                }
+            ));
+        }
+    }
+}
+
+#[test]
 fn zero_loop_gain_exports_raw_zero_and_undefined_bode_values() {
     let dir = test_dir("stb_zero_gain");
     let deck = dir.join("zero.sp");
