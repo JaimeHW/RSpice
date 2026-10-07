@@ -728,6 +728,19 @@ pub struct DigitalDriver {
     pub span: SourceSpanRef,
 }
 
+/// Exact elaboration value for a scalar parameter outside the analog numeric ABI.
+/// Changing it requires source specialization, including all shapes and processes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalElaborationParameter {
+    pub name: SmolStr,
+    pub aliases: Vec<SmolStr>,
+    pub is_public: bool,
+    pub scope: crate::semantic::ParameterScope,
+    pub also_model: bool,
+    pub value: super::digital_value::FourStateValue,
+    pub signed: bool,
+}
+
 /// The discrete-domain half of a module, lowered.
 ///
 /// Lifted out beside the analog body rather than folded into it, for the same
@@ -745,6 +758,8 @@ pub struct CanonicalDigitalPlan {
     /// editing an artifact, then keep it immutable throughout execution.
     #[serde(default)]
     pub content_identity: [u8; 32],
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub elaboration_parameters: Vec<DigitalElaborationParameter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<DigitalSignal>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -766,7 +781,8 @@ pub struct CanonicalDigitalPlan {
 
 impl CanonicalDigitalPlan {
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty()
+        self.elaboration_parameters.is_empty()
+            && self.signals.is_empty()
             && self.arrays.is_empty()
             && self.processes.is_empty()
             && self.drivers.is_empty()

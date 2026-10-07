@@ -163,6 +163,15 @@ pub fn link_digital_plans(
             .timing
             .precision_exponent
             .min(instance.plan.timing.precision_exponent);
+        for parameter in &instance.plan.elaboration_parameters {
+            let mut parameter = parameter.clone();
+            parameter.name = format!("{}.{}", instance.name, parameter.name).into();
+            for alias in &mut parameter.aliases {
+                *alias = format!("{}.{}", instance.name, alias).into();
+            }
+            parameter.is_public = false;
+            plan.elaboration_parameters.push(parameter);
+        }
         let mut files = BTreeSet::new();
         for span in instance
             .plan

@@ -180,6 +180,7 @@ impl CanonicalDigitalPlan {
             &(
                 CANONICAL_IR_SCHEMA_VERSION,
                 &self.timing,
+                &self.elaboration_parameters,
                 &self.signals,
                 &self.arrays,
                 &self.processes,
@@ -204,6 +205,19 @@ impl CanonicalDigitalPlan {
 
     fn validate_structure(&self) -> IrValidationResult {
         self.timing.validate().map_err(error)?;
+        let mut parameter_names = HashSet::new();
+        for parameter in &self.elaboration_parameters {
+            if parameter.value.width() == 0
+                || parameter.value.width() > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
+                || std::iter::once(&parameter.name)
+                    .chain(&parameter.aliases)
+                    .any(|name| name.is_empty() || !parameter_names.insert(name))
+            {
+                return Err(error(
+                    "digital elaboration parameters require bounded packed values and unique nonempty names and aliases",
+                ));
+            }
+        }
         for process in &self.processes {
             process.time_scale.validate().map_err(error)?;
             if process.time_scale.precision_exponent() < self.timing.precision_exponent {

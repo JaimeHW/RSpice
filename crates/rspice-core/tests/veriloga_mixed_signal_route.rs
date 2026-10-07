@@ -2825,3 +2825,55 @@ endmodule
         assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
     }
 }
+
+#[test]
+fn exact_packed_parameters_drive_loaded_mixed_instances() {
+    let model = ModelFile::new(
+        "exact_packed",
+        r#"
+`timescale 1ns/1ps
+module exact_packed(p,q);
+ inout p; electrical p; output reg q=0;
+ parameter PATTERN=129'h10000000000000000000000000000000xz;
+ parameter COUNT=64'h20000000000001;
+ parameter real GAIN=2;
+ aliasparam STRENGTH=GAIN;
+ analog I(p)<+(V(p)-GAIN*q)/1000;
+ initial #1 q=(PATTERN===129'h10000000000000000000000000000000xz)
+              &&(COUNT===64'h20000000000001);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* exact packed parameters\n.param vcc=1\n\
+         Xa pa qa exact_packed\nXb pb qb exact_packed STRENGTH=4\n\
+         Rpa pa 0 1k\nRqa qa 0 1k\nRpb pb 0 1k\nRqb qb 0 1k\n\
+         .va \"{}\" exact_packed module=exact_packed\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, settled) in [("pa", 1.0), ("pb", 2.0)] {
+        let values = waveform(&result, node);
+        for (&time, &value) in result.time.iter().zip(&values) {
+            if time < 0.9e-9 {
+                assert!(value.abs() < 1e-8, "{node} at {time}: {value}");
+            } else if time > 1.1e-9 {
+                assert!((value - settled).abs() < 1e-8, "{node} at {time}: {value}");
+            }
+        }
+        assert!((values.last().unwrap() - settled).abs() < 1e-8);
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(
+            events[0].value.state,
+            rspice_core::xspice::DigitalState::Zero
+        );
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+    }
+}

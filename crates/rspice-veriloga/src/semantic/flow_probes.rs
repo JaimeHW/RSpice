@@ -751,7 +751,7 @@ fn rewrite_expression(
     }
 }
 
-fn visit_statements(body: &[AnalyzedStatement], visit: &mut impl FnMut(&Expression)) {
+pub(super) fn visit_statements(body: &[AnalyzedStatement], visit: &mut impl FnMut(&Expression)) {
     for statement in body {
         match statement {
             AnalyzedStatement::Assignment(assignment) => {

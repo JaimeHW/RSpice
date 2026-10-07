@@ -35,6 +35,8 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Default)]
 pub struct AnalyzedDigital {
     pub time_scale: crate::time_scale::ModuleTimeScale,
+    /// Exact scalar constants that cannot occupy a numeric runtime slot.
+    pub elaboration_parameters: Vec<AnalyzedPackedParameter>,
     /// Declared nets and variables, in declaration order.
     pub signals: Vec<AnalyzedDigitalSignal>,
     /// Processes with their static sensitivity resolved, in declaration order.
@@ -58,6 +60,17 @@ pub struct AnalyzedDigital {
     /// never with the parent's, which would be a wrong answer wearing a right
     /// one's clothes.
     pub constants: DigitalConstants,
+}
+
+/// A scalar parameter retained exactly outside the analog numeric ABI.
+#[derive(Debug, Clone)]
+pub struct AnalyzedPackedParameter {
+    pub name: SmolStr,
+    pub aliases: Vec<SmolStr>,
+    pub is_public: bool,
+    pub scope: super::ParameterScope,
+    pub also_model: bool,
+    pub value: crate::four_state::FourStateLiteral,
 }
 
 /// The elaboration-time constants a discrete-domain body may fold.
@@ -119,7 +132,8 @@ impl DigitalConstants {
 
 impl AnalyzedDigital {
     pub fn is_empty(&self) -> bool {
-        self.signals.is_empty()
+        self.elaboration_parameters.is_empty()
+            && self.signals.is_empty()
             && self.processes.is_empty()
             && self.continuous_assigns.is_empty()
             && self.instances.is_empty()
@@ -643,6 +657,7 @@ impl SemanticAnalyzer {
         }
         analyzed.digital = AnalyzedDigital {
             time_scale: module.time_scale,
+            elaboration_parameters: Vec::new(),
             signals,
             processes,
             continuous_assigns,

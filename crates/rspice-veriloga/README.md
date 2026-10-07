@@ -556,6 +556,27 @@ This does not yet cover packed operations whose operands themselves depend on
 parameters, or realness that requires general implicit parameter/function
 type inference. Those remain part of the parameter typing and ABI work.
 
+Schema 94 adds `specialize_mixed_runtime_typed` with
+`ScalarParameterValue::{Integer, Bits, Real}`. Integral inputs reach the shared
+parameter evaluator without binary64 rounding; declarations apply their own
+assignment conversion. `Bits` preserves width, signedness and X/Z values.
+The existing numeric specialization API remains available. Both APIs resolve
+parameter aliases and reject duplicate assignments through an alias.
+
+Closed digital-only scalar parameters that cannot be represented exactly by
+the numeric ABI are retained in `digital.elaboration_parameters` and the public
+runtime ABI summary. They have no numeric runtime slot. Serialization, plan
+identity, source re-specialization and circuit-wide linking preserve their
+exact values and aliases; numeric parameters keep dense independent slots.
+Changing an elaboration value requires source specialization.
+
+Analog uses, numeric parameter dependencies and range constraints involving
+these packed values receive an explicit diagnostic until typed analog
+parameter expressions and range validation are implemented. General dependent
+packed defaults, string/array override APIs, and typed SPICE-deck/UI parameter
+transport remain open. This is a compiler API and exact elaboration increment,
+not completion of the full typed external ABI. Wasm helper ABI remains 20.
+
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification

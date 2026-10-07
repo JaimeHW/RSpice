@@ -151,6 +151,8 @@ pub mod device;
 #[cfg(feature = "native")]
 pub mod native;
 
+mod parameter_override;
+
 // Re-export primary types
 pub use ast::{Module, SourceFile};
 pub use codegen::{CodeGenerator, CompiledModel};
@@ -160,6 +162,7 @@ pub use metrics::{
     CfgStructureMetrics, Measured, NoPipelineControl, PerformanceBudget, PerformanceBudgetExceeded,
     PhaseTiming, PipelineCancelled, PipelineControl, PipelineMetrics, PipelinePhase,
 };
+pub use parameter_override::ScalarParameterValue;
 pub use parser::Parser;
 pub use preprocessor::{
     FileSystemSourceProvider, PreprocessedDependency, PreprocessedInclude, Preprocessor,
@@ -740,6 +743,22 @@ impl VerilogACompiler {
         parameters: &[(&str, f64)],
         control: &dyn PipelineControl,
     ) -> CompileResult<RuntimeCompileReport> {
+        let parameters: Vec<_> = parameters
+            .iter()
+            .map(|&(name, value)| (name, ScalarParameterValue::Real(value)))
+            .collect();
+        self.specialize_mixed_runtime_typed(artifact, &parameters, control)
+    }
+
+    /// Specialize scalar parameters without routing integral values through
+    /// binary64. The declaration determines assignment conversion; implicit
+    /// parameters retain the supplied value's type, width and signedness.
+    pub fn specialize_mixed_runtime_typed(
+        &self,
+        artifact: &canonical_ir::CanonicalIrArtifact,
+        parameters: &[(&str, ScalarParameterValue)],
+        control: &dyn PipelineControl,
+    ) -> CompileResult<RuntimeCompileReport> {
         artifact.validate().map_err(Self::canonical_ir_error)?;
         let source = artifact
             .parameter_source
@@ -771,7 +790,7 @@ impl VerilogACompiler {
         source_package: &str,
         preprocessed: &str,
         module_name: Option<&str>,
-        parameters: &[(&str, f64)],
+        parameters: &[(&str, ScalarParameterValue)],
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<RuntimeCompileReport> {
@@ -996,7 +1015,7 @@ impl VerilogACompiler {
         source_package: &str,
         source: &str,
         module_name: Option<&str>,
-        parameters: &[(&str, f64)],
+        parameters: &[(&str, ScalarParameterValue)],
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<semantic::AnalyzedFile> {
         let trace = compiler_phase_trace_enabled();
@@ -1047,34 +1066,28 @@ impl VerilogACompiler {
                     )
                 })?;
             let mut seen = std::collections::HashSet::new();
-            for &(name, value) in parameters {
-                if !value.is_finite() || !seen.insert(name) {
-                    return Err(CompileError::ModuleSelection(format!(
-                        "parameter override `{name}` must be unique and finite"
-                    )));
-                }
+            for (name, value) in parameters {
+                let canonical = selected
+                    .aliasparams
+                    .iter()
+                    .find(|alias| alias.alias == *name)
+                    .map_or(*name, |alias| alias.target.as_str());
                 let parameter = selected
                     .parameters
                     .iter_mut()
-                    .find(|parameter| parameter.name == name)
+                    .find(|parameter| parameter.name == canonical)
                     .ok_or_else(|| {
                         CompileError::ModuleSelection(format!(
                             "unknown parameter `{name}` in module `{}`",
                             selected.name
                         ))
                     })?;
-                if parameter.param_type == ast::ParamType::String
-                    || !parameter.dimensions.is_empty()
-                {
+                if !seen.insert(parameter.name.clone()) {
                     return Err(CompileError::ModuleSelection(format!(
-                        "parameter `{name}` requires a scalar numeric override"
+                        "parameter override `{name}` must be unique, including aliases"
                     )));
                 }
-                parameter.default = Some(ast::Expression::Number(ast::NumberLit {
-                    value,
-                    raw: format!("{value:e}").into(),
-                    span: parameter.span,
-                }));
+                parameter.default = Some(value.assigned_expression(parameter, selected.time_scale)?);
             }
             parser::expand_specialized_generates(selected)?;
         }
@@ -1215,7 +1228,10 @@ impl VerilogACompiler {
             )
         }) {
             artifact = artifact.with_connection_source(source);
-        } else if !artifact.digital.is_empty() && !artifact.hir.parameters.is_empty() {
+        } else if !artifact.digital.is_empty()
+            && (!artifact.hir.parameters.is_empty()
+                || !artifact.digital.elaboration_parameters.is_empty())
+        {
             artifact.parameter_source = Some(source.into());
         }
         measurements.record(PipelinePhase::IntegrityValidation, phase_started.elapsed())?;
@@ -1280,7 +1296,9 @@ impl VerilogACompiler {
         module_name: Option<&str>,
     ) -> CompileResult<std::borrow::Cow<'a, semantic::AnalyzedModule>> {
         let selected = self.select_analyzed_module(analyzed, module_name)?;
-        semantic::lower_flow_probes(semantic::elaborate_executable_module(analyzed, selected)?)
+        semantic::retain_packed_parameters(semantic::lower_flow_probes(
+            semantic::elaborate_executable_module(analyzed, selected)?,
+        )?)
     }
 
     /// Report what the discrete-domain lowering refused.

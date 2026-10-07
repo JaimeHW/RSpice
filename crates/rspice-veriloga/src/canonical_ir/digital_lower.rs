@@ -585,6 +585,19 @@ fn lower_with_analog_variables(
     CanonicalDigitalPlan {
         timing,
         content_identity: [0; 32],
+        elaboration_parameters: digital
+            .elaboration_parameters
+            .iter()
+            .map(|parameter| super::digital::DigitalElaborationParameter {
+                name: parameter.name.clone(),
+                aliases: parameter.aliases.clone(),
+                is_public: parameter.is_public,
+                scope: parameter.scope,
+                also_model: parameter.also_model,
+                value: super::digital_value::FourStateValue::from_literal(&parameter.value),
+                signed: parameter.value.signed,
+            })
+            .collect(),
         arrays,
         signals,
         processes,

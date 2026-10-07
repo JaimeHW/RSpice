@@ -311,6 +311,9 @@ pub struct RuntimeAbiSummary {
     pub module_name: SmolStr,
     pub analog_ports: Vec<RuntimeAbiPort>,
     pub parameters: Vec<RuntimeAbiParameter>,
+    /// Exact packed values fixed by elaboration; recompile to change these.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub elaboration_parameters: Vec<crate::canonical_ir::digital::DigitalElaborationParameter>,
     /// Distinct structural processes, including assigned and filtered sources.
     /// Reusing one process at multiple injections does not increase this count.
     pub noise_source_count: usize,
@@ -348,6 +351,13 @@ impl RuntimeAbiSummary {
                     default: parameter.default,
                     aliases: parameter.aliases.clone(),
                 })
+                .collect(),
+            elaboration_parameters: artifact
+                .digital
+                .elaboration_parameters
+                .iter()
+                .filter(|parameter| parameter.is_public)
+                .cloned()
                 .collect(),
             noise_source_count: artifact
                 .hir

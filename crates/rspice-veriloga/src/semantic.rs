@@ -386,6 +386,7 @@ mod elaboration;
 mod flow_probes;
 mod function_effects;
 mod implicit_integrator;
+mod packed_parameters;
 mod parameter_constants;
 mod retained_inputs;
 mod switch_branches;
@@ -395,6 +396,7 @@ pub use analyzed::*;
 pub use digital::*;
 pub(crate) use elaboration::elaborate_executable_module;
 pub(crate) use flow_probes::lower as lower_flow_probes;
+pub(crate) use packed_parameters::retain_packed_parameters;
 pub use symbols::*;
 
 // ============================================================================

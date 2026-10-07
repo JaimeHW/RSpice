@@ -159,6 +159,22 @@ impl CanonicalIrArtifact {
                 "stored connection identity does not match the connection source",
             ));
         }
+        let numeric_names: std::collections::HashSet<_> = self
+            .hir
+            .parameters
+            .iter()
+            .flat_map(|parameter| std::iter::once(&parameter.name).chain(&parameter.aliases))
+            .collect();
+        for parameter in &self.digital.elaboration_parameters {
+            if std::iter::once(&parameter.name)
+                .chain(&parameter.aliases)
+                .any(|name| numeric_names.contains(name))
+            {
+                diagnostics.push(artifact_error(
+                    "packed elaboration parameters must not alias numeric runtime parameters",
+                ));
+            }
+        }
         for variable in self
             .hir
             .variables

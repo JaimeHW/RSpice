@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 94 retains exact packed elaboration parameters outside numeric runtime slots.
 /// Version 93 retains packed operand evaluation before real conversion in dependent defaults.
 /// Version 92 evaluates replication operands once, including zero-count operands,
 /// and uses iterative concatenation and selection lowering.
@@ -96,7 +97,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 93;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 94;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
