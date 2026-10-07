@@ -3253,6 +3253,16 @@ pub enum SensitivityCardResult {
     Ac(AcSensitivityResult),
 }
 
+impl SensitivityCardResult {
+    /// Numeric slots retained by the complete authored study.
+    pub fn retained_value_count(&self) -> usize {
+        match self {
+            Self::Dc(result) => result.retained_value_count(),
+            Self::Ac(result) => result.retained_value_count(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::super::Engine;

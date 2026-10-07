@@ -179,6 +179,9 @@ pub(super) fn run(
                             ControlAnalysisResult::PoleZero(result) => {
                                 frequency::report_pz(&ctx, result)?;
                             }
+                            ControlAnalysisResult::Sensitivity(result) => {
+                                frequency::finish_sensitivity_result(&ctx, result)?;
+                            }
                             ControlAnalysisResult::AcTable(table) => {
                                 frequency::finish_ac_table(&ctx, table)?;
                             }

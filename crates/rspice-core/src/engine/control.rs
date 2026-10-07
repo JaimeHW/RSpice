@@ -10,7 +10,7 @@ use crate::control_protocol::{
 };
 use crate::netlist::expr::{
     ExpressionEvaluationError, ParamContext, eval_expression_complex_with_abort,
-    evaluate_complex_with_functions_and_abort, is_real, parse_expression_with_abort,
+    evaluate_complex_with_functions_and_abort, is_real, parse_control_expression_with_abort,
 };
 use crate::netlist::{AnalysisCommand, Netlist};
 use crate::resource::{ResourceKind, ResourceLimitError};
@@ -56,6 +56,7 @@ pub enum ControlAnalysisResult {
     DcSweep(Box<super::DcSweepResult>),
     TransferFunction(Box<crate::analysis::TransferFunctionResult>),
     PoleZero(Box<crate::analysis::PoleZeroResult>),
+    Sensitivity(Box<super::SensitivityCardResult>),
     Transient(Box<TransientResult>),
 }
 
@@ -98,7 +99,7 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" => Self::Analysis,
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             _ => {
@@ -305,6 +306,9 @@ impl ControlCircuit {
             AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
             AnalysisCommand::Tf { .. } => ("tf", crate::identity::AnalysisKind::TransferFunction),
             AnalysisCommand::PoleZero { .. } => ("pz", crate::identity::AnalysisKind::PoleZero),
+            AnalysisCommand::Sensitivity { .. } => {
+                ("sens", crate::identity::AnalysisKind::Sensitivity)
+            }
             _ => {
                 return Err(command_error(
                     line,
@@ -400,6 +404,17 @@ impl ControlCircuit {
                 (
                     kind,
                     ControlAnalysisResult::PoleZero(Box::new(result)),
+                    count,
+                )
+            }
+            AnalysisCommand::Sensitivity { .. } => {
+                let result = bounded
+                    .run_sensitivity_from_card_with_abort(&netlist, &analysis, abort)
+                    .map_err(|error| simulation_error(line, error))?;
+                let count = result.retained_value_count();
+                (
+                    kind,
+                    ControlAnalysisResult::Sensitivity(Box::new(result)),
                     count,
                 )
             }
@@ -546,7 +561,7 @@ impl ControlScalarEvaluator for ControlCircuit {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError> {
-        parse_expression_with_abort(expression, abort)
+        parse_control_expression_with_abort(expression, abort)
             .map_err(ExpressionEvaluationError::from)
             .and_then(|expression| {
                 evaluate_complex_with_functions_and_abort(

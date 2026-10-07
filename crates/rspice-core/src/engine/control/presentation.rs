@@ -3,8 +3,10 @@
 use super::*;
 mod noise;
 mod pole_zero;
+mod sensitivity;
 mod transfer;
 use crate::ComplexValue;
+use crate::engine::SensitivityCardResult;
 use crate::netlist::expr::{
     BinOpKind, Expr, ParseExpressionWithAbortError, UnaryOpKind,
     parse_control_expression_prefix_with_abort,
@@ -18,7 +20,10 @@ pub(super) fn resolve_scalar(
 ) -> Result<Option<ComplexValue>, crate::netlist::expr::ExprError> {
     match transfer::resolve_scalar(circuit, name)? {
         Some(value) => Ok(Some(value)),
-        None => pole_zero::resolve_scalar(circuit, name),
+        None => match pole_zero::resolve_scalar(circuit, name)? {
+            Some(value) => Ok(Some(value)),
+            None => sensitivity::resolve_scalar(circuit, name),
+        },
     }
 }
 
@@ -110,6 +115,7 @@ enum Column {
     NoiseContribution,
     Transfer(transfer::TransferColumn),
     PoleZero(pole_zero::PoleZeroColumn),
+    Sensitivity(sensitivity::SensitivityColumn),
 }
 
 struct Selected<'a> {
@@ -133,6 +139,10 @@ impl ControlNamedDataset {
 
     fn length(&self) -> usize {
         match &self.result {
+            ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
+                SensitivityCardResult::Dc(_) => 1,
+                SensitivityCardResult::Ac(result) => result.frequencies.len(),
+            },
             ControlAnalysisResult::OperatingPoint(_)
             | ControlAnalysisResult::TransferFunction(_)
             | ControlAnalysisResult::PoleZero(_) => 1,
@@ -147,6 +157,10 @@ impl ControlNamedDataset {
 
     fn scale_unit(&self) -> SignalUnit {
         match &self.result {
+            ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
+                SensitivityCardResult::Dc(_) => SignalUnit::Dimensionless,
+                SensitivityCardResult::Ac(_) => SignalUnit::Hertz,
+            },
             ControlAnalysisResult::OperatingPoint(_)
             | ControlAnalysisResult::TransferFunction(_)
             | ControlAnalysisResult::PoleZero(_) => SignalUnit::Dimensionless,
@@ -164,6 +178,10 @@ impl ControlNamedDataset {
 
     fn scale_name(&self) -> &str {
         match &self.result {
+            ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
+                SensitivityCardResult::Dc(_) => "index",
+                SensitivityCardResult::Ac(_) => "frequency",
+            },
             ControlAnalysisResult::OperatingPoint(_)
             | ControlAnalysisResult::TransferFunction(_)
             | ControlAnalysisResult::PoleZero(_) => "index",
@@ -180,6 +198,10 @@ impl ControlNamedDataset {
 
     fn scale_value(&self, row: usize) -> Option<Value> {
         match &self.result {
+            ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
+                SensitivityCardResult::Dc(_) => (row == 0).then_some(0.0),
+                SensitivityCardResult::Ac(result) => result.frequencies.get(row).copied(),
+            },
             ControlAnalysisResult::OperatingPoint(_)
             | ControlAnalysisResult::TransferFunction(_)
             | ControlAnalysisResult::PoleZero(_) => (row == 0).then_some(0.0),
@@ -198,7 +220,9 @@ impl ControlNamedDataset {
 
     fn branch_names(&self) -> &[String] {
         match &self.result {
-            ControlAnalysisResult::TransferFunction(_) | ControlAnalysisResult::PoleZero(_) => &[],
+            ControlAnalysisResult::TransferFunction(_)
+            | ControlAnalysisResult::PoleZero(_)
+            | ControlAnalysisResult::Sensitivity(_) => &[],
             ControlAnalysisResult::OperatingPoint(result) => &result.branch_names,
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
@@ -223,6 +247,11 @@ impl Selected<'_> {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::Sensitivity(column), ControlAnalysisResult::Sensitivity(result)) => {
+                column.sample(result, row)
+            }
+            (Column::Sensitivity(_), _)
+            | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::Sensitivity(_)) => None,
             (Column::PoleZero(column), ControlAnalysisResult::PoleZero(result)) => {
                 column.sample(result)
             }
@@ -375,6 +404,7 @@ impl ControlCircuit {
         if probe.is_none()
             && let Some(mut selected) = transfer::select(dataset, name)
                 .or(pole_zero::select_gain(dataset, name))
+                .or(sensitivity::select(dataset, name))
                 .or(noise::select(dataset, name, line)?)
         {
             if let Some(unit) = self.vector_units.get(&selected.id) {
@@ -424,7 +454,9 @@ impl ControlCircuit {
             (Column::Ground, "v(0)".into(), SignalUnit::Volt)
         } else {
             let names = match &dataset.result {
-                ControlAnalysisResult::TransferFunction(_) | ControlAnalysisResult::PoleZero(_) => {
+                ControlAnalysisResult::TransferFunction(_)
+                | ControlAnalysisResult::PoleZero(_)
+                | ControlAnalysisResult::Sensitivity(_) => {
                     return Err(unavailable(line, dataset, name));
                 }
                 ControlAnalysisResult::DcSweep(result) => {

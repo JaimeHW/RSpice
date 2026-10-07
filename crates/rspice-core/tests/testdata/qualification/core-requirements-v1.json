@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "Complete the remaining 20 of 29 control dispositions, producer dependencies and bounded orchestration. Preserve direct/control numerical equivalence, complex scalar bindings, physical units, immutable dataset identity and atomic publication. Extend qualification for earlier-card and eager-parameter temperatures, statistical/runtime binding, physical overrides, whole-run memory, cancellation, configuration and performance. Existing parser and analysis regression tests remain required."
+      "qualification_task": "Complete the remaining 19 of 29 control dispositions, producer dependencies and bounded orchestration. Preserve direct/control numerical equivalence, complex scalar bindings, physical units, immutable dataset identity and atomic publication. Extend qualification for earlier-card and eager-parameter temperatures, statistical/runtime binding, physical overrides, whole-run memory, cancellation, configuration and performance. Existing parser and analysis regression tests remain required."
     },
     {
       "id": "C05",
@@ -278,9 +278,9 @@
         "path": "src/engine/sensitivity.rs",
         "symbol": "run_sensitivity_from_card_with_abort"
       },
-      "control_host": "missing",
+      "control_host": "implemented",
       "owner": "C04",
-      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+      "qualification_task": "Control SENS reuses the bounded card runner and retains DC/AC derivatives, physical nominal units and availability. tests/control_sensitivity.rs covers direct equivalence, analytical RC derivatives, immutable identity, complex/scalar vector access, temperature, cancellation and cumulative limits. CLI/WASM publish the shared document. Broader model, option and performance qualification remains C04 work."
     },
     {
       "variant": "Tf",

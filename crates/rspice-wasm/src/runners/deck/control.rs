@@ -182,6 +182,14 @@ pub(super) fn run(
             ControlAnalysisResult::PoleZero(result) => {
                 AnalysisResultDocument::from_pole_zero(dataset.analysis_id, result)
             }
+            ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
+                SensitivityCardResult::Dc(result) => {
+                    AnalysisResultDocument::from_sensitivity(dataset.analysis_id, result)
+                }
+                SensitivityCardResult::Ac(result) => {
+                    AnalysisResultDocument::from_ac_sensitivity(dataset.analysis_id, result)
+                }
+            },
             ControlAnalysisResult::Noise(points) => {
                 AnalysisResultDocument::from_noise(dataset.analysis_id, points)
             }

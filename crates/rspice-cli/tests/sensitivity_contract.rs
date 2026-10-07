@@ -125,3 +125,88 @@ fn authored_sensitivity_documents_keep_voltage_and_current_output_units() {
         }
     }
 }
+
+#[test]
+fn control_sensitivity_publishes_direct_documents_and_complex_derivative_prints() {
+    let dir = common::test_dir("control-sensitivity");
+    let config = dir.join("empty.toml");
+    std::fs::write(&config, "").unwrap();
+    for (domain, sweep) in [("dc", ""), ("ac", " AC LIN 1 1000 1000")] {
+        let mut documents = Vec::new();
+        for (route, cards) in [
+            ("direct", format!(".sens I(V1) R1{sweep}")),
+            (
+                "explicit",
+                format!(
+                    ".control\nsens I(V1) R1{sweep}\nlet saved = sens1.R1\nprint saved R1 output\n.endc"
+                ),
+            ),
+            (
+                "run",
+                format!(".sens I(V1) R1{sweep}\n.control\nrun\nprint R1 output\n.endc"),
+            ),
+        ] {
+            let stem = format!("{domain}-{route}");
+            let deck = dir.join(format!("{stem}.sp"));
+            std::fs::write(
+                &deck,
+                format!("Sensitivity\nV1 in 0 DC 1 AC 1\nR1 in 0 1k\n{cards}\n.end\n"),
+            )
+            .unwrap();
+            let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .arg("--config")
+                .arg(&config)
+                .args(["--quiet", "run"])
+                .arg(&deck)
+                .args(["-f", "json", "-o"])
+                .arg(dir.join(format!("{stem}.json")))
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let suffix = if route == "direct" { "" } else { ".sens-001" };
+            let document = rspice_core::execution::AnalysisResultDocument::from_json(
+                &std::fs::read_to_string(dir.join(format!("{stem}{suffix}.json"))).unwrap(),
+            )
+            .unwrap();
+            documents.push(document);
+            if route != "direct" {
+                let print: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(dir.join(format!("{stem}.control-001.json"))).unwrap(),
+                )
+                .unwrap();
+                let traces = print["traces"].as_array().unwrap();
+                assert!((traces[0]["y"]["samples"][0][0].as_f64().unwrap() - 1e-6).abs() < 1e-14);
+                assert_eq!(traces.last().unwrap()["y"]["unit"], "A");
+            }
+        }
+        // Control execution attaches run coordinates; compare the physical payload.
+        assert_eq!(documents[0].payload(), documents[1].payload());
+        assert_eq!(documents[0].payload(), documents[2].payload());
+    }
+}
+
+#[test]
+fn invalid_sensitivity_print_keeps_existing_exports() {
+    let dir = common::test_dir("control-sensitivity-rollback");
+    let deck = dir.join("invalid.sp");
+    std::fs::write(
+        &deck,
+        "Sensitivity\nV1 in 0 1\nR1 in 0 1k\n.control\nsens I(V1) R1\nprint missing\n.endc\n.end\n",
+    )
+    .unwrap();
+    let existing = dir.join("result.sens-001.json");
+    std::fs::write(&existing, "previous result\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "run"])
+        .arg(&deck)
+        .args(["-f", "json", "-o"])
+        .arg(dir.join("result.json"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        std::fs::read_to_string(existing).unwrap(),
+        "previous result\n"
+    );
+    assert!(!dir.join("result.control-001.json").exists());
+}

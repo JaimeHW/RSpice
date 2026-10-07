@@ -336,6 +336,24 @@ pub struct AcSensitivityResult {
 }
 
 impl AcSensitivityResult {
+    /// Retained numeric slots, charging two slots per complex sample and
+    /// retaining the slot of an unavailable derived value.
+    pub fn retained_value_count(&self) -> usize {
+        self.sensitivities.iter().fold(
+            self.frequencies
+                .len()
+                .saturating_add(self.output_values.len().saturating_mul(2)),
+            |count, trace| {
+                count
+                    .saturating_add(1)
+                    .saturating_add(trace.absolute.len().saturating_mul(2))
+                    .saturating_add(trace.normalized.len().saturating_mul(2))
+                    .saturating_add(trace.magnitude.len())
+                    .saturating_add(trace.phase.len())
+            },
+        )
+    }
+
     /// Return the trace with this vector name, case-insensitively.
     pub fn get(&self, vector_name: &str) -> Option<&AcSensitivity> {
         self.sensitivities
@@ -442,6 +460,12 @@ pub struct SensitivityResult {
 }
 
 impl SensitivityResult {
+    /// Nominal output and each parameter's nominal, absolute and normalized
+    /// values, including unavailable normalized slots.
+    pub fn retained_value_count(&self) -> usize {
+        self.sensitivities.len().saturating_mul(3).saturating_add(1)
+    }
+
     /// Create a result with its physical output unit; the display name is not
     /// parsed to determine whether the output is a voltage or current.
     pub fn new(output: &str, output_value: Value, output_unit: SignalUnit) -> Self {

@@ -1582,6 +1582,41 @@ R2 out 0 {r2v}\n";
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn control_sensitivity_retains_documents_and_derivative_presentations() {
+        use rspice_core::engine::ControlPresentationKind;
+        use rspice_core::execution::SignalUnit;
+        for sweep in ["", " AC LIN 1 1000 1000"] {
+            let source = format!(
+                "Wasm control sensitivity\nV1 in 0 DC 1 AC 1\nR1 in 0 1k\n.sens I(V1) R1{sweep}\n.control\nrun\nprint sens1.R1 output\nsens I(V1) R1{sweep}\n.endc\n.end\n"
+            );
+            let execution = run_authored_deck_document_detailed(&source).unwrap();
+            assert_eq!(execution.control_datasets, ["sens1", "sens2"]);
+            assert_eq!(execution.results.len(), 2);
+            assert_ne!(
+                execution.results[0].analysis(),
+                execution.results[1].analysis()
+            );
+            assert_eq!(
+                execution.results[0].payload(),
+                execution.results[1].payload()
+            );
+            assert_eq!(
+                execution.results[0].result_kind(),
+                AnalysisResultKind::Sensitivity
+            );
+            let ControlPresentationKind::Print(traces) = &execution.control_presentations[0].kind
+            else {
+                panic!("print")
+            };
+            assert!((traces[0].y.samples[0].re - 1e-6).abs() < 1e-14);
+            assert_eq!(traces[1].y.unit, SignalUnit::Ampere);
+            assert!((traces[1].y.samples[0].re + 0.001).abs() < 1e-11);
+            assert_document_round_trips(AnalysisResultKind::Sensitivity, execution);
+        }
+    }
+
     /// The handle republishes exactly what the core document holds.
     fn assert_document_round_trips(kind: AnalysisResultKind, execution: DeckExecution) {
         let index = execution

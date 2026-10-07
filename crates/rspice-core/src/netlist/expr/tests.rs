@@ -2865,3 +2865,34 @@ fn deferred_parameter_resolution_cancels_after_a_missing_dependency_resumes() {
     assert_eq!(abort.count(), 129);
     assert_eq!(abort.polls_after_abort(), 0);
 }
+
+#[test]
+fn control_quoted_vectors_preserve_regular_strings_and_ternary_separators() {
+    let abort = crate::abort_signal::NoAbort;
+    let mut variables = ParamContext::new();
+    variables.set("PARAM:P", 3.0);
+    variables.set("A", 4.0);
+    variables.set("B", 5.0);
+    for (source, expected) in [
+        (r#""PARAM:p""#, 3.0),
+        (r#"1?"PARAM:p":B"#, 3.0),
+        ("1?A:B", 4.0),
+        ("0?A:B", 5.0),
+    ] {
+        let expression = parse_control_expression_with_abort(source, &abort).unwrap();
+        assert_eq!(
+            evaluate_complex(&expression, &variables).unwrap(),
+            expected.into()
+        );
+    }
+    assert!(matches!(
+        parse_expression(r#""PARAM:p""#).unwrap(),
+        Expr::StringLiteral(_)
+    ));
+    assert!(parse_control_expression_with_abort("A B", &abort).is_err());
+    let abort = crate::abort_signal::CountingAbort::new(8);
+    assert!(matches!(
+        parse_control_expression_with_abort(&format!("\"{}\"", "p".repeat(1024)), &abort),
+        Err(ParseExpressionWithAbortError::Aborted)
+    ));
+}

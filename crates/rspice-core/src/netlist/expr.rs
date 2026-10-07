@@ -49,7 +49,7 @@ pub use crate::ComplexValue;
 pub(crate) use api::{
     ParseExpressionWithAbortError, eval_expression_complex_with_abort,
     needs_forward_reference_probe, parse_control_expression_prefix_with_abort,
-    parse_expression_with_abort,
+    parse_control_expression_with_abort, parse_expression_with_abort,
 };
 pub use api::{
     eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,

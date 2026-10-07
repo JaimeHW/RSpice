@@ -597,6 +597,22 @@ preserve the ordinary PZ result document. Cancelled or failed analyses publish
 no new dataset or ordinal, and retained roots consume the session's cumulative
 result allowance.
 
+Explicit `sens` commands and declarative `.SENS` cards executed by `run` use the
+shared, bounded DC/AC sensitivity runner. `ControlAnalysisResult::Sensitivity`
+retains the complete typed result, including unavailable derived quantities.
+Immutable `sens1`, `sens2`, ... datasets expose the raw absolute derivatives by
+their SPICE vector names, such as `R1`, `R1_TC1`, or `PARAM:p`. `output` and
+`output_value` select the nominal voltage or current with its physical unit;
+derivative units remain unspecified when the parameter's unit is unknown.
+`print`, `plot`, and `settype` accept these vectors and dataset-qualified names
+such as `sens1.R1`. Quote names containing expression punctuation, for example
+`"PARAM:p"` or `"sens1.model:IS"`; the colon in an unquoted expression remains the
+ternary separator. Scalar expressions accept DC and single-frequency AC values,
+preserving both complex components; reading a multi-frequency vector as a scalar
+is an error. CLI and WASM publish the ordinary sensitivity document. Failed or
+cancelled runs preserve existing datasets and ordinals, and each retained result
+consumes the control session's cumulative result allowance.
+
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
 Semiconductor temperature behavior belongs to each device model;

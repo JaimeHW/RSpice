@@ -576,7 +576,14 @@ impl<'a> ExprParser<'a> {
                     _ => value.push(character),
                 }
             }
-            return Ok(Expr::StringLiteral(value));
+            return Ok(if self.control_vectors {
+                // A quoted control vector may contain operator characters,
+                // including ':' in SENS model/design-parameter names. Keep
+                // ordinary expressions' string literals and ternary grammar.
+                Expr::Param(value.to_uppercase())
+            } else {
+                Expr::StringLiteral(value)
+            });
         }
 
         // Number

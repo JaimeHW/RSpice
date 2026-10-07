@@ -1774,224 +1774,160 @@ pub(super) fn run_sensitivity(
 
 pub(super) fn run_sensitivity_from_command(
     ctx: &RunContext<'_>,
-    output_node: &str,
-    reference_node: Option<&str>,
-    output_is_current: bool,
-    filters: &[String],
-    ac_sweep: Option<rspice_core::netlist::SensitivityAcSweep>,
+    command: &rspice_core::netlist::AnalysisCommand,
 ) -> Result<(), CliError> {
-    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist, ctx.args.timeout)?;
-    let out_pos = if output_is_current {
-        0
-    } else {
-        resolver
-            .resolve_node(output_node)
-            .ok_or_else(|| CliError::SimulationError {
-                message: format!("Invalid .SENS output node '{}'", output_node),
-                analysis: Some("Sensitivity".to_string()),
-            })?
-    };
-    let out_neg = if output_is_current {
-        0
-    } else {
-        match reference_node {
-            Some(node) => resolver
-                .resolve_node(node)
-                .ok_or_else(|| CliError::SimulationError {
-                    message: format!("Invalid .SENS reference node '{}'", node),
-                    analysis: Some("Sensitivity".to_string()),
-                })?,
-            None => 0,
-        }
-    };
-    let output = if output_is_current {
-        rspice_core::analysis::AcSensitivityOutput::BranchCurrent(output_node.to_string())
-    } else {
-        rspice_core::analysis::AcSensitivityOutput::Voltage {
-            positive: out_pos,
-            negative: (out_neg != 0).then_some(out_neg),
-        }
-    };
-    let output_label = if output_is_current {
-        format!("I({output_node})")
-    } else {
-        reference_node.map_or_else(
-            || format!("V({output_node})"),
-            |reference| format!("V({output_node},{reference})"),
-        )
-    };
-    let output_unit = if output_is_current { "A" } else { "V" };
-
-    if let Some(ac) = ac_sweep {
-        let freqs = generate_frequency_sweep(ac.variation, ac.points, ac.start_freq, ac.stop_freq)?;
-
-        if !ctx.quiet {
-            crate::console::line(format_args!(
-                "Running AC Sensitivity analysis: {} over {} frequencies",
-                output_label,
-                freqs.len()
-            ))?;
-        }
-
-        let result = ctx
-            .engine
-            .run_sensitivity_ac_complete_with_abort(
-                ctx.netlist,
-                output,
-                &freqs,
-                filters,
-                &crate::abort::ProcessAbort,
-            )
-            .map_err(|source| map_frequency_error(ctx, "Sensitivity AC", source))?;
-
-        for trace in &result.sensitivities {
-            let combined = &trace.magnitude;
-
-            if !ctx.quiet {
-                let first = combined
-                    .first()
-                    .map(|value| format!("{value:.6e}"))
-                    .unwrap_or_else(|| "not retained".to_owned());
-                let last = combined
-                    .last()
-                    .map(|value| format!("{value:.6e}"))
-                    .unwrap_or_else(|| "not retained".to_owned());
-                crate::console::line(format_args!(
-                    "  d|{}|/d{}: {} {} per native parameter unit @ {:e} Hz, {} @ {:e} Hz",
-                    output_label,
-                    trace.vector_name,
-                    first,
-                    output_unit,
-                    freqs.first().copied().unwrap_or(0.0),
-                    last,
-                    freqs.last().copied().unwrap_or(0.0)
-                ))?;
-            }
-
-            if ctx.verbose && !ctx.quiet {
-                let (peak, available) = combined.iter().filter_map(|value| value.value()).fold(
-                    (None::<f64>, 0usize),
-                    |(peak, count), value| {
-                        (
-                            Some(peak.map_or(value.abs(), |peak| peak.max(value.abs()))),
-                            count + 1,
-                        )
-                    },
-                );
-                let peak = peak
-                    .map(|value| format!("{value:.6e}"))
-                    .unwrap_or_else(|| "unavailable".to_owned());
-                crate::console::line(format_args!(
-                    "    peak |d|{}|/d{}| = {} {} per native parameter unit ({} of {} points available)",
-                    output_label,
-                    trace.vector_name,
-                    peak,
-                    output_unit,
-                    available,
-                    combined.len()
-                ))?;
-            }
-        }
-
-        if let Some(resolved) = ctx.resolve_output("sens") {
-            let analysis_id = resolved.analysis("sens")?;
-            use super::export::{ColumnData, ExportColumn, ExportTable};
-
-            let table = ExportTable {
-                scale_unit: None,
-                analysis: "sens_ac".to_string(),
-                plot_name: "AC Sensitivity".to_string(),
-                scale_name: "frequency".to_string(),
-                scale_type: "frequency".to_string(),
-                scale: freqs.clone(),
-                columns: result
-                    .sensitivities
-                    .iter()
-                    .map(|trace| ExportColumn {
-                        unit: None,
-                        name: format!("d{}/d({})", output_label, trace.vector_name),
-                        var_type: "sensitivity".to_string(),
-                        data: ColumnData::Complex {
-                            real: trace.absolute.iter().map(|value| value.re).collect(),
-                            imag: trace.absolute.iter().map(|value| value.im).collect(),
-                        },
-                    })
-                    .collect(),
-            };
-            let schema = table_schema(&table)?;
-            // The shared sensitivity payload carries a complex derivative
-            // trace per parameter beside the operating-point derivatives, so
-            // an AC sweep publishes the same typed document a DC card does;
-            // the flat table remains the projection for the other formats.
-            super::document::publish_table_result(
-                ctx,
-                &resolved.path,
-                analysis_id,
-                schema,
-                &table,
-                || {
-                    rspice_core::execution::AnalysisResultDocument::from_ac_sensitivity(
-                        analysis_id,
-                        &result,
-                    )
-                },
-            )?;
-
-            if !ctx.quiet {
-                crate::console::line(format_args!(
-                    "  Sensitivities exported to: {}",
-                    resolved.path.display()
-                ))?;
-            }
-        }
-
-        return Ok(());
-    }
-
     if !ctx.quiet {
-        crate::console::line(format_args!(
-            "Running DC Sensitivity analysis: {output_label}"
-        ))?;
+        crate::console::line(format_args!("Running Sensitivity analysis"))?;
     }
-
     let result = ctx
         .engine
-        .run_sensitivity_dc_complete_with_abort(
-            ctx.netlist,
-            output,
-            filters,
-            &crate::abort::ProcessAbort,
-        )
+        .run_sensitivity_from_card_with_abort(ctx.netlist, command, &crate::abort::ProcessAbort)
         .map_err(|source| map_frequency_error(ctx, "Sensitivity", source))?;
-    let complete = result.clone();
-    let mut sensitivities = result.sensitivities;
+    finish_sensitivity_result(ctx, &result)
+}
 
-    sensitivities.sort_by(|a, b| {
-        b.absolute
-            .abs()
-            .partial_cmp(&a.absolute.abs())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+pub(super) fn finish_sensitivity_result(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::engine::SensitivityCardResult,
+) -> Result<(), CliError> {
+    match result {
+        rspice_core::engine::SensitivityCardResult::Ac(result) => {
+            let output_label = &result.output;
+            let output_unit = result.output_unit.symbol();
+            let freqs = &result.frequencies;
+            for trace in &result.sensitivities {
+                let combined = &trace.magnitude;
 
-    if !ctx.quiet {
-        crate::console::line(format_args!("✓ Sensitivity analysis complete"))?;
-        for sensitivity in &sensitivities {
-            crate::console::line(format_args!(
-                "  ∂{}/∂{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
-                output_label,
-                sensitivity.vector_name,
-                sensitivity.absolute,
-                output_unit,
-                sensitivity.normalized
-            ))?;
+                if !ctx.quiet {
+                    let first = combined
+                        .first()
+                        .map(|value| format!("{value:.6e}"))
+                        .unwrap_or_else(|| "not retained".to_owned());
+                    let last = combined
+                        .last()
+                        .map(|value| format!("{value:.6e}"))
+                        .unwrap_or_else(|| "not retained".to_owned());
+                    crate::console::line(format_args!(
+                        "  d|{}|/d{}: {} {} per native parameter unit @ {:e} Hz, {} @ {:e} Hz",
+                        output_label,
+                        trace.vector_name,
+                        first,
+                        output_unit,
+                        freqs.first().copied().unwrap_or(0.0),
+                        last,
+                        freqs.last().copied().unwrap_or(0.0)
+                    ))?;
+                }
+
+                if ctx.verbose && !ctx.quiet {
+                    let (peak, available) = combined.iter().filter_map(|value| value.value()).fold(
+                        (None::<f64>, 0usize),
+                        |(peak, count), value| {
+                            (
+                                Some(peak.map_or(value.abs(), |peak| peak.max(value.abs()))),
+                                count + 1,
+                            )
+                        },
+                    );
+                    let peak = peak
+                        .map(|value| format!("{value:.6e}"))
+                        .unwrap_or_else(|| "unavailable".to_owned());
+                    crate::console::line(format_args!(
+                        "    peak |d|{}|/d{}| = {} {} per native parameter unit ({} of {} points available)",
+                        output_label,
+                        trace.vector_name,
+                        peak,
+                        output_unit,
+                        available,
+                        combined.len()
+                    ))?;
+                }
+            }
+
+            if let Some(resolved) = ctx.resolve_output("sens") {
+                let analysis_id = resolved.analysis("sens")?;
+                use super::export::{ColumnData, ExportColumn, ExportTable};
+
+                let table = ExportTable {
+                    scale_unit: None,
+                    analysis: "sens_ac".to_string(),
+                    plot_name: "AC Sensitivity".to_string(),
+                    scale_name: "frequency".to_string(),
+                    scale_type: "frequency".to_string(),
+                    scale: freqs.clone(),
+                    columns: result
+                        .sensitivities
+                        .iter()
+                        .map(|trace| ExportColumn {
+                            unit: None,
+                            name: format!("d{}/d({})", output_label, trace.vector_name),
+                            var_type: "sensitivity".to_string(),
+                            data: ColumnData::Complex {
+                                real: trace.absolute.iter().map(|value| value.re).collect(),
+                                imag: trace.absolute.iter().map(|value| value.im).collect(),
+                            },
+                        })
+                        .collect(),
+                };
+                let schema = table_schema(&table)?;
+                // The shared sensitivity payload carries a complex derivative
+                // trace per parameter beside the operating-point derivatives, so
+                // an AC sweep publishes the same typed document a DC card does;
+                // the flat table remains the projection for the other formats.
+                super::document::publish_table_result(
+                    ctx,
+                    &resolved.path,
+                    analysis_id,
+                    schema,
+                    &table,
+                    || {
+                        rspice_core::execution::AnalysisResultDocument::from_ac_sensitivity(
+                            analysis_id,
+                            result,
+                        )
+                    },
+                )?;
+
+                if !ctx.quiet {
+                    crate::console::line(format_args!(
+                        "  Sensitivities exported to: {}",
+                        resolved.path.display()
+                    ))?;
+                }
+            }
+        }
+        rspice_core::engine::SensitivityCardResult::Dc(result) => {
+            let output_label = &result.output;
+            let output_unit = result.output_unit.symbol();
+            let mut sensitivities = result.sensitivities.iter().collect::<Vec<_>>();
+            sensitivities.sort_by(|a, b| {
+                b.absolute
+                    .abs()
+                    .partial_cmp(&a.absolute.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            if !ctx.quiet {
+                crate::console::line(format_args!("✓ Sensitivity analysis complete"))?;
+                for sensitivity in &sensitivities {
+                    crate::console::line(format_args!(
+                        "  ∂{}/∂{} = {:.6e} {} per native parameter unit (normalized: {:.6e})",
+                        output_label,
+                        sensitivity.vector_name,
+                        sensitivity.absolute,
+                        output_unit,
+                        sensitivity.normalized
+                    ))?;
+                }
+            }
+
+            let results = sensitivities
+                .iter()
+                .map(|sensitivity| (sensitivity.vector_name.clone(), sensitivity.absolute))
+                .collect::<Vec<_>>();
+            export_dc_sensitivity_result(ctx, output_label, result, &results)?;
         }
     }
-
-    let results = sensitivities
-        .iter()
-        .map(|sensitivity| (sensitivity.vector_name.clone(), sensitivity.absolute))
-        .collect::<Vec<_>>();
-    export_dc_sensitivity_result(ctx, &output_label, &complete, &results)?;
     Ok(())
 }
 
