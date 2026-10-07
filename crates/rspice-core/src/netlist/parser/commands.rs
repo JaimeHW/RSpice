@@ -44,7 +44,7 @@ pub(super) fn parse_command(
         startup_directives,
         startup_scope,
         options,
-        temperature_options,
+        mut temperature_options,
         max_analysis_points,
         diagnostics,
         spef_includes,
@@ -150,65 +150,57 @@ pub(super) fn parse_command(
                 temperature_options.plan,
             )?;
         }
-        ".IC" => {
-            let first_entry = initial_conditions.len();
-            let authored_nodes = parse_ic_command(
+        ".IC" | ".NODESET" => {
+            let kind = if cmd == ".IC" {
+                StartupDirectiveKind::Ic
+            } else {
+                StartupDirectiveKind::NodeSet
+            };
+            let Some(entries) = recover_startup_card(
+                parse_voltage_hint_command(stream, line_num, params, kind, defer_scoped_values),
                 stream,
                 line_num,
-                params,
-                initial_conditions,
-                defer_scoped_values,
-            )?;
-            startup_directives.push(startup_directive_record(
-                StartupDirectiveKind::Ic,
-                origin,
-                startup_scope.clone(),
-                initial_conditions[first_entry..]
-                    .iter()
-                    .zip(authored_nodes.iter())
-                    .map(|(entry, (authored_node, authored_reference))| {
-                        (
-                            authored_node.as_str(),
-                            entry.node.as_str(),
-                            authored_reference.as_deref(),
-                            entry.reference.as_deref(),
-                            entry.voltage,
-                            entry.voltage_expr.as_deref(),
-                        )
+                &mut temperature_options,
+            )?
+            else {
+                return Ok(());
+            };
+            for entry in &entries {
+                match kind {
+                    StartupDirectiveKind::Ic => initial_conditions.push(InitialCondition {
+                        node: entry.execution_node.clone(),
+                        reference: entry.execution_reference.clone(),
+                        voltage: entry.voltage,
+                        voltage_expr: entry.voltage_expr.clone(),
                     }),
+                    StartupDirectiveKind::NodeSet => node_sets.push(NodeSet {
+                        node: entry.execution_node.clone(),
+                        reference: entry.execution_reference.clone(),
+                        voltage: entry.voltage,
+                        voltage_expr: entry.voltage_expr.clone(),
+                    }),
+                }
+            }
+            startup_directives.push(startup_directive_record(
+                kind,
+                origin,
+                startup_scope,
+                entries,
             ));
         }
         ".INITCOND" => {
-            parse_device_initial_condition_command(
+            recover_startup_card(
+                parse_device_initial_condition_command(
+                    stream,
+                    line_num,
+                    params,
+                    origin,
+                    device_initial_conditions,
+                ),
                 stream,
                 line_num,
-                params,
-                origin,
-                device_initial_conditions,
+                &mut temperature_options,
             )?;
-        }
-        ".NODESET" => {
-            let first_entry = node_sets.len();
-            let authored_nodes =
-                parse_nodeset_command(stream, line_num, params, node_sets, defer_scoped_values)?;
-            startup_directives.push(startup_directive_record(
-                StartupDirectiveKind::NodeSet,
-                origin,
-                startup_scope,
-                node_sets[first_entry..]
-                    .iter()
-                    .zip(authored_nodes.iter())
-                    .map(|(entry, (authored_node, authored_reference))| {
-                        (
-                            authored_node.as_str(),
-                            entry.node.as_str(),
-                            authored_reference.as_deref(),
-                            entry.reference.as_deref(),
-                            entry.voltage,
-                            entry.voltage_expr.as_deref(),
-                        )
-                    }),
-            ));
         }
         ".INCLUDE" | ".INC" => {
             // Include directives are handled in a preprocessing pass
@@ -629,47 +621,35 @@ fn parse_lin_command(
     Ok(crate::netlist::LinAnalysis::AcOnly)
 }
 
-fn startup_directive_record<'a>(
+fn recover_startup_card<T>(
+    result: Result<T, ParseError>,
+    stream: &mut TokenStream,
+    line: usize,
+    temperatures: &mut temperature::TemperatureOptionSink<'_>,
+) -> Result<Option<T>, ParseError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error @ ParseError::ResourceLimit(_)) => Err(error),
+        Err(error) => {
+            temperatures
+                .plan
+                .retain_card_error(error, line, temperatures.origin);
+            // Startup cards contain no temperature declarations. Their staged
+            // values are discarded; independent later cards can select TEMP/
+            // TNOM, and a fresh pass must validate this entire card. Never
+            // convert a failed value to a successful default or empty record.
+            stream.skip_to_eol();
+            Ok(None)
+        }
+    }
+}
+
+fn startup_directive_record(
     kind: StartupDirectiveKind,
     origin: &NetlistSourceLocation,
     scope: StartupDirectiveScope,
-    entries: impl IntoIterator<
-        Item = (
-            &'a str,
-            &'a str,
-            Option<&'a str>,
-            Option<&'a str>,
-            Value,
-            Option<&'a str>,
-        ),
-    >,
+    entries: Vec<StartupDirectiveEntry>,
 ) -> StartupDirectiveRecord {
-    let entries = entries
-        .into_iter()
-        .map(
-            |(
-                authored_node,
-                execution_node,
-                authored_reference,
-                execution_reference,
-                voltage,
-                voltage_expr,
-            )| StartupDirectiveEntry {
-                authored_node: authored_node.to_string(),
-                execution_node: execution_node.to_string(),
-                authored_reference: authored_reference.map(ToString::to_string),
-                execution_reference: execution_reference.map(ToString::to_string),
-                canonical_node: execution_node.replace(':', ".").to_ascii_uppercase(),
-                canonical_reference: execution_reference
-                    .map(|reference| reference.replace(':', ".").to_ascii_uppercase()),
-                qualified_nodes: Vec::new(),
-                qualified_references: Vec::new(),
-                disposition: StartupDirectiveDisposition::Applied,
-                voltage,
-                voltage_expr: voltage_expr.map(ToString::to_string),
-            },
-        )
-        .collect::<Vec<_>>();
     let disposition = if entries.is_empty() {
         StartupDirectiveDisposition::Ignored(StartupDiagnosticCode::EmptyDirective)
     } else {

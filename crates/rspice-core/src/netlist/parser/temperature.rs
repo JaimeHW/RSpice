@@ -264,6 +264,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn startup_discovery_stops_at_every_cancellation_boundary() {
+        for card in [".IC V(out)", ".NODESET V(out)", ".INITCOND C1 IC"] {
+            let source = format!(
+                "Startup abort\n.options seed=37\nR1 out 0 1k\nC1 out 0 1u\n{card}={{58/(TEMP-27)+aunif(0,1)}}\n.temp {{ambient}}\n.param ambient=85\n.end\n"
+            );
+            let mut completed = false;
+            for limit in 0..1024 {
+                let abort = crate::abort_signal::CountingAbort::new(limit);
+                let result = super::super::parse_netlist_with_options_and_abort(
+                    &source,
+                    NetlistParseOptions::default(),
+                    &abort,
+                );
+                assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
+                match result {
+                    Err(ParseWithAbortError::Aborted) => {}
+                    Ok(netlist) => {
+                        assert!(limit > 20);
+                        assert_eq!(netlist.options.temp, Some(85.0));
+                        completed = true;
+                        break;
+                    }
+                    error => panic!("unexpected result at poll limit {limit}: {error:?}"),
+                }
+            }
+            assert!(
+                completed,
+                "cancellation coverage never completed for {card}"
+            );
+        }
+    }
+
+    #[test]
+    fn physical_override_reaches_startup_cards_before_authored_temperatures() {
+        for card in [".IC V(out)", ".NODESET V(out)", ".INITCOND C1 IC"] {
+            let netlist = parse_netlist_with_parameter_overrides_and_abort(
+                &format!("Startup coordinate\nR1 out 0 1k\nC1 out 0 1u\n{card}={{58/(TEMP-27)}}\n.temp 27\n.end\n"),
+                NetlistParseOptions::default(),
+                &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+                &NoAbort,
+            ).unwrap();
+            assert_eq!(netlist.options.temp, Some(85.0));
+            let voltage = if let Some(directive) = netlist.device_initial_conditions {
+                directive.entries[0].values[0]
+            } else {
+                netlist.startup_directives[0].entries[0].voltage
+            };
+            assert_eq!(voltage, 1.0);
+        }
+    }
+
+    #[test]
     fn header_discovery_stops_at_every_cancellation_boundary() {
         let source = "Header abort\n.options seed=37\n.subckt cell p params: derived={2*gain} gain={aunif(1,.1)+58/(TEMP-27)}\nV1 p 0 {derived}\n.ends\n.temp {ambient}\n.param ambient=85\n.end\n";
         for limit in 0..1024 {

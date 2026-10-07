@@ -1126,6 +1126,54 @@ mod tests {
     }
 
     #[test]
+    fn failed_startup_cards_publish_neither_partial_values_nor_provenance() {
+        for directive in [".IC", ".NODESET"] {
+            let mut state = ParseState::new();
+            process_line(
+                &format!("{directive} V(kept)=2"),
+                2,
+                &NetlistSourceLocation::in_memory(2),
+                &mut state,
+            )
+            .unwrap();
+            process_line(
+                &format!("{directive} V(partial)=1 V(failed)={{58/(TEMP-27)}} V(later)=3"),
+                3,
+                &NetlistSourceLocation::in_memory(3),
+                &mut state,
+            )
+            .unwrap();
+            assert_eq!(state.startup_directives.len(), 1);
+            assert_eq!(state.initial_conditions.len() + state.node_sets.len(), 1);
+            assert_eq!(
+                state.startup_directives[0].entries[0].execution_node,
+                "KEPT"
+            );
+            assert!(
+                state
+                    .temperature_options
+                    .take_error()
+                    .unwrap()
+                    .to_string()
+                    .contains("Division by zero")
+            );
+        }
+        let mut state = ParseState::new();
+        process_line(
+            ".INITCOND C1 IC=1 C2 IC={58/(TEMP-27)}",
+            2,
+            &NetlistSourceLocation::in_memory(2),
+            &mut state,
+        )
+        .unwrap();
+        assert!(state.device_initial_conditions.is_none());
+        assert!(matches!(
+            state.temperature_options.take_error(),
+            Some(ParseError::DeviceInitialCondition(_))
+        ));
+    }
+
+    #[test]
     fn process_line_reassembles_contiguous_xyce_device_name_punctuation() {
         let mut state = ParseState::new();
         process_line(

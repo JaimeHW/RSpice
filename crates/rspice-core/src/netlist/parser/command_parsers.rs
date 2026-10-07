@@ -1965,15 +1965,16 @@ pub(super) fn parse_voltage_output_reference(
     Ok((first, None))
 }
 
-/// Parse .NODESET command: .NODESET V(node1)=val V(node2)=val...
-pub(super) fn parse_nodeset_command(
+/// Stage a complete .IC or .NODESET card before publishing execution values
+/// or diagnostic provenance. A failed card must not leave partial hints.
+pub(super) fn parse_voltage_hint_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-    node_sets: &mut Vec<NodeSet>,
+    kind: StartupDirectiveKind,
     defer_values: bool,
-) -> Result<Vec<(String, Option<String>)>, ParseError> {
-    let mut authored_nodes = Vec::new();
+) -> Result<Vec<StartupDirectiveEntry>, ParseError> {
+    let mut entries = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -1984,58 +1985,29 @@ pub(super) fn parse_nodeset_command(
             break;
         };
 
-        require_voltage_hint_assignment(stream, line_num, ".NODESET", &target)?;
+        require_voltage_hint_assignment(stream, line_num, kind.as_spice_directive(), &target)?;
         let (voltage, voltage_expr) =
             parse_voltage_hint_value(stream, line_num, params, defer_values)?;
-        validate_voltage_hint_value(voltage, defer_values, line_num, ".NODESET")?;
-        node_sets.push(NodeSet {
-            node: target.node,
-            reference: target.reference,
+        validate_voltage_hint_value(voltage, defer_values, line_num, kind.as_spice_directive())?;
+        entries.push(StartupDirectiveEntry {
+            canonical_node: target.node.replace(':', ".").to_ascii_uppercase(),
+            canonical_reference: target
+                .reference
+                .as_deref()
+                .map(|reference| reference.replace(':', ".").to_ascii_uppercase()),
+            execution_node: target.node,
+            execution_reference: target.reference,
+            authored_node: target.authored_node,
+            authored_reference: target.authored_reference,
+            qualified_nodes: Vec::new(),
+            qualified_references: Vec::new(),
+            disposition: StartupDirectiveDisposition::Applied,
             voltage,
             voltage_expr,
         });
-        authored_nodes.push((target.authored_node, target.authored_reference));
     }
 
-    Ok(authored_nodes)
-}
-
-/// Parse .IC command: .IC V(node1)=val V(node2)=val...
-///
-/// Initial conditions set the starting voltages for transient analysis.
-/// Format: .IC V(node)=voltage [V(node2)=voltage2] ...
-pub(super) fn parse_ic_command(
-    stream: &mut TokenStream,
-    line_num: usize,
-    params: &ParamContext,
-    initial_conditions: &mut Vec<InitialCondition>,
-    defer_values: bool,
-) -> Result<Vec<(String, Option<String>)>, ParseError> {
-    let mut authored_nodes = Vec::new();
-    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-        skip_commas(stream);
-        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
-            break;
-        }
-
-        let Some(target) = parse_voltage_hint_target(stream, line_num)? else {
-            break;
-        };
-
-        require_voltage_hint_assignment(stream, line_num, ".IC", &target)?;
-        let (voltage, voltage_expr) =
-            parse_voltage_hint_value(stream, line_num, params, defer_values)?;
-        validate_voltage_hint_value(voltage, defer_values, line_num, ".IC")?;
-        initial_conditions.push(InitialCondition {
-            node: target.node,
-            reference: target.reference,
-            voltage,
-            voltage_expr,
-        });
-        authored_nodes.push((target.authored_node, target.authored_reference));
-    }
-
-    Ok(authored_nodes)
+    Ok(entries)
 }
 
 fn parse_voltage_hint_value(
