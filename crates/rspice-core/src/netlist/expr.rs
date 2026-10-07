@@ -71,6 +71,7 @@ pub use behavioral::{
     prepare_behavioral_expression_preserving_spelling, runtime_special_quantity,
     validate_global_parameter_expressions, validate_parameter_expressions,
 };
+pub(crate) use context::MODEL_TEMPERATURE_PARAMETERS;
 pub use context::{
     DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, ParameterRedefinitionDiagnosticPolicy,
     ParameterRedefinitionPolicy, RandomState, StatisticalParamMode,

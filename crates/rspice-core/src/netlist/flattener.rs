@@ -2697,6 +2697,34 @@ impl<'a> Flattener<'a> {
         }))
     }
 
+    fn prepare_scoped_model_expression(
+        &self,
+        expression: &str,
+        scope: &ParamContext,
+        element_path: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        let mut preserved_parameters: HashSet<_> = scope
+            .spectre_statistical_parameter_names()
+            .into_iter()
+            .filter(|name| scope.get_parameter_expression(name).is_none())
+            .collect();
+        preserved_parameters.extend(super::expr::MODEL_TEMPERATURE_PARAMETERS.map(str::to_string));
+        prepare_behavioral_expression_preserving_parameters_with_abort(
+            expression,
+            scope,
+            &preserved_parameters,
+            abort,
+        )
+        .map_err(|error| {
+            map_preparation_error(error, |error| {
+                ParseError::InvalidValue(format!(
+                    "model expression for element '{element_path}' could not be prepared: {error}"
+                ))
+            })
+        })
+    }
+
     /// Ready parameter leaves retain complex values and function bindings.
     /// Symbolic definitions and behavioral-only syntax still need expansion.
     fn resolve_prepared_scalar_value(
@@ -3437,11 +3465,15 @@ impl<'a> Flattener<'a> {
         scoped_model.real_vector_expr_params.clear();
 
         for (name, expr) in &model_def.expr_params {
-            if scope.expression_references_spectre_statistics(expr) {
+            if scope.expression_references_spectre_statistics(expr)
+                || scope
+                    .model_expression_references_temperature_with_abort(expr, abort)
+                    .map_err(|error| map_preparation_error(error, ParseError::InvalidValue))?
+            {
                 replace_model_param(&mut scoped_model, name);
                 scoped_model.expr_params.push((
                     name.clone(),
-                    self.prepare_spectre_statistical_expression(expr, scope, element_path, abort)?,
+                    self.prepare_scoped_model_expression(expr, scope, element_path, abort)?,
                 ));
                 continue;
             }
@@ -3529,6 +3561,29 @@ impl<'a> Flattener<'a> {
         }
 
         for (name, exprs) in &model_def.real_vector_expr_params {
+            let mut temperature_dependent = false;
+            for expression in exprs {
+                if scope
+                    .model_expression_references_temperature_with_abort(expression, abort)
+                    .map_err(|error| map_preparation_error(error, ParseError::InvalidValue))?
+                {
+                    temperature_dependent = true;
+                    break;
+                }
+            }
+            if temperature_dependent {
+                let prepared = exprs
+                    .iter()
+                    .map(|expression| {
+                        self.prepare_scoped_model_expression(expression, scope, element_path, abort)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                replace_model_param(&mut scoped_model, name);
+                scoped_model
+                    .real_vector_expr_params
+                    .push((name.clone(), prepared));
+                continue;
+            }
             let mut values = Vec::with_capacity(exprs.len());
             let mut first_error = None;
 

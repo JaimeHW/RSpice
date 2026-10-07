@@ -421,9 +421,12 @@ model expressions such as `IMG(global_value)` retain their imaginary input.
 
 Native diode, BJT, MOS, JFET, and MESFET scalar model expressions resolve at
 construction using the instance's `TEMP`/`DTEMP` and the model's `TNOM`.
-Resolved values must be finite and real; missing bindings fail with a model and
-parameter diagnostic. Existing numeric `LEVEL` selector rules still apply.
-Temperature-dependent model vectors also remain deferred. Cancellable builds
+Bare, signed, and parenthesized temperature references follow the same rules as
+braced expressions, including dependencies inside user functions. Subcircuit
+models capture local parameters and functions while retaining temperature names
+for the actual device instance. Resolved values must be finite and real; missing
+bindings fail with a model and parameter diagnostic. Existing numeric `LEVEL`
+selector rules still apply. Temperature-dependent model vectors also remain deferred. Cancellable builds
 check the caller's abort signal inside scalar and vector model evaluation,
 including XSPICE model resolution and generated bridge construction.
 
