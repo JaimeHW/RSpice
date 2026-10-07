@@ -2860,8 +2860,8 @@ impl Engine {
     /// only if it begins with `PARAM:`; an empty list means every device and
     /// model variable and no design parameter. `PARAM:a` is the TOTAL
     /// derivative — every parameter defined from `a` moves with it.
-    /// Method: design parameters on a qualified linear deck are exact
-    /// (captured expression derivatives, one transpose solve); every other row
+    /// Method: design parameters and eligible R/L/C value fields on a qualified
+    /// linear deck use physical derivatives and a transpose solve; every other row
     /// is a Richardson-extrapolated three-point stencil accepted only on 1e-4
     /// relative agreement of four independent fits, else refused by name.
     pub fn run_sensitivity_dc_complete(
@@ -2931,6 +2931,10 @@ impl Engine {
                     )?
                     .derivative[0]
                         .re
+                } else if let Some(derivative) =
+                    self.linear_device_sensitivity(&flat, &output, &target, None, &mut runs, abort)?
+                {
+                    derivative[0].re
                 } else {
                     let h = Self::complete_sensitivity_step(&target);
                     self.refine_sensitivity(
@@ -2978,7 +2982,8 @@ impl Engine {
     /// The variable universe, the `PARAM:` rule, the empty-filter default and
     /// the total-derivative semantics are exactly those of
     /// [`Self::run_sensitivity_dc_complete`], and so is the method of record:
-    /// exact for a design parameter on a qualified linear deck, refined finite
+    /// exact for a design parameter or eligible R/L/C value field on a qualified
+    /// linear deck, refined finite
     /// differences otherwise. The returned derivatives are complex and
     /// unnormalized, matching SPICE `.SENS AC` semantics; normalized,
     /// magnitude and phase derivatives are retained alongside them, every row
@@ -3069,6 +3074,15 @@ impl Engine {
                         abort,
                     )?
                     .derivative
+                } else if let Some(derivative) = self.linear_device_sensitivity(
+                    &flat,
+                    &output,
+                    &target,
+                    Some(frequencies),
+                    &mut runs,
+                    abort,
+                )? {
+                    derivative
                 } else {
                     let h = Self::complete_sensitivity_step(&target);
                     self.refine_sensitivity(

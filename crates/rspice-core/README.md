@@ -741,10 +741,15 @@ zero absolute derivatives. Normalization remains unavailable at zero output.
 Method of record. A design parameter on a qualified linear circuit is **exact**:
 the parser's forward-mode derivative of every expression the parameter reaches
 is contracted with one transpose solve per frequency, so the error is the LU
-roundoff. Every other row — every device variable, and a design parameter on a
-nonlinear or otherwise unqualified deck — is a refined finite difference, held
-to the acceptance rule described below. One study has one nominal output and
-one run budget, whichever path each of its rows took.
+roundoff. Eligible primitive resistance, capacitance and inductance value fields
+use the same physical derivative kernel. This retains small nonzero derivatives
+that finite output perturbations cannot resolve. The primitive path requires a
+qualified linear deck with resolved, positive passive values and no passive
+models or instance scaling; enforced capacitor initial-condition constraints,
+terminal-current meters and topology reduction also require the refinement
+path. Other device fields and unqualified design
+parameters use refined finite differences with the acceptance rule below.
+One study has one nominal output and one run budget, whichever path each row took.
 
 The low-level DC adjoint API differentiates effective linear resistances
 (including branch-form resistors) and independent source amplitudes. Its

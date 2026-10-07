@@ -1,5 +1,6 @@
-//! Root-coordinate derivatives of qualified linear physical equations.
-//! Field directions come from the actual binding and construction sites.
+//! Derivatives of qualified linear physical equations.
+//! Design-parameter directions come from binding and construction sites;
+//! eligible primitive-value fields contribute their native unit direction.
 
 use super::*;
 use crate::expr::Derivative;
@@ -308,13 +309,123 @@ impl Engine {
         {
             return Ok(None);
         }
+        engine
+            .linear_sensitivity_response(
+                &directed,
+                circuit,
+                &capture,
+                output,
+                parameter,
+                frequencies,
+                runs,
+                abort,
+            )
+            .map(Some)
+    }
+
+    // Share the physical direction and adjoint contraction with design-parameter
+    // replay. Eligible literal device fields do not need a noisy perturbation.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn linear_device_sensitivity(
+        &self,
+        netlist: &Netlist,
+        output: &AcSensitivityOutput,
+        target: &AcSensitivityTarget,
+        frequencies: Option<&[Value]>,
+        runs: &mut usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Complex64>>, SimulationError> {
+        let AcSensitivityLocation::ElementField {
+            element_index,
+            field,
+        } = target.location
+        else {
+            return Ok(None);
+        };
+        if !matches!(
+            field,
+            AcSensitivityElementField::ResistorValue
+                | AcSensitivityElementField::CapacitorValue
+                | AcSensitivityElementField::InductorValue
+        ) || !netlist.spectre_statistics.variations.is_empty()
+            // These construction stages change or remove the captured owner's
+            // connections. Until they capture native field directions, use the
+            // constructed-circuit refinement path, as design replay does.
+            || netlist.options.topology_supernode.unwrap_or(false)
+            || !netlist.ast_overlay.terminal_current_probes.is_empty()
+            || !netlist.elements.iter().all(|element| {
+                linear_element(&element.kind, frequencies.is_some())
+                    && !matches!(
+                        &element.kind,
+                        ElementKind::Resistor {
+                            value_expr: Some(_),
+                            ..
+                        }
+                    )
+            })
+        {
+            return Ok(None);
+        }
+        let element = &netlist.elements[element_index];
+        let capture = crate::netlist::ParameterDirectionCapture {
+            elements: [(
+                element.name.clone(),
+                ElementParameterDirection::Passive {
+                    value: target.nominal_value,
+                    direction: Derivative::from(1.0),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            owners: vec![element.clone()],
+            ..Default::default()
+        };
+        let engine = self.resolved_for_netlist(netlist);
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        if circuit
+            .capacitors
+            .ic_branch_indices
+            .iter()
+            .any(Option::is_some)
+        {
+            return Ok(None);
+        }
+        engine
+            .linear_sensitivity_response(
+                netlist,
+                circuit,
+                &capture,
+                output,
+                &target.vector_name,
+                frequencies,
+                runs,
+                abort,
+            )
+            .map(|(_, derivatives)| Some(derivatives))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn linear_sensitivity_response(
+        &self,
+        netlist: &Netlist,
+        circuit: CircuitData,
+        capture: &crate::netlist::ParameterDirectionCapture,
+        output: &AcSensitivityOutput,
+        parameter: &str,
+        frequencies: Option<&[Value]>,
+        runs: &mut usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<LinearParameterResponse, SimulationError> {
         *runs = runs.saturating_add(1);
         self.ensure_batch_runs(*runs)?;
-        let mut prepared = engine.prepare_ac_circuit(&directed, circuit, abort)?;
+        let mut prepared = self.prepare_ac_circuit(netlist, circuit, abort)?;
         let circuit = &prepared.circuit;
         let size = circuit.matrix_size();
         let points = frequencies.unwrap_or(&[0.0]);
-        engine.ensure_result_values(
+        self.ensure_result_values(
             size.saturating_mul(12)
                 .saturating_add(points.len().saturating_mul(4)),
         )?;
@@ -383,7 +494,7 @@ impl Engine {
                     frequency,
                 )?;
             }
-            if let (Some(direction), Some(resistance)) = (capture.rshunt, directed.options.rshunt)
+            if let (Some(direction), Some(resistance)) = (capture.rshunt, netlist.options.rshunt)
                 && direction != 0.0
             {
                 let conductance_direction = -direction / resistance / resistance;
@@ -436,7 +547,7 @@ impl Engine {
             );
             derivatives.push(Complex64::new(result.re, result.im));
         }
-        Ok(Some((nominal, derivatives)))
+        Ok((nominal, derivatives))
     }
 }
 
