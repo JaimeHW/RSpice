@@ -27,7 +27,7 @@
 
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::{Complex64, Value};
-use faer::{Mat, linalg::solvers::GeneralizedEigen};
+use faer::Mat;
 use std::f64::consts::PI;
 use thiserror::Error;
 
@@ -44,14 +44,16 @@ pub enum PoleZeroAnalysisError {
     /// The caller cancelled the analysis.
     #[error("pole-zero analysis was aborted")]
     Aborted,
+    /// Exact descriptor preparation exceeded the configured workspace budget.
+    #[error(transparent)]
+    ResourceLimit(#[from] crate::resource::ResourceLimitError),
     /// The descriptor, state-space model, or port definition is malformed.
     #[error("invalid pole-zero system: {0}")]
     InvalidSystem(String),
-    /// The generalized descriptor pencil contains an indeterminate 0/0
-    /// eigenpair and therefore has no qualified finite/infinite spectrum.
-    #[error(
-        "the descriptor pencil G+sC is irregular (indeterminate generalized eigenvalue {index}, |alpha|={alpha_norm:.3e}, |beta|={beta_norm:.3e})"
-    )]
+    /// The descriptor has no complete finite/infinite spectrum. Exact rank
+    /// detection uses zero homogeneous coefficients; scalar detection retains
+    /// the offending coefficients in the witness fields.
+    #[error("the descriptor pencil G+sC is irregular")]
     IrregularDescriptor {
         index: usize,
         alpha_norm: Value,
@@ -98,21 +100,18 @@ pub enum PoleZeroAnalysisError {
 /// Numerical evidence attached to one complete finite/infinite eigenspectrum.
 ///
 /// `problem_order - infinite_count` is the number of finite roots represented
-/// by the associated root vector. `max_backward_error` is the worst normalized
-/// residual among every finite eigenpair and every finite right-eigenvector
-/// representative returned for an infinite eigenvalue. Generalized infinite
-/// algebraic multiplicity is accounted separately by exact homogeneous
-/// `beta == 0` classification after rejecting non-finite and indeterminate
-/// `0/0` pairs; defective infinite eigenvalues need not have one finite
-/// eigenvector per algebraic copy.
+/// by the associated vector. Exact descriptor closure determines the infinite
+/// multiplicity before the finite eigensolve. `max_backward_error` bounds the
+/// reported finite-state eigenpair residuals and the finite-subspace projection
+/// residual against the original descriptor. Analytic scalar and polynomial
+/// paths report their exact finite/infinite degree accounting.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpectrumCertificate {
     /// Order of the ordinary eigenproblem or generalized matrix pencil.
     pub problem_order: usize,
-    /// Exact count of generalized eigenpairs whose homogeneous beta is zero.
+    /// Algebraic multiplicity at infinity established by exact descriptor closure.
     pub infinite_count: usize,
-    /// Largest normwise backward error among finite roots and available
-    /// finite eigenvector representatives of infinite roots.
+    /// Largest normalized finite-eigenpair or descriptor-projection residual.
     pub max_backward_error: Value,
     /// Strict threshold below which the spectrum is fully qualified.
     pub qualification_tolerance: Value,
@@ -593,9 +592,15 @@ pub struct PoleZeroAnalyzer {
     c_matrix: Matrix,
     /// Number of nodes
     num_nodes: usize,
+    limits: crate::resource::ResourceLimits,
 }
 
 impl PoleZeroAnalyzer {
+    pub(crate) fn with_resource_limits(mut self, limits: crate::resource::ResourceLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
     const APPROXIMATE_BACKWARD_ERROR_LIMIT: Value = 1.0e-8;
 
     fn qualification_tolerance(problem_order: usize) -> Value {
@@ -661,7 +666,7 @@ mod tests {
     fn state_space_zeros(model: &StateSpaceModel) -> Vec<Complex64> {
         let helper = PoleZeroAnalyzer::new(Matrix::identity(2), Matrix::identity(2));
         helper
-            .zeros_from_state_space(model, &PoleZeroConfig::poles_and_zeros(0, 0))
+            .zeros_from_state_space(model, &PoleZeroConfig::poles_and_zeros(0, 0), &NoAbort)
             .expect("the fabricated state-space transfer has finite zeros")
             .finite
     }

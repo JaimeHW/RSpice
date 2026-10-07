@@ -23,6 +23,7 @@ impl Engine {
         g_descriptor: &crate::solver::ComplexMatrix,
         c_descriptor: &crate::solver::ComplexMatrix,
         config: &PoleZeroConfig,
+        limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Option<PoleZeroResult>, SimulationError> {
         if abort.is_aborted() {
@@ -304,6 +305,7 @@ impl Engine {
             config,
             &format!("node{}", config.input_pos),
             &format!("node{}", config.output_pos),
+            limits,
             abort,
         ) {
             Ok(result) => result,
@@ -319,6 +321,9 @@ impl Engine {
                 | PoleZeroAnalysisError::TransferExtraction(_),
             ) => return Ok(None),
             Err(PoleZeroAnalysisError::Aborted) => return Err(SimulationError::Aborted),
+            Err(PoleZeroAnalysisError::ResourceLimit(error)) => {
+                return Err(SimulationError::ResourceLimit(error));
+            }
             Err(error) => {
                 return Err(SimulationError::Solver(
                     crate::solver::SolverError::InvalidCircuit(format!(
@@ -809,7 +814,13 @@ impl Engine {
             .any(|bjt| bjt.uses_vbic_dynamic_charges());
         let reduced =
             if !has_external_vbic_descriptor_states && Self::pz_ac_nqs_state_count(&circuit) == 0 {
-                Self::try_sparse_pz_state_space(&g_descriptor, &c_descriptor, &config, abort)?
+                Self::try_sparse_pz_state_space(
+                    &g_descriptor,
+                    &c_descriptor,
+                    &config,
+                    self.config.resource_limits,
+                    abort,
+                )?
             } else {
                 None
             };
@@ -831,9 +842,13 @@ impl Engine {
                 &mut c_matrix,
             )?;
             PoleZeroAnalyzer::new(g_matrix, c_matrix)
+                .with_resource_limits(self.config.resource_limits)
                 .analyze_with_abort(&config, abort)
                 .map_err(|error| match error {
                     PoleZeroAnalysisError::Aborted => SimulationError::Aborted,
+                    PoleZeroAnalysisError::ResourceLimit(error) => {
+                        SimulationError::ResourceLimit(error)
+                    }
                     error => SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(
                         format!("pole-zero extraction failed: {error}"),
                     )),
@@ -1006,9 +1021,15 @@ mod tests {
             }
         }
         let config = PoleZeroConfig::poles_and_zeros(0, 1);
-        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config, &NoAbort)
-            .expect("sparse reduction does not error")
-            .expect("descriptor is reducible");
+        let sparse = Engine::try_sparse_pz_state_space(
+            &g_sparse,
+            &c_sparse,
+            &config,
+            crate::resource::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .expect("sparse reduction does not error")
+        .expect("descriptor is reducible");
         let dense = PoleZeroAnalyzer::new(
             Matrix::from_dense(g.iter().map(|row| row.to_vec()).collect()),
             Matrix::from_dense(c.iter().map(|row| row.to_vec()).collect()),
@@ -1052,9 +1073,15 @@ mod tests {
 
         let mut config = PoleZeroConfig::poles_and_zeros(0, 1);
         config.compute_zeros = false;
-        let sparse = Engine::try_sparse_pz_state_space(&g_sparse, &c_sparse, &config, &NoAbort)
-            .expect("sparse reduction does not error")
-            .expect("both mixed-scale capacitances remain dynamic");
+        let sparse = Engine::try_sparse_pz_state_space(
+            &g_sparse,
+            &c_sparse,
+            &config,
+            crate::resource::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .expect("sparse reduction does not error")
+        .expect("both mixed-scale capacitances remain dynamic");
         let dense = PoleZeroAnalyzer::new(
             Matrix::from_dense(g.iter().map(|row| row.to_vec()).collect()),
             Matrix::from_dense(c.iter().map(|row| row.to_vec()).collect()),

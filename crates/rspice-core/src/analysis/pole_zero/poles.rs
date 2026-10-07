@@ -11,6 +11,7 @@ impl PoleZeroAnalyzer {
             g_matrix,
             c_matrix,
             num_nodes,
+            limits: crate::resource::ResourceLimits::default(),
         }
     }
 
@@ -21,6 +22,7 @@ impl PoleZeroAnalyzer {
     pub(in crate::analysis::pole_zero) fn find_poles(
         &self,
         config: &PoleZeroConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
         let n = self.num_nodes;
         if n == 0 {
@@ -55,7 +57,7 @@ impl PoleZeroAnalyzer {
         }
 
         // A nonsingular C has no infinite modes, so the ordinary state-space
-        // solve is complete and avoids known small-matrix QZ workspace issues.
+        // solve is complete and avoids exact algebraic-closure work.
         if let Some(state_space) = self.build_state_space(&vec![0.0; n], &vec![0.0; n])
             && state_space.a.rows == n
         {
@@ -68,7 +70,7 @@ impl PoleZeroAnalyzer {
         }
 
         // Singular descriptors require generalized finite/infinite accounting.
-        let mut spectrum = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix)?;
+        let mut spectrum = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort)?;
         self.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
         spectrum
             .finite

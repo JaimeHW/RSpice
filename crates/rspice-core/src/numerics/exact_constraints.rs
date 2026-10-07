@@ -17,6 +17,7 @@ pub(crate) enum ConstraintError {
 }
 
 mod descriptor;
+pub(crate) mod finite;
 pub(crate) use descriptor::{ConstraintDisposition, close_descriptor};
 
 #[derive(Debug, Clone)]

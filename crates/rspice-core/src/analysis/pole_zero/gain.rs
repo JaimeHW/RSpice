@@ -19,6 +19,7 @@ impl PoleZeroAnalyzer {
         config: &PoleZeroConfig,
         input_label: &str,
         output_label: &str,
+        limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
         ensure_pole_zero_not_aborted(abort)?;
@@ -38,7 +39,8 @@ impl PoleZeroAnalyzer {
                     .to_string(),
             ));
         }
-        let helper = Self::new(Matrix::identity(n), Matrix::identity(n));
+        let helper =
+            Self::new(Matrix::identity(n), Matrix::identity(n)).with_resource_limits(limits);
         let model = StateSpaceModel { a, b, c, d };
         let mut result = PoleZeroResult::new(input_label, output_label);
         if config.compute_poles {
@@ -53,7 +55,7 @@ impl PoleZeroAnalyzer {
         }
         if config.compute_zeros {
             ensure_pole_zero_not_aborted(abort)?;
-            let spectrum = helper.zeros_from_state_space(&model, config)?;
+            let spectrum = helper.zeros_from_state_space(&model, config, abort)?;
             ensure_pole_zero_not_aborted(abort)?;
             result.set_zeros(spectrum);
         }
@@ -260,7 +262,7 @@ impl PoleZeroAnalyzer {
                 ))?;
             if config.compute_poles {
                 ensure_pole_zero_not_aborted(abort)?;
-                let spectrum = voltage_analyzer.find_poles(config)?;
+                let spectrum = voltage_analyzer.find_poles(config, abort)?;
                 ensure_pole_zero_not_aborted(abort)?;
                 result.set_poles(spectrum);
             }
@@ -272,11 +274,16 @@ impl PoleZeroAnalyzer {
                 } else if let Some(state_space) =
                     voltage_analyzer.build_state_space(&drive_vec, &output_ext)
                 {
-                    let spectrum = voltage_analyzer.zeros_from_state_space(&state_space, config)?;
+                    let spectrum =
+                        voltage_analyzer.zeros_from_state_space(&state_space, config, abort)?;
                     result.set_zeros(spectrum);
                 } else {
-                    let spectrum =
-                        voltage_analyzer.numerator_roots_raw(&drive_vec, &output_ext, config)?;
+                    let spectrum = voltage_analyzer.numerator_roots_raw(
+                        &drive_vec,
+                        &output_ext,
+                        config,
+                        abort,
+                    )?;
                     let spectrum = voltage_analyzer.finalize_zero_roots(spectrum, config)?;
                     result.set_zeros(spectrum);
                 }
@@ -297,7 +304,7 @@ impl PoleZeroAnalyzer {
         // Find poles
         if config.compute_poles {
             ensure_pole_zero_not_aborted(abort)?;
-            let spectrum = self.find_poles(config)?;
+            let spectrum = self.find_poles(config, abort)?;
             ensure_pole_zero_not_aborted(abort)?;
             result.set_poles(spectrum);
         }
@@ -305,7 +312,7 @@ impl PoleZeroAnalyzer {
         // Find zeros
         if config.compute_zeros {
             ensure_pole_zero_not_aborted(abort)?;
-            let spectrum = self.find_zeros(config)?;
+            let spectrum = self.find_zeros(config, abort)?;
             ensure_pole_zero_not_aborted(abort)?;
             result.set_zeros(spectrum);
         }

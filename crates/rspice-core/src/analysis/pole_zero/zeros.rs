@@ -6,6 +6,7 @@ impl PoleZeroAnalyzer {
         input_vec: &[Value],
         output_vec: &[Value],
         config: &PoleZeroConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
         if self.num_nodes == 0 {
             return Err(PoleZeroAnalysisError::InvalidSystem(
@@ -25,7 +26,7 @@ impl PoleZeroAnalyzer {
 
         // Qualify the underlying descriptor before interpreting an irregular
         // augmented pencil as an identically-zero transfer numerator.
-        self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix)?;
+        self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort)?;
 
         let n = self.num_nodes;
         let mut g_aug = Matrix::zeros(n + 1, n + 1);
@@ -40,7 +41,7 @@ impl PoleZeroAnalyzer {
             g_aug.set(n, i, output_vec[i]);
         }
 
-        let mut spectrum = match self.generalized_eigenvalues(&g_aug, &c_aug) {
+        let mut spectrum = match self.generalized_eigenvalues(&g_aug, &c_aug, abort) {
             Err(PoleZeroAnalysisError::IrregularDescriptor { .. }) => {
                 return Err(PoleZeroAnalysisError::TransferExtraction(
                     "transfer numerator is identically zero",
@@ -170,203 +171,70 @@ impl PoleZeroAnalyzer {
         &self,
         g_matrix: &Matrix,
         c_matrix: &Matrix,
+        abort: &dyn AbortSignal,
     ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
-        let n = g_matrix.rows;
-        if n == 0 || g_matrix.rows != g_matrix.cols || c_matrix.rows != c_matrix.cols {
-            return Err(PoleZeroAnalysisError::InvalidSystem(
-                "generalized eigenvalue matrices must be non-empty and square".to_string(),
-            ));
-        }
-        if g_matrix.rows != c_matrix.rows {
-            return Err(PoleZeroAnalysisError::InvalidSystem(
-                "generalized eigenvalue matrices must have equal dimensions".to_string(),
-            ));
-        }
-
-        let scale = self
-            .matrix_eigen_scale(g_matrix)
-            .max(self.matrix_eigen_scale(c_matrix));
-        let g_scaled = self.scale_matrix(g_matrix, 1.0 / scale);
-        let c_scaled = self.scale_matrix(c_matrix, 1.0 / scale);
-
-        let mut a = self.to_faer_matrix(&g_scaled);
-        for row in 0..n {
-            for col in 0..n {
-                a[(row, col)] = -a[(row, col)];
-            }
-        }
-        let b = self.to_faer_matrix(&c_scaled);
-        let gevd =
-            GeneralizedEigen::<f64>::new_from_real(a.as_ref(), b.as_ref()).map_err(|_| {
-                PoleZeroAnalysisError::EigenvalueFailure {
-                    problem: "generalized descriptor",
+        use crate::numerics::exact_constraints::{
+            ConstraintError,
+            finite::{FiniteDescriptorError, finite_dynamics},
+        };
+        let dynamics = finite_dynamics(&g_matrix.data, &c_matrix.data, self.limits, abort)
+            .map_err(|error| match error {
+                FiniteDescriptorError::Irregular => PoleZeroAnalysisError::IrregularDescriptor {
+                    index: 0,
+                    alpha_norm: 0.0,
+                    beta_norm: 0.0,
+                },
+                FiniteDescriptorError::Constraint(ConstraintError::Aborted) => {
+                    PoleZeroAnalysisError::Aborted
+                }
+                FiniteDescriptorError::Constraint(ConstraintError::ResourceLimit(error)) => {
+                    PoleZeroAnalysisError::ResourceLimit(error)
+                }
+                FiniteDescriptorError::Constraint(ConstraintError::Invalid(message)) => {
+                    PoleZeroAnalysisError::InvalidSystem(message)
                 }
             })?;
-        let alpha = gevd.S_a().column_vector();
-        let beta = gevd.S_b().column_vector();
-        let eigenvectors = gevd.U();
-        let g_norm = Self::matrix_frobenius_norm(&g_scaled);
-        let c_norm = Self::matrix_frobenius_norm(&c_scaled);
-        let qualification_tolerance = Self::qualification_tolerance(n);
-
-        let mut eigenvalues = Vec::with_capacity(n);
-        let mut infinite = 0;
-        let mut max_backward_error = 0.0_f64;
-        for idx in 0..n {
-            let alpha = *alpha.get(idx);
-            let beta = *beta.get(idx);
-            if !alpha.re.is_finite()
-                || !alpha.im.is_finite()
-                || !beta.re.is_finite()
-                || !beta.im.is_finite()
-            {
-                return Err(PoleZeroAnalysisError::NonFiniteEigenvalue {
-                    problem: "generalized descriptor",
-                    index: idx,
-                });
-            }
-
-            let alpha_norm = alpha.norm();
-            let beta_norm = beta.norm();
-            if alpha_norm == 0.0 && beta_norm == 0.0 {
-                return Err(PoleZeroAnalysisError::IrregularDescriptor {
-                    index: idx,
-                    alpha_norm,
-                    beta_norm,
-                });
-            }
-
-            let homogeneous_scale = alpha_norm.max(beta_norm);
-            let alpha_re = alpha.re / homogeneous_scale;
-            let alpha_im = alpha.im / homogeneous_scale;
-            let beta_re = beta.re / homogeneous_scale;
-            let beta_im = beta.im / homogeneous_scale;
-            let alpha_scaled_norm = alpha_norm / homogeneous_scale;
-            let beta_scaled_norm = beta_norm / homogeneous_scale;
-
-            let eigenvector_is_finite = (0..n).all(|row| {
-                let component = eigenvectors[(row, idx)];
-                component.re.is_finite() && component.im.is_finite()
-            });
-            // Exact beta=0 classifies an infinite generalized eigenvalue.
-            // A defective eigenvalue at infinity may require generalized
-            // eigenvector chains, and faer then returns NaN for algebraic
-            // copies that have no independent right eigenvector. QZ's finite
-            // alpha and exact zero beta still provide complete multiplicity
-            // accounting. Qualify every finite representative faer does
-            // return, but do not duplicate one vector to claim a chain.
-            if beta_norm == 0.0 && !eigenvector_is_finite {
-                infinite += 1;
-                continue;
-            }
-            if !eigenvector_is_finite {
-                return Err(PoleZeroAnalysisError::NonFiniteEigenvalue {
-                    problem: "generalized descriptor qualification",
-                    index: idx,
-                });
-            }
-
-            let mut vector_norm = 0.0_f64;
-            let mut residual_norm = 0.0_f64;
-            for row in 0..n {
-                let component = eigenvectors[(row, idx)];
-                vector_norm = vector_norm.hypot(component.re.hypot(component.im));
-
-                let mut g_product_re = 0.0;
-                let mut g_product_im = 0.0;
-                let mut c_product_re = 0.0;
-                let mut c_product_im = 0.0;
-                for col in 0..n {
-                    let vector_value = eigenvectors[(col, idx)];
-                    let g_weight = g_scaled.data[row][col];
-                    let c_weight = c_scaled.data[row][col];
-                    g_product_re += g_weight * vector_value.re;
-                    g_product_im += g_weight * vector_value.im;
-                    c_product_re += c_weight * vector_value.re;
-                    c_product_im += c_weight * vector_value.im;
-                }
-
-                // Faer solved (-G)u*beta = C*u*alpha. Multiplying the
-                // residual by -1 gives beta*G*u + alpha*C*u.
-                let beta_g_re = beta_re * g_product_re - beta_im * g_product_im;
-                let beta_g_im = beta_re * g_product_im + beta_im * g_product_re;
-                let alpha_c_re = alpha_re * c_product_re - alpha_im * c_product_im;
-                let alpha_c_im = alpha_re * c_product_im + alpha_im * c_product_re;
-                residual_norm =
-                    residual_norm.hypot((beta_g_re + alpha_c_re).hypot(beta_g_im + alpha_c_im));
-            }
-            if vector_norm == 0.0 {
-                if beta_norm == 0.0 {
-                    infinite += 1;
-                    continue;
-                }
-                return Err(PoleZeroAnalysisError::NonFiniteEigenvalue {
-                    problem: "generalized descriptor qualification",
-                    index: idx,
-                });
-            }
-            let denominator =
-                (beta_scaled_norm * g_norm + alpha_scaled_norm * c_norm) * vector_norm;
-            let backward_error = if denominator > 0.0 {
-                residual_norm / denominator
-            } else if residual_norm == 0.0 {
-                0.0
-            } else {
-                Value::INFINITY
-            };
-            if !backward_error.is_finite() {
-                return Err(PoleZeroAnalysisError::NonFiniteEigenvalue {
-                    problem: "generalized descriptor qualification",
-                    index: idx,
-                });
-            }
-            if backward_error > Self::APPROXIMATE_BACKWARD_ERROR_LIMIT {
-                return Err(PoleZeroAnalysisError::NumericalQualification {
-                    problem: "generalized descriptor",
-                    index: idx,
-                    backward_error,
-                    maximum: Self::APPROXIMATE_BACKWARD_ERROR_LIMIT,
-                });
-            }
-            max_backward_error = max_backward_error.max(backward_error);
-
-            if beta_norm == 0.0 {
-                infinite += 1;
-                continue;
-            }
-
-            let lambda = alpha / beta;
-            if !lambda.re.is_finite() || !lambda.im.is_finite() {
-                return Err(PoleZeroAnalysisError::NonFiniteEigenvalue {
-                    problem: "generalized descriptor",
-                    index: idx,
-                });
-            }
-            eigenvalues.push(Complex64::new(lambda.re, lambda.im));
+        let order = g_matrix.rows;
+        let finite_count = dynamics.matrix.len();
+        if finite_count == 0 {
+            return ComputedSpectrum::exact(Vec::new(), order, order);
         }
-
-        if eigenvalues.len() + infinite != n {
-            return Err(PoleZeroAnalysisError::IncompleteSpectrum {
-                problem: "generalized descriptor",
-                expected: n,
-                actual: eigenvalues.len() + infinite,
+        ensure_pole_zero_not_aborted(abort)?;
+        let spectrum = self.eigenvalues_from_matrix(&Matrix::from_dense(dynamics.matrix))?;
+        ensure_pole_zero_not_aborted(abort)?;
+        let error = dynamics
+            .projection_error
+            .max(spectrum.evidence.certificate().unwrap().max_backward_error);
+        if !dynamics.projection_error.is_finite()
+            || !error.is_finite()
+            || error > Self::APPROXIMATE_BACKWARD_ERROR_LIMIT
+        {
+            return Err(PoleZeroAnalysisError::NumericalQualification {
+                problem: "finite descriptor projection",
+                index: 0,
+                backward_error: error,
+                maximum: Self::APPROXIMATE_BACKWARD_ERROR_LIMIT,
             });
         }
-
-        let certificate =
-            SpectrumCertificate::new(n, infinite, max_backward_error, qualification_tolerance)
-                .ok_or_else(|| {
-                    PoleZeroAnalysisError::InvalidSystem(
-                        "generalized spectrum certificate is internally inconsistent".to_string(),
-                    )
-                })?;
-        ComputedSpectrum::from_certificate(eigenvalues, certificate)
+        let certificate = SpectrumCertificate::new(
+            order,
+            order - finite_count,
+            error,
+            Self::qualification_tolerance(order),
+        )
+        .ok_or_else(|| {
+            PoleZeroAnalysisError::InvalidSystem(
+                "finite descriptor certificate is internally inconsistent".to_owned(),
+            )
+        })?;
+        ComputedSpectrum::from_certificate(spectrum.finite, certificate)
     }
 
     pub(in crate::analysis::pole_zero) fn zeros_from_state_space(
         &self,
         model: &StateSpaceModel,
         config: &PoleZeroConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
         let n = model.a.rows;
         if n == 0 {
@@ -400,7 +268,7 @@ impl PoleZeroAnalyzer {
         }
         g_zero.set(n, n, model.d);
 
-        let spectrum = match self.generalized_eigenvalues(&g_zero, &c_zero) {
+        let spectrum = match self.generalized_eigenvalues(&g_zero, &c_zero, abort) {
             Err(PoleZeroAnalysisError::IrregularDescriptor { .. }) => {
                 return Err(PoleZeroAnalysisError::TransferExtraction(
                     "transfer numerator is identically zero",
@@ -601,7 +469,8 @@ impl PoleZeroAnalyzer {
             let mut drive_vec = vec![0.0; self.num_nodes];
             drive_vec[input_voltage_branch] = config.input_voltage_gain;
             return Some((
-                PoleZeroAnalyzer::new(self.g_matrix.clone(), self.c_matrix.clone()),
+                PoleZeroAnalyzer::new(self.g_matrix.clone(), self.c_matrix.clone())
+                    .with_resource_limits(self.limits),
                 drive_vec,
                 output_vec.to_vec(),
             ));
@@ -639,7 +508,11 @@ impl PoleZeroAnalyzer {
         let mut output_ext = vec![0.0; n + 1];
         output_ext[..n].copy_from_slice(output_vec);
 
-        Some((PoleZeroAnalyzer::new(g_ext, c_ext), drive_vec, output_ext))
+        Some((
+            PoleZeroAnalyzer::new(g_ext, c_ext).with_resource_limits(self.limits),
+            drive_vec,
+            output_ext,
+        ))
     }
 
     pub(in crate::analysis::pole_zero) fn finalize_zero_roots(
@@ -763,6 +636,7 @@ impl PoleZeroAnalyzer {
     pub(in crate::analysis::pole_zero) fn find_zeros(
         &self,
         config: &PoleZeroConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
         if self.num_nodes == 0 {
             return Err(PoleZeroAnalysisError::InvalidSystem(
@@ -781,10 +655,10 @@ impl PoleZeroAnalyzer {
 
         if config.input_is_current {
             if let Some(state_space) = self.build_state_space(&input_vec, &output_vec) {
-                return self.zeros_from_state_space(&state_space, config);
+                return self.zeros_from_state_space(&state_space, config, abort);
             }
 
-            let zeros = self.numerator_roots_raw(&input_vec, &output_vec, config)?;
+            let zeros = self.numerator_roots_raw(&input_vec, &output_vec, config, abort)?;
             return self.finalize_zero_roots(zeros, config);
         }
 
@@ -797,10 +671,10 @@ impl PoleZeroAnalyzer {
         };
 
         if let Some(state_space) = voltage_analyzer.build_state_space(&drive_vec, &output_ext) {
-            return voltage_analyzer.zeros_from_state_space(&state_space, config);
+            return voltage_analyzer.zeros_from_state_space(&state_space, config, abort);
         }
 
-        let zeros = voltage_analyzer.numerator_roots_raw(&drive_vec, &output_ext, config)?;
+        let zeros = voltage_analyzer.numerator_roots_raw(&drive_vec, &output_ext, config, abort)?;
         self.finalize_zero_roots(zeros, config)
     }
 }
