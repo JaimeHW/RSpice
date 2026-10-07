@@ -4128,10 +4128,14 @@ fn resolve_static_model_expression_params_with_abort(
                     &expression,
                     &context,
                     abort,
-                )
-                .map(|value| value.re)
-                {
-                    Ok(value) if value.is_finite() => {
+                ) {
+                    Ok(value) if value.re.is_finite() => {
+                        let value = crate::netlist::expr::require_real(value).map_err(|error| {
+                            ParseError::InvalidValue(format!(
+                                "Model '{}' parameter '{}': {error}",
+                                model.name, name
+                            ))
+                        })?;
                         // Keep the enclosing parameter namespace authoritative,
                         // just as when this expression resolves on its card.
                         if !context.has_any_parameter_binding(&name) {

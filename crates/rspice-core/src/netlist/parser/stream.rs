@@ -291,11 +291,10 @@ impl TokenStream<'_> {
         &self,
         expression: &str,
         params: &ParamContext,
-    ) -> Result<Value, ExprError> {
+    ) -> Result<crate::ComplexValue, ExprError> {
         crate::netlist::expr::eval_expression_complex_with_probe_and_abort(
             expression, params, self.abort,
         )
-        .map(|value| value.re)
         .map_err(numeric_expression_error)
     }
 

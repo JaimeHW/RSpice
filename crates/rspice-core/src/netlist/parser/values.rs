@@ -445,13 +445,16 @@ pub(super) fn parse_model_params(
                                 &mut expr_params,
                                 name,
                                 value,
-                            );
+                                line_num,
+                            )?;
                         } else if stream.model_expression_references_temperature(&value, params)
                             || params.expression_references_spectre_statistics(&value)
                         {
                             stream.advance();
                             expr_params.push((name, value));
-                        } else if let Some(value) = try_signed_model_value(stream, params) {
+                        } else if let Some(value) =
+                            try_signed_model_value(stream, params, line_num, &name)?
+                        {
                             numeric_params.push((name, value));
                         } else {
                             // A bare identifier that does not resolve *here*
@@ -497,7 +500,8 @@ pub(super) fn parse_model_params(
                                 &mut expr_params,
                                 name,
                                 value,
-                            );
+                                line_num,
+                            )?;
                         } else {
                             let TokenKind::Expression(expr) = &stream.peek().kind else {
                                 unreachable!("expression branch matched before fallback")
@@ -512,7 +516,10 @@ pub(super) fn parse_model_params(
                             } else if let Ok(value) =
                                 stream.evaluate_model_expression(&expr, params)
                             {
-                                numeric_params.push((name, value));
+                                numeric_params.push((
+                                    name.clone(),
+                                    real_model_value(value, line_num, &name)?,
+                                ));
                             } else if let Some(value) = params.get_string(&expr) {
                                 push_model_string_value(
                                     &mut string_params,
@@ -594,13 +601,16 @@ pub(super) fn parse_model_params(
                                 &mut expr_params,
                                 name,
                                 value,
-                            );
+                                line_num,
+                            )?;
                         } else if let Some(expr) =
                             try_deferred_model_temperature_value(stream, params)
                         {
                             expr_params.push((name, expr));
                         } else if stream.consume(&TokenKind::LParen) {
-                            if let Some(value) = try_signed_model_value(stream, params) {
+                            if let Some(value) =
+                                try_signed_model_value(stream, params, line_num, &name)?
+                            {
                                 numeric_params.push((name, value));
                             }
                             if !stream.consume(&TokenKind::RParen) {
@@ -611,7 +621,9 @@ pub(super) fn parse_model_params(
                                             .to_string(),
                                 });
                             }
-                        } else if let Some(value) = try_signed_model_value(stream, params) {
+                        } else if let Some(value) =
+                            try_signed_model_value(stream, params, line_num, &name)?
+                        {
                             numeric_params.push((name, value));
                         } else {
                             return Err(ParseError::Syntax {
@@ -654,7 +666,7 @@ pub(super) fn parse_model_params(
                 }
             } else if let Some(expr) = try_deferred_model_temperature_value(stream, params) {
                 expr_params.push((name, expr));
-            } else if let Some(value) = try_signed_model_value(stream, params) {
+            } else if let Some(value) = try_signed_model_value(stream, params, line_num, &name)? {
                 // Xyce and SPICE-compatible model cards also permit the
                 // positional `NAME VALUE` form (for example, `BF 20`).
                 // Consume only a value-like token here so bare model flags
@@ -717,7 +729,7 @@ enum BareModelIdentString {
 }
 
 enum ParsedModelScalarExpression {
-    Resolved(Value),
+    Resolved(crate::ComplexValue),
     Deferred(String),
 }
 
@@ -741,15 +753,18 @@ fn push_model_scalar_expression_param(
     expr_params: &mut Vec<(String, String)>,
     name: String,
     value: ParsedModelScalarExpression,
-) {
+    line_num: usize,
+) -> Result<(), ParseError> {
     match value {
         ParsedModelScalarExpression::Resolved(value) => {
+            let value = real_model_value(value, line_num, &name)?;
             numeric_params.push((name, value));
         }
         ParsedModelScalarExpression::Deferred(expr) => {
             expr_params.push((name, expr));
         }
     }
+    Ok(())
 }
 
 fn xspice_model_type_accepts_contiguous_expressions(model_type: Option<&str>) -> bool {
@@ -775,11 +790,13 @@ fn try_xspice_model_scalar_expression(
     }
 
     let expr = collect_contiguous_expression(stream)?;
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
-        return Some(ParsedModelScalarExpression::Resolved(value));
+    if !expr.contains(['j', 'J'])
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr)
+    {
+        return Some(ParsedModelScalarExpression::Resolved(value.into()));
     }
     if let Some(value) = parse_boolean_literal(&expr) {
-        return Some(ParsedModelScalarExpression::Resolved(value));
+        return Some(ParsedModelScalarExpression::Resolved(value.into()));
     }
     if defer_expression_params
         || stream.model_expression_references_temperature(&expr, params)
@@ -1369,7 +1386,9 @@ fn parse_model_complex_component(
             ),
         })?;
 
-    if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
+    if !expr.contains(['j', 'J'])
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr)
+    {
         return Ok(ParsedModelComplexComponent::Resolved(sign * value));
     }
     if let Some(value) = parse_boolean_literal(&expr) {
@@ -1381,13 +1400,15 @@ fn parse_model_complex_component(
         )));
     }
 
-    let value = stream.evaluate_expression(&expr, params).map_err(|err| {
+    let value = stream.evaluate_model_expression(&expr, params).map_err(|err| {
         ParseError::InvalidValue(format!(
             "line {}: complex model parameter '{}' {} expression '{}' could not be resolved: {}",
             line_num, name, component, expr, err
         ))
     })?;
-    Ok(ParsedModelComplexComponent::Resolved(sign * value))
+    Ok(ParsedModelComplexComponent::Resolved(
+        sign * real_model_value(value, line_num, name)?,
+    ))
 }
 
 fn model_complex_component_expr(component: ParsedModelComplexComponent) -> String {
@@ -1584,7 +1605,9 @@ fn parse_model_real_vector_entry(
         ),
     })?;
 
-    let entry = if let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr) {
+    let entry = if !expr.contains(['j', 'J'])
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value_complete(&expr)
+    {
         ParsedModelRealVectorEntry::Resolved(sign * value)
     } else if let Some(value) = parse_boolean_literal(&expr) {
         ParsedModelRealVectorEntry::Resolved(sign * value)
@@ -1593,13 +1616,13 @@ fn parse_model_real_vector_entry(
     {
         ParsedModelRealVectorEntry::Deferred(signed_expr(expr))
     } else {
-        let value = stream.evaluate_expression(&expr, params).map_err(|err| {
+        let value = stream.evaluate_model_expression(&expr, params).map_err(|err| {
             ParseError::InvalidValue(format!(
                 "line {}: model parameter vector '{}' expression '{}' could not be resolved: {}",
                 line_num, name, expr, err
             ))
         })?;
-        ParsedModelRealVectorEntry::Resolved(sign * value)
+        ParsedModelRealVectorEntry::Resolved(sign * real_model_value(value, line_num, name)?)
     };
 
     if let ParsedModelRealVectorEntry::Resolved(value) = &entry
@@ -2183,13 +2206,58 @@ pub(super) fn try_signed_value(stream: &mut TokenStream, params: &ParamContext) 
     try_value_unsigned(stream, params)
 }
 
-/// Signed model-card values use the same token recombination as command-level
-/// value lists; retain this name at model call sites to document that context.
-pub(super) fn try_signed_model_value(
+fn real_model_value(
+    value: crate::ComplexValue,
+    line: usize,
+    name: &str,
+) -> Result<Value, ParseError> {
+    crate::netlist::expr::require_real(value).map_err(|error| {
+        ParseError::InvalidValue(format!("line {line}: model parameter '{name}': {error}"))
+    })
+}
+
+/// Preserve complex values until the model field admits them. A failed optional
+/// probe must not turn an invalid authored scalar into a bare flag or a default.
+fn try_signed_model_value(
     stream: &mut TokenStream,
     params: &ParamContext,
-) -> Option<Value> {
-    try_signed_value(stream, params)
+    line: usize,
+    name: &str,
+) -> Result<Option<Value>, ParseError> {
+    skip_commas(stream);
+    let (offset, sign) = match stream.peek().kind {
+        TokenKind::Plus => (1, 1.0),
+        TokenKind::Minus => (1, -1.0),
+        _ => (0, 1.0),
+    };
+    let token = stream.peek_n(offset);
+    let value = match &token.kind {
+        TokenKind::Number(value) if !token.lexeme.contains(['j', 'J']) => Some((*value).into()),
+        TokenKind::Number(_) => stream.evaluate_model_expression(&token.lexeme, params).ok(),
+        TokenKind::Expression(expression) => {
+            stream.evaluate_model_expression(expression, params).ok()
+        }
+        TokenKind::Ident(reference) => params.get_complex(reference).or_else(|| {
+            if let Some(value) = parse_boolean_literal(reference) {
+                Some(value.into())
+            } else if let Ok(value) = crate::netlist::lexer::parse_spice_value(reference) {
+                if reference.contains(['j', 'J']) {
+                    stream.evaluate_model_expression(reference, params).ok()
+                } else {
+                    Some(value.into())
+                }
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    };
+    let Some(value) = value else { return Ok(None) };
+    let value = real_model_value(value, line, name)?;
+    for _ in 0..=offset {
+        stream.advance();
+    }
+    Ok(Some(sign * value))
 }
 
 #[inline]

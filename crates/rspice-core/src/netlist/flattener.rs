@@ -3294,12 +3294,16 @@ impl<'a> Flattener<'a> {
         component: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Value, ParseWithAbortError> {
-        resolve_parametric_value(
+        resolve_numeric_parameter_binding(
             &ParametricValue::Expression(expr.to_string()),
             scope,
             &self.random,
             abort,
         )
+        .and_then(|binding| {
+            super::expr::require_real(binding.value)
+                .map_err(|error| ParseError::InvalidValue(error.to_string()).into())
+        })
         .map_err(|err| {
             map_resolution_error(err, |err| {
                 ParseError::InvalidValue(format!(
@@ -3523,10 +3527,13 @@ impl<'a> Flattener<'a> {
                 continue;
             }
 
-            match super::expr::eval_expression_complex_with_abort(expr, scope, abort)
-                .map(|value| value.re)
-            {
-                Ok(value) if value.is_finite() => {
+            match super::expr::eval_expression_complex_with_abort(expr, scope, abort) {
+                Ok(value) if value.re.is_finite() => {
+                    let value = super::expr::require_real(value).map_err(|error| {
+                        ParseError::InvalidValue(format!(
+                            "model parameter '{name}' for scoped model '{model_name}': {error}"
+                        ))
+                    })?;
                     replace_model_param(&mut scoped_model, name);
                     scoped_model.params.push((name.clone(), value));
                 }
@@ -3588,10 +3595,15 @@ impl<'a> Flattener<'a> {
             let mut first_error = None;
 
             for expr in exprs {
-                match super::expr::eval_expression_complex_with_abort(expr, scope, abort)
-                    .map(|value| value.re)
-                {
-                    Ok(value) if value.is_finite() => values.push(value),
+                match super::expr::eval_expression_complex_with_abort(expr, scope, abort) {
+                    Ok(value) if value.re.is_finite() => {
+                        let value = super::expr::require_real(value).map_err(|error| {
+                            ParseError::InvalidValue(format!(
+                                "model vector parameter '{name}' for scoped model '{model_name}': {error}"
+                            ))
+                        })?;
+                        values.push(value);
+                    }
                     Ok(value) => {
                         return Err(ParseError::InvalidValue(format!(
                             "model vector parameter '{}' for scoped model '{}' expression '{}' resolved to non-finite value {}",

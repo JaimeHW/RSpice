@@ -431,6 +431,14 @@ bodies and two-argument `LIMIT`; three-argument clipping remains deterministic.
 Ordinary bindings still shadow globals without replacing their namespace.
 Available-parameter materialization uses the same complex numeric resolver, so
 model expressions such as `IMG(global_value)` retain their imaginary input.
+
+Real model fields reject a nonzero imaginary component in the final result;
+there is no tolerance that silently discards a small component. This applies to
+eager and forward expressions, scoped model cards, temperature-dependent fields,
+real vectors, and thermal material updates. Complex intermediate calculations
+remain supported; use `RE()`, `IMG()`, or `MAG()` to select a real result.
+XSPICE complex pairs retain both components, and each component must itself be
+real.
 Model fields do not replace enclosing `.PARAM` or `.GLOBAL_PARAM` bindings while
 resolving expressions, including forward references and runtime expressions.
 Model fields supply otherwise unbound names within their own card. Temperature
