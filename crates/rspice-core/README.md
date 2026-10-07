@@ -527,8 +527,14 @@ resolved callers retain their policies; unresolved callers resolve each row's
 authored options and executed control overrides. Only options explicitly changed
 by control commands survive as overrides during source replay. Circuit equations
 and noise densities use the same temperature; the noise fallback applies to
-unresolved rows without a temperature option. Table control publication through
-the CLI/WASM typed-document adapters remains an open implementation-plan slice.
+unresolved rows without a temperature option. Version 11 result documents retain
+table bindings, aligned coordinate axes, requested rows and model-finish evidence.
+The CLI and WASM direct/control adapters use these documents and compact table
+runners; browser metadata exposes the bindings and bounded windows carry every
+coordinate. CLI flat exports retain coordinates as `data(column)` columns; typed
+JSON additionally retains binding and completion metadata. Noise band totals
+require at least two strictly increasing frequencies with all other coordinates
+constant.
 Textual multi-run expansion preserves tables needed by frequency/control consumers,
 including shared tables and ALTER variants. Scoped qualification is recorded in
 `tests/testdata/qualification/core-control-frequency-data-windows-20261006.json`.
