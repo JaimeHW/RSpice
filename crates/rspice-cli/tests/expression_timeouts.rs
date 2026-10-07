@@ -175,6 +175,7 @@ fn timeout_interrupts_runtime_model_expressions_during_construction() {
     let dir = common::test_dir("construction-model-expression-timeout");
     for (index, body) in [
         ".MODEL rm R(RSH={TEMP+work(26)})\nR2 out 0 rm L=1 W=1",
+        ".FUNC thermal() {TEMP+work(26)}\n.MODEL rm R(RSH={thermal()})\nR2 out 0 rm L=1 W=1",
         ".MODEL cm C(CJ={TEMP+work(26)})\nC1 out 0 cm L=1 W=1",
         ".MODEL lm L(L={TEMP+work(26)})\nL1 aux 0 1m lm\nR2 out aux 1k",
         ".MODEL dd D(IS={TEMP*0+work(26)*1p})\nD1 out 0 dd",
