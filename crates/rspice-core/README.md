@@ -470,8 +470,15 @@ precedence across scopes. Ordinary failures at `.ENDS` retain their physical
 card error while later independent source cards can select temperatures. Every
 assignment must validate in a fresh pass before the circuit is returned.
 
+Failed `.IF`/`.ELSEIF` expressions leave their chain unresolved for the
+current pass. No branch of that chain emits cards or evaluates later decisions,
+but nesting and branch structure remain checked. Independent later temperature
+declarations can trigger a fresh pass; every active decision must then evaluate
+successfully. Inactive `.DATA` blocks neither evaluate rows nor publish tables,
+and their continuations remain attached to their original logical card.
+
 General dependency planning remains incomplete. Other eager parameter error
-classes and conditional, subcircuit-header and other card failures can still
+classes, subcircuit-header defaults and other earlier card failures can still
 prevent discovery. These cases and broader statistical/runtime binding
 qualification remain in the implementation plan.
 
