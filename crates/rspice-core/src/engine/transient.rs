@@ -5260,6 +5260,7 @@ impl Engine {
                 Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
                 if circuit.has_coupled_event_nets() {
                     self.accept_transient_models(
+                        abort,
                         &mut circuit,
                         &mut matrix,
                         &mut solution,
@@ -10434,6 +10435,7 @@ impl Engine {
                         .as_ref()
                         .map_or(trial_phase_context, |event| event.phase_context());
                     let (veriloga_discontinuity, static_history) = self.accept_transient_models(
+                        abort,
                         &mut circuit,
                         &mut matrix,
                         &mut new_solution,
@@ -11022,6 +11024,7 @@ impl Engine {
                 .as_ref()
                 .map_or(trial_phase_context, |event| event.phase_context());
             let (veriloga_discontinuity, static_history) = self.accept_transient_models(
+                abort,
                 &mut circuit,
                 &mut matrix,
                 &mut new_solution,

@@ -4,6 +4,15 @@
 
 use super::*;
 
+impl From<crate::circuit::ThermalUpdateError> for SimulationError {
+    fn from(error: crate::circuit::ThermalUpdateError) -> Self {
+        match error {
+            crate::circuit::ThermalUpdateError::Aborted => Self::Aborted,
+            crate::circuit::ThermalUpdateError::Invalid(message) => Self::Circuit(message),
+        }
+    }
+}
+
 /// Borrowed native state carried through the same validation barrier as HDL.
 /// Preparation owns only new values; accepted history storage stays in place.
 pub(super) struct NativeHistoryAcceptance<'state, 'inputs> {
@@ -33,6 +42,7 @@ impl Engine {
         final_step: bool,
     ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
         self.accept_transient_models(
+            &NoAbort,
             circuit,
             matrix,
             solution,
@@ -51,6 +61,7 @@ impl Engine {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn accept_transient_models(
         &self,
+        abort: &dyn AbortSignal,
         circuit: &mut crate::circuit::CircuitData,
         matrix: &mut crate::solver::StaticMatrix,
         solution: &mut [Value],
@@ -153,8 +164,8 @@ impl Engine {
                 // preceding material/load state until every HDL participant agrees.
                 let thermal = circuit
                     .resistors
-                    .prepare_thermal_step(solution, dt)
-                    .map_err(SimulationError::Circuit)?;
+                    .prepare_thermal_step(solution, dt, abort)
+                    .map_err(SimulationError::from)?;
                 let prepared_native = native
                     .as_mut()
                     .map(|native| {
@@ -1106,6 +1117,7 @@ mod tests {
             current: 1e-9 / dt,
         }];
         engine.accept_transient_models(
+            &NoAbort,
             circuit,
             matrix,
             solution,
@@ -1182,6 +1194,7 @@ mod tests {
                 .unwrap();
             engine
                 .accept_transient_models(
+                    &NoAbort,
                     &mut circuit,
                     &mut matrix,
                     &mut solution,

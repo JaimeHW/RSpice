@@ -10,9 +10,13 @@
 //! charge models whose capacitance depends on the solution.
 
 use super::*;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::expr::{ModelEvaluationContext, ModelNominalTemperature};
 
 mod capacitor_noise;
+
+#[cfg(test)]
+mod thermal_tests;
 
 #[inline]
 fn solution_partial(partials: &[(usize, Value)], column: usize) -> Value {
@@ -20,6 +24,30 @@ fn solution_partial(partials: &[(usize, Value)], column: usize) -> Value {
         .iter()
         .filter_map(|(index, value)| (*index == column).then_some(*value))
         .sum()
+}
+
+/// Cancellation must remain distinct from invalid material data at the
+/// engine boundary, including while a candidate is still uncommitted.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ThermalUpdateError {
+    #[error("thermal material evaluation aborted")]
+    Aborted,
+    #[error("{0}")]
+    Invalid(String),
+}
+
+impl From<String> for ThermalUpdateError {
+    fn from(message: String) -> Self {
+        Self::Invalid(message)
+    }
+}
+
+fn check_thermal_abort(abort: &dyn AbortSignal) -> Result<(), ThermalUpdateError> {
+    if abort.is_aborted() {
+        Err(ThermalUpdateError::Aborted)
+    } else {
+        Ok(())
+    }
 }
 
 /// Runtime state for an Xyce LEVEL=2 self-consistent thermal resistor.
@@ -84,10 +112,11 @@ pub(crate) struct PreparedThermalResistorStep {
 }
 
 impl ThermalResistorState {
-    fn material_context(
+    fn material_context<'a>(
         &self,
         temperature_celsius: Value,
-    ) -> Result<ModelEvaluationContext<'_>, String> {
+        abort: &'a dyn AbortSignal,
+    ) -> Result<ModelEvaluationContext<'a>, ThermalUpdateError> {
         let mut context = self.base_context.clone();
         context.set("GMIN", self.gmin);
         ModelEvaluationContext::resolve(
@@ -97,10 +126,13 @@ impl ThermalResistorState {
             &self.model_expr_params,
             temperature_celsius,
             ModelNominalTemperature::Resolved(self.tnom_celsius),
-            &crate::abort_signal::NoAbort,
+            abort,
         )
-        .map_err(|error| {
-            format!("thermal resistor material expressions could not be resolved: {error}")
+        .map_err(|error| match error {
+            crate::netlist::expr::ParameterResolutionError::Aborted => ThermalUpdateError::Aborted,
+            error => ThermalUpdateError::Invalid(format!(
+                "thermal resistor material expressions could not be resolved: {error}"
+            )),
         })
     }
 
@@ -108,7 +140,7 @@ impl ThermalResistorState {
         &self,
         context: &ModelEvaluationContext<'_>,
         names: &[&str],
-    ) -> Result<Option<Value>, String> {
+    ) -> Result<Option<Value>, ThermalUpdateError> {
         for candidate in names {
             if let Some((_, value)) = self
                 .model_params
@@ -125,11 +157,15 @@ impl ThermalResistorState {
                 return context
                     .model_expression(name, expression)
                     .map(|value| Some(value.re))
-                    .map_err(|error| {
-                        format!(
-                            "thermal resistor material {name} could not be resolved: {}",
-                            crate::netlist::expr::ParameterResolutionError::from(error)
-                        )
+                    .map_err(|error| match error {
+                        crate::netlist::expr::ExpressionEvaluationError::Aborted => {
+                            ThermalUpdateError::Aborted
+                        }
+                        crate::netlist::expr::ExpressionEvaluationError::Expression(error) => {
+                            ThermalUpdateError::Invalid(format!(
+                                "thermal resistor material {name} could not be resolved: {error}"
+                            ))
+                        }
                     });
             }
         }
@@ -141,7 +177,7 @@ impl ThermalResistorState {
     pub(crate) fn initialize_material(
         &mut self,
         context: &ModelEvaluationContext<'_>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ThermalUpdateError> {
         let material = self.prepare_material_with_context(self.temperature_celsius, context)?;
         self.apply_material(material);
         Ok(())
@@ -153,7 +189,9 @@ impl ThermalResistorState {
         &mut self,
         temperature_celsius: Value,
     ) -> Result<(), String> {
-        let material = self.prepare_material_at_temperature(temperature_celsius)?;
+        let material = self
+            .prepare_material_at_temperature(temperature_celsius, &NoAbort)
+            .map_err(|error| error.to_string())?;
         self.apply_material(material);
         Ok(())
     }
@@ -161,13 +199,15 @@ impl ThermalResistorState {
     fn prepare_material_at_temperature(
         &self,
         temperature_celsius: Value,
-    ) -> Result<ThermalMaterialCandidate, String> {
+        abort: &dyn AbortSignal,
+    ) -> Result<ThermalMaterialCandidate, ThermalUpdateError> {
+        check_thermal_abort(abort)?;
         if !temperature_celsius.is_finite() {
-            return Err(format!(
+            return Err(ThermalUpdateError::Invalid(format!(
                 "thermal resistor temperature became non-finite: {temperature_celsius}"
-            ));
+            )));
         }
-        let context = self.material_context(temperature_celsius)?;
+        let context = self.material_context(temperature_celsius, abort)?;
         self.prepare_material_with_context(temperature_celsius, &context)
     }
 
@@ -175,13 +215,14 @@ impl ThermalResistorState {
         &self,
         temperature_celsius: Value,
         context: &ModelEvaluationContext<'_>,
-    ) -> Result<ThermalMaterialCandidate, String> {
-        let material = |instance: Option<Value>, name: &str| -> Result<Option<Value>, String> {
-            match instance {
-                Some(value) => Ok(Some(value)),
-                None => self.model_value(context, &[name]),
-            }
-        };
+    ) -> Result<ThermalMaterialCandidate, ThermalUpdateError> {
+        let material =
+            |instance: Option<Value>, name: &str| -> Result<Option<Value>, ThermalUpdateError> {
+                match instance {
+                    Some(value) => Ok(Some(value)),
+                    None => self.model_value(context, &[name]),
+                }
+            };
         let resistivity = material(self.instance_resistivity, "RESISTIVITY")?
             .ok_or_else(|| "thermal resistor requires RESISTIVITY".to_string())?;
         let heat_capacity = material(self.instance_heat_capacity, "HEATCAPACITY")?
@@ -196,15 +237,15 @@ impl ThermalResistorState {
             || !thermal_heat_capacity.is_finite()
             || thermal_heat_capacity <= 0.0
         {
-            return Err(format!(
+            return Err(ThermalUpdateError::Invalid(format!(
                 "thermal resistor material values must be finite and positive (RESISTIVITY={resistivity}, HEATCAPACITY={heat_capacity}, THERMAL_HEATCAPACITY={thermal_heat_capacity})"
-            ));
+            )));
         }
         let resistance = resistivity * self.length / self.area;
         if !resistance.is_finite() || resistance <= 0.0 {
-            return Err(format!(
+            return Err(ThermalUpdateError::Invalid(format!(
                 "thermal resistor material resistance is invalid: {resistance}"
-            ));
+            )));
         }
         Ok(ThermalMaterialCandidate {
             temperature_celsius,
@@ -236,7 +277,9 @@ impl ThermalResistorState {
         conductance: Value,
         step_size: Value,
     ) -> Result<(), String> {
-        let candidate = self.prepare_accepted_step(voltage, conductance, step_size)?;
+        let candidate = self
+            .prepare_accepted_step(voltage, conductance, step_size, &NoAbort)
+            .map_err(|error| error.to_string())?;
         self.apply_accepted_step(candidate);
         Ok(())
     }
@@ -246,24 +289,26 @@ impl ThermalResistorState {
         voltage: Value,
         conductance: Value,
         step_size: Value,
-    ) -> Result<ThermalStepCandidate, String> {
+        abort: &dyn AbortSignal,
+    ) -> Result<ThermalStepCandidate, ThermalUpdateError> {
+        check_thermal_abort(abort)?;
         if !step_size.is_finite() || step_size < 0.0 {
-            return Err(format!(
+            return Err(ThermalUpdateError::Invalid(format!(
                 "thermal resistor accepted step size is invalid: {step_size}"
-            ));
+            )));
         }
         let current = voltage * conductance;
         let dissipation = current * current * self.reported_resistance;
         let denominator = self.area * self.length * self.heat_capacity
             + self.thermal_area * self.thermal_length * self.thermal_heat_capacity;
         if !denominator.is_finite() || denominator <= 0.0 {
-            return Err(format!(
+            return Err(ThermalUpdateError::Invalid(format!(
                 "thermal resistor heat-capacity denominator is invalid: {denominator}"
-            ));
+            )));
         }
         let temperature = self.temperature_celsius + dissipation * step_size / denominator;
         Ok(ThermalStepCandidate {
-            material: self.prepare_material_at_temperature(temperature)?,
+            material: self.prepare_material_at_temperature(temperature, abort)?,
             output_resistance: self.reported_resistance,
             output_conductance: conductance,
         })
@@ -423,7 +468,9 @@ impl Resistors {
         solution: &[Value],
         step_size: Value,
     ) -> Result<(), String> {
-        let prepared = self.prepare_thermal_step(solution, step_size)?;
+        let prepared = self
+            .prepare_thermal_step(solution, step_size, &NoAbort)
+            .map_err(|error| error.to_string())?;
         self.commit_thermal_step(prepared);
         Ok(())
     }
@@ -433,9 +480,13 @@ impl Resistors {
         &self,
         solution: &[Value],
         step_size: Value,
-    ) -> Result<PreparedThermalResistorStep, String> {
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedThermalResistorStep, ThermalUpdateError> {
         let mut entries = Vec::new();
         for (index, state) in self.thermal.iter().enumerate() {
+            if index.is_multiple_of(16) {
+                check_thermal_abort(abort)?;
+            }
             let Some(state) = state else {
                 continue;
             };
@@ -449,8 +500,14 @@ impl Resistors {
             };
             let voltage = node_voltage(stamp.pp.row) - node_voltage(stamp.nn.row);
             let candidate = state
-                .prepare_accepted_step(voltage, self.conductances[index], step_size)
-                .map_err(|error| format!("thermal resistor '{}': {error}", self.names[index]))?;
+                .prepare_accepted_step(voltage, self.conductances[index], step_size, abort)
+                .map_err(|error| match error {
+                    ThermalUpdateError::Aborted => ThermalUpdateError::Aborted,
+                    ThermalUpdateError::Invalid(message) => ThermalUpdateError::Invalid(format!(
+                        "thermal resistor '{}': {message}",
+                        self.names[index]
+                    )),
+                })?;
             let resistance =
                 candidate.material.reported_resistance * state.scale / state.multiplicity;
             let conductance = 1.0 / resistance;
@@ -459,13 +516,14 @@ impl Resistors {
                 || !conductance.is_finite()
                 || conductance <= 0.0
             {
-                return Err(format!(
+                return Err(ThermalUpdateError::Invalid(format!(
                     "thermal resistor '{}' resolved to invalid electrical resistance/conductance {resistance}/{conductance}",
                     self.names[index]
-                ));
+                )));
             }
             entries.push((index, candidate, conductance));
         }
+        check_thermal_abort(abort)?;
         Ok(PreparedThermalResistorStep { entries })
     }
 

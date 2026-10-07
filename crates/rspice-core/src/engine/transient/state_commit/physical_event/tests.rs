@@ -74,6 +74,7 @@ fn accept(
 ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
     let coefficients = CompanionCoefficients::backward_euler();
     engine.accept_transient_models(
+        &NoAbort,
         circuit,
         matrix,
         solution,

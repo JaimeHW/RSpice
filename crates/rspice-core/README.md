@@ -447,6 +447,8 @@ resistors. Each physical instance retains its own samples. Thermal material
 updates use the same dependency resolver, preserve enclosing parameter bindings,
 and retain the nominal temperature already resolved during construction. Initial
 thermal material values reuse the construction result instead of sampling again.
+Transient material evaluation observes run cancellation before any prepared
+thermal values become accepted state.
 
 Native diode, BJT, MOS, JFET, and MESFET scalar model expressions resolve at
 construction using the instance's `TEMP`/`DTEMP` and the model's `TNOM`.

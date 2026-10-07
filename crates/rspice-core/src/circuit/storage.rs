@@ -29,6 +29,6 @@ pub(crate) use passive::SolutionDependentCapacitorState;
 pub use passive::{
     Capacitors, ResistorBranches, ResistorFlickerNoise, Resistors, ThermalResistorState,
 };
-pub(crate) use passive::{ResistorValues, SolutionDependentCompanionStep};
+pub(crate) use passive::{ResistorValues, SolutionDependentCompanionStep, ThermalUpdateError};
 pub use sources::{CurrentSources, VoltageSources};
 pub(crate) use sources::{SourceExcitation, SourceTimeBasis, SourceTimeSide};

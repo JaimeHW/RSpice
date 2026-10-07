@@ -315,11 +315,9 @@ fn resolve_level2_thermal_resistor_state(
         instance_heat_capacity: instance_param(instance_params, &["HEATCAPACITY"]),
         instance_thermal_heat_capacity: instance_param(instance_params, &["THERMAL_HEATCAPACITY"]),
     };
-    state.initialize_material(eval_ctx).map_err(|error| {
-        SimulationError::Circuit(format!(
-            "thermal resistor material resolution failed: {error}"
-        ))
-    })?;
+    state
+        .initialize_material(eval_ctx)
+        .map_err(SimulationError::from)?;
     Ok(Some(state))
 }
 
