@@ -262,6 +262,11 @@ the shared nearest-integer conversion. Unknown, unrepresentable, and out-of-rang
 indices produce an explicit diagnostic, consistent with the current analog array
 runtime. Digitally owned arrays and multidimensional arrays still require work.
 Canonical schema 67 versions this indexed-read contract.
+Schema 68 requires finite integral declaration bounds, preserves integer-valued
+constant indices without floating-point narrowing, and checks extents before
+allocation. Constant real indices use the same checked rounding as runtime
+indices. Single-element arrays at either signed 64-bit endpoint retain their
+exact element names; invalid ranges and non-finite indices produce diagnostics.
 
 Delay-controlled nonblocking assignments capture their RHS and converted delay
 at encounter, then continue immediately. Positive delays retain every update

@@ -3396,13 +3396,15 @@ fn checked_logical_upper_bound(
     label: &str,
     lower: i64,
     len: usize,
-) -> JitResult<i64> {
+) -> JitResult<i128> {
     let len = i64::try_from(len).map_err(|_| JitError::InvalidCanonicalIr {
         model: model.name.clone(),
         detail: format!("canonical indexed assignment '{label}' length {len} does not fit i64")
             .into(),
     })?;
-    lower.checked_add(len).ok_or_else(|| JitError::InvalidCanonicalIr {
+    // The exclusive end can be i64::MAX + 1 for a valid final element.
+    let upper = i128::from(lower) + i128::from(len);
+    (upper <= i128::from(i64::MAX) + 1).then_some(upper).ok_or_else(|| JitError::InvalidCanonicalIr {
         model: model.name.clone(),
         detail: format!(
             "canonical indexed assignment '{label}' logical range {lower} plus length {len} overflows i64"
@@ -3443,7 +3445,7 @@ pub(crate) fn ranges_overlap(
 ) -> JitResult<bool> {
     let left_upper = checked_logical_upper_bound(model, label, left_lower, left_len)?;
     let right_upper = checked_logical_upper_bound(model, label, right_lower, right_len)?;
-    Ok(left_lower < right_upper && right_lower < left_upper)
+    Ok(i128::from(left_lower) < right_upper && i128::from(right_lower) < left_upper)
 }
 
 fn lower_live_canonical_assignment_statements(
@@ -3913,7 +3915,7 @@ fn canonical_scalar_shadow_assignments(
     if let Some((array, index, "")) = parse_array_variable_name(target_name) {
         for shadow in shadow_index.array_shadows(array) {
             let upper = checked_logical_upper_bound(model, array, shadow.lower, shadow.len)?;
-            if index >= shadow.lower && index < upper {
+            if index >= shadow.lower && i128::from(index) < upper {
                 let slot = shadow.base + (index - shadow.lower) as usize;
                 append(slot, model.variable_names[slot].as_str(), &shadow.axes)?;
             }
@@ -3940,7 +3942,7 @@ fn canonical_array_shadow_assignments(
     let mut assignments = Vec::new();
     let source_upper = checked_logical_upper_bound(model, array_name, source_lower, source_len)?;
     for shadow in shadow_index.other_array_shadows(array_name) {
-        if shadow.logical_index >= source_lower && shadow.logical_index < source_upper {
+        if shadow.logical_index >= source_lower && i128::from(shadow.logical_index) < source_upper {
             // Grouped noise owns derivatives with respect to its unit process
             // sources. Those are not node/current derivatives and the normal
             // assignment pass must not recreate them. Only omit a recognized

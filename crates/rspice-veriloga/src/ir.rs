@@ -1898,7 +1898,7 @@ impl DeviceIR {
                 let read = *arena.indexed(payload);
                 let array = arena.name(read.array);
                 recurse(index)
-                    && (read.lower..read.lower + read.len as i64)
+                    && ((0..read.len).map(|offset| read.lower + offset as i64))
                         .all(|k| static_vars.contains(format!("{array}[{k}]").as_str()))
             }
             Node::Binary(_, left, right) => recurse(left) && recurse(right),
@@ -2010,7 +2010,9 @@ impl DeviceIR {
                                         static_vars,
                                     );
                                 if !write_static {
-                                    for k in target.lower..target.lower + target.len as i64 {
+                                    for k in
+                                        (0..target.len).map(|offset| target.lower + offset as i64)
+                                    {
                                         let elem: SmolStr = format!("{}[{k}]", target.array).into();
                                         if static_vars.remove(&elem) {
                                             *changed = true;
@@ -2557,7 +2559,7 @@ pub mod autodiff {
                         if current | mask != current {
                             let merged = current | mask;
                             deps.insert(array.name.clone(), merged);
-                            for k in array.lower..array.lower + array.len as i64 {
+                            for k in (0..array.len).map(|offset| array.lower + offset as i64) {
                                 deps.insert(format!("{}[{k}]", array.name).into(), merged);
                             }
                             *changed = true;
@@ -2633,7 +2635,7 @@ pub mod autodiff {
                 let index = families.len();
                 let mut members = Vec::with_capacity(array.len + 1);
                 members.push(array.name.clone());
-                for k in array.lower..array.lower + array.len as i64 {
+                for k in (0..array.len).map(|offset| array.lower + offset as i64) {
                     members.push(format!("{}[{k}]", array.name).into());
                 }
                 for member in &members {
@@ -3697,7 +3699,7 @@ pub mod autodiff {
                         merged.extend(axes.iter().copied());
                         if merged != current {
                             deps.insert(array.name.clone(), merged.clone());
-                            for index in array.lower..array.lower + array.len as i64 {
+                            for index in (0..array.len).map(|offset| array.lower + offset as i64) {
                                 deps.insert(
                                     format!("{}[{index}]", array.name).into(),
                                     merged.clone(),
@@ -3926,7 +3928,7 @@ pub mod autodiff {
                 let run_name = ShadowContext::shadow_name(&array.name, &axis);
                 let run_base = variables.len();
                 ctx.array_shadow_base.insert(run_name, run_base);
-                for index in array.lower..array.lower + array.len as i64 {
+                for index in (0..array.len).map(|offset| array.lower + offset as i64) {
                     let element = format!("{}[{index}]", array.name);
                     let shadow = ShadowContext::shadow_name(&element, &axis);
                     shadow_index.insert(shadow.clone(), variables.len());

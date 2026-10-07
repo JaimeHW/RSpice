@@ -53,6 +53,74 @@ fn terminal_current(device: &mut VerilogADevice, voltages: &[f64]) -> f64 {
 }
 
 #[test]
+fn array_shape_bounds_are_exact_and_extents_are_checked_before_allocation() {
+    for (bounds, detail) in [
+        ("0:1.5", "finite integers"),
+        ("0:(0.0/0.0)", "finite integers"),
+        ("0:(1.0/0.0)", "finite integers"),
+        ("0:9223372036854775808.0", "finite integers"),
+        ("-9223372036854775808.0:0", "9223372036854775809 elements"),
+        (
+            "-9223372036854775808.0:(9223372036854774784+1023)",
+            "18446744073709551616 elements",
+        ),
+    ] {
+        let source = format!("module shape; real samples[{bounds}]; endmodule");
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .unwrap_err();
+        assert!(error.to_string().contains(detail), "{bounds}: {error}");
+    }
+}
+
+#[test]
+fn array_constant_indices_keep_exact_extreme_names_and_jacobians() {
+    for (expression, expected) in [
+        ("64'sh0020000000000000+64'sd1", 9_007_199_254_740_993_i64),
+        ("64'sh7ffffffffffffc00+64'sd1023", i64::MAX),
+        ("64'sh8000000000000000", i64::MIN),
+    ] {
+        let source = format!(
+            "module exact(p,n); inout p,n; electrical p,n; \
+             real samples[{expression}:{expression}]; \
+             analog begin samples[{expression}]=V(p,n)*V(p,n); \
+             I(p,n)<+samples[{expression}]; end endmodule"
+        );
+        let model = compile(&source);
+        assert_eq!(model.canonical_ir.hir.arrays[0].lower, expected);
+        assert_eq!(model.canonical_ir.hir.arrays[0].len, 1);
+        let mut device = model.device("X", &[1, 0]);
+        let (matrix, rhs) = collect_stamps(&mut device, &[0.5]);
+        assert!((matrix[&(0, 0)] - 1.0).abs() < 1e-12, "{expression}");
+        assert!((rhs[&0] - 0.25).abs() < 1e-12, "{expression}");
+        model.observe(&mut device);
+        assert_eq!(device.variable(&format!("samples[{expected}]")), Some(0.25));
+    }
+}
+
+#[test]
+fn array_constant_indices_reject_nonfinite_or_unrepresentable_values() {
+    for expression in ["0.0/0.0", "1.0/0.0", "1e30", "-1e30"] {
+        for statement in [
+            format!("samples[{expression}]=1; I(p,n)<+samples[0];"),
+            format!("I(p,n)<+samples[{expression}];"),
+        ] {
+            let source = format!(
+                "module invalid(p,n); inout p,n; electrical p,n; \
+                 real samples[0:0]; analog begin {statement} end endmodule"
+            );
+            let error = VerilogACompiler::default()
+                .compile_canonical_ir(&source)
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("finite signed 64-bit integer"),
+                "{statement}: {error}"
+            );
+        }
+    }
+}
+
+#[test]
 fn const_index_elements_resolve_under_unrolled_loop() {
     // Literal loop bounds unroll, so coef[i] resolves to element variables
     // at compile time; G = (1+2+3+4) mS = 10 mS

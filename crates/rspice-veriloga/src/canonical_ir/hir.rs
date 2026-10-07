@@ -1554,6 +1554,14 @@ impl HirModel {
                     CompilerPhase::HirValidation,
                     format!("HIR array '{}' must not have zero length", array.name),
                 ));
+            } else if i128::from(array.lower) + len as i128 - 1 > i128::from(i64::MAX) {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR array '{}' logical index range overflows i64",
+                        array.name
+                    ),
+                ));
             }
             let Some(end) = base.checked_add(len) else {
                 diagnostics.push(IrDiagnostic::global_error(

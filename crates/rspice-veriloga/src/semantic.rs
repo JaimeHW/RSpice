@@ -2134,8 +2134,8 @@ impl SemanticAnalyzer {
         }
         let dim = &item.dimensions[0];
         let (Some(start), Some(end)) = (
-            self.eval_const_invariant(&dim.start),
-            self.eval_const_invariant(&dim.end),
+            self.eval_const_invariant_value(&dim.start),
+            self.eval_const_invariant_value(&dim.end),
         ) else {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
@@ -2146,15 +2146,26 @@ impl SemanticAnalyzer {
             );
             return None;
         };
-        let (start, end) = (start.round() as i64, end.round() as i64);
+        let (Some(start), Some(end)) = (start.as_exact_i64(), end.as_exact_i64()) else {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "array '{}' bounds must be finite integers in the signed 64-bit index range",
+                    item.name
+                )),
+                dim.span,
+            );
+            return None;
+        };
         // The LRM writes ranges [lo:hi]; accept either order
         let (lower, upper) = if start <= end {
             (start, end)
         } else {
             (end, start)
         };
-        let len = (upper - lower + 1) as usize;
-        if len > Self::MAX_ARRAY_ELEMENTS {
+        // The full signed index domain spans 2^64 elements. Check its extent
+        // before narrowing to the target's allocation size (including Wasm).
+        let len = i128::from(upper) - i128::from(lower) + 1;
+        if len > Self::MAX_ARRAY_ELEMENTS as i128 {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "array '{}' has {len} elements (limit {})",
@@ -2165,6 +2176,7 @@ impl SemanticAnalyzer {
             );
             return None;
         }
+        let len = len as usize;
         let value_type = match var_type {
             VarType::Real => ValueType::Real,
             VarType::Integer => ValueType::Integer,
@@ -5060,9 +5072,8 @@ impl SemanticAnalyzer {
                 };
                 self.symbols.mark_used(&array_name);
                 let index = self.lower_expression_with_side_effects(index, module, sink)?;
-                if let Some(k) = self.eval_const_invariant(&index) {
+                if let Some(k) = self.constant_array_index(&index, &array_name)? {
                     // Compile-time index: target the element slot directly
-                    let k = k.round() as i64;
                     self.check_array_bounds(&array_name, &layout, k, *span)?;
                     let elem = SmolStr::from(format!("{array_name}[{k}]"));
                     (array_name, elem, *span, None)
@@ -5215,6 +5226,32 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    /// Preserve integral constants exactly and give real constants the same
+    /// checked rounding as runtime array indices. Saturating casts would turn
+    /// NaN or an unrepresentable index into an unrelated valid element.
+    fn constant_array_index(
+        &self,
+        expression: &Expression,
+        name: &str,
+    ) -> CompileResult<Option<i64>> {
+        let Some(value) = self.eval_const_invariant_value(expression) else {
+            return Ok(None);
+        };
+        match value {
+            ConstantValue::Integer(value) => Ok(Some(value)),
+            ConstantValue::Real(value) => crate::array_index::checked_rounded_i64(value)
+                .map(Some)
+                .map_err(|_| {
+                    CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::IndexOutOfBounds(format!(
+                            "index {value} of '{name}' must round to a finite signed 64-bit integer"
+                        )),
+                        expression.span(),
+                    ))
+                }),
+        }
+    }
+
     /// Validate a compile-time array index against the declared bounds
     fn check_array_bounds(
         &self,
@@ -5223,12 +5260,13 @@ impl SemanticAnalyzer {
         k: i64,
         span: Span,
     ) -> CompileResult<()> {
-        if k < layout.lower || k >= layout.lower + layout.len as i64 {
+        let offset = i128::from(k) - i128::from(layout.lower);
+        if offset < 0 || offset >= layout.len as i128 {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::IndexOutOfBounds(format!(
                     "index {k} outside '{name}[{}:{}]'",
                     layout.lower,
-                    layout.lower + layout.len as i64 - 1
+                    i128::from(layout.lower) + layout.len as i128 - 1
                 )),
                 span,
             )));
@@ -6428,8 +6466,7 @@ impl SemanticAnalyzer {
                 // Indexes that fold to instance-invariant constants (literals,
                 // unrolled loop variables) resolve straight to the element
                 // variable; everything else stays a runtime indexed access
-                if let Some(k) = self.eval_const_invariant(&index) {
-                    let k = k.round() as i64;
+                if let Some(k) = self.constant_array_index(&index, &array_name)? {
                     self.check_array_bounds(&array_name, &layout, k, a.span)?;
                     Expression::Identifier(Identifier {
                         name: SmolStr::from(format!("{array_name}[{k}]")),

@@ -3442,7 +3442,8 @@ fn dynamic_variable_bounds_error(
     lower: i64,
     len_i64: i64,
 ) -> String {
-    let upper = lower.saturating_add(len_i64).saturating_sub(1);
+    let upper = (i128::from(lower) + i128::from(len_i64) - 1)
+        .clamp(i128::from(i64::MIN), i128::from(i64::MAX));
     format!(
         "native dynamic variable access: array index {index} outside declared bounds [{lower}:{upper}]; no interpreter fallback"
     )
