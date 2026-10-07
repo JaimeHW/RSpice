@@ -11,6 +11,7 @@ fn options() -> FrequencyDataOptions {
         analysis: ".AC",
         positive_frequency: false,
         retain_netlists: false,
+        default_temperature: None,
     }
 }
 
@@ -99,4 +100,31 @@ fn allocator_refusal_preserves_its_typed_cause() {
     )
     .unwrap_err();
     assert!(matches!(error, SimulationError::Allocation { .. }));
+}
+
+#[test]
+fn temperature_coordinate_preserves_unrelated_resolved_policy() {
+    let netlist = Netlist::parse("Policy\n.options temp=27 itl1=99 reltol=.01\n.data points FREQ TEMP\n1 27\n2 127\n.enddata\n.end\n").unwrap();
+    let base = Engine::default();
+    let mut config = base.config().clone();
+    config.temperature = 350.0;
+    config.max_iterations = 17;
+    config.convergence_config.voltage_reltol = 1e-5;
+    let engine = base.try_resolved_with_config(config).unwrap();
+    let (_, result) = engine
+        .run_frequency_data(
+            &netlist,
+            "points",
+            options(),
+            &NoAbort,
+            |row_engine, _, _, _| {
+                let config = row_engine.config();
+                assert_eq!(config.max_iterations, 17);
+                assert_eq!(config.convergence_config.voltage_reltol, 1e-5);
+                Ok(vec![config.temperature])
+            },
+            |_| 1,
+        )
+        .unwrap();
+    assert_eq!(result.points, [300.15, 400.15]);
 }

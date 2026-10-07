@@ -563,6 +563,35 @@ impl Engine {
         resolved_engine
     }
 
+    /// Table coordinates select physical conditions even for a resolved caller.
+    /// Other resolved policies remain authoritative. An unresolved noise caller
+    /// supplies a fallback temperature only when the row has no authored one.
+    pub(super) fn frequency_row_config(
+        &self,
+        row: &Netlist,
+        temperature_celsius: Option<Value>,
+        default_temperature: Option<Value>,
+    ) -> SimulationConfig {
+        let mut config = if self.config_is_resolved {
+            self.config.clone()
+        } else {
+            resolve_simulation_config(
+                &self.config,
+                Some(&row.options),
+                &SimulationConfigOverrides::default(),
+            )
+        };
+        if let Some(temperature) = temperature_celsius {
+            config.temperature = temperature + 273.15;
+        } else if !self.config_is_resolved
+            && row.options.temp.is_none()
+            && let Some(temperature) = default_temperature
+        {
+            config.temperature = temperature;
+        }
+        config
+    }
+
     /// Per-deck engine from a configuration the caller has already resolved.
     ///
     /// Same metric-sharing contract as [`Self::resolved_for_netlist`]: the

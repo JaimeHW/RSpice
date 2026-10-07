@@ -19,6 +19,7 @@ pub(super) struct FrequencyDataOptions {
     pub analysis: &'static str,
     pub positive_frequency: bool,
     pub retain_netlists: bool,
+    pub default_temperature: Option<Value>,
 }
 
 struct FrequencyDataOverridePlan {
@@ -205,6 +206,9 @@ impl Engine {
         }
         let plan =
             FrequencyDataOverridePlan::resolve(netlist, &table.params, table.rows.len(), abort)?;
+        let temperature_column = plan.columns.iter().position(|column| {
+            matches!(&column.target, FrequencyDataTarget::Parameter(name) if name == "TEMP")
+        });
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
@@ -250,7 +254,7 @@ impl Engine {
             limits.max_expanded_source_bytes = limits
                 .max_expanded_source_bytes
                 .saturating_sub(retained_source_bytes);
-            let (row, _) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
+            let (mut row, _) = Self::create_perturbed_netlist_multi_with_limits_and_abort(
                 netlist, &overrides, limits, abort,
             )
             .map_err(|error| {
@@ -270,11 +274,16 @@ impl Engine {
                     self.config().resource_limits.max_expanded_source_bytes,
                 )?;
             }
-            // Resolve row options before constructing a bounded resolved engine.
-            let row_engine = self.resolved_for_netlist(&row);
-            let mut config = row_engine.config().clone();
+            // A physical study coordinate also overrides an executed control
+            // option. Keep the compatibility netlist and solver in agreement.
+            let temperature = temperature_column.map(|index| values[index]);
+            if let Some(temperature) = temperature {
+                row.options.temp = Some(temperature);
+            }
+            let mut config =
+                self.frequency_row_config(&row, temperature, options.default_temperature);
             config.resource_limits.max_result_values -= retained_values;
-            let bounded = row_engine.try_resolved_with_config(config)?;
+            let bounded = self.try_resolved_with_config(config)?;
             let mut points = match solve_row(&bounded, &row, values[frequency_column], abort) {
                 Err(SimulationError::ModelFinished(finish)) if !result.points.is_empty() => {
                     result.finish = Some(*finish);

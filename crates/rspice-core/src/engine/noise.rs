@@ -3178,7 +3178,10 @@ impl Engine {
     }
 
     /// Execute table-driven noise with compact, typed coordinates for each row.
-    /// Row options supply the noise temperature, falling back to the argument.
+    /// A `TEMP` coordinate selects the row's physical temperature. Otherwise a
+    /// resolved caller retains its run temperature; an unresolved caller uses
+    /// the row's options, falling back to the Kelvin argument. Circuit equations
+    /// and noise densities use that same selected temperature.
     #[allow(clippy::too_many_arguments)]
     pub fn run_noise_table_named_with_input_source_and_abort(
         &self,
@@ -3244,21 +3247,17 @@ impl Engine {
                 analysis: ".NOISE",
                 positive_frequency: true,
                 retain_netlists,
+                default_temperature: Some(default_temperature),
             },
             abort,
             |engine, row, frequency, abort| {
-                let temperature = row
-                    .options
-                    .temp
-                    .map(|celsius| celsius + 273.15)
-                    .unwrap_or(default_temperature);
                 engine.run_noise_named_with_input_source_and_abort(
                     row,
                     output_pos,
                     output_neg,
                     input_source,
                     &[frequency],
-                    temperature,
+                    engine.config().temperature,
                     abort,
                 )
             },

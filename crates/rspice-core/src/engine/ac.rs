@@ -3154,6 +3154,7 @@ impl Engine {
                 analysis: ".AC",
                 positive_frequency: false,
                 retain_netlists,
+                default_temperature: None,
             },
             abort,
             |engine, row, frequency, abort| engine.run_ac_with_abort(row, &[frequency], abort),
