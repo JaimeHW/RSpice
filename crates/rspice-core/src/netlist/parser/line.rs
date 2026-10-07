@@ -215,7 +215,13 @@ pub(super) fn process_line(
 
     // Check for .SUBCKT start
     if head.eq_ignore_ascii_case(".subckt") {
-        let subckt = parse_subckt_def(line, line_num, state.condition_scope())?;
+        let (subckt, provisional_error) =
+            parse_subckt_def(line, line_num, state.condition_scope())?;
+        if let Some(error) = provisional_error {
+            state
+                .temperature_options
+                .retain_card_error(error, line_num, origin);
+        }
         let parent_scope = state
             .subckt_stack
             .last()

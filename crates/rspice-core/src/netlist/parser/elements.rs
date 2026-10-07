@@ -8672,7 +8672,7 @@ pub(super) fn parse_subckt_def(
     line: &str,
     line_num: usize,
     params_ctx: &ParamContext,
-) -> Result<SubcircuitDef, ParseError> {
+) -> Result<(SubcircuitDef, Option<ParseError>), ParseError> {
     let expression_dialect = params_ctx.expression_dialect();
     let (fields, parenthesized_port_count) = split_subckt_definition_fields(
         line,
@@ -8797,10 +8797,14 @@ pub(super) fn parse_subckt_def(
         }
     }
 
-    let (params, expr_params, string_params) =
-        resolve_subckt_default_params(assignments, params_ctx, line_num)?;
+    let ResolvedSubcktDefaults {
+        params,
+        expr_params,
+        string_params,
+        provisional_error,
+    } = resolve_subckt_default_params(assignments, params_ctx, line_num);
 
-    Ok(SubcircuitDef {
+    let definition = SubcircuitDef {
         name,
         ports,
         elements: Vec::new(),
@@ -8816,7 +8820,8 @@ pub(super) fn parse_subckt_def(
         local_options: std::collections::HashMap::new(),
         library_ref: None,
         nested_subcircuits: Vec::new(),
-    })
+    };
+    Ok((definition, provisional_error))
 }
 
 /// Split a `.SUBCKT` declaration while recognizing the HSpice-compatible
@@ -8997,23 +9002,23 @@ fn skip_subckt_optional_defaults(
     }
 }
 
-/// Parameters after resolution, split by what each one resolved to: numeric
-/// values, string literals, and the assignments that stayed symbolic.
-type ResolvedParams = (
-    Vec<(String, Value)>,
-    Vec<(String, String)>,
-    Vec<(String, String)>,
-);
+/// Defaults retain expressions for each instance, including defaults that
+/// cannot yet be evaluated at the provisional parser temperatures.
+#[derive(Default)]
+struct ResolvedSubcktDefaults {
+    params: Vec<(String, Value)>,
+    expr_params: Vec<(String, String)>,
+    string_params: Vec<(String, String)>,
+    provisional_error: Option<ParseError>,
+}
 
 fn resolve_subckt_default_params(
     assignments: Vec<(String, String)>,
     params_ctx: &ParamContext,
     line_num: usize,
-) -> Result<ResolvedParams, ParseError> {
+) -> ResolvedSubcktDefaults {
     let mut eval_ctx = params_ctx.isolated_random_clone();
-    let mut params = Vec::new();
-    let mut expr_params = Vec::new();
-    let mut string_params = Vec::new();
+    let mut resolved = ResolvedSubcktDefaults::default();
     let mut pending = authoritative_subckt_default_assignments(
         assignments,
         params_ctx.parameter_redefinition_policy(),
@@ -9023,12 +9028,11 @@ fn resolve_subckt_default_params(
         let mut progress = false;
         let mut unresolved = Vec::new();
         let mut first_error = None;
-        let mut deferrable = true;
 
         for (param_name, raw_value) in pending {
             if let Some(value) = parse_string_field_value(&raw_value, &eval_ctx) {
                 eval_ctx.set_string(&param_name, value.clone());
-                string_params.push((param_name, value));
+                resolved.string_params.push((param_name, value));
                 progress = true;
                 continue;
             }
@@ -9038,38 +9042,42 @@ fn resolve_subckt_default_params(
                     eval_ctx.set(&param_name, value);
                     if parse_spice_value(raw_value.trim()).is_err() {
                         let expr = strip_wrapping_expression_delimiters(&raw_value).to_string();
-                        upsert_param_expression(&mut expr_params, param_name.clone(), expr);
+                        upsert_param_expression(
+                            &mut resolved.expr_params,
+                            param_name.clone(),
+                            expr,
+                        );
                     }
-                    params.push((param_name, value));
+                    resolved.params.push((param_name, value));
                     progress = true;
                 }
                 Err(err) => {
                     if !parameter_error_can_defer(&err) {
-                        deferrable = false;
+                        first_error.get_or_insert(err);
                     }
-                    first_error.get_or_insert(err);
                     unresolved.push((param_name, raw_value));
                 }
             }
         }
 
         if !progress {
-            if deferrable {
-                for (param_name, raw_value) in unresolved {
-                    let expr = strip_wrapping_expression_delimiters(&raw_value).to_string();
-                    upsert_param_expression(&mut expr_params, param_name, expr);
-                }
-                break;
+            // Only retain failures after the header's forward defaults stop
+            // making progress: a later default can repair an earlier operand.
+            // Undefined names keep their ordinary instance-time resolution;
+            // other failures require a successful fresh-source temperature
+            // pass, even if this definition is unused or an instance overrides
+            // the failing default. Never invent a numeric fallback binding.
+            resolved.provisional_error = first_error;
+            for (param_name, raw_value) in unresolved {
+                let expr = strip_wrapping_expression_delimiters(&raw_value).to_string();
+                upsert_param_expression(&mut resolved.expr_params, param_name, expr);
             }
-            return Err(first_error.unwrap_or_else(|| ParseError::Syntax {
-                line: line_num,
-                message: "subcircuit default parameters could not be resolved".to_string(),
-            }));
+            break;
         }
         pending = unresolved;
     }
 
-    Ok((params, expr_params, string_params))
+    resolved
 }
 
 fn authoritative_subckt_default_assignments(

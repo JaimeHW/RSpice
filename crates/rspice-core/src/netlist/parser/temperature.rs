@@ -264,6 +264,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn header_discovery_stops_at_every_cancellation_boundary() {
+        let source = "Header abort\n.options seed=37\n.subckt cell p params: derived={2*gain} gain={aunif(1,.1)+58/(TEMP-27)}\nV1 p 0 {derived}\n.ends\n.temp {ambient}\n.param ambient=85\n.end\n";
+        for limit in 0..1024 {
+            let abort = crate::abort_signal::CountingAbort::new(limit);
+            let result = super::super::parse_netlist_with_options_and_abort(
+                source,
+                NetlistParseOptions::default(),
+                &abort,
+            );
+            assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
+            match result {
+                Err(ParseWithAbortError::Aborted) => {}
+                Ok(netlist) => {
+                    assert!(limit > 20);
+                    assert_eq!(netlist.options.temp, Some(85.0));
+                    return;
+                }
+                error => panic!("unexpected result at poll limit {limit}: {error:?}"),
+            }
+        }
+        panic!("header cancellation coverage never reached successful completion");
+    }
+
+    #[test]
+    fn physical_override_reaches_header_defaults_before_authored_temperatures() {
+        let netlist = parse_netlist_with_parameter_overrides_and_abort(
+            "Header coordinate\n.subckt cell p params: gain={58/(TEMP-27)}\n.ends\n.temp 27\n.end\n",
+            NetlistParseOptions::default(),
+            &[ParameterOverride { name: "TEMP".into(), value: 85.0, global: false, direction: false }],
+            &NoAbort,
+        ).unwrap();
+        assert_eq!(netlist.options.temp, Some(85.0));
+        assert!(
+            netlist.subcircuits[0]
+                .params
+                .iter()
+                .any(|(name, value)| name.eq_ignore_ascii_case("gain") && *value == 1.0)
+        );
+    }
+
+    #[test]
     fn conditional_discovery_stops_at_every_cancellation_boundary() {
         for source in [
             "Conditional abort\n.if (1/(TEMP-27))\n.param selected=1\n.else\n.param selected=2\n.endif\n.temp 85\n.end\n",
