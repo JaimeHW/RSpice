@@ -113,21 +113,29 @@ impl ParserTemperatures {
 
 /// Resolve both global temperatures before publishing any eagerly parsed
 /// values. An acyclic dependence between TEMP and TNOM needs at most three
-/// passes (discovery, dependency propagation, confirmation). A changing or
-/// cyclic selection is an error, never a silently accepted provisional deck.
+/// successful passes (discovery, dependency propagation, confirmation). Failed
+/// discovery can skip later random draws, so it has a separate three-attempt
+/// limit. Either limit stops replay: at most five total attempts are possible.
+/// A changing or cyclic selection never publishes a provisional deck.
 pub(super) fn parse_with_consistent_temperatures(
     mut parse: impl FnMut(
         Option<ParserTemperatures>,
     ) -> Result<(Netlist, ParserTemperatures), TemperaturePassError>,
 ) -> Result<Netlist, ParseWithAbortError> {
     let mut selected = None;
-    for _ in 0..3 {
+    let mut completed_passes = 0;
+    let mut failed_passes = 0;
+    loop {
         let (netlist, used) = match parse(selected) {
             Ok(result) => result,
             Err(TemperaturePassError {
                 selected: Some(temperatures),
                 ..
             }) => {
+                failed_passes += 1;
+                if failed_passes == 3 {
+                    break;
+                }
                 selected = Some(temperatures);
                 continue;
             }
@@ -136,6 +144,10 @@ pub(super) fn parse_with_consistent_temperatures(
         let resolved = ParserTemperatures::resolved(&netlist);
         if used == resolved {
             return Ok(netlist);
+        }
+        completed_passes += 1;
+        if completed_passes == 3 {
+            break;
         }
         selected = Some(resolved);
     }
@@ -302,9 +314,26 @@ mod tests {
 
     #[test]
     fn pending_group_discovery_stops_at_every_cancellation_boundary() {
-        for source in [
-            "Root group\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1 nominal=55\n.end\n",
-            "Delayed group\n.subckt parent p\n.subckt child q\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1\n.ends\n.param nominal=55\n.ends\n.end\n",
+        let mut reference = ParamContext::new();
+        reference.set_random_seed(37);
+        let operand = eval_expression("aunif(0,1)", &reference).unwrap();
+        let nominal = 55.0 + eval_expression("aunif(0,1)", &reference).unwrap();
+        for (source, expected_temp, expected_tnom) in [
+            (
+                "Root group\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1 nominal=55\n.end\n",
+                1.0 / 28.0,
+                55.0,
+            ),
+            (
+                "Delayed group\n.subckt parent p\n.subckt child q\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1\n.ends\n.param nominal=55\n.ends\n.end\n",
+                1.0 / 28.0,
+                55.0,
+            ),
+            (
+                "Reachable draws\n.options seed=37 temp={scale/(TNOM-27)+aunif(0,1)} tnom={nominal+aunif(0,1)}\n.param scale=1 nominal=55\n.end\n",
+                operand + 1.0 / (nominal - 27.0),
+                nominal,
+            ),
         ] {
             let mut completed = false;
             for limit in 0..1024 {
@@ -319,8 +348,8 @@ mod tests {
                     Err(ParseWithAbortError::Aborted) => {}
                     Ok(netlist) => {
                         assert!(limit > 20);
-                        assert_eq!(netlist.options.temp, Some(1.0 / 28.0));
-                        assert_eq!(netlist.options.tnom, Some(55.0));
+                        assert_eq!(netlist.options.temp, Some(expected_temp));
+                        assert_eq!(netlist.options.tnom, Some(expected_tnom));
                         completed = true;
                         break;
                     }
@@ -433,6 +462,10 @@ mod tests {
                 ".param nominal=55\n.options temp={TNOM+10} tnom={nominal}\n",
                 3,
             ),
+            (
+                ".options seed=37 temp={scale/(TNOM-27)+aunif(0,1)} tnom={nominal+aunif(0,1)}\n.param scale=1 nominal=55\n",
+                4,
+            ),
         ] {
             let source = format!("Temperature pass count\n{body}.end\n");
             let mut passes = 0;
@@ -453,6 +486,48 @@ mod tests {
             })
             .unwrap();
             assert_eq!(passes, expected, "{body}");
+        }
+    }
+
+    #[test]
+    fn unstable_discovery_and_confirmation_have_independent_finite_limits() {
+        let template = Netlist::parse("Empty template\n.end\n").unwrap();
+        for (failures, expected) in [
+            ([true; 5], 3),
+            ([false; 5], 3),
+            ([true, false, true, false, true], 5),
+            ([false, true, false, true, false], 5),
+        ] {
+            let mut calls = 0;
+            let result = parse_with_consistent_temperatures(|selected| {
+                let failed = failures[calls];
+                calls += 1;
+                let resolved = ParserTemperatures {
+                    temp: Some(calls as Value),
+                    tnom: None,
+                };
+                let used = selected.unwrap_or_default();
+                if failed {
+                    Err(TemperaturePassError::after_completion(
+                        ParseError::InvalidValue("failed operand".into()).into(),
+                        used,
+                        resolved,
+                        None,
+                        &[],
+                    ))
+                } else {
+                    let mut netlist = template.clone();
+                    netlist.options.temp = resolved.temp;
+                    Ok((netlist, used))
+                }
+            });
+            assert_eq!(calls, expected);
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("TEMP/TNOM selection changes")
+            );
         }
     }
 

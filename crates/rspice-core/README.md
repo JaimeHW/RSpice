@@ -408,8 +408,12 @@ A deferred analysis that fails at the provisional temperature retains its error
 while the parser discovers any later `.TEMP` selection. If options or that
 directive select a different temperature, a fresh pass must validate the whole
 deck before publication. The original error remains fatal at a stable setting;
-cancellation and resource errors return immediately. This uses the existing
-three-pass bound and preserves physical study overrides and statistical order.
+cancellation and resource errors return immediately. Successful passes retain
+their three-attempt consistency limit. Failed discovery has its own
+three-attempt limit because an invalid operand can skip later random draws;
+either limit stops replay, for at most five total attempts. Publication still
+requires a complete pass at the same selected temperature. Physical study
+overrides and statistical order are preserved.
 
 Typed `AnalysisCardError` values retain the physical card origin in `origin`.
 Both their `source_location()` method and `ParseError::source_location()` expose
