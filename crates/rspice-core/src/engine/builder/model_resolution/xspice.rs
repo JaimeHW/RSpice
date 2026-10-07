@@ -1097,11 +1097,11 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
 ) -> Result<ResolvedXspiceModel, SimulationError> {
     let materialized = instance
         .materialize_string_aliases(&netlist.params, netlist.abort)
-        .map_err(|error| match error {
-            crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
-            crate::netlist::ParseWithAbortError::Parse(error) => SimulationError::Circuit(format!(
-                "XSPICE model '{model_name}' instance parameters: {error}"
-            )),
+        .map_err(|error| {
+            map_build_parse_error(
+                &format!("XSPICE model '{model_name}' instance parameters"),
+                error,
+            )
         })?;
     let instance = materialized
         .as_ref()

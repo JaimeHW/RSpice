@@ -9355,14 +9355,14 @@ impl Engine {
                             real_vector_expr_params,
                         },
                     )
-                    .map_err(|e| {
-                        if matches!(e, SimulationError::Aborted) {
-                            return e;
-                        }
-                        SimulationError::Circuit(format!(
+                    .map_err(|error| match error {
+                        SimulationError::Circuit(message) => SimulationError::Circuit(format!(
                             "Failed to resolve XSPICE model '{}' for element {}: {}",
-                            model, element.name, e
-                        ))
+                            model, element.name, message
+                        )),
+                        // Parsing, cancellation and other typed failures retain
+                        // their category across the construction boundary.
+                        error => error,
                     })?;
 
                     let mut numeric_params = resolved_model.numeric_params.clone();

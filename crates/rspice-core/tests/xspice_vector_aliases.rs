@@ -152,3 +152,25 @@ fn alias_parsing_and_binding_preserve_cancellation_at_every_poll() {
     let actual = flatten_netlist_with_models(&netlist).unwrap();
     assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
 }
+
+#[test]
+fn late_alias_syntax_failures_keep_the_netlist_error_category() {
+    for scoped in [false, true] {
+        let mut body = String::from("A1 [in] print_param_types real_array={payload}");
+        if scoped {
+            body = format!(".SUBCKT cell in\n{body}\n.ENDS\nX1 in cell");
+        }
+        let netlist = Netlist::parse(&format!(
+            "* typed alias error\n{body}\n.PARAM payload=\"[1 2] trailing\"\n.END\n"
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .build_circuit(&netlist)
+            .map(|_| ())
+            .expect_err("malformed vector alias");
+        assert!(
+            matches!(error, rspice_core::SimulationError::Netlist(_)),
+            "scoped={scoped}: {error}"
+        );
+    }
+}
