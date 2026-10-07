@@ -486,7 +486,7 @@ Each result-family batch includes public control/direct equivalence, result iden
 | C04f | `Pac`, `Pxf`, `Pnoise`, `Pstb`, `Envelope`, `Qpac`, `Qpxf`, `Qpnoise` | Validate producer compatibility; preserve sideband/lattice identity, conversion data, correlations, and continuation |
 | C04g | `Step`, `Temp`, `MonteCarlo` | Bounded child-analysis orchestration, nested identities, deterministic seeds, completed-child retention, cancellation, and circuit/configuration invalidation |
 
-These groups enumerate the original 26 missing variants exactly once; `Dc`, `Noise`, `AcData` and `NoiseData` have core dispatch and 22 remain. Table documents and CLI/WASM adapters now publish coordinates and binding/completion metadata. Keep OP/DC/AC/NOISE/transient and mixed-script regressions in every affected contract check; producer cards and wrappers must not be forced into standalone analysis semantics.
+These groups enumerate the original 26 missing variants exactly once; `Dc`, `Noise`, `AcData`, `NoiseData` and `Tf` have core dispatch and 21 remain. Table documents and CLI/WASM adapters now publish coordinates and binding/completion metadata. Keep OP/DC/AC/NOISE/TF/transient and mixed-script regressions in every affected contract check; producer cards and wrappers must not be forced into standalone analysis semantics.
 
 C04b delivery is tracked in the following slices:
 
