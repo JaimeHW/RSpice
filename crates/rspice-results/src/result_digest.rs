@@ -1086,40 +1086,14 @@ fn encode_result_payload(
             writer.u8(12);
             encode_fft_spectrum_evidence(writer, spectrum);
         }
+        AnalysisResultPayload::Stb { response } if !response.circuit_poles.is_not_computed() => {
+            writer.u8(19);
+            encode_stb_response(writer, response);
+        }
         AnalysisResultPayload::Stb { response } => {
-            // New payload tag; never reuse a previously published tag.
+            // Preserve published tag-18 hashes for legacy/sweep-only evidence.
             writer.u8(18);
-            writer.bool(response.success);
-            writer.sequence(response.bode_points.len());
-            for p in &response.bode_points {
-                writer.f64(p.frequency);
-                writer.f64(p.loop_gain.re);
-                writer.f64(p.loop_gain.im);
-                for value in [p.magnitude, p.magnitude_db, p.phase_deg] {
-                    writer.option(value.as_ref(), |w, v| w.f64(*v));
-                }
-            }
-            writer.sequence(response.nyquist_points.len());
-            for p in &response.nyquist_points {
-                writer.f64(p.frequency);
-                writer.f64(p.real);
-                writer.f64(p.imag);
-            }
-            for margin in [response.margins.gain_margin, response.margins.phase_margin] {
-                writer.option(margin.as_ref(), |w, m| {
-                    w.f64(m.value);
-                    w.f64(m.frequency);
-                });
-            }
-            writer.option(response.margins.dc_loop_gain.as_ref(), |w, v| {
-                w.f64(v.re);
-                w.f64(v.im);
-            });
-            writer.usize(response.margins.num_crossovers);
-            writer.sequence(response.warnings.len());
-            for warning in &response.warnings {
-                writer.string(warning);
-            }
+            encode_stb_response(writer, response);
         }
         AnalysisResultPayload::Qpnoise { response } => {
             writer.u8(17);
@@ -1269,6 +1243,95 @@ const fn digital_bus_source_tag(source: DigitalBusSourceEvidence) -> u8 {
         DigitalBusSourceEvidence::Engine => 0,
         DigitalBusSourceEvidence::Schematic => 1,
         DigitalBusSourceEvidence::Import => 2,
+    }
+}
+
+fn encode_stb_response(
+    writer: &mut ResultDigestWriter,
+    response: &rspice_core::analysis::stb::StbResult,
+) {
+    writer.bool(response.success);
+    writer.sequence(response.bode_points.len());
+    for p in &response.bode_points {
+        writer.f64(p.frequency);
+        writer.f64(p.loop_gain.re);
+        writer.f64(p.loop_gain.im);
+        for value in [p.magnitude, p.magnitude_db, p.phase_deg] {
+            writer.option(value.as_ref(), |w, v| w.f64(*v));
+        }
+    }
+    writer.sequence(response.nyquist_points.len());
+    for p in &response.nyquist_points {
+        writer.f64(p.frequency);
+        writer.f64(p.real);
+        writer.f64(p.imag);
+    }
+    for margin in [response.margins.gain_margin, response.margins.phase_margin] {
+        writer.option(margin.as_ref(), |w, m| {
+            w.f64(m.value);
+            w.f64(m.frequency);
+        });
+    }
+    writer.option(response.margins.dc_loop_gain.as_ref(), |w, v| {
+        w.f64(v.re);
+        w.f64(v.im);
+    });
+    writer.usize(response.margins.num_crossovers);
+    writer.sequence(response.warnings.len());
+    for warning in &response.warnings {
+        writer.string(warning);
+    }
+    if !response.circuit_poles.is_not_computed() {
+        use rspice_core::analysis::stb::{CircuitPoleEvidence as E, CircuitPoleFailure as F};
+        match &response.circuit_poles {
+            E::Available { spectrum } => {
+                writer.u8(0);
+                writer.sequence(spectrum.poles.len());
+                for pole in &spectrum.poles {
+                    writer.f64(pole.re);
+                    writer.f64(pole.im);
+                }
+                // Available evidence is validated before retaining a result.
+                use rspice_core::analysis::pole_zero::RootSetEvidence as R;
+                writer.u8(match &spectrum.evidence {
+                    R::NotRequested => 0,
+                    R::QualifiedEmpty { .. } => 1,
+                    R::Qualified { .. } => 2,
+                    R::Approximate { .. } => 3,
+                    R::LegacyUnknown => 4,
+                    _ => 255,
+                });
+                let certificate = spectrum.evidence.certificate();
+                writer.option(certificate, |w, c| {
+                    w.usize(c.problem_order);
+                    w.usize(c.infinite_count);
+                    w.f64(c.max_backward_error);
+                    w.f64(c.qualification_tolerance);
+                });
+            }
+            E::Unavailable { cause } => match cause {
+                F::Unsupported { capability, detail } => {
+                    writer.u8(1);
+                    writer.string(capability);
+                    writer.string(detail);
+                }
+                F::Numerical { detail } => {
+                    writer.u8(2);
+                    writer.string(detail);
+                }
+                F::ResourceLimit {
+                    resource,
+                    requested,
+                    limit,
+                } => {
+                    writer.u8(3);
+                    writer.string(resource);
+                    writer.usize(*requested);
+                    writer.usize(*limit);
+                }
+            },
+            E::NotComputed => unreachable!(),
+        }
     }
 }
 

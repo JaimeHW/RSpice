@@ -3,6 +3,60 @@
 use super::*;
 
 #[test]
+fn stb_worker_preserves_circuit_modes_and_rejects_corrupt_root_buffers() {
+    use rspice_core::analysis::pole_zero::{Matrix, PoleZeroAnalyzer};
+    use rspice_core::analysis::stb::{
+        CircuitPoleEvidence, CircuitPoleFailure, StbAnalyzer, StbConfig,
+    };
+    let mut retained = StbAnalyzer::new(StbConfig::new())
+        .analyze(
+            &[1.0, 10.0],
+            &[
+                rspice_core::Complex64::new(2.0, -1.0),
+                rspice_core::Complex64::new(0.2, -0.1),
+            ],
+        )
+        .unwrap();
+    let spectrum = PoleZeroAnalyzer::new(Matrix::from_dense(vec![vec![-2.0]]), Matrix::identity(1))
+        .pole_spectrum()
+        .unwrap();
+    for evidence in [
+        CircuitPoleEvidence::Available { spectrum },
+        CircuitPoleEvidence::Unavailable {
+            cause: CircuitPoleFailure::Numerical {
+                detail: "descriptor is irregular".into(),
+            },
+        },
+        CircuitPoleEvidence::Unavailable {
+            cause: CircuitPoleFailure::ResourceLimit {
+                resource: "result_values".into(),
+                requested: 100,
+                limit: 90,
+            },
+        },
+    ] {
+        retained.circuit_poles = evidence;
+        let response = WorkerResponse {
+            id: 73,
+            outcome: WorkerOutcome::Success(Box::new(WorkerSimulationResult::Stb {
+                response: retained.clone(),
+                measurements: Vec::new(),
+            })),
+        };
+        let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
+        assert_eq!(transport.clone().into_response().unwrap(), response);
+        if retained.circuit_poles.spectrum().is_some() {
+            assert_eq!(transport.buffers.len(), 2);
+            for invalid in [f64::NAN, 3.0] {
+                let mut bad = transport.clone();
+                bad.buffers.iter_mut().find(|v| v.len() == 2).unwrap()[0] = invalid;
+                assert!(bad.into_response().is_err());
+            }
+        }
+    }
+}
+
+#[test]
 fn stb_worker_retains_zero_samples_and_rejects_invalid_availability() {
     use rspice_core::analysis::stb::{StbAnalyzer, StbConfig};
     let mut evidence = StbAnalyzer::new(StbConfig::new())

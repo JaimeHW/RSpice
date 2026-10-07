@@ -497,10 +497,11 @@ fn format_frequency(value: f64) -> String {
 fn payload_values_label(payload: &AnalysisResultPayload) -> String {
     match payload {
         AnalysisResultPayload::Stb { response } => format!(
-            "{} loop-gain samples / {} measured unity crossings; {}",
+            "{} loop-gain samples / {} measured unity crossings; {}; circuit stability {:?}",
             response.bode_points.len(),
             response.margins.num_crossovers,
-            response.margin_assessment()
+            response.margin_assessment(),
+            response.stability_verdict()
         ),
         AnalysisResultPayload::Qpnoise { response } => format!(
             "{} frequencies / {} outputs / {} physical mechanisms; full noise covariance and measurement statuses",

@@ -1,10 +1,91 @@
 //! Transfer complete STB samples with explicit presence bits in a bounded numeric buffer.
 use super::*;
-use rspice_core::analysis::stb::{BodePoint, NyquistPoint, StabilityMargins, StbResult};
+use rspice_core::analysis::pole_zero::{PoleSpectrum, RootSetEvidence};
+use rspice_core::analysis::stb::{
+    BodePoint, CircuitPoleEvidence, CircuitPoleFailure, NyquistPoint, StabilityMargins, StbResult,
+};
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+enum WorkerCircuitPoles {
+    #[default]
+    NotComputed,
+    Available {
+        roots: WorkerF64Series,
+        evidence: RootSetEvidence,
+    },
+    Unavailable {
+        cause: CircuitPoleFailure,
+    },
+}
+
+impl WorkerCircuitPoles {
+    #[cfg(any(feature = "browser-worker", test))]
+    fn from_response(
+        value: CircuitPoleEvidence,
+        buffers: &mut Vec<Vec<f64>>,
+    ) -> Result<Self, String> {
+        Ok(match value {
+            CircuitPoleEvidence::NotComputed => Self::NotComputed,
+            CircuitPoleEvidence::Unavailable { cause } => Self::Unavailable { cause },
+            CircuitPoleEvidence::Available { spectrum } => {
+                let mut values = Vec::new();
+                values
+                    .try_reserve_exact(
+                        spectrum
+                            .poles
+                            .len()
+                            .checked_mul(2)
+                            .ok_or("circuit-pole buffer overflow")?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                for pole in spectrum.poles {
+                    values.extend([pole.re, pole.im]);
+                }
+                Self::Available {
+                    roots: WorkerF64Series::from_vec(values, buffers),
+                    evidence: spectrum.evidence,
+                }
+            }
+        })
+    }
+
+    fn into_response(
+        self,
+        buffers: &[Vec<f64>],
+        remaining: usize,
+    ) -> Result<CircuitPoleEvidence, String> {
+        Ok(match self {
+            Self::NotComputed => CircuitPoleEvidence::NotComputed,
+            Self::Unavailable { cause } => CircuitPoleEvidence::Unavailable { cause },
+            Self::Available { roots, evidence } => {
+                if !matches!(roots, WorkerF64Series::Buffer { .. })
+                    || !roots.len().is_multiple_of(2)
+                    || roots.len() > remaining
+                {
+                    return Err("circuit poles require a bounded dedicated buffer".into());
+                }
+                let values = roots.into_vec(buffers)?;
+                let mut poles = Vec::new();
+                poles
+                    .try_reserve_exact(values.len() / 2)
+                    .map_err(|e| e.to_string())?;
+                for value in values.chunks_exact(2) {
+                    poles.push(rspice_core::Complex64::new(value[0], value[1]));
+                }
+                CircuitPoleEvidence::Available {
+                    spectrum: PoleSpectrum { poles, evidence },
+                }
+            }
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct WorkerStbResultTransport {
+    #[serde(default)]
+    circuit_poles: WorkerCircuitPoles,
     margins: StabilityMargins,
     warnings: Vec<String>,
     nyquist: bool,
@@ -26,7 +107,10 @@ impl WorkerStbResultTransport {
             .bode_points
             .len()
             .checked_mul(9)
-            .filter(|n| *n <= MAX_WORKER_F64_VALUES)
+            .filter(|n| {
+                n.saturating_add(response.circuit_poles.retained_value_count())
+                    <= MAX_WORKER_F64_VALUES
+            })
             .ok_or("STB evidence exceeds worker limit")?;
         let mut values = Vec::new();
         values.try_reserve_exact(len).map_err(|e| e.to_string())?;
@@ -37,6 +121,7 @@ impl WorkerStbResultTransport {
             }
         }
         Ok(Self {
+            circuit_poles: WorkerCircuitPoles::from_response(response.circuit_poles, buffers)?,
             margins: response.margins,
             warnings: response.warnings,
             nyquist: !response.nyquist_points.is_empty(),
@@ -44,6 +129,17 @@ impl WorkerStbResultTransport {
         })
     }
     pub(super) fn into_response(self, buffers: &[Vec<f64>]) -> Result<StbResult, String> {
+        if let (
+            WorkerCircuitPoles::Available {
+                roots: WorkerF64Series::Buffer { buffer: roots, .. },
+                ..
+            },
+            WorkerF64Series::Buffer { buffer: points, .. },
+        ) = (&self.circuit_poles, &self.points)
+            && roots == points
+        {
+            return Err("circuit poles and STB samples must use distinct buffers".into());
+        }
         let n = self.points.len();
         let limits = rspice_core::ResourceLimits::default();
         if !matches!(self.points, WorkerF64Series::Buffer { .. })
@@ -64,6 +160,9 @@ impl WorkerStbResultTransport {
             }
         };
         let mut response = StbResult::new();
+        response.circuit_poles = self
+            .circuit_poles
+            .into_response(buffers, MAX_WORKER_F64_VALUES.saturating_sub(n))?;
         response
             .bode_points
             .try_reserve_exact(n / 9)
@@ -95,5 +194,38 @@ impl WorkerStbResultTransport {
             .validate_with_abort(&limits, &rspice_core::NoAbort)
             .map_err(|e| e.to_string())?;
         Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stb_worker_refuses_aliasing_circuit_poles_with_loop_samples() {
+        let mut response = rspice_core::analysis::stb::StbAnalyzer::new(Default::default())
+            .analyze(&[1.0, 2.0], &[rspice_core::Complex64::new(0.5, 0.0); 2])
+            .unwrap();
+        response.circuit_poles = CircuitPoleEvidence::Available {
+            spectrum: PoleSpectrum {
+                poles: vec![rspice_core::Complex64::new(-1.0, 0.0)],
+                evidence: RootSetEvidence::Qualified {
+                    certificate: rspice_core::analysis::SpectrumCertificate::exact(1, 0).unwrap(),
+                },
+            },
+        };
+        let mut buffers = Vec::new();
+        let mut transport =
+            WorkerStbResultTransport::from_response(response, &mut buffers).unwrap();
+        let WorkerCircuitPoles::Available { roots, .. } = &mut transport.circuit_poles else {
+            panic!()
+        };
+        *roots = transport.points.clone();
+        assert!(
+            transport
+                .into_response(&buffers)
+                .unwrap_err()
+                .contains("distinct buffers")
+        );
     }
 }

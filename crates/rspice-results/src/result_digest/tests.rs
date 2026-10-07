@@ -3,6 +3,60 @@
 use super::*;
 
 #[test]
+fn stb_circuit_modes_and_unavailability_participate_in_the_digest() {
+    use rspice_core::analysis::pole_zero::{Matrix, PoleZeroAnalyzer};
+    use rspice_core::analysis::stb::{
+        CircuitPoleEvidence, CircuitPoleFailure, StbAnalyzer, StbConfig,
+    };
+    let response = StbAnalyzer::new(StbConfig::new())
+        .analyze(&[1.0], &[rspice_core::Complex64::new(0.5, 0.0)])
+        .unwrap();
+    let digest = |evidence| {
+        let mut response = response.clone();
+        response.circuit_poles = evidence;
+        let mut writer = ResultDigestWriter::new("test-stb-poles", ResultDigestEncoding::CURRENT);
+        encode_result_payload(
+            &mut writer,
+            &AnalysisResultPayload::Stb {
+                response: std::sync::Arc::new(response),
+            },
+            ResultDigestEncoding::CURRENT,
+        );
+        writer.finish()
+    };
+    let empty = digest(CircuitPoleEvidence::NotComputed);
+    let mut seen = vec![empty];
+    for g in [-1.0, 1.0, 2.0] {
+        let spectrum =
+            PoleZeroAnalyzer::new(Matrix::from_dense(vec![vec![g]]), Matrix::identity(1))
+                .pole_spectrum()
+                .unwrap();
+        let hash = digest(CircuitPoleEvidence::Available { spectrum });
+        assert!(!seen.contains(&hash));
+        seen.push(hash);
+    }
+    for cause in [
+        CircuitPoleFailure::Numerical {
+            detail: "irregular descriptor".into(),
+        },
+        CircuitPoleFailure::ResourceLimit {
+            resource: "result_values".into(),
+            requested: 100,
+            limit: 80,
+        },
+        CircuitPoleFailure::ResourceLimit {
+            resource: "result_values".into(),
+            requested: 101,
+            limit: 80,
+        },
+    ] {
+        let hash = digest(CircuitPoleEvidence::Unavailable { cause });
+        assert!(!seen.contains(&hash));
+        seen.push(hash);
+    }
+}
+
+#[test]
 fn current_impulse_derivatives_participate_in_authenticated_identity() {
     let point = rspice_core::CurrentImpulseDerivative {
         time: 0.3,
