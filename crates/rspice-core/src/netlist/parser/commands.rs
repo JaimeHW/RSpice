@@ -26,6 +26,7 @@ pub(super) fn parse_command(
         parameter_overrides,
         logical_line,
         analysis_cards,
+        startup_cards,
         scopes,
         analyses,
         monte_carlo_source_cards,
@@ -44,7 +45,7 @@ pub(super) fn parse_command(
         startup_directives,
         startup_scope,
         options,
-        mut temperature_options,
+        temperature_options,
         max_analysis_points,
         diagnostics,
         spef_includes,
@@ -77,6 +78,27 @@ pub(super) fn parse_command(
             output_requests,
             diagnostics,
             options,
+        },
+    )? {
+        return Ok(());
+    }
+    if startup_cards.parse(
+        scopes,
+        &cmd,
+        stream,
+        startup_cards::StartupCardContext {
+            line: line_num,
+            params,
+            origin,
+            scope: &startup_scope,
+            defer_values: defer_scoped_values,
+            after_provisional_error: temperature_options.plan.has_error(),
+        },
+        startup_cards::StartupCardSink {
+            initial_conditions,
+            node_sets,
+            records: startup_directives,
+            device: device_initial_conditions,
         },
     )? {
         return Ok(());
@@ -148,58 +170,6 @@ pub(super) fn parse_command(
                 origin,
                 parameter_overrides,
                 temperature_options.plan,
-            )?;
-        }
-        ".IC" | ".NODESET" => {
-            let kind = if cmd == ".IC" {
-                StartupDirectiveKind::Ic
-            } else {
-                StartupDirectiveKind::NodeSet
-            };
-            let Some(entries) = recover_startup_card(
-                parse_voltage_hint_command(stream, line_num, params, kind, defer_scoped_values),
-                stream,
-                line_num,
-                &mut temperature_options,
-            )?
-            else {
-                return Ok(());
-            };
-            for entry in &entries {
-                match kind {
-                    StartupDirectiveKind::Ic => initial_conditions.push(InitialCondition {
-                        node: entry.execution_node.clone(),
-                        reference: entry.execution_reference.clone(),
-                        voltage: entry.voltage,
-                        voltage_expr: entry.voltage_expr.clone(),
-                    }),
-                    StartupDirectiveKind::NodeSet => node_sets.push(NodeSet {
-                        node: entry.execution_node.clone(),
-                        reference: entry.execution_reference.clone(),
-                        voltage: entry.voltage,
-                        voltage_expr: entry.voltage_expr.clone(),
-                    }),
-                }
-            }
-            startup_directives.push(startup_directive_record(
-                kind,
-                origin,
-                startup_scope,
-                entries,
-            ));
-        }
-        ".INITCOND" => {
-            recover_startup_card(
-                parse_device_initial_condition_command(
-                    stream,
-                    line_num,
-                    params,
-                    origin,
-                    device_initial_conditions,
-                ),
-                stream,
-                line_num,
-                &mut temperature_options,
             )?;
         }
         ".INCLUDE" | ".INC" => {
@@ -619,49 +589,6 @@ fn parse_lin_command(
         });
     }
     Ok(crate::netlist::LinAnalysis::AcOnly)
-}
-
-fn recover_startup_card<T>(
-    result: Result<T, ParseError>,
-    stream: &mut TokenStream,
-    line: usize,
-    temperatures: &mut temperature::TemperatureOptionSink<'_>,
-) -> Result<Option<T>, ParseError> {
-    match result {
-        Ok(value) => Ok(Some(value)),
-        Err(error @ ParseError::ResourceLimit(_)) => Err(error),
-        Err(error) => {
-            temperatures
-                .plan
-                .retain_card_error(error, line, temperatures.origin);
-            // Startup cards contain no temperature declarations. Their staged
-            // values are discarded; independent later cards can select TEMP/
-            // TNOM, and a fresh pass must validate this entire card. Never
-            // convert a failed value to a successful default or empty record.
-            stream.skip_to_eol();
-            Ok(None)
-        }
-    }
-}
-
-fn startup_directive_record(
-    kind: StartupDirectiveKind,
-    origin: &NetlistSourceLocation,
-    scope: StartupDirectiveScope,
-    entries: Vec<StartupDirectiveEntry>,
-) -> StartupDirectiveRecord {
-    let disposition = if entries.is_empty() {
-        StartupDirectiveDisposition::Ignored(StartupDiagnosticCode::EmptyDirective)
-    } else {
-        StartupDirectiveDisposition::Applied
-    };
-    StartupDirectiveRecord {
-        kind,
-        origin: origin.clone(),
-        scope,
-        entries,
-        disposition,
-    }
 }
 
 fn remaining_command_source(stream: &TokenStream) -> String {

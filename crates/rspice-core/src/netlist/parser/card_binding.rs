@@ -67,6 +67,20 @@ impl CardBinding {
         Ok(card)
     }
 
+    /// Validate a card during an already-failed pass without consuming live
+    /// draws or materializing any of the declarations it reaches.
+    pub(super) fn probe<T>(
+        &self,
+        environment: &ScopeEnvironment,
+        line: usize,
+        origin: &NetlistSourceLocation,
+        abort: &dyn AbortSignal,
+        mut parse: impl FnMut(&mut TokenStream, &ParamContext) -> Result<T, ParseError>,
+    ) -> Result<T, ParseWithAbortError> {
+        self.stage(&environment.isolated(), line, origin, abort, &mut parse)
+            .map(|(card, _)| card)
+    }
+
     fn stage<T>(
         &self,
         environment: &ScopeEnvironment,

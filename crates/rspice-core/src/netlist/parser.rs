@@ -58,6 +58,7 @@ mod chebyshev_synthesis;
 mod command_parsers;
 mod commands;
 mod scopes;
+mod startup_cards;
 mod stream;
 mod temperature;
 use stream::TokenStream;
@@ -861,7 +862,10 @@ fn parse_netlist_impl(
         &mut state,
         abort,
     )
-    .map_err(|error| state.temperature_options.prefer_error(error))?;
+    .map_err(|error| {
+        let error = state.temperature_options.prefer_error(error);
+        state.startup_cards.prefer_error(&state, error, abort)
+    })?;
 
     if let Some(seed) = options.statistical_seed {
         state.options.seed = Some(seed);
@@ -911,11 +915,14 @@ fn parse_netlist_impl(
             abort,
         )?;
         resolve_static_model_expression_params_with_abort(&mut state, abort)?;
+        std::mem::take(&mut state.startup_cards).complete(&mut state, abort)?;
         Ok(())
     })();
     let completion_error = completion
         .err()
         .map(|error| state.temperature_options.prefer_error(error));
+    let completion_error =
+        completion_error.map(|error| state.startup_cards.prefer_error(&state, error, abort));
     // Ready analysis cards retain their authored values. Pending root cards
     // bind after the existing declaration/source/model completion phases, then
     // merge their staged effects back into authored order.

@@ -613,7 +613,7 @@ fn rebuild_effective_vectors(
     Ok(())
 }
 
-fn append_applied_entries(
+pub(super) fn append_applied_entries(
     record: &StartupDirectiveRecord,
     initial_conditions: &mut Vec<InitialCondition>,
     node_sets: &mut Vec<NodeSet>,

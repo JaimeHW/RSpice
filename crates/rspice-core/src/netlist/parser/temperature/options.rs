@@ -212,6 +212,10 @@ impl TemperatureOptionPlan {
         self.provisional_error.take()
     }
 
+    pub(in super::super) fn has_error(&self) -> bool {
+        self.provisional_error.is_some()
+    }
+
     pub(in super::super) fn prefer_error(
         &mut self,
         error: ParseWithAbortError,

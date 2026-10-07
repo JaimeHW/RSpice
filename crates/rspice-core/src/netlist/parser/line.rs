@@ -416,6 +416,7 @@ pub(super) fn process_line(
                 &mut dummy_measurements,
                 ParseLineContext {
                     analysis_cards: &mut state.analysis_cards,
+                    startup_cards: &mut state.startup_cards,
                     scopes: &mut state.scopes,
                     parameter_direction: state.parameter_direction.as_deref_mut(),
                     parameter_overrides: &[],
@@ -488,6 +489,7 @@ pub(super) fn process_line(
         &mut state.measurements,
         ParseLineContext {
             analysis_cards: &mut state.analysis_cards,
+            startup_cards: &mut state.startup_cards,
             scopes: &mut state.scopes,
             parameter_direction: state.parameter_direction.as_deref_mut(),
             parameter_overrides: &state.parameter_overrides,
@@ -560,6 +562,7 @@ pub(super) fn parse_line(
         defer_simple_param_refs || params.expression_references_spectre_statistics(line);
     let ParseLineContext {
         analysis_cards,
+        startup_cards,
         scopes,
         parameter_direction,
         parameter_overrides,
@@ -622,6 +625,7 @@ pub(super) fn parse_line(
             line_num,
             ParseCommandContext {
                 analysis_cards,
+                startup_cards,
                 scopes,
                 parameter_direction,
                 parameter_overrides,
@@ -1150,10 +1154,9 @@ mod tests {
                 "KEPT"
             );
             assert!(
-                state
-                    .temperature_options
-                    .take_error()
-                    .unwrap()
+                std::mem::take(&mut state.startup_cards)
+                    .complete(&mut state, &NoAbort)
+                    .unwrap_err()
                     .to_string()
                     .contains("Division by zero")
             );
@@ -1168,8 +1171,10 @@ mod tests {
         .unwrap();
         assert!(state.device_initial_conditions.is_none());
         assert!(matches!(
-            state.temperature_options.take_error(),
-            Some(ParseError::DeviceInitialCondition(_))
+            std::mem::take(&mut state.startup_cards).complete(&mut state, &NoAbort),
+            Err(ParseWithAbortError::Parse(
+                ParseError::DeviceInitialCondition(_)
+            ))
         ));
     }
 
