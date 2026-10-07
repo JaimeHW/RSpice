@@ -462,10 +462,17 @@ overlays applied to an already materialized circuit keep their atomic error
 contract. Schedule look-ahead classifies tokens without evaluating operands,
 so only actual value reads consume statistical draws.
 
-General dependency planning remains incomplete. Pending temperature-option
-groups can fail before their later TEMP/TNOM entries bind; other eager parameter
-error classes and conditional, subcircuit-header and other card failures can
-also prevent discovery. These cases and broader statistical/runtime binding
+A failed deferred temperature-option group also probes its later operands.
+Successful isolated values are retry candidates, not published options or
+parameter bindings; probes consume no live random draws. Groups still wait for
+unfinished declaration owners, and assignment order controls candidate
+precedence across scopes. Ordinary failures at `.ENDS` retain their physical
+card error while later independent source cards can select temperatures. Every
+assignment must validate in a fresh pass before the circuit is returned.
+
+General dependency planning remains incomplete. Other eager parameter error
+classes and conditional, subcircuit-header and other card failures can still
+prevent discovery. These cases and broader statistical/runtime binding
 qualification remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and

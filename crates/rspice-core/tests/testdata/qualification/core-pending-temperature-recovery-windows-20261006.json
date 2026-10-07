@@ -1,0 +1,207 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C13",
+    "C14"
+  ],
+  "batch": "Deferred temperature-group recovery and bounded statistical confirmation",
+  "status": "pending_group_recovery_delivered_general_dependency_planning_remains",
+  "base_revision": "7ec628db6456980bdec8c70ad67423ff62b75454",
+  "source_revision": "8525c535e073a7aebec4b01264504307cefb5935",
+  "implementation_commits": [
+    "ab1a7acbec2104e589bc0f32d62d5aae92e5c5f5",
+    "8525c535e073a7aebec4b01264504307cefb5935"
+  ],
+  "captured_utc": "2026-10-07T00:19:55.657232+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash in CLI runtime builds; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "wasm_runner_version": "wasm-bindgen-test-runner 0.2.126",
+    "wasm_runner_executable_sha256": "e451b278c106269fa9a2731a4f8e77f888ccd2694b2b3a1760319198f6c2a68e"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib netlist:: -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1106
+      ],
+      "log": "target/core-qualification/pending-temperature-netlist-final.log",
+      "log_sha256": "981e8a452a29ce138e89db0feee5366b09f734f7829399d76674c40574464f66"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test pending_temperature_recovery --test temperature_replay_budget --test provisional_option_temperature --test option_schedule_statistics --test provisional_parameter_temperature --test provisional_temperature --test parent_temperature_options --test temperature_options --test forward_analyses --test analysis_error_origins --test analysis_card_transactions --test control_noise --test control_dc --test control_execution --test frequency_data --test step_temp --test forward_globals --test forward_parameters --test forward_sources --test xyce_restart_plan -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        6,
+        8,
+        5,
+        17,
+        8,
+        11,
+        11,
+        7,
+        1,
+        9,
+        13,
+        15,
+        13,
+        9,
+        2,
+        21,
+        3,
+        6
+      ],
+      "log": "target/core-qualification/pending-temperature-core-final.log",
+      "log_sha256": "f6816255720068f0c9bad2da8ab9d38b017018f9a3bc41df7288411733ef73ce"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test temperature_axis --test control_noise --test control_dc --test analysis_error_origins --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        1,
+        1,
+        6
+      ],
+      "log": "target/core-qualification/pending-temperature-cli-final.log",
+      "log_sha256": "32495c64275fbb001a363fa6a89a328744f40c8b696d4bf9ce7c36633dd8d730"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test pending_temperature_recovery --test temperature_replay_budget -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/pending-temperature-clippy-final.log",
+      "log_sha256": "feeb83a1c6412405c9ec026e9a36e1629638bdfbc1df9c24c4a3fccb3bb5f9df"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test pending_temperature_recovery --test temperature_replay_budget --test provisional_option_temperature --test option_schedule_statistics --test provisional_parameter_temperature --test provisional_temperature --test parent_temperature_options --test temperature_options --test forward_analyses --test forward_parameters --test forward_globals --test forward_sources --test analysis_error_origins --test analysis_card_transactions -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        16,
+        8,
+        10,
+        10,
+        1,
+        9,
+        13,
+        15,
+        13,
+        9,
+        19,
+        3
+      ],
+      "log": "target/core-qualification/pending-temperature-wasm-final.log",
+      "log_sha256": "c03e7425f580e98f366f2b84b60dfb5730bf32d924c80978178bfe660489ef08"
+    }
+  ],
+  "formatting": {
+    "command": "python target/core-qualification/check-workspace-format.py",
+    "outcome": "passed",
+    "targets": 584,
+    "batches": 11,
+    "failed_batches": 0,
+    "log": "target/core-qualification/pending-temperature-workspace-format.log",
+    "log_sha256": "3af7726cddac12d3419b8e8cbeeca37df6007f6b4bcfef47d7b361f1b1c12fcb",
+    "script_sha256": "655a9f32a65d5e7c24fe3d8af6fd4bee3f12b2aaccfe905fdba198196839c2d8",
+    "method": "Read locked cargo metadata, select every workspace member target, deduplicate target source paths by edition, and invoke rustfmt --check --edition in argument batches below the Windows command-line limit. Module traversal uses the default rustfmt behavior."
+  },
+  "unique_passed_tests": {
+    "native": 1288,
+    "optimized_wasm": 134
+  },
+  "test_accounting": "Parser/expression units, twenty core integration targets, four CLI targets and fourteen optimized WASM targets. Earlier development runs and publication-ledger checks are excluded. No selected test is ignored. Netlist units and Clippy ran immediately before the second commit against the same source bytes; the remaining qualification ran on the committed revision.",
+  "source_hash_format": "SHA-256 of committed Git blob bytes",
+  "source_files_sha256": {
+    "crates/rspice-core/README.md": "95b810534769d45d0ef4bdd1943ad26deb26c341a31e944a654ba4d24a6a253e",
+    "crates/rspice-core/src/netlist/parser.rs": "92b391ab93b51f2404ba1db2abe718940013f0f27d61966b03f1074cb4ed4e32",
+    "crates/rspice-core/src/netlist/parser/temperature.rs": "aebb0c4b92e2f4ac48d56e2bee97f61bc8ed009c8dc9e413fbf27be38e24a8ac",
+    "crates/rspice-core/src/netlist/parser/temperature/options.rs": "db071e7b9ba3170169fb471e92b10f02d6500ec8a1e97118e5a8d0586dc179ef",
+    "crates/rspice-core/src/netlist/parser/temperature/options/binding.rs": "0871ef36204ac9256d3dda809761b109031b8e18f92b2a0a7ffb9357f37e69da",
+    "crates/rspice-core/tests/pending_temperature_recovery.rs": "e6aa5f99f9b616c7b4a5b1bf020b2c8ad8946b88d7bdd807e49abdd4511a8776",
+    "crates/rspice-core/tests/temperature_replay_budget.rs": "4050c94326580237423590df39d3d0be567d1f3453fe6c896dae40215da7b0bc",
+    "Cargo.lock": "b8e4cc402c12137eee5b660d8c95d208b5ae45e5251b096c76e2f8c2117cb34b",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "publication_ledger_sha256": "f5354ac9d8b4c2411f7eea3a1d8ddfda7223316f773de5add7187d338d216681",
+  "implementation": [
+    "Deferred groups continue isolated numeric evaluation after ordinary errors. Later incomplete declaration owners defer the entire group; terminal cancellation/resource errors return immediately. A failed group exposes only successful ordinal-tagged temperature candidates, without materializing bindings, options or live random draws.",
+    "Scope completion retains the first physical error and continues independent groups/cards. Candidate selection respects authored option precedence before scalar TEMP directives and physical coordinate overrides. The same fresh-source parser must validate every assignment before publication.",
+    "Failed discovery and successful consistency checks have separate three-attempt limits. Either limit ends replay, so at most five total attempts occur. Newly reachable random operands may consume the remaining confirmation passes without changing final statistical phases. Stable errors remain fatal and cyclic/unstable selection remains bounded."
+  ],
+  "acceptance_evidence": [
+    "Thirteen portable group regressions cover same-card and reverse TEMP/TNOM dependencies, both expression dialects for numeric validation, unfinished parents, later root/sibling groups, source-order precedence, scalar TEMP versus sweeps, exact deferred samples and parameter materialization, stable invalid/superseded assignments, typed resource limits and included continuation origins.",
+    "A current-source divider test independently verifies that recovered TEMP=85 reaches the returned parameters and DC circuit, producing 0.085 V from 1 mA through the temperature-valued resistor.",
+    "Three portable statistical regressions reproduce root, child and eager-parameter recovery requiring a fourth pass. Independent seeded contexts verify final option values and the exact next unused random draw.",
+    "Private tests verify candidate-only isolation, unchanged live options/bindings/draws on failed probes, physical override precedence, every cancellation boundary across root/parent/four-pass recovery, unchanged one/two/three-pass fast paths, the four-pass statistical case, and three/five-attempt hard limits for failed, successful and alternating unstable parses."
+  ],
+  "baseline_reproductions": [
+    {
+      "core_revision": "7ec628db6456980bdec8c70ad67423ff62b75454",
+      "outcome": "2_expected_regression_failures",
+      "log": "target/core-qualification/pending-temperature-before.log",
+      "log_sha256": "bf1bef41d3234bae0cb74cf9343f32f4ac84731bff9f24c830aa28dbc596b5af"
+    },
+    {
+      "core_revision": "ab1a7acbec2104e589bc0f32d62d5aae92e5c5f5",
+      "outcome": "3_expected_regression_failures",
+      "log": "target/core-qualification/temperature-replay-budget-before.log",
+      "log_sha256": "580ff80a72d5efbf9b28f4feae5099ba47918c0c9d7c41cd8b51895369fd6460"
+    }
+  ],
+  "resolved_cli_reproduction": {
+    "source_revision": "8525c535e073a7aebec4b01264504307cefb5935",
+    "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/provisional-option-pending-group.cir",
+    "outcome": "valid",
+    "exit_code": 0,
+    "log": "target/core-qualification/provisional-option-pending-group-resolved.log",
+    "log_sha256": "85af729392eff266eab06c843bc25000e1e29b6b90c12b5efb04745bdbcb7a72",
+    "deck": "Pending option completion\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1 nominal=55\n.end\n",
+    "scope": "Direct current-revision CLI check of the former pending-group failure; not included in test totals."
+  },
+  "remaining_reproduction": {
+    "source_revision": "8525c535e073a7aebec4b01264504307cefb5935",
+    "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/pending-temperature-conditional.cir",
+    "outcome": "unresolved_provisional_conditional_division_by_zero",
+    "exit_code": 65,
+    "log": "target/core-qualification/pending-temperature-conditional-remaining.log",
+    "log_sha256": "f19deb06317c9e3f9c995fe4274422ee765f76e3ce6934cb1d4120385dd60bdc",
+    "deck": "Provisional conditional\n.if (1/(TEMP-27))\n.param selected=1\n.endif\n.temp 85\n.end\n",
+    "expected": "The condition evaluates true after TEMP=85 selection; parameter selected is 1."
+  },
+  "limits": [
+    "Earlier conditional/subcircuit-header and other card errors can still prevent authoritative temperature discovery. Other eager parameter error classes and general statistical/runtime binding remain open.",
+    "Inner-loop cancellation, allocation/performance bounds and broader production qualification remain open. No C00-C14 package closes.",
+    "Prior Rust 1.94/1.95 compiler and native WASM-runner reliability incidents remain C14 work. CLI runtime qualification uses Rust 1.95. These successful runs do not establish general toolchain reproducibility."
+  ],
+  "development_notes": "The original pending-group defect failed two public regressions. After that granular fix, three independently sampled cases exposed an insufficient confirmation budget; these were fixed in a separate commit rather than weakening the expected samples. A type annotation and a collapsible-if Clippy finding were corrected during development. Existing numerical, cancellation and source-origin assertions were preserved.",
+  "publication_validation": {
+    "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+    "outcome": "passed",
+    "test_target_passed_counts": [
+      3
+    ],
+    "log": "target/core-qualification/pending-temperature-ledger.log",
+    "log_sha256": "661811231ecc37aad422c4d31c715d6312c73bc8ce619638370af39cb2b39e60",
+    "scope": "Requirements/evidence-path validation after documentation updates; excluded from implementation test totals."
+  }
+}
