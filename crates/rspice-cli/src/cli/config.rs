@@ -282,7 +282,9 @@ impl Config {
                 voltage_abstol: 1e-6,
                 current_abstol: self.simulation.abstol,
                 residual_reltol: self.simulation.residual_reltol,
-                ..rspice_core::ConvergenceConfig::default()
+                ..rspice_core::ConvergencePreset::from_mode_name(&self.simulation.convergence_mode)
+                    .unwrap_or(rspice_core::ConvergencePreset::Default)
+                    .to_convergence_config()
             },
             resource_limits: self.resources.limits(),
             ..rspice_core::SimulationConfig::default()
@@ -606,6 +608,39 @@ mod tests {
     use super::*;
     use crate::cli::OutputFormat;
     use clap::ValueEnum;
+
+    #[test]
+    fn convergence_policy_reaches_the_shared_engine_base_without_losing_tolerances() {
+        use rspice_core::config::DampingStrategy;
+
+        for (mode, stepping, arc_length, damping) in [
+            ("fast", false, false, DampingStrategy::None),
+            ("default", true, false, DampingStrategy::VoltageLimiting),
+            ("robust", true, true, DampingStrategy::Combined),
+        ] {
+            let mut config = Config::default();
+            config.simulation.convergence_mode = mode.into();
+            config.simulation.reltol = 2e-4;
+            config.simulation.abstol = 3e-13;
+            config.simulation.residual_reltol = 4e-5;
+            config.validate().expect("valid frontend configuration");
+
+            // Health constructs its engine directly from this shared boundary.
+            let engine = rspice_core::Engine::try_new(config.core_simulation_config())
+                .expect("valid engine configuration");
+            let policy = &engine.config().convergence_config;
+            assert_eq!(policy.gmin_stepping, stepping, "{mode}");
+            assert_eq!(policy.source_stepping, stepping, "{mode}");
+            assert_eq!(policy.pseudo_transient, stepping, "{mode}");
+            assert_eq!(policy.arc_length, arc_length, "{mode}");
+            assert_eq!(policy.damping_strategy, damping, "{mode}");
+            assert_eq!(engine.config().tolerance, 2e-4);
+            assert_eq!(policy.voltage_reltol, 2e-4);
+            assert_eq!(policy.voltage_abstol, 1e-6);
+            assert_eq!(policy.current_abstol, 3e-13);
+            assert_eq!(policy.residual_reltol, 4e-5);
+        }
+    }
 
     /// `output.format` and `-f` name the same set of formats.
     ///
