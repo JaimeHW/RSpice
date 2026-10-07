@@ -674,6 +674,12 @@ converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1`
 and `0.5` become `0`, `1` and `x`, one change per level held rather than one
 per grid point, and the drive strength those columns already dropped is not
 recovered. A source with neither event timelines nor such columns is refused.
+Sampled columns must have a time coordinate. Explicit `s`, `ms`, `us` (also
+`µs`/`μs`), `ns`, `ps`, and `fs` units are converted to seconds; a time coordinate
+without a unit already denotes seconds. Frequency, index, and other non-time
+coordinates are refused. Every sampled time is checked for non-negative,
+nondecreasing order before unchanged levels are removed. VCD `--start` and
+`--stop` bounds are always in seconds, including when the source uses another unit.
 
 VCD bus selectors accept scoped names, full declared ranges, and bit names,
 including qualified forms such as `D(top.data[7:0])` and `D(top.data[3])`.

@@ -45,6 +45,7 @@ use crate::commands::waveform_io::{
 
 mod clipping;
 mod selection;
+mod time;
 #[cfg(test)]
 use selection::select_and_clip;
 #[cfg(test)]
@@ -605,6 +606,7 @@ fn typed_transient_traces(
 ///
 /// A table with neither kind of column has no dump to write and is refused.
 fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces, CliError> {
+    let seconds_factor = time::seconds_factor(path, table)?;
     let mut digital_traces = Vec::new();
     let mut real_traces = Vec::new();
 
@@ -620,7 +622,10 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
                 if points.last().is_some_and(|last| last.value == value) {
                     continue;
                 }
-                points.push(DigitalTracePoint { time: *time, value });
+                points.push(DigitalTracePoint {
+                    time: *time * seconds_factor,
+                    value,
+                });
             }
             digital_traces.push(DigitalTrace {
                 node_name: node.to_string(),
@@ -633,7 +638,7 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
                     continue;
                 }
                 points.push(RealTracePoint {
-                    time: *time,
+                    time: *time * seconds_factor,
                     value: *value,
                 });
             }
