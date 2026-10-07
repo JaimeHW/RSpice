@@ -1130,13 +1130,13 @@ pub(super) fn finish_transient_result(
                 }
             }
         };
-        ctx.record_published(super::PublishedResult {
+        let publication = super::PublishedResult {
             analysis_id: analysis_id.tag(),
             schema: super::document::scalar_schema(&signals)?,
             artifact: output_path.clone(),
-        });
+        };
 
-        if result.fft_results.is_empty() {
+        let fft_output_path = if result.fft_results.is_empty() {
             publish::artifact(&output_path, |writer| {
                 document.write_to(
                     writer,
@@ -1146,6 +1146,7 @@ pub(super) fn finish_transient_result(
                 )
             })
             .map_err(|error| map_atomic_output_error(&output_path, error))?;
+            None
         } else {
             let parent_analysis_id = ctx.current_transient_analysis_id()?;
             let fft_output_path =
@@ -1173,6 +1174,11 @@ pub(super) fn finish_transient_result(
                     fft_output_path.display()
                 ))?;
             }
+            Some(fft_output_path)
+        };
+        ctx.record_published(publication);
+        if let Some(path) = fft_output_path {
+            ctx.record_output(path);
         }
 
         if !ctx.quiet {

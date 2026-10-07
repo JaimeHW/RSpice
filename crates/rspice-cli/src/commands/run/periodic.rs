@@ -352,7 +352,6 @@ fn export_pac(
             }
         },
     )?;
-    ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  PAC sidebands exported to: {}",
@@ -586,7 +585,6 @@ fn export_pxf(
             }
         },
     )?;
-    ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  PXF transfer exported to: {}",
@@ -671,7 +669,6 @@ fn export_pstb(
         AnalysisResultDocument::from_pstb(analysis_id, card, stability)
             .map(|builder| builder.parent_analysis(upstream))
     })?;
-    ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  PSTB spectrum exported to: {}",
@@ -742,7 +739,6 @@ fn export_pnoise(
             }
         },
     )?;
-    ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  PNOISE spectrum exported to: {}",
@@ -885,7 +881,6 @@ fn export_envelope(
             }
         },
     )?;
-    ctx.record_output(path.to_path_buf());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  Envelope trajectory exported to: {}",

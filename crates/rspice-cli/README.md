@@ -1025,6 +1025,8 @@ Because every failure category maps to a documented nonzero exit code,
 `rspice run deck.sp && deploy` is safe without parsing any output. The
 `--summary` JSON carries the same verdict plus the full measurement records for
 archiving, using the same measurement fields as `--meas-file` JSON.
+Its `outputs` list names artifacts successfully published by this invocation;
+a failed replacement does not count an older destination file as new output.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
 

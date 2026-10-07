@@ -132,6 +132,7 @@ pub(super) fn export_step_sweep(
         }
     }
 
+    ctx.record_output(output_path.clone());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  Step results exported to: {}",
@@ -576,7 +577,6 @@ pub(super) fn export_pss(
         },
     )?;
 
-    ctx.record_output(output_path.to_path_buf());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  PSS waveforms exported to: {}",
@@ -776,7 +776,6 @@ fn export_hb(
         },
     )?;
 
-    ctx.record_output(output_path.to_path_buf());
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  HB spectrum exported to: {}",
@@ -854,6 +853,7 @@ fn publish_sparam_run(
             });
         }
         write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering)?;
+        ctx.record_output(output_path.clone());
     } else {
         let signals = sparameter_export_signals(run, &frequencies, &scattering, kind == "sparam");
         super::document::publish_analysis_result(
@@ -912,12 +912,12 @@ fn publish_sparam_run(
             // documents the same path whenever the deck authors only this
             // card, and the second would overwrite the first.
             let noise_path = super::sibling_output_path(output_path, "port-noise");
-            ctx.record_output(noise_path.clone());
             let builder =
                 rspice_core::execution::AnalysisResultDocument::from_port_noise(analysis_id, noise)
                     .map_err(|error| super::document::document_error(ctx, analysis_id, error))?;
             let document = super::document::finish(ctx, analysis_id, builder)?;
             super::document::write_document(ctx, &noise_path, &document)?;
+            ctx.record_output(noise_path.clone());
             if !ctx.quiet {
                 crate::console::line(format_args!(
                     "  Port noise exported to: {}",

@@ -204,6 +204,5 @@ fn publish(
         schema,
         artifact: path.clone(),
     });
-    ctx.record_output(path.clone());
     Ok(())
 }

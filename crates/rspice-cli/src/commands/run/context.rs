@@ -435,7 +435,8 @@ impl<'a> RunContext<'a> {
     /// (`--monte-carlo`, `--sparam`, ...), which is single by construction and
     /// therefore publishes under the bare tag.
     ///
-    /// Every resolved path is remembered for the `--summary` manifest.
+    /// Publication records the path for the `--summary` manifest only after
+    /// the artifact has been written successfully.
     pub(super) fn output_path_for(&self, tag: &str) -> Option<std::path::PathBuf> {
         self.resolve_output(tag).map(|output| output.path)
     }
@@ -451,7 +452,6 @@ impl<'a> RunContext<'a> {
         let path = self.output.clone()?;
         let (qualified_tag, analysis) = self.take_planned_identity(tag)?;
         let resolved = self.namespaced_artifact_path(path, &qualified_tag);
-        self.outputs.borrow_mut().push(resolved.clone());
         Some(ResolvedOutput {
             path: resolved,
             analysis,
@@ -640,14 +640,14 @@ impl<'a> RunContext<'a> {
         Ok(Some(fingerprint))
     }
 
-    /// Record one artifact this run wrote outside `resolve_output`, so the
-    /// `--summary` manifest names it too.
+    /// Record one successfully written artifact without a typed result schema.
     pub(super) fn record_output(&self, path: std::path::PathBuf) {
         self.outputs.borrow_mut().push(path);
     }
 
     /// Record one typed result this run published.
     pub(super) fn record_published(&self, published: PublishedResult) {
+        self.record_output(published.artifact.clone());
         self.published.borrow_mut().push(published);
     }
 
