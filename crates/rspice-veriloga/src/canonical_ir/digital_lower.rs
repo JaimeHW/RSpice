@@ -2240,12 +2240,15 @@ impl ProcessLowerer<'_> {
                         }
                     }
                     crate::ast::PackedSelect::Part { msb, lsb } => {
-                        let (Some(msb), Some(lsb)) =
-                            (self.constant_index(msb), self.constant_index(lsb))
+                        let range = self.signals[usize::from(array.base)].declared_range();
+                        let Some(selected) = self.part_select_bounds(msb, lsb, range, access.span)
                         else {
                             return;
                         };
-                        super::digital::DigitalArrayWriteSelect::Part { msb, lsb }
+                        super::digital::DigitalArrayWriteSelect::Part {
+                            msb: selected.msb,
+                            lsb: selected.lsb,
+                        }
                     }
                 };
                 let width = self.packed_select_width(&access.select);
@@ -2475,9 +2478,16 @@ impl ProcessLowerer<'_> {
                 lsb,
                 span,
             } => {
-                let msb = self.constant_index(msb)?;
-                let lsb = self.constant_index(lsb)?;
-                (name, *span, DigitalWriteSelect::Part { msb, lsb })
+                let selected =
+                    self.part_select_bounds(msb, lsb, self.declared_range_of(name), *span)?;
+                (
+                    name,
+                    *span,
+                    DigitalWriteSelect::Part {
+                        msb: selected.msb,
+                        lsb: selected.lsb,
+                    },
+                )
             }
             DigitalLValue::ArraySelect(access) => {
                 self.error(
@@ -2520,12 +2530,7 @@ impl ProcessLowerer<'_> {
             DigitalLValue::BitSelect { name, .. } => self
                 .digital_array(name)
                 .map_or(1, |array| self.width_of(array.base)),
-            DigitalLValue::PartSelect { msb, lsb, .. } => {
-                match (self.constant(msb), self.constant(lsb)) {
-                    (Some(msb), Some(lsb)) => msb.abs_diff(lsb) as u32 + 1,
-                    _ => 1,
-                }
-            }
+            DigitalLValue::PartSelect { msb, lsb, .. } => self.part_select_width(msb, lsb),
             DigitalLValue::Concat { elements, .. } => {
                 elements.iter().map(|part| self.lvalue_width(part)).sum()
             }
@@ -2885,16 +2890,120 @@ impl ProcessLowerer<'_> {
         }
     }
 
+    fn bounded_part_width(msb: i64, lsb: i64) -> Option<u32> {
+        let width = VectorBounds { msb, lsb }.width();
+        (width <= crate::semantic::MAX_DIGITAL_VECTOR_WIDTH).then_some(width)
+    }
+
+    /// Inference uses a bounded placeholder on failure; actual lowering reports
+    /// the source diagnostic before any value or assignment can be published.
+    fn part_select_width(&self, msb: &Expression, lsb: &Expression) -> u32 {
+        self.constant(msb)
+            .zip(self.constant(lsb))
+            .and_then(|(msb, lsb)| Self::bounded_part_width(msb, lsb))
+            .unwrap_or(1)
+    }
+
     fn packed_select_width(&self, select: &crate::ast::PackedSelect) -> u32 {
         match select {
             crate::ast::PackedSelect::Bit(_) => 1,
-            crate::ast::PackedSelect::Part { msb, lsb } => self
-                .constant(msb)
-                .zip(self.constant(lsb))
-                .and_then(|(msb, lsb)| msb.abs_diff(lsb).checked_add(1))
-                .and_then(|width| u32::try_from(width).ok())
-                .unwrap_or(1),
+            crate::ast::PackedSelect::Part { msb, lsb } => self.part_select_width(msb, lsb),
         }
+    }
+
+    fn part_select_bounds(
+        &mut self,
+        msb: &Expression,
+        lsb: &Expression,
+        range: VectorBounds,
+        span: Span,
+    ) -> Option<VectorBounds> {
+        let selected = VectorBounds {
+            msb: self.constant_index(msb)?,
+            lsb: self.constant_index(lsb)?,
+        };
+        if Self::bounded_part_width(selected.msb, selected.lsb).is_none() {
+            self.error(
+                "packed part-select width exceeds the supported vector width",
+                span,
+            );
+            return None;
+        }
+        if selected.msb != selected.lsb && (selected.msb > selected.lsb) != (range.msb >= range.lsb)
+        {
+            self.error(
+                "packed part-select runs against its declared direction",
+                span,
+            );
+            return None;
+        }
+        Some(selected)
+    }
+
+    fn packed_named_value(
+        &mut self,
+        block: BlockId,
+        name: &SmolStr,
+        span: Span,
+    ) -> Option<ValueId> {
+        let named = Expression::Identifier(crate::ast::Identifier {
+            name: name.clone(),
+            span,
+        });
+        if self.is_real_expression(&named) {
+            self.error(
+                "packed selection requires an integral value; a real has no selectable bits",
+                span,
+            );
+            return None;
+        }
+        Some(self.named_value(block, name, span))
+    }
+
+    fn packed_bit_read(
+        &mut self,
+        block: BlockId,
+        input: ValueId,
+        range: VectorBounds,
+        bit: &Expression,
+    ) -> ValueId {
+        let kind = CfgValueKind::DigitalBitSelect {
+            input,
+            signed: self.self_signed(bit),
+            index: self.array_index_value(block, bit),
+            bounds: (range.msb, range.lsb),
+        };
+        self.builder
+            .push(block, CfgValueType::FourState { width: 1 }, kind)
+    }
+
+    fn packed_part_read(
+        &mut self,
+        block: BlockId,
+        input: ValueId,
+        range: VectorBounds,
+        msb: &Expression,
+        lsb: &Expression,
+        span: Span,
+    ) -> ValueId {
+        let Some(selected) = self.part_select_bounds(msb, lsb, range, span) else {
+            return self.unknown(1);
+        };
+        let width = selected.width();
+        let (Some(msb), Some(lsb)) = (
+            range.checked_position_of(selected.msb),
+            range.checked_position_of(selected.lsb),
+        ) else {
+            // A bounded selection with unrepresentable endpoints is entirely
+            // outside storage. Preserve its width instead of saturating both
+            // offsets to the same position and accidentally selecting one bit.
+            return self.unknown(width);
+        };
+        self.builder.push(
+            block,
+            CfgValueType::FourState { width },
+            CfgValueKind::DigitalPartSelect { input, msb, lsb },
+        )
     }
 
     fn array_packed_read(
@@ -2910,6 +3019,13 @@ impl ProcessLowerer<'_> {
             span: access.span,
         };
         let (input, range) = if let Some(array) = self.digital_array(&access.name) {
+            if self.real_signal(array.base) {
+                self.error(
+                    "packed selection requires integral array elements",
+                    access.span,
+                );
+                return self.unknown(1);
+            }
             (
                 self.digital_array_read(block, &element),
                 self.signals[usize::from(array.base)].declared_range(),
@@ -2931,31 +3047,12 @@ impl ProcessLowerer<'_> {
             );
             return self.unknown(1);
         };
-        let kind = match &access.select {
-            crate::ast::PackedSelect::Bit(bit) => CfgValueKind::DigitalBitSelect {
-                input,
-                signed: self.self_signed(bit),
-                index: self.array_index_value(block, bit),
-                bounds: (range.msb, range.lsb),
-            },
+        match &access.select {
+            crate::ast::PackedSelect::Bit(bit) => self.packed_bit_read(block, input, range, bit),
             crate::ast::PackedSelect::Part { msb, lsb } => {
-                let msb = self.constant_index(msb).unwrap_or(0);
-                let lsb = self.constant_index(lsb).unwrap_or(0);
-                let (Some(msb), Some(lsb)) = (
-                    range.checked_position_of(msb),
-                    range.checked_position_of(lsb),
-                ) else {
-                    // Both endpoints of this bounded-width selection are far
-                    // outside the value. Saturating them separately would
-                    // collapse the result's width to one bit.
-                    return self.unknown(self.packed_select_width(&access.select));
-                };
-                CfgValueKind::DigitalPartSelect { input, msb, lsb }
+                self.packed_part_read(block, input, range, msb, lsb, access.span)
             }
-        };
-        let width = self.packed_select_width(&access.select);
-        self.builder
-            .push(block, CfgValueType::FourState { width }, kind)
+        }
     }
 
     fn digital_array_read(
@@ -3761,24 +3858,11 @@ impl ProcessLowerer<'_> {
                 self.array_packed_read(block, access)
             }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
-                let input = self.named_value(block, &select.name, select.span);
-                let msb = self.constant_index(&select.msb).unwrap_or(0);
-                let lsb = self.constant_index(&select.lsb).unwrap_or(0);
-                let width = msb.abs_diff(lsb) as u32 + 1;
-                // The author wrote the *names* of two bits; the node selects
-                // positions. This is the one place a source-level select meets
-                // the declaration it was written against, so it is the one
-                // place the two are reconciled.
+                let Some(input) = self.packed_named_value(block, &select.name, select.span) else {
+                    return self.unknown(1);
+                };
                 let range = self.declared_range_of(&select.name);
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width },
-                    CfgValueKind::DigitalPartSelect {
-                        input,
-                        msb: range.position_of(msb),
-                        lsb: range.position_of(lsb),
-                    },
-                )
+                self.packed_part_read(block, input, range, &select.msb, &select.lsb, select.span)
             }
             Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => {
                 let left = self.operand(block, &xnor.left, inner);
@@ -3873,20 +3957,11 @@ impl ProcessLowerer<'_> {
                 if self.analog_array(&access.array).is_some() {
                     return self.analog_array_read(block, access);
                 }
-                let input = self.named_value(block, &access.array, access.span);
-                let signed = self.self_signed(&access.index);
-                let index = self.array_index_value(block, &access.index);
-                let bounds = self.declared_range_of(&access.array);
-                self.builder.push(
-                    block,
-                    CfgValueType::FourState { width: 1 },
-                    CfgValueKind::DigitalBitSelect {
-                        input,
-                        index,
-                        bounds: (bounds.msb, bounds.lsb),
-                        signed,
-                    },
-                )
+                let Some(input) = self.packed_named_value(block, &access.array, access.span) else {
+                    return self.unknown(1);
+                };
+                let range = self.declared_range_of(&access.array);
+                self.packed_bit_read(block, input, range, &access.index)
             }
             // Section 5.4.1 makes every operand of a concatenation
             // self-determined, and the concatenation's own size the sum of
@@ -4141,11 +4216,7 @@ impl ProcessLowerer<'_> {
                 self.packed_select_width(&access.select)
             }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
-                match (self.constant(&select.msb), self.constant(&select.lsb)) {
-                    (Some(msb), Some(lsb)) => msb.abs_diff(lsb) as u32 + 1,
-                    // Refused when lowered, and one bit of `x` when it is.
-                    _ => 1,
-                }
+                self.part_select_width(&select.msb, &select.lsb)
             }
             Expression::Digital(crate::ast::DigitalExpr::Xnor(xnor)) => self
                 .self_width(&xnor.left)

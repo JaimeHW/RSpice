@@ -4854,6 +4854,64 @@ fn runtime_delays_convert_unknown_signed_and_wide_values_without_clamping() {
 }
 
 #[test]
+fn packed_parameter_selections_validate_bounds_before_sizing() {
+    for (selection, diagnostic) in [
+        ("P[4294967295:0]", "width"),
+        ("P[65536:0]", "width"),
+        ("P[64'sh7fffffffffffffff:64'sh8000000000000000]", "width"),
+        ("P[0:7]", "direction"),
+        ("P[select:0]", "constant"),
+        ("P[3.5:0]", "constant"),
+        ("R[0]", "packed"),
+        ("R[3:0]", "packed"),
+    ] {
+        let source = format!(
+            "module invalid; parameter P=8'ha6; parameter real R=2.5; integer select; reg [7:0] q; initial begin select=3; q={selection}; end endmodule"
+        );
+        let compiled =
+            std::panic::catch_unwind(|| VerilogACompiler::default().compile_canonical_ir(&source))
+                .expect("invalid source must return a diagnostic, never panic");
+        let error = compiled.err().expect("invalid selection was accepted");
+        assert!(
+            error.to_string().contains(diagnostic),
+            "{selection}: {error}"
+        );
+        assert!(
+            !error.to_string().contains("Internal error"),
+            "{selection}: {error}"
+        );
+    }
+}
+
+#[test]
+fn packed_parameter_selections_preserve_unsigned_clipped_values() {
+    let mut h = Harness::from_source(
+        r#"
+module constants;
+ parameter P=8'ha6; parameter SIGNED=8'sh80;
+ reg [63:0] widened, unsigned_signed, whole_signed;
+ reg [4:0] upper, lower; reg [3:0] far_bits, nested; reg invalid;
+ initial begin
+   widened=P[7:0]; unsigned_signed=SIGNED[7:0]; whole_signed=SIGNED;
+   upper=P[10:6]; lower=P[2:-2]; invalid=P[100];
+   far_bits=P[64'h20000000000003:64'h20000000000000];
+   nested=P[(SIGNED[7:7]+2):0];
+ end
+endmodule
+"#,
+    );
+    expect_finished(h.run());
+    assert_eq!(h.get("widened"), format!("{:064b}", 0xa6));
+    assert_eq!(h.get("unsigned_signed"), format!("{:064b}", 0x80));
+    assert_eq!(h.get("whole_signed"), format!("{:064b}", -128i64 as u64));
+    assert_eq!(h.get("upper"), "xxx10");
+    assert_eq!(h.get("lower"), "110xx");
+    assert_eq!(h.get("invalid"), "x");
+    assert_eq!(h.get("far_bits"), "xxxx");
+    assert_eq!(h.get("nested"), "0110");
+}
+
+#[test]
 fn packed_selector_constants_use_digital_widths_and_exact_known_bits() {
     let mut h = Harness::from_source(
         r#"

@@ -364,6 +364,15 @@ before publishing a result. Real storage has no packed view, and storage still
 cannot be written from both domains. Packed parameter bit reads also retain
 their resolved width. This uses existing IR/runtime operations and keeps Wasm
 helper ABI 20; shipping-platform qualification remains open.
+Schema 78 bounds packed part-select widths before expression or assignment
+sizing. Canonical lowering validates constant bounds, direction and integral
+types for parameters as well as storage, so invalid parameter selections return
+source diagnostics instead of overflowing a width calculation or reaching an
+ill-typed executable node. Scalar and array reads share checked packed-selection
+lowering; unrepresentable endpoint offsets preserve the selected width and X
+result. Existing runtime operations and Wasm helper ABI 20 are unchanged.
+Constant out-of-range checking for ordinary digital scalars remains to be
+aligned with the runtime's clipped-selection behavior.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification
