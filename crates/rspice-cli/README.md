@@ -629,6 +629,9 @@ noise requires positive frequencies. Control scripts validate requests they
 author or invoke through `run`; unused declarative cards may be replaced.
 Verilog-A compiler warnings include their original source locations and count
 toward `--strict`; JSON warning records retain this metadata in `diagnostic`.
+Failed checks also include every validation issue in the process error, preserving
+the cause when stdout is redirected. With `--error-format json`, compiler findings
+remain structured in `error.diagnostics`, including warnings that fail strict mode.
 The `run` command emits the same compiler findings using `--error-format`,
 including on cache hits. Rebuilding a model for multiple analyses on one engine
 does not repeat its findings. `--quiet` suppresses their console presentation.

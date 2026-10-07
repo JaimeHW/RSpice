@@ -104,6 +104,15 @@ fn check_strict_includes_veriloga_compiler_warnings() {
             "VA-SEM-NO-EFFECT-SYSTEM-TASK"
         );
         let diagnostic = &result["warnings"][0]["diagnostic"];
+        if strict {
+            let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(
+                error["error"]["diagnostics"],
+                serde_json::json!([diagnostic])
+            );
+            assert_eq!(error["error"]["line"], diagnostic["line"]);
+            assert_eq!(error["error"]["path"], diagnostic["path"]);
+        }
         assert_eq!(diagnostic["line"], 4);
         assert_eq!(diagnostic["column"], 2);
         assert_eq!(
@@ -155,6 +164,17 @@ fn control_runs_retain_compiler_warnings_and_check_refuses_broken_models() {
         "{result}"
     );
     assert_eq!(result["errors"][0]["diagnostic"]["line"], 1, "{result}");
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    let diagnostics = result["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|issue| (!issue["diagnostic"].is_null()).then_some(issue["diagnostic"].clone()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        error["error"]["diagnostics"],
+        serde_json::json!(diagnostics)
+    );
 }
 
 #[test]

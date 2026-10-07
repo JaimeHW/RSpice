@@ -81,19 +81,58 @@ pub fn execute(
     }
 
     if !result.is_ok() {
-        return Err(CliError::parse_error(format!(
-            "{} error(s)",
-            result.errors.len()
-        )));
+        return Err(validation_failure(
+            CliError::parse_error(format!("{} error(s)", result.errors.len())),
+            &result.errors,
+        ));
     }
     if args.strict && !result.warnings.is_empty() {
-        return Err(CliError::InvalidArgument {
-            message: format!("{} warning(s) in strict mode", result.warnings.len()),
-            suggestion: None,
-        });
+        return Err(validation_failure(
+            CliError::InvalidArgument {
+                message: format!("{} warning(s) in strict mode", result.warnings.len()),
+                suggestion: None,
+            },
+            &result.warnings,
+        ));
     }
 
     Ok(())
+}
+
+// The returned error must stand alone when a caller redirects stdout or reads
+// only the process-level JSON error. Keep every reported issue and compiler
+// diagnostic while preserving the existing failure category and exit status.
+fn validation_failure(error: CliError, issues: &[ValidationIssue]) -> CliError {
+    use std::fmt::Write as _;
+    let mut message = error.to_string();
+    let mut details = error.details();
+    for issue in issues {
+        message.push_str("\n  ");
+        if let Some(diagnostic) = &issue.compiler_diagnostic {
+            let _ = write!(message, "{diagnostic}");
+            details.diagnostics.push(diagnostic.clone());
+        } else {
+            if let Some(code) = &issue.code {
+                let _ = write!(message, "[{code}] ");
+            }
+            if let Some(element) = &issue.element {
+                let _ = write!(message, "element {element}: ");
+            }
+            if let Some(line) = issue.line {
+                let _ = write!(message, "line {line}: ");
+            }
+            message.push_str(&issue.message);
+        }
+    }
+    if let [issue] = issues {
+        details.line = issue.line;
+        details.instance_name = issue.element.clone();
+        details.path = issue
+            .compiler_diagnostic
+            .as_ref()
+            .and_then(|diagnostic| diagnostic.path.clone());
+    }
+    CliError::reported(message, Some(details))
 }
 
 fn validate_input(args: &CheckArgs, config: &Config) -> Result<ValidationResult, CliError> {

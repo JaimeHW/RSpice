@@ -182,3 +182,56 @@ fn xspice_check_resolves_config_deck_and_swept_temperatures() {
         }
     }
 }
+
+#[test]
+fn process_errors_retain_every_validation_issue_and_strict_warning() {
+    let directory = test_dir("check_process_diagnostics");
+    for (name, source, exit_code, issue_key) in [
+        (
+            "errors",
+            "* topology errors\nV1 in 0 1\nV2 in 0 2\nV3 out 0 1\nV4 out 0 2\n.OP\n.END\n",
+            65,
+            "errors",
+        ),
+        (
+            "warnings",
+            "* option warnings\n.OPTIONS foobar=1 other_unknown=2\nV1 in 0 1\nR1 in 0 1k\n.OP\n.END\n",
+            2,
+            "warnings",
+        ),
+    ] {
+        let deck = directory.join(format!("{name}.cir"));
+        std::fs::write(&deck, source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "--quiet",
+                "--error-format",
+                "json",
+                "check",
+                "--strict",
+                "--json",
+            ])
+            .arg(&deck)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(exit_code), "{name}: {output:?}");
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let diagnostic: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        let message = diagnostic["error"]["message"].as_str().unwrap();
+        let issues = report[issue_key].as_array().unwrap();
+        assert!(issues.len() >= 2, "{report}");
+        for issue in issues {
+            assert!(
+                message.contains(issue["message"].as_str().unwrap()),
+                "{report}: {diagnostic}"
+            );
+            if let Some(line) = issue["line"].as_u64() {
+                assert!(message.contains(&format!("line {line}")), "{diagnostic}");
+            }
+            if let Some(element) = issue["element"].as_str() {
+                assert!(message.contains(element), "{diagnostic}");
+            }
+        }
+        assert_eq!(diagnostic["error"]["exit_code"], exit_code);
+    }
+}
