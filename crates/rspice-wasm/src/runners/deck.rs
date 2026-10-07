@@ -1561,6 +1561,27 @@ R2 out 0 {r2v}\n";
         }
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn sensitivity_nominal_units_are_retained_by_the_deck_route() {
+        use rspice_core::execution::SignalUnit;
+        for (probe, unit) in [("V(out)", SignalUnit::Volt), ("I(V1)", SignalUnit::Ampere)] {
+            for sweep in ["", " AC LIN 1 1000 1000"] {
+                let source = format!(
+                    "Wasm sensitivity units\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nR2 out 0 1k\n.sens {probe} R1{sweep}\n.end\n"
+                );
+                let execution = run_authored_deck_document_detailed(&source).unwrap();
+                let result = &execution.results[0];
+                assert_eq!(result.result_kind(), AnalysisResultKind::Sensitivity);
+                if sweep.is_empty() {
+                    assert_eq!(result.scalars()[0].unit(), Some(&unit));
+                } else {
+                    assert_eq!(result.signals()[0].descriptor().unit(), &unit);
+                }
+            }
+        }
+    }
+
     /// The handle republishes exactly what the core document holds.
     fn assert_document_round_trips(kind: AnalysisResultKind, execution: DeckExecution) {
         let index = execution

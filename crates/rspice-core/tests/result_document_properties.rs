@@ -770,7 +770,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             ResultScalar::new(
                 "output_value",
                 "Output value",
-                None,
+                Some(SignalUnit::Volt),
                 ScalarValue::Real { value: Some(1e6) },
             )
             .unwrap(),

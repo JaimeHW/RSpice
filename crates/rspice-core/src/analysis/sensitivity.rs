@@ -26,6 +26,7 @@
 //! ```
 
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::signal_unit::SignalUnit;
 use crate::{Complex64, Value};
 use rspice_veriloga_runtime::arithmetic::ScaledValue;
 use serde::{Deserialize, Serialize};
@@ -286,6 +287,15 @@ pub enum AcSensitivityOutput {
     BranchCurrent(String),
 }
 
+impl AcSensitivityOutput {
+    pub(crate) fn unit(&self) -> SignalUnit {
+        match self {
+            Self::Voltage { .. } => SignalUnit::Volt,
+            Self::BranchCurrent(_) => SignalUnit::Ampere,
+        }
+    }
+}
+
 /// Frequency-dependent sensitivity of one output to one real-valued circuit
 /// parameter.
 #[derive(Debug, Clone)]
@@ -315,6 +325,8 @@ pub struct AcSensitivity {
 pub struct AcSensitivityResult {
     /// Human-readable selected output probe.
     pub output: String,
+    /// Physical unit of the nominal output, independent of its display name.
+    pub output_unit: SignalUnit,
     /// Frequency grid in hertz.
     pub frequencies: Vec<Value>,
     /// Nominal complex output at every frequency.
@@ -421,6 +433,8 @@ impl Sensitivity {
 pub struct SensitivityResult {
     /// Output variable name
     pub output: String,
+    /// Physical unit of the nominal output, independent of its display name.
+    pub output_unit: SignalUnit,
     /// Output value at operating point
     pub output_value: Value,
     /// Sensitivities for each element
@@ -428,10 +442,12 @@ pub struct SensitivityResult {
 }
 
 impl SensitivityResult {
-    /// Create new result
-    pub fn new(output: &str, output_value: Value) -> Self {
+    /// Create a result with its physical output unit; the display name is not
+    /// parsed to determine whether the output is a voltage or current.
+    pub fn new(output: &str, output_value: Value, output_unit: SignalUnit) -> Self {
         Self {
             output: output.to_string(),
+            output_unit,
             output_value,
             sensitivities: Vec::new(),
         }
@@ -926,7 +942,11 @@ impl SensitivityAnalyzer {
             }
         }
 
-        self.build_result_with_abort(&format!("V({})", output_node + 1), output_value, abort)
+        self.build_result_with_abort(
+            &Self::voltage_output_name(output_node, output_ref),
+            output_value,
+            abort,
+        )
     }
 
     /// Assemble sensitivities from the adjoint supplied to
@@ -959,7 +979,18 @@ impl SensitivityAnalyzer {
         let output_value = output_ref
             .map(|reference| self.solution[output_node] - self.solution[reference])
             .unwrap_or(self.solution[output_node]);
-        self.build_result_with_abort(&format!("V({})", output_node + 1), output_value, abort)
+        self.build_result_with_abort(
+            &Self::voltage_output_name(output_node, output_ref),
+            output_value,
+            abort,
+        )
+    }
+
+    fn voltage_output_name(output_node: usize, output_ref: Option<usize>) -> String {
+        match output_ref {
+            Some(reference) => format!("V({},{})", output_node + 1, reference + 1),
+            None => format!("V({})", output_node + 1),
+        }
     }
 
     fn valid_vectors_with_abort(
@@ -988,7 +1019,7 @@ impl SensitivityAnalyzer {
         if !output_value.is_finite() {
             return Ok(None);
         }
-        let mut result = SensitivityResult::new(output_name, output_value);
+        let mut result = SensitivityResult::new(output_name, output_value, SignalUnit::Volt);
 
         // Compute sensitivity for each element
         for (index, elem) in self.elements.iter().enumerate() {

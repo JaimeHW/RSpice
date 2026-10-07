@@ -144,9 +144,9 @@ def test_every_family_publishes_the_shared_document(results):
     for kind, result in results:
         document = result.document()
         assert document["schema"] == "rspice-analysis-result", kind
-        # Version 9 carries sampled periodic-noise evidence. Older readers must
-        # reject it before trying to decode the new payload fields.
-        assert document["schemaVersion"] == 9, kind
+        # Version 13 qualifies nominal sensitivity output units. Every producer
+        # uses the shared version so older readers reject new guarantees.
+        assert document["schemaVersion"] == 13, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 

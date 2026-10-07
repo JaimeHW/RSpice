@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 12                          this build's exact version
+//!   "schemaVersion": 13                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -225,7 +225,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 12;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 13;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -262,6 +262,9 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 12;
 /// Version 11 adds frequency-table provenance and physical row coordinates.
 /// Version 12 adds explicit pole-zero root and gain units. Earlier documents
 /// keep both units absent; input labels cannot reconstruct the excitation kind.
+/// Version 13 qualifies sensitivity nominal-output units as volts or amperes.
+/// Earlier sensitivity documents used dimensionless/unspecified placeholders;
+/// decoding keeps their numbers and marks placeholder output units unspecified.
 ///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
@@ -269,8 +272,8 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 12;
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 12] =
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 13] =
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -690,9 +693,92 @@ impl AnalysisResultDocument {
         self.validate_current_impulses()?;
         frequency_table::validate(self, abort)?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
+            self.validate_sensitivity_units(abort)?;
             self.validate_sensitivity_availability(payload, abort)?;
         }
         check_abort(abort)
+    }
+
+    fn validate_sensitivity_units(
+        &self,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ResultDocumentError> {
+        let units = self
+            .scalars
+            .iter()
+            .filter(|scalar| scalar.name == "output_value")
+            .map(|scalar| scalar.unit.as_ref())
+            .chain(
+                self.signals
+                    .iter()
+                    .filter(|signal| signal.descriptor.canonical_name() == "output")
+                    .map(|signal| Some(signal.descriptor.unit())),
+            );
+        let mut count = 0;
+        for unit in units {
+            check_abort(abort)?;
+            let valid = if self.schema_version >= 13 {
+                matches!(unit, Some(SignalUnit::Volt | SignalUnit::Ampere))
+            } else {
+                matches!(
+                    unit,
+                    Some(SignalUnit::Volt | SignalUnit::Ampere | SignalUnit::Unspecified)
+                )
+            };
+            if !valid {
+                return Err(ResultDocumentError::Malformed {
+                    location: "sensitivity output unit",
+                    detail: "nominal output requires volts or amperes from version 13; legacy placeholders must remain unspecified".into(),
+                });
+            }
+            count += 1;
+        }
+        if count != 1 {
+            return Err(ResultDocumentError::Malformed {
+                location: "sensitivity output unit",
+                detail: "sensitivity requires exactly one nominal-output scalar or signal".into(),
+            });
+        }
+        Ok(())
+    }
+
+    fn normalize_legacy_sensitivity_units(
+        &mut self,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ResultDocumentError> {
+        if self.schema_version >= 13 || !matches!(self.payload, ResultPayload::Sensitivity(_)) {
+            return Ok(());
+        }
+        for scalar in &mut self.scalars {
+            check_abort(abort)?;
+            if scalar.name == "output_value"
+                && matches!(scalar.unit, None | Some(SignalUnit::Dimensionless))
+            {
+                scalar.unit = Some(SignalUnit::Unspecified);
+            }
+        }
+        for signal in &mut self.signals {
+            check_abort(abort)?;
+            let descriptor = &signal.descriptor;
+            if descriptor.canonical_name() == "output"
+                && *descriptor.unit() == SignalUnit::Dimensionless
+            {
+                signal.descriptor = SignalDescriptor::new(
+                    descriptor.canonical_name(),
+                    descriptor.display_name(),
+                    descriptor.kind(),
+                    SignalUnit::Unspecified,
+                    descriptor.value_type(),
+                    descriptor.shape(),
+                    descriptor.owner().clone(),
+                )
+                .map_err(|error| ResultDocumentError::Malformed {
+                    location: "legacy sensitivity output unit",
+                    detail: error.to_string(),
+                })?;
+            }
+        }
+        Ok(())
     }
 
     fn validate_sensitivity_availability(
@@ -1023,8 +1109,9 @@ impl AnalysisResultDocument {
             });
         }
         check_abort(abort)?;
-        let document: Self = serde_json::from_str(json)
+        let mut document: Self = serde_json::from_str(json)
             .map_err(|error| ResultDocumentError::Json(error.to_string()))?;
+        document.normalize_legacy_sensitivity_units(abort)?;
         document.validate_with_limits_and_abort(limits, abort)?;
         Ok(document)
     }

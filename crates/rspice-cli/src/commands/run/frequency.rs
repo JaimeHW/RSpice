@@ -2030,6 +2030,7 @@ fn export_parameter_sensitivity(
                 analysis_id,
                 &output_label,
                 output_value,
+                rspice_core::execution::SignalUnit::Volt,
                 param_name,
                 param_value,
                 absolute,

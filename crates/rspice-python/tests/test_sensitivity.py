@@ -144,6 +144,7 @@ class TestSensitivity:
             assert restored.percent_per_percent is None
             assert restored.normalized_unavailability == "zero-output"
         assert dc.document()["payload"]["entries"][0]["normalized"] == {"unavailable": "zero-output"}
+        assert dc.document()["scalars"][0]["unit"]["unit"] == "volt"
 
         ac = engine.run_sensitivity_ac_complete(netlist, "out", [1.0, 2.0])
         assert ac.top(0) == []
@@ -159,7 +160,8 @@ class TestSensitivity:
             assert trace.phase_unavailability == ["zero-output"] * 2
             assert trace.phase_degrees_unavailability == ["zero-output"] * 2
             assert trace.db_unavailability == ["zero-output"] * 2
-        assert ac.document()["schemaVersion"] == 9
+        assert ac.document()["schemaVersion"] == 13
+        assert ac.document()["signals"][0]["descriptor"]["unit"]["unit"] == "volt"
         with pytest.raises(ValueError, match="rerun"):
             rspice.ElementSensitivity._unpickle(("V1", "V1", "VoltageSource", "dc"), 0.0, 1.0, 0.0)
 
@@ -223,7 +225,7 @@ R2 out 0 1k
         )
         result = engine.run_sensitivity_dc_complete(netlist, "out", filters=["R*"])
         assert isinstance(result, rspice.SensitivityResult)
-        assert result.output == "V(2)"
+        assert result.output == "V(OUT)"
         assert result.output_value == pytest.approx(5.0, abs=1e-9)
         assert result.vector_names == ["R1", "R2"]
         assert result.get("R1").vector_name == "R1"
@@ -245,6 +247,7 @@ R2 out 0 1k
         )
         assert result.output == "I(V1)"
         assert result.output_value == pytest.approx(-5e-3, rel=1e-9)
+        assert result.document()["scalars"][0]["unit"]["unit"] == "ampere"
         assert result.vector_names == ["R1"]
         assert result.get("R1").absolute == pytest.approx(2.5e-6, rel=1e-6)
 
@@ -320,7 +323,7 @@ R2 out 0 1k
         )
 
         assert isinstance(result, rspice.AcSensitivityResult)
-        assert result.output == "V(2)"
+        assert result.output == "V(OUT)"
         assert result.vector_names == ["R1", "R2"]
         assert result.frequencies.dtype == np.float64
         assert result.output_complex.dtype == np.complex128
@@ -358,6 +361,7 @@ R2 out 0 1k
         )
         assert result.output == "I(V1)"
         assert result.get("R1").absolute[0] == pytest.approx(2.5e-7 + 0j, rel=1e-6)
+        assert result.document()["signals"][0]["descriptor"]["unit"]["unit"] == "ampere"
 
     def test_engine_run_executes_complete_ac_sensitivity_directive(self, engine):
         netlist = rspice.Netlist.parse(

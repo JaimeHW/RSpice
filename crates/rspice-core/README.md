@@ -822,8 +822,11 @@ the magnitude derivative is nondifferentiable there when the complex derivative
 is nonzero. A zero complex derivative retains a zero magnitude derivative.
 Unrepresentable derived values report `OutOfRange` while preserving the absolute
 derivative. Invalid inputs remain errors at the result-document boundary.
-Shared result documents use version 5; sensitivity documents from earlier
-versions require a rerun because their zero values do not establish availability.
+Sensitivity results retain voltage/current units independently of display names.
+Version 13 documents require the nominal output in volts or amperes. Decoding
+version 5–12 sensitivity documents preserves their values and marks their former
+placeholder output units unspecified. Sensitivity documents before version 5
+require a rerun because their zero values do not establish availability.
 Other supported legacy result families remain readable. Python exposes missing
 DC normalization as `None`, and unavailable AC samples as NumPy NaNs paired with
 `*_unavailability` reason arrays; rankings include only available normalization.

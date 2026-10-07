@@ -2162,7 +2162,7 @@ impl AnalysisResultDocument {
             LOCATION,
             "output_value",
             "Output value",
-            SignalUnit::Dimensionless,
+            result.output_unit.clone(),
             result.output_value,
         )?];
         let payload = SensitivityPayload {
@@ -2190,6 +2190,7 @@ impl AnalysisResultDocument {
         analysis: AnalysisInstanceId,
         output: &str,
         output_value: Value,
+        output_unit: SignalUnit,
         parameter: &str,
         nominal_value: Value,
         absolute: Value,
@@ -2212,7 +2213,7 @@ impl AnalysisResultDocument {
             LOCATION,
             "output_value",
             "Output value",
-            SignalUnit::Dimensionless,
+            output_unit,
             output_value,
         )?];
         let name = parameter.to_ascii_uppercase();
@@ -2272,7 +2273,7 @@ impl AnalysisResultDocument {
                 LOCATION,
                 "output",
                 "Nominal output",
-                SignalUnit::Unspecified,
+                result.output_unit.clone(),
                 SignalValueType::Complex,
                 point_count,
             )?,

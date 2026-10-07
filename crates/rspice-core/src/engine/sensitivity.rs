@@ -2909,7 +2909,7 @@ impl Engine {
         let output_name = Self::sensitivity_output_name(&output, |node| {
             nominal_result.node_names.get(node).map(String::as_str)
         })?;
-        let mut result = SensitivityResult::new(&output_name, nominal_output);
+        let mut result = SensitivityResult::new(&output_name, nominal_output, output.unit());
         result.sensitivities.reserve(targets.len());
 
         let mut runs = 1;
@@ -3110,6 +3110,7 @@ impl Engine {
 
         Ok(AcSensitivityResult {
             output: output_name,
+            output_unit: output.unit(),
             frequencies: frequencies.to_vec(),
             output_values: nominal_output,
             sensitivities,

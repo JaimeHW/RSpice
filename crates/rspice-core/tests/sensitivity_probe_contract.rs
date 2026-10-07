@@ -1,6 +1,9 @@
 //! Physical probe identities and signed/zero differential sensitivity outputs.
 use rspice_core::analysis::{AcSensitivityOutput, SensitivityUnavailability};
 use rspice_core::engine::SensitivityCardResult;
+use rspice_core::execution::{
+    AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, SignalUnit,
+};
 use rspice_core::{ComplexValue, Engine, Netlist, NoAbort};
 
 const CIRCUIT: &str =
@@ -145,5 +148,173 @@ fn sparse_adjoint_accepts_ground_and_reports_the_same_physical_probe() {
                 .run_sensitivity_ac_complete(&netlist, output, &[1000.0], &["R1".into()])
                 .is_err()
         );
+    }
+}
+
+fn document(body: &str, probe: &str, sweep: &str) -> AnalysisResultDocument {
+    let netlist = Netlist::parse(&format!("{body}.sens {probe} R1{sweep}\n.end\n")).unwrap();
+    let id = AnalysisInstanceId::new(AnalysisKind::Sensitivity, 1);
+    match Engine::default()
+        .run_sensitivity_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+        .unwrap()
+    {
+        SensitivityCardResult::Dc(result) => {
+            assert_eq!(
+                result.output_unit,
+                if probe.starts_with('I') {
+                    SignalUnit::Ampere
+                } else {
+                    SignalUnit::Volt
+                }
+            );
+            AnalysisResultDocument::from_sensitivity(id, &result).unwrap()
+        }
+        SensitivityCardResult::Ac(result) => {
+            assert_eq!(
+                result.output_unit,
+                if probe.starts_with('I') {
+                    SignalUnit::Ampere
+                } else {
+                    SignalUnit::Volt
+                }
+            );
+            AnalysisResultDocument::from_ac_sensitivity(id, &result).unwrap()
+        }
+    }
+    .build()
+    .unwrap()
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn nominal_output_units_survive_voltage_and_current_documents() {
+    for (probe, unit) in [
+        ("V(out)", SignalUnit::Volt),
+        ("V(0,out)", SignalUnit::Volt),
+        ("I(V1)", SignalUnit::Ampere),
+    ] {
+        for sweep in ["", " AC LIN 2 1000 2000"] {
+            let result = document(CIRCUIT, probe, sweep);
+            if sweep.is_empty() {
+                assert_eq!(result.scalars()[0].unit(), Some(&unit));
+            } else {
+                assert_eq!(result.signals()[0].descriptor().unit(), &unit);
+            }
+            assert_eq!(
+                AnalysisResultDocument::from_json(&result.to_json().unwrap()).unwrap(),
+                result
+            );
+        }
+    }
+    // The display spelling is not the authority for a physical unit.
+    let result = rspice_core::analysis::SensitivityResult::new(
+        "Voltage-looking label V(out)",
+        2.0,
+        SignalUnit::Ampere,
+    );
+    let result = AnalysisResultDocument::from_sensitivity(
+        AnalysisInstanceId::new(AnalysisKind::Sensitivity, 1),
+        &result,
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    assert_eq!(result.scalars()[0].unit(), Some(&SignalUnit::Ampere));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn legacy_sensitivity_units_remain_unknown_without_changing_numbers() {
+    for sweep in ["", " AC LIN 2 1000 2000"] {
+        let original = document(CIRCUIT, "I(V1)", sweep);
+        let mut raw = serde_json::to_value(&original).unwrap();
+        let mut explicitly_typed_legacy = raw.clone();
+        explicitly_typed_legacy["schemaVersion"] = 12.into();
+        let preserved =
+            AnalysisResultDocument::from_json(&explicitly_typed_legacy.to_string()).unwrap();
+        assert_eq!(
+            serde_json::to_value(preserved).unwrap(),
+            explicitly_typed_legacy
+        );
+        let unit_path = if sweep.is_empty() {
+            "/scalars/0/unit"
+        } else {
+            "/signals/0/descriptor/unit"
+        };
+        *raw.pointer_mut(unit_path).unwrap() = serde_json::json!({"unit": if sweep.is_empty() { "dimensionless" } else { "unspecified" }});
+        for version in 5..=12 {
+            raw["schemaVersion"] = version.into();
+            let restored = AnalysisResultDocument::from_json(&raw.to_string()).unwrap();
+            let mut expected = raw.clone();
+            *expected.pointer_mut(unit_path).unwrap() = serde_json::json!({"unit":"unspecified"});
+            assert_eq!(serde_json::to_value(&restored).unwrap(), expected);
+            assert_eq!(
+                AnalysisResultDocument::from_json(&restored.to_json().unwrap()).unwrap(),
+                restored
+            );
+        }
+        raw["schemaVersion"] = 13.into();
+        assert!(
+            AnalysisResultDocument::from_json(&raw.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("sensitivity output unit")
+        );
+        raw["schemaVersion"] = 4.into();
+        assert!(
+            AnalysisResultDocument::from_json(&raw.to_string())
+                .unwrap_err()
+                .to_string()
+                .contains("rerun")
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn sensitivity_nominal_metadata_cannot_claim_invalid_or_missing_units() {
+    for sweep in ["", " AC LIN 2 1000 2000"] {
+        let original = serde_json::to_value(document(CIRCUIT, "V(out)", sweep)).unwrap();
+        let unit_path = if sweep.is_empty() {
+            "/scalars/0/unit"
+        } else {
+            "/signals/0/descriptor/unit"
+        };
+        for invalid in [
+            serde_json::json!({"unit":"dimensionless"}),
+            serde_json::json!({"unit":"unspecified"}),
+            serde_json::json!({"unit":"ohm"}),
+            serde_json::Value::Null,
+        ] {
+            let mut raw = original.clone();
+            *raw.pointer_mut(unit_path).unwrap() = invalid;
+            assert!(AnalysisResultDocument::from_json(&raw.to_string()).is_err());
+        }
+        let mut raw = original;
+        raw[if sweep.is_empty() {
+            "scalars"
+        } else {
+            "signals"
+        }] = serde_json::json!([]);
+        assert!(AnalysisResultDocument::from_json(&raw.to_string()).is_err());
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn standalone_adjoint_retains_both_numeric_terminals_and_voltage_units() {
+    use rspice_core::analysis::sensitivity::SensitivityAnalyzer;
+    let mut dense =
+        SensitivityAnalyzer::new(vec![vec![1.0, 0.0], vec![0.0, 1.0]], vec![3.0, 1.0], vec![]);
+    let sparse =
+        SensitivityAnalyzer::with_precomputed_adjoint(vec![3.0, 1.0], vec![1.0, -1.0], vec![])
+            .unwrap();
+    for result in [
+        dense.analyze(0, Some(1)).unwrap(),
+        sparse.analyze_precomputed(0, Some(1)).unwrap(),
+    ] {
+        assert_eq!(result.output, "V(1,2)");
+        assert_eq!(result.output_value, 2.0);
+        assert_eq!(result.output_unit, SignalUnit::Volt);
     }
 }

@@ -395,7 +395,7 @@ fn stability_result() -> StbResult {
 }
 
 fn sensitivity_result() -> SensitivityResult {
-    let mut result = SensitivityResult::new("V(out)", 0.5);
+    let mut result = SensitivityResult::new("V(out)", 0.5, SignalUnit::Volt);
     result.add(Sensitivity::new(
         "R1",
         ElementType::Resistor,
@@ -1563,6 +1563,7 @@ fn sensitivity_availability_survives_document_round_trip_and_rejects_legacy_zero
             instance(AnalysisKind::Sensitivity),
             "V(out)",
             output,
+            SignalUnit::Volt,
             "p",
             nominal,
             derivative,
@@ -1640,6 +1641,7 @@ fn a_sens_document_tags_a_design_parameter_as_a_parameter() {
     };
     let ac = AcSensitivityResult {
         output: "V(out)".to_owned(),
+        output_unit: SignalUnit::Volt,
         frequencies: vec![1.0e3],
         output_values: vec![Complex64::new(0.5, 0.0)],
         sensitivities: vec![
@@ -1668,6 +1670,7 @@ fn a_probed_design_parameter_is_named_as_a_sens_card_names_it() {
         instance(AnalysisKind::Sensitivity),
         "V(out)",
         0.5,
+        SignalUnit::Volt,
         "bias",
         2.0,
         -0.25,
