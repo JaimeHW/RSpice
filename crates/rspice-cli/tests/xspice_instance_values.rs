@@ -402,3 +402,94 @@ fn invalid_late_vector_aliases_never_replace_existing_results() {
         }
     }
 }
+
+#[test]
+fn retained_dependencies_observe_instance_overrides_in_published_results() {
+    for (fields, definitions, expected) in [
+        ("gain={dependent} in_offset=3", "", 16.0),
+        (
+            "gain={read_gain()} in_offset={later}",
+            ".PARAM later=3",
+            16.0,
+        ),
+        ("gain={IMAG(z)} in_offset=0", ".PARAM z={2+3j}", 3.0),
+    ] {
+        for scoped in [false, true] {
+            let directory = common::test_dir("retained_instance_dependencies");
+            let deck = directory.join("deck.cir");
+            let result = directory.join("result.csv");
+            let mut body = format!("A1 in out gain {fields}");
+            if scoped {
+                body = format!(".SUBCKT cell in out\n{body}\n.ENDS\nX1 in out cell");
+            }
+            std::fs::write(&deck, format!("* retained instance dependency\n.PARAM in_offset=1\n.GLOBAL_PARAM dependent={{in_offset+1}}\n.FUNC read_gain() {{dependent}}\n{definitions}\nV1 in 0 1\n{body}\n.OP\n.END\n")).unwrap();
+            for command in ["check", "run"] {
+                let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                process.args(["--quiet", command]).arg(&deck);
+                if command == "run" {
+                    process.args(["--format", "csv", "--output"]).arg(&result);
+                }
+                let output = process.output().unwrap();
+                assert!(
+                    output.status.success(),
+                    "{fields}, scoped={scoped}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            let actual = csv_voltage(&result, "out");
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "{fields}, scoped={scoped}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn dependency_errors_report_the_cause_without_replacing_results() {
+    for (fields, expected) in [
+        (
+            "gain={in_offset} in_offset={missing}",
+            "Undefined parameter: MISSING",
+        ),
+        ("gain={in_offset} in_offset={gain}", "cyclic dependency"),
+    ] {
+        for scoped in [false, true] {
+            let directory = common::test_dir("instance_dependency_diagnostic");
+            let deck = directory.join("deck.cir");
+            let result = directory.join("result.csv");
+            let mut body = format!("A1 in out gain {fields}");
+            if scoped {
+                body = format!(".SUBCKT cell in out\n{body}\n.ENDS\nX1 in out cell");
+            }
+            std::fs::write(
+                &deck,
+                format!("* invalid dependency\nV1 in 0 1\n{body}\n.OP\n.END\n"),
+            )
+            .unwrap();
+            for command in ["check", "run"] {
+                std::fs::write(&result, "existing result").unwrap();
+                let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                process.args(["--quiet", command]).arg(&deck);
+                if command == "run" {
+                    process.args(["--format", "csv", "--output"]).arg(&result);
+                }
+                let output = process.output().unwrap();
+                assert!(
+                    !output.status.success(),
+                    "{fields}, scoped={scoped}, {command}"
+                );
+                let diagnostic = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    diagnostic.contains(expected),
+                    "{fields}, scoped={scoped}, {command}: {diagnostic}"
+                );
+                assert_eq!(std::fs::read_to_string(&result).unwrap(), "existing result");
+            }
+        }
+    }
+}
