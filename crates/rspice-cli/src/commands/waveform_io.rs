@@ -375,16 +375,24 @@ fn load_rawfile(
     resource_limits: rspice_core::ResourceLimits,
     section: Option<&str>,
 ) -> Result<ImportedResult, CliError> {
-    let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits).map_err(
-        |error| match error {
-            rspice_core::io::RawParseError::ResourceLimit(source) => CliError::ResourceLimit {
-                path: path.to_path_buf(),
-                source,
-            },
-            error => conversion_error(path, error),
-        },
-    )?;
+    let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits)
+        .map_err(|error| raw_read_error(path, error))?;
     raw_result(path, file, section)
+}
+
+/// Preserve parser admission and I/O errors for every RAW read path.
+pub(crate) fn raw_read_error(path: &Path, error: rspice_core::io::RawParseError) -> CliError {
+    match error {
+        rspice_core::io::RawParseError::ResourceLimit(source) => CliError::ResourceLimit {
+            path: path.to_owned(),
+            source,
+        },
+        rspice_core::io::RawParseError::Io(source) => CliError::InputReadError {
+            path: path.to_owned(),
+            source,
+        },
+        error => conversion_error(path, error),
+    }
 }
 
 fn raw_result(

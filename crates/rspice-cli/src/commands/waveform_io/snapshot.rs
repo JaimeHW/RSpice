@@ -78,15 +78,7 @@ impl ResultSnapshot {
                     let file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(
                         bytes, limits,
                     )
-                    .map_err(|error| match error {
-                        rspice_core::io::RawParseError::ResourceLimit(source) => {
-                            CliError::ResourceLimit {
-                                path: path.to_owned(),
-                                source,
-                            }
-                        }
-                        error => conversion_error(path, error),
-                    })?;
+                    .map_err(|error| raw_read_error(path, error))?;
                     raw_result(path, file, section)?
                 }
                 InputFormat::Csv => parse_delimited(path, text()?, ',', limits)?,

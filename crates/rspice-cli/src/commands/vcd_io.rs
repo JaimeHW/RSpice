@@ -444,7 +444,7 @@ fn event_traces_of(
     let traces = match format {
         InputFormat::Raw | InputFormat::RawAscii => {
             let file = rspice_core::io::parse_raw_plots_file_with_limits(path, resource_limits)
-                .map_err(|error| conversion_error(path, error))?;
+                .map_err(|error| crate::commands::waveform_io::raw_read_error(path, error))?;
             rspice_core::execution::decode_event_plots(&file)
                 .map_err(|error| conversion_error(path, error))?
         }
