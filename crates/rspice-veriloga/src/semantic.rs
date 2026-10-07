@@ -1624,6 +1624,31 @@ impl SemanticAnalyzer {
             };
 
             for item in &var_decl.items {
+                let completes_integer_port = var_decl.var_type == VarType::Integer
+                    && self
+                        .symbols
+                        .lookup(&item.name)
+                        .is_some_and(|symbol| symbol.kind == SymbolKind::Port);
+                if completes_integer_port {
+                    if !matches!(port_info.get(&item.name), Some((PortDirection::Output, _))) {
+                        return Err(SemanticError::new(
+                            SemanticErrorKind::InvalidContribution(format!(
+                                "`{}` is an integer variable port; only output ports may be variables",
+                                item.name
+                            )), item.span
+                        ).into());
+                    }
+                    if !item.dimensions.is_empty() {
+                        return Err(SemanticError::new(
+                            SemanticErrorKind::UnsupportedFeature(format!(
+                                "unpacked integer port `{}` requires array connection elaboration",
+                                item.name
+                            )),
+                            item.span,
+                        )
+                        .into());
+                    }
+                }
                 if !item.dimensions.is_empty() {
                     let name = item.name.clone();
                     if let Some(layout) =
@@ -1651,13 +1676,22 @@ impl SemanticAnalyzer {
                     is_event_controlled: false,
                 });
 
-                self.define_symbol(Symbol {
-                    name: item.name.clone(),
-                    kind: SymbolKind::Variable,
-                    value_type,
-                    span: var_decl.span,
-                    attrs: Default::default(),
-                })?;
+                if completes_integer_port {
+                    // Complete the header declaration while retaining duplicate-variable
+                    // diagnostics on any later declaration of the same name.
+                    let symbol = self.symbols.lookup_mut(&item.name).expect("port exists");
+                    symbol.kind = SymbolKind::Variable;
+                    symbol.value_type = value_type;
+                    symbol.span = item.span;
+                } else {
+                    self.define_symbol(Symbol {
+                        name: item.name.clone(),
+                        kind: SymbolKind::Variable,
+                        value_type,
+                        span: var_decl.span,
+                        attrs: Default::default(),
+                    })?;
+                }
             }
         }
 

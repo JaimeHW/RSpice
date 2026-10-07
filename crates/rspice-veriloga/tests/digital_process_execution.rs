@@ -7347,3 +7347,150 @@ module top; counters a(); counters b(); endmodule
     }
     assert_eq!(h.get("b.q"), format!("{:032b}", 2));
 }
+
+#[test]
+fn integer_output_ports_preserve_types_initializers_and_hierarchy_conversion() {
+    use rspice_veriloga::canonical_ir::digital::DigitalInitialValue;
+    let source = r#"
+module ansi(output integer a=START, b=-3, unused,
+            output reg [7:0] tag=8'h9a, input wire clk);
+ parameter START=-2;
+ always @(posedge clk) begin a<=-4; b<=8'bz; end
+endmodule
+module legacy(a,b); output integer a=-2,b=-3;
+ initial #1 a=-5;
+endmodule
+module split_decl(a); output a; integer a=-2;
+ initial #1 a=-6;
+endmodule
+module top(input wire clk);
+ parameter START=99;
+ wire [39:0] wide; wire [3:0] small; wire [0:47] sliced;
+ wire [31:0] legacy_a,legacy_b,split_a;
+ ansi u(.a(wide),.b(small),.unused(),.tag(),.clk(clk));
+ ansi v(.a(sliced[4:43]),.b(),.unused(),.tag(),.clk(clk));
+ legacy w(legacy_a,legacy_b); split_decl x(split_a);
+endmodule
+"#;
+    let mut design = Design::new(source, "top");
+    for name in ["u.a", "u.b", "u.unused", "v.a", "w.a", "w.b", "x.a"] {
+        let signal = design.plan.signal(design.signal(name)).unwrap();
+        assert_eq!(signal.width, 32, "{name}");
+        assert_eq!(signal.bounds, Some((31, 0)), "{name}");
+        assert!(
+            signal.integer && signal.signed && signal.procedurally_assignable,
+            "{name}"
+        );
+    }
+    for signal in &design.plan.signals {
+        if let Some(DigitalInitialValue::FourState(value)) = &signal.initial_value {
+            design.store.values[usize::from(signal.id)] = value.clone();
+        }
+    }
+    assert_eq!(design.get("u.a"), format!("{:032b}", -2i32 as u32));
+    assert_eq!(design.get("u.tag"), "10011010");
+    assert_eq!(design.get("u.unused"), "x".repeat(32));
+    design.set("clk", "0");
+    design.start_all();
+    design.settle();
+    assert_eq!(design.get("wide"), format!("{}10", "1".repeat(38)));
+    assert_eq!(design.get("small"), "1101");
+    assert_eq!(
+        design.get("sliced"),
+        format!("zzzz{}10zzzz", "1".repeat(38))
+    );
+    assert_eq!(design.get("legacy_a"), format!("{:032b}", -2i32 as u32));
+    assert_eq!(design.get("legacy_b"), format!("{:032b}", -3i32 as u32));
+    assert_eq!(design.get("split_a"), format!("{:032b}", -2i32 as u32));
+    design.transition("clk", "1");
+    assert_eq!(design.get("wide"), format!("{}00", "1".repeat(38)));
+    assert_eq!(design.get("small"), "zzzz");
+    assert_eq!(
+        design.get("sliced"),
+        format!("zzzz{}00zzzz", "1".repeat(38))
+    );
+    assert_eq!(
+        design.get("w.a"),
+        format!("{:032b}", -2i32 as u32),
+        "instances remain independent"
+    );
+    let encoded = serde_json::to_string(&design.plan).unwrap();
+    let decoded: CanonicalDigitalPlan = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, design.plan);
+    decoded.validate().unwrap();
+
+    // A constant or unwritten integer port is still a signed variable, even
+    // when the entire module contains no digital process.
+    for source in [
+        "module constant(output integer q=-7, empty); endmodule",
+        "module constant(q,empty); output integer q=-7,empty; endmodule",
+        "module constant(q,empty); output q,empty; integer q=-7,empty; endmodule",
+    ] {
+        let h = Harness::from_source(source);
+        let q = h.plan.signal(h.signal("q")).unwrap();
+        assert!(q.integer && q.signed && q.procedurally_assignable);
+        assert_eq!(
+            q.initial_value,
+            Some(DigitalInitialValue::FourState(
+                FourStateValue::from_integer(32, -7)
+            ))
+        );
+        assert_eq!(h.get("empty"), "x".repeat(32));
+    }
+}
+
+#[test]
+fn integer_output_ports_reject_invalid_declarations_and_keep_ownership_diagnostics() {
+    for source in [
+        "module invalid(input integer q); endmodule",
+        "module invalid(inout integer q); endmodule",
+        "module invalid(output integer signed q); endmodule",
+        "module invalid(output integer [31:0] q); endmodule",
+        "module invalid(output integer electrical q); endmodule",
+        "module invalid(output integer q[0:1]); endmodule",
+        "module invalid(output integer q); integer q; endmodule",
+        "module invalid(output wire q=1); endmodule",
+        "module invalid(input reg q=1); endmodule",
+        "module invalid(output integer q=other); integer other; initial other=1; endmodule",
+        "module invalid(output integer q=$time); endmodule",
+        "module invalid(q); input q; integer q; initial q=1; endmodule",
+        "module invalid(q); inout q; integer q; endmodule",
+        "module invalid(q); integer q; initial q=1; endmodule",
+        "module invalid(q); output [7:0] q; integer q; initial q=1; endmodule",
+        "module invalid(q); output q; integer q[0:1]; initial q[0]=1; endmodule",
+    ] {
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .expect_err(source)
+            .to_string();
+        assert!(!error.contains("Internal error"), "{source}: {error}");
+    }
+    for (body, expected) in [
+        ("analog q=1;", "analog-owned integer output port"),
+        (
+            "analog q=1; initial q=2;",
+            "written by both the analog body and a discrete process",
+        ),
+        ("electrical q; initial q=2;", "integer port"),
+    ] {
+        let source = format!("module invalid(output integer q); {body} endmodule");
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+    // A signed integer read in analog code must retain integer identity,
+    // rather than hit the 31-bit packed-vector read restriction.
+    let artifact = VerilogACompiler::default().compile_canonical_ir(
+        "module mixed(p,q); inout p; electrical p; output integer q=-2; initial #1 q=-4; analog I(p)<+(V(p)-q)/1000; endmodule"
+    ).unwrap();
+    let q = artifact
+        .digital
+        .signals
+        .iter()
+        .find(|signal| signal.name == "q")
+        .unwrap();
+    assert!(q.integer && q.signed);
+    artifact.digital.validate().unwrap();
+}

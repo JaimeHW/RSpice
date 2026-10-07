@@ -460,6 +460,10 @@ impl<'a> Parser<'a> {
                             self.advance();
                             Some(PortNetType::Reg)
                         }
+                        TokenKind::Integer => {
+                            self.advance();
+                            Some(PortNetType::Integer)
+                        }
                         // Verilog-AMS LRM 2.4 section 6.5.2 puts `wreal`
                         // exactly where a 1364 net type goes.
                         TokenKind::Wreal => {
@@ -477,6 +481,7 @@ impl<'a> Parser<'a> {
                         }
                         _ => None,
                     };
+                    self.check_integer_port(direction, net_type)?;
                     let discipline: Option<SmolStr> = if self.is_discipline_keyword()
                         || (self.check(TokenKind::Identifier)
                             && self.peek_is(TokenKind::Identifier))
@@ -485,7 +490,11 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    let signedness = self.parse_signedness();
+                    let signedness = if net_type == Some(PortNetType::Integer) {
+                        Signedness::Signed
+                    } else {
+                        self.parse_signedness()
+                    };
                     let range = self.parse_optional_vector_range()?;
 
                     let name: SmolStr = self.expect_identifier("port name")?.into();
@@ -493,6 +502,7 @@ impl<'a> Parser<'a> {
                         name: name.clone(),
                         span,
                     });
+                    let initializers = self.parse_port_initializer(direction, net_type, &name)?;
                     let declaration = PortDeclaration {
                         direction,
                         discipline: discipline.clone(),
@@ -500,6 +510,7 @@ impl<'a> Parser<'a> {
                         signedness,
                         net_type,
                         names: vec![name],
+                        initializers,
                         span: span.extend(self.previous_span()),
                     };
                     Self::expand_port_net_type(module, &declaration);
@@ -521,6 +532,11 @@ impl<'a> Parser<'a> {
                     // discipline, and vector shape of the preceding declared
                     // port.
                     if let Some(context) = &ansi_context {
+                        let initializers = self.parse_port_initializer(
+                            context.direction,
+                            context.net_type,
+                            &name,
+                        )?;
                         let declaration = PortDeclaration {
                             direction: context.direction,
                             discipline: context.discipline.clone(),
@@ -528,6 +544,7 @@ impl<'a> Parser<'a> {
                             signedness: context.signedness,
                             net_type: context.net_type,
                             names: vec![name],
+                            initializers,
                             span: span.extend(self.previous_span()),
                         };
                         Self::expand_port_net_type(module, &declaration);
@@ -1022,6 +1039,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Some(PortNetType::Reg)
             }
+            TokenKind::Integer => {
+                self.advance();
+                Some(PortNetType::Integer)
+            }
             // Verilog-AMS LRM 2.4 section 6.5.2's port grammar reads
             // `[discipline_identifier] [net_type | wreal]`, so a real-valued
             // port declares its type here like any other.
@@ -1039,6 +1060,8 @@ impl<'a> Parser<'a> {
             _ => None,
         };
 
+        self.check_integer_port(direction, net_type)?;
+
         // Optional discipline. User-defined disciplines are identifiers, so
         // distinguish `inout foo bar;` from `inout foo, bar;` by requiring
         // two adjacent identifiers, matching ANSI port-list parsing.
@@ -1051,13 +1074,20 @@ impl<'a> Parser<'a> {
         };
 
         // IEEE 1364-2005 section 12.3.3: `input [signed] [range] names;`
-        let signedness = self.parse_signedness();
+        let signedness = if net_type == Some(PortNetType::Integer) {
+            Signedness::Signed
+        } else {
+            self.parse_signedness()
+        };
         let range = self.parse_optional_vector_range()?;
 
         // Port names
         let mut names = Vec::new();
+        let mut initializers = Vec::new();
         loop {
-            names.push(self.expect_identifier("port name")?.into());
+            let name: SmolStr = self.expect_identifier("port name")?.into();
+            initializers.extend(self.parse_port_initializer(direction, net_type, &name)?);
+            names.push(name);
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
@@ -1071,8 +1101,46 @@ impl<'a> Parser<'a> {
             signedness,
             net_type,
             names,
+            initializers,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    /// The integer output-variable form has no discipline, sign or range prefix.
+    fn check_integer_port(
+        &self,
+        direction: PortDirection,
+        net_type: Option<PortNetType>,
+    ) -> Result<(), ParseError> {
+        if net_type == Some(PortNetType::Integer)
+            && (direction != PortDirection::Output
+                || !self.check(TokenKind::Identifier)
+                || self.peek_is(TokenKind::Identifier))
+        {
+            return Err(self.error(ParseErrorKind::InvalidPort));
+        }
+        Ok(())
+    }
+
+    fn parse_port_initializer(
+        &mut self,
+        direction: PortDirection,
+        net_type: Option<PortNetType>,
+        name: &SmolStr,
+    ) -> Result<Vec<(SmolStr, Expression)>, ParseError> {
+        if !self.check(TokenKind::Assign_) {
+            return Ok(Vec::new());
+        }
+        if direction != PortDirection::Output
+            || !matches!(
+                net_type,
+                Some(PortNetType::Reg | PortNetType::Integer | PortNetType::Real)
+            )
+        {
+            return Err(self.error(ParseErrorKind::InvalidPort));
+        }
+        self.advance();
+        Ok(vec![(name.clone(), self.parse_expression()?)])
     }
 
     /// The separate declaration a section 12.3.4 compact port stands for.
@@ -1092,7 +1160,11 @@ impl<'a> Parser<'a> {
             .map(|name| DigitalDeclItem {
                 name: name.clone(),
                 dimensions: Vec::new(),
-                init: None,
+                init: declaration
+                    .initializers
+                    .iter()
+                    .find(|(port, _)| port == name)
+                    .map(|(_, expression)| expression.clone()),
                 span: declaration.span,
             })
             .collect();
@@ -1112,6 +1184,21 @@ impl<'a> Parser<'a> {
                 signedness: Signedness::Unsigned,
                 range: declaration.range.clone(),
                 items,
+                span: declaration.span,
+            }),
+            // Keep integer declarations in the common numeric ownership pass.
+            // A declaration initializer does not select a simulation domain.
+            PortNetType::Integer => module.variables.push(VariableDecl {
+                var_type: VarType::Integer,
+                items: items
+                    .into_iter()
+                    .map(|item| VariableItem {
+                        name: item.name,
+                        dimensions: item.dimensions,
+                        init: item.init,
+                        span: item.span,
+                    })
+                    .collect(),
                 span: declaration.span,
             }),
             PortNetType::Reg => module.digital_variables.push(DigitalVariableDecl {

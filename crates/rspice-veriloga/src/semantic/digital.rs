@@ -1040,9 +1040,6 @@ impl SemanticAnalyzer {
                 written.insert(name.clone());
             }
         }
-        if written.is_empty() {
-            return;
-        }
         // What the continuous body does with each name, over every analog
         // block the module declares rather than only the first: `analog
         // initial x = 0;` beside `analog V(a) <+ x;` is two blocks and one
@@ -1074,8 +1071,60 @@ impl SemanticAnalyzer {
                 VarType::String => continue,
             };
             for item in &declaration.items {
-                if !written.contains(&item.name) || seen.contains_key(&item.name) {
+                let integer_port = (declaration.var_type == VarType::Integer)
+                    .then(|| {
+                        module
+                            .port_declarations
+                            .iter()
+                            .find(|port| port.names.contains(&item.name))
+                    })
+                    .flatten();
+                if (!written.contains(&item.name) && integer_port.is_none())
+                    || seen.contains_key(&item.name)
+                {
                     continue;
+                }
+                if let Some(port) = integer_port {
+                    if port.direction != PortDirection::Output {
+                        self.record_error_at(SemanticErrorKind::InvalidContribution(format!(
+                            "`{}` is an integer variable port; only output ports may be variables",
+                            item.name
+                        )), item.span);
+                        continue;
+                    }
+                    if port.discipline.is_some()
+                        || module.nets.iter().any(|net| net.names.contains(&item.name))
+                    {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "integer port `{}` cannot also declare an analog net or discipline",
+                                item.name
+                            )),
+                            item.span,
+                        );
+                        continue;
+                    }
+                    if let Some(port_range) = &port.range {
+                        if self.resolve_vector_range(Some(port_range), "integer port")
+                            != Some(INTEGER_BOUNDS)
+                        {
+                            self.record_error_at(
+                                SemanticErrorKind::InvalidExpression(format!(
+                                    "integer port `{}` requires the fixed range [31:0]",
+                                    item.name
+                                )),
+                                port_range.span,
+                            );
+                            continue;
+                        }
+                    }
+                    if analog_writes.contains(&item.name) && !written.contains(&item.name) {
+                        self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
+                            "analog-owned integer output port `{}` requires continuous-to-discrete port driving",
+                            item.name
+                        )), item.span);
+                        continue;
+                    }
                 }
                 // Verilog-AMS LRM 2.4 section 7.3: a variable's own domain is
                 // the only one that may write it. Two writers is a program the
@@ -1107,7 +1156,7 @@ impl SemanticAnalyzer {
                     signedness,
                     range,
                     width,
-                    redeclares_port: false,
+                    redeclares_port: integer_port.is_some(),
                     span: item.span,
                 });
             }

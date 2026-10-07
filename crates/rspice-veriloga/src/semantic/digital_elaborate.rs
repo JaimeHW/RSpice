@@ -390,6 +390,7 @@ impl DigitalElaborator<'_> {
                 ));
             }
 
+            let resizes_variable = is_variable && !declared.class.is_real();
             let own = qualify(path, &port.name);
             let form = connections[index]
                 .map(|expression| connection_form(expression, path, &port.name))
@@ -412,7 +413,7 @@ impl DigitalElaborator<'_> {
                 Some(ConnectionForm::Select { name, select, span }) => {
                     let outer = lookup_connection(name, parent_scope, path, &port.name, span)?;
                     let width = select.width(span)?;
-                    if width != declared.width {
+                    if width != declared.width && !resizes_variable {
                         return Err(semantic_error(
                             SemanticErrorKind::TypeMismatch {
                                 expected: format!("{}-bit connection", declared.width),
@@ -487,7 +488,7 @@ impl DigitalElaborator<'_> {
                     let span = identifier.span;
                     let outer =
                         lookup_connection(&identifier.name, parent_scope, path, &port.name, span)?;
-                    if outer.width != declared.width {
+                    if outer.width != declared.width && !(resizes_variable && outer.width != 0) {
                         return Err(semantic_error(
                             SemanticErrorKind::TypeMismatch {
                                 expected: format!("{}-bit connection", declared.width),

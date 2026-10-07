@@ -2573,3 +2573,58 @@ endmodule
         );
     }
 }
+
+#[test]
+fn integer_output_ports_drive_spice_loaded_mixed_instances() {
+    let model = ModelFile::new(
+        "integer_port_sampler",
+        r#"
+`timescale 1ns/1ps
+module integer_source(output integer code=-2);
+ initial #1 code=-4;
+endmodule
+module integer_port_sampler(p,q);
+ inout p; electrical p; output reg q=0;
+ wire [7:0] code;
+ integer_source source(code);
+ analog I(p)<+(V(p)-(code-256.0))/1000;
+ initial #1.001 q=(code==252);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* integer output drives a mixed hierarchy\n.param vcc=1\nXa pa qa integer_port_sampler\nXb pb qb integer_port_sampler\nRa pa 0 1k\nRb pb 0 2k\nRqa qa 0 1k\nRqb qb 0 1k\nCqa qa 0 1p\nCqb qb 0 1p\n.va \"{}\" integer_port_sampler module=integer_port_sampler\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, initial, final_value) in [("pa", -1.0, -2.0), ("pb", -4.0 / 3.0, -8.0 / 3.0)] {
+        let values = waveform(&result, node);
+        assert!(
+            (values[0] - initial).abs() < 1e-8,
+            "{node}: initial {}",
+            values[0]
+        );
+        assert!(
+            (values.last().unwrap() - final_value).abs() < 1e-8,
+            "{node}: final {:?}",
+            values.last()
+        );
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(events[0].time, 0.0);
+        assert_eq!(
+            events[0].value.state,
+            rspice_core::xspice::DigitalState::Zero
+        );
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!(
+            (events[1].time - 1.001e-9).abs() < 1e-22,
+            "{node}: {events:?}"
+        );
+    }
+}

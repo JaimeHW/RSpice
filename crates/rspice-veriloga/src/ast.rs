@@ -228,6 +228,14 @@ impl Module {
             || !self.digital_variables.is_empty()
             || !self.continuous_assigns.is_empty()
             || !self.digital_processes.is_empty()
+            || self.variables.iter().any(|declaration| {
+                declaration.var_type == VarType::Integer
+                    && declaration.items.iter().any(|item| {
+                        self.port_declarations
+                            .iter()
+                            .any(|port| port.names.contains(&item.name))
+                    })
+            })
     }
 
     pub fn new(name: impl Into<SmolStr>, span: Span) -> Self {
@@ -391,6 +399,8 @@ pub struct PortDeclaration {
     pub net_type: Option<PortNetType>,
     /// Port names
     pub names: Vec<SmolStr>,
+    /// Constant initializers on output variable ports, keyed by port name.
+    pub initializers: Vec<(SmolStr, Expression)>,
     /// Source span
     pub span: Span,
 }
@@ -402,6 +412,8 @@ pub enum PortNetType {
     Wire,
     /// `output reg [3:0] q;`
     Reg,
+    /// `output integer q;` — a signed 32-bit variable (VAMS-2023 A.2.2.1).
+    Integer,
     /// `input wreal in;` — Verilog-AMS LRM 2.4 section 6.5.3's real-valued
     /// port, whose syntax (section 6.5.2) admits `wreal` wherever a net type
     /// may be written.

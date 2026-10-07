@@ -448,6 +448,22 @@ and evaluates each pattern before publishing its values. Block declaration
 initializers remain an extension to VAMS-2023 A.2.8. Artifact validation rejects
 orphan cells, inconsistent element identities and aliased local declarations.
 Wasm helper ABI remains 20.
+Integer output ports now accept ANSI declarations, inherited ANSI names and
+both compact and separate non-ANSI declarations. They retain signed [31:0]
+four-state storage and integer identity through hierarchy linking and analog
+reads. Constant declaration initializers use the declaring instance's parameter
+scope; unassigned integer outputs use discrete storage with the ordinary
+unknown default. Integral variable outputs drive wider or narrower parent nets
+and fixed selections through assignment conversion, preserving their own storage.
+Output-variable initializers are also retained for the existing reg and real
+port forms. Input/inout integer variables, conflicting declarations, incompatible
+ranges and nonconstant initializers are rejected. Analog-written integer output
+ports remain an explicit unsupported continuous-to-discrete port-driving case;
+variables written in both domains remain errors. Time ports, unpacked port
+arrays and general unequal-width net-port connections remain open.
+This uses the existing schema 86 storage and Wasm helper ABI 20.
+Source: [VAMS-2023, 6.5.2, 7.2.2 and A.2.1.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
+
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification
