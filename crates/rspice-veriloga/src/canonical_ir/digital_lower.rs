@@ -63,7 +63,7 @@
 //!   values, and a string is neither.
 //! - A process-local `reg` whose bounds are not literal, and an array of any
 //!   kind inside a process.
-//! - `**`, a non-constant delay, and a non-constant select bound.
+//! - A non-constant part-select bound.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
 //! `fork`/`join`, `wait`, `disable`, and `force`/`release` — the parser stops
@@ -4314,8 +4314,7 @@ impl ProcessLowerer<'_> {
                 | BinaryOp::Sub
                 | BinaryOp::Mul
                 | BinaryOp::Div
-                | BinaryOp::Mod
-                | BinaryOp::Pow => {
+                | BinaryOp::Mod => {
                     self.self_signed(&binary.left) && self.self_signed(&binary.right)
                 }
                 BinaryOp::And
@@ -4326,11 +4325,9 @@ impl ProcessLowerer<'_> {
                 | BinaryOp::Le
                 | BinaryOp::Gt
                 | BinaryOp::Ge => false,
-                // A shift takes its type from the value being shifted. The
-                // count is self-determined and cannot make a signed shift
-                // unsigned, which is what keeps `a >>> 1` arithmetic when the
-                // count is a plain `reg`.
-                BinaryOp::Shl | BinaryOp::Shr => self.self_signed(&binary.left),
+                // Shifts and powers take their type from the left operand.
+                // The count/exponent keeps its own type (5.5.1, table 5-22).
+                BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Pow => self.self_signed(&binary.left),
             },
             _ => false,
         }
@@ -4436,8 +4433,7 @@ impl ProcessLowerer<'_> {
                 | BinaryOp::Sub
                 | BinaryOp::Mul
                 | BinaryOp::Div
-                | BinaryOp::Mod
-                | BinaryOp::Pow => self
+                | BinaryOp::Mod => self
                     .self_width(&binary.left)
                     .max(self.self_width(&binary.right)),
                 // Sections 4.1.6, 4.1.7 and 4.1.8: one bit, and the operands'
@@ -4450,10 +4446,9 @@ impl ProcessLowerer<'_> {
                 | BinaryOp::Le
                 | BinaryOp::Gt
                 | BinaryOp::Ge => 1,
-                // Section 4.1.12 and table 5-22: a shift is as wide as the
-                // value being shifted. The count is self-determined and does
-                // not enter.
-                BinaryOp::Shl | BinaryOp::Shr => self.self_width(&binary.left),
+                // Table 5-22: shifts and powers take the left operand's
+                // width; the count/exponent is self-determined.
+                BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Pow => self.self_width(&binary.left),
             },
             // `$realtobits` is 64 bits by the format it names, not by the
             // context it sits in: it is double-precision's own pattern, and a
@@ -4876,11 +4871,14 @@ impl ProcessLowerer<'_> {
                 CfgValueKind::DigitalShift { op, value, count }
             }
             BinaryOp::Pow => {
-                self.error(
-                    "`**` has no discrete-domain lowering in this wave",
-                    binary.span,
-                );
-                return self.unknown(width);
+                let base = self.operand(block, &binary.left, context);
+                let exponent = self.expression(block, &binary.right);
+                CfgValueKind::DigitalPower {
+                    base,
+                    exponent,
+                    base_signed: context.signed,
+                    exponent_signed: self.self_signed(&binary.right),
+                }
             }
         };
         self.builder

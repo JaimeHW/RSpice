@@ -2593,19 +2593,19 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    /// Parse power (**)
+    /// Parse power (**), left-associative under VAMS-2023 section 4.2.2.
     fn parse_power(&mut self) -> Result<Expression, ParseError> {
         let start = self.current_span();
-        let left = self.parse_unary()?;
+        let mut left = self.parse_unary()?;
 
-        if self.match_token(TokenKind::StarStar) {
-            let right = self.parse_power()?; // Right associative
-            return Ok(Expression::Binary(BinaryExpr {
+        while self.match_token(TokenKind::StarStar) {
+            let right = self.parse_unary()?;
+            left = Expression::Binary(BinaryExpr {
                 op: BinaryOp::Pow,
                 left: Box::new(left),
                 right: Box::new(right),
                 span: start.extend(self.previous_span()),
-            }));
+            });
         }
 
         Ok(left)

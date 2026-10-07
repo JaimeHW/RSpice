@@ -620,6 +620,7 @@ fn relocate_value(
         | CfgValueKind::DigitalCaseMatch { .. }
         | CfgValueKind::DigitalRelational { .. }
         | CfgValueKind::DigitalArithmetic { .. }
+        | CfgValueKind::DigitalPower { .. }
         | CfgValueKind::DigitalShift { .. }
         | CfgValueKind::DigitalPartSelect { .. }
         | CfgValueKind::DigitalBitSelect { .. }

@@ -2481,6 +2481,22 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     op, &left, &right, signed,
                 )))
             }
+            CfgValueKind::DigitalPower {
+                base,
+                exponent,
+                base_signed,
+                exponent_signed,
+            } => {
+                let (base_signed, exponent_signed) = (*base_signed, *exponent_signed);
+                let base = self.four_state(*base)?;
+                let exponent = self.four_state(*exponent)?;
+                Ok(DigitalScalar::FourState(digital_value::power(
+                    &base,
+                    &exponent,
+                    base_signed,
+                    exponent_signed,
+                )))
+            }
             CfgValueKind::DigitalShift { op, value, count } => {
                 let (op, value, count) = (*op, *value, *count);
                 let value = self.four_state(value)?;

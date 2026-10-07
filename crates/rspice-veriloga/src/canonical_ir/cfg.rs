@@ -1120,6 +1120,13 @@ pub enum CfgValueKind {
         /// where it decides the answer.
         signed: bool,
     },
+    /// Integral power with a context-sized base and self-determined exponent.
+    DigitalPower {
+        base: ValueId,
+        exponent: ValueId,
+        base_signed: bool,
+        exponent_signed: bool,
+    },
     /// Shift, keeping the shifted value's width. Whether it fills with zero or
     /// with the sign bit is the operator's own, [`digital_value::ShiftOp`].
     DigitalShift {
@@ -1372,6 +1379,7 @@ impl CfgValueKind {
             | Self::DigitalCaseMatch { .. }
             | Self::DigitalRelational { .. }
             | Self::DigitalArithmetic { .. }
+            | Self::DigitalPower { .. }
             | Self::DigitalShift { .. }
             | Self::DigitalPartSelect { .. }
             | Self::DigitalBitSelect { .. }
@@ -1668,6 +1676,7 @@ impl CfgValueKind {
             Self::DigitalCaseMatch {
                 selector, label, ..
             } => vec![*selector, *label],
+            Self::DigitalPower { base, exponent, .. } => vec![*base, *exponent],
             Self::DigitalShift { value, count, .. } => vec![*value, *count],
             Self::DigitalConcat { parts } => parts.clone(),
             Self::DigitalSelect {
@@ -2012,6 +2021,10 @@ impl CfgValueKind {
             } => {
                 *selector = map(*selector);
                 *label = map(*label);
+            }
+            Self::DigitalPower { base, exponent, .. } => {
+                *base = map(*base);
+                *exponent = map(*exponent);
             }
             Self::DigitalShift { value, count, .. } => {
                 *value = map(*value);
@@ -2515,6 +2528,14 @@ impl CfgFunction {
             let lanes = self.value_lanes(value.id);
             match &value.kind {
                 CfgValueKind::LaneSplat(_) | CfgValueKind::BlockParameter => {}
+                CfgValueKind::DigitalPower { base, exponent, .. } => {
+                    if !matches!(value.value_type, CfgValueType::FourState { width } if width > 0)
+                        || self.value(*base).value_type != value.value_type
+                        || !matches!(self.value(*exponent).value_type, CfgValueType::FourState { width } if width > 0)
+                    {
+                        return Err(CfgValidationError::DigitalPowerTypeMismatch(value.id));
+                    }
+                }
                 CfgValueKind::Select {
                     condition,
                     then_value,
@@ -2883,6 +2904,7 @@ pub enum CfgValidationError {
     MultiplyDefinedValue(ValueId),
     LaneShapeMismatch(ValueId),
     SelectionTypeMismatch(ValueId),
+    DigitalPowerTypeMismatch(ValueId),
     /// A discrete-domain value reached the derivative pass.
     ///
     /// Not an unsupported model — a compiler bug. Nothing in a four-state
@@ -2925,6 +2947,10 @@ impl std::fmt::Display for CfgValidationError {
             Self::SelectionTypeMismatch(value) => write!(
                 f,
                 "{value} requires a Boolean condition and two operands matching its numerical type"
+            ),
+            Self::DigitalPowerTypeMismatch(value) => write!(
+                f,
+                "{value}: digital power has inconsistent base, exponent or result types"
             ),
             Self::DigitalValueInDerivative(value) => write!(
                 f,

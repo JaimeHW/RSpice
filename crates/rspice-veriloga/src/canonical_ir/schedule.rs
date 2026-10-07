@@ -1904,6 +1904,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalEquality { .. }
         | CfgValueKind::DigitalRelational { .. }
         | CfgValueKind::DigitalArithmetic { .. }
+        | CfgValueKind::DigitalPower { .. }
         | CfgValueKind::DigitalShift { .. }
         | CfgValueKind::DigitalPartSelect { .. }
             | CfgValueKind::DigitalBitSelect { .. }
@@ -2350,6 +2351,12 @@ mod digital_leaf_class {
                 left: value,
                 right: value,
                 signed: false,
+            },
+            CfgValueKind::DigitalPower {
+                base: value,
+                exponent: value,
+                base_signed: true,
+                exponent_signed: false,
             },
             CfgValueKind::DigitalShift {
                 op: ShiftOp::Left,

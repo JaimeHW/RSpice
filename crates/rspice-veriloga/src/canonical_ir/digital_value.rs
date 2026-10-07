@@ -41,7 +41,7 @@
 //! a table test, not a wrong waveform.
 
 use crate::four_state::{FourStateBit, FourStateLiteral};
-use num_bigint::{BigInt, Sign};
+use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 
@@ -1096,6 +1096,70 @@ pub fn arithmetic(
         ArithmeticOp::Mod => left.wrapping_rem(right),
     };
     FourStateValue::from_integer(width, value)
+}
+
+/// Integral power, IEEE 1364-2005 5.1.5 and table 5-22.
+///
+/// The base already has the result's context width and sign. The exponent
+/// retains its own width and sign, including negative and very wide values.
+/// Positive powers are computed modulo 2^width: intermediate storage is bounded
+/// by the result width, and work scales with encoded exponent bits, not its
+/// numeric value. No floating-point conversion or unbounded power is used.
+pub fn power(
+    base: &FourStateValue,
+    exponent: &FourStateValue,
+    base_signed: bool,
+    exponent_signed: bool,
+) -> FourStateValue {
+    let width = base.width();
+    if base.has_unknown() || exponent.has_unknown() {
+        return FourStateValue::splat(width, FourStateBit::Unknown);
+    }
+    if exponent_signed && exponent.sign_bit() == FourStateBit::One {
+        let base = base.to_wide_integer(base_signed).expect("known base");
+        if base.sign() == Sign::NoSign {
+            return FourStateValue::splat(width, FourStateBit::Unknown);
+        }
+        let result = if base == BigInt::from(-1_i8) {
+            if exponent.bit(0) == FourStateBit::One {
+                -1
+            } else {
+                1
+            }
+        } else if base == BigInt::from(1_u8) {
+            1
+        } else {
+            0
+        };
+        // -1 must fill the complete vector, including widths above i128.
+        return if result == -1 {
+            FourStateValue::splat(width, FourStateBit::One)
+        } else {
+            FourStateValue::from_u64(width, result as u64)
+        };
+    }
+
+    if width <= 64 {
+        let base = base.to_u64().expect("known narrow base");
+        let mut result = 1_u64;
+        // Wrapping at 64 bits preserves every lower result bit. Walk the
+        // exponent's complete encoding without narrowing it to a machine int.
+        for word in exponent.aval().iter().rev() {
+            for bit in (0..32).rev() {
+                result = result.wrapping_mul(result);
+                if word & (1 << bit) != 0 {
+                    result = result.wrapping_mul(base);
+                }
+            }
+        }
+        return FourStateValue::from_u64(width, result);
+    }
+
+    let base = BigUint::new(base.aval().to_vec());
+    let exponent = BigUint::new(exponent.aval().to_vec());
+    let modulus = BigUint::from(1_u8) << width as usize;
+    let digits = base.modpow(&exponent, &modulus).to_u32_digits();
+    FourStateValue::from_planes(width, &digits, &[])
 }
 
 /// Shift direction, and what fills the positions it vacates.

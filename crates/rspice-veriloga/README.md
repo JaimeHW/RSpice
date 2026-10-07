@@ -349,9 +349,9 @@ metadata. Local shadows, signal/probe reads and runtime clock queries cannot bec
 constant bounds, including inside unselected conditional arms. Analog packed
 selectors accept exact known based literals with encodings up to 64 bits and
 values in the signed-64 range, while keeping analog arithmetic and runtime
-parameter overrides. Wider analog literal encodings and digital integer
-exponentiation remain unsupported; this does not complete constant grammar or
-parameter-dependent shape support.
+parameter overrides. Wider analog literal encodings remain unsupported;
+this does not complete constant grammar or parameter-dependent shape support.
+Digital integer exponentiation is supported starting with schema 85.
 Schema 77 gives digital packed reads of analog-owned integers their [31:0]
 range and accepts packed reads of indexed analog integer array elements.
 The existing typed probes supply candidate-state values; array reads share one
@@ -423,6 +423,15 @@ in source order across interleaved reg, integer and real declarations. Both SSA
 locals and addressable locals retain the resulting values across suspension and
 process re-entry. This ordering is an RSpice contract; VAMS-2023 section A.2.8
 does not specify local declaration initializers. Wasm helper ABI remains 20.
+Schema 85 adds exact four-state integer exponentiation. The base receives the
+result context while the exponent retains its own width and signedness.
+Modular integer arithmetic bounds intermediate storage by the result width,
+including for very wide exponents. Negative powers follow the integral rules;
+unknown/high-impedance operand bits produce an all-unknown result. Real powers
+keep their existing real arithmetic path. Chained powers now associate left to
+right as VAMS-2023 4.2.2 specifies; explicit parentheses preserve grouping.
+The shared digital evaluator also supplies powers in constant select bounds.
+Wasm helper ABI remains 20.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification

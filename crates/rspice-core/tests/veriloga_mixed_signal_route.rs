@@ -2442,19 +2442,19 @@ module variable_sampler(p,q);
    measured[-2]=gain[1]*V(p); measured[-1]=-gain[1]*V(p);
    codes[-2]=gain[1]; codes[-1]=-gain[1];
    @(timer(0,period[4],0,enabled)) count=-3;
-   I(p)<+(V(p)-gain[1]+adjustment[-2]-255
+   I(p)<+(V(p)-gain[1]+adjustment[-2]-255+(2.0**3.0**2.0-64.0)
      +selected[-2][7:4]*16+selected[-2][3:0]-255
      +selected[selection_word][selection_bit]-1)/1000;
  end
  initial begin : sample
-   reg signed [4:0] initial_gain=-16;
+   reg signed [4:0] initial_gain=-(2 ** 4);
    integer local_gain=initial_gain;
    local_gain[3:2]<=#1 2'b10;
    period[4]=1.537e-9; enabled=1; index=-2;
    startup_ok=(measured[index]-4*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]-4*LOAD/(1000+LOAD)>-1e-8);
    @(local_gain); index=0; selection_bit=0; index[selection_bit]=1;
-   gain[index]=local_gain; selection_bit=2;
+   gain[index]=local_gain**1; selection_bit=2;
    local_gain[selection_bit]=1; gain[index][selection_bit]=local_gain[selection_bit]; index=-1;
    selected[-1][15]=1; selection_word=-1; selection_bit=15;
    q=startup_ok && (count==-3) && (adjustment[-2]==-1)

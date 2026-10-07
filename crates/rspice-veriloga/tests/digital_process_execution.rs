@@ -7033,3 +7033,157 @@ endmodule
     assert_eq!(harness.get("msb"), "1");
     assert_eq!(harness.get("state"), format!("{:032b}", 0x800000ff_u32));
 }
+
+/// IEEE 1364-2005 5.1.5, 5.5.1 and table 5-22: independent exponent typing.
+#[test]
+fn integer_power_preserves_context_sign_wide_bits_and_unknowns() {
+    use rspice_veriloga::canonical_ir::cfg::{CfgValueKind, CfgValueType};
+    let mut h = Harness::from_source(
+        r#"
+module powers;
+ reg [3:0] base;
+ reg [5:0] exponent;
+ reg signed [3:0] negative;
+ reg signed [2:0] reciprocal;
+ reg [15:0] contextual, isolated, chained, grouped;
+ reg [7:0] negative_odd, negative_even, unsigned_reciprocal, minus_one_odd,
+   minus_one_even, zero_zero, zero_negative, positive_reciprocal, negative_reciprocal,
+   exponent_wrap, unknown_base, unknown_exponent, high_impedance, unary_power, narrow_huge;
+ reg [159:0] wide_base, wide_result, huge, huge_odd, huge_even;
+ reg signed [159:0] wide_minus_one, wide_negative_exponent, wide_negative_result;
+ reg signed [63:0] signed_boundary;
+ reg [63:0] unsigned_boundary;
+ reg [7:0] selected, data;
+ reg signed_result;
+ real fractional, integral_to_real, real_chain, real_group;
+ initial begin
+   base=15; exponent=10;
+   contextual=base**exponent; isolated={base**exponent};
+   negative=-2; exponent=3; reciprocal=-1;
+   negative_odd=negative**exponent; negative_even=negative**2;
+   signed_result=(negative**exponent < 0);
+   unsigned_reciprocal=4'd2**reciprocal;
+   minus_one_odd=(-4'sd1)**(-3'sd3);
+   minus_one_even=(-4'sd1)**(-3'sd2);
+   zero_zero=4'd0**0; zero_negative=4'd0**reciprocal;
+   positive_reciprocal=4'd1**reciprocal;
+   negative_reciprocal=negative**reciprocal;
+   exponent_wrap=4'd3**(2'b11+2'b01);
+   unknown_base=4'bx001**0; unknown_exponent=1**4'b00x0;
+   high_impedance=4'b000z**2;
+   chained=2**3**2; grouped=2**(3**2); unary_power=-2**2;
+   wide_base=160'h10000000000000001; wide_result=wide_base**2;
+   huge=160'h8000000000000000000000000000000000000001;
+   huge_odd=160'd3**huge; huge_even=160'd2**huge; narrow_huge=8'd2**huge;
+   wide_minus_one=-1; wide_negative_exponent=huge;
+   wide_negative_result=wide_minus_one**wide_negative_exponent;
+   signed_boundary=64'sh8000000000000000**3;
+   unsigned_boundary=64'hffffffffffffffff**3;
+   data=8'ha5; selected=data[2**3-1:2**2];
+   fractional=2**(-1.0); integral_to_real=2**(-1);
+   real_chain=4.0**0.5**2; real_group=4.0**(0.5**2);
+ end
+endmodule
+"#,
+    );
+    h.plan = serde_json::from_str(&serde_json::to_string(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    let power = h.plan.processes[0]
+        .function
+        .values
+        .iter()
+        .position(|value| matches!(value.kind, CfgValueKind::DigitalPower { .. }))
+        .unwrap();
+    for bad_type in [
+        CfgValueType::Real,
+        CfgValueType::FourState { width: 0 },
+        CfgValueType::FourState { width: 1 },
+    ] {
+        let mut invalid = h.plan.clone();
+        invalid.processes[0].function.values[power].value_type = bad_type;
+        let errors = invalid.validate().unwrap_err();
+        assert!(
+            format!("{errors:?}").contains("digital power"),
+            "{errors:?}"
+        );
+    }
+    expect_finished(h.start(0));
+    for (name, value, width) in [
+        ("contextual", 0xac61_u64, 16),
+        ("isolated", 1, 16),
+        ("chained", 64, 16),
+        ("grouped", 512, 16),
+        ("negative_odd", 248, 8),
+        ("negative_even", 4, 8),
+        ("unsigned_reciprocal", 0, 8),
+        ("minus_one_odd", 255, 8),
+        ("minus_one_even", 1, 8),
+        ("zero_zero", 1, 8),
+        ("positive_reciprocal", 1, 8),
+        ("negative_reciprocal", 0, 8),
+        ("narrow_huge", 0, 8),
+        ("exponent_wrap", 1, 8),
+        ("unary_power", 4, 8),
+        ("selected", 10, 8),
+        ("signed_boundary", 0, 64),
+        ("unsigned_boundary", u64::MAX, 64),
+    ] {
+        assert_eq!(h.get(name), format!("{value:0width$b}"), "{name}");
+    }
+    for name in [
+        "zero_negative",
+        "unknown_base",
+        "unknown_exponent",
+        "high_impedance",
+    ] {
+        assert_eq!(h.get(name), "xxxxxxxx", "{name}");
+    }
+    assert_eq!(h.get("signed_result"), "1");
+    // (2^64+1)^2 = 2^128 + 2^65 + 1, beyond floating-point/u128 precision.
+    let mut expected = FourStateValue::from_u64(160, 1);
+    expected.set_bit(128, FourStateBit::One);
+    expected.set_bit(65, FourStateBit::One);
+    assert_eq!(h.get("wide_result"), expected.spelling());
+    // 3^(2^159+1) mod 2^160 = 3; 2^(2^159+1) mod 2^160 = 0.
+    assert_eq!(h.get("huge_odd"), format!("{}11", "0".repeat(158)));
+    assert_eq!(h.get("huge_even"), "0".repeat(160));
+    assert_eq!(h.get("wide_negative_result"), "1".repeat(160));
+    assert_eq!(h.get_real("fractional"), 0.5);
+    assert_eq!(h.get_real("integral_to_real"), 0.0);
+    assert_eq!(h.get_real("real_chain"), 4.0);
+    assert!((h.get_real("real_group") - 2.0_f64.sqrt()).abs() < 1e-14);
+}
+
+#[test]
+fn integer_power_captures_deferred_values_and_tracks_driver_inputs() {
+    let mut h = Harness::from_source(
+        r#"
+module power_timing;
+ reg [7:0] base, exponent, captured, resumed, recomputed;
+ wire [7:0] driven;
+ initial begin
+   base=3; exponent=3;
+   captured<=base**exponent;
+   resumed=#1 base**2;
+   #1; recomputed=base**exponent;
+ end
+ assign driven=base**exponent;
+endmodule
+"#,
+    );
+    let state = expect_suspended(h.start(0)).into_parts().1;
+    let driver_state = expect_suspended(h.start(1)).into_parts().1;
+    h.resolve_drivers();
+    assert_eq!(h.get("driven"), "00011011");
+    h.set("base", "00000101");
+    h.set("exponent", "00000010");
+    h.flush_nonblocking();
+    assert_eq!(h.get("captured"), "00011011");
+    let state = expect_suspended(h.resume(0, &state)).into_parts().1;
+    assert_eq!(h.get("resumed"), "00001001");
+    expect_suspended(h.resume(1, &driver_state));
+    h.resolve_drivers();
+    assert_eq!(h.get("driven"), "00011001");
+    expect_finished(h.resume(0, &state));
+    assert_eq!(h.get("recomputed"), "00011001");
+}
