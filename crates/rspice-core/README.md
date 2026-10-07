@@ -452,8 +452,12 @@ forward-reference probes do not advance the live statistical stream.
 Repeated XSPICE instance assignments use the last value, including changes in
 value type or expression deferral. Scalar fields resolve sibling dependencies
 at the root and inside subcircuits without consuming samples on failed retries.
-Pending instance overrides cannot be replaced by model defaults in sibling
-expressions; a self-reference may still use its enclosing or model value.
+Pending instance overrides cannot be replaced by enclosing globals or model
+defaults in sibling expressions; a self-reference may still use its enclosing
+or model value. Root expressions that read sibling fields wait for the complete
+instance context. Retained `.GLOBAL_PARAM` expansion preserves those dependencies
+inside subcircuits, and independent root expressions keep their source-order
+statistical sampling.
 Complex instance components resolve forward parameter and function references.
 Component functions accept comma-separated arguments and whitespace inside groups.
 Instance vectors and complex values use resolved scalar overrides; numeric

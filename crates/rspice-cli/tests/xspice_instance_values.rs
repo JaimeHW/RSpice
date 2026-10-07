@@ -233,3 +233,77 @@ fn model_defaults_and_quoted_vectors_preserve_published_values() {
         );
     }
 }
+
+#[test]
+fn global_names_do_not_override_explicit_instance_siblings() {
+    for definitions in [
+        ".PARAM in_offset=1",
+        ".PARAM base=1\n.GLOBAL_PARAM in_offset={base}",
+    ] {
+        for fields in [
+            "gain={in_offset+1} in_offset=3",
+            "gain={field_gain()} in_offset={later}",
+            "in_offset={later} gain={in_offset+1}",
+        ] {
+            for scoped in [false, true] {
+                let directory = common::test_dir("instance_global_collision");
+                let deck = directory.join("deck.cir");
+                let result = directory.join("result.csv");
+                let mut body = format!("A1 in out gain {fields}");
+                if scoped {
+                    body = format!(".SUBCKT cell in out\n{body}\n.ENDS\nX1 in out cell");
+                }
+                std::fs::write(&deck, format!("* instance precedence\n{definitions}\n.FUNC field_gain() {{in_offset+1}}\nV1 in 0 1\n{body}\n.PARAM later=3\n.OP\n.END\n")).unwrap();
+                for command in ["check", "run"] {
+                    let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                    process.args(["--quiet", command]).arg(&deck);
+                    if command == "run" {
+                        process.args(["--format", "csv", "--output"]).arg(&result);
+                    }
+                    let output = process.output().unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{command}, {body}: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                let actual = csv_voltage(&result, "out");
+                assert!(
+                    (actual - 16.0).abs() < 1e-12,
+                    "{definitions}: {body}: {actual}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn global_defaults_cannot_turn_cyclic_instance_bindings_into_success() {
+    for scoped in [false, true] {
+        let directory = common::test_dir("cyclic_instance_global_collision");
+        let deck = directory.join("deck.cir");
+        let result = directory.join("result.csv");
+        let mut body = String::from("A1 in out gain gain={in_offset} in_offset={gain}");
+        if scoped {
+            body = format!(".SUBCKT cell in out\n{body}\n.ENDS\nX1 in out cell");
+        }
+        std::fs::write(&deck, format!("* cyclic instance bindings\n.PARAM gain=1 in_offset=1\nV1 in 0 1\n{body}\n.OP\n.END\n")).unwrap();
+        for command in ["check", "run"] {
+            std::fs::write(&result, "existing result").unwrap();
+            let mut process = Command::new(env!("CARGO_BIN_EXE_rspice"));
+            process.args(["--quiet", command]).arg(&deck);
+            if command == "run" {
+                process.args(["--format", "csv", "--output"]).arg(&result);
+            }
+            let output = process.output().unwrap();
+            assert!(!output.status.success(), "{command}: {body}");
+            let diagnostic = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(diagnostic.contains("could not be resolved"), "{diagnostic}");
+            assert_eq!(std::fs::read_to_string(&result).unwrap(), "existing result");
+        }
+    }
+}
