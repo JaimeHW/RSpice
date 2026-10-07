@@ -27,6 +27,7 @@
 //! loop, so phase margin is `180 deg + arg T` at unity crossover — exactly
 //! what `StbAnalyzer` extracts.
 
+use super::progress::StudyProgress;
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::stb::{StbAnalysisError, StbAnalyzer, StbConfig, StbResult};
@@ -138,9 +139,9 @@ impl Engine {
         config: StbConfig,
         abort: &dyn AbortSignal,
     ) -> Result<StbAnalysisResult, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
+        let progress = StudyProgress::new(abort)?;
+        let setup = progress.stage(0.0, 0.15);
+        let abort: &dyn AbortSignal = &setup;
         let frequency_count = config
             .frequency_point_count()
             .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
@@ -237,6 +238,9 @@ impl Engine {
         circuit.link_indices(&matrix);
 
         let has_nonlinear = circuit.has_nonlinear_devices();
+        progress.report(0.15)?;
+        let bias = progress.stage(0.15, 0.35);
+        let abort: &dyn AbortSignal = &bias;
         let dc_solution = engine.solve_dc_operating_point_with_abort(
             netlist,
             &mut circuit,
@@ -252,6 +256,9 @@ impl Engine {
             .map_err(SimulationError::Circuit)?;
 
         let size = circuit.matrix_size();
+        progress.report(0.35)?;
+        let sweep = progress.stage(0.35, 0.95);
+        let abort: &dyn AbortSignal = &sweep;
         let br = circuit.get_branch_matrix_index(br_ordinal);
 
         let mut ac_matrix = rspice_matrix::ComplexMatrix::from_real_structure(&matrix);
@@ -311,7 +318,8 @@ impl Engine {
                 abort,
             )?;
             loop_gains.push(t);
-            abort.observe_progress((frequency_index + 1) as f64 / frequencies.len() as f64);
+            progress
+                .report(0.35 + 0.6 * (frequency_index + 1) as f64 / frequencies.len() as f64)?;
         }
 
         if abort.is_aborted() {
@@ -319,11 +327,17 @@ impl Engine {
         }
 
         let analyzer = StbAnalyzer::new(config);
+        let projection = progress.stage(0.95, 0.99);
         let result = analyzer
-            .analyze_preallocated_with_abort(&frequencies, &loop_gains, prepared_result, abort)
+            .analyze_preallocated_with_abort(
+                &frequencies,
+                &loop_gains,
+                prepared_result,
+                &projection,
+            )
             .map_err(map_stb_analysis_error)?;
 
-        Ok(StbAnalysisResult {
+        progress.complete(StbAnalysisResult {
             frequencies,
             loop_gains,
             result,

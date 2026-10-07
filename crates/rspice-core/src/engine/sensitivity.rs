@@ -3,9 +3,9 @@ mod design_parameter_tests;
 #[cfg(test)]
 mod expression_value_tests;
 mod parameter;
-mod progress;
 mod refinement;
 
+use super::progress::StudyProgress;
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::sensitivity::{
@@ -16,7 +16,6 @@ use crate::analysis::sensitivity::{
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::solver::SimulationResult;
 use crate::{CircuitData, Complex64, Netlist, Value};
-use progress::StudyProgress;
 use rspice_veriloga_runtime::arithmetic::ScaledValue;
 use std::collections::{HashMap, HashSet};
 

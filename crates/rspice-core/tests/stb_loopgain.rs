@@ -45,7 +45,8 @@ fn single_pole_t(f: Value) -> Complex64 {
     Complex64::new(A0, 0.0) / Complex64::new(1.0, f / FP)
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn single_pole_loop_gain_matches_the_closed_form() {
     let analysis = run_stb(SINGLE_POLE, "vprobe", 10.0, 1.0e7, 20);
 
@@ -90,7 +91,8 @@ fn single_pole_loop_gain_matches_the_closed_form() {
 }
 
 /// Reversing the probe must not change the Tian loop gain.
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn loop_gain_is_independent_of_probe_orientation() {
     let reversed = "\
 * single-pole inverting loop, probe reversed
@@ -115,7 +117,8 @@ c1 ctrl 0 159.154943091895n
 /// Tian experiment carries no information and T degenerates to 0 for any
 /// circuit — silently reporting "no feedback" for a live loop. That must be
 /// a hard error pointing at the signal path, not a number.
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn grounded_probe_terminal_is_rejected() {
     let grounded_leg = "\
 * probe tied to the reference node
@@ -168,7 +171,8 @@ fn loaded_break_t(f: Value) -> Complex64 {
     Complex64::new(A2, 0.0) * zg / (Complex64::new(RO + RF, 0.0) + zg)
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn loaded_break_matches_the_return_ratio_where_single_injection_fails() {
     let analysis = run_stb(LOADED_BREAK, "vprobe", 10.0, 1.0e6, 20);
 
@@ -220,7 +224,8 @@ fn loaded_break_matches_the_return_ratio_where_single_injection_fails() {
 /// The `.STB` netlist card drives the same analysis from deck text: the
 /// card parses into `AnalysisCommand::Stb`, and mapping it to a config the
 /// way the CLI does reproduces the closed-form loop gain.
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn stb_card_parses_and_drives_the_same_loop_gain() {
     use rspice_core::analysis::stb::StbSweepType;
     use rspice_core::netlist::{AnalysisCommand, FreqVariation};
@@ -278,7 +283,8 @@ c1 ctrl 0 159.154943091895n
 }
 
 /// The probe also parses as a bare trailing name (no PROBE= key).
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn stb_card_accepts_a_bare_probe_name() {
     use rspice_core::netlist::AnalysisCommand;
 
@@ -305,7 +311,8 @@ c1 ctrl 0 159.154943091895n
 
 /// A probeless `.stb` card is a parse error that names the requirement,
 /// not a deferred runtime failure.
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn stb_card_without_probe_is_a_parse_error() {
     let deck = "\
 * missing probe
@@ -321,4 +328,106 @@ c1 out 0 1u
         message.to_ascii_lowercase().contains("probe"),
         "error names the missing probe: {message}"
     );
+}
+
+#[derive(Default)]
+struct Progress {
+    samples: std::sync::Mutex<Vec<f64>>,
+    cancelled: std::sync::atomic::AtomicBool,
+    stop_at: Option<f64>,
+    completed: std::sync::atomic::AtomicBool,
+    polls_after_completion: std::sync::atomic::AtomicUsize,
+}
+impl rspice_core::AbortSignal for Progress {
+    fn is_aborted(&self) -> bool {
+        if self.completed.load(std::sync::atomic::Ordering::Relaxed) {
+            self.polls_after_completion
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn observe_progress(&self, fraction: f64) {
+        self.samples.lock().unwrap().push(fraction);
+        if fraction == 1.0 {
+            self.completed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if self.stop_at.is_some_and(|threshold| fraction >= threshold) {
+            self.cancelled
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn stb_progress_is_monotonic_and_completes_only_a_successful_study() {
+    let netlist = Netlist::parse(SINGLE_POLE).unwrap();
+    for probe in ["VPROBE", "MISSING"] {
+        let observer = Progress::default();
+        let config = StbConfig::new().with_sweep(10.0, 1e6, 3).with_probe(probe);
+        let result = Engine::default().run_stb_with_abort(&netlist, config, &observer);
+        let samples = observer.samples.lock().unwrap();
+        assert!(
+            samples
+                .iter()
+                .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        );
+        assert!(
+            samples.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{samples:?}"
+        );
+        if probe == "VPROBE" {
+            result.unwrap();
+            assert_eq!(samples.last(), Some(&1.0));
+            assert_eq!(
+                samples.iter().filter(|value| **value == 1.0).count(),
+                1,
+                "{samples:?}"
+            );
+            assert!(samples.len() >= 2);
+            // Completion follows Bode/Nyquist and margin construction. Only
+            // the callback-cancellation check remains after notification.
+            assert_eq!(
+                observer
+                    .polls_after_completion
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                1
+            );
+        } else {
+            assert!(result.unwrap_err().to_string().contains("MISSING"));
+            assert!(
+                !samples.contains(&1.0),
+                "failed study completed: {samples:?}"
+            );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn stb_observes_cancellation_from_work_and_completion_callbacks() {
+    let netlist = Netlist::parse(SINGLE_POLE).unwrap();
+    for stop_at in [0.25, 0.5, 1.0] {
+        let observer = Progress {
+            stop_at: Some(stop_at),
+            ..Default::default()
+        };
+        let config = StbConfig::new()
+            .with_sweep(10.0, 1e6, 3)
+            .with_probe("VPROBE");
+        let result = Engine::default().run_stb_with_abort(&netlist, config, &observer);
+        assert!(
+            matches!(result, Err(rspice_core::SimulationError::Aborted)),
+            "{result:?}"
+        );
+        let samples = observer.samples.lock().unwrap();
+        assert!(samples.last().is_some_and(|value| *value >= stop_at));
+        assert!(
+            samples[..samples.len() - 1]
+                .iter()
+                .all(|value| *value < stop_at),
+            "{samples:?}"
+        );
+    }
 }

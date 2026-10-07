@@ -1,4 +1,4 @@
-//! Progress belongs to the whole sensitivity study, including result projection.
+//! Progress belongs to the whole analysis, including result projection.
 
 use super::SimulationError;
 use crate::abort_signal::{AbortReason, AbortSignal, ModelRunControl, TransientSample};

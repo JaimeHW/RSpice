@@ -93,6 +93,7 @@ mod pstb;
 mod requirements;
 use crate::analysis::transient as result;
 pub use pstb::PeriodicStabilityResult;
+mod progress;
 mod sensitivity;
 pub use sensitivity::SensitivityCardResult;
 mod sp;

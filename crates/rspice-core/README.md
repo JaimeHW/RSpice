@@ -333,6 +333,9 @@ infinity sentinel. Scaled arithmetic preserves intermediate exponents and
 cancellation; an exactly singular or unrepresentable return ratio is an error.
 Both probe orientations and loaded breaks use the same calculation and the
 original two batched solves. Sparse row traversal shares the matrix pattern.
+STB progress covers circuit construction, bias, the frequency sweep and margin
+projection. It reaches completion once, after the result is constructed, and
+observes cancellation requested by that final callback before returning it.
 
 STB result and workspace reservations also retain their allocator cause in
 `StbAnalysisError::Allocation { object, requested, source }` or

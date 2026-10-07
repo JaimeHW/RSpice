@@ -686,6 +686,7 @@ jobs:
           --test control_pole_zero
           --test control_sensitivity
           --test stb_precision
+          --test stb_loopgain
           --test sensitivity_probe_contract --test sensitivity_linear_devices
           --test analysis_numeric_fields --test forward_analyses
           --test frequency_grid_errors
