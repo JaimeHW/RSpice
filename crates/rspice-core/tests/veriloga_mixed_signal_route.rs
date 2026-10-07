@@ -2580,15 +2580,23 @@ fn integer_output_ports_drive_spice_loaded_mixed_instances() {
         "integer_port_sampler",
         r#"
 `timescale 1ns/1ps
-module integer_source(output integer code=BASE);
+module integer_leaf(output integer code=BASE);
  parameter integer BASE=-2;
  initial #1 code=2*BASE;
+endmodule
+module integer_source(output wire [7:0] code);
+ parameter integer BASE=-2, DEPTH=1;
+ generate if(DEPTH>0) begin : descend
+   integer_source #(.BASE(BASE),.DEPTH(DEPTH-1)) next(code);
+ end else begin : terminal
+   integer_leaf #(.BASE(BASE)) leaf(code);
+ end endgenerate
 endmodule
 module integer_port_sampler(p,q);
  inout p; electrical p; output reg q=0;
  parameter integer START=-2;
  wire [7:0] code; reg configured;
- integer_source #(.BASE(START)) source(code);
+ integer_source #(.BASE(START),.DEPTH(-START)) source(code);
  generate if(START < -2) begin : larger
    initial configured=1;
  end else begin : smaller

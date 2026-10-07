@@ -7681,3 +7681,158 @@ module top; parameter K=8'd255+8'd2; leaf a(); leaf #(.N(K)) b(); endmodule
     assert_eq!(design.get("a.q"), format!("{:032b}", 1));
     assert_eq!(design.get("b.q"), format!("{:032b}", 2));
 }
+
+#[test]
+fn recursive_digital_generate_specializations_execute_independently() {
+    let source = r#"
+module tree(output wire [31:0] q, input wire clk);
+ parameter integer DEPTH=3, BASE=2;
+ wire [31:0] left_value,right_value;
+ reg [31:0] value;
+ initial value=BASE;
+ always @(posedge clk) value<=value+1;
+ generate if(DEPTH>0) begin : children
+   tree #(.DEPTH(DEPTH-1),.BASE(2*BASE)) left(left_value,clk);
+   tree #(.DEPTH(DEPTH-1),.BASE(2*BASE+1)) right(right_value,clk);
+   assign q=left_value+right_value;
+ end else begin : leaf
+   assign q=value;
+ end endgenerate
+endmodule
+module top(input wire a_clk,b_clk);
+ wire [31:0] a_value,b_value;
+ tree a(a_value,a_clk);
+ tree #(.DEPTH(3),.BASE(2)) b(b_value,b_clk);
+endmodule
+"#;
+    let mut design = Design::new(source, "top");
+    design.set("a_clk", "0");
+    design.set("b_clk", "0");
+    design.start_all();
+    design.settle();
+    assert_eq!(design.get("a_value"), format!("{:032b}", 156));
+    assert_eq!(design.get("b_value"), format!("{:032b}", 156));
+    let left_leaf = "children.left.children.left.children.left.value";
+    assert_eq!(
+        design.get(&format!("a.{left_leaf}")),
+        format!("{:032b}", 16)
+    );
+    assert_eq!(
+        design.get(&format!("b.{left_leaf}")),
+        format!("{:032b}", 16)
+    );
+    design.transition("a_clk", "1");
+    assert_eq!(design.get("a_value"), format!("{:032b}", 164));
+    assert_eq!(design.get("b_value"), format!("{:032b}", 156));
+    assert_eq!(
+        design.get(&format!("a.{left_leaf}")),
+        format!("{:032b}", 17)
+    );
+    assert_eq!(
+        design.get(&format!("b.{left_leaf}")),
+        format!("{:032b}", 16)
+    );
+    design.transition("b_clk", "1");
+    assert_eq!(design.get("b_value"), format!("{:032b}", 164));
+    let encoded = serde_json::to_string(&design.plan).unwrap();
+    let decoded: CanonicalDigitalPlan = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, design.plan);
+    decoded.validate().unwrap();
+
+    // The selected root participates in recursion too. An empty override key
+    // must describe its own default structure, not every instance of its module.
+    let mut root = Design::new(source, "tree");
+    root.set("clk", "0");
+    root.start_all();
+    root.settle();
+    assert_eq!(root.get("q"), format!("{:032b}", 156));
+    root.transition("clk", "1");
+    assert_eq!(root.get("q"), format!("{:032b}", 164));
+
+    // Indirect recursion with changing parameters must terminate just as direct
+    // recursion does; independent siblings can reuse the same templates.
+    let mut mutual = Design::new(
+        r#"
+module first(output wire q,input wire clk);
+ parameter integer N=0;
+ generate if(N>0) begin : descend
+   second #(.N(N-1)) next(q,clk);
+ end else begin : leaf assign q=clk; end endgenerate
+endmodule
+module second(output wire q,input wire clk);
+ parameter integer N=0;
+ generate if(N>0) begin : descend
+   first #(.N(N-1)) next(q,clk);
+ end else begin : leaf assign q=clk; end endgenerate
+endmodule
+module top(input wire clk);
+ wire a,b; first #(.N(4)) x(a,clk); second #(.N(5)) y(b,clk);
+endmodule
+"#,
+        "top",
+    );
+    mutual.set("clk", "0");
+    mutual.start_all();
+    mutual.settle();
+    assert_eq!(mutual.get("a"), "0");
+    assert_eq!(mutual.get("b"), "0");
+    mutual.transition("clk", "1");
+    assert_eq!(mutual.get("a"), "1");
+    assert_eq!(mutual.get("b"), "1");
+}
+
+#[test]
+fn recursive_digital_generate_rejects_cycles_and_bounds_expansion() {
+    for source in [
+        // Same value through a different binding spelling must not evade the
+        // cycle guard: aliases bind to the same parameter index.
+        r#"module loop;
+            parameter integer N=1; aliasparam COUNT=N;
+            reg q; initial q=N;
+            loop #(.COUNT(N)) again();
+           endmodule"#,
+        // Repeating a specialization after several different values is a cycle.
+        r#"module loop;
+            parameter integer N=0;
+            reg q; initial q=N;
+            loop #(.N(1-N)) again();
+           endmodule"#,
+        r#"module loop;
+            parameter integer N=1; reg q; initial q=N;
+            other #(.N(N)) next();
+           endmodule
+           module other;
+            parameter integer N=1; reg q; initial q=N;
+            loop #(.N(N)) next();
+           endmodule"#,
+    ] {
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir_module(source, Some("loop"))
+            .expect_err("a repeated specialization cannot terminate")
+            .to_string();
+        assert!(error.contains("Circular dependency"), "{error}");
+        assert!(error.contains("specialization repeats ancestor"), "{error}");
+        assert!(error.contains("instance"), "{error}");
+    }
+    // Distinct values do not prove termination. Also refuse a finite hierarchy
+    // over the resource bound explicitly, without calling it a circular design.
+    for stop in ["1", "N<258"] {
+        let source = format!(
+            r#"
+module loop;
+ parameter integer N=0; reg q; initial q=N;
+ generate if({stop}) begin : level
+   loop #(.N(N+1)) next();
+ end endgenerate
+endmodule
+"#
+        );
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir_module(&source, Some("loop"))
+            .expect_err("resource bounds must stop excessive expansion")
+            .to_string();
+        assert!(error.contains("depth limit of 256"), "{error}");
+        assert!(!error.contains("Circular dependency"), "{error}");
+        assert!(!error.contains("Internal error"), "{error}");
+    }
+}

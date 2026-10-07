@@ -480,8 +480,18 @@ signed integer semantics. Generate selectors still require a known integer;
 four-state case selection remains open.
 Array/string overrides, non-finite real overrides, the full typed external
 parameter ABI, parameter-dependent analog array layouts and general mixed HDL
-hierarchy remain open. Existing recursive-module and generate-body restrictions
-also remain. Wasm helper ABI stays at 20.
+hierarchy remain open. Broader generate bodies also remain open.
+Wasm helper ABI stays at 20.
+
+Finite recursive digital hierarchies now elaborate through conditional generate.
+Cycle detection compares the module and its closed typed overrides along the
+active ancestor path; repeated templates in sibling instances remain independent.
+Traversal is iterative and preserves source order. Repeating specializations
+report the instance and ancestor; non-repeating expansion is bounded to 256
+instance levels below the root and 65,536 digital child instances per compiled
+root. Exceeding these limits is a resource diagnostic, not a claim that the
+design is cyclic. Recursive analog or mixed child modules remain unsupported.
+This uses the existing schema 87 flat plan and Wasm helper ABI 20.
 Source: [VAMS-2023, 6.3 and 6.6](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated

@@ -70,6 +70,9 @@
 //! with the child's declared assignment type. Equal specializations share an
 //! analyzed template, while each instance retains independent storage and process
 //! identities. Widths, initializers and generated structure are rebuilt together.
+//! Conditional generate can therefore terminate recursive module instantiation.
+//! The explicit traversal stack detects repeating specializations on an ancestor
+//! path and bounds depth and total instances without using the host call stack.
 //!
 //! # What is refused
 //!
@@ -96,7 +99,8 @@
 //!   language restriction: what can still reach it is a port the analyzer
 //!   deliberately left out of the digital table, such as one declared with a
 //!   discipline;
-//! * an instantiation cycle, as a typed error rather than a stack overflow;
+//! * a repeating specialization on one ancestor path, or a hierarchy exceeding
+//!   the documented resource limits, as a source-located error;
 //! * a module that mixes discrete and continuous content, and an analog module
 //!   instantiated inside a digital one — mixed-signal elaboration is a later
 //!   wave, and both directions refuse rather than dropping one half.
@@ -132,9 +136,7 @@ pub(crate) fn elaborate_digital_hierarchy(
         instances: Vec::new(),
         specializations: HashMap::new(),
     };
-    let scope = Scope::for_root(root, root_source);
-    let mut module_stack = vec![root.name.clone()];
-    elaborator.append_instances(root_source, &scope, &mut module_stack, "", true)?;
+    elaborator.append_instances(root_source, Scope::for_root(root, root_source))?;
     Ok(elaborator.instances)
 }
 
@@ -209,7 +211,26 @@ struct DigitalElaborator<'a> {
     analyzed: &'a AnalyzedFile,
     source_modules: &'a HashMap<SmolStr, &'a Module>,
     instances: Vec<ElaboratedDigitalInstance>,
-    specializations: HashMap<(SmolStr, Vec<(usize, String)>), std::sync::Arc<SpecializedModule>>,
+    specializations: HashMap<SpecializationKey, std::sync::Arc<SpecializedModule>>,
+}
+
+fn check_hierarchy_capacity(
+    depth: usize,
+    instances: usize,
+    path: &str,
+    span: Span,
+) -> CompileResult<()> {
+    let detail = if depth > MAX_DIGITAL_HIERARCHY_DEPTH {
+        format!("exceeds the digital hierarchy depth limit of {MAX_DIGITAL_HIERARCHY_DEPTH}")
+    } else if instances >= MAX_DIGITAL_HIERARCHY_INSTANCES {
+        format!("exceeds the digital hierarchy instance limit of {MAX_DIGITAL_HIERARCHY_INSTANCES}")
+    } else {
+        return Ok(());
+    };
+    Err(semantic_error(
+        SemanticErrorKind::UnsupportedFeature(format!("instance `{path}` {detail}")),
+        span,
+    ))
 }
 
 struct SpecializedModule {
@@ -217,18 +238,51 @@ struct SpecializedModule {
     analyzed: AnalyzedModule,
 }
 
+/// These bounds apply to the discrete hierarchy below the compiled root.
+/// They limit non-repeating expansion as well as finite but oversized designs.
+const MAX_DIGITAL_HIERARCHY_DEPTH: usize = 256;
+const MAX_DIGITAL_HIERARCHY_INSTANCES: usize = 65_536;
+
+/// Closed explicit overrides identify a deterministic source specialization.
+/// An omitted override and an explicit value equal to its default may have
+/// different keys; this can delay cycle detection, but cannot
+/// reject a finite hierarchy or permit unbounded expansion.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SpecializationKey {
+    module: SmolStr,
+    overrides: Vec<(usize, String)>,
+}
+
+struct HierarchyFrame {
+    key: SpecializationKey,
+    path: SmolStr,
+    scope: Scope,
+    pending: std::vec::IntoIter<ModuleInstance>,
+    seen: HashSet<SmolStr>,
+    analog_children_allowed: bool,
+}
+
 impl DigitalElaborator<'_> {
-    fn append_instances(
-        &mut self,
-        source_module: &Module,
-        scope: &Scope,
-        module_stack: &mut Vec<SmolStr>,
-        path_prefix: &str,
-        analog_children_allowed: bool,
-    ) -> CompileResult<()> {
-        let mut seen: HashSet<SmolStr> = HashSet::new();
-        for instance in &source_module.instances {
-            if !seen.insert(instance.name.clone()) {
+    fn append_instances(&mut self, source: &Module, scope: Scope) -> CompileResult<()> {
+        let mut stack = vec![HierarchyFrame {
+            key: SpecializationKey {
+                module: source.name.clone(),
+                overrides: Vec::new(),
+            },
+            path: "".into(),
+            scope,
+            pending: source.instances.clone().into_iter(),
+            seen: HashSet::new(),
+            analog_children_allowed: true,
+        }];
+        // Depth-first source order is retained, including signal/process IDs.
+        // Finished siblings leave the stack, so sharing their specialization
+        // is not mistaken for an ancestor cycle.
+        while let Some(mut frame) = stack.pop() {
+            let Some(instance) = frame.pending.next() else {
+                continue;
+            };
+            if !frame.seen.insert(instance.name.clone()) {
                 return Err(semantic_error(
                     SemanticErrorKind::DuplicateSymbol {
                         name: instance.name.clone(),
@@ -243,11 +297,12 @@ impl DigitalElaborator<'_> {
                     instance.span,
                 )
             })?;
-            let path = qualify(path_prefix, &instance.name);
+            let path = qualify(&frame.path, &instance.name);
+            let analog_children_allowed = frame.analog_children_allowed;
+            stack.push(frame);
             if !is_digital_child(child) {
                 if analog_children_allowed {
-                    // An analog instance of the compiled module. The analog
-                    // flattening owns it, and owns everything under it.
+                    // The analog pass owns this subtree of the compiled root.
                     continue;
                 }
                 return Err(semantic_error(
@@ -260,7 +315,9 @@ impl DigitalElaborator<'_> {
                     instance.span,
                 ));
             }
-            self.append_instance(instance, child, scope, module_stack, &path)?;
+            check_hierarchy_capacity(stack.len(), self.instances.len(), &path, instance.span)?;
+            let next = self.append_instance(&instance, child, &stack, &path)?;
+            stack.push(next);
         }
         Ok(())
     }
@@ -269,26 +326,10 @@ impl DigitalElaborator<'_> {
         &mut self,
         instance: &ModuleInstance,
         child: &AnalyzedModule,
-        parent_scope: &Scope,
-        module_stack: &mut Vec<SmolStr>,
+        ancestors: &[HierarchyFrame],
         path: &str,
-    ) -> CompileResult<()> {
-        // Before anything recurses. A module that instantiates itself, however
-        // indirectly, describes an infinite design; reporting the cycle is the
-        // only thing that can be done with it, and doing so here is what keeps
-        // the walk from being the thing that reports it, as a stack overflow.
-        if module_stack.contains(&instance.module) {
-            let mut cycle = module_stack.iter().map(SmolStr::as_str).collect::<Vec<_>>();
-            cycle.push(instance.module.as_str());
-            return Err(semantic_error(
-                SemanticErrorKind::CircularDependency(format!(
-                    "digital module hierarchy {} at instance '{path}'",
-                    cycle.join(" -> ")
-                )),
-                instance.span,
-            ));
-        }
-
+    ) -> CompileResult<HierarchyFrame> {
+        let parent_scope = &ancestors.last().expect("instance parent").scope;
         let child_source = self
             .source_modules
             .get(&instance.module)
@@ -300,7 +341,28 @@ impl DigitalElaborator<'_> {
                 ))
             })?;
 
-        let specialized = self.specialize(instance, child_source, child, parent_scope, path)?;
+        let (key, specialized) =
+            self.specialize(instance, child_source, child, parent_scope, path)?;
+        if let Some(first) = ancestors.iter().position(|frame| frame.key == key) {
+            let mut cycle: Vec<_> = ancestors[first..]
+                .iter()
+                .map(|frame| frame.key.module.as_str())
+                .collect();
+            cycle.push(instance.module.as_str());
+            let origin = &ancestors[first].path;
+            let origin = if origin.is_empty() {
+                "<root>"
+            } else {
+                origin.as_str()
+            };
+            return Err(semantic_error(
+                SemanticErrorKind::CircularDependency(format!(
+                    "digital module hierarchy {} at instance '{path}': specialization repeats ancestor '{origin}'",
+                    cycle.join(" -> ")
+                )),
+                instance.span,
+            ));
+        }
         let (child_source, child) = specialized
             .as_deref()
             .map(|specialized| (&specialized.source, &specialized.analyzed))
@@ -334,10 +396,14 @@ impl DigitalElaborator<'_> {
             span: instance.span,
         });
 
-        module_stack.push(instance.module.clone());
-        let nested = self.append_instances(child_source, &scope, module_stack, path, false);
-        module_stack.pop();
-        nested
+        Ok(HierarchyFrame {
+            key,
+            path: path.into(),
+            scope,
+            pending: child_source.instances.clone().into_iter(),
+            seen: HashSet::new(),
+            analog_children_allowed: false,
+        })
     }
 
     fn specialize(
@@ -347,10 +413,16 @@ impl DigitalElaborator<'_> {
         child: &AnalyzedModule,
         parent: &Scope,
         path: &str,
-    ) -> CompileResult<Option<std::sync::Arc<SpecializedModule>>> {
+    ) -> CompileResult<(SpecializationKey, Option<std::sync::Arc<SpecializedModule>>)> {
         if instance.parameters.is_empty() {
             validate_parameter_ranges(source, path)?;
-            return Ok(None);
+            return Ok((
+                SpecializationKey {
+                    module: instance.module.clone(),
+                    overrides: Vec::new(),
+                },
+                None,
+            ));
         }
         let mut overrides: Vec<_> =
             super::elaboration::bind_parameter_overrides(instance, child, path)?
@@ -390,9 +462,12 @@ impl DigitalElaborator<'_> {
             key.push((index, identity));
             values.push((index, value));
         }
-        let key = (instance.module.clone(), key);
+        let key = SpecializationKey {
+            module: instance.module.clone(),
+            overrides: key,
+        };
         if let Some(specialized) = self.specializations.get(&key) {
-            return Ok(Some(specialized.clone()));
+            return Ok((key, Some(specialized.clone())));
         }
         let mut source = source.clone();
         for (index, value) in values {
@@ -406,8 +481,9 @@ impl DigitalElaborator<'_> {
         let mut analyzed = analyzer.analyze_module(&source, child.default_transition)?;
         analyzed.default_discipline = child.default_discipline.clone();
         let specialized = std::sync::Arc::new(SpecializedModule { source, analyzed });
-        self.specializations.insert(key, specialized.clone());
-        Ok(Some(specialized))
+        self.specializations
+            .insert(key.clone(), specialized.clone());
+        Ok((key, Some(specialized)))
     }
 
     /// Resolve one instance's ports into elaborated names.
