@@ -1087,7 +1087,8 @@ impl VerilogACompiler {
                         "parameter override `{name}` must be unique, including aliases"
                     )));
                 }
-                parameter.default = Some(value.assigned_expression(parameter, selected.time_scale)?);
+                parameter.default =
+                    Some(value.assigned_expression(parameter, selected.time_scale)?);
             }
             parser::expand_specialized_generates(selected)?;
         }
