@@ -1,7 +1,7 @@
 //! Read the row-oriented FFT schema without flattening metadata or harmonics.
 use super::*;
 use crate::commands::waveform_io::{
-    conversion_error, enforce_resource_limit, parse_delimited_record,
+    conversion_error, delimited_records, enforce_resource_limit, parse_delimited_record,
 };
 
 struct Fields(Vec<String>);
@@ -117,33 +117,6 @@ impl Fields {
     }
 }
 
-/// Preserve embedded newlines in quoted source expressions and assignments.
-fn records(content: &str) -> impl Iterator<Item = &str> {
-    let mut start = 0;
-    let mut quoted = false;
-    let mut offsets = content.char_indices();
-    std::iter::from_fn(move || {
-        for (index, ch) in offsets.by_ref() {
-            if ch == '"' {
-                quoted = !quoted;
-            }
-            if ch == '\n' && !quoted {
-                let record = &content[start..index];
-                start = index + 1;
-                return Some(record.trim_end_matches('\r'));
-            }
-        }
-        if start < content.len() {
-            let record = &content[start..];
-            start = content.len();
-            Some(record)
-        } else {
-            None
-        }
-    })
-    .filter(|record| !record.trim().is_empty())
-}
-
 impl FftBundle {
     pub(crate) fn is_delimited(header: &[String]) -> bool {
         // A damaged typed header still takes the typed decoder and is refused.
@@ -160,9 +133,9 @@ impl FftBundle {
         limits: rspice_core::ResourceLimits,
     ) -> Result<Self, CliError> {
         let err = |message| conversion_error(path, message);
-        let mut rows = records(content);
+        let mut rows = delimited_records(content);
         let header = parse_delimited_record(
-            rows.next().ok_or_else(|| err("empty FFT table".into()))?,
+            rows.next().ok_or_else(|| err("empty FFT table".into()))?.1,
             separator,
         )
         .map_err(err)?;
@@ -176,8 +149,10 @@ impl FftBundle {
         let mut coordinate = None;
         let mut unavailable = false;
         let mut numeric_values = 0usize;
-        for row in rows {
-            let fields = Fields(parse_delimited_record(row, separator).map_err(err)?);
+        for (line_number, row) in rows {
+            let fields = Fields(parse_delimited_record(row, separator).map_err(|message| {
+                conversion_error(path, format!("row {line_number}: {message}"))
+            })?);
             if fields.0.len() != FFT_DELIMITED_HEADER.len() {
                 return Err(err("invalid FFT table row length".into()));
             }

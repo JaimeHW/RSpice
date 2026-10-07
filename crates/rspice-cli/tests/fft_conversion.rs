@@ -103,6 +103,26 @@ fn incomplete_requests_survive_mixed_and_empty_spectrum_bundles() {
 }
 
 #[test]
+fn quoted_multiline_fft_coordinate_text_survives_delimited_conversion() {
+    let directory = test_dir("multiline-coordinate");
+    let source = source(&directory);
+    let mut expected = read_json(&source);
+    let assignment = expected["coordinate"]["assignment"].as_str().unwrap();
+    expected["coordinate"]["assignment"] =
+        format!(" {assignment}\r\n\"quoted, annotation\" ").into();
+    std::fs::write(&source, serde_json::to_vec(&expected).unwrap()).unwrap();
+    for format in ["csv", "tsv"] {
+        let intermediate = directory.join(format!("metadata.{format}"));
+        let recovered = directory.join(format!("{format}-metadata.json"));
+        let output = convert(&source, &intermediate, "json", format, &[]);
+        assert!(output.status.success(), "{output:?}");
+        let output = convert(&intermediate, &recovered, format, "json", &[]);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(read_json(&recovered), expected);
+    }
+}
+
+#[test]
 fn invalid_metadata_bins_and_partial_transform_requests_preserve_existing_output() {
     let directory = test_dir("invalid");
     let source = source(&directory);

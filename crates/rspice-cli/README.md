@@ -631,6 +631,10 @@ and coordinate units. Comparison requires matching units, including the case
 of SI prefixes (`mV` differs from `MV`); it does not perform unit conversion.
 Legacy files without unit metadata use their declared quantity types when
 available. CSV/TSV retain numbers and column names only.
+Quoted CSV/TSV fields preserve delimiters, escaped quotes, surrounding whitespace
+and embedded line endings. Waveform tables, operating-point reports and FFT
+tables share these rules; malformed quotes are rejected, with data-row errors
+located by physical source line.
 `--interpolate` resamples analog signals linearly and holds digital and real
 event signals until their next transition. It never extrapolates or resamples
 between differently declared coordinate units.

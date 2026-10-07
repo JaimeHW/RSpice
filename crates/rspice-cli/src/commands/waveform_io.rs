@@ -13,7 +13,9 @@ use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::hdf5::read_hdf5_sections_with_limits;
 use std::path::Path;
 
+mod delimited;
 mod snapshot;
+pub(crate) use delimited::{parse_record as parse_delimited_record, records as delimited_records};
 mod touchstone;
 pub(crate) use snapshot::ResultSnapshot;
 
@@ -511,6 +513,7 @@ fn load_operating_point_report(
     content: &str,
     separator: char,
     header: &[String],
+    resource_limits: rspice_core::ResourceLimits,
 ) -> Result<Option<ExportTable>, CliError> {
     if header.len() != 2
         || !header[0].trim().eq_ignore_ascii_case("signal")
@@ -519,16 +522,12 @@ fn load_operating_point_report(
         return Ok(None);
     }
 
-    let rows: Vec<&str> = content
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .skip(1)
-        .collect();
-    let Some(first) = rows.first() else {
+    let mut rows = delimited_records(content).skip(1).peekable();
+    let Some(&(line_number, first)) = rows.peek() else {
         return Ok(None);
     };
     let first = parse_delimited_record(first, separator)
-        .map_err(|message| conversion_error(path, format!("row 2: {message}")))?;
+        .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
     if first
         .first()
         .is_some_and(|name| name.trim().parse::<f64>().is_ok())
@@ -537,8 +536,7 @@ fn load_operating_point_report(
     }
 
     let mut columns = Vec::new();
-    for (row, line) in rows.iter().enumerate() {
-        let line_number = row + 2;
+    for (line_number, line) in rows {
         let fields = parse_delimited_record(line, separator)
             .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
         if fields.len() != 2 {
@@ -551,8 +549,8 @@ fn load_operating_point_report(
                 ),
             ));
         }
-        let name = fields[0].trim();
-        if name.is_empty() {
+        let name = fields[0].as_str();
+        if name.trim().is_empty() {
             return Err(conversion_error(
                 path,
                 format!("row {line_number} names no signal"),
@@ -571,6 +569,7 @@ fn load_operating_point_report(
                 format!("non-finite value '{token}' for signal '{name}', row {line_number}"),
             ));
         }
+        enforce_table_value_limits(path, columns.len().saturating_add(2), resource_limits)?;
         columns.push(ExportColumn {
             unit: None,
             name: name.to_string(),
@@ -605,11 +604,12 @@ fn parse_delimited(
     separator: char,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
-    let mut lines = content.lines().filter(|line| !line.trim().is_empty());
+    let mut lines = delimited_records(content);
     let header = parse_delimited_record(
         lines
             .next()
-            .ok_or_else(|| conversion_error(path, "empty input file"))?,
+            .ok_or_else(|| conversion_error(path, "empty input file"))?
+            .1,
         separator,
     )
     .map_err(|message| conversion_error(path, format!("header row: {message}")))?;
@@ -632,15 +632,16 @@ fn parse_delimited(
         resource_limits.max_external_data_values,
     )?;
 
-    if let Some(table) = load_operating_point_report(path, content, separator, &header)? {
+    if let Some(table) =
+        load_operating_point_report(path, content, separator, &header, resource_limits)?
+    {
         return Ok(table.into());
     }
 
     let mut scale = Vec::new();
     let mut series: Vec<Vec<f64>> = vec![Vec::new(); header.len().saturating_sub(1)];
     let mut parsed_values = 0_usize;
-    for (row, line) in lines.enumerate() {
-        let line_number = row + 2;
+    for (line_number, line) in lines {
         let fields = parse_delimited_record(line, separator)
             .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
         let parse = |field: &str, column: &str| {
@@ -727,56 +728,6 @@ fn parse_delimited(
         columns,
     }
     .into())
-}
-
-pub(crate) fn parse_delimited_record(line: &str, separator: char) -> Result<Vec<String>, String> {
-    let mut fields = Vec::new();
-    let mut field = String::new();
-    let mut chars = line.chars().peekable();
-    let mut in_quotes = false;
-    let mut quoted = false;
-
-    while let Some(ch) = chars.next() {
-        if in_quotes {
-            if ch == '"' {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    field.push('"');
-                } else {
-                    in_quotes = false;
-                    quoted = true;
-                }
-            } else {
-                field.push(ch);
-            }
-            continue;
-        }
-
-        if ch == separator {
-            fields.push(finish_delimited_field(&field, quoted));
-            field.clear();
-            quoted = false;
-        } else if ch == '"' && field.trim().is_empty() {
-            field.clear();
-            in_quotes = true;
-        } else {
-            field.push(ch);
-        }
-    }
-
-    if in_quotes {
-        return Err("unterminated quoted field".to_string());
-    }
-    fields.push(finish_delimited_field(&field, quoted));
-    Ok(fields)
-}
-
-fn finish_delimited_field(field: &str, quoted: bool) -> String {
-    if quoted {
-        field.to_string()
-    } else {
-        field.trim().to_string()
-    }
 }
 
 fn load_json(

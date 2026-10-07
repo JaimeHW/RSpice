@@ -544,6 +544,7 @@ pub(crate) fn delimited_cell(value: &str, delimiter: char) -> String {
         || value.contains('"')
         || value.contains('\n')
         || value.contains('\r')
+        || value.trim() != value
     {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
