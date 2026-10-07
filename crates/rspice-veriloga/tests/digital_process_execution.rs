@@ -5781,6 +5781,152 @@ endmodule
 }
 
 #[test]
+fn analog_integer_packed_reads_keep_sample_barriers_and_unsigned_results() {
+    let mut h = Harness::from_source(
+        r#"
+module packed_samples(p); inout p; electrical p;
+ parameter P=8'h80;
+ integer count, words[-1:-2], word, bit;
+ reg [7:0] prefix; reg [63:0] whole, widened;
+ reg sign, rounded, invalid, local_read, parameter_read, array_sign, after, unknown_bit;
+ reg unknown_index; reg [3:0] captured, clipped, array_clipped;
+ real real_bit;
+ analog begin count=-3; words[-2]=-3; words[-1]=5; end
+ initial begin
+   prefix=prefix+1; bit=31; real_bit=30.5;
+   whole=count; widened=count[31:28];
+   sign=count[bit]; rounded=count[real_bit]; clipped=count[33:30];
+   invalid=count[99]; unknown_bit=count[unknown_index]; parameter_read=P[7];
+   begin : shadow
+     integer count;
+     count=1; local_read=count[0];
+   end
+   word=-2; captured=words[word][3:0];
+   word=-2; array_sign=words[word][31]; array_clipped=words[word][33:30];
+   #1; after=words[word][bit];
+ end
+endmodule
+"#,
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    assert_eq!(
+        h.plan.analog_probes.len(),
+        3,
+        "one scalar and one two-word binding group"
+    );
+    h.set("prefix", "00000000");
+    let first = expect_suspended(h.start(0));
+    assert_eq!(
+        first.wait(),
+        &DigitalWaitRequest::AnalogSample(h.probe("count"))
+    );
+    assert_eq!(h.get("prefix"), "00000001");
+    h.set_analog("count", -3.0);
+    let array = expect_suspended(h.resume(0, first.resume_state()));
+    assert_eq!(
+        array.wait(),
+        &DigitalWaitRequest::AnalogSample(h.probe("words[-2]"))
+    );
+    assert_eq!(h.get("whole"), format!("{:064b}", u64::MAX - 2));
+    assert_eq!(
+        h.get("widened"),
+        format!("{:064b}", 15),
+        "packed selections are unsigned"
+    );
+    for name in ["sign", "rounded", "local_read", "parameter_read"] {
+        assert_eq!(h.get(name), "1", "{name}");
+    }
+    assert_eq!(h.get("clipped"), "xx11");
+    assert_eq!(h.get("invalid"), "x");
+    assert_eq!(h.get("unknown_bit"), "x");
+    // The word selector was already evaluated at the sample barrier.
+    h.set("word", &format!("{:032b}", -1i32 as u32));
+    h.set_analog("words[-2]", -3.0);
+    h.set_analog("words[-1]", 5.0);
+    let delayed = expect_suspended(h.resume(0, array.resume_state()));
+    assert_eq!(h.get("captured"), "1101");
+    assert_eq!(h.get("array_sign"), "1");
+    assert_eq!(h.get("array_clipped"), "xx11");
+    assert_eq!(h.get("prefix"), "00000001");
+    h.set("word", &format!("{:032b}", -1i32 as u32));
+    h.set("bit", &format!("{:032b}", 2));
+    h.set_analog("words[-1]", 1.0);
+    expect_finished(h.resume(0, delayed.resume_state()));
+    assert_eq!(
+        h.get("after"),
+        "0",
+        "the next activation reads the current sample"
+    );
+
+    for (word, sample) in [(99, 1.0), (-1, 0.5)] {
+        h.set("word", &format!("{:032b}", word as u32));
+        h.set_analog("words[-1]", sample);
+        let error = resume(
+            &h.plan,
+            &h.plan.processes[0],
+            delayed.resume_state(),
+            &mut h.store,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DigitalEvalError::InvalidNumericConversion { .. }
+        ));
+        assert_eq!(
+            h.get("after"),
+            "0",
+            "a failed read must not publish a result"
+        );
+    }
+}
+
+#[test]
+fn analog_integer_packed_reads_validate_types_and_ownership() {
+    for (body, diagnostic) in [
+        (
+            "integer count; reg q; analog count=-1; initial q=count[0:31];",
+            "direction",
+        ),
+        (
+            "integer count, bit; reg q; analog count=-1; initial begin bit=0; q=count[bit:0]; end",
+            "constant",
+        ),
+        (
+            "integer count; reg q; analog count=-1; initial q=count[2147483647:0];",
+            "width",
+        ),
+        (
+            "real value; reg q; analog value=V(p); initial q=value[0];",
+            "no bits",
+        ),
+        (
+            "real value[0:1]; reg q; analog begin value[0]=V(p); value[1]=0; end initial q=value[0][0];",
+            "integer",
+        ),
+        (
+            "integer count; analog count=-1; initial count[0]=0;",
+            "both",
+        ),
+        (
+            "integer values[-1:0]; analog begin values[-1]=-1; values[0]=0; end initial values[-1][3]=0;",
+            "both",
+        ),
+        (
+            "integer values[-1:0]; reg q; analog begin values[-1]=-1; values[0]=0; end initial q=values[0:-1];",
+            "slice",
+        ),
+    ] {
+        let source = format!("module invalid(p); inout p; electrical p; {body} endmodule");
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .err()
+            .expect("invalid packed read/write");
+        assert!(error.to_string().contains(diagnostic), "{body}: {error}");
+    }
+}
+
+#[test]
 fn analog_variable_reads_retain_real_values_signed_width_and_resampling() {
     let mut harness = Harness::from_source(
         r#"

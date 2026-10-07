@@ -1891,27 +1891,31 @@ impl SemanticAnalyzer {
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
     ) {
-        let Resolution::Digital(position) = self.resolve_digital_name(&select.name, index) else {
-            self.record_error_at(
-                SemanticErrorKind::InvalidExpression(format!(
-                    "`{}` is not a discrete unpacked array",
-                    select.name
-                )),
-                select.span,
-            );
-            return;
+        let range = match self.resolve_digital_name(&select.name, index) {
+            Resolution::Digital(position)
+                if signals[position].unpacked.is_some() && !signals[position].class.is_real() =>
+            {
+                signals[position].range.unwrap_or(VectorBounds::SCALAR)
+            }
+            Resolution::Analog(SymbolKind::Variable)
+                if self.arrays.contains_key(&select.name)
+                    && self.symbols.lookup(&select.name).is_some_and(|symbol| {
+                        symbol.value_type == crate::types::ValueType::Integer
+                    }) =>
+            {
+                INTEGER_BOUNDS
+            }
+            _ => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "packed selection of `{}` requires an unpacked array of four-state or integer elements",
+                        select.name
+                    )),
+                    select.span,
+                );
+                return;
+            }
         };
-        let signal = &signals[position];
-        if signal.unpacked.is_none() || signal.class.is_real() {
-            self.record_error_at(
-                SemanticErrorKind::InvalidExpression(format!(
-                    "packed selection of `{}` requires an unpacked array of four-state elements",
-                    select.name
-                )),
-                select.span,
-            );
-            return;
-        }
         if let PackedSelect::Part { msb, lsb } = &select.select {
             let high = self
                 .digital_selector_value(msb, index)
@@ -1939,7 +1943,6 @@ impl SemanticAnalyzer {
                 );
                 return;
             }
-            let range = signal.range.unwrap_or(VectorBounds::SCALAR);
             self.check_part_select_direction(
                 &select.name,
                 select.span,
@@ -2046,9 +2049,16 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
         bound: SelectBound,
     ) -> Option<(VectorBounds, i64)> {
-        if let Resolution::Digital(position) = self.resolve_digital_name(name, index)
-            && signals[position].unpacked.is_some()
-        {
+        let analog_storage = matches!(
+            self.resolve_digital_name(name, index),
+            Resolution::Analog(SymbolKind::Variable)
+        );
+        let unpacked = match self.resolve_digital_name(name, index) {
+            Resolution::Digital(position) => signals[position].unpacked.is_some(),
+            Resolution::Analog(SymbolKind::Variable) => self.arrays.contains_key(name),
+            _ => false,
+        };
+        if unpacked {
             if matches!(bound, SelectBound::Part) {
                 self.record_error_at(
                     SemanticErrorKind::UnsupportedFeature(format!(
@@ -2096,6 +2106,22 @@ impl SemanticAnalyzer {
                 });
                 (range, Some(local.kind))
             }
+            Resolution::Analog(SymbolKind::Variable) => {
+                if !self
+                    .symbols
+                    .lookup(name)
+                    .is_some_and(|symbol| symbol.value_type == crate::types::ValueType::Integer)
+                {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "analog variable `{name}` has no bits to select; packed selection requires integer storage"
+                        )),
+                        expression.span(),
+                    );
+                    return None;
+                }
+                (Some(INTEGER_BOUNDS), None)
+            }
             Resolution::Analog(_) | Resolution::Undeclared => return None,
         };
         // A bit select being read carries its position as a value, so a
@@ -2123,7 +2149,10 @@ impl SemanticAnalyzer {
             // A scalar signal has exactly one bit, numbered zero.
             None => selected == 0,
         };
-        if !inside {
+        // A sampled analog integer is an ordinary 32-bit value in the
+        // digital expression. Nonexistent selected bits retain the runtime's
+        // X result, including partially overlapping part selections.
+        if !inside && !analog_storage {
             let declared = range.map_or_else(
                 || {
                     kind.map_or_else(
@@ -2197,6 +2226,19 @@ impl SemanticAnalyzer {
         let (Some((range, high)), Some((_, low))) = (msb, lsb) else {
             return;
         };
+        if high
+            .abs_diff(low)
+            .checked_add(1)
+            .is_none_or(|width| width > u64::from(MAX_DIGITAL_VECTOR_WIDTH))
+        {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(
+                    "packed part-select width exceeds the supported vector width".into(),
+                ),
+                span,
+            );
+            return;
+        }
         if high == low || (high > low) == (range.msb >= range.lsb) {
             return;
         }

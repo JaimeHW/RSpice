@@ -1309,18 +1309,33 @@ impl ProcessLowerer<'_> {
 
     /// The range the name a select is written against numbers its bits over.
     ///
-    /// A process-local shadows a module signal, the same order
-    /// [`Self::named_value`] resolves in, because the select and the read have
-    /// to be about one variable. A name that resolves to neither has already
-    /// been reported by [`Self::named_value`]; the scalar range keeps the
-    /// select's own lowering honest in the meantime.
+    /// Resolve in the same scope order as [`Self::named_value`]. Parameters
+    /// and analog integers retain their own fixed ranges. Unknown names are
+    /// reported by the value read; the scalar range is only its placeholder.
     fn declared_range_of(&self, name: &str) -> VectorBounds {
         if let Some(local) = self.lookup_local(name) {
             return self.locals[usize::from(local)].bounds;
         }
         match self.index.get(name) {
             Some(signal) => self.signals[usize::from(*signal)].declared_range(),
-            None => VectorBounds::SCALAR,
+            None => {
+                // Parameters retain their authored width; analog integers use
+                // the same [31:0] numbering as digital integer storage.
+                if let Some((value, _)) = self.constants.bits.get(name) {
+                    VectorBounds {
+                        msb: i64::from(value.width()) - 1,
+                        lsb: 0,
+                    }
+                } else if self.analog_variables.get(name).is_some_and(|variable| {
+                    variable.array.is_none()
+                        && variable.quantity
+                            == super::digital::DigitalAnalogQuantity::IntegerVariable
+                }) {
+                    INTEGER_BOUNDS
+                } else {
+                    VectorBounds::SCALAR
+                }
+            }
         }
     }
 
@@ -2887,24 +2902,35 @@ impl ProcessLowerer<'_> {
         block: BlockId,
         access: &crate::ast::ArraySelectExpr,
     ) -> ValueId {
-        let Some(array) = self.digital_array(&access.name) else {
+        let element = crate::ast::ArrayAccessExpr {
+            packed: None,
+            array: access.name.clone(),
+            index: access.index.clone(),
+            discrete_validity: None,
+            span: access.span,
+        };
+        let (input, range) = if let Some(array) = self.digital_array(&access.name) {
+            (
+                self.digital_array_read(block, &element),
+                self.signals[usize::from(array.base)].declared_range(),
+            )
+        } else if self
+            .analog_array(&access.name)
+            .is_some_and(|(quantity, _, _)| {
+                quantity == super::digital::DigitalAnalogQuantity::IntegerVariable
+            })
+        {
+            // Keep the ordinary candidate-state probe and its single word
+            // selector. Packed selection consumes the resulting signed-32
+            // sample without introducing a second observation or conversion.
+            (self.analog_array_read(block, &element), INTEGER_BOUNDS)
+        } else {
             self.error(
-                "packed selection requires a discrete unpacked array",
+                "packed selection requires an unpacked array of four-state or integer elements",
                 access.span,
             );
             return self.unknown(1);
         };
-        let input = self.digital_array_read(
-            block,
-            &crate::ast::ArrayAccessExpr {
-                packed: None,
-                array: access.name.clone(),
-                index: access.index.clone(),
-                discrete_validity: None,
-                span: access.span,
-            },
-        );
-        let range = self.signals[usize::from(array.base)].declared_range();
         let kind = match &access.select {
             crate::ast::PackedSelect::Bit(bit) => CfgValueKind::DigitalBitSelect {
                 input,

@@ -2437,8 +2437,10 @@ module variable_sampler(p,q);
  reg [95:0] selected[-2:-1]='{96'hxxxx_xxxx_xxxx_xxxx_xxxx_xxff,96'bz};
  integer selection_word=-2, selection_bit=7;
  real measured[-2:-1],period[5:4]='{9,1.537e-9}; integer count,enabled,index;
+ integer codes[-1:-2];
  analog begin
    measured[-2]=gain[1]*V(p); measured[-1]=-gain[1]*V(p);
+   codes[-2]=gain[1]; codes[-1]=-gain[1];
    @(timer(0,period[4],0,enabled)) count=-3;
    I(p)<+(V(p)-gain[1]+adjustment[-2]-255
      +selected[-2][7:4]*16+selected[-2][3:0]-255
@@ -2451,6 +2453,8 @@ module variable_sampler(p,q);
    #1; index=1; gain[index]=-4; index=-1;
    selected[-1][15]=1; selection_word=-1; selection_bit=15;
    q=startup_ok && (count==-3) && (adjustment[-2]==-1)
+     && count[31] && (count[3:0]==13)
+     && codes[-2][31] && (codes[-2][3:0]==12) && (codes[index][3:0]==4)
      && (measured[index]+16*LOAD/(1000+LOAD)<1e-8)
      && (measured[index]+16*LOAD/(1000+LOAD)>-1e-8);
  end

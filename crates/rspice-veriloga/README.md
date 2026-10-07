@@ -352,6 +352,18 @@ values in the signed-64 range, while keeping analog arithmetic and runtime
 parameter overrides. Wider analog literal encodings and digital integer
 exponentiation remain unsupported; this does not complete constant grammar or
 parameter-dependent shape support.
+Schema 77 gives digital packed reads of analog-owned integers their [31:0]
+range and accepts packed reads of indexed analog integer array elements.
+The existing typed probes supply candidate-state values; array reads share one
+binding group and retain the evaluated word selector across a sample barrier.
+Bit selectors may vary at runtime; ordinary part-select bounds are constant,
+bounded, and follow the integer's declared direction. Selected values are
+unsigned, even when the sampled integer is negative. Nonexistent selected bits
+produce X; invalid word indices and malformed integer samples report errors
+before publishing a result. Real storage has no packed view, and storage still
+cannot be written from both domains. Packed parameter bit reads also retain
+their resolved width. This uses existing IR/runtime operations and keeps Wasm
+helper ABI 20; shipping-platform qualification remains open.
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
 initializer patterns, multidimensional shapes, full parameter-dependent
 shape/child-override support, and remaining mixed-host/platform qualification
