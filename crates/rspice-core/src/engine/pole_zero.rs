@@ -9,6 +9,7 @@ use crate::device::semiconductor::{
 use crate::{CircuitData, Netlist, Value};
 
 mod ac_nqs;
+mod reduction;
 
 impl Engine {
     /// Reduce a sparse `G + sC` descriptor to a dense state-space model whose
@@ -188,6 +189,9 @@ impl Engine {
                 return Ok(None);
             }
             let b_offset = dynamic_count * algebraic_count;
+            if !reduction::prove_block_rank(&g_aa, n, limits, abort)? {
+                return Ok(None);
+            }
             (solved[..b_offset].to_vec(), solved[b_offset..].to_vec())
         };
 
@@ -314,6 +318,9 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
 
+        if !reduction::prove_block_rank(&c_sparse, n, limits, abort)? {
+            return Ok(None);
+        }
         let mut a = Matrix::zeros(dynamic_count, dynamic_count);
         for col in 0..dynamic_count {
             for row in 0..dynamic_count {
@@ -321,7 +328,23 @@ impl Engine {
             }
         }
         let b = solved[dynamic_count * dynamic_count..].to_vec();
-        let result = match PoleZeroAnalyzer::analyze_state_space_with_abort(
+        let reduction_error = reduction::SparseReduction {
+            g: g_descriptor,
+            c: c_descriptor,
+            dynamic_map: &dynamic_map,
+            algebraic_map: &algebraic_map,
+            algebraic_count,
+            inverse_g_ad: &g_aa_inv_g_ad,
+            inverse_b_a: &g_aa_inv_b_a,
+            input: &input,
+            output: &output,
+            a: &a,
+            b: &b,
+            output_c: &c_eff,
+            output_d: d_eff,
+        }
+        .backward_error(limits, abort)?;
+        let mut result = match PoleZeroAnalyzer::analyze_state_space_with_abort(
             a,
             b,
             c_eff,
@@ -356,6 +379,11 @@ impl Engine {
                 ));
             }
         };
+        if reduction::retain_original_evidence(&mut result, algebraic_count, reduction_error)
+            .is_none()
+        {
+            return Ok(None);
+        }
         Ok(Some(result))
     }
 

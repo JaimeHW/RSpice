@@ -6,6 +6,27 @@ use rspice_core::{Engine, Netlist, NoAbort};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn sparse_certificates_retain_the_original_algebraic_multiplicity() {
+    let netlist = Netlist::parse(
+        "RC descriptor\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 1u\n.pz in 0 out 0 vol pz\n.end\n",
+    ).unwrap();
+    let result = Engine::default()
+        .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+        .unwrap();
+    let poles = result.pole_evidence.certificate().unwrap();
+    let zeros = result.zero_evidence.certificate().unwrap();
+    // Two node voltages and one ideal-source branch; the zero pencil adds
+    // one transfer constraint. Eliminating them does not erase multiplicity.
+    assert_eq!((poles.problem_order, poles.infinite_count), (3, 2));
+    assert_eq!((zeros.problem_order, zeros.infinite_count), (4, 4));
+    assert_eq!(result.poles.len(), 1);
+    assert!((result.poles[0].re + 1000.0).abs() < 1e-10);
+    assert!(result.zeros.is_empty());
+    assert!(result.has_consistent_root_evidence());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn expression_capacitor_poles_use_the_accepted_bias_and_control_derivatives() {
     use rspice_core::config::ExpressionDialect;
     use rspice_core::engine::{SimulationConfig, SpiceDialect};

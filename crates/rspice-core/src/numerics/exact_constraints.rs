@@ -21,6 +21,51 @@ pub(crate) mod finite;
 pub(crate) mod transition;
 pub(crate) use descriptor::{ConstraintDisposition, close_descriptor};
 
+/// Scratch words for binary64 product operands, exact signed/absolute sums,
+/// and a rounded ratio. Products use at most 4196 bits and accumulation adds
+/// at most usize::BITS. The caller charges this reusable per-equation space.
+pub(crate) const RESIDUAL_SCRATCH_WORDS: usize = 1536;
+
+/// Componentwise backward error of sum(a*x)=0, retaining products and
+/// cancellation exactly before rounding the normalized residual upward.
+pub(crate) fn equation_backward_error(
+    terms: impl IntoIterator<Item = (Value, Value)>,
+    abort: &dyn AbortSignal,
+) -> Result<Value, ConstraintError> {
+    let mut residual = BigInt::default();
+    let mut magnitude = BigUint::default();
+    for (coefficient, value) in terms {
+        if abort.is_aborted() {
+            return Err(ConstraintError::Aborted);
+        }
+        if !coefficient.is_finite() || !value.is_finite() {
+            return Err(ConstraintError::Invalid(
+                "nonfinite original-equation audit term".into(),
+            ));
+        }
+        if coefficient == 0.0 || value == 0.0 {
+            continue;
+        }
+        let product =
+            integer_coefficient(coefficient).unwrap() * integer_coefficient(value).unwrap();
+        magnitude += product.magnitude();
+        residual += product;
+    }
+    if abort.is_aborted() {
+        return Err(ConstraintError::Aborted);
+    }
+    if residual.sign() == Sign::NoSign {
+        return Ok(0.0);
+    }
+    // |sum| <= sum(|terms|), so an unrepresentable ratio can only be a
+    // positive underflow. Retain a conservative nonzero upper bound.
+    Ok(coefficient_ratio(
+        &BigInt::from(residual.magnitude().clone()),
+        &BigInt::from(magnitude),
+    )
+    .map_or(Value::from_bits(1), Value::next_up))
+}
+
 /// Prove full rank of a square matrix without rounding its coefficients.
 /// Entries must be unique and ordered by column; absent entries are zero.
 /// Eliminate columns as rows of the transpose so only one incoming sparse
@@ -371,6 +416,21 @@ mod rank_tests {
         (0, 1, 0.1),
         (1, 1, 0.3),
     ];
+
+    #[test]
+    fn original_equation_error_retains_overflow_underflow_and_cancellation() {
+        let error = |terms| equation_backward_error(terms, &NoAbort).unwrap();
+        assert_eq!(error([(1e300, 1e300), (-1e300, 1e300)]), 0.0);
+        assert!(error([(1e-300, 1e-300), (0.0, 0.0)]) >= 1.0);
+        // Binary64 rounds 1.1*1.1 before subtraction, hiding this residual.
+        assert!(error([(1.1, 1.1), (-1.1_f64.powi(2), 1.0)]) > 0.0);
+        assert!(equation_backward_error([(Value::NAN, 0.0)], &NoAbort).is_err());
+        let abort = CountingAbort::new(1);
+        assert!(matches!(
+            equation_backward_error([(1.0, 1.0), (-1.0, 1.0)], &abort),
+            Err(ConstraintError::Aborted)
+        ));
+    }
 
     #[test]
     fn rank_preserves_sub_ulp_determinants_and_empty_columns() {
