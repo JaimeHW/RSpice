@@ -1375,7 +1375,9 @@ impl SemanticAnalyzer {
                 .default
                 .as_ref()
                 .filter(|_| !is_parameter_array)
-                .map(|expression| self.normalize_scalar_parameter_default(param, expression, module))
+                .map(|expression| {
+                    self.normalize_scalar_parameter_default(param, expression, module)
+                })
                 .transpose()?;
             let declared_default_value = normalized_default
                 .as_ref()
@@ -6156,8 +6158,10 @@ impl SemanticAnalyzer {
         flow_probes::visit_expression(expression, &mut |expression| {
             // A selected parameter is still a dependency, even when the AST
             // stores its base name directly instead of an Identifier child.
-            if matches!(expression, Expression::Identifier(_) | Expression::ArrayAccess(_))
-                || matches!(expression, Expression::Digital(value) if value.base_name().is_some())
+            if matches!(
+                expression,
+                Expression::Identifier(_) | Expression::ArrayAccess(_)
+            ) || matches!(expression, Expression::Digital(value) if value.base_name().is_some())
             {
                 closed = false;
             }
