@@ -22,17 +22,7 @@ pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
 
 /// Evaluate an expression with the given context, preserving complex values.
 pub fn evaluate_complex(expr: &Expr, ctx: &ParamContext) -> Result<ComplexValue, ExprError> {
-    evaluate_complex_with(expr, ctx, &mut |_| Ok(None))
-}
-
-/// Resolve host scalars at the actual parameter read, preserving lazy branches,
-/// user-function argument scope, random draws and dialect normalization.
-pub(crate) fn evaluate_complex_with(
-    expr: &Expr,
-    ctx: &ParamContext,
-    resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
-) -> Result<ComplexValue, ExprError> {
-    evaluate_complex_with_functions(expr, ctx, resolver, &mut |_, _| Ok(None))
+    evaluate_complex_with_functions(expr, ctx, &mut |_| Ok(None), &mut |_, _| Ok(None))
 }
 
 /// Resolve host functions after their arguments are evaluated, exactly once

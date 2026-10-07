@@ -285,6 +285,14 @@ pub struct PoleZeroResult {
 }
 
 impl PoleZeroResult {
+    pub(crate) fn retained_value_count(&self) -> usize {
+        self.poles
+            .len()
+            .saturating_add(self.zeros.len())
+            .saturating_mul(2)
+            .saturating_add(2)
+    }
+
     /// Create empty result
     pub fn new(input: &str, output: &str, gain_unit: SignalUnit) -> Self {
         Self {

@@ -9,7 +9,8 @@ use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
 };
 use crate::netlist::expr::{
-    ParamContext, eval_expression_complex, evaluate_complex_with, is_real, parse_expression,
+    ParamContext, eval_expression_complex, evaluate_complex_with_functions, is_real,
+    parse_expression,
 };
 use crate::netlist::{AnalysisCommand, Netlist};
 use crate::resource::{ResourceKind, ResourceLimitError};
@@ -54,6 +55,7 @@ pub enum ControlAnalysisResult {
     NoiseTable(FrequencyDataResult<crate::analysis::NoiseResult>),
     DcSweep(Box<super::DcSweepResult>),
     TransferFunction(Box<crate::analysis::TransferFunctionResult>),
+    PoleZero(Box<crate::analysis::PoleZeroResult>),
     Transient(Box<TransientResult>),
 }
 
@@ -96,7 +98,7 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "dc" | "ac" | "noise" | "tran" | "tf" => Self::Analysis,
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             _ => {
@@ -302,6 +304,7 @@ impl ControlCircuit {
             }
             AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
             AnalysisCommand::Tf { .. } => ("tf", crate::identity::AnalysisKind::TransferFunction),
+            AnalysisCommand::PoleZero { .. } => ("pz", crate::identity::AnalysisKind::PoleZero),
             _ => {
                 return Err(command_error(
                     line,
@@ -386,6 +389,17 @@ impl ControlCircuit {
                 (
                     "tran",
                     ControlAnalysisResult::Transient(Box::new(result)),
+                    count,
+                )
+            }
+            AnalysisCommand::PoleZero { .. } => {
+                let result = bounded
+                    .run_pz_from_card_with_abort(&netlist, &analysis, abort)
+                    .map_err(|error| simulation_error(line, error))?;
+                let count = result.retained_value_count();
+                (
+                    kind,
+                    ControlAnalysisResult::PoleZero(Box::new(result)),
                     count,
                 )
             }
@@ -532,9 +546,12 @@ impl ControlScalarEvaluator for ControlCircuit {
     ) -> Result<ComplexValue, ControlError> {
         parse_expression(expression)
             .and_then(|expression| {
-                evaluate_complex_with(&expression, variables, &mut |name| {
-                    presentation::resolve_transfer_scalar(self, name)
-                })
+                evaluate_complex_with_functions(
+                    &expression,
+                    variables,
+                    &mut |name| presentation::resolve_scalar(self, name),
+                    &mut |name, args| presentation::resolve_root_function(self, name, args),
+                )
             })
             .map_err(|error| {
                 ControlError::new(line, ControlErrorKind::Expression, error.to_string())

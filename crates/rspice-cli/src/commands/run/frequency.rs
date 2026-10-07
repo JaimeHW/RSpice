@@ -1512,7 +1512,7 @@ pub(super) fn run_pz(
 ///
 /// The export follows the rawfile convention for .PZ results: a single
 /// point with one complex variable per pole/zero (`pole(1)`, `zero(1)`, ...).
-fn report_pz(
+pub(super) fn report_pz(
     ctx: &RunContext<'_>,
     result: &rspice_core::analysis::PoleZeroResult,
 ) -> Result<(), CliError> {

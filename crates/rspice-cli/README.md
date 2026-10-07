@@ -98,8 +98,8 @@ operating point is run by default.
 With `.control` regions, `run` executes their commands in order, including
 regions loaded through `.include` and `-I` search paths. The current control
 host supports scalar assignments and nested loops/conditionals, `alter`,
-`op`, `dc`, `ac`, `noise`, `tf`, `tran`, `run`, `print`, `plot`, and `settype`. A control
-`run` executes the deck's declarative OP, DC, AC, noise, TF and transient analyses,
+`op`, `dc`, `ac`, `noise`, `tf`, `pz`, `tran`, `run`, `print`, `plot`, and `settype`. A control
+`run` executes the deck's declarative OP, DC, AC, noise, TF, PZ and transient analyses,
 including AC/noise `DATA=<table>` forms. Unsupported commands fail with their source location.
 
 Transfer-function datasets (`tf1`, `tf2`, ...) retain gain, input/output impedance
@@ -114,6 +114,11 @@ version 1. Plotting requires finite samples.
 `let`, `if` and loop conditions can read finite TF scalars, for example
 `let resistance = tf1.input_impedance`. Reading an infinite impedance in a scalar
 expression reports an error; an unselected `if` branch remains unevaluated.
+Pole-zero datasets (`pz1`, `pz2`, ...) expose one-based `pole(index)` and
+`zero(index)` functions and `dc_gain`/`hf_gain` scalars. Qualified references such
+as `pz1.pole(2)` read earlier runs. Complex roots retain rad/s and gains retain
+their physical units in typed results and control presentations. Missing roots
+or gains with no finite value report an error when evaluated.
 An explicit command-line analysis mode continues to supersede authored cards.
 
 Frequency tables retain authored row order, including repeated or decreasing

@@ -176,6 +176,9 @@ pub(super) fn run(
                             ControlAnalysisResult::TransferFunction(result) => {
                                 frequency::finish_tf_result(&ctx, result)?;
                             }
+                            ControlAnalysisResult::PoleZero(result) => {
+                                frequency::report_pz(&ctx, result)?;
+                            }
                             ControlAnalysisResult::AcTable(table) => {
                                 frequency::finish_ac_table(&ctx, table)?;
                             }

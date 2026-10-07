@@ -584,6 +584,21 @@ evaluation and user-function scoping as ordinary parameters. An active read of
 an infinite impedance returns an expression error, rather than a finite overflow
 sentinel; an unselected `if` branch does not read it.
 
+Explicit `pz` commands and declarative `.PZ` cards executed by `run` use the
+shared PZ card runner. `ControlAnalysisResult::PoleZero` retains root evidence,
+physical port names and gains; SDK hosts matching this enum must handle the new
+variant. Immutable `pz1`, `pz2`, ... datasets support `pole(index)`, `zero(index)`,
+`dc_gain` and `hf_gain`/`high_frequency_gain`, with optional dataset qualification
+such as `pz1.pole(2)`. Root indices are one-based real integers. Roots retain
+both complex components in rad/s; gains retain their physical units. Missing
+roots and gains with no finite value produce errors when evaluated. Scalar
+assignments and conditions retain lazy branches, user-function scopes and
+random-draw order. `print`, complex-plane `plot` expressions using `real()` and
+`imag()`, and `settype` use the same retained roots. CLI and WASM publication
+preserve the ordinary PZ result document. Cancelled or failed analyses publish
+no new dataset or ordinal, and retained roots consume the session's cumulative
+result allowance.
+
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
 Semiconductor temperature behavior belongs to each device model;

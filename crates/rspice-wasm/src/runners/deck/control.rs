@@ -179,6 +179,9 @@ pub(super) fn run(
             ControlAnalysisResult::TransferFunction(result) => {
                 AnalysisResultDocument::from_transfer_function(dataset.analysis_id, result)
             }
+            ControlAnalysisResult::PoleZero(result) => {
+                AnalysisResultDocument::from_pole_zero(dataset.analysis_id, result)
+            }
             ControlAnalysisResult::Noise(points) => {
                 AnalysisResultDocument::from_noise(dataset.analysis_id, points)
             }
@@ -284,6 +287,36 @@ fn source_error(mut error: WasmError, line: usize, script: &ControlScriptSource)
 #[cfg(test)]
 mod tests {
     use super::super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn pole_zero_control_matches_direct_documents_and_retains_root_presentations() {
+        let source = "PZ\nV1 in 0 0\nR1 in mid 1\nL1 mid out 1\nC1 out 0 1\n";
+        let direct =
+            run_authored_deck_document_detailed(&format!("{source}.pz in 0 out 0 vol pz\n.end\n"))
+                .unwrap();
+        for cards in [
+            ".control\npz in 0 out 0 vol pz\nlet saved = pz1.pole(1)\nprint pole(1) saved\n.endc",
+            ".pz in 0 out 0 vol pz\n.control\nrun\nprint pole(1)\n.endc",
+        ] {
+            let control =
+                run_authored_deck_document_detailed(&format!("{source}{cards}\n.end\n")).unwrap();
+            assert_eq!(control.control_datasets, ["pz1"]);
+            assert_eq!(control.results[0].payload(), direct.results[0].payload());
+            let rspice_core::engine::ControlPresentationKind::Print(traces) =
+                &control.control_presentations[0].kind
+            else {
+                panic!("print")
+            };
+            assert_eq!(traces[0].y.unit, SignalUnit::RadianPerSecond);
+            assert!((traces[0].y.samples[0].im - 3.0_f64.sqrt() / 2.0).abs() < 1e-9);
+            let invalid = format!(
+                "{source}{}\n.end\n",
+                cards.replace("print pole(1)", "print pole(9)")
+            );
+            assert!(run_authored_deck_document_detailed(&invalid).is_err());
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]

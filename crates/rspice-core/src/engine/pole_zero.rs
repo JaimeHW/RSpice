@@ -873,14 +873,7 @@ impl Engine {
             input_neg_node,
         )?;
         result.output = port("V", output_pos, output_neg.unwrap_or(0))?;
-        self.ensure_result_values(
-            result
-                .poles
-                .len()
-                .saturating_add(result.zeros.len())
-                .saturating_mul(2)
-                .saturating_add(2),
-        )?;
+        self.ensure_result_values(result.retained_value_count())?;
         abort.observe_progress(1.0);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);

@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "Complete the remaining 21 control dispositions, broader option/binding/configuration qualification, producer dependencies and bounded orchestration. Core table dispatch/presentation is delivered by b6d545304; cacddf36c aligns circuit/noise temperatures, 33c176b7a preserves only executed option overrides, and d7f95d93a retains frequency/control tables during textual expansion. Version-11 table documents and CLI/WASM publication are now implemented by 3a293bf4f, 69c94f135 and deeeab702; shared borrowed admission and CLI preflight are delivered by 87491ea53 and 6a76fd6a9. Hardening in 557cbdb0c, 58776c350 and af155b9c6 recognizes implicit TEMP coordinates, bounds and cancels document projection, rejects malformed finish fields and misaligned noise contributions, and preserves consumer limits. core-frequency-table-documents-windows-20261006.json records the scoped publication qualification; the older core-control-frequency-data-windows-20261006.json remains evidence for its earlier source revision and then-open adapter gaps. Preserve the parser contracts indexed in the plan and existing_evidence. Broader earlier-card/eager-parameter temperature cases, statistical/runtime binding, physical overrides, whole-run memory, cancellation/complexity and C14 compiler/runner causes remain open. TF control execution, physical gain units, final-progress cancellation, typed unbounded publication and finite scalar assignments/conditions are delivered in a6eeb0ccd, 73092ff2e and 9a262e3a3. core-control-transfer-function-windows-20261007.json records native and optimized WASM scope, independent circuit equations, migration requirements and remaining binding/configuration/resource/performance work. Eight of 29 control dispositions are implemented; all packages remain open/in progress."
+      "qualification_task": "Complete the remaining 20 of 29 control dispositions, producer dependencies and bounded orchestration. Preserve direct/control numerical equivalence, complex scalar bindings, physical units, immutable dataset identity and atomic publication. Extend qualification for earlier-card and eager-parameter temperatures, statistical/runtime binding, physical overrides, whole-run memory, cancellation, configuration and performance. Existing parser and analysis regression tests remain required."
     },
     {
       "id": "C05",
@@ -267,9 +267,9 @@
         "path": "src/engine/pole_zero.rs",
         "symbol": "run_pz_from_card_with_abort"
       },
-      "control_host": "missing",
+      "control_host": "implemented",
       "owner": "C04",
-      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits. Direct PZ port/completion defects, spurious finite descriptor roots and missing dense high-frequency gains are repaired; tests/pole_zero_public_contract.rs, tests/pole_zero_descriptor_rank.rs and tests/pole_zero_high_frequency.rs preserve the scoped gates. Control execution, complex bindings, complete units and broader numerical/performance qualification remain required."
+      "qualification_task": "Control PZ reuses the direct card runner, immutable complex roots and gain units, lazy scalar/root bindings, and CLI/WASM documents. tests/control_pole_zero.rs covers direct equivalence, analytic RC/RLC roots, temperature, cancellation, cumulative limits and rollback. Direct solver regressions remain in tests/pole_zero_public_contract.rs, tests/pole_zero_descriptor_rank.rs and tests/pole_zero_high_frequency.rs. Broader model, option and performance qualification remains C04 work."
     },
     {
       "variant": "Sensitivity",

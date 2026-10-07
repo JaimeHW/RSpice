@@ -2,6 +2,7 @@
 
 use super::*;
 mod noise;
+mod pole_zero;
 mod transfer;
 use crate::ComplexValue;
 use crate::netlist::expr::{
@@ -9,7 +10,17 @@ use crate::netlist::expr::{
     parse_control_expression_prefix_with_abort,
 };
 use crate::signal_unit::SignalUnit;
-pub(super) use transfer::resolve_scalar as resolve_transfer_scalar;
+pub(super) use pole_zero::resolve_function as resolve_root_function;
+
+pub(super) fn resolve_scalar(
+    circuit: &ControlCircuit,
+    name: &str,
+) -> Result<Option<ComplexValue>, crate::netlist::expr::ExprError> {
+    match transfer::resolve_scalar(circuit, name)? {
+        Some(value) => Ok(Some(value)),
+        None => pole_zero::resolve_scalar(circuit, name),
+    }
+}
 
 /// A canonical vector identity. Dataset names remain stable for the session.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -98,6 +109,7 @@ enum Column {
     Noise(noise::NoiseColumn),
     NoiseContribution,
     Transfer(transfer::TransferColumn),
+    PoleZero(pole_zero::PoleZeroColumn),
 }
 
 struct Selected<'a> {
@@ -122,7 +134,8 @@ impl ControlNamedDataset {
     fn length(&self) -> usize {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_)
-            | ControlAnalysisResult::TransferFunction(_) => 1,
+            | ControlAnalysisResult::TransferFunction(_)
+            | ControlAnalysisResult::PoleZero(_) => 1,
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => points.len(),
             ControlAnalysisResult::Noise(points)
@@ -135,7 +148,8 @@ impl ControlNamedDataset {
     fn scale_unit(&self) -> SignalUnit {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_)
-            | ControlAnalysisResult::TransferFunction(_) => SignalUnit::Dimensionless,
+            | ControlAnalysisResult::TransferFunction(_)
+            | ControlAnalysisResult::PoleZero(_) => SignalUnit::Dimensionless,
             ControlAnalysisResult::Ac(_)
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
@@ -151,7 +165,8 @@ impl ControlNamedDataset {
     fn scale_name(&self) -> &str {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_)
-            | ControlAnalysisResult::TransferFunction(_) => "index",
+            | ControlAnalysisResult::TransferFunction(_)
+            | ControlAnalysisResult::PoleZero(_) => "index",
             ControlAnalysisResult::Ac(_)
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
@@ -166,7 +181,8 @@ impl ControlNamedDataset {
     fn scale_value(&self, row: usize) -> Option<Value> {
         match &self.result {
             ControlAnalysisResult::OperatingPoint(_)
-            | ControlAnalysisResult::TransferFunction(_) => (row == 0).then_some(0.0),
+            | ControlAnalysisResult::TransferFunction(_)
+            | ControlAnalysisResult::PoleZero(_) => (row == 0).then_some(0.0),
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
                 points.get(row).map(|point| point.frequency)
@@ -182,7 +198,7 @@ impl ControlNamedDataset {
 
     fn branch_names(&self) -> &[String] {
         match &self.result {
-            ControlAnalysisResult::TransferFunction(_) => &[],
+            ControlAnalysisResult::TransferFunction(_) | ControlAnalysisResult::PoleZero(_) => &[],
             ControlAnalysisResult::OperatingPoint(result) => &result.branch_names,
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
@@ -207,6 +223,11 @@ impl Selected<'_> {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::PoleZero(column), ControlAnalysisResult::PoleZero(result)) => {
+                column.sample(result)
+            }
+            (Column::PoleZero(_), _)
+            | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::PoleZero(_)) => None,
             (Column::Transfer(column), ControlAnalysisResult::TransferFunction(result)) => {
                 Some(column.sample(result).into())
             }
@@ -352,8 +373,9 @@ impl ControlCircuit {
         line: usize,
     ) -> Result<Selected<'a>, ControlError> {
         if probe.is_none()
-            && let Some(mut selected) =
-                transfer::select(dataset, name).or(noise::select(dataset, name, line)?)
+            && let Some(mut selected) = transfer::select(dataset, name)
+                .or(pole_zero::select_gain(dataset, name))
+                .or(noise::select(dataset, name, line)?)
         {
             if let Some(unit) = self.vector_units.get(&selected.id) {
                 selected.unit = unit.clone();
@@ -402,7 +424,7 @@ impl ControlCircuit {
             (Column::Ground, "v(0)".into(), SignalUnit::Volt)
         } else {
             let names = match &dataset.result {
-                ControlAnalysisResult::TransferFunction(_) => {
+                ControlAnalysisResult::TransferFunction(_) | ControlAnalysisResult::PoleZero(_) => {
                     return Err(unavailable(line, dataset, name));
                 }
                 ControlAnalysisResult::DcSweep(result) => {
@@ -450,7 +472,12 @@ impl ControlCircuit {
         })
     }
 
-    fn direct<'a>(&'a self, expression: &Expr, line: usize) -> Result<Selected<'a>, ControlError> {
+    fn direct<'a>(
+        &'a self,
+        expression: &Expr,
+        variables: &ParamContext,
+        line: usize,
+    ) -> Result<Selected<'a>, ControlError> {
         match expression {
             Expr::Param(name) => {
                 let (dataset, name) = self.qualified(name, line)?;
@@ -458,6 +485,24 @@ impl ControlCircuit {
             }
             Expr::FnCall { name, args } => {
                 let (dataset, probe) = self.qualified(name, line)?;
+                if matches!(probe, "POLE" | "ZERO") {
+                    if args.len() != 1 {
+                        return Err(command_error(line, "a root reference requires one index"));
+                    }
+                    let index = evaluate_complex_with_functions(
+                        &args[0],
+                        variables,
+                        &mut |name| resolve_scalar(self, name),
+                        &mut |name, args| resolve_root_function(self, name, args),
+                    )
+                    .map_err(|error| command_error(line, error.to_string()))?;
+                    let mut selected = pole_zero::select_root(dataset, probe, &[index])
+                        .map_err(|error| command_error(line, error.to_string()))?;
+                    if let Some(unit) = self.vector_units.get(&selected.id) {
+                        selected.unit = unit.clone();
+                    }
+                    return Ok(selected);
+                }
                 if probe == "OUTPUT_IMPEDANCE_AT_V" {
                     let mut selected = transfer::output_probe(dataset, args, line)?;
                     if let Some(unit) = self.vector_units.get(&selected.id) {
@@ -552,7 +597,7 @@ impl ControlCircuit {
                 let (expression, _) = expression(&mut input, line, abort)?;
                 let selected = match self.group(&expression, line)? {
                     Some(group) => group,
-                    None => vec![self.direct(&expression, line)?],
+                    None => vec![self.direct(&expression, variables, line)?],
                 };
                 for selected in selected {
                     if selected.sample(0).is_none() {
@@ -599,7 +644,14 @@ impl ControlCircuit {
                 };
                 if command.name == "print"
                     && x.is_none()
-                    && let Ok(selected) = self.direct(&y, line)
+                    // Only transfer scalars can have this determination. Do
+                    // not evaluate a root index here and again while binding.
+                    && match &y {
+                        Expr::Param(_) => true,
+                        Expr::FnCall { name, .. } => name.rsplit('.').next() == Some("OUTPUT_IMPEDANCE_AT_V"),
+                        _ => false,
+                    }
+                    && let Ok(selected) = self.direct(&y, variables, line)
                     && let Some(scalar) =
                         transfer::unbounded(&selected, &label, traces.len() + scalars.len(), line)?
                 {
@@ -806,7 +858,7 @@ impl<'a> Resolver<'a> {
                 let probe = name.rsplit('.').next().unwrap_or(name);
                 if matches!(
                     probe,
-                    "V" | "N" | "I" | "DNO" | "DNI" | "OUTPUT_IMPEDANCE_AT_V"
+                    "V" | "N" | "I" | "DNO" | "DNI" | "OUTPUT_IMPEDANCE_AT_V" | "POLE" | "ZERO"
                 ) {
                     if matches!(probe, "V" | "N") && args.len() == 2 {
                         let mut first = Expr::FnCall {
@@ -826,7 +878,7 @@ impl<'a> Resolver<'a> {
                         };
                         return Ok(binary_unit(BinOpKind::Sub, a, b));
                     }
-                    let selected = self.circuit.direct(expression, self.line)?;
+                    let selected = self.circuit.direct(expression, self.variables, self.line)?;
                     return Ok(bind_selected(expression, selected, inputs));
                 }
                 // Only functions whose control-vector semantics are implemented
@@ -835,6 +887,7 @@ impl<'a> Resolver<'a> {
                 let canonical = match name.as_str() {
                     "ABS" | "MAG" | "MAGNITUDE" => "ABS",
                     "REAL" | "RE" => "REAL",
+                    "IMAG" | "IMG" | "IM" => "IMAG",
                     _ => {
                         return Err(command_error(
                             self.line,
