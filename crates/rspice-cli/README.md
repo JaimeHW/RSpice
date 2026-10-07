@@ -578,6 +578,11 @@ temperature. `--strict` turns a warning-only deck
 into a usage failure, which exits 2. The JSON document reports both verdicts
 separately: `valid` tracks the non-strict exit status, and `strict_valid` stays
 false whenever there are warnings.
+AC/noise `DATA` preflight uses the same borrowed-table admission checks as
+execution: the table must exist, have one frequency column and finite rows,
+and fit the point, batch and coordinate-value limits. AC permits zero frequency;
+noise requires positive frequencies. Control scripts validate requests they
+author or invoke through `run`; unused declarative cards may be replaced.
 Verilog-A compiler warnings include their original source locations and count
 toward `--strict`; JSON warning records retain this metadata in `diagnostic`.
 The `run` command emits the same compiler findings using `--error-format`,

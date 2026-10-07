@@ -130,6 +130,15 @@ fn analysis_request(
     transient_stop: Option<f64>,
 ) -> Result<(), CliError> {
     match analysis {
+        AnalysisCommand::AcData { .. } | AnalysisCommand::NoiseData { .. } => {
+            rspice_core::Engine::validate_frequency_data_request_with_abort(
+                netlist,
+                analysis,
+                limits,
+                &crate::abort::ProcessAbort,
+            )
+            .map_err(CliError::from)
+        }
         AnalysisCommand::Tran {
             step,
             stop,
