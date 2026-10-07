@@ -842,6 +842,12 @@ pub(super) fn parse_untyped_json(
 
     // Preferred schema: {"analysis", "scale": {"name", "values"}, "signals": [...]}
     if let Some(scale_obj) = value.get("scale") {
+        if scale_obj.get("real").is_some() || scale_obj.get("imag").is_some() {
+            return Err(conversion_error(
+                path,
+                "scale must use real 'values'; 'real' and 'imag' coordinate fields are not supported",
+            ));
+        }
         let scale_name = scale_obj
             .get("name")
             .and_then(|v| v.as_str())
@@ -866,6 +872,14 @@ pub(super) fn parse_untyped_json(
                 .ok_or_else(|| conversion_error(path, "signal has no 'name'"))?
                 .to_string();
             let data = if let Some(values) = signal.get("values") {
+                if signal.get("real").is_some() || signal.get("imag").is_some() {
+                    return Err(conversion_error(
+                        path,
+                        format!(
+                            "signal '{name}' has conflicting numeric representations: use either 'values' or both 'real' and 'imag'"
+                        ),
+                    ));
+                }
                 ColumnData::Real(to_f64_vec(values, &name)?)
             } else {
                 ColumnData::Complex {

@@ -716,6 +716,9 @@ checked. HDF5 decoding uses the same bounded, owned input bytes.
 Typed JSON imports validate the declared schema, version, and full retained
 payload before selecting or converting data. Value budgets include event
 histories and other retained evidence omitted from the selected output.
+Legacy JSON table signals use either `values` or both `real` and `imag` arrays;
+mixing these representations is rejected. Their real coordinates use `values`
+only. Validation covers all signals before variable selection.
 For tables, `max_result_values` counts coordinate values and both components
 of complex samples. HDF5 readers admit the combined dataset and measurement
 value count before decoding any section, including sections not selected.
