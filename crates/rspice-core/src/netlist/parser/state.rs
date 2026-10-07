@@ -349,6 +349,7 @@ fn apply_temp_directive_to_options(netlist: &mut Netlist) {
 }
 
 pub(super) struct ParseLineContext<'a> {
+    pub(super) abort: &'a dyn AbortSignal,
     pub(super) analysis_cards: &'a mut commands::analysis::AnalysisCardPlan,
     pub(super) startup_cards: &'a mut startup_cards::StartupCardPlan,
     pub(super) scopes: &'a mut scopes::LexicalScopes,

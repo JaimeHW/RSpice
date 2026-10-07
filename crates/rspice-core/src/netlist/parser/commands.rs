@@ -20,7 +20,8 @@ pub(super) fn parse_command(
     stream: &mut TokenStream,
     line_num: usize,
     context: ParseCommandContext<'_>,
-) -> Result<(), ParseError> {
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
     let ParseCommandContext {
         parameter_direction,
         parameter_overrides,
@@ -157,6 +158,7 @@ pub(super) fn parse_command(
                 origin,
                 parameter_overrides,
                 temperature_options.plan,
+                abort,
             )?;
         }
         ".GLOBAL_PARAM" => {
@@ -170,6 +172,7 @@ pub(super) fn parse_command(
                 origin,
                 parameter_overrides,
                 temperature_options.plan,
+                abort,
             )?;
         }
         ".INCLUDE" | ".INC" => {
@@ -187,7 +190,8 @@ pub(super) fn parse_command(
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: ".spef_include requires a file path".to_string(),
-                    });
+                    }
+                    .into());
                 };
                 let path = path.clone();
                 stream.advance();
@@ -4545,12 +4549,14 @@ pub(super) fn parse_param_statement(
     origin: &NetlistSourceLocation,
     overrides: &[ParameterOverride],
     temperature_options: &mut temperature::TemperatureOptionPlan,
-) -> Result<(), ParseError> {
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
     if retain_global_expression && deferred_params.is_some() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: ".GLOBAL_PARAM is only valid in the top-level netlist scope".to_string(),
-        });
+        }
+        .into());
     }
     // Parse one or more NAME=VALUE pairs
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline) {
@@ -4561,6 +4567,7 @@ pub(super) fn parse_param_statement(
             break;
         }
 
+        ensure_parse_not_aborted(abort)?;
         let name = expect_ident(stream, line_num)?;
         if retain_global_expression
             && matches!(
@@ -4571,7 +4578,8 @@ pub(super) fn parse_param_statement(
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: format!(".GLOBAL_PARAM name '{}' is reserved by the simulator", name),
-            });
+            }
+            .into());
         }
 
         if matches!(stream.peek().kind, TokenKind::LParen) {
@@ -4600,7 +4608,8 @@ pub(super) fn parse_param_statement(
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: format!("Expected '=' after parameter name '{}'", name),
-            });
+            }
+            .into());
         }
 
         let acceptance =
@@ -4620,6 +4629,7 @@ pub(super) fn parse_param_statement(
                 retain_global_expression,
                 name.clone(),
                 parameter_override.map(|parameter| parameter.value),
+                abort,
             )? {
                 temperature_options.retain_parameter_error(error, origin);
             }
@@ -4644,6 +4654,7 @@ pub(super) fn parse_param_statement(
                 retain_global_expression,
                 name.clone(),
                 None,
+                abort,
             )? {
                 temperature_options.retain_parameter_error(error, origin);
             }
@@ -4703,6 +4714,7 @@ fn handle_parameter_redefinition(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_param_assignment_value(
     stream: &mut TokenStream,
     line_num: usize,
@@ -4711,7 +4723,8 @@ fn parse_param_assignment_value(
     retain_global_expression: bool,
     name: String,
     override_value: Option<Value>,
-) -> Result<Option<crate::netlist::expr::ExprError>, ParseError> {
+    abort: &dyn AbortSignal,
+) -> Result<Option<crate::netlist::expr::ExprError>, ParseWithAbortError> {
     let mut provisional_error = None;
     let override_binding = override_value.map(|value| (name.clone(), value));
     // Get the value (could be number, expression, or string-valued vector).
@@ -4743,20 +4756,22 @@ fn parse_param_assignment_value(
         }
         _ if param_rhs_continues(stream) => {
             let expr = collect_param_rhs_expression(stream, line_num, &name)?;
-            reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
+            reject_parameter_expression_circuit_probe(&name, &expr, line_num, params, abort)?;
             if !retain_runtime_param_expression(
                 params,
                 deferred_params.as_deref_mut(),
                 retain_global_expression,
                 &name,
                 &expr,
-            ) {
+                abort,
+            )? {
                 match eval_and_bind_param_expression(
                     params,
                     &name,
                     &expr,
                     retain_global_expression,
                     deferred_params.is_none(),
+                    abort,
                 ) {
                     Ok(()) => {
                         upsert_deferred_param_expression(
@@ -4765,7 +4780,10 @@ fn parse_param_assignment_value(
                             &expr,
                         );
                     }
-                    Err(err) => {
+                    Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
+                        return Err(ParseWithAbortError::Aborted);
+                    }
+                    Err(crate::netlist::expr::ExpressionEvaluationError::Expression(err)) => {
                         provisional_error = defer_param_expression_or_error(
                             deferred_params.as_deref_mut(),
                             params,
@@ -4797,20 +4815,22 @@ fn parse_param_assignment_value(
         TokenKind::Expression(expr) => {
             let expr = expr.clone();
             stream.advance();
-            reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
+            reject_parameter_expression_circuit_probe(&name, &expr, line_num, params, abort)?;
             if !retain_runtime_param_expression(
                 params,
                 deferred_params.as_deref_mut(),
                 retain_global_expression,
                 &name,
                 &expr,
-            ) {
+                abort,
+            )? {
                 match eval_and_bind_param_expression(
                     params,
                     &name,
                     &expr,
                     retain_global_expression,
                     deferred_params.is_none(),
+                    abort,
                 ) {
                     Ok(()) => {
                         upsert_deferred_param_expression(
@@ -4819,7 +4839,10 @@ fn parse_param_assignment_value(
                             &expr,
                         );
                     }
-                    Err(err) => {
+                    Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
+                        return Err(ParseWithAbortError::Aborted);
+                    }
+                    Err(crate::netlist::expr::ExpressionEvaluationError::Expression(err)) => {
                         provisional_error = defer_param_expression_or_error(
                             deferred_params.as_deref_mut(),
                             params,
@@ -4847,7 +4870,8 @@ fn parse_param_assignment_value(
                 retain_global_expression,
                 &name,
                 &expr,
-            );
+                abort,
+            )?;
         }
         TokenKind::Ident(param_name) if params.get_complex(param_name).is_some() => {
             let expr = param_name.clone();
@@ -4858,8 +4882,9 @@ fn parse_param_assignment_value(
                 &expr,
                 retain_global_expression,
                 deferred_params.is_none(),
+                abort,
             )
-            .map_err(|error| ParseError::InvalidValue(format!("line {line_num}: {error}")))?;
+            .map_err(|error| parameter_evaluation_error(line_num, error))?;
             upsert_deferred_param_expression(deferred_params.as_deref_mut(), &name, &expr);
         }
         _ => {
@@ -4905,12 +4930,21 @@ fn parse_param_assignment_value(
                 }
                 Err(err) => {
                     let expr = collect_param_rhs_expression(stream, line_num, &name)?;
-                    reject_parameter_expression_circuit_probe(&name, &expr, line_num, params)?;
-                    let Err(error) = crate::netlist::expr::eval_expression_complex(
+                    reject_parameter_expression_circuit_probe(
+                        &name, &expr, line_num, params, abort,
+                    )?;
+                    let Err(error) = crate::netlist::expr::eval_expression_complex_with_abort(
                         &expr,
                         &params.isolated_random_clone(),
+                        abort,
                     ) else {
-                        return Err(err);
+                        return Err(err.into());
+                    };
+                    let error = match error {
+                        crate::netlist::expr::ExpressionEvaluationError::Aborted => {
+                            return Err(ParseWithAbortError::Aborted);
+                        }
+                        crate::netlist::expr::ExpressionEvaluationError::Expression(error) => error,
                     };
                     provisional_error = defer_param_expression_or_error(
                         deferred_params,
@@ -4937,17 +4971,34 @@ fn parse_param_assignment_value(
     Ok(provisional_error)
 }
 
+fn parameter_evaluation_error(
+    line: usize,
+    error: crate::netlist::expr::ExpressionEvaluationError,
+) -> ParseWithAbortError {
+    match error {
+        crate::netlist::expr::ExpressionEvaluationError::Aborted => ParseWithAbortError::Aborted,
+        crate::netlist::expr::ExpressionEvaluationError::Expression(error) => {
+            ParseError::InvalidValue(format!("line {line}: {error}")).into()
+        }
+    }
+}
+
 fn eval_and_bind_param_expression(
     params: &mut ParamContext,
     name: &str,
     expression: &str,
     global: bool,
     root_scope: bool,
-) -> Result<(), crate::netlist::expr::ExprError> {
+    abort: &dyn AbortSignal,
+) -> Result<(), crate::netlist::expr::ExpressionEvaluationError> {
     if crate::netlist::expr::needs_forward_reference_probe(expression, params) {
         // An unresolved declaration must not retain draws from a failed
         // partial evaluation. The full expression draws once when resolved.
-        crate::netlist::expr::eval_expression_complex(expression, &params.isolated_random_clone())?;
+        crate::netlist::expr::eval_expression_complex_with_abort(
+            expression,
+            &params.isolated_random_clone(),
+            abort,
+        )?;
     }
     // Capture before evaluation so random operators replay the same draw
     // positions without consuming additional draws from the authored stream.
@@ -4956,7 +5007,7 @@ fn eval_and_bind_param_expression(
     } else {
         None
     };
-    let (value, direction) = params.evaluate_parameter_binding(expression)?;
+    let (value, direction) = params.evaluate_parameter_binding_with_abort(expression, abort)?;
     if global {
         params.define_global_expression(name, expression, Some(value));
     } else {
@@ -4967,14 +5018,31 @@ fn eval_and_bind_param_expression(
     Ok(())
 }
 
+// Semantic preparation failures retain the authored expression for the normal
+// parameter diagnostics. Cancellation must never fall back to another evaluator.
+fn prepare_parameter_expression(
+    expression: &str,
+    params: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<String, ParseWithAbortError> {
+    use crate::netlist::expr::{
+        BehavioralPreparationError, prepare_behavioral_expression_with_abort,
+    };
+    match prepare_behavioral_expression_with_abort(expression, params, abort) {
+        Ok(prepared) => Ok(prepared),
+        Err(BehavioralPreparationError::Semantic(_)) => Ok(expression.to_owned()),
+        Err(BehavioralPreparationError::Aborted) => Err(ParseWithAbortError::Aborted),
+    }
+}
+
 fn reject_parameter_expression_circuit_probe(
     name: &str,
     expression: &str,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(), ParseError> {
-    let prepared = crate::netlist::expr::prepare_behavioral_expression(expression, params)
-        .unwrap_or_else(|_| expression.to_string());
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
+    let prepared = prepare_parameter_expression(expression, params, abort)?;
     let Some(probe) = crate::netlist::expr::parameter_expression_circuit_probe(&prepared) else {
         return Ok(());
     };
@@ -4986,7 +5054,8 @@ fn reject_parameter_expression_circuit_probe(
             name.to_ascii_uppercase(),
             probe.reference
         ),
-    })
+    }
+    .into())
 }
 
 fn upsert_deferred_param_expression(
@@ -5040,14 +5109,14 @@ fn retain_runtime_param_expression(
     global: bool,
     name: &str,
     expression: &str,
-) -> bool {
+    abort: &dyn AbortSignal,
+) -> Result<bool, ParseWithAbortError> {
     if params.expression_dialect() != ExpressionDialect::Xyce {
-        return false;
+        return Ok(false);
     }
-    let prepared = crate::netlist::expr::prepare_behavioral_expression(expression, params)
-        .unwrap_or_else(|_| expression.to_string());
+    let prepared = prepare_parameter_expression(expression, params, abort)?;
     if !crate::netlist::expr::behavioral_expression_references_runtime_quantity(&prepared) {
-        return false;
+        return Ok(false);
     }
     if global {
         params.define_global_expression(name, expression, None);
@@ -5055,7 +5124,7 @@ fn retain_runtime_param_expression(
         params.define_parameter_expression(name, expression, None);
     }
     upsert_deferred_param_expression(deferred_params, name, expression);
-    true
+    Ok(true)
 }
 
 fn parse_param_function_definition(

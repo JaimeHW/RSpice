@@ -18,6 +18,15 @@ impl From<ExprError> for ParameterResolutionError {
     }
 }
 
+impl From<ExpressionEvaluationError> for ParameterResolutionError {
+    fn from(error: ExpressionEvaluationError) -> Self {
+        match error {
+            ExpressionEvaluationError::Aborted => Self::Aborted,
+            ExpressionEvaluationError::Expression(error) => Self::Expression(error),
+        }
+    }
+}
+
 /// Supplies lexical declaration ownership to the same numeric graph walker used
 /// for a single context. Scope identities are local to one resolver operation.
 pub(crate) trait ParameterEnvironment {
@@ -154,6 +163,7 @@ impl ParameterResolver {
             name.clone(),
             expression,
             params,
+            abort,
         )?];
         let mut active = HashSet::from([(scope, namespace, name.clone())]);
         while let Some(current) = stack.last_mut() {
@@ -161,9 +171,11 @@ impl ParameterResolver {
                 return Err(ParameterResolutionError::Aborted);
             }
             let params = environment.parameters(current.scope);
-            match current.program.resume_with(params, &mut |dependency| {
-                Ok(self.scoped_value(current.scope, dependency, environment))
-            })? {
+            match current.program.resume_with_abort(
+                params,
+                &mut |dependency| Ok(self.scoped_value(current.scope, dependency, environment)),
+                abort,
+            )? {
                 PreparedProgress::Complete(value) => {
                     let value =
                         if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
@@ -213,8 +225,14 @@ impl ParameterResolver {
                         self.values.entry(scope).or_default()[namespace].insert(dependency, value);
                         continue;
                     };
-                    let pending =
-                        Self::pending(scope, namespace, dependency.clone(), expression, params)?;
+                    let pending = Self::pending(
+                        scope,
+                        namespace,
+                        dependency.clone(),
+                        expression,
+                        params,
+                        abort,
+                    )?;
                     active.insert((scope, namespace, dependency));
                     stack.push(pending);
                 }
@@ -265,9 +283,11 @@ impl ParameterResolver {
         name: String,
         expression: &str,
         params: &ParamContext,
-    ) -> Result<PendingParameter, ExprError> {
-        let parsed = parse_expression(expression)?;
-        let mut program = PreparedExpression::compile(&parsed, params)?;
+        abort: &dyn AbortSignal,
+    ) -> Result<PendingParameter, ParameterResolutionError> {
+        let parsed = parse_expression_with_abort(expression, abort)
+            .map_err(ExpressionEvaluationError::from)?;
+        let mut program = PreparedExpression::compile_with_abort(&parsed, params, abort)?;
         let mut authoritative = HashSet::new();
         program.visit_runtime_parameters(|name| {
             let retained = if params.has_parameter_binding(name) {
@@ -288,6 +308,7 @@ impl ParameterResolver {
                 &parsed,
                 params,
                 &authoritative,
+                abort,
             )?;
         }
         program.begin_evaluation();

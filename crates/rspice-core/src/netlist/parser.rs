@@ -4375,7 +4375,10 @@ fn process_line_gated(
     {
         state.temperature_options.retain_scope_error(error)?;
     }
-    process_line(line, line_num, origin, state).map_err(map_current_error)
+    process_line_with_abort(line, line_num, origin, state, abort).map_err(|error| match error {
+        ParseWithAbortError::Aborted => ParseWithAbortError::Aborted,
+        ParseWithAbortError::Parse(error) => map_current_error(error),
+    })
 }
 
 /// Pre-scan for `.options seed=<n>` (alias `rndseed=<n>`) so the statistical

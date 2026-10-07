@@ -391,9 +391,13 @@ fn prepared_external_nodes_are_disjoint_from_authored_parameters() {
         right: Box::new(Expr::Param(internal.to_string())),
     };
     let externals = std::collections::HashSet::from([internal.to_string()]);
-    let mut prepared =
-        PreparedExpression::compile_with_external_parameters(&expression, &ctx, &externals)
-            .unwrap();
+    let mut prepared = PreparedExpression::compile_with_external_parameters(
+        &expression,
+        &ctx,
+        &externals,
+        &crate::NoAbort,
+    )
+    .unwrap();
     let mut runtime_parameters = Vec::new();
     prepared.visit_runtime_parameters(|name| runtime_parameters.push(name.to_string()));
     assert_eq!(runtime_parameters, [authored]);
@@ -2810,4 +2814,54 @@ fn prepared_cancellation_precedes_random_draws_and_preserves_expression_errors()
             ExprError::DivisionByZero
         ))
     ));
+}
+
+#[test]
+fn parameter_binding_cancels_both_value_and_derivative_evaluation() {
+    for directions in [false, true] {
+        let mut ctx = ParamContext::new();
+        ctx.set("DEPTH", 14.0);
+        ctx.define_function("F0", Vec::new(), "1");
+        for index in 1..=14 {
+            ctx.define_function(
+                &format!("F{index}"),
+                Vec::new(),
+                &format!("F{}()+F{}()", index - 1, index - 1),
+            );
+        }
+        ctx.define_function("WORK", vec!["X".into()], "IF(X>2,F14(),X+X)");
+        if directions {
+            ctx.seed_parameter_direction("DEPTH", false);
+        }
+        let abort = crate::abort_signal::CountingAbort::new(128);
+        assert!(matches!(
+            ctx.evaluate_parameter_binding_with_abort("WORK(DEPTH)", &abort),
+            Err(ExpressionEvaluationError::Aborted)
+        ));
+        assert_eq!(abort.count(), 129);
+        assert_eq!(abort.polls_after_abort(), 0);
+        // A cancelled evaluation does not leave function argument bindings on
+        // a subsequent call, with or without the derivative kernel.
+        ctx.set("DEPTH", 2.0);
+        assert_eq!(
+            ctx.evaluate_parameter_binding("WORK(DEPTH)").unwrap().0,
+            4.0.into()
+        );
+    }
+}
+
+#[test]
+fn deferred_parameter_resolution_cancels_after_a_missing_dependency_resumes() {
+    let mut ctx = ParamContext::new();
+    ctx.define_function("WORK", vec!["X".into()], "IF(X<=0,1,WORK(X-1)+WORK(X-1))");
+    ctx.define_parameter_expression("DEPTH", "14", None);
+    ctx.define_parameter_expression("EXPENSIVE", "WORK(DEPTH)", None);
+    let mut resolver = ParameterResolver::default();
+    let abort = crate::abort_signal::CountingAbort::new(128);
+    assert!(matches!(
+        resolver.resolve("EXPENSIVE", "WORK(DEPTH)", &ctx, &abort),
+        Err(ParameterResolutionError::Aborted)
+    ));
+    assert_eq!(abort.count(), 129);
+    assert_eq!(abort.polls_after_abort(), 0);
 }

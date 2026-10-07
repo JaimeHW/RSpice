@@ -748,21 +748,43 @@ impl ParamContext {
         &self,
         expression: &str,
     ) -> Result<(ComplexValue, Option<Result<ComplexDirection, ExprError>>), ExprError> {
-        if self.parameter_directions.is_none() {
-            return eval_expression_complex(expression, self).map(|value| (value, None));
+        match self.evaluate_parameter_binding_with_abort(expression, &crate::NoAbort) {
+            Ok(value) => Ok(value),
+            Err(ExpressionEvaluationError::Expression(error)) => Err(error),
+            Err(ExpressionEvaluationError::Aborted) => {
+                unreachable!("NoAbort cannot cancel evaluation")
+            }
         }
-        let expression = parse_expression(expression)?;
-        let mut prepared = PreparedExpression::compile(&expression, self)?;
+    }
+
+    pub(crate) fn evaluate_parameter_binding_with_abort(
+        &self,
+        expression: &str,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<
+        (ComplexValue, Option<Result<ComplexDirection, ExprError>>),
+        ExpressionEvaluationError,
+    > {
+        if self.parameter_directions.is_none() {
+            return eval_expression_complex_with_abort(expression, self, abort)
+                .map(|value| (value, None));
+        }
+        let expression = parse_expression_with_abort(expression, abort)?;
+        let mut prepared = PreparedExpression::compile_with_abort(&expression, self, abort)?;
         let mut dependency_error = None;
-        let (value, direction) = prepared.evaluate_parameter_direction_with(self, &mut |name| {
-            Ok(self.get_complex(name).map(|value| {
-                let direction = self.parameter_direction(name).unwrap_or_else(|error| {
-                    dependency_error.get_or_insert(error);
-                    ComplexDirection::undefined()
-                });
-                (value, direction)
-            }))
-        })?;
+        let (value, direction) = prepared.evaluate_parameter_direction_with(
+            self,
+            &mut |name| {
+                Ok(self.get_complex(name).map(|value| {
+                    let direction = self.parameter_direction(name).unwrap_or_else(|error| {
+                        dependency_error.get_or_insert(error);
+                        ComplexDirection::undefined()
+                    });
+                    (value, direction)
+                }))
+            },
+            abort,
+        )?;
         // A dependency's undefined direction enters as the tangent
         // `ComplexDirection::undefined` documents: this expression reports the
         // dependency's own error only where that tangent survives to its

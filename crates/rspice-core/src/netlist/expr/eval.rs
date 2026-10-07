@@ -271,7 +271,7 @@ where
 
 impl PreparedExpression {
     pub(crate) fn compile(expr: &Expr, ctx: &ParamContext) -> Result<Self, ExprError> {
-        Self::compile_with_external_parameters(expr, ctx, &HashSet::new())
+        Self::compile_with_bindings(expr, ctx, &HashSet::new(), &mut |_| Ok(None))
     }
 
     pub(crate) fn compile_with_abort(
@@ -279,8 +279,17 @@ impl PreparedExpression {
         ctx: &ParamContext,
         abort: &dyn crate::abort_signal::AbortSignal,
     ) -> Result<Self, ExpressionEvaluationError> {
+        Self::compile_with_external_parameters(expr, ctx, &HashSet::new(), abort)
+    }
+
+    pub(crate) fn compile_with_external_parameters(
+        expr: &Expr,
+        ctx: &ParamContext,
+        external_parameters: &HashSet<String>,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Self, ExpressionEvaluationError> {
         let mut cancelled = false;
-        let result = Self::compile_with_bindings(expr, ctx, &HashSet::new(), &mut |_| {
+        let result = Self::compile_with_bindings(expr, ctx, external_parameters, &mut |_| {
             if abort.is_aborted() {
                 cancelled = true;
                 Err(ExprError::InvalidArgument(
@@ -295,14 +304,6 @@ impl PreparedExpression {
         } else {
             result.map_err(Into::into)
         }
-    }
-
-    pub(crate) fn compile_with_external_parameters(
-        expr: &Expr,
-        ctx: &ParamContext,
-        external_parameters: &HashSet<String>,
-    ) -> Result<Self, ExprError> {
-        Self::compile_with_bindings(expr, ctx, external_parameters, &mut |_| Ok(None))
     }
 
     /// Bind host-owned symbolic operands in the root and every reachable user
@@ -369,8 +370,17 @@ impl PreparedExpression {
         resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
         abort: &dyn crate::abort_signal::AbortSignal,
     ) -> Result<ComplexValue, ExpressionEvaluationError> {
+        self.evaluate_using_with_abort(ctx, resolver, abort)
+    }
+
+    fn evaluate_using_with_abort<E: PreparedEvaluation>(
+        &mut self,
+        ctx: &ParamContext,
+        evaluation: &mut E,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<ComplexValue, ExpressionEvaluationError> {
         self.begin_evaluation();
-        match self.resume_using::<_, false, ()>(ctx, resolver, &mut || {
+        match self.resume_using::<_, false, ()>(ctx, evaluation, &mut || {
             if abort.is_aborted() {
                 ControlFlow::Break(())
             } else {
@@ -410,15 +420,16 @@ impl PreparedExpression {
             Option<(ComplexValue, super::parameter_direction::ComplexDirection)>,
             ExprError,
         >,
+        abort: &dyn crate::abort_signal::AbortSignal,
     ) -> Result<
         (
             ComplexValue,
             Result<super::parameter_direction::ComplexDirection, ExprError>,
         ),
-        ExprError,
+        ExpressionEvaluationError,
     > {
         let mut evaluation = super::parameter_direction::ParameterDirection::new(resolver);
-        let value = self.evaluate_using(ctx, &mut evaluation)?;
+        let value = self.evaluate_using_with_abort(ctx, &mut evaluation, abort)?;
         Ok((value, evaluation.finish()))
     }
 
@@ -457,6 +468,24 @@ impl PreparedExpression {
     ) -> Result<PreparedProgress, ExprError> {
         self.resume_using::<_, true, Infallible>(ctx, resolver, &mut || ControlFlow::Continue(()))
             .map(uninterrupted)
+    }
+
+    pub(crate) fn resume_with_abort(
+        &mut self,
+        ctx: &ParamContext,
+        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<PreparedProgress, ExpressionEvaluationError> {
+        match self.resume_using::<_, true, ()>(ctx, resolver, &mut || {
+            if abort.is_aborted() {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })? {
+            ControlFlow::Break(()) => Err(ExpressionEvaluationError::Aborted),
+            ControlFlow::Continue(progress) => Ok(progress),
+        }
     }
 
     fn resume_using<E: PreparedEvaluation, const SUSPEND: bool, B>(

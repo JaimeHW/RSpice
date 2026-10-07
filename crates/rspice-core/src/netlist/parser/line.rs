@@ -186,12 +186,25 @@ fn expect_xspice_instance_name(
     expect_element_name(stream, line_num)
 }
 
+#[cfg(test)]
 pub(super) fn process_line(
     line: &str,
     line_num: usize,
     origin: &NetlistSourceLocation,
     state: &mut ParseState,
 ) -> Result<(), ParseError> {
+    finish_non_aborting_parse(process_line_with_abort(
+        line, line_num, origin, state, &NoAbort,
+    ))
+}
+
+pub(super) fn process_line_with_abort(
+    line: &str,
+    line_num: usize,
+    origin: &NetlistSourceLocation,
+    state: &mut ParseState,
+    abort: &dyn AbortSignal,
+) -> Result<(), ParseWithAbortError> {
     let temperature_depth = state.subckt_stack.len();
     let authored_element_name = line
         .split_whitespace()
@@ -286,7 +299,8 @@ pub(super) fn process_line(
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: ".ENDS without matching .SUBCKT".to_string(),
-                });
+                }
+                .into());
             }
             // Xyce treats an unmatched .ENDS as a warning and ignores the
             // card.  Keep parsing the surrounding top-level circuit so
@@ -307,7 +321,8 @@ pub(super) fn process_line(
                         ".ENDS `{end_name}` does not match open .SUBCKT `{}`",
                         open_frame.def.name
                     ),
-                });
+                }
+                .into());
             }
         }
 
@@ -415,6 +430,7 @@ pub(super) fn process_line(
                 &mut frame.local_params,
                 &mut dummy_measurements,
                 ParseLineContext {
+                    abort,
                     analysis_cards: &mut state.analysis_cards,
                     startup_cards: &mut state.startup_cards,
                     scopes: &mut state.scopes,
@@ -488,6 +504,7 @@ pub(super) fn process_line(
         &mut state.params,
         &mut state.measurements,
         ParseLineContext {
+            abort,
             analysis_cards: &mut state.analysis_cards,
             startup_cards: &mut state.startup_cards,
             scopes: &mut state.scopes,
@@ -557,10 +574,11 @@ pub(super) fn parse_line(
     params: &mut ParamContext,
     measurements: &mut Vec<MeasureStatement>,
     context: ParseLineContext<'_>,
-) -> Result<(), ParseError> {
+) -> Result<(), ParseWithAbortError> {
     let defer_simple_param_refs =
         defer_simple_param_refs || params.expression_references_spectre_statistics(line);
     let ParseLineContext {
+        abort,
         analysis_cards,
         startup_cards,
         scopes,
@@ -609,7 +627,8 @@ pub(super) fn parse_line(
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: "Expected identifier at start of line".to_string(),
-            });
+            }
+            .into());
         }
     };
 
@@ -620,44 +639,47 @@ pub(super) fn parse_line(
         parameter_direction.filter(|_| !defer_simple_param_refs || first_char == '.');
 
     match first_char {
-        '.' => parse_command(
-            &mut stream,
-            line_num,
-            ParseCommandContext {
-                analysis_cards,
-                startup_cards,
-                scopes,
-                parameter_direction,
-                parameter_overrides,
-                logical_line: line,
-                analyses,
-                monte_carlo_source_cards,
-                lin_analysis,
-                fft_analyses,
-                unknown_warned,
-                models,
-                model_bare_ident_deferrals,
-                pending_xyce_diode_model_warnings,
-                params,
-                initial_conditions,
-                device_initial_conditions,
-                node_sets,
-                startup_directives,
-                startup_scope,
-                global_nodes,
-                measurements,
-                saves,
-                output_requests,
-                options,
-                temperature_options,
-                max_analysis_points,
-                diagnostics,
-                spef_includes,
-                origin,
-                defer_scoped_values: defer_simple_param_refs,
-                deferred_body_params,
-            },
-        ),
+        '.' => {
+            return parse_command(
+                &mut stream,
+                line_num,
+                ParseCommandContext {
+                    analysis_cards,
+                    startup_cards,
+                    scopes,
+                    parameter_direction,
+                    parameter_overrides,
+                    logical_line: line,
+                    analyses,
+                    monte_carlo_source_cards,
+                    lin_analysis,
+                    fft_analyses,
+                    unknown_warned,
+                    models,
+                    model_bare_ident_deferrals,
+                    pending_xyce_diode_model_warnings,
+                    params,
+                    initial_conditions,
+                    device_initial_conditions,
+                    node_sets,
+                    startup_directives,
+                    startup_scope,
+                    global_nodes,
+                    measurements,
+                    saves,
+                    output_requests,
+                    options,
+                    temperature_options,
+                    max_analysis_points,
+                    diagnostics,
+                    spef_includes,
+                    origin,
+                    defer_scoped_values: defer_simple_param_refs,
+                    deferred_body_params,
+                },
+                abort,
+            );
+        }
         'R' => parse_resistor(
             &mut stream,
             line_num,
@@ -825,6 +847,7 @@ pub(super) fn parse_line(
             message: format!("Unknown element type: {}", first_char),
         }),
     }
+    .map_err(ParseWithAbortError::from)
 }
 
 fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &ParamContext) {
