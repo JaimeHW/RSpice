@@ -8,6 +8,10 @@ pub(crate) struct ScaledProduct {
 }
 
 impl ScaledProduct {
+    pub(crate) const ZERO: Self = Self {
+        mantissa: 0.0,
+        exponent: 0,
+    };
     pub(crate) const ONE: Self = Self {
         mantissa: 1.0,
         exponent: 0,
@@ -25,9 +29,17 @@ impl ScaledProduct {
     /// Remove a known nonzero factor without materializing the full product.
     pub(crate) fn without_factor(self, factor: Value) -> Self {
         let (factor, exponent) = libm::frexp(factor);
+        self.divide(Self {
+            mantissa: factor,
+            exponent: i64::from(exponent),
+        })
+    }
+
+    pub(crate) fn divide(self, divisor: Self) -> Self {
+        let (mantissa, normalization) = libm::frexp(self.mantissa / divisor.mantissa);
         Self {
-            mantissa: self.mantissa / factor,
-            exponent: self.exponent - i64::from(exponent),
+            mantissa,
+            exponent: self.exponent - divisor.exponent + i64::from(normalization),
         }
     }
 
@@ -38,19 +50,25 @@ impl ScaledProduct {
     /// Include an additive offset before rounding: a product above f64's
     /// range can cancel against a finite offset to yield a finite result.
     pub(crate) fn plus(self, offset: Value) -> Value {
+        self.add(Self::ONE.multiply(offset)).value()
+    }
+
+    pub(crate) fn add(self, other: Self) -> Self {
         if self.mantissa == 0.0 {
-            return offset;
+            return other;
         }
-        if offset == 0.0 {
-            return self.value();
+        if other.mantissa == 0.0 {
+            return self;
         }
-        let (mantissa, exponent) = libm::frexp(offset);
-        let exponent = i64::from(exponent);
-        let common = self.exponent.max(exponent);
-        scale(
-            scale(self.mantissa, self.exponent - common) + scale(mantissa, exponent - common),
-            common,
-        )
+        let common = self.exponent.max(other.exponent);
+        let (mantissa, normalization) = libm::frexp(
+            scale(self.mantissa, self.exponent - common)
+                + scale(other.mantissa, other.exponent - common),
+        );
+        Self {
+            mantissa,
+            exponent: common + i64::from(normalization),
+        }
     }
 }
 

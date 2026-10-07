@@ -942,10 +942,6 @@ impl CodeModel for Divider {
         let Ok(transfer) = divide_transfer_for_context(ctx) else {
             return Vec::new();
         };
-        if !transfer.num_partial.is_finite() || !transfer.den_partial.is_finite() {
-            return Vec::new();
-        }
-
         vec![
             ("num".to_string(), transfer.num_partial),
             ("den".to_string(), transfer.den_partial),
@@ -1009,15 +1005,38 @@ fn divide_transfer_from_signature(signature: DivideTransferSignature) -> DivideT
         signature.den_domain
     };
 
-    let numerator = (signature.num + signature.num_offset) * signature.num_gain;
-    let denominator = (signature.den + signature.den_offset) * signature.den_gain;
+    let numerator = ScaledProduct::ONE
+        .multiply(signature.num + signature.num_offset)
+        .multiply(signature.num_gain);
+    let denominator = ScaledProduct::ONE
+        .multiply(signature.den + signature.den_offset)
+        .multiply(signature.den_gain);
+    let raw_den = denominator.value();
     let (limited_den, den_partial) =
-        divide_limited_denominator(denominator, den_lower_limit, den_domain);
-
-    let output = signature.out_offset + signature.out_gain * numerator / limited_den;
-    let num_partial = signature.out_gain * signature.num_gain / limited_den;
-    let den_partial = -signature.out_gain * numerator * signature.den_gain * den_partial
-        / (limited_den * limited_den);
+        divide_limited_denominator(raw_den, den_lower_limit, den_domain);
+    // Preserve the full denominator when limiting leaves it unchanged, even
+    // when its materialized value exceeds f64's range.
+    let denominator = if limited_den == raw_den {
+        denominator
+    } else {
+        ScaledProduct::ONE.multiply(limited_den)
+    };
+    let output = numerator
+        .multiply(signature.out_gain)
+        .divide(denominator)
+        .plus(signature.out_offset);
+    let num_partial = ScaledProduct::ONE
+        .multiply(signature.out_gain)
+        .multiply(signature.num_gain)
+        .divide(denominator)
+        .value();
+    let den_partial = numerator
+        .multiply(-signature.out_gain)
+        .multiply(signature.den_gain)
+        .multiply(den_partial)
+        .divide(denominator)
+        .divide(denominator)
+        .value();
     DivideTransfer {
         output,
         num_partial,

@@ -5,6 +5,7 @@
 //! sequence instead of a rewritten polynomial ordering.
 
 use crate::Value;
+use crate::numerics::scaled_product::ScaledProduct;
 use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
@@ -180,15 +181,6 @@ fn checked_multiplier(ctx: &CmContext) -> CmResult<Value> {
         ));
     }
     Ok(multiplier)
-}
-
-fn evterm(x: Value, mut n: usize) -> Value {
-    let mut product = 1.0;
-    while n > 0 {
-        product *= x;
-        n -= 1;
-    }
-    product
 }
 
 fn nxtpwr(pwrseq: &mut [usize]) {
@@ -392,46 +384,51 @@ fn evaluate_poly_partial_slow(
     term: &PolyTerm,
     input_index: usize,
     exponent: usize,
-) -> Value {
-    let mut partial_product = exponent as Value;
+) -> ScaledProduct {
+    let mut product = ScaledProduct::ONE
+        .multiply(term.coefficient)
+        .multiply(exponent as Value);
     for &(term_index, term_exponent) in &term.active_exponents {
-        partial_product *= if term_index == input_index {
-            evterm(inputs[term_index], term_exponent - 1)
+        let power = if term_index == input_index {
+            term_exponent - 1
         } else {
-            evterm(inputs[term_index], term_exponent)
+            term_exponent
         };
+        for _ in 0..power {
+            product = product.multiply(inputs[term_index]);
+        }
     }
-    partial_product
+    product
 }
 
 fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEval {
-    let mut value = plan.constant;
-    let mut partials = vec![0.0; inputs.len()];
-
+    let mut value = ScaledProduct::ONE.multiply(plan.constant);
+    let mut partials = vec![ScaledProduct::ZERO; inputs.len()];
     for term in &plan.terms {
-        let mut product = 1.0;
+        let mut product = ScaledProduct::ONE.multiply(term.coefficient);
         for &(input_index, exponent) in &term.active_exponents {
-            product *= evterm(inputs[input_index], exponent);
+            for _ in 0..exponent {
+                product = product.multiply(inputs[input_index]);
+            }
         }
-        value += term.coefficient * product;
-
+        value = value.add(product);
         for &(input_index, exponent) in &term.active_exponents {
             let input = inputs[input_index];
-            let partial_product = if product.is_finite() && input.is_finite() && input != 0.0 {
-                product * exponent as Value / input
+            let partial = if input != 0.0 {
+                product.without_factor(input).multiply(exponent as Value)
             } else {
                 evaluate_poly_partial_slow(inputs, term, input_index, exponent)
             };
-            partials[input_index] += term.coefficient * partial_product;
+            partials[input_index] = partials[input_index].add(partial);
         }
     }
-
-    value *= multiplier;
-    for partial in &mut partials {
-        *partial *= multiplier;
+    PolyEval {
+        value: value.multiply(multiplier).value(),
+        partials: partials
+            .into_iter()
+            .map(|partial| partial.multiply(multiplier).value())
+            .collect(),
     }
-
-    PolyEval { value, partials }
 }
 
 fn evaluate_context(ctx: &CmContext) -> CmResult<Arc<PolyEval>> {
@@ -526,11 +523,7 @@ impl CodeModel for Spice2Poly {
                 .copied()
                 .enumerate()
                 .filter_map(|(index, partial)| {
-                    (partial.is_finite() && partial != 0.0).then_some((
-                        "in".to_string(),
-                        index,
-                        partial,
-                    ))
+                    (partial != 0.0).then_some(("in".to_string(), index, partial))
                 })
                 .collect(),
             Err(_) => Vec::new(),

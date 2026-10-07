@@ -1,5 +1,8 @@
 //! Memoryless code-model arithmetic must retain representable derivatives.
-use rspice_core::xspice::{CmContext, CodeModel, models::Multiplier};
+use rspice_core::xspice::{
+    CmContext, CodeModel,
+    models::{Divider, Multiplier, Spice2Poly},
+};
 
 fn multiplier(inputs: &[f64], gains: &[f64], offset: f64) -> (f64, Vec<f64>) {
     let mut context = CmContext::new();
@@ -95,4 +98,94 @@ fn multiplier_ac_retains_a_derivative_below_the_dc_output_range() {
         .unwrap();
     assert_eq!(points[0].voltages[out].re, tiny);
     assert_eq!(points[0].voltages[out].im, 0.0);
+}
+
+fn divider(num: f64, den: f64, num_gain: f64, den_gain: f64, out_gain: f64) -> (f64, Vec<f64>) {
+    let mut context = CmContext::new();
+    context.set_input_analog("num", num);
+    context.set_input_analog("den", den);
+    for (name, value) in [
+        ("num_gain", num_gain),
+        ("den_gain", den_gain),
+        ("out_gain", out_gain),
+        ("den_lower_limit", 1e-10),
+    ] {
+        context.set_param(name, value);
+    }
+    Divider.init(&mut context).unwrap();
+    Divider.evaluate(&mut context).unwrap();
+    (
+        context.output("out"),
+        Divider
+            .output_input_partials(&context, "out")
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect(),
+    )
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn divider_preserves_scaled_quotients_and_both_partials() {
+    let huge = 2.0f64.powi(600);
+    let tiny = 2.0f64.powi(-600);
+    for gain in [1.0, huge] {
+        let (output, partials) = divider(huge, huge, gain, gain, 1.0);
+        assert_eq!(output, 1.0);
+        assert_eq!(partials, [tiny, -tiny]);
+    }
+    let (output, partials) = divider(tiny, 2.0, tiny, 1.0, huge);
+    assert_eq!(output, tiny / 2.0);
+    assert_eq!(partials, [0.5, -tiny / 4.0]);
+}
+
+fn polynomial(inputs: &[f64], coefficients: &[f64]) -> (f64, Vec<f64>) {
+    let mut context = CmContext::new();
+    context.set_port_width("in", inputs.len());
+    context.set_input_analog_vector("in", inputs).unwrap();
+    context.set_real_vector_param("coef", coefficients.to_vec());
+    context.mark_param_provided("coef");
+    context.set_param("m", 1.0);
+    Spice2Poly.init(&mut context).unwrap();
+    Spice2Poly.evaluate(&mut context).unwrap();
+    let mut partials = vec![0.0; inputs.len()];
+    for (_, index, value) in Spice2Poly.output_input_vector_partials(&context, "out") {
+        partials[index] = value;
+    }
+    (context.output("out"), partials)
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn polynomial_retains_derivatives_and_coefficient_scale_before_rounding() {
+    let tiny = 2.0f64.powi(-600);
+    let huge = 2.0f64.powi(600);
+    assert_eq!(
+        polynomial(&[tiny], &[0.0, 0.0, 1.0]),
+        (0.0, vec![2.0 * tiny])
+    );
+    assert_eq!(
+        polynomial(&[tiny], &[0.0, 0.0, 2.0f64.powi(1000)]),
+        (2.0f64.powi(-200), vec![2.0f64.powi(401)])
+    );
+    assert_eq!(
+        polynomial(&[huge, huge], &[0.0, 0.0, 0.0, 0.0, tiny]),
+        (huge, vec![1.0, 1.0])
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn polynomial_keeps_cancellation_between_out_of_range_terms() {
+    let huge = 2.0f64.powi(1023);
+    assert_eq!(polynomial(&[huge], &[-huge, 2.0]), (huge, vec![2.0]));
+    assert_eq!(
+        polynomial(&[huge, huge], &[0.0, 2.0, -2.0]),
+        (0.0, vec![2.0, -2.0])
+    );
+    let huge = 2.0f64.powi(600);
+    assert_eq!(
+        polynomial(&[huge, huge], &[0.0, 0.0, 0.0, 0.5, 0.0, -0.5]),
+        (0.0, vec![huge, -huge])
+    );
 }
