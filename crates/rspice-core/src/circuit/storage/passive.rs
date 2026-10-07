@@ -155,8 +155,8 @@ impl ThermalResistorState {
                 .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
             {
                 return context
-                    .model_expression(name, expression)
-                    .map(|value| Some(value.re))
+                    .real_model_expression(name, expression)
+                    .map(Some)
                     .map_err(|error| match error {
                         crate::netlist::expr::ExpressionEvaluationError::Aborted => {
                             ThermalUpdateError::Aborted

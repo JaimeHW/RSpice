@@ -279,19 +279,16 @@ fn resolve_scalar_expression_params(
             }
         }
 
-        let value = ctx
-            .model_expression(name, expr)
-            .map(|value| value.re)
-            .map_err(|error| {
-                map_model_expression_error(error, |err| {
-                    format!(
-                        "XSPICE model '{}' expression parameter '{}' could not be resolved: {}",
-                        code_model.name(),
-                        name,
-                        err
-                    )
-                })
-            })?;
+        let value = ctx.real_model_expression(name, expr).map_err(|error| {
+            map_model_expression_error(error, |err| {
+                format!(
+                    "XSPICE model '{}' expression parameter '{}' could not be resolved: {}",
+                    code_model.name(),
+                    name,
+                    err
+                )
+            })
+        })?;
         if !value.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE model '{}' expression parameter '{}' resolved to non-finite value {}",
@@ -855,7 +852,7 @@ fn resolve_native_xtradev_expr_params(
 
     for (name, expr) in &model_def.expr_params {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
-        let value = ctx.model_expression(name, expr).map(|value| value.re).map_err(|error| {
+        let value = ctx.real_model_expression(name, expr).map_err(|error| {
                 map_model_expression_error(error, |err| format!(
                 "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
                  '{name}' could not be resolved: {err}"

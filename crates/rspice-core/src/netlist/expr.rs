@@ -90,4 +90,5 @@ pub(crate) use model::{
 };
 pub(crate) use parameter_direction::ComplexDirection;
 pub(crate) use resolution::{ParameterEnvironment, ParameterResolutionError, ParameterResolver};
+pub(crate) use types::require_real;
 pub use types::{BinOpKind, Expr, UnaryOpKind, is_real};

@@ -4,7 +4,7 @@
 //! arithmetic, comparison, and boolean operators. [`ComplexValue`] — the
 //! crate-wide alias for `Complex64` — is the evaluation type: expressions are
 //! always evaluated complex so AC-analysis callers can project the imaginary
-//! component, with real-valued callers simply taking `re`.
+//! component. Real model fields validate the final result before taking `re`.
 
 use super::*;
 
@@ -21,6 +21,18 @@ use super::*;
 #[inline]
 pub fn is_real(value: ComplexValue) -> bool {
     value.im == 0.0
+}
+
+/// Admit a complex calculation into a real field without losing information.
+/// Finiteness and physical-domain limits remain the consuming field's policy.
+pub(crate) fn require_real(value: ComplexValue) -> Result<Value, ExprError> {
+    if is_real(value) {
+        Ok(value.re)
+    } else {
+        Err(ExprError::InvalidArgument(format!(
+            "expected a real value, got {value}; use RE(), IMG() or MAG() explicitly"
+        )))
+    }
 }
 
 /// Expression node in the AST

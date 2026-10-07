@@ -302,17 +302,14 @@ fn resolve_model_param(
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(candidate))
         {
-            let value = ctx
-                .model_expression(name, expr)
-                .map_err(|error| {
-                    map_model_expression_error(error, |e| {
-                        format!(
-                            "Model '{}' parameter '{}' could not be resolved: {}",
-                            model_def.name, name, e
-                        )
-                    })
-                })?
-                .re;
+            let value = ctx.real_model_expression(name, expr).map_err(|error| {
+                map_model_expression_error(error, |e| {
+                    format!(
+                        "Model '{}' parameter '{}' could not be resolved: {}",
+                        model_def.name, name, e
+                    )
+                })
+            })?;
             return Ok(Some(value));
         }
     }
@@ -363,7 +360,7 @@ pub(super) fn resolve_native_model_card<'a>(
             continue;
         }
         let value = context
-            .model_expression(name, expression)
+            .real_model_expression(name, expression)
             .map_err(|error| {
                 map_model_expression_error(error, |error| {
                     format!(
@@ -372,7 +369,7 @@ pub(super) fn resolve_native_model_card<'a>(
                     )
                 })
             })?;
-        if !value.re.is_finite() || !value.im.is_finite() || value.im != 0.0 {
+        if !value.is_finite() {
             return Err(SimulationError::Circuit(format!(
                 "Model '{}' parameter '{}' must resolve to a finite real value, got {}",
                 model.name, name, value
@@ -381,7 +378,7 @@ pub(super) fn resolve_native_model_card<'a>(
         resolved
             .params
             .retain(|(key, _)| !key.eq_ignore_ascii_case(name));
-        resolved.params.push((name.clone(), value.re));
+        resolved.params.push((name.clone(), value));
     }
     Ok(Some(std::borrow::Cow::Owned(resolved)))
 }
@@ -465,17 +462,14 @@ pub(super) fn resolve_supported_model_params_upper_map(
 
     for (name, expr) in &model_def.expr_params {
         if let Some(param) = canonical_supported_model_param(name, supported) {
-            let value = ctx
-                .model_expression(name, expr)
-                .map_err(|error| {
-                    map_model_expression_error(error, |err| {
-                        format!(
-                            "{} '{}' model '{}' parameter {} could not be resolved: {}",
-                            element_kind, element_name, model_name, param, err
-                        )
-                    })
-                })?
-                .re;
+            let value = ctx.real_model_expression(name, expr).map_err(|error| {
+                map_model_expression_error(error, |err| {
+                    format!(
+                        "{} '{}' model '{}' parameter {} could not be resolved: {}",
+                        element_kind, element_name, model_name, param, err
+                    )
+                })
+            })?;
             if !value.is_finite() {
                 return Err(SimulationError::Circuit(format!(
                     "{} '{}' model '{}' uses non-finite model parameter {}={}",

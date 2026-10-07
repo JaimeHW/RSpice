@@ -22,21 +22,22 @@ impl<'a> ModelEvaluationContext<'a> {
 
     pub(crate) fn evaluate(&self, expression: &str) -> Result<Value, ExpressionEvaluationError> {
         eval_expression_complex_with_abort(expression, &self.context, self.abort)
-            .map(|value| value.re)
+            .and_then(|value| require_real(value).map_err(Into::into))
     }
 
-    pub(crate) fn model_expression(
+    pub(crate) fn real_model_expression(
         &self,
         name: &str,
         expression: &str,
-    ) -> Result<ComplexValue, ExpressionEvaluationError> {
+    ) -> Result<Value, ExpressionEvaluationError> {
         if let Some(error) = self.expression_errors.get(&name.to_ascii_uppercase()) {
             return Err(ExpressionEvaluationError::Expression(error.clone()));
         }
-        match self.resolved_expressions.get(&name.to_ascii_uppercase()) {
+        let value = match self.resolved_expressions.get(&name.to_ascii_uppercase()) {
             Some(value) => Ok(*value),
             None => eval_expression_complex_with_abort(expression, &self.context, self.abort),
-        }
+        }?;
+        require_real(value).map_err(Into::into)
     }
 }
 
