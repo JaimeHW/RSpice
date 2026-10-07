@@ -14,6 +14,7 @@ pub(crate) mod exact_constraints;
 pub(crate) mod krylov;
 mod power_law;
 pub(crate) mod scaled_noise;
+pub(crate) mod scaled_product;
 mod split_mix;
 pub(crate) use power_law::{power_product_binary_normalization, scaled_power_law};
 pub(crate) use split_mix::{SPLIT_MIX_GAMMA, fnv1a, split_mix64_at, split_mix64_output};

@@ -2,6 +2,7 @@
 //!
 //! Implements fundamental analog behavioral blocks used in mixed-signal simulation.
 
+use crate::numerics::scaled_product::ScaledProduct;
 use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
@@ -577,10 +578,8 @@ struct MultTransferBaseSignature {
 
 #[derive(Debug, Clone, PartialEq)]
 struct MultTransfer {
-    accumulate_in: Value,
-    transfer_gain: Value,
-    out_offset: Value,
-    shifted_inputs: Vec<Value>,
+    output: Value,
+    partials: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -659,8 +658,8 @@ fn mult_transfer_from_context_with_signature(
     let out_offset = finite_analog_scalar_param(ctx, "mult", "out_offset")?;
 
     let input_count = inputs.len();
-    let mut accumulate_gain = 1.0;
-    let mut accumulate_in = 1.0;
+    let mut product = ScaledProduct::ONE.multiply(out_gain);
+    let mut zero_count = 0;
     let mut signature_inputs = Vec::new();
     signature_inputs
         .try_reserve_exact(input_count)
@@ -682,12 +681,31 @@ fn mult_transfer_from_context_with_signature(
         let offset = analog_vector_param_at(in_offset, index, 0.0);
         let shifted = input.value + offset;
         signature_inputs.push(input.value);
-        accumulate_gain *= gain;
-        accumulate_in *= shifted;
+        product = product.multiply(gain);
+        if shifted == 0.0 {
+            zero_count += 1;
+        } else {
+            product = product.multiply(shifted);
+        }
         shifted_inputs.push(shifted);
     }
 
-    let transfer_gain = accumulate_gain * out_gain;
+    let output = if zero_count == 0 {
+        product.plus(out_offset)
+    } else {
+        product.multiply(0.0).plus(out_offset)
+    };
+    // Reuse the input scratch allocation for the cached Jacobian. No rounded
+    // full product or reciprocal is needed to remove an input factor.
+    for shifted in &mut shifted_inputs {
+        *shifted = if zero_count == 0 {
+            product.without_factor(*shifted).value()
+        } else if zero_count == 1 && *shifted == 0.0 {
+            product.value()
+        } else {
+            0.0
+        };
+    }
     Ok((
         MultTransferSignature {
             inputs: signature_inputs,
@@ -697,10 +715,8 @@ fn mult_transfer_from_context_with_signature(
             out_offset,
         },
         Arc::new(MultTransfer {
-            accumulate_in,
-            transfer_gain,
-            out_offset,
-            shifted_inputs,
+            output,
+            partials: shifted_inputs,
         }),
     ))
 }
@@ -743,7 +759,7 @@ fn cache_mult_transfer(ctx: &mut CmContext) -> CmResult<Arc<MultTransfer>> {
 }
 
 fn mult_output_from_transfer(transfer: &MultTransfer) -> Value {
-    transfer.accumulate_in * transfer.transfer_gain + transfer.out_offset
+    transfer.output
 }
 
 /// Test-only convenience wrapper; production evaluates from the cached transfer.
@@ -754,39 +770,21 @@ fn mult_output_from_context(ctx: &CmContext) -> CmResult<Value> {
 }
 
 fn mult_partials_from_transfer(transfer: &MultTransfer) -> CmResult<Vec<(String, usize, Value)>> {
-    let input_count = transfer.shifted_inputs.len();
+    let input_count = transfer.partials.len();
     let mut partials = Vec::new();
     partials.try_reserve_exact(input_count).map_err(|err| {
         CmError::EvaluationError(format!(
             "mult unable to reserve {input_count} input partial(s): {err}"
         ))
     })?;
-    let mut zero_count = 0usize;
-    let mut nonzero_product = 1.0;
-    for shifted in transfer.shifted_inputs.iter().copied() {
-        if shifted == 0.0 {
-            zero_count += 1;
-        } else {
-            nonzero_product *= shifted;
-        }
-    }
-
-    for (index, shifted) in transfer.shifted_inputs.iter().copied().enumerate() {
-        let partial = if !transfer.transfer_gain.is_finite() {
-            0.0
-        } else if zero_count == 0
-            && transfer.accumulate_in != 0.0
-            && transfer.accumulate_in.is_finite()
-            && shifted != 0.0
-        {
-            transfer.accumulate_in / shifted * transfer.transfer_gain
-        } else if zero_count == 1 && shifted == 0.0 && nonzero_product.is_finite() {
-            nonzero_product * transfer.transfer_gain
-        } else {
-            0.0
-        };
-        partials.push(("in".to_string(), index, partial));
-    }
+    partials.extend(
+        transfer
+            .partials
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, partial)| ("in".to_string(), index, partial)),
+    );
     Ok(partials)
 }
 
@@ -4053,10 +4051,8 @@ mod tests {
         let resource = MultTransferResource {
             signature,
             transfer: Arc::new(MultTransfer {
-                accumulate_in: -2.0,
-                transfer_gain: -3.0,
-                out_offset: -4.0,
-                shifted_inputs: vec![-5.0, -6.0, -7.0],
+                output: -2.0,
+                partials: vec![-5.0, -6.0, -7.0],
             }),
         };
 
@@ -4105,10 +4101,8 @@ mod tests {
 
         let signature = mult_transfer_signature(&ctx);
         let sentinel = MultTransfer {
-            accumulate_in: -2.0,
-            transfer_gain: -3.0,
-            out_offset: -4.0,
-            shifted_inputs: vec![-5.0, -6.0, -7.0],
+            output: -2.0,
+            partials: vec![-5.0, -6.0, -7.0],
         };
         let sentinel = Arc::new(sentinel);
         ctx.set_resource(
