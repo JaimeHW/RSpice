@@ -114,6 +114,61 @@ fn timeout_interrupts_conditionals_and_eager_element_expressions() {
     }
 }
 
+#[test]
+fn timeout_interrupts_forward_and_scoped_expression_resolution() {
+    let functions = work_functions();
+    let dir = common::test_dir("deferred-element-expression-timeout");
+    for (index, (body, execution_started)) in [
+        (
+            "V2 a 0 SIN(0 1 1 {later+work(26)})\nR2 a 0 1k\n.PARAM later=1",
+            false,
+        ),
+        (
+            ".MODEL dd D(IS={later+work(26)})\nD1 out 0 dd\n.PARAM later=1",
+            false,
+        ),
+        (
+            ".SUBCKT cell a\nV2 a 0 SIN(0 1 1 {work(26)})\n.ENDS\nX1 aux cell\nR2 aux 0 1k",
+            true,
+        ),
+        (
+            ".SUBCKT cell a\nR2 a 0 {work(26)}\n.ENDS\nX1 out cell",
+            false,
+        ),
+        (
+            ".SUBCKT cell a\nR2 a 0 1k TEMP={work(26)}\n.ENDS\nX1 out cell",
+            true,
+        ),
+        (
+            ".SUBCKT cell a\n.MODEL dd D(IS={work(26)})\nD1 a 0 dd\n.ENDS\nX1 out cell",
+            true,
+        ),
+        (
+            ".SUBCKT cell a PARAMS: value=1\nR2 a 0 {value}\n.ENDS\nX1 out cell value={work(26)}",
+            false,
+        ),
+        (
+            ".SUBCKT cell a\nR2 a 0 1k\n.ENDS\nX1 out cell M={work(26)}",
+            true,
+        ),
+        (
+            ".SUBCKT cell a\n.IC V(a)={work(26)}\nR2 a 0 1k\n.ENDS\nX1 out cell",
+            false,
+        ),
+        (
+            ".SUBCKT cell a\n.NODESET V(a)={work(26)}\nR2 a 0 1k\n.ENDS\nX1 out cell",
+            false,
+        ),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let deck = dir.join(format!("deferred-{index}.cir"));
+        std::fs::write(&deck, format!("* deferred expression deadline\n{functions}V1 out 0 1\nR1 out 0 1k\n{body}\n.OP\n.END\n")).unwrap();
+        assert_times_out(&deck, body, *execution_started);
+    }
+}
+
 fn assert_times_out(deck: &std::path::Path, source: &str, execution_started: bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "--error-format", "json", "run"])
