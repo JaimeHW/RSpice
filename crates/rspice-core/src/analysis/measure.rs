@@ -841,20 +841,23 @@ impl MeasureEngine {
         self.evaluate_with_segment_starts_and_context(
             data,
             (&crate::netlist::ParamContext::new()).into(),
+            &crate::abort_signal::NoAbort,
         )
+        .unwrap_or_else(|error| self.fail_all(&error.to_string()))
     }
 
     pub(crate) fn evaluate_with_segment_starts_and_context(
         &self,
         data: MeasureData<'_, '_>,
         params: MeasureParameters<'_>,
-    ) -> Vec<MeasureResult> {
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Vec<MeasureResult>, crate::SimulationError> {
         let MeasureData {
             axis: time,
             signals,
             segment_starts,
         } = data;
-        self.evaluate_with_signal_maps(time, &[signals], segment_starts, params)
+        self.evaluate_with_signal_maps(time, &[signals], segment_starts, params, abort)
     }
 
     /// Evaluate each statement against its own signal view. Continuous Xyce
@@ -867,9 +870,10 @@ impl MeasureEngine {
         signal_maps: &[HashMap<String, &[Value]>],
         segment_starts: &[usize],
         params: MeasureParameters<'_>,
-    ) -> Vec<MeasureResult> {
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Vec<MeasureResult>, crate::SimulationError> {
         let signal_map_refs = signal_maps.iter().collect::<Vec<_>>();
-        self.evaluate_with_signal_maps(time, &signal_map_refs, segment_starts, params)
+        self.evaluate_with_signal_maps(time, &signal_map_refs, segment_starts, params, abort)
     }
 
     fn evaluate_with_signal_maps(
@@ -878,41 +882,43 @@ impl MeasureEngine {
         signal_maps: &[&HashMap<String, &[Value]>],
         segment_starts: &[usize],
         params: MeasureParameters<'_>,
-    ) -> Vec<MeasureResult> {
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Vec<MeasureResult>, crate::SimulationError> {
+        continuous::poll(abort, 0)?;
         if self.measurements.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         if signal_maps.len() != 1 && signal_maps.len() != self.measurements.len() {
-            return self.fail_all("measurement signal-map count does not match statement count");
+            return Ok(self.fail_all("measurement signal-map count does not match statement count"));
         }
         if time.is_empty() {
-            return self.fail_all("measurement axis is empty");
+            return Ok(self.fail_all("measurement axis is empty"));
         }
         if let Some(index) = time.iter().position(|value| !value.is_finite()) {
-            return self.fail_all(&format!(
+            return Ok(self.fail_all(&format!(
                 "measurement axis contains non-finite sample at index {index}"
-            ));
+            )));
         }
         if let Some((name, signal)) = signal_maps
             .iter()
             .flat_map(|signals| signals.iter())
             .find(|(_, signal)| signal.len() != time.len())
         {
-            return self.fail_all(&format!(
+            return Ok(self.fail_all(&format!(
                 "signal '{name}' has {} samples but measurement axis has {}",
                 signal.len(),
                 time.len()
-            ));
+            )));
         }
         if segment_starts.iter().enumerate().any(|(index, start)| {
             *start == 0 || *start >= time.len() || index > 0 && *start <= segment_starts[index - 1]
         }) {
-            return self.fail_all("measurement segment starts are invalid or unordered");
+            return Ok(self.fail_all("measurement segment starts are invalid or unordered"));
         }
         let indexed_signal_maps = signal_maps
             .iter()
-            .map(|signals| index_measure_signals(signals))
-            .collect::<Vec<_>>();
+            .map(|signals| index_measure_signals_with_abort(signals, abort))
+            .collect::<Result<Vec<_>, _>>()?;
         let signal_maps = indexed_signal_maps.iter().collect::<Vec<_>>();
 
         // Expression measures (PARAM='...') read other results by name, so
@@ -922,37 +928,41 @@ impl MeasureEngine {
             .measurements
             .iter()
             .enumerate()
-            .map(|(index, m)| match &m.measure_type {
-                MeasureType::Param { .. } | MeasureType::Equation { .. } => {
-                    MeasureResult::failed_for_statement(m, "PARAM expression not yet evaluated")
-                }
-                _ => {
-                    let signals = if signal_maps.len() == 1 {
-                        signal_maps[0]
-                    } else {
-                        signal_maps[index]
-                    };
-                    self.evaluate_one(
-                        m,
-                        MeasureData {
-                            axis: time,
-                            signals,
-                            segment_starts,
-                        },
-                    )
-                }
+            .map(|(index, m)| {
+                continuous::poll(abort, 0)?;
+                Ok(match &m.measure_type {
+                    MeasureType::Param { .. } | MeasureType::Equation { .. } => {
+                        MeasureResult::failed_for_statement(m, "PARAM expression not yet evaluated")
+                    }
+                    _ => {
+                        let signals = if signal_maps.len() == 1 {
+                            signal_maps[0]
+                        } else {
+                            signal_maps[index]
+                        };
+                        self.evaluate_one(
+                            m,
+                            MeasureData {
+                                axis: time,
+                                signals,
+                                segment_starts,
+                            },
+                        )
+                    }
+                })
             })
-            .collect();
+            .collect::<Result<_, crate::SimulationError>>()?;
         for (idx, m) in self.measurements.iter().enumerate() {
+            continuous::poll(abort, idx)?;
             if let MeasureType::Param { expression } = &m.measure_type {
                 results[idx] = self
-                    .eval_param(&m.name, expression, &results, params, time.len() - 1)
+                    .eval_param(&m.name, expression, &results, params, time.len() - 1, abort)?
                     .check_contract(m);
             }
         }
         let statements = self.measurements.iter().collect::<Vec<_>>();
         super::measure_units::annotate(&statements, &mut results, None, &HashMap::new());
-        results
+        Ok(results)
     }
 
     fn fail_all(&self, reason: &str) -> Vec<MeasureResult> {
@@ -1914,32 +1924,52 @@ impl MeasureEngine {
         prior: &[MeasureResult],
         params: MeasureParameters<'_>,
         row: usize,
-    ) -> MeasureResult {
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<MeasureResult, crate::SimulationError> {
+        use crate::netlist::expr::{
+            ExpressionEvaluationError, ParseExpressionWithAbortError, PreparedExpression,
+        };
         let mut ctx = params.base.clone();
-        for result in prior {
+        for (index, result) in prior.iter().enumerate() {
+            continuous::poll(abort, index)?;
             if let Some(value) = result.raw_value {
                 ctx.set(&result.name, value);
             }
         }
-        let parsed = match crate::netlist::expr::parse_expression(&expression.text) {
-            Ok(parsed) => parsed,
-            Err(err) => {
-                return MeasureResult::failed(name, &format!("PARAM expression failed: {err}"));
-            }
-        };
-        match crate::netlist::expr::evaluate_complex_raw_with(&parsed, &ctx, &mut |name| {
-            // Named measurement results retain precedence over deck parameters.
-            if prior
-                .iter()
-                .any(|result| result.name.eq_ignore_ascii_case(name) && result.raw_value.is_some())
-            {
-                return Ok(None);
-            }
-            params
-                .rows
-                .map_or(Ok(None), |parameters| parameters.resolve(name, row))
-                .map_err(crate::netlist::expr::ExprError::InvalidArgument)
-        }) {
+        let parsed =
+            match crate::netlist::expr::parse_expression_with_abort(&expression.text, abort) {
+                Ok(parsed) => parsed,
+                Err(ParseExpressionWithAbortError::Aborted) => {
+                    return Err(crate::SimulationError::Aborted);
+                }
+                Err(ParseExpressionWithAbortError::Parse(err)) => {
+                    return Ok(MeasureResult::failed(
+                        name,
+                        &format!("PARAM expression failed: {err}"),
+                    ));
+                }
+            };
+        let value = PreparedExpression::compile_with_abort(&parsed, &ctx, abort).and_then(
+            |mut prepared| {
+                prepared.evaluate_with_abort(
+                    &ctx,
+                    &mut |name| {
+                        // Named measurement results retain precedence over deck parameters.
+                        if prior.iter().any(|result| {
+                            result.name.eq_ignore_ascii_case(name) && result.raw_value.is_some()
+                        }) {
+                            return Ok(None);
+                        }
+                        params
+                            .rows
+                            .map_or(Ok(None), |parameters| parameters.resolve(name, row))
+                            .map_err(crate::netlist::expr::ExprError::InvalidArgument)
+                    },
+                    abort,
+                )
+            },
+        );
+        match value {
             Ok(value) => {
                 let xyce =
                     params.base.expression_dialect() == crate::config::ExpressionDialect::Xyce;
@@ -1950,13 +1980,13 @@ impl MeasureEngine {
                 };
                 if !xyce {
                     if value.re.is_nan() || value.im.is_nan() {
-                        return MeasureResult::failed(
+                        return Ok(MeasureResult::failed(
                             name,
                             &format!(
                                 "PARAM expression produced NaN ({} {:+}j)",
                                 value.re, value.im
                             ),
-                        );
+                        ));
                     }
                     let imag_tolerance = if value.re.is_finite() {
                         1.0e-15 * value.re.abs().max(1.0)
@@ -1964,22 +1994,26 @@ impl MeasureEngine {
                         0.0
                     };
                     if value.im.abs() > imag_tolerance {
-                        return MeasureResult::failed(
+                        return Ok(MeasureResult::failed(
                             name,
                             &format!(
                                 "PARAM expression produced complex value ({} {:+}j); scalar measurement results must be real",
                                 value.re, value.im
                             ),
-                        );
+                        ));
                     }
                 }
                 // MeasureBase applies fixNan/fixInf to both components at an
                 // authored ExpressionOp root, then exposes the real output.
                 // Typed raw MeasureOp references deliberately bypass that
                 // normalization and retain their IEEE real projection.
-                MeasureResult::success(name, value.re)
+                Ok(MeasureResult::success(name, value.re))
             }
-            Err(err) => MeasureResult::failed(name, &format!("PARAM expression failed: {err}")),
+            Err(ExpressionEvaluationError::Aborted) => Err(crate::SimulationError::Aborted),
+            Err(ExpressionEvaluationError::Expression(err)) => Ok(MeasureResult::failed(
+                name,
+                &format!("PARAM expression failed: {err}"),
+            )),
         }
     }
 
@@ -4256,14 +4290,17 @@ mod tests {
 
         let mut params = crate::netlist::ParamContext::new();
         params.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
-        let xyce = engine.evaluate_with_segment_starts_and_context(
-            MeasureData {
-                axis: &time,
-                signals: &signals,
-                segment_starts: &[],
-            },
-            (&params).into(),
-        );
+        let xyce = engine
+            .evaluate_with_segment_starts_and_context(
+                MeasureData {
+                    axis: &time,
+                    signals: &signals,
+                    segment_starts: &[],
+                },
+                (&params).into(),
+                &crate::abort_signal::NoAbort,
+            )
+            .unwrap();
         assert!(xyce[0].passed, "{:?}", xyce[0]);
         assert_eq!(xyce[0].value, Some(0.0));
         assert_eq!(xyce[0].error, None);
@@ -4303,14 +4340,17 @@ mod tests {
         let mut params = crate::netlist::ParamContext::new();
         params.set_expression_dialect(crate::config::ExpressionDialect::Xyce);
 
-        let results = engine.evaluate_with_segment_starts_and_context(
-            MeasureData {
-                axis: &axis,
-                signals: &signals,
-                segment_starts: &[],
-            },
-            (&params).into(),
-        );
+        let results = engine
+            .evaluate_with_segment_starts_and_context(
+                MeasureData {
+                    axis: &axis,
+                    signals: &signals,
+                    segment_starts: &[],
+                },
+                (&params).into(),
+                &crate::abort_signal::NoAbort,
+            )
+            .unwrap();
 
         assert_eq!(results[0].value, Some(Value::NEG_INFINITY));
         assert_eq!(results[1].value, Some(-1.0e50));

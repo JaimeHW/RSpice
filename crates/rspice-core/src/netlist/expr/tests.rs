@@ -2763,3 +2763,51 @@ fn prepared_recursive_function_graph_keeps_distinct_call_scopes() {
         8.0.into()
     );
 }
+
+#[test]
+fn prepared_cancellation_bounds_literal_function_work_and_allows_reuse() {
+    let mut ctx = ParamContext::new();
+    ctx.set("DEPTH", 14.0);
+    ctx.define_function(
+        "WORK",
+        vec!["X".to_owned()],
+        "IF(X<=0,1,WORK(X-1)+WORK(X-1))",
+    );
+    let mut prepared =
+        PreparedExpression::compile(&parse_expression("WORK(DEPTH)").unwrap(), &ctx).unwrap();
+    let abort = crate::abort_signal::CountingAbort::new(128);
+    assert!(matches!(
+        prepared.evaluate_with_abort(&ctx, &mut |_| Ok(None), &abort),
+        Err(ExpressionEvaluationError::Aborted)
+    ));
+    assert_eq!(abort.count(), 129);
+    assert_eq!(abort.polls_after_abort(), 0);
+    ctx.set("DEPTH", 2.0);
+    assert_eq!(
+        prepared
+            .evaluate_with_abort(&ctx, &mut |_| Ok(None), &crate::NoAbort)
+            .unwrap(),
+        4.0.into()
+    );
+}
+
+#[test]
+fn prepared_cancellation_precedes_random_draws_and_preserves_expression_errors() {
+    let ctx = ParamContext::new();
+    let fresh = ParamContext::new();
+    let mut prepared =
+        PreparedExpression::compile(&parse_expression("RAND()").unwrap(), &ctx).unwrap();
+    let abort = crate::abort_signal::CountingAbort::new(0);
+    assert!(matches!(
+        prepared.evaluate_with_abort(&ctx, &mut |_| Ok(None), &abort),
+        Err(ExpressionEvaluationError::Aborted)
+    ));
+    assert_eq!(ctx.random().next_uniform(), fresh.random().next_uniform());
+    let mut invalid = PreparedExpression::compile(&parse_expression("1/0").unwrap(), &ctx).unwrap();
+    assert!(matches!(
+        invalid.evaluate_with_abort(&ctx, &mut |_| Ok(None), &crate::NoAbort),
+        Err(ExpressionEvaluationError::Expression(
+            ExprError::DivisionByZero
+        ))
+    ));
+}

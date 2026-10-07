@@ -73,7 +73,7 @@ pub use context::{
 };
 pub use error::ExprError;
 pub(crate) use eval::{
-    PreparedExpression, PreparedProgress, evaluate_complex_raw, evaluate_complex_raw_with,
+    ExpressionEvaluationError, PreparedExpression, PreparedProgress, evaluate_complex_raw,
     evaluate_complex_with_functions, normalize_xyce_expression_component,
     normalize_xyce_expression_result,
 };

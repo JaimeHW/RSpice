@@ -59,7 +59,9 @@ use super::transient::{TransientDeviceOpTrace, TransientResult};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{AcResult, NoiseContributionKind, NoiseContributionProbe};
-use crate::netlist::expr::{ComplexValue, Expr as NetExpr, PreparedExpression, is_real};
+use crate::netlist::expr::{
+    ComplexValue, Expr as NetExpr, ExpressionEvaluationError, PreparedExpression, is_real,
+};
 use crate::netlist::{
     InterfaceNodeAliases, Netlist, NetlistSourceLocation, OutputAnalysisKind, OutputDirectiveKind,
     OutputNodeNamespace, OutputOperandKind, OutputRequest, SaveSignal, canonical_symbol,
@@ -649,6 +651,7 @@ struct LiveMeasureReadContext<'program, 'netlist> {
     primitive_window: Option<(Value, Value)>,
     boundary: Option<current_measure::Boundary>,
     abort: &'program dyn AbortSignal,
+    cancelled: bool,
 }
 
 /// One row of the series a live measurement is being advanced over.
@@ -909,7 +912,16 @@ impl LivePreparedExpression {
         reads: &mut LiveMeasureReadContext<'_, '_>,
         params: &crate::netlist::ParamContext,
     ) -> Result<ComplexValue, String> {
-        self.value_with(row, signals, params, &mut |name| reads.read_measure(name))
+        self.value_with(row, signals, params, reads.abort, &mut |name| {
+            reads.read_measure(name)
+        })
+        .map_err(|error| match error {
+            ExpressionEvaluationError::Aborted => {
+                reads.cancelled = true;
+                "expression evaluation aborted".to_owned()
+            }
+            ExpressionEvaluationError::Expression(error) => error.to_string(),
+        })
     }
 
     fn value_with(
@@ -917,12 +929,14 @@ impl LivePreparedExpression {
         row: usize,
         signals: &CanonicalMeasureSignalIndex<'_>,
         params: &crate::netlist::ParamContext,
+        abort: &dyn AbortSignal,
         read_measure: &mut impl FnMut(&str) -> Result<Option<Value>, String>,
-    ) -> Result<ComplexValue, String> {
+    ) -> Result<ComplexValue, ExpressionEvaluationError> {
         let probes = &self.probes;
         let parameters = &self.parameters;
-        self.evaluator
-            .evaluate_with(params, &mut |name| {
+        self.evaluator.evaluate_with_abort(
+            params,
+            &mut |name| {
                 if let Some(probe) = probes.get(name) {
                     return probe
                         .value(row, signals)
@@ -958,8 +972,9 @@ impl LivePreparedExpression {
                     .parameter(name, row)
                     .map_err(crate::netlist::expr::ExprError::InvalidArgument)?
                     .or(parameter.context_value))
-            })
-            .map_err(|error| error.to_string())
+            },
+            abort,
+        )
     }
 }
 
@@ -2493,10 +2508,13 @@ pub(crate) fn evaluate_output_operand(
                     primitive_window: None,
                     boundary: None,
                     abort,
+                    cancelled: false,
                 };
-                let value = prepared
-                    .value(row, signal_index, &mut reads, params)
-                    .map_err(|detail| (Some(row), detail))?;
+                let value = prepared.value(row, signal_index, &mut reads, params);
+                if reads.cancelled {
+                    return Err(OutputOperandEvaluationError::Aborted);
+                }
+                let value = value.map_err(|detail| (Some(row), detail))?;
                 values.push(crate::netlist::expr::normalize_xyce_expression_component(
                     value.re,
                 ));
@@ -3117,6 +3135,7 @@ fn evaluate_equation_measurements_with_observations(
                     primitive_window: current_measure::scalar_window(&state, axis),
                     boundary: None,
                     abort,
+                    cancelled: false,
                 };
                 let update = state.update(
                     row,
@@ -3128,6 +3147,9 @@ fn evaluate_equation_measurements_with_observations(
                     &netlist.params,
                     dc_sweep_ascending,
                 );
+                if reads.cancelled {
+                    return Err(EquationMeasurementEvaluationError::Aborted);
+                }
                 boundary_read = reads.boundary;
                 update
             };
@@ -5613,6 +5635,7 @@ fn evaluate_noise_measurements_with_parameters(
                 equation_default: -1.0,
                 use_legacy_tran_trig_targ: false,
             },
+            abort,
         ),
         Err(_) => evaluate_statements(
             &statements,
@@ -5623,8 +5646,9 @@ fn evaluate_noise_measurements_with_parameters(
                 rows: parameters,
             },
             false,
+            abort,
         ),
-    };
+    }?;
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "NOISE");
     super::measure_units::annotate_native(
         netlist,
@@ -5681,7 +5705,8 @@ fn evaluate_statements(
     signals: &HashMap<String, &[Value]>,
     params: MeasureParameters<'_>,
     use_legacy_tran_trig_targ: bool,
-) -> Vec<MeasureResult> {
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
     evaluate_statements_with_segment_starts(
         statements,
         axis,
@@ -5689,6 +5714,7 @@ fn evaluate_statements(
         params,
         &[],
         use_legacy_tran_trig_targ,
+        abort,
     )
 }
 
@@ -5699,8 +5725,16 @@ fn evaluate_statements_with_segment_starts(
     params: MeasureParameters<'_>,
     segment_starts: &[usize],
     use_legacy_tran_trig_targ: bool,
-) -> Vec<MeasureResult> {
-    let derived = materialize_measure_expression_signals(statements, axis, signals, params);
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    let derived = materialize_measure_expression_signals_with_limits_and_abort(
+        statements,
+        axis,
+        signals,
+        params,
+        &ResourceLimits::unlimited(),
+        abort,
+    )?;
     let mut augmented_signals = signals.clone();
     for (name, waveform) in &derived {
         augmented_signals.insert(name.clone(), waveform.as_slice());
@@ -5717,6 +5751,7 @@ fn evaluate_statements_with_segment_starts(
             segment_starts,
         },
         params,
+        abort,
     )
 }
 
@@ -5730,6 +5765,7 @@ struct MeasureEvaluationPolicy {
     use_legacy_tran_trig_targ: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_statements_with_equation_traces(
     statements: &[&MeasureStatement],
     axis: &[Value],
@@ -5738,7 +5774,8 @@ fn evaluate_statements_with_equation_traces(
     segment_starts: &[usize],
     traces: &[EquationMeasureTrace],
     policy: MeasureEvaluationPolicy,
-) -> Vec<MeasureResult> {
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
     let MeasureEvaluationPolicy {
         global_default,
         equation_default,
@@ -5819,9 +5856,16 @@ fn evaluate_statements_with_equation_traces(
         .iter()
         .zip(&signal_maps)
         .map(|(statement, map)| {
-            materialize_measure_expression_signals(&[*statement], axis, map, params)
+            materialize_measure_expression_signals_with_limits_and_abort(
+                &[*statement],
+                axis,
+                map,
+                params,
+                &ResourceLimits::unlimited(),
+                abort,
+            )
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     for (map, derived) in signal_maps.iter_mut().zip(&expression_signals) {
         for (name, waveform) in derived {
             map.insert(name.clone(), waveform.as_slice());
@@ -5838,6 +5882,7 @@ fn evaluate_statements_with_equation_traces(
         &signal_maps,
         segment_starts,
         params,
+        abort,
     )
 }
 
@@ -5980,23 +6025,6 @@ fn overlay_continuous_equation_results(
     }
 }
 
-fn materialize_measure_expression_signals(
-    statements: &[&MeasureStatement],
-    axis: &[Value],
-    signals: &HashMap<String, &[Value]>,
-    params: MeasureParameters<'_>,
-) -> Vec<(String, Vec<Value>)> {
-    materialize_measure_expression_signals_with_limits_and_abort(
-        statements,
-        axis,
-        signals,
-        params,
-        &ResourceLimits::unlimited(),
-        &NoAbort,
-    )
-    .unwrap_or_default()
-}
-
 fn materialize_measure_expression_signals_with_limits_and_abort(
     statements: &[&MeasureStatement],
     axis: &[Value],
@@ -6121,13 +6149,14 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
             })?;
         for row in 0..axis.len() {
             super::measure::continuous::poll(abort, row)?;
-            match expression.value_with(row, &signal_index, params.base, &mut |_| Ok(None)) {
+            match expression.value_with(row, &signal_index, params.base, abort, &mut |_| Ok(None)) {
                 // Authored measurement expressions normalize non-finite root
                 // components before the scalar measurement engine consumes them.
                 Ok(value) => waveform.push(
                     crate::netlist::expr::normalize_xyce_expression_component(value.re),
                 ),
-                Err(_) => break,
+                Err(ExpressionEvaluationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(ExpressionEvaluationError::Expression(_)) => break,
             }
         }
         if waveform.len() == axis.len() {
@@ -6636,6 +6665,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
                 equation_default: -1.0,
                 use_legacy_tran_trig_targ: netlist.options.measure_use_lttm(),
             },
+            abort,
         ),
         Err(_) => evaluate_statements(
             &statements,
@@ -6643,8 +6673,9 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             &signals,
             (&netlist.params).into(),
             netlist.options.measure_use_lttm(),
+            abort,
         ),
-    };
+    }?;
     overlay_continuous_equation_results(&statements, &mut results, live_traces, "TRAN");
     for result in &mut results {
         if let Some(replacement) = current_overrides.remove(&result.name.to_ascii_uppercase()) {
@@ -6813,6 +6844,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
                 equation_default: 0.0,
                 use_legacy_tran_trig_targ: false,
             },
+            abort,
         ),
         Err(_) => evaluate_statements_with_segment_starts(
             &statements,
@@ -6821,8 +6853,9 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             (&netlist.params).into(),
             &segment_starts,
             false,
+            abort,
         ),
-    };
+    }?;
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "DC");
     super::measure_units::annotate_native(netlist, "DC", &mut results, signals.keys(), None);
     for measurement in &mut results {
@@ -7045,6 +7078,7 @@ fn evaluate_ac_measurements_with_parameters(
                 equation_default: -1.0,
                 use_legacy_tran_trig_targ: false,
             },
+            abort,
         ),
         Err(_) => evaluate_statements(
             &statements,
@@ -7055,8 +7089,9 @@ fn evaluate_ac_measurements_with_parameters(
                 rows: parameters,
             },
             false,
+            abort,
         ),
-    };
+    }?;
     overlay_continuous_equation_results(&statements, &mut results, equation_traces, "AC");
     super::measure_units::annotate_native(netlist, "AC", &mut results, signals.keys(), None);
     if abort.is_aborted() {
@@ -8695,6 +8730,7 @@ mod tests {
                 primitive_window: None,
                 boundary: None,
                 abort: &NoAbort,
+                cancelled: false,
             };
             if let Some(event) = selector
                 .update(
@@ -9295,6 +9331,7 @@ mod tests {
                 primitive_window: None,
                 boundary: None,
                 abort: &NoAbort,
+                cancelled: false,
             };
             if let Some(value) = find_state
                 .update(
@@ -9321,6 +9358,7 @@ mod tests {
                 primitive_window: None,
                 boundary: None,
                 abort: &NoAbort,
+                cancelled: false,
             };
             if let Some(value) = derivative_state
                 .update(

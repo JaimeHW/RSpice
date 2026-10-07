@@ -9,6 +9,8 @@ use crate::config::ExpressionDialect;
 
 use super::*;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::Infallible;
+use std::ops::ControlFlow;
 
 const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
@@ -55,15 +57,6 @@ pub(crate) fn evaluate_complex_raw(
     ExpressionEvaluator::new(ctx).evaluate(expr)
 }
 
-/// Resolve row-local values without changing measurement root normalization.
-pub(crate) fn evaluate_complex_raw_with(
-    expr: &Expr,
-    ctx: &ParamContext,
-    resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
-) -> Result<ComplexValue, ExprError> {
-    ExpressionEvaluator::new(ctx).evaluate_with(expr, resolver, &mut |_, _| Ok(None))
-}
-
 /// Compile an expression into an index-based program that can be evaluated
 /// repeatedly without cloning its AST or allocating evaluator stacks. Runtime
 /// parameter reads are exposed through a resolver so live measurements can
@@ -73,6 +66,25 @@ pub(crate) fn evaluate_complex_raw_with(
 pub(crate) enum PreparedProgress {
     Complete(ComplexValue),
     MissingParameter(String),
+}
+
+#[derive(Debug)]
+pub(crate) enum ExpressionEvaluationError {
+    Aborted,
+    Expression(ExprError),
+}
+
+impl From<ExprError> for ExpressionEvaluationError {
+    fn from(error: ExprError) -> Self {
+        Self::Expression(error)
+    }
+}
+
+fn uninterrupted<T>(progress: ControlFlow<Infallible, T>) -> T {
+    match progress {
+        ControlFlow::Continue(value) => value,
+        ControlFlow::Break(never) => match never {},
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -235,6 +247,29 @@ impl PreparedExpression {
         Self::compile_with_external_parameters(expr, ctx, &HashSet::new())
     }
 
+    pub(crate) fn compile_with_abort(
+        expr: &Expr,
+        ctx: &ParamContext,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Self, ExpressionEvaluationError> {
+        let mut cancelled = false;
+        let result = Self::compile_with_bindings(expr, ctx, &HashSet::new(), &mut |_| {
+            if abort.is_aborted() {
+                cancelled = true;
+                Err(ExprError::InvalidArgument(
+                    "expression compilation aborted".into(),
+                ))
+            } else {
+                Ok(None)
+            }
+        });
+        if cancelled {
+            Err(ExpressionEvaluationError::Aborted)
+        } else {
+            result.map_err(Into::into)
+        }
+    }
+
     pub(crate) fn compile_with_external_parameters(
         expr: &Expr,
         ctx: &ParamContext,
@@ -299,6 +334,30 @@ impl PreparedExpression {
         self.evaluate_using(ctx, resolver)
     }
 
+    /// Poll inside the instruction loop, including calls with only literal or
+    /// formal arguments. Parameter-read callbacks alone cannot bound the work.
+    pub(crate) fn evaluate_with_abort(
+        &mut self,
+        ctx: &ParamContext,
+        resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<ComplexValue, ExpressionEvaluationError> {
+        self.begin_evaluation();
+        match self.resume_using::<_, false, ()>(ctx, resolver, &mut || {
+            if abort.is_aborted() {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })? {
+            ControlFlow::Break(()) => Err(ExpressionEvaluationError::Aborted),
+            ControlFlow::Continue(PreparedProgress::Complete(value)) => Ok(value),
+            ControlFlow::Continue(PreparedProgress::MissingParameter(name)) => {
+                Err(ExprError::UndefinedParam(name).into())
+            }
+        }
+    }
+
     /// Evaluate with the real scalar derivative kernel used by behavioral
     /// and output expressions. This does not project complex parameter
     /// arithmetic into a real tangent; non-real leaves are rejected.
@@ -342,7 +401,11 @@ impl PreparedExpression {
         evaluation: &mut E,
     ) -> Result<ComplexValue, ExprError> {
         self.begin_evaluation();
-        match self.resume_using::<E, false>(ctx, evaluation)? {
+        match uninterrupted(self.resume_using::<E, false, Infallible>(
+            ctx,
+            evaluation,
+            &mut || ControlFlow::Continue(()),
+        )?) {
             PreparedProgress::Complete(value) => Ok(value),
             PreparedProgress::MissingParameter(name) => Err(ExprError::UndefinedParam(name)),
         }
@@ -365,15 +428,24 @@ impl PreparedExpression {
         ctx: &ParamContext,
         resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
     ) -> Result<PreparedProgress, ExprError> {
-        self.resume_using::<_, true>(ctx, resolver)
+        self.resume_using::<_, true, Infallible>(ctx, resolver, &mut || ControlFlow::Continue(()))
+            .map(uninterrupted)
     }
 
-    fn resume_using<E: PreparedEvaluation, const SUSPEND: bool>(
+    fn resume_using<E: PreparedEvaluation, const SUSPEND: bool, B>(
         &mut self,
         ctx: &ParamContext,
         evaluation: &mut E,
-    ) -> Result<PreparedProgress, ExprError> {
+        poll: &mut impl FnMut() -> ControlFlow<B>,
+    ) -> Result<ControlFlow<B, PreparedProgress>, ExprError> {
+        let mut instructions = 0usize;
         while let Some(frame) = self.frames.pop() {
+            if instructions.is_multiple_of(64)
+                && let ControlFlow::Break(reason) = poll()
+            {
+                return Ok(ControlFlow::Break(reason));
+            }
+            instructions = instructions.wrapping_add(1);
             match frame {
                 PreparedEvalFrame::Eval { expression, scope } => {
                     match &self.programs[expression.program].nodes[expression.node] {
@@ -418,7 +490,9 @@ impl PreparedExpression {
                                 } else if SUSPEND {
                                     self.frames
                                         .push(PreparedEvalFrame::Eval { expression, scope });
-                                    return Ok(PreparedProgress::MissingParameter(name.clone()));
+                                    return Ok(ControlFlow::Continue(
+                                        PreparedProgress::MissingParameter(name.clone()),
+                                    ));
                                 } else {
                                     return Err(ExprError::UndefinedParam(name.clone()));
                                 };
@@ -431,7 +505,9 @@ impl PreparedExpression {
                             } else if SUSPEND {
                                 self.frames
                                     .push(PreparedEvalFrame::Eval { expression, scope });
-                                return Ok(PreparedProgress::MissingParameter(name.clone()));
+                                return Ok(ControlFlow::Continue(
+                                    PreparedProgress::MissingParameter(name.clone()),
+                                ));
                             } else {
                                 return Err(ExprError::UndefinedParam(name.clone()));
                             };
@@ -652,9 +728,9 @@ impl PreparedExpression {
         }
 
         if self.values.len() == 1 {
-            Ok(PreparedProgress::Complete(
+            Ok(ControlFlow::Continue(PreparedProgress::Complete(
                 self.values.pop().expect("length checked").numeric,
-            ))
+            )))
         } else {
             Err(ExprError::InvalidArgument(format!(
                 "prepared expression evaluation produced {} values",
