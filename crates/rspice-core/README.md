@@ -450,11 +450,19 @@ error. Pending `.TEMP` dependencies can resolve through their declaration owners
 when ordinary parameter finalization is incomplete. No failed pass publishes a
 netlist, and cancellation and resource failures remain terminal.
 
-General dependency planning remains incomplete: other eager evaluation errors,
-option fields and earlier conditional, subcircuit-header and other card failures
-can still prevent the parser from reaching temperature discovery. These cases
-and broader statistical/runtime binding qualification remain in the
-implementation plan.
+Eager option fields use the same failed-pass error contract. Scalar fields,
+package transitions, time-point vectors and output/restart schedules retain
+their grammar boundaries while later fields select TEMP/TNOM. A fresh pass must
+validate every field; later assignments cannot erase an earlier error. Option
+overlays applied to an already materialized circuit keep their atomic error
+contract. Schedule look-ahead classifies tokens without evaluating operands,
+so only actual value reads consume statistical draws.
+
+General dependency planning remains incomplete. Pending temperature-option
+groups can fail before their later TEMP/TNOM entries bind; other eager parameter
+error classes and conditional, subcircuit-header and other card failures can
+also prevent discovery. These cases and broader statistical/runtime binding
+qualification remain in the implementation plan.
 
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.

@@ -1,0 +1,236 @@
+{
+  "schema": "rspice-core-execution-evidence",
+  "version": 1,
+  "package": "C04",
+  "related_packages": [
+    "C00",
+    "C13",
+    "C14"
+  ],
+  "batch": "Provisional-temperature recovery for eager option fields and schedule sampling",
+  "status": "eager_option_recovery_delivered_pending_groups_and_general_discovery_remain",
+  "base_revision": "bbc8eb8ecbb57f5370ee6a80b4ca43b5dc066b96",
+  "source_revision": "7580b76fb72a0cce2e5babf2ac08624a76df1dd4",
+  "implementation_commits": [
+    "4a33fb9c1b69915050eadd5b04b2c563419c3c0a",
+    "7580b76fb72a0cce2e5babf2ac08624a76df1dd4"
+  ],
+  "captured_utc": "2026-10-06T23:58:44.526791+00:00",
+  "host": "x86_64-pc-windows-msvc",
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cli_rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cli_toolchain_reason": "Previously reproduced pinned Rust 1.94/faer compiler crash in CLI runtime builds; repository pin unchanged.",
+    "wasm_target": "wasm32-unknown-unknown",
+    "wasm_profile": "release",
+    "wasm_features": [
+      "wasm",
+      "veriloga-wasm-jit"
+    ],
+    "wasm_runtime": "headless Chrome dedicated worker",
+    "WASM_BINDGEN_TEST_TIMEOUT": "180",
+    "webdriver_config_sha256": "93458ed98943268e089c8c9a793bf2e899872e62941ac54795b0c27b7104785b",
+    "wasm_runner_version": "wasm-bindgen-test-runner 0.2.126",
+    "wasm_runner_executable_sha256": "e451b278c106269fa9a2731a4f8e77f888ccd2694b2b3a1760319198f6c2a68e"
+  },
+  "commands": [
+    {
+      "command": "cargo test --locked -p rspice-core --lib netlist:: -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1102
+      ],
+      "log": "target/core-qualification/provisional-option-netlist-final.log",
+      "log_sha256": "6e33a8c43ae680119b59480dde7544a495c27fdbef172d1250a514633fc0d2b0"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --test provisional_option_temperature --test option_schedule_statistics --test provisional_parameter_temperature --test provisional_temperature --test parent_temperature_options --test temperature_options --test forward_analyses --test analysis_error_origins --test analysis_card_transactions --test control_noise --test control_dc --test control_execution --test frequency_data --test step_temp --test forward_globals --test forward_parameters --test forward_sources --test xyce_restart_plan -- --test-threads=8",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        6,
+        8,
+        5,
+        17,
+        8,
+        11,
+        11,
+        7,
+        1,
+        9,
+        15,
+        13,
+        9,
+        2,
+        21,
+        6
+      ],
+      "log": "target/core-qualification/provisional-option-core-final.log",
+      "log_sha256": "0deb43ee98b5fa7845b31d4c0ffd00fde9319f39794c93e0d3f76429c9b61d39"
+    },
+    {
+      "command": "cargo +1.95.0 test --locked -p rspice-cli --test temperature_axis --test control_noise --test control_dc --test analysis_error_origins --target-dir target/core-cli-195",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        1,
+        1,
+        1,
+        6
+      ],
+      "log": "target/core-qualification/provisional-option-cli.log",
+      "log_sha256": "613233bca530d7c9a34b0a4ebebd962b1c697a08a36c408dfb6d8f0dd3469f14"
+    },
+    {
+      "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test provisional_option_temperature --test option_schedule_statistics -- -D warnings",
+      "outcome": "passed",
+      "test_target_passed_counts": [],
+      "log": "target/core-qualification/provisional-option-clippy-final.log",
+      "log_sha256": "ad0dbc07355fb4ed80fd13f25bc02780c5d73a4fc593990801b2ef1c9c78d3fe"
+    },
+    {
+      "command": "cargo test --locked -p rspice-core --target wasm32-unknown-unknown --release --no-default-features --features wasm,veriloga-wasm-jit --test provisional_option_temperature --test option_schedule_statistics --test provisional_parameter_temperature --test provisional_temperature --test parent_temperature_options --test temperature_options --test forward_analyses --test forward_parameters --test forward_globals --test forward_sources --test analysis_error_origins --test analysis_card_transactions -- --nocapture",
+      "outcome": "passed",
+      "test_target_passed_counts": [
+        4,
+        4,
+        16,
+        8,
+        10,
+        10,
+        1,
+        9,
+        15,
+        13,
+        9,
+        19
+      ],
+      "log": "target/core-qualification/provisional-option-wasm.log",
+      "log_sha256": "178f18b83e9eb94cfe152ba4b9c5d602346597db9b141925557d8fd3b7cc0f30"
+    }
+  ],
+  "formatting": {
+    "command": "python target/core-qualification/check-workspace-format.py",
+    "outcome": "passed",
+    "targets": 580,
+    "batches": 11,
+    "failed_batches": 0,
+    "log": "target/core-qualification/provisional-option-workspace-format.log",
+    "log_sha256": "101cdb0398efca457138cf285dd1d9bcbca709ba916cae9226b1325fb5c26aaf",
+    "script_sha256": "655a9f32a65d5e7c24fe3d8af6fd4bee3f12b2aaccfe905fdba198196839c2d8",
+    "method": "Read locked cargo metadata, select every workspace member target, deduplicate target source paths by edition, and invoke rustfmt --check --edition in argument batches below the Windows command-line limit. Module traversal uses the default rustfmt behavior."
+  },
+  "unique_passed_tests": {
+    "native": 1268,
+    "optimized_wasm": 118
+  },
+  "test_accounting": "Committed-source parser/expression units, 18 core integration targets, four CLI targets and twelve optimized WASM targets. Development runs and separate publication-ledger checks are excluded. No selected tests are ignored.",
+  "source_hash_format": "SHA-256 of committed Git blob bytes",
+  "source_files_sha256": {
+    "crates/rspice-core/src/netlist/lexer.rs": "8cdb7e7090be0d78a3d50ec6cd8f8e8601c584c4e8dd8da33bddebf1b93bed2e",
+    "crates/rspice-core/src/netlist/parser.rs": "6553d3ece27b8f4c1cf5a7b0ef4a45c6c86dfab95b51e439687a9d669485e114",
+    "crates/rspice-core/src/netlist/parser/commands.rs": "7293ddd9ddaddcd4d373b221e98fdf1775da03bda56b0191f03072835e100a66",
+    "crates/rspice-core/src/netlist/parser/commands/options.rs": "4cc902baf7715494d57ceb523f0042026b16b49b40264711e925eb79bf0f21bf",
+    "crates/rspice-core/src/netlist/parser/commands/options/recovery.rs": "2ecce045fa4258a86ac0f1ca49666effe37178175e000c88cb0829676328a1f5",
+    "crates/rspice-core/src/netlist/parser/temperature.rs": "e8a0166dd01da5b51617d94841bb82a469f9c94149c4659fc43bbaaf6a1eb293",
+    "crates/rspice-core/src/netlist/parser/temperature/options.rs": "391bcf331e9c5ce0180b8be63e99b8469dc8ce8bba66dfc37cfb2e6e5ed5dc80",
+    "crates/rspice-core/tests/option_schedule_statistics.rs": "004238ccfc7d9d40e950c0a512dc9faccad156254ee5b9c4a6c75b3e27baf3a9",
+    "crates/rspice-core/tests/provisional_option_temperature.rs": "3815ab2782d4180a0748bf8209d66eb9e0c8708ae6f0612dca8c158476605d55",
+    "Cargo.lock": "b8e4cc402c12137eee5b660d8c95d208b5ae45e5251b096c76e2f8c2117cb34b",
+    "rust-toolchain.toml": "0a73f8e6f0e60b4a2bba97a16fdc0c66517abad4410e72582981b9578bc1aa62"
+  },
+  "publication_ledger_sha256": "b3344d17e9823a065b4ef2bb8688ed4197350ff7bf314172ee57006952d9a452",
+  "implementation": [
+    "The ordinary option grammar is isolated in parser/commands/options.rs. Each field uses the existing handlers and validators. On a failed whole-deck pass, a token cursor restores the field start and its scalar/vector/schedule boundary is consumed without evaluation or numeric placeholders, allowing later fields to select physical temperatures.",
+    "Option failures share the existing first-error retention with parameter declarations, including physical included-source attribution. A later assignment cannot erase the error; the fresh immutable-source parser must validate every field before returning a netlist. Cancellation and resource errors remain terminal, and standalone materialized option overlays remain fail-fast and atomic.",
+    "OUTPUT/RESTART positional look-ahead no longer evaluates expressions or consumes statistical samples. It recognizes authored expression/signed operands syntactically, then the ordinary numeric reader performs validation and sampling.",
+    "The existing TEMP/TNOM replay bound, scalar-versus-sweep TEMP precedence, physical overrides and scoped temperature binding remain in use."
+  ],
+  "acceptance_evidence": [
+    "Two baseline public regressions failed at eager RELTOL and TEMP division-by-zero operands before later same-card TEMP/TNOM assignments were discovered. Both now return the exact expected option values.",
+    "Fifteen public option regressions cover same-card assignments, implicit numeric values, numerical validators, package transitions, pending parent temperatures in nested scopes, time vectors, OUTPUT and RESTART positional schedules, scalar/sweep precedence and inactive literal hints.",
+    "Independent seeded expression contexts verify one draw per schedule operand, a following eager declaration and the next unused draw for OUTPUT and RESTART, and verify exact eager option sample order through a failed temperature pass.",
+    "Stable invalid options, duplicate overwrites and incomplete values remain errors. Included continued option errors retain options.inc:2. Later option vector resource exhaustion retains ParseError::ResourceLimit, and materialized option overlays preserve their input on failure.",
+    "The private cancellation test visits every abort poll across failed schedule discovery and successful replay, asserting no polls after abort. Existing parameter/source/model/analysis and CLI temperature/control/origin regressions remain active."
+  ],
+  "limits": [
+    "A retained temperature-option group can still stop at a provisional failure before binding later independent TEMP/TNOM entries. The failed committed-source CLI reproduction below is explicitly outside delivered eager-field recovery.",
+    "Other eager parameter error classes, unresolved conditional/subcircuit-header decisions, general statistical/runtime binding, inner-loop cancellation and allocation/performance evidence remain open. No C00-C14 package closes.",
+    "Earlier Rust 1.94/1.95 compiler and native WASM-runner reliability incidents remain C14 work. CLI runtime qualification continues to use Rust 1.95; successful runs here do not establish general toolchain reproducibility."
+  ],
+  "baseline_reproduction": {
+    "core_revision": "4f6934da747d47ca4ea5cc9886cb01f9f0c89d55",
+    "outcome": "two_expected_regression_failures",
+    "log": "target/core-qualification/provisional-option-before.log",
+    "log_sha256": "f1c370aad66972e69c2f5a389cdda057b346cfa77ce904c67b05e4120eaa997b"
+  },
+  "remaining_reproduction": {
+    "source_revision": "7580b76fb72a0cce2e5babf2ac08624a76df1dd4",
+    "command": "target/core-cli-195/debug/rspice.exe --error-format json check --json target/core-qualification/provisional-option-pending-group.cir",
+    "outcome": "unresolved_division_by_zero_before_later_TNOM_binding",
+    "exit_code": 65,
+    "log": "target/core-qualification/provisional-option-pending-group-remaining.log",
+    "log_sha256": "dab972f11eb713d4bc1de69896b25d4c51ffec2a3889b024ea9006e10c3c1b30",
+    "deck": "Pending option completion\n.options temp={scale/(TNOM-27)} tnom={nominal}\n.param scale=1 nominal=55\n.end\n",
+    "expected": "TEMP=1/28 and TNOM=55 after bounded temperature reconciliation"
+  },
+  "development_notes": "Separated the schedule look-ahead repair from option recovery in granular commits. Existing field handlers and numerical validation were retained when the option driver moved into its own module; only its failure boundary and SEED=random loop return changed. Integrated three newer remote-main compare/VCD commits before final qualification. No existing regression was weakened or ignored.",
+  "post_qualification_integration": {
+    "revision": "b0661affd349352b432f3e9f1d5804e49dffdb65",
+    "merged_commits": [
+      "53095efcc",
+      "883ca4455"
+    ],
+    "reason": "Remote main advanced during the push. A merge preserves the qualified implementation revision and integrates independent CLI signal-selection work without rewriting it.",
+    "scope": "Only CLI files changed. The entire rspice-core tree, Cargo.lock and rust-toolchain.toml are byte-identical to the qualified source revision.",
+    "commands": [
+      {
+        "command": "cargo +1.95.0 test --locked -p rspice-cli --test compare_signal_index --test convert_selection_identity --target-dir target/core-cli-195",
+        "outcome": "passed",
+        "test_target_passed_counts": [
+          2,
+          4
+        ],
+        "log": "target/core-qualification/provisional-option-integration-cli.log",
+        "log_sha256": "a5ea2804d9e6c8a1fba69dec910a3f1992995352e0878f66c898f2bef1786ff3"
+      },
+      {
+        "command": "cargo clippy --locked -p rspice-core -p rspice-cli -p rspice-wasm -p rspice-engine-adapter --lib --bins --test provisional_option_temperature --test option_schedule_statistics --test compare_signal_index --test convert_selection_identity -- -D warnings",
+        "outcome": "passed",
+        "test_target_passed_counts": [],
+        "log": "target/core-qualification/provisional-option-integration-clippy.log",
+        "log_sha256": "0b3455605cc67307e9bed8c416c4f1f95e4229e14a08e30632fa2684cc58bf5b"
+      }
+    ],
+    "formatting": {
+      "targets": 582,
+      "batches": 11,
+      "failed_batches": 0,
+      "command": "python target/core-qualification/check-workspace-format.py",
+      "outcome": "passed",
+      "log": "target/core-qualification/provisional-option-integration-format.log",
+      "log_sha256": "567946881906a97a6eecb4008d044e8b92be4867ba7675d68f5df503813a2d36"
+    },
+    "test_accounting": "Six additional CLI integration tests passed. They are separate from the 1268 native and 118 optimized WASM tests at source_revision; no core test count is duplicated.",
+    "source_files_sha256": {
+      "crates/rspice-cli/README.md": "4196db0f1ed54646c19fc2a5b3ac7366f3d81b42d209b9fa2be427e0ab4c3632",
+      "crates/rspice-cli/src/commands/compare.rs": "2a4b345a6516f9bd9355e76d3ceabd63561594ea6a77a3a175a281f51e01b929",
+      "crates/rspice-cli/src/commands/compare/selection.rs": "ab26099868f9904457a45d5c64481639f7cc0c0cbb58693e415f71010c4847d6",
+      "crates/rspice-cli/src/commands/export_table.rs": "7de6e04860d931a55b8c781fb132ce40512f3bc26bb8405783937bc293cab52a",
+      "crates/rspice-cli/src/commands/vcd_io.rs": "e939e5e6603f065f1e0228ca7ca72edc7ffdbeedc6285653e6c5a79d067ed8b3",
+      "crates/rspice-cli/tests/compare_signal_index.rs": "230900da4c4ce0c8aa4481cb7710d4a7f76a8715636cd4308ab1c46e397c130d",
+      "crates/rspice-cli/tests/convert_selection_identity.rs": "e13589bddff4ae896bd8a363f6f49a7d262cf69c1a6c9b5c0b7c40a7751abd8b"
+    }
+  },
+  "publication_validation": {
+    "command": "cargo test --locked -p rspice-core --lib engine::requirements",
+    "outcome": "passed",
+    "test_target_passed_counts": [
+      3
+    ],
+    "log": "target/core-qualification/provisional-option-ledger.log",
+    "log_sha256": "b8f6f9057998cefbee68b1d8d883e9b36abad9a52a9009fcafca6f47aec85d36",
+    "scope": "Requirements/evidence-path validation after documentation updates; excluded from implementation and integration test totals."
+  }
+}
