@@ -152,6 +152,16 @@ pub(crate) fn parse_xspice(
                     // This is a parameter assignment
                     stream.advance(); // consume identifier
                     stream.advance(); // consume '='
+                    // A later assignment replaces the entire typed value,
+                    // including a previously deferred expression.
+                    remove_previous_param(&mut params, &id_str);
+                    remove_previous_param(&mut expr_params, &id_str);
+                    remove_previous_param(&mut string_params, &id_str);
+                    remove_previous_param(&mut string_expr_params, &id_str);
+                    remove_previous_param(&mut string_vector_params, &id_str);
+                    remove_previous_param(&mut string_vector_expr_params, &id_str);
+                    remove_previous_param(&mut real_vector_params, &id_str);
+                    remove_previous_param(&mut real_vector_expr_params, &id_str);
                     match parse_param_value(
                         stream,
                         line_num,
@@ -987,6 +997,10 @@ fn node_name_piece_from_token(token: &Token) -> Option<String> {
         }),
         _ => None,
     }
+}
+
+fn remove_previous_param<T>(params: &mut Vec<(String, T)>, name: &str) {
+    params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
 }
 
 enum XspiceParamValue {
