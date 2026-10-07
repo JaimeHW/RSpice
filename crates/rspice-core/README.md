@@ -659,6 +659,16 @@ SDK migration: `TransferFunctionResult::new` now takes
 the explicit `SignalUnit` immediately after `gain`; struct literals must supply
 `gain_unit`. Do not infer a source's quantity from its hierarchical name.
 
+Computed pole-zero results populate `hf_gain` with the finite high-frequency
+limit, including zero and static gains. Exact descriptor equations combine
+the selected input and output before classifying improper transfers; `None`
+means a nonzero positive power of frequency remains. A finite limit that
+overflows binary64 or loses a nonzero value to underflow returns
+`PoleZeroAnalysisError::UnrepresentableGain`. It is not replaced with zero or
+classified as unbounded. Exact preparation retains cancellation and configured
+workspace limits. This contract applies to newly computed results; manually
+constructed or historical results can still have an unavailable gain.
+
 How each analysis is reached (netlist card, CLI flag, or engine API only)
 varies. The [CLI README](../rspice-cli/README.md) documents the netlist-card
 and flag surface; anything not listed there is engine-API only.

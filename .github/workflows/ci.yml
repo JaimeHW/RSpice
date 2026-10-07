@@ -681,6 +681,7 @@ jobs:
           --test bjt_excess_phase_transient --test gp_history_resources
           --test gp_phase_cancellation --test gp_phase_regimes
           --test pole_zero_public_contract --test pole_zero_descriptor_rank
+          --test pole_zero_high_frequency
       - name: Test UI clocks in a browser window
         env:
           WASM_BINDGEN_USE_BROWSER: '1'

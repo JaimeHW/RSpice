@@ -1,6 +1,39 @@
 use super::*;
 
 impl PoleZeroAnalyzer {
+    fn high_frequency_gain(
+        &self,
+        input: &[Value],
+        output: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Value>, PoleZeroAnalysisError> {
+        use crate::numerics::exact_constraints::{ConstraintError, transition};
+        transition::high_frequency_gain(
+            &self.g_matrix.data,
+            &self.c_matrix.data,
+            input,
+            output,
+            self.limits,
+            abort,
+        )
+        .map_err(|error| match error {
+            transition::AsymptoteError::Unrepresentable => {
+                PoleZeroAnalysisError::UnrepresentableGain {
+                    quantity: "high-frequency",
+                }
+            }
+            transition::AsymptoteError::Constraint(ConstraintError::Aborted) => {
+                PoleZeroAnalysisError::Aborted
+            }
+            transition::AsymptoteError::Constraint(ConstraintError::ResourceLimit(error)) => {
+                PoleZeroAnalysisError::ResourceLimit(error)
+            }
+            transition::AsymptoteError::Constraint(ConstraintError::Invalid(message)) => {
+                PoleZeroAnalysisError::InvalidSystem(message)
+            }
+        })
+    }
+
     /// Analyze an already reduced continuous-time SISO state-space model.
     ///
     /// Engine-level sparse descriptor reduction uses this entry point after
@@ -294,6 +327,8 @@ impl PoleZeroAnalyzer {
             if let Some(gain) = self.dc_gain_from_config(config) {
                 result.dc_gain = Some(gain);
             }
+            result.hf_gain =
+                voltage_analyzer.high_frequency_gain(&drive_vec, &output_ext, abort)?;
 
             result.sort_poles_by_magnitude();
             result.sort_zeros_by_magnitude();
@@ -322,6 +357,12 @@ impl PoleZeroAnalyzer {
         if let Some(gain) = self.dc_gain_from_config(config) {
             result.dc_gain = Some(gain);
         }
+        let (input, output) =
+            self.build_port_vectors(config)
+                .ok_or(PoleZeroAnalysisError::TransferExtraction(
+                    "input or output port is invalid",
+                ))?;
+        result.hf_gain = self.high_frequency_gain(&input, &output, abort)?;
 
         result.sort_poles_by_magnitude();
         result.sort_zeros_by_magnitude();

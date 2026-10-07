@@ -47,6 +47,10 @@ pub enum PoleZeroAnalysisError {
     /// Exact descriptor preparation exceeded the configured workspace budget.
     #[error(transparent)]
     ResourceLimit(#[from] crate::resource::ResourceLimitError),
+    /// A mathematically finite gain cannot be represented without overflow or
+    /// losing a nonzero value to underflow.
+    #[error("{quantity} gain cannot be represented in finite binary64 precision")]
+    UnrepresentableGain { quantity: &'static str },
     /// The descriptor, state-space model, or port definition is malformed.
     #[error("invalid pole-zero system: {0}")]
     InvalidSystem(String),
@@ -267,7 +271,9 @@ pub struct PoleZeroResult {
     pub zero_evidence: RootSetEvidence,
     /// DC gain H(0), when the transfer function has a finite DC value.
     pub dc_gain: Option<Value>,
-    /// High-frequency gain H(∞) if finite
+    /// High-frequency gain H(∞). A computed result contains `None` only when
+    /// the observed transfer has a nonzero positive-power term; a finite gain
+    /// outside binary64 range is an explicit extraction error.
     pub hf_gain: Option<Value>,
     /// Input specification
     pub input: String,

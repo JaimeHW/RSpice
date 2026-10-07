@@ -6,7 +6,9 @@
 use super::*;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 
+mod asymptote;
 mod storage;
+pub(crate) use asymptote::{AsymptoteError, high_frequency_gain};
 
 type Result<T> = std::result::Result<T, ConstraintError>;
 type Terms = Vec<Vec<(usize, Value)>>;
