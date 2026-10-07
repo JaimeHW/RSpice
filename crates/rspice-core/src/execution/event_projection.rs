@@ -713,11 +713,9 @@ fn checked_node_name(node: &str) -> Result<String, EventProjectionError> {
 /// Round one event time to whole femtoseconds, refusing anything that is not
 /// already one.
 ///
-/// The residual is compared against the width of the arithmetic rather than
-/// against zero: `1e-9 * 1e15` is not exactly `1_000_000` in binary64, and a
-/// test against zero would reject every nanosecond in the run. A time that is
-/// genuinely between two femtoseconds misses by half a tick, which is many
-/// orders of magnitude outside that width.
+/// Permit the relative rounding error of binary64 event times, but retain
+/// the low integer bits when scaling them. Above 2^53 femtoseconds, the
+/// product alone can move an edge by whole ticks or merge distinct times.
 fn event_femtoseconds(
     node: &str,
     time: Value,
@@ -738,23 +736,33 @@ fn event_femtoseconds(
         });
     }
     let scaled = time * FEMTOSECONDS_PER_SECOND;
-    if scaled >= u64::MAX as f64 {
+    if scaled > u64::MAX as f64 {
         return Err(EventProjectionError::UnrepresentableTime {
             node: node.to_string(),
             time,
         });
     }
-    let ticks = scaled.round();
+    let integral = scaled.round_ties_even();
+    // Fused arithmetic recovers the multiplication residual without rounding
+    // the product first. Apply its whole-tick correction in integer arithmetic
+    // so it is not lost again when added to a large binary64 timestamp.
+    let residual = time.mul_add(FEMTOSECONDS_PER_SECOND, -integral);
+    let correction = residual.round_ties_even();
     // An absolute tolerance would admit positive sub-femtosecond events as
     // zero. Only allow error proportional to the timestamp's arithmetic.
     let tolerance = scaled * 8.0 * f64::EPSILON;
-    if (scaled - ticks).abs() > tolerance {
+    if (residual - correction).abs() > tolerance {
         return Err(EventProjectionError::InexactTime {
             node: node.to_string(),
             time,
         });
     }
-    Ok(ticks as u64)
+    u64::try_from(integral as i128 + correction as i128).map_err(|_| {
+        EventProjectionError::UnrepresentableTime {
+            node: node.to_string(),
+            time,
+        }
+    })
 }
 
 fn choose_timescale<'a>(points: impl Iterator<Item = &'a (u64, VcdValue)> + Clone) -> VcdTimescale {

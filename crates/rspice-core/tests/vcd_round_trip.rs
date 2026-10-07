@@ -254,3 +254,26 @@ fn a_time_between_two_femtoseconds_is_refused_rather_than_quantised() {
         Err(EventProjectionError::InexactTime { .. })
     ));
 }
+
+#[test]
+fn multiplication_roundoff_does_not_move_long_timeline_events() {
+    for (time, expected) in [
+        (20.000_000_000_000_014, 20_000_000_000_000_014),
+        (20.000_000_000_000_018, 20_000_000_000_000_018),
+        (18_446.744_073_709_55, 18_446_744_073_709_549_411),
+    ] {
+        let document = event_vcd_document("tran", &[digital_trace("clk", &[time])], &[], &[])
+            .expect("the nearest whole femtosecond fits the integer timeline");
+        let tick = document.signals[0].changes[0].tick * document.timescale.femtoseconds();
+        assert_eq!(tick, expected, "{time}");
+    }
+    assert!(matches!(
+        event_vcd_document(
+            "tran",
+            &[digital_trace("clk", &[18_446.744_073_709_553])],
+            &[],
+            &[]
+        ),
+        Err(EventProjectionError::UnrepresentableTime { .. })
+    ));
+}

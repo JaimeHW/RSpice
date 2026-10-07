@@ -136,6 +136,31 @@ fn positive_sub_femtosecond_events_are_never_moved_to_zero() {
 }
 
 #[test]
+fn close_events_on_long_timelines_keep_distinct_ticks() {
+    let dir = test_dir("vcd_long_time_precision");
+    let input = dir.join("source.json");
+    let output = dir.join("events.vcd");
+    table(
+        &input,
+        "time",
+        None,
+        &[20.000_000_000_000_014, 20.000_000_000_000_018],
+        &[0.0, 1.0],
+    );
+    let converted = convert(&input, &output, "vcd", &[]);
+    assert!(converted.status.success(), "{converted:?}");
+    let document = rspice_core::io::parse_vcd_file(&output).unwrap();
+    assert_eq!(
+        document.signals[0]
+            .changes
+            .iter()
+            .map(|change| change.tick * document.timescale.femtoseconds())
+            .collect::<Vec<_>>(),
+        [20_000_000_000_000_014, 20_000_000_000_000_018],
+    );
+}
+
+#[test]
 fn vcd_clipping_uses_seconds_after_converting_the_declared_time_unit() {
     let dir = test_dir("vcd_scaled_time_clipping");
     let input = dir.join("source.json");
