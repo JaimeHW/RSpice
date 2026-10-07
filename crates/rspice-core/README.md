@@ -452,10 +452,14 @@ forward-reference probes do not advance the live statistical stream.
 Repeated XSPICE instance assignments use the last value, including changes in
 value type or expression deferral. Scalar fields resolve sibling dependencies
 at the root and inside subcircuits without consuming samples on failed retries.
+Pending instance overrides cannot be replaced by model defaults in sibling
+expressions; a self-reference may still use its enclosing or model value.
 Complex instance components resolve forward parameter and function references.
 Instance vectors and complex values use resolved scalar overrides; numeric
 evaluation begins only after a complete complex-literal grammar is recognized.
 Quoted vector literals reject trailing tokens instead of discarding them.
+Quoted numeric entries use the deck's expression dialect, functions and seeded
+stream; scoped entries resolve and sample separately for each instance.
 Quote individual string-vector entries that resemble `<real imag>` pairs to
 preserve them as literal text.
 

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::abort_signal::AbortSignal;
+use std::collections::HashSet;
 
 /// Resolve scalar instance fields in dependency order, publishing each
 /// successful value for sibling expressions. An unresolved attempt must not
@@ -14,6 +15,10 @@ pub(crate) fn resolve_real_instance_expressions(
     check_abort(abort)?;
     let mut context = context.clone();
     let mut pending = expressions.iter().collect::<Vec<_>>();
+    let mut pending_names = expressions
+        .iter()
+        .map(|(name, _)| name.to_ascii_uppercase())
+        .collect::<HashSet<_>>();
     let mut resolved = Vec::with_capacity(expressions.len());
 
     while !pending.is_empty() {
@@ -21,7 +26,24 @@ pub(crate) fn resolve_real_instance_expressions(
         let mut first_error = None;
         let mut progress = false;
         for entry @ (name, expression) in pending {
-            match eval_expression_complex_with_probe_and_abort(expression, &context, abort) {
+            // A pending explicit field shadows an enclosing/model fallback
+            // for sibling reads. Its own expression can still use its previous
+            // enclosing value, as in GAIN={GAIN*2}.
+            let value = super::api::eval_expression_complex_with_probe_and_resolver(
+                expression,
+                &context,
+                &mut |parameter| {
+                    if !parameter.eq_ignore_ascii_case(name)
+                        && pending_names.contains(&parameter.to_ascii_uppercase())
+                    {
+                        Err(ExprError::UndefinedParam(parameter.to_string()))
+                    } else {
+                        Ok(None)
+                    }
+                },
+                abort,
+            );
+            match value {
                 Ok(value) => {
                     let value = require_real(value).map_err(|error| {
                         ParameterResolutionError::Definition(format!(
@@ -34,6 +56,7 @@ pub(crate) fn resolve_real_instance_expressions(
                         )));
                     }
                     context.set(name, value);
+                    pending_names.remove(&name.to_ascii_uppercase());
                     resolved.push((name.clone(), value));
                     progress = true;
                 }

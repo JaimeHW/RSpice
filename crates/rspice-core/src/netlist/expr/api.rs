@@ -106,6 +106,17 @@ pub(crate) fn eval_expression_complex_with_probe_and_abort(
     ctx: &ParamContext,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<ComplexValue, ExpressionEvaluationError> {
+    eval_expression_complex_with_probe_and_resolver(input, ctx, &mut |_| Ok(None), abort)
+}
+
+/// The resolver is a side-effect-free parameter lookup/filter: both the
+/// isolated probe and the selected live evaluation consult the same bindings.
+pub(super) fn eval_expression_complex_with_probe_and_resolver(
+    input: &str,
+    ctx: &ParamContext,
+    resolver: &mut impl FnMut(&str) -> Result<Option<ComplexValue>, ExprError>,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<ComplexValue, ExpressionEvaluationError> {
     let expr = parse_expression_with_abort(input, abort)?;
     // A function not yet defined is also a forward reference. Conservatively
     // probe calls (and grouping) before a prefix can draw from the live stream.
@@ -113,18 +124,12 @@ pub(crate) fn eval_expression_complex_with_probe_and_abort(
         evaluate_complex_with_functions_and_abort(
             &expr,
             &ctx.isolated_random_clone(),
-            &mut |_| Ok(None),
+            resolver,
             &mut |_, _| Ok(None),
             abort,
         )?;
     }
-    evaluate_complex_with_functions_and_abort(
-        &expr,
-        ctx,
-        &mut |_| Ok(None),
-        &mut |_, _| Ok(None),
-        abort,
-    )
+    evaluate_complex_with_functions_and_abort(&expr, ctx, resolver, &mut |_, _| Ok(None), abort)
 }
 
 /// Evaluate a simple expression without parameters

@@ -142,3 +142,81 @@ fn scoped_retained_expressions_resolve_with_instance_bindings() {
     let actual = result.try_voltage_named("out").unwrap();
     assert!((actual - 6.0).abs() < 1e-12, "{actual} != 6");
 }
+
+#[test]
+fn explicit_pending_fields_shadow_model_defaults_in_sibling_expressions() {
+    for fields in [
+        "gain={in_offset+1} in_offset={later}",
+        "in_offset={later} gain={in_offset+1}",
+        "gain={field_gain()} in_offset={later}",
+        "gain={apply(in_offset)} in_offset={later}",
+        "gain={apply(3)} in_offset={later}",
+        "gain={if(1,4,in_offset)} in_offset={later}",
+    ] {
+        for scoped in [false, true] {
+            let source = deck(fields, ".PARAM later=3\n.FUNC field_gain() {in_offset+1}\n.FUNC apply(in_offset) {in_offset+1}", scoped)
+                .replace("in out gain ", "in out alias ")
+                .replace(
+                    ".OPTIONS SEED=37",
+                    ".OPTIONS SEED=37\n.MODEL alias gain(gain=5 in_offset=1)",
+                );
+            let result = Engine::default()
+                .run_dc_op(&Netlist::parse(&source).unwrap())
+                .unwrap();
+            let actual = result.try_voltage_named("out").unwrap();
+            assert!((actual - 16.0).abs() < 1e-12, "{source}: {actual}");
+        }
+    }
+}
+
+#[test]
+fn model_defaults_cannot_hide_instance_dependency_cycles() {
+    let source = deck("gain={in_offset} in_offset={gain}", "", false)
+        .replace("in out gain ", "in out alias ")
+        .replace(
+            ".OPTIONS SEED=37",
+            ".OPTIONS SEED=37\n.MODEL alias gain(gain=1 in_offset=1)",
+        );
+    let error = Engine::default()
+        .build_circuit(&Netlist::parse(&source).unwrap())
+        .map(|_| ())
+        .expect_err("explicit cyclic overrides cannot use stale defaults")
+        .to_string();
+    assert!(error.contains("could not be resolved"), "{error}");
+}
+
+#[test]
+fn a_self_reference_can_still_use_its_model_default() {
+    let source = deck("gain={gain*2}", "", false)
+        .replace("in out gain ", "in out alias ")
+        .replace(
+            ".OPTIONS SEED=37",
+            ".OPTIONS SEED=37\n.MODEL alias gain(gain=3)",
+        );
+    let result = Engine::default()
+        .run_dc_op(&Netlist::parse(&source).unwrap())
+        .unwrap();
+    assert!((result.try_voltage_named("out").unwrap() - 6.0).abs() < 1e-12);
+}
+
+#[test]
+fn masking_model_defaults_does_not_consume_speculative_samples() {
+    let source = deck(
+        "gain={aunif(100,1)+in_offset} in_offset={later}",
+        ".PARAM later=0",
+        false,
+    )
+    .replace("in out gain ", "in out alias ")
+    .replace(
+        ".OPTIONS SEED=37",
+        ".OPTIONS SEED=37\n.MODEL alias gain(in_offset=1)",
+    );
+    let mut reference = ParamContext::new();
+    reference.set_random_seed(37);
+    let expected = eval_expression("aunif(100,1)", &reference).unwrap();
+    let result = Engine::default()
+        .run_dc_op(&Netlist::parse(&source).unwrap())
+        .unwrap();
+    let actual = result.try_voltage_named("out").unwrap();
+    assert!((actual - expected).abs() < 1e-10, "{actual} != {expected}");
+}
