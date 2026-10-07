@@ -2196,6 +2196,55 @@ impl ProcessLowerer<'_> {
                     target.span(),
                 );
             }
+            DigitalLValue::ArraySelect(access) => {
+                let Some(array) = self.digital_array(&access.name) else {
+                    self.error(
+                        "packed selection requires a discrete unpacked array",
+                        access.span,
+                    );
+                    return;
+                };
+                let signed = self.self_signed(&access.index);
+                let index = self.array_index_value(block, &access.index);
+                let select = match &access.select {
+                    crate::ast::PackedSelect::Bit(bit) => {
+                        super::digital::DigitalArrayWriteSelect::Bit {
+                            signed: self.self_signed(bit),
+                            index: self.array_index_value(block, bit),
+                        }
+                    }
+                    crate::ast::PackedSelect::Part { msb, lsb } => {
+                        let (Some(msb), Some(lsb)) =
+                            (self.constant_index(msb), self.constant_index(lsb))
+                        else {
+                            return;
+                        };
+                        super::digital::DigitalArrayWriteSelect::Part { msb, lsb }
+                    }
+                };
+                let width = self.packed_select_width(&access.select);
+                let value = self.resize(block, value, width, false);
+                let kind = if nonblocking {
+                    CfgValueKind::DigitalArrayNonblockingWrite {
+                        array,
+                        index,
+                        signed,
+                        select,
+                        value,
+                        region: DigitalSchedulingRegion::NonBlockingAssign,
+                        wait,
+                    }
+                } else {
+                    CfgValueKind::DigitalArrayBlockingWrite {
+                        array,
+                        index,
+                        signed,
+                        select,
+                        value,
+                    }
+                };
+                self.builder.push(block, CfgValueType::Effect, kind);
+            }
             // IEEE 1364 9.2.1/9.2.2: blocking targets are evaluated after
             // the intra-assignment wait; NBA targets are captured at scheduling.
             DigitalLValue::BitSelect { name, index, .. } if self.digital_array(name).is_some() => {
@@ -2209,6 +2258,7 @@ impl ProcessLowerer<'_> {
                 };
                 let kind = if nonblocking {
                     CfgValueKind::DigitalArrayNonblockingWrite {
+                        select: super::digital::DigitalArrayWriteSelect::Whole,
                         array,
                         index,
                         signed,
@@ -2218,6 +2268,7 @@ impl ProcessLowerer<'_> {
                     }
                 } else {
                     CfgValueKind::DigitalArrayBlockingWrite {
+                        select: super::digital::DigitalArrayWriteSelect::Whole,
                         array,
                         index,
                         signed,
@@ -2402,6 +2453,13 @@ impl ProcessLowerer<'_> {
                 let lsb = self.constant_index(lsb)?;
                 (name, *span, DigitalWriteSelect::Part { msb, lsb })
             }
+            DigitalLValue::ArraySelect(access) => {
+                self.error(
+                    "packed array elements cannot be continuous driver targets",
+                    access.span,
+                );
+                return None;
+            }
             DigitalLValue::Concat { .. } => unreachable!("a concatenation is split before here"),
         };
         match self.index.get(name.as_str()) {
@@ -2425,6 +2483,7 @@ impl ProcessLowerer<'_> {
 
     fn lvalue_width(&mut self, target: &DigitalLValue) -> u32 {
         match target {
+            DigitalLValue::ArraySelect(access) => self.packed_select_width(&access.select),
             DigitalLValue::Identifier { name, .. } => match self.lookup_local(name) {
                 Some(local) => self.local_width(local),
                 None => self
@@ -2798,6 +2857,67 @@ impl ProcessLowerer<'_> {
         } else {
             self.index.get(name).copied().into_iter().collect()
         }
+    }
+
+    fn packed_select_width(&self, select: &crate::ast::PackedSelect) -> u32 {
+        match select {
+            crate::ast::PackedSelect::Bit(_) => 1,
+            crate::ast::PackedSelect::Part { msb, lsb } => self
+                .constant(msb)
+                .zip(self.constant(lsb))
+                .and_then(|(msb, lsb)| msb.abs_diff(lsb).checked_add(1))
+                .and_then(|width| u32::try_from(width).ok())
+                .unwrap_or(1),
+        }
+    }
+
+    fn array_packed_read(
+        &mut self,
+        block: BlockId,
+        access: &crate::ast::ArraySelectExpr,
+    ) -> ValueId {
+        let Some(array) = self.digital_array(&access.name) else {
+            self.error(
+                "packed selection requires a discrete unpacked array",
+                access.span,
+            );
+            return self.unknown(1);
+        };
+        let input = self.digital_array_read(
+            block,
+            &crate::ast::ArrayAccessExpr {
+                array: access.name.clone(),
+                index: access.index.clone(),
+                discrete_validity: None,
+                span: access.span,
+            },
+        );
+        let range = self.signals[usize::from(array.base)].declared_range();
+        let kind = match &access.select {
+            crate::ast::PackedSelect::Bit(bit) => CfgValueKind::DigitalBitSelect {
+                input,
+                signed: self.self_signed(bit),
+                index: self.array_index_value(block, bit),
+                bounds: (range.msb, range.lsb),
+            },
+            crate::ast::PackedSelect::Part { msb, lsb } => {
+                let msb = self.constant_index(msb).unwrap_or(0);
+                let lsb = self.constant_index(lsb).unwrap_or(0);
+                let (Some(msb), Some(lsb)) = (
+                    range.checked_position_of(msb),
+                    range.checked_position_of(lsb),
+                ) else {
+                    // Both endpoints of this bounded-width selection are far
+                    // outside the value. Saturating them separately would
+                    // collapse the result's width to one bit.
+                    return self.unknown(self.packed_select_width(&access.select));
+                };
+                CfgValueKind::DigitalPartSelect { input, msb, lsb }
+            }
+        };
+        let width = self.packed_select_width(&access.select);
+        self.builder
+            .push(block, CfgValueType::FourState { width }, kind)
     }
 
     fn digital_array_read(
@@ -3585,6 +3705,9 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::FourStateConstant(value),
                 )
             }
+            Expression::Digital(crate::ast::DigitalExpr::ArraySelect(access)) => {
+                self.array_packed_read(block, access)
+            }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
                 let input = self.named_value(block, &select.name, select.span);
                 let msb = self.constant_index(&select.msb).unwrap_or(0);
@@ -3700,7 +3823,7 @@ impl ProcessLowerer<'_> {
                 }
                 let input = self.named_value(block, &access.array, access.span);
                 let signed = self.self_signed(&access.index);
-                let index = self.expression(block, &access.index);
+                let index = self.array_index_value(block, &access.index);
                 let bounds = self.declared_range_of(&access.array);
                 self.builder.push(
                     block,
@@ -3874,6 +3997,7 @@ impl ProcessLowerer<'_> {
                         })
             }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(_))
+            | Expression::Digital(crate::ast::DigitalExpr::ArraySelect(_))
             | Expression::ArrayLiteral(_) => false,
             // Rules (g) and (h).
             Expression::Digital(crate::ast::DigitalExpr::CaseEquality(_))
@@ -3953,6 +4077,9 @@ impl ProcessLowerer<'_> {
             // their significant bits before any enclosing context is applied.
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
                 literal.value.width()
+            }
+            Expression::Digital(crate::ast::DigitalExpr::ArraySelect(access)) => {
+                self.packed_select_width(&access.select)
             }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(select)) => {
                 match (self.constant(&select.msb), self.constant(&select.lsb)) {
@@ -4742,6 +4869,11 @@ fn collect_lvalue_index_reads(target: &DigitalLValue, reads: &mut BTreeSet<Strin
     match target {
         DigitalLValue::Identifier { .. } => {}
         DigitalLValue::BitSelect { index, .. } => collect_expression_reads(index, reads),
+        DigitalLValue::ArraySelect(select) => {
+            for child in select.children() {
+                collect_expression_reads(child, reads);
+            }
+        }
         DigitalLValue::PartSelect { msb, lsb, .. } => {
             collect_expression_reads(msb, reads);
             collect_expression_reads(lsb, reads);

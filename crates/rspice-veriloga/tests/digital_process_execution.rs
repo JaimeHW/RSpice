@@ -58,6 +58,152 @@ fn parse_value(spelling: &str) -> FourStateValue {
 }
 
 #[test]
+fn packed_array_elements_preserve_selected_bits_and_deferred_targets() {
+    let mut h = Harness::from_source(
+        r#"
+module packed_arrays;
+ reg signed [7:0] memory[-2:-1]; reg [0:7] ascending[4:5];
+ integer codes[1:2], word, bit; real real_bit;
+ reg [7:0] clipped[0:0]; reg [-1:-8] far[0:0]; reg [3:0] far_read; reg [15:0] widened; reg [3:0] part, asc_part, clipped_part; reg known, unknown, invalid, sign_bit, real_known;
+ initial begin
+   memory[-2]=8'h81; memory[-1]=8'bx10z0011;
+   ascending[4]=8'h90; ascending[5]=0; codes[1]=-1;
+   widened=memory[-2][7:4]; asc_part=ascending[4][0:3]; part=memory[-1][3:0];
+   clipped[0]=255; clipped[0][9:6]=4'b1000; clipped_part=clipped[0][9:6];
+   clipped[0][99]=1; clipped[0][1'bx]=1; clipped[99][0]=0;
+   far[0]=255; far_read=far[0][(9223372036854774784+1023):(9223372036854774784+1020)];
+   far[0][(9223372036854774784+1023):(9223372036854774784+1020)]=0;
+   known=memory[-1][1]; unknown=memory[-1][7]; invalid=memory[99][0];
+   sign_bit=codes[1][31]; real_bit=1.5; ascending[5][real_bit]=1; real_known=ascending[5][real_bit];
+   word=-2; bit=1;
+   memory[word][bit] <= #5 1'b1;
+   memory[word][7:4] <= #5 4'h3;
+   memory[-2][3:0]=4'hc;
+   word=-1; bit=6;
+   memory[word][bit] = #7 1'b0;
+ end
+endmodule
+"#,
+    );
+    let DigitalProcessOutcome::Suspended(wait) = h.start(0) else {
+        panic!("blocking wait");
+    };
+    assert_eq!(
+        h.get("widened"),
+        "0000000000001000",
+        "part selections of signed elements are unsigned"
+    );
+    assert_eq!(h.get("part"), "0011");
+    assert_eq!(h.get("asc_part"), "1001");
+    assert_eq!(h.get("clipped[0]"), "00111111");
+    assert_eq!(h.get("clipped_part"), "xx00");
+    assert_eq!(h.get("far[0]"), "11111111");
+    assert_eq!(h.get("far_read"), "xxxx");
+    assert_eq!(h.get("known"), "1");
+    assert_eq!(h.get("unknown"), "x");
+    assert_eq!(h.get("invalid"), "x");
+    assert_eq!(h.get("sign_bit"), "1");
+    assert_eq!(h.get("real_known"), "1");
+    assert_eq!(h.get("ascending[5]"), "00100000");
+    assert_eq!(h.get("memory[-2]"), "10001100");
+    assert_eq!(h.store.deferred.len(), 2);
+    h.set("word", &format!("{:032b}", -2i32 as u32));
+    h.set("bit", &format!("{:032b}", 2));
+    expect_finished(h.resume(0, wait.resume_state()));
+    assert_eq!(
+        h.get("memory[-2]"),
+        "10001000",
+        "blocking target evaluated after wait"
+    );
+    let deferred = std::mem::take(&mut h.store.deferred);
+    for update in &deferred {
+        apply_deferred(&h.plan, &mut h.store, &update.clone()).unwrap();
+    }
+    assert_eq!(
+        h.get("memory[-2]"),
+        "00111010",
+        "captured NBA selects merge into current storage"
+    );
+    assert_eq!(h.get("memory[-1]"), "x10z0011");
+}
+
+#[test]
+fn packed_array_elements_link_and_validate_selectors() {
+    let source = r#"
+module child(out); output out; wire out;
+ reg [7:0] memory[0:1]; integer word, bit;
+ initial begin word=0; bit=2; memory[0]=0; memory[1]=0; memory[word][bit]<=1; end
+ assign out=memory[word][bit];
+endmodule
+module top; wire a,b; child u1(a); child u2(b); endmodule
+"#;
+    let mut h = Harness::from_module(source, Some("top"));
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    let initial: Vec<_> = h
+        .plan
+        .processes
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.kind == DigitalProcessKind::Initial)
+        .map(|(i, _)| i)
+        .collect();
+    for process in initial {
+        expect_finished(h.start(process));
+    }
+    assert_eq!(h.store.deferred.len(), 2);
+    let updates = std::mem::take(&mut h.store.deferred);
+    assert_ne!(updates[0].target.signal, updates[1].target.signal);
+    for update in updates {
+        apply_deferred(&h.plan, &mut h.store, &update).unwrap();
+    }
+    for prefix in ["u1", "u2"] {
+        assert_eq!(h.get(&format!("{prefix}.memory[0]")), "00000100");
+        assert_eq!(h.get(&format!("{prefix}.memory[1]")), "00000000");
+        let reads = ["memory[0]", "memory[1]", "word", "bit"]
+            .map(|name| h.signal(&format!("{prefix}.{name}")));
+        assert!(
+            h.plan
+                .processes
+                .iter()
+                .any(|p| p.static_sensitivity.as_ref().is_some_and(|s| reads
+                    .iter()
+                    .all(|id| s.terms.iter().any(|t| t.signal == *id))))
+        );
+    }
+    use rspice_veriloga::canonical_ir::{CfgValueKind, digital::DigitalArrayWriteSelect};
+    let mut malformed = h.plan.clone();
+    let select = malformed
+        .processes
+        .iter_mut()
+        .flat_map(|p| p.function.values.iter_mut())
+        .find_map(|v| match &mut v.kind {
+            CfgValueKind::DigitalArrayNonblockingWrite { select, .. } => Some(select),
+            _ => None,
+        })
+        .unwrap();
+    *select = DigitalArrayWriteSelect::Part {
+        msb: i64::MAX,
+        lsb: i64::MIN,
+    };
+    let errors = malformed.validate().unwrap_err();
+    assert!(format!("{errors:?}").contains("width or direction"));
+    for body in [
+        "real a[0:1]; initial a[0][0]=1;",
+        "reg [7:0] a[0:1]; initial a[0][0:3]=1;",
+        "reg [7:0] a[0:1]; integer n; initial a[0][n:0]=1;",
+        "reg [7:0] a[0:1]; initial a[0][9223372036854775807:-9223372036854775808]=1;",
+    ] {
+        assert!(
+            VerilogACompiler::new(CompilerOptions::default())
+                .compile_canonical_ir_module(&format!("module bad; {body} endmodule"), None)
+                .is_err(),
+            "accepted {body}"
+        );
+    }
+}
+
+#[test]
 fn unpacked_arrays_execute_typed_elements_and_assignment_timing() {
     let mut h = Harness::from_source(
         r#"

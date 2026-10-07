@@ -286,6 +286,16 @@ impl VectorBounds {
         index >= low && index <= high
     }
 
+    /// Exact position when representable. Part reads use this to preserve their
+    /// authored width even when both endpoints lie beyond the position range.
+    pub const fn checked_position_of(self, index: i64) -> Option<i64> {
+        if self.msb >= self.lsb {
+            index.checked_sub(self.lsb)
+        } else {
+            self.lsb.checked_sub(index)
+        }
+    }
+
     /// Where the bit this range *names* `index` is stored, counting from the
     /// least significant end.
     ///
@@ -1769,6 +1779,13 @@ impl SemanticAnalyzer {
         procedural: bool,
     ) {
         match target {
+            DigitalLValue::ArraySelect(select) => {
+                self.check_assignable(&select.name, select.span, signals, index, procedural);
+                self.check_array_packed_select(select, signals, index);
+                for child in select.children() {
+                    self.check_digital_expression(child, signals, index);
+                }
+            }
             DigitalLValue::Concat { elements, .. } => {
                 for element in elements {
                     self.check_digital_lvalue(element, signals, index, procedural);
@@ -1808,6 +1825,70 @@ impl SemanticAnalyzer {
                 self.check_digital_expression(msb, signals, index);
                 self.check_digital_expression(lsb, signals, index);
             }
+        }
+    }
+
+    fn check_array_packed_select(
+        &mut self,
+        select: &ArraySelectExpr,
+        signals: &[AnalyzedDigitalSignal],
+        index: &HashMap<SmolStr, usize>,
+    ) {
+        let Resolution::Digital(position) = self.resolve_digital_name(&select.name, index) else {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{}` is not a discrete unpacked array",
+                    select.name
+                )),
+                select.span,
+            );
+            return;
+        };
+        let signal = &signals[position];
+        if signal.unpacked.is_none() || signal.class.is_real() {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "packed selection of `{}` requires an unpacked array of four-state elements",
+                    select.name
+                )),
+                select.span,
+            );
+            return;
+        }
+        if let PackedSelect::Part { msb, lsb } = &select.select {
+            let high = self
+                .eval_const_invariant_value(msb)
+                .and_then(|v| v.as_exact_i64());
+            let low = self
+                .eval_const_invariant_value(lsb)
+                .and_then(|v| v.as_exact_i64());
+            let (Some(high), Some(low)) = (high, low) else {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(
+                        "packed array part-select bounds must be constant signed 64-bit integers"
+                            .into(),
+                    ),
+                    select.span,
+                );
+                return;
+            };
+            let width = high.abs_diff(low).checked_add(1);
+            if width.is_none_or(|width| width > u64::from(MAX_DIGITAL_VECTOR_WIDTH)) {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(
+                        "packed array part-select width exceeds the supported vector width".into(),
+                    ),
+                    select.span,
+                );
+                return;
+            }
+            let range = signal.range.unwrap_or(VectorBounds::SCALAR);
+            self.check_part_select_direction(
+                &select.name,
+                select.span,
+                Some((range, high)),
+                Some((range, low)),
+            );
         }
     }
 
@@ -2047,10 +2128,8 @@ impl SemanticAnalyzer {
     /// answer to a question the standard does not let an author ask, and the
     /// author who wrote it meant something the declaration cannot provide.
     ///
-    /// Asked through [`VectorBounds::position_of`] rather than by comparing the
-    /// two indices with the two bounds, because "more significant" is exactly
-    /// what a position is: `[4:7] q; q[5:6]` is in the declared direction even
-    /// though 5 is the smaller number.
+    /// Compare the authored indices directly: offsets can be unrepresentable
+    /// for an out-of-range selection, but declaration direction remains exact.
     fn check_part_select_direction(
         &mut self,
         name: &SmolStr,
@@ -2061,7 +2140,7 @@ impl SemanticAnalyzer {
         let (Some((range, high)), Some((_, low))) = (msb, lsb) else {
             return;
         };
-        if range.position_of(high) >= range.position_of(low) {
+        if high == low || (high > low) == (range.msb >= range.lsb) {
             return;
         }
         self.record_error_at(
@@ -2128,6 +2207,9 @@ impl SemanticAnalyzer {
                 }
             }
             Expression::Digital(digital) => {
+                if let DigitalExpr::ArraySelect(select) = digital {
+                    self.check_array_packed_select(select, signals, index);
+                }
                 if let Some(name) = digital.base_name() {
                     if matches!(
                         self.resolve_digital_name(name, index),

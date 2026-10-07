@@ -979,6 +979,8 @@ pub enum DigitalExpr {
     /// The indexed forms `bus[base +: width]` and `bus[base -: width]` are not
     /// part of this wave and are refused by name.
     PartSelect(PartSelectExpr),
+    /// Packed bit or constant part of an unpacked array element.
+    ArraySelect(ArraySelectExpr),
     /// Bitwise XNOR: `a ~^ b`, `a ^~ b` (IEEE 1364-2005 section 5.1.9).
     ///
     /// Here rather than as a [`BinaryOp`] because the continuous half of the
@@ -1011,6 +1013,7 @@ impl DigitalExpr {
         match self {
             Self::FourState(literal) => literal.span,
             Self::PartSelect(select) => select.span,
+            Self::ArraySelect(select) => select.span,
             Self::Xnor(xnor) => xnor.span,
             Self::CaseEquality(equality) => equality.span,
             Self::Reduction(reduction) => reduction.span,
@@ -1023,6 +1026,7 @@ impl DigitalExpr {
         match self {
             Self::FourState(_) => "four-state literal",
             Self::PartSelect(_) => "part-select",
+            Self::ArraySelect(_) => "packed array-element select",
             Self::Xnor(_) => "bitwise XNOR operator",
             Self::CaseEquality(_) => "case equality operator",
             Self::Reduction(_) => "reduction operator",
@@ -1036,6 +1040,7 @@ impl DigitalExpr {
         match self {
             Self::FourState(_) => Vec::new(),
             Self::PartSelect(select) => vec![&select.msb, &select.lsb],
+            Self::ArraySelect(select) => select.children(),
             Self::Xnor(xnor) => vec![&xnor.left, &xnor.right],
             Self::CaseEquality(equality) => vec![&equality.left, &equality.right],
             Self::Reduction(reduction) => vec![&reduction.operand],
@@ -1045,7 +1050,7 @@ impl DigitalExpr {
 
     /// The signal this expression reads, when it names one.
     ///
-    /// Only a part-select does. The operators name no signal of their own —
+    /// Named vector and array-element selections do. Operators name no signal of their own —
     /// whatever they read is in [`Self::children`], which is where a walk that
     /// wants every read has to look.
     pub fn base_name(&self) -> Option<&SmolStr> {
@@ -1056,6 +1061,7 @@ impl DigitalExpr {
             | Self::Reduction(_)
             | Self::ArithmeticShiftRight(_) => None,
             Self::PartSelect(select) => Some(&select.name),
+            Self::ArraySelect(select) => Some(&select.name),
         }
     }
 }
@@ -1150,6 +1156,40 @@ pub struct PartSelectExpr {
     pub msb: Box<Expression>,
     pub lsb: Box<Expression>,
     pub span: Span,
+}
+
+/// The packed selection applied after choosing an unpacked array element.
+#[derive(Debug, Clone)]
+pub enum PackedSelect {
+    Bit(Box<Expression>),
+    Part {
+        msb: Box<Expression>,
+        lsb: Box<Expression>,
+    },
+}
+
+/// `name[index][bit]` or `name[index][msb:lsb]`.
+#[derive(Debug, Clone)]
+pub struct ArraySelectExpr {
+    pub name: SmolStr,
+    pub index: Box<Expression>,
+    pub select: PackedSelect,
+    pub span: Span,
+}
+
+impl ArraySelectExpr {
+    pub fn children(&self) -> Vec<&Expression> {
+        match &self.select {
+            PackedSelect::Bit(bit) => vec![&self.index, bit],
+            PackedSelect::Part { msb, lsb } => vec![&self.index, msb, lsb],
+        }
+    }
+    pub fn children_mut(&mut self) -> Vec<&mut Expression> {
+        match &mut self.select {
+            PackedSelect::Bit(bit) => vec![&mut self.index, bit],
+            PackedSelect::Part { msb, lsb } => vec![&mut self.index, msb, lsb],
+        }
+    }
 }
 
 /// Number literal
@@ -1991,6 +2031,8 @@ pub enum DigitalLValue {
         lsb: Box<Expression>,
         span: Span,
     },
+    /// Packed selection inside an unpacked array element.
+    ArraySelect(ArraySelectExpr),
     /// A concatenation of targets: `{carry, sum}`
     Concat {
         elements: Vec<DigitalLValue>,
@@ -2005,6 +2047,7 @@ impl DigitalLValue {
             | Self::BitSelect { span, .. }
             | Self::PartSelect { span, .. }
             | Self::Concat { span, .. } => *span,
+            Self::ArraySelect(select) => select.span,
         }
     }
 
@@ -2020,6 +2063,7 @@ impl DigitalLValue {
             Self::Identifier { name, span }
             | Self::BitSelect { name, span, .. }
             | Self::PartSelect { name, span, .. } => names.push((name, *span)),
+            Self::ArraySelect(select) => names.push((&select.name, select.span)),
             Self::Concat { elements, .. } => {
                 for element in elements {
                     element.collect_written_names(names);

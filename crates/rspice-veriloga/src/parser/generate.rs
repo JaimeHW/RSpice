@@ -642,6 +642,11 @@ impl Unroller<'_> {
     fn substitute_digital(&self, digital: &mut DigitalExpr) {
         match digital {
             DigitalExpr::FourState(_) => {}
+            DigitalExpr::ArraySelect(select) => {
+                for child in select.children_mut() {
+                    self.substitute(child);
+                }
+            }
             DigitalExpr::PartSelect(select) => {
                 self.substitute(&mut select.msb);
                 self.substitute(&mut select.lsb);
@@ -677,6 +682,11 @@ impl Unroller<'_> {
     fn substitute_lvalue(&self, target: &mut DigitalLValue) {
         match target {
             DigitalLValue::Identifier { .. } => {}
+            DigitalLValue::ArraySelect(select) => {
+                for child in select.children_mut() {
+                    self.substitute(child);
+                }
+            }
             DigitalLValue::BitSelect { index, .. } => self.substitute(index),
             DigitalLValue::PartSelect { msb, lsb, .. } => {
                 self.substitute(msb);

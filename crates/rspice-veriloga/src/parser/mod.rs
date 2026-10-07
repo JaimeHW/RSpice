@@ -2828,6 +2828,11 @@ impl<'a> Parser<'a> {
                         )));
                     }
                     self.expect(TokenKind::RBracket)?;
+                    if self.check(TokenKind::LBracket) {
+                        return Ok(Expression::Digital(DigitalExpr::ArraySelect(
+                            self.parse_array_packed_select(name.into(), index, start)?,
+                        )));
+                    }
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
                         discrete_validity: None,
                         array: name.into(),

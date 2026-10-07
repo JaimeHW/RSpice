@@ -569,19 +569,20 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalArrayRead { array, signed, .. } => {
                 write!(out, "digital-array-read:{array:?}:{signed}")
             }
-            CfgValueKind::DigitalArrayBlockingWrite { array, signed, .. } => {
-                write!(out, "digital-array-blocking-write:{array:?}:{signed}")
+            CfgValueKind::DigitalArrayBlockingWrite { array, signed, select, .. } => {
+                write!(out, "digital-array-blocking-write:{array:?}:{signed}:{select:?}")
             }
             CfgValueKind::DigitalArrayNonblockingWrite {
                 array,
                 signed,
+                select,
                 region,
                 wait,
                 ..
             } => {
                 write!(
                     out,
-                    "digital-array-nonblocking-write:{array:?}:{signed}:{region:?}:{wait:?}"
+                    "digital-array-nonblocking-write:{array:?}:{signed}:{select:?}:{region:?}:{wait:?}"
                 )
             }
             CfgValueKind::DigitalSignalRead { signal } => {

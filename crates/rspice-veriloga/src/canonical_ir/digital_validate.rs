@@ -409,7 +409,9 @@ impl CanonicalDigitalPlan {
                             if value.value_type != (CfgValueType::FourState { width: 1 })
                                 || !matches!(
                                     function.value(*index).value_type,
-                                    CfgValueType::FourState { .. } | CfgValueType::Integer
+                                    CfgValueType::FourState { .. }
+                                        | CfgValueType::Integer
+                                        | CfgValueType::Real
                                 )
                                 || !matches!(function.value(*input).value_type, CfgValueType::FourState { width: w } if Some(u64::from(w)) == width)
                             {
@@ -482,12 +484,52 @@ impl CanonicalDigitalPlan {
                                         ));
                                     }
                                 }
-                                CfgValueKind::DigitalArrayBlockingWrite { value: rhs, .. }
+                                CfgValueKind::DigitalArrayBlockingWrite {
+                                    value: rhs,
+                                    select,
+                                    ..
+                                }
                                 | CfgValueKind::DigitalArrayNonblockingWrite {
-                                    value: rhs, ..
+                                    value: rhs,
+                                    select,
+                                    ..
                                 } => {
+                                    let expected = match select {
+                                        DigitalArrayWriteSelect::Whole => element_type,
+                                        DigitalArrayWriteSelect::Bit { index, .. } => {
+                                            if signal.kind.is_real()
+                                                || !matches!(
+                                                    function.value(*index).value_type,
+                                                    CfgValueType::Real
+                                                        | CfgValueType::Integer
+                                                        | CfgValueType::FourState { .. }
+                                                )
+                                            {
+                                                return Err(error(
+                                                    "digital array bit write requires a four-state element and numeric selector",
+                                                ));
+                                            }
+                                            CfgValueType::FourState { width: 1 }
+                                        }
+                                        DigitalArrayWriteSelect::Part { msb, lsb } => {
+                                            let width = msb.abs_diff(*lsb).checked_add(1).filter(|width| *width <= u64::from(crate::semantic::MAX_DIGITAL_VECTOR_WIDTH));
+                                            let bounds = signal.bounds.unwrap_or((0, 0));
+                                            if signal.kind.is_real()
+                                                || width.is_none()
+                                                || (msb != lsb
+                                                    && (msb > lsb) != (bounds.0 >= bounds.1))
+                                            {
+                                                return Err(error(
+                                                    "digital array part write has an invalid element type, width or direction",
+                                                ));
+                                            }
+                                            CfgValueType::FourState {
+                                                width: width.unwrap() as u32,
+                                            }
+                                        }
+                                    };
                                     if value.value_type != CfgValueType::Effect
-                                        || function.value(*rhs).value_type != element_type
+                                        || function.value(*rhs).value_type != expected
                                     {
                                         return Err(error(
                                             "digital array write has the wrong effect or element type",

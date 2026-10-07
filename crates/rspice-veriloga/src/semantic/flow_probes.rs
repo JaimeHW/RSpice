@@ -949,6 +949,11 @@ pub(super) fn for_child_mut<'a>(
         Expression::NoiseSource(NoiseSource::Table { data, .. }) => data.iter_mut().for_each(visit),
         Expression::Digital(digital) => match digital {
             DigitalExpr::FourState(_) => {}
+            DigitalExpr::ArraySelect(select) => {
+                for child in select.children_mut() {
+                    visit(child);
+                }
+            }
             DigitalExpr::PartSelect(expr) => {
                 visit(&mut expr.msb);
                 visit(&mut expr.lsb);

@@ -128,6 +128,7 @@
 //!
 //! [`CfgValueKind::DigitalSignalRead`]: super::cfg::CfgValueKind::DigitalSignalRead
 
+use super::ValueId;
 use super::cfg::CfgFunction;
 use super::diagnostic::SourceSpanRef;
 use super::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
@@ -547,6 +548,31 @@ impl DigitalWriteSelect {
             Self::Whole => 0,
             Self::Bit(index) => range.position_of(*index),
             Self::Part { msb, lsb } => range.position_of(*msb).min(range.position_of(*lsb)),
+        }
+    }
+}
+
+/// Packed selection inside a runtime-selected unpacked array element.
+/// Unlike a captured `DigitalWriteSelect`, a bit index here is an SSA value:
+/// it is evaluated at the write and resolved before an update is deferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalArrayWriteSelect {
+    Whole,
+    Bit { index: ValueId, signed: bool },
+    Part { msb: i64, lsb: i64 },
+}
+
+impl DigitalArrayWriteSelect {
+    pub fn operand(self) -> Option<ValueId> {
+        match self {
+            Self::Bit { index, .. } => Some(index),
+            _ => None,
+        }
+    }
+
+    pub fn map_operands(&mut self, map: &mut impl FnMut(ValueId) -> ValueId) {
+        if let Self::Bit { index, .. } = self {
+            *index = map(*index);
         }
     }
 }

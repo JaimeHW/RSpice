@@ -967,7 +967,7 @@ pub fn apply_deferred<E: DigitalEnvironment + ?Sized>(
 /// signal does not name comes to write nothing.
 fn patch(current: &mut FourStateValue, low: i64, value: &FourStateValue) {
     for offset in 0..value.width() {
-        let position = low + i64::from(offset);
+        let position = low.saturating_add(i64::from(offset));
         if position < 0 || position >= i64::from(current.width()) {
             continue;
         }
@@ -1759,13 +1759,46 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         index: ValueId,
         signed: bool,
     ) -> Result<Option<DigitalSignalId>, DigitalEvalError> {
+        Ok(self
+            .selection_index(index, signed)?
+            .and_then(|index| array.element(index)))
+    }
+
+    fn selection_index(
+        &self,
+        index: ValueId,
+        signed: bool,
+    ) -> Result<Option<i64>, DigitalEvalError> {
         let index = match self.scalar(index)? {
             ScalarRef::Real(value) => crate::array_index::checked_rounded_i64(value).ok(),
             ScalarRef::Integer(value) => Some(i64::from(value)),
             ScalarRef::FourState(value) => value.bit_index(signed),
             ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(index)),
         };
-        Ok(index.and_then(|index| array.element(index)))
+        Ok(index)
+    }
+
+    fn array_write_target(
+        &self,
+        array: super::digital::DigitalArrayRef,
+        index: ValueId,
+        signed: bool,
+        select: super::digital::DigitalArrayWriteSelect,
+    ) -> Result<Option<DigitalWriteTarget>, DigitalEvalError> {
+        use super::digital::DigitalArrayWriteSelect;
+        let select = match select {
+            DigitalArrayWriteSelect::Whole => Some(DigitalWriteSelect::Whole),
+            DigitalArrayWriteSelect::Bit { index, signed } => self
+                .selection_index(index, signed)?
+                .map(DigitalWriteSelect::Bit),
+            DigitalArrayWriteSelect::Part { msb, lsb } => {
+                Some(DigitalWriteSelect::Part { msb, lsb })
+            }
+        };
+        let signal = self.array_element(array, index, signed)?;
+        Ok(signal
+            .zip(select)
+            .map(|(signal, select)| DigitalWriteTarget { signal, select }))
     }
 
     fn blocking_write(
@@ -2063,21 +2096,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 array,
                 index,
                 signed,
+                select,
                 value,
-            } => match self.array_element(*array, *index, *signed)? {
-                Some(signal) => self.blocking_write(
-                    &DigitalWriteTarget {
-                        signal,
-                        select: DigitalWriteSelect::Whole,
-                    },
-                    *value,
-                ),
+            } => match self.array_write_target(*array, *index, *signed, *select)? {
+                Some(target) => self.blocking_write(&target, *value),
                 None => Ok(DigitalScalar::Effect),
             },
             CfgValueKind::DigitalArrayNonblockingWrite {
                 array,
                 index,
                 signed,
+                select,
                 value,
                 region,
                 wait,
@@ -2087,16 +2116,8 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     Some(wait) => self.capture_wait(wait)?,
                     None => None,
                 };
-                match self.array_element(*array, *index, *signed)? {
-                    Some(signal) => self.nonblocking_write(
-                        &DigitalWriteTarget {
-                            signal,
-                            select: DigitalWriteSelect::Whole,
-                        },
-                        *value,
-                        *region,
-                        wait,
-                    ),
+                match self.array_write_target(*array, *index, *signed, *select)? {
+                    Some(target) => self.nonblocking_write(&target, *value, *region, wait),
                     None => Ok(DigitalScalar::Effect),
                 }
             }
@@ -2370,9 +2391,8 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 signed,
             } => {
                 let input = self.four_state(*input)?;
-                let index = self.four_state(*index)?;
-                let bit = index
-                    .bit_index(*signed)
+                let bit = self
+                    .selection_index(*index, *signed)?
                     .map(|index| {
                         super::VectorBounds {
                             msb: bounds.0,

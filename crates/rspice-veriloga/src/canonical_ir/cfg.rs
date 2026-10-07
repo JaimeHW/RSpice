@@ -1169,6 +1169,7 @@ pub enum CfgValueKind {
         array: super::digital::DigitalArrayRef,
         index: ValueId,
         signed: bool,
+        select: super::digital::DigitalArrayWriteSelect,
         value: ValueId,
     },
     /// Capture both the selected scalar cell and RHS when scheduling the update.
@@ -1176,6 +1177,7 @@ pub enum CfgValueKind {
         array: super::digital::DigitalArrayRef,
         index: ValueId,
         signed: bool,
+        select: super::digital::DigitalArrayWriteSelect,
         value: ValueId,
         region: DigitalSchedulingRegion,
         wait: Option<DigitalWait>,
@@ -1646,11 +1648,24 @@ impl CfgValueKind {
             } => vec![*condition, *then_value, *else_value],
             Self::DigitalBitSelect { input, index, .. } => vec![*input, *index],
             Self::DigitalArrayRead { index, .. } => vec![*index],
-            Self::DigitalArrayBlockingWrite { index, value, .. } => vec![*index, *value],
-            Self::DigitalArrayNonblockingWrite {
-                index, value, wait, ..
+            Self::DigitalArrayBlockingWrite {
+                index,
+                select,
+                value,
+                ..
             } => [*index, *value]
                 .into_iter()
+                .chain(select.operand())
+                .collect(),
+            Self::DigitalArrayNonblockingWrite {
+                index,
+                select,
+                value,
+                wait,
+                ..
+            } => [*index, *value]
+                .into_iter()
+                .chain(select.operand())
                 .chain(wait.iter().flat_map(DigitalWait::operands))
                 .collect(),
             Self::DigitalNonblockingWrite { value, wait, .. } => std::iter::once(*value)
@@ -1976,15 +1991,26 @@ impl CfgValueKind {
                 *index = map(*index);
             }
             Self::DigitalArrayRead { index, .. } => *index = map(*index),
-            Self::DigitalArrayBlockingWrite { index, value, .. } => {
-                *index = map(*index);
-                *value = map(*value);
-            }
-            Self::DigitalArrayNonblockingWrite {
-                index, value, wait, ..
+            Self::DigitalArrayBlockingWrite {
+                index,
+                select,
+                value,
+                ..
             } => {
                 *index = map(*index);
                 *value = map(*value);
+                select.map_operands(&mut map);
+            }
+            Self::DigitalArrayNonblockingWrite {
+                index,
+                select,
+                value,
+                wait,
+                ..
+            } => {
+                *index = map(*index);
+                *value = map(*value);
+                select.map_operands(&mut map);
                 if let Some(wait) = wait {
                     wait.map_operands(&mut map);
                 }

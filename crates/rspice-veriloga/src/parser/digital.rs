@@ -1014,9 +1014,39 @@ impl Parser<'_> {
             });
         }
         self.expect(TokenKind::RBracket)?;
+        if self.check(TokenKind::LBracket) {
+            return Ok(DigitalLValue::ArraySelect(
+                self.parse_array_packed_select(name, first, start)?,
+            ));
+        }
         Ok(DigitalLValue::BitSelect {
             name,
             index: Box::new(first),
+            span: start.extend(self.previous_span()),
+        })
+    }
+
+    pub(super) fn parse_array_packed_select(
+        &mut self,
+        name: SmolStr,
+        index: Expression,
+        start: crate::Span,
+    ) -> Result<ArraySelectExpr, ParseError> {
+        self.expect(TokenKind::LBracket)?;
+        let first = self.parse_expression()?;
+        let select = if self.match_token(TokenKind::Colon) {
+            PackedSelect::Part {
+                msb: Box::new(first),
+                lsb: Box::new(self.parse_expression()?),
+            }
+        } else {
+            PackedSelect::Bit(Box::new(first))
+        };
+        self.expect(TokenKind::RBracket)?;
+        Ok(ArraySelectExpr {
+            name,
+            index: Box::new(index),
+            select,
             span: start.extend(self.previous_span()),
         })
     }

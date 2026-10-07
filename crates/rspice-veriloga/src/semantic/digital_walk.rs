@@ -87,6 +87,11 @@ pub(super) fn visit_roots(body: &DigitalStatement, visit: &mut impl FnMut(&Expre
             }
             Work::Target(target) => match target {
                 DigitalLValue::Identifier { .. } => {}
+                DigitalLValue::ArraySelect(select) => {
+                    for child in select.children() {
+                        visit(child);
+                    }
+                }
                 DigitalLValue::BitSelect { index, .. } => visit(index),
                 DigitalLValue::PartSelect { msb, lsb, .. } => {
                     visit(msb);
@@ -196,6 +201,11 @@ pub(super) fn rewrite_roots(body: &mut DigitalStatement, visit: &mut impl FnMut(
             }
             Work::Target(target) => match target {
                 DigitalLValue::Identifier { .. } => {}
+                DigitalLValue::ArraySelect(select) => {
+                    for child in select.children_mut() {
+                        visit(child);
+                    }
+                }
                 DigitalLValue::BitSelect { index, .. } => visit(index),
                 DigitalLValue::PartSelect { msb, lsb, .. } => {
                     visit(msb);

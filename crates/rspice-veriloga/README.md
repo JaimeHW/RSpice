@@ -311,9 +311,20 @@ The shared checked operations are lowered by the VM, native, generated-Rust and
 Wasm paths (Wasm helper ABI 20). Full shipping-platform execution remains to be
 qualified. Non-finite real inputs still use the current rejection policy when
 read; language-complete propagation of special real values remains open.
-Unpacked net/port arrays, whole-array values and slices, replicated initializer
-patterns, multidimensional shapes, full parameter-dependent shape/child-override
-support, and remaining mixed-host/platform qualification are still open.
+Schema 73 supports `array[word][bit]` and `array[word][msb:lsb]` in digital
+expressions and procedural assignments. Bit selectors may vary at runtime;
+ordinary part-select bounds are constant and follow the packed declaration's
+direction. Selected results are unsigned and retain X/Z bits. Out-of-range
+read bits become X; writes affect only bits that exist. Nonblocking updates
+capture the element, packed selection and RHS at scheduling, then merge into
+current storage when delivered. Blocking intra-assignment waits resolve both
+selectors after resumption. Linking and event dependencies retain the array,
+word selector and packed selector.
+Direct packed-element projection into analog expressions, indexed part-selects
+(`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
+initializer patterns, multidimensional shapes, full parameter-dependent
+shape/child-override support, and remaining mixed-host/platform qualification
+are still open.
 
 Delay-controlled nonblocking assignments capture their RHS and converted delay
 at encounter, then continue immediately. Positive delays retain every update
