@@ -7,12 +7,10 @@ use super::*;
 use crate::analysis::quasi_periodic::{check_abort, finite};
 mod adaptive;
 pub(crate) mod event;
-pub use adaptive::{
-    SpectralEnvelopeAdvance, SpectralEnvelopeControl, advance_spectral_envelope_with_abort,
-};
-pub use event::{
-    SpectralEnvelopeEvent, SpectralEnvelopeEventConfig, SpectralEnvelopeEventEquation,
-};
+pub use adaptive::SpectralEnvelopeControl;
+pub(crate) use adaptive::advance_spectral_envelope_with_abort;
+pub use event::SpectralEnvelopeEventConfig;
+pub(crate) use event::{SpectralEnvelopeEvent, SpectralEnvelopeEventEquation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -26,7 +24,7 @@ pub enum SpectralEnvelopeMethod {
 /// Accepted numerical envelope history, not an authenticated engine artifact.
 /// The caller owns the physical circuit and its consistent MNA coordinate order.
 #[derive(Debug, Clone)]
-pub struct SpectralEnvelopeState {
+pub(crate) struct SpectralEnvelopeState {
     time: Value,
     solution: QuasiPeriodicSolution,
     /// Delivered charge has the negative sign of the physical Q equations.
@@ -37,29 +35,29 @@ pub struct SpectralEnvelopeState {
 }
 
 impl SpectralEnvelopeState {
-    pub fn time(&self) -> Value {
+    pub(crate) fn time(&self) -> Value {
         self.time
     }
-    pub fn grid(&self) -> &Arc<QuasiPeriodicGrid> {
+    pub(crate) fn grid(&self) -> &Arc<QuasiPeriodicGrid> {
         self.solution.grid()
     }
-    pub fn spectra(&self) -> &[Vec<Complex64>] {
+    pub(crate) fn spectra(&self) -> &[Vec<Complex64>] {
         self.solution.spectra()
     }
-    pub fn iterations(&self) -> usize {
+    pub(crate) fn iterations(&self) -> usize {
         self.solution.iterations()
     }
-    pub fn normalized_residual(&self) -> Value {
+    pub(crate) fn normalized_residual(&self) -> Value {
         self.solution.normalized_residual()
     }
     /// Zero at initialization, otherwise the order actually used for this step.
-    pub fn order(&self) -> usize {
+    pub(crate) fn order(&self) -> usize {
         self.order
     }
     /// Restart the multistep stencil after a source discontinuity. The
     /// accepted physical state and its charge/flux remain intact; this does
     /// not itself solve an algebraic jump or choose a source's event side.
-    pub fn restart_integration_history(&mut self) {
+    pub(crate) fn restart_integration_history(&mut self) {
         self.older = None;
     }
 }

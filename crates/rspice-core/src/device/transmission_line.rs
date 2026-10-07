@@ -52,8 +52,11 @@ use distributed::{
     DistributedRcKernel, DistributedRlcKernel, distributed_rc_coefficients,
     distributed_rlc_coefficients, distributed_rlc_max_safe_step,
 };
-pub(crate) use line::{DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint};
-pub use line::{TransmissionLine, TransmissionLineHistoryEvent, TransmissionLineTimeSide};
+pub use line::TransmissionLine;
+pub(crate) use line::{
+    DistributedRlgc, LtraRgTwoPort, TransmissionLineCheckpoint, TransmissionLineHistoryEvent,
+    TransmissionLineTimeSide,
+};
 pub(crate) use response::TlineTransientResponse;
 pub(crate) use txl::TxlTransientStamp;
 

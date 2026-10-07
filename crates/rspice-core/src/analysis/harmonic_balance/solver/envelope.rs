@@ -16,7 +16,7 @@ impl HbSolver {
         clippy::too_many_arguments,
         reason = "event topology, sided forcing, solver policy and resources are independent"
     )]
-    pub fn transition_spectral_envelope_with_abort(
+    pub(crate) fn transition_spectral_envelope_with_abort(
         &mut self,
         previous: &SpectralEnvelopeState,
         rows: &[SpectralEnvelopeEventEquation],
@@ -81,7 +81,7 @@ impl HbSolver {
     /// Capture the physical charge and flux of an initial periodic solution.
     /// The caller must retain the same circuit coordinate order throughout the
     /// mission. This numerical state is not an authenticated engine artifact.
-    pub fn initialize_spectral_envelope_with_abort(
+    pub(crate) fn initialize_spectral_envelope_with_abort(
         &mut self,
         time: Value,
         initial: &QuasiPeriodicSolution,
@@ -104,7 +104,7 @@ impl HbSolver {
         clippy::too_many_arguments,
         reason = "physical history, solver policy and resources are independent"
     )]
-    pub fn step_spectral_envelope_with_abort(
+    pub(crate) fn step_spectral_envelope_with_abort(
         &mut self,
         previous: &SpectralEnvelopeState,
         time: Value,

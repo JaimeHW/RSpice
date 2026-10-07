@@ -35,7 +35,7 @@ impl SpectralEnvelopeControl {
 }
 
 #[derive(Debug, Clone)]
-pub struct SpectralEnvelopeAdvance {
+pub(crate) struct SpectralEnvelopeAdvance {
     pub state: SpectralEnvelopeState,
     pub suggested_step: Value,
     pub error_ratio: Value,
@@ -105,7 +105,7 @@ fn compare(
 /// BDF2 uses its embedded backward-Euler difference as a conservative local
 /// indicator. BE startup/restarts use two half steps and twice their difference
 /// from the full step, estimating the error of the accepted full BE step.
-pub fn advance_spectral_envelope_with_abort<F>(
+pub(crate) fn advance_spectral_envelope_with_abort<F>(
     previous: &SpectralEnvelopeState,
     requested_step: Value,
     deadline: Value,

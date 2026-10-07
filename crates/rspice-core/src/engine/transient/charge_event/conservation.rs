@@ -33,7 +33,7 @@ impl CurrentConservation {
     /// Compile once per prepared circuit. The weights annihilate every
     /// charge-port column and complete source-current incidence column.
     /// Rank decisions use exact authored coefficients, never a DC Jacobian.
-    pub fn new(
+    pub(super) fn new(
         nodes: usize,
         size: usize,
         charge_ports: &[(usize, usize)],

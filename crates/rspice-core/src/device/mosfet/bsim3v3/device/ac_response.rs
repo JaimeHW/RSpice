@@ -31,7 +31,7 @@ impl Bsim3v3Device {
     /// This operator is for response linearization only; it does not change
     /// carrier equations or advance accepted device state. A caller must
     /// register distinct auxiliary coordinates outside the physical circuit.
-    pub fn stamp_ac_nqs_response(
+    pub(crate) fn stamp_ac_nqs_response(
         &self,
         solution: &[Value],
         auxiliary: [NodeId; 3],

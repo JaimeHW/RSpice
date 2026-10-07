@@ -6,7 +6,7 @@ use super::*;
 /// storage and that ideal-source currents occur only in their KCL incidence.
 /// Bias-dependent numerical rank is not a substitute for that certificate.
 #[derive(Debug, Clone)]
-pub enum SpectralEnvelopeEventEquation {
+pub(crate) enum SpectralEnvelopeEventEquation {
     /// Preserve this physical row's charge/flux, allowing declared voltage
     /// sources to supply a separate integrated-current impulse.
     Charge,
@@ -33,7 +33,7 @@ pub struct SpectralEnvelopeEventConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct SpectralEnvelopeEvent {
+pub(crate) struct SpectralEnvelopeEvent {
     pub state: SpectralEnvelopeState,
     /// Integrated source currents in coulombs, indexed by original MNA row.
     /// Empty rows are non-source coordinates. These are not finite currents.

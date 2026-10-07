@@ -24,7 +24,7 @@ impl Bsim4v8Device {
     /// auxiliary nodes outside the device topology must be registered by the
     /// caller. Gate/body resistance networks, leakage, NF, M and all overlap
     /// and junction charge remain in their native topology.
-    pub fn stamp_ac_nqs_response(
+    pub(crate) fn stamp_ac_nqs_response(
         &self,
         solution: &[Value],
         auxiliary: [NodeId; 3],

@@ -22,9 +22,11 @@ pub use small_signal::{
 };
 pub use solve::{
     QuasiPeriodicAutonomousConfig, QuasiPeriodicLinearConfig, QuasiPeriodicLinearMethod,
-    QuasiPeriodicSolution, QuasiPeriodicSolveConfig, SpectralEnvelopeAdvance,
-    SpectralEnvelopeControl, SpectralEnvelopeEvent, SpectralEnvelopeEventConfig,
-    SpectralEnvelopeEventEquation, SpectralEnvelopeMethod, SpectralEnvelopeState,
+    QuasiPeriodicSolution, QuasiPeriodicSolveConfig, SpectralEnvelopeControl,
+    SpectralEnvelopeEventConfig, SpectralEnvelopeMethod,
+};
+pub(crate) use solve::{
+    SpectralEnvelopeEvent, SpectralEnvelopeEventEquation, SpectralEnvelopeState,
     advance_spectral_envelope_with_abort,
 };
 pub use transform::{QuasiPeriodicSampleSpectrum, QuasiPeriodicTransform};

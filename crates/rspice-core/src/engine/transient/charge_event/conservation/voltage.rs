@@ -13,7 +13,7 @@ pub(super) struct VoltageSeed {
 }
 
 impl VoltageSeed {
-    pub fn new(
+    pub(super) fn new(
         nodes: usize,
         sources: &[EventVoltageSource],
         options: &EventOptions,
@@ -97,7 +97,7 @@ impl VoltageSeed {
         })
     }
 
-    pub fn project(
+    pub(super) fn project(
         &self,
         incoming: &[Value],
         sources: &[EventVoltageSource],

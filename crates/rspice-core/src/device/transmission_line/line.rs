@@ -2,7 +2,7 @@ use super::*;
 
 mod events;
 use events::HistoryEvent;
-pub use events::{TransmissionLineHistoryEvent, TransmissionLineTimeSide};
+pub(crate) use events::{TransmissionLineHistoryEvent, TransmissionLineTimeSide};
 
 #[derive(Debug, Clone, Copy)]
 struct TlineStateSample {

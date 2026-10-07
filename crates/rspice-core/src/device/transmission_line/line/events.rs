@@ -3,7 +3,7 @@ use super::*;
 mod promotion;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransmissionLineTimeSide {
+pub(crate) enum TransmissionLineTimeSide {
     Incoming,
     Outgoing,
 }
@@ -12,7 +12,7 @@ pub enum TransmissionLineTimeSide {
 /// V1, I1, V2, I2; slope arrays are d(V1+Z0*I1)/dt, d(V2+Z0*I2)/dt.
 /// Slopes are finite one-sided derivatives, never jump size divided by dt.
 #[derive(Debug, Clone, Copy)]
-pub struct TransmissionLineHistoryEvent {
+pub(crate) struct TransmissionLineHistoryEvent {
     pub time: Value,
     pub incoming: [Value; 4],
     pub outgoing: [Value; 4],
@@ -155,7 +155,7 @@ impl TransmissionLine {
     /// Commit a solved ideal event without integrating its jump. Existing
     /// accepted history is unchanged on invalid input. Distributed/convolution
     /// lines require their own event equations and are not admitted here.
-    pub fn accept_history_event(
+    pub(crate) fn accept_history_event(
         &mut self,
         event: TransmissionLineHistoryEvent,
     ) -> Result<(), String> {
@@ -301,7 +301,10 @@ impl TransmissionLine {
     }
 
     /// Next exactly owned delayed event, including a slope-only corner.
-    pub fn next_history_event_arrival_after(&self, time: Value) -> Result<Option<Value>, String> {
+    pub(crate) fn next_history_event_arrival_after(
+        &self,
+        time: Value,
+    ) -> Result<Option<Value>, String> {
         if !time.is_finite() {
             return Err("invalid transmission-line event query clock".into());
         }
@@ -316,7 +319,7 @@ impl TransmissionLine {
     }
 
     /// Native delayed launched wave on one side of its physical arrival.
-    pub fn lossless_wave_on_side(
+    pub(crate) fn lossless_wave_on_side(
         &self,
         time: Value,
         forward: bool,
@@ -409,7 +412,7 @@ impl TransmissionLine {
     /// Finite derivative of the same delayed wave used by the native Norton
     /// stamp. Event limits use solved rates; ordinary samples use the selected
     /// native polynomial, never a jump divided by its neighboring clock gap.
-    pub fn lossless_wave_slope_on_side(
+    pub(crate) fn lossless_wave_slope_on_side(
         &self,
         time: Value,
         forward: bool,
