@@ -2727,6 +2727,7 @@ mod tests {
     fn one_signal_plan(bounds: Option<(i64, i64)>, width: u32) -> CanonicalDigitalPlan {
         CanonicalDigitalPlan {
             signals: vec![DigitalSignal {
+                initial_value: None,
                 id: DigitalSignalId::from(0usize),
                 name: "q".into(),
                 kind: DigitalSignalKind::FourState,

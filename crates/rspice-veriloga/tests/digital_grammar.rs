@@ -2574,11 +2574,6 @@ fn module_integer_ownership_refuses_dual_writes_and_overwide_groups() {
     }
     let array = analyze_error("module bad; integer values[0:1]; initial values[0]=1; endmodule");
     assert!(array.contains("array of `integer`"), "{array}");
-    let initializer = analyze_error("module bad; integer value=1; initial value=2; endmodule");
-    assert!(
-        initializer.contains("declaration initializer"),
-        "{initializer}"
-    );
 }
 
 #[test]
@@ -2651,4 +2646,110 @@ endmodule
         error.contains("written by both the analog body and a discrete process"),
         "{error}"
     );
+}
+
+#[test]
+fn numeric_declaration_initializers_retain_types_parameter_scope_and_identity() {
+    use rspice_veriloga::canonical_ir::digital::DigitalInitialValue;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module initialized(p); inout p; electrical p;
+parameter real HALF=-1.5; localparam BASE=5;
+integer rounded=HALF, signed_value=8'shfe, unknown='hx;
+real gain=BASE/2.0, analog_only=3;
+initial begin #1; rounded=rounded+1; signed_value=0; unknown=0; gain=gain+1; end
+analog I(p)<+(rounded+signed_value+gain+analog_only)*V(p);
+endmodule
+"#,
+        )
+        .unwrap();
+    let plan = &artifact.digital;
+    let initial = |name: &str| {
+        plan.signals
+            .iter()
+            .find(|signal| signal.name == name)
+            .unwrap()
+            .initial_value
+            .as_ref()
+            .unwrap()
+    };
+    for name in ["rounded", "signed_value"] {
+        let DigitalInitialValue::FourState(value) = initial(name) else {
+            panic!("{name}")
+        };
+        assert_eq!(value.width(), 32);
+        assert_eq!(value.to_integer(true), Some(-2));
+    }
+    let DigitalInitialValue::FourState(value) = initial("unknown") else {
+        panic!("unknown")
+    };
+    assert_eq!(value.to_integer(true), None);
+    assert_eq!(initial("gain"), &DigitalInitialValue::Real(2.5));
+    assert!(
+        plan.signals
+            .iter()
+            .all(|signal| signal.name != "analog_only")
+    );
+    assert_eq!(
+        plan.processes.len(),
+        1,
+        "initialization must not synthesize another process"
+    );
+    let encoded = serde_json::to_string(plan).unwrap();
+    let decoded: rspice_veriloga::canonical_ir::CanonicalDigitalPlan =
+        serde_json::from_str(&encoded).unwrap();
+    assert_eq!(&decoded, plan);
+    decoded.validate().unwrap();
+    let mut bad = decoded;
+    bad.signals
+        .iter_mut()
+        .find(|signal| signal.name == "gain")
+        .unwrap()
+        .initial_value = Some(DigitalInitialValue::FourState(
+        rspice_veriloga::canonical_ir::digital_value::FourStateValue::from_integer(32, 1),
+    ));
+    assert!(bad.validate().is_err());
+    let hierarchical = VerilogACompiler::default()
+        .compile_canonical_ir_module(
+            r#"
+module child;
+parameter BASE=5; integer state=BASE+1;
+initial #1 state=state+1;
+endmodule
+module top;
+parameter BASE=99;
+child a(); child b();
+endmodule
+"#,
+            Some("top"),
+        )
+        .unwrap();
+    for name in ["a.state", "b.state"] {
+        let signal = hierarchical
+            .digital
+            .signals
+            .iter()
+            .find(|signal| signal.name == name)
+            .unwrap();
+        let Some(DigitalInitialValue::FourState(value)) = &signal.initial_value else {
+            panic!("{name}")
+        };
+        assert_eq!(
+            value.to_integer(true),
+            Some(6),
+            "{name} must use its own parameter scope"
+        );
+    }
+    for expression in ["other", "$time", "V(p)"] {
+        let source = format!(
+            "module invalid(p); inout p; electrical p; integer other; integer state={expression}; initial begin other=2; state=3; end endmodule"
+        );
+        assert!(
+            VerilogACompiler::default()
+                .compile_canonical_ir(&source)
+                .is_err(),
+            "nonconstant initializer {expression}"
+        );
+    }
 }

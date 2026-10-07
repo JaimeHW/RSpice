@@ -360,6 +360,9 @@ pub const INTEGER_BOUNDS: VectorBounds = VectorBounds { msb: 31, lsb: 0 };
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone)]
 pub struct AnalyzedDigitalSignal {
+    /// Context-free numeric declaration assignment, evaluated in this instance's
+    /// parameter scope and installed in discrete storage before process startup.
+    pub initializer: Option<Expression>,
     pub name: SmolStr,
     pub class: DigitalSignalClass,
     pub signedness: Signedness,
@@ -937,21 +940,9 @@ impl SemanticAnalyzer {
                     );
                     continue;
                 }
-                if item.init.is_some() {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "a declaration initializer on the module-level `{}` `{}` that a \
-                             process writes is not supported yet; initialization must be \
-                             scheduled in its owning domain",
-                            kind.keyword(),
-                            item.name
-                        )),
-                        item.span,
-                    );
-                    continue;
-                }
                 seen.insert(item.name.clone(), item.span);
                 signals.push(AnalyzedDigitalSignal {
+                    initializer: item.init.clone(),
                     name: item.name.clone(),
                     class: DigitalSignalClass::Variable(kind),
                     signedness,
@@ -1105,6 +1096,7 @@ impl SemanticAnalyzer {
                 }
                 seen.insert(name.clone(), declaration.span);
                 signals.push(AnalyzedDigitalSignal {
+                    initializer: None,
                     name: name.clone(),
                     class: DigitalSignalClass::Net(DigitalNetKind::Wire),
                     signedness: declaration.signedness,
@@ -1171,6 +1163,7 @@ impl SemanticAnalyzer {
 
         seen.insert(item.name.clone(), item.span);
         signals.push(AnalyzedDigitalSignal {
+            initializer: None,
             name: item.name.clone(),
             class,
             signedness,

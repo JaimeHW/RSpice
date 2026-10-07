@@ -2405,7 +2405,7 @@ fn analog_variable_reads_share_the_candidate_with_spice_loads_and_digital_inputs
 module variable_sampler(p,q);
  inout p; electrical p; output q; reg q;
  parameter real LOAD=1000;
- integer gain; reg signed [7:0] adjustment; reg startup_ok;
+ integer gain=-2; reg signed [7:0] adjustment; reg startup_ok;
  real measured,period; integer count,enabled;
  analog begin
    measured=gain*V(p);
@@ -2413,7 +2413,7 @@ module variable_sampler(p,q);
    I(p)<+(V(p)-gain+adjustment-255)/1000;
  end
  initial begin
-   gain=-2; adjustment=-1; period=1.537e-9; enabled=1; q=0;
+   adjustment=-1; period=1.537e-9; enabled=1; q=0;
    startup_ok=(measured-4*LOAD/(1000+LOAD)<1e-8)
      && (measured-4*LOAD/(1000+LOAD)>-1e-8);
    #1; gain=-4;

@@ -290,6 +290,32 @@ fn lower_with_analog_variables(
     // after *that* net and which is therefore already in the table. Reusing
     // the entry is what collapsing is; there is no separate merge step.
     // ------------------------------------------------------------------
+    let module_constants = constants::resolve(
+        &digital.constants,
+        digital.time_scale,
+        &digital.processes,
+        &digital.continuous_assigns,
+        digital
+            .signals
+            .iter()
+            .filter_map(|signal| signal.initializer.as_ref()),
+    )?;
+    let instance_constants = digital
+        .instances
+        .iter()
+        .map(|instance| {
+            constants::resolve(
+                &instance.constants,
+                instance.time_scale,
+                &instance.processes,
+                &instance.continuous_assigns,
+                instance
+                    .signals
+                    .iter()
+                    .filter_map(|signal| signal.declared.initializer.as_ref()),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let mut signals = lower_signals(&digital.signals);
     let mut elaborated: HashMap<SmolStr, DigitalSignalId> = signals
         .iter()
@@ -312,6 +338,24 @@ fn lower_with_analog_variables(
             ids.push(id);
         }
         frame_signal_ids.push(ids);
+    }
+
+    for (declared, signal) in digital.signals.iter().zip(&mut signals) {
+        signal.initial_value =
+            constants::initializer(declared, &module_constants, digital.time_scale)?;
+    }
+    for ((instance, ids), constants) in digital
+        .instances
+        .iter()
+        .zip(&frame_signal_ids)
+        .zip(&instance_constants)
+    {
+        for (declared, id) in instance.signals.iter().zip(ids) {
+            if declared.declared.initializer.is_some() {
+                signals[usize::from(*id)].initial_value =
+                    constants::initializer(&declared.declared, constants, instance.time_scale)?;
+            }
+        }
     }
 
     // One scope per frame, each mapping the names *that frame's* body writes to
@@ -370,24 +414,6 @@ fn lower_with_analog_variables(
     // it belongs to neither scope: this pass wrote it, in elaborated names, and
     // the only expressions in one are a name and a select whose bounds are
     // already literals.
-    let module_constants = constants::resolve(
-        &digital.constants,
-        digital.time_scale,
-        &digital.processes,
-        &digital.continuous_assigns,
-    )?;
-    let instance_constants = digital
-        .instances
-        .iter()
-        .map(|instance| {
-            constants::resolve(
-                &instance.constants,
-                instance.time_scale,
-                &instance.processes,
-                &instance.continuous_assigns,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
     let no_constants = ResolvedConstants::default();
     let no_analog_variables = HashMap::new();
 
@@ -712,6 +738,7 @@ fn lower_signal(
     name: SmolStr,
 ) -> DigitalSignal {
     DigitalSignal {
+        initial_value: None,
         id,
         name,
         kind: match (signal.class.is_real(), signal.class.wreal_resolution()) {

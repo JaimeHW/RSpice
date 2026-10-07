@@ -1708,6 +1708,10 @@ impl SemanticAnalyzer {
             }));
         }
 
+        // Establish ownership before routing declaration initialization. Numeric
+        // declarations do not choose a domain; their procedural writers do.
+        self.analyze_digital(module, &mut analyzed);
+
         // Phase 10: Module-level variable initializers run before the
         // analog initialization, in declaration order.
         self.in_analog_initial = true;
@@ -1717,6 +1721,16 @@ impl SemanticAnalyzer {
         for var_decl in &module.variables {
             for item in &var_decl.items {
                 let Some(init) = &item.init else { continue };
+                if analyzed
+                    .digital
+                    .signals
+                    .iter()
+                    .any(|signal| signal.name == item.name)
+                {
+                    // The digital plan initializes this storage before processes
+                    // start. It must never acquire a second analog assignment.
+                    continue;
+                }
                 function_effects::validate_initializer_expression(init, &self.user_functions)?;
 
                 if let Some(layout) = self.arrays.get(&item.name).cloned() {
@@ -1861,14 +1875,6 @@ impl SemanticAnalyzer {
                 block.span,
             );
         }
-
-        // Phase 10b: the discrete (IEEE 1364) half of the module. It runs
-        // after every analog declaration is in the symbol table, so a digital
-        // name that collides with one is caught and a process can read an
-        // analog `integer` or `real`. Unlike `analog final`, digital content
-        // is *accepted* here: it is refused at each executable backend
-        // boundary instead, where the compiler would have to run it.
-        self.analyze_digital(module, &mut analyzed);
 
         // Phase 11: Capture analog initialization independently of the Newton body.
         self.in_analog_initial = true;

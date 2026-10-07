@@ -239,6 +239,16 @@ budget. Some known based literals of 64 bits or fewer still pass through scalar
 parsing and are refused when their exact integer is not representable by `f64`;
 full literal/type/conversion work in MS06 remains open.
 
+Module-level `integer` and `real` declarations assigned by digital processes
+can carry constant initializers. The initializer does not select the variable's
+domain; ownership still follows its procedural writers, and writes from both
+domains remain errors. Each initializer uses its own instance's parameters and
+typed assignment conversion. Canonical signals retain the initial value, and the
+core installs it before process startup, preserving it through ordinary trial
+rollback and checkpoint restoration. Custom digital stores must initialize from
+`DigitalSignal::initial_value` when present. Numeric arrays and explicit `reg`
+declaration assignments remain separate unsupported cases.
+
 Delay-controlled nonblocking assignments capture their RHS and converted delay
 at encounter, then continue immediately. Positive delays retain every update
 until its due tick; zero/X/Z delays use the current nonblocking region without

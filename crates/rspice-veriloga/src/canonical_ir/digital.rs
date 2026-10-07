@@ -328,9 +328,19 @@ impl DigitalSignalKind {
     }
 }
 
+/// Typed, constant initial storage for a numeric variable declaration.
+/// This is installed before processes run, not replayed as a procedural driver.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum DigitalInitialValue {
+    FourState(super::digital_value::FourStateValue),
+    Real(f64),
+}
+
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DigitalSignal {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_value: Option<DigitalInitialValue>,
     pub id: DigitalSignalId,
     pub name: SmolStr,
     /// What the signal carries.

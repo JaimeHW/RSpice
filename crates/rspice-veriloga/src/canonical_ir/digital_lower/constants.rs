@@ -75,13 +75,17 @@ pub(super) fn lower_math_call(
     lowerer.builder.push(block, CfgValueType::Real, kind)
 }
 
-pub(super) fn resolve(
+pub(super) fn resolve<'a>(
     source: &DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
     processes: &[AnalyzedDigitalProcess],
     assignments: &[crate::semantic::AnalyzedContinuousAssign],
+    initializers: impl IntoIterator<Item = &'a Expression>,
 ) -> Result<ResolvedConstants, Vec<DigitalLoweringDiagnostic>> {
     let mut required = BTreeSet::new();
+    for initializer in initializers {
+        collect_expression_reads(initializer, &mut required);
+    }
     for process in processes {
         collect_parameters(&process.body, &BTreeSet::new(), &mut required);
     }
@@ -246,6 +250,79 @@ fn resolve_one(
         }
     }
     Ok(())
+}
+
+/// Numeric module declarations require constant expressions (VAMS-2023 3.2).
+/// Use the same typed expression evaluator as parameters, with the declared
+/// assignment type, so rounding, overflow and four-state bits are preserved.
+pub(super) fn initializer(
+    signal: &AnalyzedDigitalSignal,
+    constants: &ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Result<Option<super::super::digital::DigitalInitialValue>, Vec<DigitalLoweringDiagnostic>> {
+    use super::super::digital::DigitalInitialValue;
+    let Some(expression) = &signal.initializer else {
+        return Ok(None);
+    };
+    let refuse = |detail: String| {
+        vec![DigitalLoweringDiagnostic::refusal(
+            format!("declaration initializer of `{}`: {detail}", signal.name),
+            signal.span.into(),
+        )]
+    };
+    let empty_index = HashMap::new();
+    let empty_analog = HashMap::new();
+    let mut probes = Vec::new();
+    let mut lowerer = ProcessLowerer {
+        constant_expression: true,
+        time_scale,
+        signals: &[],
+        index: &empty_index,
+        constants,
+        analog_variables: &empty_analog,
+        probes: &mut probes,
+        builder: ProcessBuilder::new(),
+        diagnostics: Vec::new(),
+        locals: Vec::new(),
+        scopes: Vec::new(),
+        static_scopes: HashMap::new(),
+        static_local_count: 0,
+    };
+    let entry = lowerer.builder.create_block();
+    lowerer.builder.seal_block(entry);
+    let value = if signal.class.is_real() {
+        lowerer.real_expression(entry, expression)
+    } else {
+        let signed = lowerer.self_signed(expression);
+        let value = lowerer.assigned_value(entry, expression, signal.width);
+        lowerer.resize(entry, value, signal.width, signed)
+    };
+    lowerer.builder.set_terminator(entry, CfgTerminator::Return);
+    if !lowerer.diagnostics.is_empty() {
+        return Err(lowerer.diagnostics);
+    }
+    let (function, outputs) = lowerer
+        .builder
+        .finish_with_outputs(entry, &[value])
+        .map_err(|error| refuse(format!("constant expression failed validation: {error:?}")))?;
+    let value = evaluate_constant_expression(function, outputs[0], signal.span.into())
+        .map_err(|error| refuse(format!("cannot evaluate constant expression: {error}")))?;
+    Ok(Some(match value {
+        DigitalScalar::FourState(value) if !signal.class.is_real() => {
+            DigitalInitialValue::FourState(value)
+        }
+        DigitalScalar::Integer(value) if !signal.class.is_real() => DigitalInitialValue::FourState(
+            FourStateValue::from_integer(signal.width, i128::from(value)),
+        ),
+        DigitalScalar::Real(value) if signal.class.is_real() && value.is_finite() => {
+            DigitalInitialValue::Real(value)
+        }
+        _ => {
+            return Err(refuse(
+                "requires a finite real or a correctly typed integer constant".into(),
+            ));
+        }
+    }))
 }
 
 // Implicit sensitivity excludes declaration initializers and event expressions.

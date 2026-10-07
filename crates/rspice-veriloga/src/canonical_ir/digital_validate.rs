@@ -116,6 +116,23 @@ impl CanonicalDigitalPlan {
                     signal.name
                 )));
             }
+            if let Some(value) = &signal.initial_value {
+                let valid = signal.procedurally_assignable
+                    && match value {
+                        super::digital::DigitalInitialValue::FourState(value) => {
+                            !signal.kind.is_real() && value.width() == signal.width
+                        }
+                        super::digital::DigitalInitialValue::Real(value) => {
+                            signal.kind.is_real() && value.is_finite()
+                        }
+                    };
+                if !valid {
+                    return Err(error(format!(
+                        "digital signal '{}' has an incompatible declaration initializer",
+                        signal.name
+                    )));
+                }
+            }
             if !valid_width {
                 return Err(error(format!(
                     "digital signal '{}' has invalid width or bounds",

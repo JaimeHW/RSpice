@@ -561,12 +561,23 @@ impl DigitalElaborator<'_> {
 
 /// Whether the module has continuous-domain content to flatten.
 fn has_analog_content(module: &AnalyzedModule) -> bool {
+    // Numeric declarations remain in the symbol table after digital ownership
+    // is established. Those entries are not a second, continuous-domain body.
+    let digital_names: HashSet<_> = module
+        .digital
+        .signals
+        .iter()
+        .map(|signal| &signal.name)
+        .collect();
     !module.contributions.is_empty()
         || !module.body.is_empty()
         || !module.statements.is_empty()
         || !module.branches.is_empty()
         || !module.internal_nodes.is_empty()
-        || !module.variables.is_empty()
+        || module
+            .variables
+            .iter()
+            .any(|variable| !digital_names.contains(&variable.name))
 }
 
 /// Match an instance's connections to the child's ports.

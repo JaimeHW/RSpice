@@ -527,7 +527,20 @@ impl DigitalSignalStore {
         // digital nets which have an initial value of `z`, wreal nets shall
         // have an initial value of zero". So it is written here, where the
         // four-state initial values are, rather than left to the fold.
-        let reals = vec![0.0; count];
+        let mut reals = vec![0.0; count];
+        // Declaration values are part of the initial accepted store. They do
+        // not create drivers, events, or assignments to replay after rejection.
+        for (index, signal) in plan.signals.iter().enumerate() {
+            match &signal.initial_value {
+                Some(rspice_veriloga::canonical_ir::digital::DigitalInitialValue::FourState(
+                    value,
+                )) => values[index] = value.clone(),
+                Some(rspice_veriloga::canonical_ir::digital::DigitalInitialValue::Real(value)) => {
+                    reals[index] = *value
+                }
+                None => {}
+            }
+        }
 
         // Grouped by net so resolution reads one contiguous slice, and sized
         // from the plan so a driver that has never run still occupies its slot.
@@ -1142,6 +1155,7 @@ mod tests {
 
     fn signal(index: usize, name: &str, width: u32, reg: bool) -> DigitalSignal {
         DigitalSignal {
+            initial_value: None,
             id: DigitalSignalId::from(index),
             name: name.into(),
             kind: DigitalSignalKind::FourState,
@@ -1158,6 +1172,7 @@ mod tests {
     /// because Verilog-AMS LRM 2.4 section 3.7 gives one no bits.
     fn real_signal(index: usize, name: &str, resolution: DigitalRealResolution) -> DigitalSignal {
         DigitalSignal {
+            initial_value: None,
             id: DigitalSignalId::from(index),
             name: name.into(),
             kind: DigitalSignalKind::Real(resolution),
