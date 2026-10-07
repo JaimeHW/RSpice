@@ -2175,6 +2175,30 @@ impl<'a> Flattener<'a> {
                 real_vector_params,
                 real_vector_expr_params,
             } => {
+                let instance = super::XspiceInstanceParams {
+                    params,
+                    expr_params,
+                    string_params,
+                    string_expr_params,
+                    string_vector_params,
+                    string_vector_expr_params,
+                    real_vector_params,
+                    real_vector_expr_params,
+                };
+                let materialized = instance.materialize_string_aliases(scope, abort)?;
+                let super::XspiceInstanceParams {
+                    params,
+                    expr_params,
+                    string_params,
+                    string_expr_params,
+                    string_vector_params,
+                    string_vector_expr_params,
+                    real_vector_params,
+                    real_vector_expr_params,
+                } = materialized
+                    .as_ref()
+                    .map(|value| value.as_ref())
+                    .unwrap_or(instance);
                 let model = self.resolve_xspice_scoped_model(
                     model,
                     scope,
@@ -2228,7 +2252,6 @@ impl<'a> Flattener<'a> {
                     string_vector_params: self.merge_deferred_string_vector_params(
                         string_vector_params,
                         string_vector_expr_params,
-                        scope,
                         numeric_scope,
                         element_path,
                         abort,
@@ -3274,7 +3297,6 @@ impl<'a> Flattener<'a> {
         &self,
         instance_params: &[(String, Vec<String>)],
         deferred_params: &[(String, String)],
-        scope: &ParamContext,
         numeric_scope: &ParamContext,
         element_path: &str,
         abort: &dyn AbortSignal,
@@ -3294,21 +3316,10 @@ impl<'a> Flattener<'a> {
                     abort,
                 )?
             } else {
-                let value = scope
-                        .get_string(expr)
-                        .map(ToString::to_string)
-                        .ok_or_else(|| {
-                            ParseError::InvalidValue(format!(
-                                "XSPICE instance string-vector parameter '{}' for element '{}' could not resolve string parameter '{}'",
-                                name, element_path, expr
-                            ))
-                        })?;
-                super::parse_xspice_string_vector_literal(&value, 1, name).map_err(|err| {
-                        ParseError::InvalidValue(format!(
-                            "XSPICE instance string-vector parameter '{}' for element '{}' could not parse string parameter '{}': {}",
-                            name, element_path, expr, err
-                        ))
-                    })?
+                // Known aliases were classified before numeric binding.
+                return Err(ParseError::InvalidValue(format!(
+                    "XSPICE instance string-vector parameter '{name}' for element '{element_path}' could not resolve string parameter '{expr}'"
+                )).into());
             };
             match merged
                 .iter_mut()

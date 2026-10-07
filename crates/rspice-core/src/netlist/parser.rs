@@ -58,7 +58,8 @@ mod scopes;
 mod startup_cards;
 mod stream;
 mod temperature;
-use stream::{NumericParseAbort, TokenStream};
+pub(super) use stream::NumericParseAbort;
+use stream::TokenStream;
 
 use temperature::{
     ParserTemperatures, TemperatureDirective, TemperaturePassError, apply_replayed_temperature,

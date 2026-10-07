@@ -32,20 +32,20 @@ impl std::fmt::Debug for TokenStream<'_> {
 /// Numeric grammar probes can discard an expression error or retry on a clone.
 /// Retain cancellation independently until the enclosing parse boundary, and
 /// never poll the caller again after its first abort.
-pub(super) struct NumericParseAbort<'a> {
+pub(in crate::netlist) struct NumericParseAbort<'a> {
     signal: &'a dyn AbortSignal,
     cancelled: AtomicBool,
 }
 
 impl<'a> NumericParseAbort<'a> {
-    pub(super) fn new(signal: &'a dyn AbortSignal) -> Self {
+    pub(in crate::netlist) fn new(signal: &'a dyn AbortSignal) -> Self {
         Self {
             signal,
             cancelled: AtomicBool::new(false),
         }
     }
 
-    pub(super) fn finish<T, E: Into<ParseWithAbortError>>(
+    pub(in crate::netlist) fn finish<T, E: Into<ParseWithAbortError>>(
         &self,
         result: Result<T, E>,
     ) -> Result<T, ParseWithAbortError> {

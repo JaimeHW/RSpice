@@ -42,7 +42,7 @@ use super::lexer::{
 };
 use super::{Element, ElementKind, ParamContext, ParseError, XspiceDigitalNode, XspicePort, expr};
 use crate::Value;
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use std::collections::HashSet;
 
 //=============================================================================
@@ -1048,7 +1048,7 @@ fn remove_previous_param<T>(params: &mut Vec<(String, T)>, name: &str) {
     params.retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
 }
 
-enum XspiceParamValue {
+pub(super) enum XspiceParamValue {
     Resolved(crate::ComplexValue),
     Deferred(String),
     String(String),
@@ -1760,43 +1760,30 @@ fn parse_string_backed_param_value(
     Ok(Some(parsed))
 }
 
-pub(crate) fn parse_xspice_string_vector_literal(
+/// Parse an alias in its lexical scope without evaluating numeric entries.
+/// The same quoted-value grammar is used by authored literals and late aliases.
+pub(super) fn parse_xspice_string_value(
+    name: &str,
     value: &str,
-    line_num: usize,
-    param_name: &str,
-) -> Result<Vec<String>, ParseError> {
-    let tokens = tokenize(value).map_err(|err| ParseError::Syntax {
-        line: line_num,
-        message: format!("Invalid XSPICE string-vector parameter literal: {err}"),
-    })?;
-    let mut stream = TokenStream::new(tokens);
-    let values = match parse_string_vector_param(
-        &mut stream,
-        line_num,
-        param_name,
-        &XspiceParseContext {
-            params: &ParamContext::new(),
-            abort: &NoAbort,
-            eager: true,
-            instance_fields: &HashSet::new(),
-            current_field: param_name,
-        },
-        false,
-    )? {
-        XspiceParamValue::StringVector(values) => values,
-        XspiceParamValue::StringVectorDeferred(_) => {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "Unexpected deferred XSPICE string-vector parameter '{}'",
-                    param_name
-                ),
-            });
-        }
-        _ => unreachable!("string-vector parser only returns string-vector values"),
+    scope: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<XspiceParamValue, super::ParseWithAbortError> {
+    let cancellation = super::parser::NumericParseAbort::new(abort);
+    let context = XspiceParseContext {
+        params: scope,
+        abort: &cancellation,
+        eager: false,
+        instance_fields: &HashSet::new(),
+        current_field: name,
     };
-    finish_vector_literal(&mut stream, line_num, param_name)?;
-    Ok(values)
+    let parsed = context.check_abort().and_then(|()| {
+        parse_string_backed_param_value(name, value, 1, &context, true).map(|parsed| {
+            parsed.unwrap_or_else(|| {
+                xspice_string_value_from_param_preference(name, value.to_string())
+            })
+        })
+    });
+    cancellation.finish(parsed)
 }
 
 fn finish_vector_literal(

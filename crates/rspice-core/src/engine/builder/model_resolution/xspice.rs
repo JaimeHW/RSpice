@@ -580,19 +580,10 @@ fn resolve_instance_string_vector_expression_params(
             resolved.push((name.clone(), values));
             continue;
         }
-        let value = netlist.params.get_string(expr).ok_or_else(|| {
-            SimulationError::Circuit(format!(
-                "XSPICE model '{}' instance string-vector parameter '{}' could not resolve string parameter '{}'",
-                model_name, name, expr
-            ))
-        })?;
-        let values = crate::netlist::parse_xspice_string_vector_literal(value, 1, name).map_err(|err| {
-            SimulationError::Circuit(format!(
-                "XSPICE model '{}' instance string-vector parameter '{}' could not parse '{}': {}",
-                model_name, name, expr, err
-            ))
-        })?;
-        resolved.push((name.clone(), values));
+        // Bound aliases were classified into their typed channels first.
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE model '{model_name}' instance string-vector parameter '{name}' could not resolve string parameter '{expr}'"
+        )));
     }
 
     Ok(resolved)
@@ -790,22 +781,7 @@ fn reject_native_xtradev_non_scalar_params(
     Ok(())
 }
 
-/// One XSPICE instance card's parameters, split by the form the parser left
-/// them in: resolved scalars, unresolved scalar expressions, and the string,
-/// string-vector and real-vector forms with their own unresolved variants.
-/// A resolver reads all eight to decide what a parameter means, so they are
-/// one card rather than eight lists.
-#[derive(Clone, Copy)]
-pub(in crate::engine::builder) struct XspiceInstanceParams<'a> {
-    pub params: &'a [(String, f64)],
-    pub expr_params: &'a [(String, String)],
-    pub string_params: &'a [(String, String)],
-    pub string_expr_params: &'a [(String, String)],
-    pub string_vector_params: &'a [(String, Vec<String>)],
-    pub string_vector_expr_params: &'a [(String, String)],
-    pub real_vector_params: &'a [(String, Vec<f64>)],
-    pub real_vector_expr_params: &'a [(String, Vec<String>)],
-}
+pub(in crate::engine::builder) use crate::netlist::XspiceInstanceParams;
 
 /// The non-scalar parameter forms a native `xtradev` model rejects, in the
 /// order the diagnostics report them.
@@ -1119,6 +1095,18 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     model_name: &str,
     instance: XspiceInstanceParams<'_>,
 ) -> Result<ResolvedXspiceModel, SimulationError> {
+    let materialized = instance
+        .materialize_string_aliases(&netlist.params, netlist.abort)
+        .map_err(|error| match error {
+            crate::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+            crate::netlist::ParseWithAbortError::Parse(error) => SimulationError::Circuit(format!(
+                "XSPICE model '{model_name}' instance parameters: {error}"
+            )),
+        })?;
+    let instance = materialized
+        .as_ref()
+        .map(|value| value.as_ref())
+        .unwrap_or(instance);
     let XspiceInstanceParams {
         params: instance_params,
         expr_params: instance_expr_params,

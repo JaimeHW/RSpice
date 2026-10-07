@@ -50,7 +50,9 @@ mod spectre_statistics;
 pub mod spef;
 mod startup;
 mod topology;
+mod xspice_params;
 mod xspice_parser;
+pub(crate) use xspice_params::XspiceInstanceParams;
 
 pub use add_resistors::*;
 pub use ast::*;
@@ -116,9 +118,8 @@ pub(crate) use topology::{
 pub(crate) use xspice_parser::{
     DeferredXspiceStringVectorEntry, encode_deferred_xspice_complex,
     encode_deferred_xspice_complex_vector, parse_deferred_xspice_complex,
-    parse_deferred_xspice_complex_vector, parse_xspice_string_vector_literal,
-    xspice_model_param_accepts_bare_string, xspice_param_prefers_string_vector,
-    xspice_param_preserves_numeric_string,
+    parse_deferred_xspice_complex_vector, xspice_model_param_accepts_bare_string,
+    xspice_param_prefers_string_vector, xspice_param_preserves_numeric_string,
 };
 
 impl crate::io::xyce_prn::XycePrnDelimiterSource for PrintDelimiter {
