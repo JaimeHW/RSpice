@@ -10,6 +10,7 @@ use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{Netlist, Value};
 
 mod result;
+mod validation;
 pub use result::{FrequencyDataColumn, FrequencyDataResult, FrequencyDataTarget};
 
 #[cfg(test)]
@@ -177,38 +178,18 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         self.ensure_valid_configuration()?;
-        let table = netlist
-            .data_tables
-            .iter()
-            .find(|table| table.name.eq_ignore_ascii_case(table_name))
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "{} DATA references unknown .DATA table '{table_name}'",
-                    options.analysis
-                ))
-            })?;
-        self.ensure_analysis_points(table.rows.len())?;
-        self.ensure_batch_runs(table.rows.len())?;
-        // Bound metadata before cloning any rows, column names or result storage.
-        let coordinate_values = table.rows.len().saturating_mul(table.params.len());
-        self.ensure_result_values(coordinate_values)?;
-        let table_error =
-            |error| SimulationError::Circuit(format!("{} DATA {error}", options.analysis));
-        let frequency_column = table.frequency_column().map_err(table_error)?;
-        for (index, row) in table.rows.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let frequency = table
-                .validate_frequency_row(index, row, frequency_column)
-                .map_err(table_error)?;
-            if options.positive_frequency && frequency <= 0.0 {
-                return Err(SimulationError::Circuit(format!(
-                    "{} DATA frequencies must be strictly positive, got {frequency}",
-                    options.analysis
-                )));
-            }
-        }
+        let validation::Input {
+            table,
+            frequency_column,
+            coordinate_values,
+        } = validation::input(
+            netlist,
+            table_name,
+            options.analysis,
+            options.positive_frequency,
+            self.config().resource_limits,
+            abort,
+        )?;
         let plan =
             FrequencyDataOverridePlan::resolve(netlist, &table.params, table.rows.len(), abort)?;
         let temperature_column = plan.columns.iter().position(|column| {

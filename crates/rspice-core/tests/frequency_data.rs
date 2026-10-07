@@ -5,6 +5,84 @@ use rspice_core::{
 
 const DECK: &str = "Frequency table\n.param resistance=1k\nV1 in 0 AC 1\nR1 in out {resistance}\nC1 out 0 1u\n.data points FREQ resistance\n10 1k\n100 2k\n.enddata\n.end\n";
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn borrowed_preflight_checks_exact_admission_limits_without_solving_rows() {
+    let netlist = Netlist::parse(DECK).unwrap();
+    let request = rspice_core::netlist::AnalysisCommand::AcData {
+        table_name: "POINTS".into(),
+    };
+    let mut limits = ResourceLimits::default();
+    limits.max_analysis_points = 2;
+    limits.max_batch_runs = 2;
+    limits.max_result_values = 4;
+    Engine::validate_frequency_data_request_with_abort(
+        &netlist,
+        &request,
+        limits,
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    // These exact limits admit the four coordinates, without allocating or
+    // charging for row solutions that checking does not produce.
+    for resource in [
+        ResourceKind::AnalysisPoints,
+        ResourceKind::BatchRuns,
+        ResourceKind::ResultValues,
+    ] {
+        let mut bounded = limits;
+        let (requested, limit) = match resource {
+            ResourceKind::AnalysisPoints => {
+                bounded.max_analysis_points = 1;
+                (2, 1)
+            }
+            ResourceKind::BatchRuns => {
+                bounded.max_batch_runs = 1;
+                (2, 1)
+            }
+            _ => {
+                bounded.max_result_values = 3;
+                (4, 3)
+            }
+        };
+        let error = Engine::validate_frequency_data_request_with_abort(
+            &netlist,
+            &request,
+            bounded,
+            &rspice_core::NoAbort,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, SimulationError::ResourceLimit(found) if found.resource == resource && found.requested == requested && found.limit == limit)
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn borrowed_preflight_observes_cancellation_during_row_validation() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CancelAfter(AtomicUsize);
+    impl rspice_core::AbortSignal for CancelAfter {
+        fn is_aborted(&self) -> bool {
+            self.0.fetch_add(1, Ordering::Relaxed) >= 2
+        }
+    }
+    let netlist = Netlist::parse(DECK).unwrap();
+    let request = rspice_core::netlist::AnalysisCommand::AcData {
+        table_name: "points".into(),
+    };
+    assert!(matches!(
+        Engine::validate_frequency_data_request_with_abort(
+            &netlist,
+            &request,
+            ResourceLimits::default(),
+            &CancelAfter(AtomicUsize::new(0))
+        ),
+        Err(SimulationError::Aborted)
+    ));
+}
+
 fn engine(limits: ResourceLimits) -> Engine {
     Engine::new(SimulationConfig {
         resource_limits: limits,
