@@ -2399,6 +2399,9 @@ impl Emitter<'_> {
 
             CfgValueKind::FourStateConstant(_)
             | CfgValueKind::IntegerConstant(_)
+            | CfgValueKind::DigitalArrayRead { .. }
+            | CfgValueKind::DigitalArrayBlockingWrite { .. }
+            | CfgValueKind::DigitalArrayNonblockingWrite { .. }
             | CfgValueKind::DigitalSignalRead { .. }
             | CfgValueKind::DigitalRealSignalRead { .. }
             | CfgValueKind::DigitalTime { .. }

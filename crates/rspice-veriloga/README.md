@@ -268,6 +268,20 @@ allocation. Constant real indices use the same checked rounding as runtime
 indices. Single-element arrays at either signed 64-bit endpoint retain their
 exact element names; invalid ranges and non-finite indices produce diagnostics.
 
+Schema 69 introduces the runtime foundation for digitally owned unpacked
+variables: explicitly declared array groups over ordinary scalar signal cells,
+with runtime-indexed reads, blocking writes and nonblocking writes. The selected
+cell and RHS are captured when a deferred update is scheduled. Linking preserves
+instance-local array storage; expression-event dependencies cover the address and
+all possible cells, then reevaluate the selected value. Array shape, cell type,
+name, ownership and non-overlap are validated at the artifact boundary. Unknown
+or out-of-range four-state reads produce X; invalid writes have no effect.
+Invalid real-array reads currently diagnose instead of inventing a sample; their
+language-level invalid-value contract remains to be qualified. This foundation
+does not yet enable source-level digital array declarations. Declaration/instance
+lowering, initializers, digital-to-analog array bindings, multidimensional shapes
+and mixed-host checkpoint qualification remain outstanding MS06 work.
+
 Delay-controlled nonblocking assignments capture their RHS and converted delay
 at encounter, then continue immediately. Positive delays retain every update
 until its due tick; zero/X/Z delays use the current nonblocking region without

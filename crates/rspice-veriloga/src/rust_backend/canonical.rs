@@ -563,6 +563,24 @@ fn kernel_region_metrics(
                 write!(out, "four-state:{}", value.spelling())
             }
             CfgValueKind::IntegerConstant(value) => write!(out, "integer:{value}"),
+            CfgValueKind::DigitalArrayRead { array, signed, .. } => {
+                write!(out, "digital-array-read:{array:?}:{signed}")
+            }
+            CfgValueKind::DigitalArrayBlockingWrite { array, signed, .. } => {
+                write!(out, "digital-array-blocking-write:{array:?}:{signed}")
+            }
+            CfgValueKind::DigitalArrayNonblockingWrite {
+                array,
+                signed,
+                region,
+                wait,
+                ..
+            } => {
+                write!(
+                    out,
+                    "digital-array-nonblocking-write:{array:?}:{signed}:{region:?}:{wait:?}"
+                )
+            }
             CfgValueKind::DigitalSignalRead { signal } => {
                 write!(out, "digital-read:{signal}")
             }

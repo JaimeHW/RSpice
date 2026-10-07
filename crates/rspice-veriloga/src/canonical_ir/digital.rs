@@ -336,6 +336,44 @@ pub enum DigitalInitialValue {
     Real(f64),
 }
 
+/// A checked, contiguous group of scalar signal cells for an unpacked array.
+/// Storage follows increasing logical index, independently of declaration direction.
+/// Keeping ordinary signal IDs preserves element-level events and checkpoint state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalArrayRef {
+    pub base: DigitalSignalId,
+    pub lower: i64,
+    pub len: u32,
+}
+
+impl DigitalArrayRef {
+    /// The bounded storage range; malformed artifacts must not create huge walks.
+    pub fn cell_range(self) -> Option<std::ops::Range<u32>> {
+        if self.len == 0 || self.len > 65_536 {
+            return None;
+        }
+        self.lower.checked_add(i64::from(self.len) - 1)?;
+        Some(self.base.index()..self.base.index().checked_add(self.len)?)
+    }
+
+    /// Resolve in the integer domain, including indices beyond f64 precision.
+    pub fn element(self, index: i64) -> Option<DigitalSignalId> {
+        self.cell_range()?;
+        let offset = i128::from(index) - i128::from(self.lower);
+        (offset >= 0 && offset < i128::from(self.len))
+            .then(|| DigitalSignalId::new(self.base.index() + offset as u32))
+    }
+}
+
+/// An unpacked variable declaration over scalar element storage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalArray {
+    pub name: SmolStr,
+    /// Left/right bounds as authored, retained for declaration-order operations.
+    pub bounds: (i64, i64),
+    pub storage: DigitalArrayRef,
+}
+
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DigitalSignal {
@@ -654,6 +692,8 @@ pub struct CanonicalDigitalPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<DigitalSignal>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arrays: Vec<DigitalArray>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processes: Vec<CfgDigitalProcess>,
     /// Every continuous driver in the module, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -671,6 +711,7 @@ pub struct CanonicalDigitalPlan {
 impl CanonicalDigitalPlan {
     pub fn is_empty(&self) -> bool {
         self.signals.is_empty()
+            && self.arrays.is_empty()
             && self.processes.is_empty()
             && self.drivers.is_empty()
             && self.analog_probes.is_empty()

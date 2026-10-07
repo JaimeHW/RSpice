@@ -872,6 +872,12 @@ pub enum CfgValueKind {
     FourStateConstant(digital_value::FourStateValue),
     /// A signed 32-bit integer constant.
     IntegerConstant(i32),
+    /// Read one unpacked element, preserving its real or packed value domain.
+    DigitalArrayRead {
+        array: super::digital::DigitalArrayRef,
+        index: ValueId,
+        signed: bool,
+    },
     /// The current value of a declared net or variable.
     ///
     /// A leaf: within one process function a signal has no derivation. Two
@@ -1148,6 +1154,22 @@ pub enum CfgValueKind {
         then_value: ValueId,
         else_value: ValueId,
     },
+    /// Write one unpacked variable element at the index evaluated here.
+    DigitalArrayBlockingWrite {
+        array: super::digital::DigitalArrayRef,
+        index: ValueId,
+        signed: bool,
+        value: ValueId,
+    },
+    /// Capture both the selected scalar cell and RHS when scheduling the update.
+    DigitalArrayNonblockingWrite {
+        array: super::digital::DigitalArrayRef,
+        index: ValueId,
+        signed: bool,
+        value: ValueId,
+        region: DigitalSchedulingRegion,
+        wait: Option<DigitalWait>,
+    },
     /// A blocking write (`=`), visible to the next instruction.
     DigitalBlockingWrite {
         target: DigitalWriteTarget,
@@ -1277,6 +1299,9 @@ impl CfgValueKind {
 
             Self::FourStateConstant(_)
             | Self::IntegerConstant(_)
+            | Self::DigitalArrayRead { .. }
+            | Self::DigitalArrayBlockingWrite { .. }
+            | Self::DigitalArrayNonblockingWrite { .. }
             | Self::DigitalSignalRead { .. }
             | Self::DigitalRealSignalRead { .. }
             | Self::DigitalTime { .. }
@@ -1608,6 +1633,14 @@ impl CfgValueKind {
                 else_value,
             } => vec![*condition, *then_value, *else_value],
             Self::DigitalBitSelect { input, index, .. } => vec![*input, *index],
+            Self::DigitalArrayRead { index, .. } => vec![*index],
+            Self::DigitalArrayBlockingWrite { index, value, .. } => vec![*index, *value],
+            Self::DigitalArrayNonblockingWrite {
+                index, value, wait, ..
+            } => [*index, *value]
+                .into_iter()
+                .chain(wait.iter().flat_map(DigitalWait::operands))
+                .collect(),
             Self::DigitalNonblockingWrite { value, wait, .. } => std::iter::once(*value)
                 .chain(wait.iter().flat_map(DigitalWait::operands))
                 .collect(),
@@ -1928,6 +1961,20 @@ impl CfgValueKind {
             Self::DigitalBitSelect { input, index, .. } => {
                 *input = map(*input);
                 *index = map(*index);
+            }
+            Self::DigitalArrayRead { index, .. } => *index = map(*index),
+            Self::DigitalArrayBlockingWrite { index, value, .. } => {
+                *index = map(*index);
+                *value = map(*value);
+            }
+            Self::DigitalArrayNonblockingWrite {
+                index, value, wait, ..
+            } => {
+                *index = map(*index);
+                *value = map(*value);
+                if let Some(wait) = wait {
+                    wait.map_operands(&mut map);
+                }
             }
             Self::DigitalNonblockingWrite { value, wait, .. } => {
                 *value = map(*value);

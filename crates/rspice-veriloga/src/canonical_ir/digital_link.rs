@@ -347,6 +347,12 @@ pub fn link_digital_plans(
         let source = layout.instance.plan;
         layout.map.signals =
             relocation[layout.first_signal..layout.first_signal + source.signals.len()].to_vec();
+        for array in &source.arrays {
+            let mut array = array.clone();
+            array.name = format!("{}.{}", layout.instance.name, array.name).into();
+            relocate_array(&mut array.storage, &layout.map)?;
+            plan.arrays.push(array);
+        }
         for probe in &source.analog_probes {
             let id = DigitalAnalogProbeId::new(index(plan.analog_probes.len(), "analog probe")?);
             let mut probe = probe.clone();
@@ -510,6 +516,25 @@ fn relocate_target(
     target.signal = map.signals[usize::from(target.signal)];
 }
 
+fn relocate_array(
+    array: &mut super::digital::DigitalArrayRef,
+    map: &DigitalLinkedInstance,
+) -> LinkResult<()> {
+    let range = array
+        .cell_range()
+        .ok_or_else(|| error("invalid linked array extent"))?;
+    let base = map.signals[usize::from(array.base)];
+    for (offset, source) in range.enumerate() {
+        if base.index().checked_add(offset as u32) != Some(map.signals[source as usize].index()) {
+            return Err(error(
+                "linking must preserve distinct contiguous array cells",
+            ));
+        }
+    }
+    array.base = base;
+    Ok(())
+}
+
 fn relocate_value(
     kind: &mut CfgValueKind,
     source: &CanonicalDigitalPlan,
@@ -520,6 +545,17 @@ fn relocate_value(
         CfgValueKind::DigitalExpression { function, .. } => {
             for value in &mut function.values {
                 relocate_value(&mut value.kind, source, map, drivers)?;
+            }
+        }
+        CfgValueKind::DigitalArrayRead { array, .. }
+        | CfgValueKind::DigitalArrayBlockingWrite { array, .. } => {
+            // Declaration relocation already checked member contiguity once.
+            array.base = map.signals[usize::from(array.base)];
+        }
+        CfgValueKind::DigitalArrayNonblockingWrite { array, wait, .. } => {
+            array.base = map.signals[usize::from(array.base)];
+            if let Some(wait) = wait {
+                relocate_wait(wait, map);
             }
         }
         CfgValueKind::DigitalSignalRead { signal }

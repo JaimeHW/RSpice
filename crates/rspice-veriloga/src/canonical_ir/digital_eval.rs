@@ -1753,6 +1753,69 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             .ok_or(DigitalEvalError::UndeclaredSignal(id))
     }
 
+    fn array_element(
+        &self,
+        array: super::digital::DigitalArrayRef,
+        index: ValueId,
+        signed: bool,
+    ) -> Result<Option<DigitalSignalId>, DigitalEvalError> {
+        let index = match self.scalar(index)? {
+            ScalarRef::Real(value) => crate::array_index::checked_rounded_i64(value).ok(),
+            ScalarRef::Integer(value) => Some(i64::from(value)),
+            ScalarRef::FourState(value) => value.bit_index(signed),
+            ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(index)),
+        };
+        Ok(index.and_then(|index| array.element(index)))
+    }
+
+    fn blocking_write(
+        &mut self,
+        target: &DigitalWriteTarget,
+        value: ValueId,
+    ) -> Result<DigitalScalar, DigitalEvalError> {
+        if self.signal(target.signal)?.kind.is_real() {
+            let value = self.real(value)?;
+            self.environment.write_real_signal(target.signal, value);
+        } else {
+            let Interpreter {
+                plan,
+                function,
+                environment,
+                scratch,
+                ..
+            } = self;
+            let value = four_state_in(function, &scratch.table, value)?;
+            apply_write(plan, &mut **environment, target, &value)?;
+        }
+        Ok(DigitalScalar::Effect)
+    }
+
+    fn nonblocking_write(
+        &mut self,
+        target: &DigitalWriteTarget,
+        value: ValueId,
+        region: DigitalSchedulingRegion,
+        wait: Option<DigitalWaitRequest>,
+    ) -> Result<DigitalScalar, DigitalEvalError> {
+        // Both the scalar target and resized RHS are captured at encounter time.
+        let signal = self.signal(target.signal)?;
+        let value = if signal.kind.is_real() {
+            DigitalUpdate::Real(self.real(value)?)
+        } else {
+            DigitalUpdate::FourState(
+                self.four_state(value)?
+                    .resized(target_width(signal, &target.select)),
+            )
+        };
+        self.environment.defer_update(DigitalDeferredUpdate {
+            target: target.clone(),
+            value,
+            region,
+            wait,
+        });
+        Ok(DigitalScalar::Effect)
+    }
+
     fn capture_wait(
         &mut self,
         wait: &DigitalWait,
@@ -1965,6 +2028,78 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             }
             CfgValueKind::FourStateConstant(value) => Ok(DigitalScalar::FourState(value.clone())),
             CfgValueKind::IntegerConstant(value) => Ok(DigitalScalar::Integer(*value)),
+            CfgValueKind::DigitalArrayRead {
+                array,
+                index,
+                signed,
+            } => {
+                let element = self.array_element(*array, *index, *signed)?;
+                let declaration = self.signal(array.base)?;
+                if declaration.kind.is_real() {
+                    let value = match element {
+                        Some(id) => self
+                            .environment
+                            .read_real_signal(id)
+                            .ok_or(DigitalEvalError::SignalUnavailable(id))?,
+                        // Keep the existing checked real-array policy until the
+                        // language-level invalid-real contract is qualified.
+                        None => {
+                            return Err(DigitalEvalError::InvalidNumericConversion {
+                                value: *index,
+                                detail: "real array index is unknown, unrepresentable or outside the declared bounds",
+                            });
+                        }
+                    };
+                    Ok(DigitalScalar::Real(value))
+                } else {
+                    let value = match element {
+                        Some(id) => read_signal(self.environment, self.signal(id)?)?,
+                        None => FourStateValue::splat(declaration.width, FourStateBit::Unknown),
+                    };
+                    Ok(DigitalScalar::FourState(value))
+                }
+            }
+            CfgValueKind::DigitalArrayBlockingWrite {
+                array,
+                index,
+                signed,
+                value,
+            } => match self.array_element(*array, *index, *signed)? {
+                Some(signal) => self.blocking_write(
+                    &DigitalWriteTarget {
+                        signal,
+                        select: DigitalWriteSelect::Whole,
+                    },
+                    *value,
+                ),
+                None => Ok(DigitalScalar::Effect),
+            },
+            CfgValueKind::DigitalArrayNonblockingWrite {
+                array,
+                index,
+                signed,
+                value,
+                region,
+                wait,
+            } => {
+                // Capture controls even if an invalid target suppresses the update.
+                let wait = match wait {
+                    Some(wait) => self.capture_wait(wait)?,
+                    None => None,
+                };
+                match self.array_element(*array, *index, *signed)? {
+                    Some(signal) => self.nonblocking_write(
+                        &DigitalWriteTarget {
+                            signal,
+                            select: DigitalWriteSelect::Whole,
+                        },
+                        *value,
+                        *region,
+                        wait,
+                    ),
+                    None => Ok(DigitalScalar::Effect),
+                }
+            }
             CfgValueKind::DigitalSignalRead { signal } => {
                 let signal = self.signal(*signal)?;
                 Ok(DigitalScalar::FourState(read_signal(
@@ -2303,29 +2438,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 )))
             }
             CfgValueKind::DigitalBlockingWrite { target, value } => {
-                let value = *value;
-                // One write node for both domains, the way
-                // [`CfgValueKind::DigitalDriverWrite`] is: what the written
-                // name carries is a property of the declaration, and the plan
-                // recorded it.
-                if self.signal(target.signal)?.kind.is_real() {
-                    let value = self.real(value)?;
-                    self.environment.write_real_signal(target.signal, value);
-                    return Ok(DigitalScalar::Effect);
-                }
-                // The plan, the environment and the value table are three
-                // fields, so the write borrows them apart rather than taking a
-                // copy of the value to hand the store.
-                let Interpreter {
-                    plan,
-                    function,
-                    environment,
-                    scratch,
-                    ..
-                } = self;
-                let value = four_state_in(function, &scratch.table, value)?;
-                apply_write(plan, &mut **environment, target, &value)?;
-                Ok(DigitalScalar::Effect)
+                self.blocking_write(target, *value)
             }
             CfgValueKind::DigitalDriverWrite {
                 driver,
@@ -2373,36 +2486,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     Some(wait) => self.capture_wait(wait)?,
                     None => None,
                 };
-                let (value, region) = (*value, *region);
-                let signal = self.signal(target.signal)?;
-                if signal.kind.is_real() {
-                    let value = self.real(value)?;
-                    self.environment.defer_update(DigitalDeferredUpdate {
-                        target: target.clone(),
-                        value: DigitalUpdate::Real(value),
-                        region,
-                        wait,
-                    });
-                    return Ok(DigitalScalar::Effect);
-                }
-                // Resized here, where the assignment is, rather than at the
-                // flush: section 5.2.1's width is the target's, and the target
-                // is known now.
-                let width = target_width(signal, &target.select);
-                let Interpreter {
-                    function,
-                    environment,
-                    scratch,
-                    ..
-                } = self;
-                let value = four_state_in(function, &scratch.table, value)?;
-                environment.defer_update(DigitalDeferredUpdate {
-                    target: target.clone(),
-                    value: DigitalUpdate::FourState(value.resized(width)),
-                    region,
-                    wait,
-                });
-                Ok(DigitalScalar::Effect)
+                self.nonblocking_write(target, *value, *region, wait)
             }
             // A block parameter is defined by the edge that entered the block,
             // so reaching it here means nothing bound it.

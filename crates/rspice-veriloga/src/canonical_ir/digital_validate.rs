@@ -54,6 +54,7 @@ impl CanonicalDigitalPlan {
                 CANONICAL_IR_SCHEMA_VERSION,
                 &self.timing,
                 &self.signals,
+                &self.arrays,
                 &self.processes,
                 &self.drivers,
                 &self.analog_probes,
@@ -138,6 +139,57 @@ impl CanonicalDigitalPlan {
                     "digital signal '{}' has invalid width or bounds",
                     signal.name
                 )));
+            }
+        }
+        let mut arrays = HashSet::new();
+        let mut array_cells = vec![false; self.signals.len()];
+        for array in &self.arrays {
+            let range = array
+                .storage
+                .cell_range()
+                .ok_or_else(|| error("digital array has invalid storage extent"))?;
+            if array.name.is_empty()
+                || !names.insert(&array.name)
+                || array.bounds.0.min(array.bounds.1) != array.storage.lower
+                || array.bounds.0.abs_diff(array.bounds.1).checked_add(1)
+                    != Some(u64::from(array.storage.len))
+                || !arrays.insert(array.storage)
+            {
+                return Err(error(
+                    "digital arrays require unique names, storage and matching declared bounds",
+                ));
+            }
+            let first = self
+                .signal(array.storage.base)
+                .ok_or_else(|| error("digital array names absent storage"))?;
+            for slot in range {
+                let cell = self
+                    .signal(super::ids::DigitalSignalId::new(slot))
+                    .ok_or_else(|| error("digital array exceeds declared signal storage"))?;
+                let occupied = &mut array_cells[slot as usize];
+                let index = array.storage.lower + i64::from(slot - array.storage.base.index());
+                if *occupied
+                    || !cell.procedurally_assignable
+                    || cell.name != format!("{}[{index}]", array.name)
+                    || (
+                        cell.kind,
+                        cell.width,
+                        cell.bounds,
+                        cell.signed,
+                        cell.integer,
+                    ) != (
+                        first.kind,
+                        first.width,
+                        first.bounds,
+                        first.signed,
+                        first.integer,
+                    )
+                {
+                    return Err(error(
+                        "digital array cells must be distinct, consistently named variables of one element type",
+                    ));
+                }
+                *occupied = true;
             }
         }
         for (index, probe) in self.analog_probes.iter().enumerate() {
@@ -396,6 +448,68 @@ impl CanonicalDigitalPlan {
                                 ));
                             }
                         }
+                        CfgValueKind::DigitalArrayRead { array, index, .. }
+                        | CfgValueKind::DigitalArrayBlockingWrite { array, index, .. }
+                        | CfgValueKind::DigitalArrayNonblockingWrite { array, index, .. } => {
+                            if !arrays.contains(array) {
+                                return Err(error(
+                                    "digital array operation must name a declared array's complete storage",
+                                ));
+                            }
+                            if !matches!(
+                                function.value(*index).value_type,
+                                CfgValueType::Real
+                                    | CfgValueType::Integer
+                                    | CfgValueType::FourState { .. }
+                            ) {
+                                return Err(error(
+                                    "digital array operation has an invalid index type",
+                                ));
+                            }
+                            let signal = self.signal(array.base).expect("validated array storage");
+                            let element_type = if signal.kind.is_real() {
+                                CfgValueType::Real
+                            } else {
+                                CfgValueType::FourState {
+                                    width: signal.width,
+                                }
+                            };
+                            match kind {
+                                CfgValueKind::DigitalArrayRead { .. } => {
+                                    if value.value_type != element_type {
+                                        return Err(error(
+                                            "digital array read has the wrong element type",
+                                        ));
+                                    }
+                                }
+                                CfgValueKind::DigitalArrayBlockingWrite { value: rhs, .. }
+                                | CfgValueKind::DigitalArrayNonblockingWrite {
+                                    value: rhs, ..
+                                } => {
+                                    if value.value_type != CfgValueType::Effect
+                                        || function.value(*rhs).value_type != element_type
+                                    {
+                                        return Err(error(
+                                            "digital array write has the wrong effect or element type",
+                                        ));
+                                    }
+                                }
+                                _ => unreachable!(),
+                            }
+                            if let CfgValueKind::DigitalArrayNonblockingWrite {
+                                region, wait, ..
+                            } = kind
+                            {
+                                if *region != DigitalSchedulingRegion::NonBlockingAssign {
+                                    return Err(error(
+                                        "digital array nonblocking write has the wrong scheduling region",
+                                    ));
+                                }
+                                if let Some(wait) = wait {
+                                    check_wait(wait)?;
+                                }
+                            }
+                        }
                         CfgValueKind::DigitalSignalRead { signal }
                         | CfgValueKind::DigitalRealSignalRead { signal } => {
                             let Some(signal) = self.signal(*signal) else {
@@ -589,6 +703,8 @@ pub(crate) fn event_expression_schedule(
             || matches!(
                 value.kind,
                 CfgValueKind::BlockParameter
+                    | CfgValueKind::DigitalArrayBlockingWrite { .. }
+                    | CfgValueKind::DigitalArrayNonblockingWrite { .. }
                     | CfgValueKind::DigitalAnalogPotential { .. }
                     | CfgValueKind::DigitalAnalogFlow { .. }
                     | CfgValueKind::DigitalAnalogVariable { .. }
@@ -604,6 +720,12 @@ pub(crate) fn event_expression_schedule(
         | CfgValueKind::DigitalRealSignalRead { signal } = value.kind
         {
             dependencies.insert(signal);
+        }
+        if let CfgValueKind::DigitalArrayRead { array, .. } = value.kind {
+            let range = array
+                .cell_range()
+                .ok_or("event expression has invalid array storage")?;
+            dependencies.extend(range.map(super::ids::DigitalSignalId::new));
         }
         if let CfgValueKind::DigitalExpression { function, result } = &value.kind {
             function.validate().map_err(|error| error.to_string())?;
@@ -672,6 +794,8 @@ fn expression_dependencies(
         if matches!(
             value.kind,
             CfgValueKind::DigitalExpression { .. }
+                | CfgValueKind::DigitalArrayBlockingWrite { .. }
+                | CfgValueKind::DigitalArrayNonblockingWrite { .. }
                 | CfgValueKind::DigitalBlockingWrite { .. }
                 | CfgValueKind::DigitalNonblockingWrite { .. }
                 | CfgValueKind::DigitalDriverWrite { .. }
@@ -693,6 +817,12 @@ fn expression_dependencies(
         | CfgValueKind::DigitalRealSignalRead { signal } = value.kind
         {
             dependencies.insert(signal);
+        }
+        if let CfgValueKind::DigitalArrayRead { array, .. } = value.kind {
+            let range = array
+                .cell_range()
+                .ok_or("event expression has invalid array storage")?;
+            dependencies.extend(range.map(super::ids::DigitalSignalId::new));
         }
     }
     let mut incoming = vec![0usize; function.blocks.len()];

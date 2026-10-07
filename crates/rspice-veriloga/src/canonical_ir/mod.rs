@@ -68,10 +68,10 @@ pub use diagnostic::{
     CompilerPhase, DiagnosticSeverity, IrDiagnostic, IrValidationResult, SourceSpanRef,
 };
 pub use digital::{
-    CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriver, DigitalDriverId, DigitalEdge,
-    DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSensitivityTerm,
-    DigitalSignal, DigitalStaticSensitivity, DigitalTimeQuery, DigitalWriteSelect,
-    DigitalWriteTarget,
+    CanonicalDigitalPlan, CfgDigitalProcess, DigitalArray, DigitalArrayRef, DigitalDriver,
+    DigitalDriverId, DigitalEdge, DigitalProcessKind, DigitalSchedulingRegion,
+    DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal, DigitalStaticSensitivity,
+    DigitalTimeQuery, DigitalWriteSelect, DigitalWriteTarget,
 };
 pub use digital_eval::{
     DigitalClock, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
@@ -109,3 +109,6 @@ pub use state::{
     CanonicalStateFamily, CanonicalStateLayout, CanonicalStateOperator, CanonicalStateSite,
     CfgStateAllocation, CfgStateAllocationError, EmissionCensus,
 };
+
+#[cfg(test)]
+mod digital_array_tests;

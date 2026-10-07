@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 69 adds discrete array cells and runtime-indexed read/write operations.
 /// Version 68 recompiles array shapes/constant indices without float narrowing.
 /// Version 67 retains runtime-indexed analog array reads in digital plans.
 /// Version 66 carries typed numeric declaration initialization in digital storage.
@@ -70,7 +71,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 68;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 69;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

@@ -543,6 +543,7 @@ fn lower_with_analog_variables(
     CanonicalDigitalPlan {
         timing,
         content_identity: [0; 32],
+        arrays: Vec::new(),
         signals,
         processes,
         drivers,
