@@ -614,16 +614,7 @@ fn write_run_summary(
                 "error": report.error,
                 "error_details": report.error_details,
                 "duration_secs": report.duration_secs,
-                "measurements": report.measurements.iter().map(|meas| {
-                    serde_json::json!({
-                        "name": meas.name,
-                        "value": meas.value,
-                        "expected": meas.expected,
-                        "tolerance": meas.tolerance,
-                        "passed": meas.passed,
-                        "error": meas.error,
-                    })
-                }).collect::<Vec<_>>(),
+                "measurements": report.measurements,
             })
         }).collect::<Vec<_>>(),
     });

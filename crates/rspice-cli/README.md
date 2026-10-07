@@ -307,9 +307,10 @@ fails closed. The stream passes only when evaluation succeeds, produces at
 least one record, and every record passes; failed records remain in the stream
 instead of being replaced by a single aggregate failure.
 
-Continuous rows are serialized additively. JSON and CSV retain `record_index`,
-raw value, threshold, per-record verdict, event or trigger/target coordinates,
-and `aggregate_policy=all_records_must_pass`. Measurement CSV retains enough
+Continuous rows are serialized additively. Measurement JSON, CSV, and
+`--summary` JSON retain `record_index`, raw value, threshold, per-record verdict,
+event or trigger/target coordinates, and
+`aggregate_policy=all_records_must_pass`. Measurement CSV retains enough
 digits to recover every stored finite `f64` value exactly. JUnit and TAP emit one named case
 per row (`name[record N]`) and include the same contract metadata in their
 diagnostics. `--allow-failed-meas` changes only the process exit code; it does
@@ -1019,8 +1020,8 @@ rspice compare results.csv golden.csv --bless
 
 Because every failure category maps to a documented nonzero exit code,
 `rspice run deck.sp && deploy` is safe without parsing any output. The
-`--summary` JSON carries the same verdict plus every measurement value for
-archiving.
+`--summary` JSON carries the same verdict plus the full measurement records for
+archiving, using the same measurement fields as `--meas-file` JSON.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).
 

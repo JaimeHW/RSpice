@@ -56,7 +56,7 @@ pub(crate) fn format_spice_exponent(value: f64) -> String {
 }
 
 /// Measurement result for reporting
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct MeasurementReport {
     /// Measurement name
     pub name: String,
@@ -432,36 +432,31 @@ fn write_measurement_json<W: Write + ?Sized>(
     path: &Path,
     reports: &[SimulationReport],
 ) -> Result<(), CliError> {
+    #[derive(serde::Serialize)]
+    struct MeasurementRow<'a> {
+        run: &'a str,
+        netlist: &'a str,
+        #[serde(flatten)]
+        measurement: &'a MeasurementReport,
+    }
+
     let mut results = Vec::new();
 
     for report in reports {
         for meas in &report.measurements {
-            results.push(serde_json::json!({
-                "run": report.name,
-                "netlist": report.netlist,
-                "name": meas.name,
-                "value": meas.value,
-                "raw_value": meas.raw_value,
-                "expected": meas.expected,
-                "tolerance": meas.tolerance,
-                "failure_limit": meas.failure_limit,
-                "failure_limit_exceeded": meas.failure_limit_exceeded,
-                "passed": meas.passed,
-                "error": meas.error,
-                "record_index": meas.record_index,
-                "event_axis": meas.event_axis,
-                "trigger_axis": meas.trigger_axis,
-                "target_axis": meas.target_axis,
-                "aggregate_policy": meas.aggregate_policy,
-            }));
+            results.push(MeasurementRow {
+                run: &report.name,
+                netlist: &report.netlist,
+                measurement: meas,
+            });
         }
     }
 
     let json = serde_json::json!({
         "measurements": results,
         "total": results.len(),
-        "passed": results.iter().filter(|r| r["passed"] == true).count(),
-        "failed": results.iter().filter(|r| r["passed"] == false).count(),
+        "passed": results.iter().filter(|r| r.measurement.passed).count(),
+        "failed": results.iter().filter(|r| !r.measurement.passed).count(),
     });
     let json = crate::observability::envelope("rspice.measurements", json);
 

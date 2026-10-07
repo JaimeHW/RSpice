@@ -358,6 +358,7 @@ fn xyce_continuous_failvalue_is_reachable_through_the_cli() {
     let dir = test_dir("continuous_failvalue");
     let deck = dir.join("continuous.sp");
     let json_path = dir.join("continuous.json");
+    let summary_path = dir.join("summary.json");
     std::fs::write(
         &deck,
         "* Xyce continuous measurement\n\
@@ -377,6 +378,8 @@ fn xyce_continuous_failvalue_is_reachable_through_the_cli() {
         "xyce",
         "--meas-file",
         json_path.to_str().unwrap(),
+        "--summary",
+        summary_path.to_str().unwrap(),
     ]);
     assert_eq!(
         output.status.code(),
@@ -404,6 +407,26 @@ fn xyce_continuous_failvalue_is_reachable_through_the_cli() {
     assert_eq!(rows[1]["passed"], false);
     assert_eq!(rows[1]["aggregate_policy"], "all_records_must_pass");
 
+    let expected_summary_rows: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            let mut row = row.as_object().expect("measurement object").clone();
+            row.remove("run");
+            row.remove("netlist");
+            serde_json::Value::Object(row)
+        })
+        .collect();
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&summary_path).expect("read summary"))
+            .expect("parse summary");
+    assert_eq!(summary["passed"], false);
+    assert_eq!(summary["counts"]["failed_measurements"], 1);
+    assert_eq!(
+        summary["runs"][0]["measurements"],
+        serde_json::json!(expected_summary_rows),
+        "the summary must retain every measurement field from the dedicated report"
+    );
+
     let allowed = run_rspice(&[
         "--quiet",
         "run",
@@ -411,8 +434,20 @@ fn xyce_continuous_failvalue_is_reachable_through_the_cli() {
         "--spice-dialect",
         "xyce",
         "--allow-failed-meas",
+        "--summary",
+        "-",
     ]);
     assert_eq!(allowed.status.code(), Some(0));
+    let allowed_summary: serde_json::Value =
+        serde_json::from_slice(&allowed.stdout).expect("parse stdout summary");
+    assert_eq!(allowed_summary["passed"], true);
+    assert_eq!(allowed_summary["runs"][0]["passed"], false);
+    assert_eq!(allowed_summary["counts"]["failed_measurements"], 1);
+    assert_eq!(
+        allowed_summary["runs"][0]["measurements"],
+        serde_json::json!(expected_summary_rows),
+        "allowing failed measurements must preserve the full record and its verdict"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
