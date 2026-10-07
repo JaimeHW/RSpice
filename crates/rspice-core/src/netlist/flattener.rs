@@ -15,10 +15,10 @@
 //! - Proper parameter scoping with precedence resolution
 
 use super::expr::{
-    behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
-    prepare_behavioral_expression_preserving_parameters,
-    prepare_behavioral_expression_preserving_spelling,
-    validate_prepared_behavioral_runtime_expression,
+    behavioral_expression_references_runtime_quantity,
+    prepare_behavioral_expression_preserving_parameters_with_abort,
+    prepare_behavioral_expression_preserving_spelling_with_abort,
+    prepare_behavioral_expression_with_abort, validate_prepared_behavioral_runtime_expression,
 };
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
@@ -41,6 +41,34 @@ use crate::expr::Derivative;
 use crate::resource::{ResourceKind, ResourceLimitError};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+// Add source context only to semantic failures. Cancellation must bypass
+// diagnostics and deferred-expression recovery without polling the signal again.
+fn map_resolution_error(
+    error: ParseWithAbortError,
+    context: impl FnOnce(ParseError) -> ParseError,
+) -> ParseWithAbortError {
+    match error {
+        ParseWithAbortError::Aborted => ParseWithAbortError::Aborted,
+        ParseWithAbortError::Parse(error) => context(error).into(),
+    }
+}
+
+fn map_preparation_error(
+    error: super::expr::BehavioralPreparationError,
+    context: impl FnOnce(String) -> ParseError,
+) -> ParseWithAbortError {
+    match error {
+        super::expr::BehavioralPreparationError::Aborted => ParseWithAbortError::Aborted,
+        super::expr::BehavioralPreparationError::Semantic(error) => context(error).into(),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ScopedModelParameter<'a> {
+    model: &'a str,
+    parameter: &'a str,
+}
 
 fn format_xspice_complex_component(value: Value) -> String {
     let formatted = value.to_string();
@@ -576,7 +604,7 @@ impl<'a> Flattener<'a> {
                 multiplicity,
             } => {
                 let generated =
-                    super::parser::lower_deferred_rf_port(element, source, *line, scope)?;
+                    super::parser::lower_deferred_rf_port(element, source, *line, scope, abort)?;
                 for mut generated in generated {
                     ensure_parse_not_aborted(abort)?;
                     apply_element_multiplicity(&mut generated, *multiplicity);
@@ -604,8 +632,9 @@ impl<'a> Flattener<'a> {
                     }
                     .into());
                 };
-                let resolve =
-                    |value: &ParametricValue| resolve_parametric_value(value, scope, &self.random);
+                let resolve = |value: &ParametricValue| {
+                    resolve_parametric_value(value, scope, &self.random, abort)
+                };
                 let spec = super::parser::ChebyshevSpec {
                     kind: *filter_kind,
                     frequencies_hz: frequencies_hz
@@ -619,12 +648,14 @@ impl<'a> Flattener<'a> {
                     input_expression,
                     scope,
                     &self.qualify_hierarchy_name(prefix, &element.name),
+                    abort,
                 )?;
                 let multiplicity = self.resolve_source_multiplicity(
                     multiplicity,
                     scope,
                     &self.qualify_hierarchy_name(prefix, &element.name),
                     None,
+                    abort,
                 )?;
                 let mut synthesized = super::parser::synthesize_chebyshev(
                     &element.name,
@@ -681,6 +712,7 @@ impl<'a> Flattener<'a> {
                     let new_element = self.resolve_external_subcircuit_params(
                         self.remap_element(element, prefix, node_map),
                         scope,
+                        abort,
                     )?;
                     self.push_flattened_element(output, new_element)?;
                 } else {
@@ -1069,7 +1101,8 @@ impl<'a> Flattener<'a> {
                     if let Some(capture) = &mut self.parameter_direction {
                         capture.has_uncaptured_dependencies = true;
                     }
-                    let resolved = resolve_parametric_value(value, caller_scope, &self.random)?;
+                    let resolved =
+                        resolve_parametric_value(value, caller_scope, &self.random, abort)?;
                     if !resolved.is_finite() || resolved <= 0.0 {
                         return Err(ParseError::Syntax {
                             line: 0,
@@ -1112,8 +1145,13 @@ impl<'a> Flattener<'a> {
             let branch_result = (|| -> Result<(), ParseWithAbortError> {
                 // Apply parameter substitution to element values.
                 let element_path = self.qualify_hierarchy_name(&new_prefix, &sub_element.name);
-                let mut substituted =
-                    self.substitute_params(sub_element, &param_scope, &element_path, &new_prefix)?;
+                let mut substituted = self.substitute_params(
+                    sub_element,
+                    &param_scope,
+                    &element_path,
+                    &new_prefix,
+                    abort,
+                )?;
                 if multiplicity != 1.0 {
                     apply_element_multiplicity(&mut substituted, multiplicity);
                 }
@@ -1174,6 +1212,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     ".IC",
                     &ic.node,
+                    abort,
                 )?,
                 voltage_expr: None,
             });
@@ -1193,6 +1232,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     ".NODESET",
                     &nodeset.node,
+                    abort,
                 )?,
                 voltage_expr: None,
             });
@@ -1225,6 +1265,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     record.kind.as_spice_directive(),
                     &entry.execution_node,
+                    abort,
                 )?;
                 entry.voltage_expr = None;
                 entry.qualified_nodes = vec![
@@ -1250,17 +1291,21 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         directive: &str,
         node: &str,
-    ) -> Result<Value, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, ParseWithAbortError> {
         let value = match voltage_expr {
             Some(expr) => resolve_parametric_value(
                 &ParametricValue::Expression(expr.to_string()),
                 scope,
                 &self.random,
+                abort,
             )
             .map_err(|err| {
-                ParseError::InvalidValue(format!(
-                    "{directive} for node '{node}' could not resolve expression '{expr}': {err}"
-                ))
+                map_resolution_error(err, |err| {
+                    ParseError::InvalidValue(format!(
+                        "{directive} for node '{node}' could not resolve expression '{expr}': {err}"
+                    ))
+                })
             })?,
             None => voltage,
         };
@@ -1269,7 +1314,8 @@ impl<'a> Flattener<'a> {
         } else {
             Err(ParseError::InvalidValue(format!(
                 "{directive} for node '{node}' resolved to non-finite voltage {value}"
-            )))
+            ))
+            .into())
         }
     }
 
@@ -1740,7 +1786,8 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
         model_scope_path: &str,
-    ) -> Result<Element, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Element, ParseWithAbortError> {
         let capture_fields =
             self.parameter_direction.is_some() && !scope.has_retained_parameter_expressions();
         let mut scalar_direction = capture_fields.then(|| Derivative::from(0.0));
@@ -1762,6 +1809,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     Some(&mut scalar_direction),
+                    abort,
                 )?;
                 ElementKind::Resistor {
                     value,
@@ -1771,11 +1819,13 @@ impl<'a> Flattener<'a> {
                         scope,
                         element_path,
                         model_scope_path,
+                        abort,
                     )?,
                     instance_params: self.merge_deferred_params(
                         instance_params,
                         deferred_params,
                         scope,
+                        abort,
                     )?,
                     deferred_params: Vec::new(),
                 }
@@ -1794,6 +1844,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     Some(&mut scalar_direction),
+                    abort,
                 )?;
                 ElementKind::Capacitor {
                     value,
@@ -1804,11 +1855,13 @@ impl<'a> Flattener<'a> {
                         scope,
                         element_path,
                         model_scope_path,
+                        abort,
                     )?,
                     instance_params: self.merge_deferred_params(
                         instance_params,
                         deferred_params,
                         scope,
+                        abort,
                     )?,
                     deferred_params: Vec::new(),
                 }
@@ -1826,6 +1879,7 @@ impl<'a> Flattener<'a> {
                     value_expr,
                     scope,
                     Some(&mut scalar_direction),
+                    abort,
                 )?,
                 value_expr: None,
                 initial_current: *initial_current,
@@ -1834,11 +1888,13 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
                     scope,
+                    abort,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -1853,6 +1909,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 initial_current: *initial_current,
             },
@@ -1872,11 +1929,13 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
                     scope,
+                    abort,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -1891,12 +1950,14 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 bjt_type: *bjt_type,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
                     scope,
+                    abort,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -1912,6 +1973,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 mos_type: *mos_type,
                 compact_syntax: *compact_syntax,
@@ -1919,6 +1981,7 @@ impl<'a> Flattener<'a> {
                     instance_params,
                     deferred_params,
                     scope,
+                    abort,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -1933,12 +1996,14 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 jfet_type: *jfet_type,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
                     scope,
+                    abort,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -1953,12 +2018,14 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 mesfet_type: *mesfet_type,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
                     scope,
+                    abort,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -1972,11 +2039,13 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,
                     scope,
+                    abort,
                 )?,
                 deferred_params: Vec::new(),
             },
@@ -2010,16 +2079,18 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 pspice_u_timing: pspice_u_timing.clone(),
                 ports: ports.clone(),
-                params: self.merge_deferred_params(params, expr_params, scope)?,
+                params: self.merge_deferred_params(params, expr_params, scope, abort)?,
                 expr_params: Vec::new(),
                 string_params: self.merge_deferred_string_params(
                     string_params,
                     string_expr_params,
                     scope,
                     element_path,
+                    abort,
                 )?,
                 string_expr_params: Vec::new(),
                 string_vector_params: self.merge_deferred_string_vector_params(
@@ -2027,12 +2098,14 @@ impl<'a> Flattener<'a> {
                     string_vector_expr_params,
                     scope,
                     element_path,
+                    abort,
                 )?,
                 string_vector_expr_params: Vec::new(),
                 real_vector_params: self.merge_deferred_real_vector_params(
                     real_vector_params,
                     real_vector_expr_params,
                     scope,
+                    abort,
                 )?,
                 real_vector_expr_params: Vec::new(),
             },
@@ -2043,6 +2116,7 @@ impl<'a> Flattener<'a> {
                 element_path,
                 true,
                 source_directions.as_ref(),
+                abort,
             )?,
             ElementKind::CurrentSourceDeferred(raw_spec) => self.resolve_deferred_source_kind(
                 raw_spec,
@@ -2050,6 +2124,7 @@ impl<'a> Flattener<'a> {
                 element_path,
                 false,
                 source_directions.as_ref(),
+                abort,
             )?,
 
             ElementKind::BehavioralVoltage {
@@ -2062,6 +2137,7 @@ impl<'a> Flattener<'a> {
                     expression,
                     scope,
                     element_path,
+                    abort,
                 )?,
                 tc1: *tc1,
                 tc2: *tc2,
@@ -2070,6 +2146,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     None,
+                    abort,
                 )?,
             },
             ElementKind::BehavioralCurrent {
@@ -2082,6 +2159,7 @@ impl<'a> Flattener<'a> {
                     expression,
                     scope,
                     element_path,
+                    abort,
                 )?,
                 tc1: *tc1,
                 tc2: *tc2,
@@ -2090,6 +2168,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     None,
+                    abort,
                 )?,
             },
 
@@ -2104,6 +2183,7 @@ impl<'a> Flattener<'a> {
                     gain_expr,
                     scope,
                     Some(&mut scalar_direction),
+                    abort,
                 )?,
                 gain_expr: None,
                 control_nodes: control_nodes.clone(),
@@ -2119,6 +2199,7 @@ impl<'a> Flattener<'a> {
                     transconductance_expr,
                     scope,
                     Some(&mut scalar_direction),
+                    abort,
                 )?,
                 transconductance_expr: None,
                 multiplicity: self.resolve_source_multiplicity(
@@ -2126,6 +2207,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     Some(&mut multiplicity_direction),
+                    abort,
                 )?,
                 control_nodes: control_nodes.clone(),
             },
@@ -2139,6 +2221,7 @@ impl<'a> Flattener<'a> {
                     gain_expr,
                     scope,
                     Some(&mut scalar_direction),
+                    abort,
                 )?,
                 gain_expr: None,
                 control_element: control_element.clone(),
@@ -2153,6 +2236,7 @@ impl<'a> Flattener<'a> {
                     transresistance_expr,
                     scope,
                     Some(&mut scalar_direction),
+                    abort,
                 )?,
                 transresistance_expr: None,
                 control_element: control_element.clone(),
@@ -2170,6 +2254,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 initial_state: *initial_state,
             },
@@ -2184,6 +2269,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
                 initial_state: *initial_state,
             },
@@ -2197,16 +2283,20 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
-                control_expression: prepare_behavioral_expression_preserving_spelling(
+                control_expression: prepare_behavioral_expression_preserving_spelling_with_abort(
                     control_expression,
                     scope,
+                    abort,
                 )
                 .map_err(|err| {
-                    ParseError::InvalidValue(format!(
-                        "behavioral expression for element '{}' could not be prepared: {}",
-                        element_path, err
-                    ))
+                    map_preparation_error(err, |err| {
+                        ParseError::InvalidValue(format!(
+                            "behavioral expression for element '{}' could not be prepared: {}",
+                            element_path, err
+                        ))
+                    })
                 })?,
                 initial_state: *initial_state,
             },
@@ -2222,6 +2312,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
             },
             ElementKind::TransmissionLine {
@@ -2240,6 +2331,7 @@ impl<'a> Flattener<'a> {
                     scope,
                     element_path,
                     model_scope_path,
+                    abort,
                 )?,
             },
 
@@ -2251,6 +2343,7 @@ impl<'a> Flattener<'a> {
             &mut new_kind,
             scope,
             element_path,
+            abort,
         )?;
 
         if capture_fields && let Some(capture) = &mut self.parameter_direction {
@@ -2309,9 +2402,10 @@ impl<'a> Flattener<'a> {
         lowered: &mut ElementKind,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<(), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ParseWithAbortError> {
         let prepare = |expression: &str| {
-            self.prepare_spectre_statistical_expression(expression, scope, element_path)
+            self.prepare_spectre_statistical_expression(expression, scope, element_path, abort)
         };
         match (authored, lowered) {
             (
@@ -2502,22 +2596,24 @@ impl<'a> Flattener<'a> {
         expression: &str,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<String, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let preserved_parameters = scope
             .spectre_statistical_parameter_names()
             .into_iter()
             .filter(|name| scope.get_parameter_expression(name).is_none())
             .collect();
-        prepare_behavioral_expression_preserving_parameters(
+        prepare_behavioral_expression_preserving_parameters_with_abort(
             expression,
             scope,
             &preserved_parameters,
+            abort,
         )
-        .map_err(|error| {
+        .map_err(|error| map_preparation_error(error, |error| {
             ParseError::InvalidValue(format!(
                 "statistical expression for element '{element_path}' could not be prepared: {error}"
             ))
-        })
+        }))
     }
 
     /// Ready parameter leaves retain complex values and function bindings.
@@ -2528,9 +2624,16 @@ impl<'a> Flattener<'a> {
         prepared: String,
         scope: &ParamContext,
         direction: Option<&mut Option<Derivative>>,
-    ) -> Result<Value, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, ParseWithAbortError> {
         let preserves_bindings = !scope.has_retained_parameter_expressions()
-            && super::expr::parse_expression(expression).is_ok();
+            && match super::expr::parse_expression_with_abort(expression, abort) {
+                Ok(_) => true,
+                Err(super::expr::ParseExpressionWithAbortError::Parse(_)) => false,
+                Err(super::expr::ParseExpressionWithAbortError::Aborted) => {
+                    return Err(ParseWithAbortError::Aborted);
+                }
+            };
         let expression = if preserves_bindings {
             expression.to_string()
         } else {
@@ -2540,6 +2643,7 @@ impl<'a> Flattener<'a> {
             &ParametricValue::Expression(expression),
             scope,
             &self.random,
+            abort,
         )?;
         if let Some(direction) = direction {
             *direction = if preserves_bindings && direction.is_some() {
@@ -2562,21 +2666,26 @@ impl<'a> Flattener<'a> {
         value_expr: &Option<String>,
         scope: &ParamContext,
         direction: Option<&mut Option<Derivative>>,
-    ) -> Result<Value, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, ParseWithAbortError> {
         match value_expr {
             Some(expr) => {
-                let prepared = prepare_behavioral_expression(expr, scope).map_err(|error| {
-                    ParseError::InvalidValue(format!(
-                        "element value expression could not be prepared: {error}"
-                    ))
-                })?;
+                let prepared = prepare_behavioral_expression_with_abort(expr, scope, abort)
+                    .map_err(|error| {
+                        map_preparation_error(error, |error| {
+                            ParseError::InvalidValue(format!(
+                                "element value expression could not be prepared: {error}"
+                            ))
+                        })
+                    })?;
                 if behavioral_expression_references_runtime_quantity(&prepared) {
                     return Err(ParseError::InvalidValue(
                         "runtime-dependent value expressions are not supported for this element"
                             .to_string(),
-                    ));
+                    )
+                    .into());
                 }
-                self.resolve_prepared_scalar_value(expr, prepared, scope, direction)
+                self.resolve_prepared_scalar_value(expr, prepared, scope, direction, abort)
             }
             None => Ok(value),
         }
@@ -2588,12 +2697,14 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
         direction: Option<&mut Option<Derivative>>,
-    ) -> Result<SourceMultiplicity, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<SourceMultiplicity, ParseWithAbortError> {
         let value = self.resolve_optional_value_expr(
             multiplicity.value,
             &multiplicity.value_expr,
             scope,
             direction,
+            abort,
         )?;
         if !value.is_finite()
             || scope.expression_dialect() == ExpressionDialect::Xyce && value <= 0.0
@@ -2601,7 +2712,8 @@ impl<'a> Flattener<'a> {
             return Err(ParseError::InvalidValue(format!(
                 "source element '{}' has invalid multiplicity M={}",
                 element_path, value
-            )));
+            ))
+            .into());
         }
         Ok(SourceMultiplicity {
             value,
@@ -2617,11 +2729,12 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
         direction: Option<&mut Option<Derivative>>,
-    ) -> Result<(Value, Option<String>), ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<(Value, Option<String>), ParseWithAbortError> {
         match value_expr {
             Some(expr) => {
                 let prepared =
-                    self.prepare_scoped_behavioral_expression(expr, scope, element_path)?;
+                    self.prepare_scoped_behavioral_expression(expr, scope, element_path, abort)?;
                 if behavioral_expression_references_runtime_quantity(&prepared) {
                     if let Some(direction) = direction {
                         *direction = None;
@@ -2629,7 +2742,9 @@ impl<'a> Flattener<'a> {
                     Ok((Value::NAN, Some(prepared)))
                 } else {
                     Ok((
-                        self.resolve_prepared_scalar_value(expr, prepared, scope, direction)?,
+                        self.resolve_prepared_scalar_value(
+                            expr, prepared, scope, direction, abort,
+                        )?,
                         None,
                     ))
                 }
@@ -2646,25 +2761,29 @@ impl<'a> Flattener<'a> {
         instance_params: &[(String, Value)],
         deferred_params: &[(String, String)],
         scope: &ParamContext,
-    ) -> Result<Vec<(String, Value)>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(String, Value)>, ParseWithAbortError> {
         if deferred_params.is_empty() {
             return Ok(instance_params.to_vec());
         }
         let mut merged = instance_params.to_vec();
         for (name, expr) in deferred_params {
-            let prepared = prepare_behavioral_expression(expr, scope).map_err(|error| {
-                ParseError::InvalidValue(format!(
-                    "instance parameter '{}' could not be prepared: {}",
-                    name, error
-                ))
-            })?;
+            let prepared =
+                prepare_behavioral_expression_with_abort(expr, scope, abort).map_err(|error| {
+                    map_preparation_error(error, |error| {
+                        ParseError::InvalidValue(format!(
+                            "instance parameter '{}' could not be prepared: {}",
+                            name, error
+                        ))
+                    })
+                })?;
             if behavioral_expression_references_runtime_quantity(&prepared) {
                 return Err(ParseError::InvalidValue(format!(
                     "runtime-dependent instance/model parameter '{}' is not supported by this device target",
                     name
-                )));
+                )).into());
             }
-            let value = self.resolve_prepared_scalar_value(expr, prepared, scope, None)?;
+            let value = self.resolve_prepared_scalar_value(expr, prepared, scope, None, abort)?;
             match merged
                 .iter_mut()
                 .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
@@ -2683,31 +2802,35 @@ impl<'a> Flattener<'a> {
         element_path: &str,
         voltage_source: bool,
         direction: Option<&std::cell::RefCell<[Derivative; 3]>>,
-    ) -> Result<ElementKind, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<ElementKind, ParseWithAbortError> {
         if scope.expression_references_spectre_statistics(raw_spec) {
             let prepared =
-                super::parser::map_source_spec_values(raw_spec, scope, &|expression, nominal| {
+                super::parser::map_source_spec_values(raw_spec, scope, abort, &|expression, nominal, abort| {
                     if scope.expression_references_spectre_statistics(expression) {
-                        self.prepare_spectre_statistical_expression(expression, scope, element_path)
+                        self.prepare_spectre_statistical_expression(expression, scope, element_path, abort)
                     } else {
                         Ok(nominal.to_string())
                     }
                 })
-                .map_err(|error| {
+                .map_err(|error| map_resolution_error(error, |error| {
                     ParseError::InvalidValue(format!(
                         "statistical source specification for element '{element_path}' could not be prepared: {error}"
                     ))
-                })?;
+                }))?;
             return Ok(if voltage_source {
                 ElementKind::VoltageSourceDeferred(prepared)
             } else {
                 ElementKind::CurrentSourceDeferred(prepared)
             });
         }
-        match super::parser::parse_source_spec_text_with_direction(raw_spec, 0, scope, direction) {
+        match super::parser::parse_source_spec_text_with_direction_and_abort(
+            raw_spec, 0, scope, direction, abort,
+        ) {
             Ok(spec) if voltage_source => Ok(ElementKind::VoltageSource(spec)),
             Ok(spec) => Ok(ElementKind::CurrentSource(spec)),
-            Err(source_error) => {
+            Err(ParseWithAbortError::Aborted) => Err(ParseWithAbortError::Aborted),
+            Err(ParseWithAbortError::Parse(source_error)) => {
                 let resolution_error = || {
                     ParseError::InvalidValue(format!(
                         "source specification for element '{}' could not be resolved: {}",
@@ -2716,12 +2839,16 @@ impl<'a> Flattener<'a> {
                 };
                 let expression =
                     grouped_source_expression(raw_spec).ok_or_else(resolution_error)?;
-                let expression =
-                    self.prepare_scoped_behavioral_expression(expression, scope, element_path)?;
+                let expression = self.prepare_scoped_behavioral_expression(
+                    expression,
+                    scope,
+                    element_path,
+                    abort,
+                )?;
                 // Preserve constant-evaluation failures such as division by zero
                 // instead of handing them to the runtime evaluator's domain rules.
                 if !behavioral_expression_references_runtime_quantity(&expression) {
-                    return Err(resolution_error());
+                    return Err(resolution_error().into());
                 }
                 if voltage_source {
                     Ok(ElementKind::BehavioralVoltage {
@@ -2747,12 +2874,15 @@ impl<'a> Flattener<'a> {
         expression: &str,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<String, ParseError> {
-        prepare_behavioral_expression(expression, scope).map_err(|err| {
-            ParseError::InvalidValue(format!(
-                "behavioral expression for element '{}' could not be prepared: {}",
-                element_path, err
-            ))
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        prepare_behavioral_expression_with_abort(expression, scope, abort).map_err(|err| {
+            map_preparation_error(err, |err| {
+                ParseError::InvalidValue(format!(
+                    "behavioral expression for element '{}' could not be prepared: {}",
+                    element_path, err
+                ))
+            })
         })
     }
 
@@ -2762,7 +2892,8 @@ impl<'a> Flattener<'a> {
         deferred_params: &[(String, String)],
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<Vec<(String, String)>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(String, String)>, ParseWithAbortError> {
         let mut merged: Vec<(String, String)> = instance_params
             .iter()
             .map(|(name, value)| {
@@ -2790,6 +2921,7 @@ impl<'a> Flattener<'a> {
                     &imag_expr,
                     scope,
                     element_path,
+                    abort,
                 )?
             } else {
                 let raw_value = scope
@@ -2823,7 +2955,8 @@ impl<'a> Flattener<'a> {
         instance_params: &[(String, Vec<Value>)],
         deferred_params: &[(String, Vec<String>)],
         scope: &ParamContext,
-    ) -> Result<Vec<(String, Vec<Value>)>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(String, Vec<Value>)>, ParseWithAbortError> {
         if deferred_params.is_empty() {
             return Ok(instance_params.to_vec());
         }
@@ -2837,6 +2970,7 @@ impl<'a> Flattener<'a> {
                         &ParametricValue::Expression(expr.clone()),
                         scope,
                         &self.random,
+                        abort,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -2857,7 +2991,8 @@ impl<'a> Flattener<'a> {
         deferred_params: &[(String, String)],
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<Vec<(String, Vec<String>)>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(String, Vec<String>)>, ParseWithAbortError> {
         if deferred_params.is_empty() {
             return Ok(instance_params.to_vec());
         }
@@ -2865,7 +3000,13 @@ impl<'a> Flattener<'a> {
         let mut merged = instance_params.to_vec();
         for (name, expr) in deferred_params {
             let values = if let Some(entries) = super::parse_deferred_xspice_complex_vector(expr) {
-                self.resolve_deferred_xspice_complex_vector(name, entries, scope, element_path)?
+                self.resolve_deferred_xspice_complex_vector(
+                    name,
+                    entries,
+                    scope,
+                    element_path,
+                    abort,
+                )?
             } else {
                 let value = scope
                         .get_string(expr)
@@ -2900,7 +3041,8 @@ impl<'a> Flattener<'a> {
         entries: Vec<super::DeferredXspiceStringVectorEntry>,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<Vec<String>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<String>, ParseWithAbortError> {
         entries
             .into_iter()
             .map(|entry| match entry {
@@ -2912,6 +3054,7 @@ impl<'a> Flattener<'a> {
                         &imag,
                         scope,
                         element_path,
+                        abort,
                     ),
             })
             .collect()
@@ -2924,13 +3067,15 @@ impl<'a> Flattener<'a> {
         imag_expr: &str,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<String, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let real = self.resolve_deferred_xspice_complex_component(
             param_name,
             real_expr,
             scope,
             element_path,
             "real",
+            abort,
         )?;
         let imag = self.resolve_deferred_xspice_complex_component(
             param_name,
@@ -2938,6 +3083,7 @@ impl<'a> Flattener<'a> {
             scope,
             element_path,
             "imaginary",
+            abort,
         )?;
 
         Ok(format!(
@@ -2954,40 +3100,44 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
         component: &str,
-    ) -> Result<Value, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, ParseWithAbortError> {
         resolve_parametric_value(
             &ParametricValue::Expression(expr.to_string()),
             scope,
             &self.random,
+            abort,
         )
         .map_err(|err| {
-            ParseError::InvalidValue(format!(
-                "XSPICE instance complex parameter '{}' for element '{}' could not resolve {} expression '{}': {}",
-                param_name, element_path, component, expr, err
-            ))
+            map_resolution_error(err, |err| {
+                ParseError::InvalidValue(format!(
+                    "XSPICE instance complex parameter '{}' for element '{}' could not resolve {} expression '{}': {}",
+                    param_name, element_path, component, expr, err
+                ))
+            })
         })
     }
 
     fn resolve_deferred_xspice_model_complex_vector(
         &self,
-        model_name: &str,
-        param_name: &str,
+        parameter: ScopedModelParameter<'_>,
         entries: Vec<super::DeferredXspiceStringVectorEntry>,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<Vec<String>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<String>, ParseWithAbortError> {
         entries
             .into_iter()
             .map(|entry| match entry {
                 super::DeferredXspiceStringVectorEntry::Resolved(value) => Ok(value),
                 super::DeferredXspiceStringVectorEntry::Complex { real, imag } => self
                     .resolve_deferred_xspice_model_complex_string(
-                        model_name,
-                        param_name,
+                        parameter,
                         &real,
                         &imag,
                         scope,
                         element_path,
+                        abort,
                     ),
             })
             .collect()
@@ -2995,28 +3145,28 @@ impl<'a> Flattener<'a> {
 
     fn resolve_deferred_xspice_model_complex_string(
         &self,
-        model_name: &str,
-        param_name: &str,
+        parameter: ScopedModelParameter<'_>,
         real_expr: &str,
         imag_expr: &str,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<String, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let real = self.resolve_deferred_xspice_model_complex_component(
-            model_name,
-            param_name,
+            parameter,
             real_expr,
             scope,
             element_path,
             "real",
+            abort,
         )?;
         let imag = self.resolve_deferred_xspice_model_complex_component(
-            model_name,
-            param_name,
+            parameter,
             imag_expr,
             scope,
             element_path,
             "imaginary",
+            abort,
         )?;
 
         Ok(format!(
@@ -3028,23 +3178,26 @@ impl<'a> Flattener<'a> {
 
     fn resolve_deferred_xspice_model_complex_component(
         &self,
-        model_name: &str,
-        param_name: &str,
+        parameter: ScopedModelParameter<'_>,
         expr: &str,
         scope: &ParamContext,
         element_path: &str,
         component: &str,
-    ) -> Result<Value, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, ParseWithAbortError> {
         resolve_parametric_value(
             &ParametricValue::Expression(expr.to_string()),
             scope,
             &self.random,
+            abort,
         )
         .map_err(|err| {
-            ParseError::InvalidValue(format!(
-                "XSPICE model '{}' complex parameter '{}' for scoped instance '{}' could not resolve {} expression '{}': {}",
-                model_name, param_name, element_path, component, expr, err
-            ))
+            map_resolution_error(err, |err| {
+                ParseError::InvalidValue(format!(
+                    "XSPICE model '{}' complex parameter '{}' for scoped instance '{}' could not resolve {} expression '{}': {}",
+                    parameter.model, parameter.parameter, element_path, component, expr, err
+                ))
+            })
         })
     }
 
@@ -3052,7 +3205,8 @@ impl<'a> Flattener<'a> {
         &self,
         mut element: Element,
         scope: &ParamContext,
-    ) -> Result<Element, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Element, ParseWithAbortError> {
         if let ElementKind::Subcircuit { params, .. } = &mut element.kind {
             let mut master_scope = None;
             for (_, value) in params.iter_mut() {
@@ -3071,7 +3225,7 @@ impl<'a> Flattener<'a> {
                     continue;
                 }
                 let scope = master_scope.get_or_insert_with(|| self.external_master_scope(scope));
-                let resolved = resolve_parametric_value(value, scope, &self.random)?;
+                let resolved = resolve_parametric_value(value, scope, &self.random, abort)?;
                 *value = ParametricValue::Resolved(resolved);
             }
         }
@@ -3113,11 +3267,18 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
         model_scope_path: &str,
-    ) -> Result<Option<String>, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<String>, ParseWithAbortError> {
         model_name
             .as_deref()
             .map(|model| {
-                self.resolve_native_scoped_model(model, scope, element_path, model_scope_path)
+                self.resolve_native_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                    abort,
+                )
             })
             .transpose()
     }
@@ -3128,8 +3289,16 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
         model_scope_path: &str,
-    ) -> Result<String, ParseError> {
-        self.resolve_scoped_model(model_name, scope, element_path, model_scope_path, false)
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        self.resolve_scoped_model(
+            model_name,
+            scope,
+            element_path,
+            model_scope_path,
+            false,
+            abort,
+        )
     }
 
     fn resolve_xspice_scoped_model(
@@ -3138,8 +3307,16 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         element_path: &str,
         model_scope_path: &str,
-    ) -> Result<String, ParseError> {
-        self.resolve_scoped_model(model_name, scope, element_path, model_scope_path, true)
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
+        self.resolve_scoped_model(
+            model_name,
+            scope,
+            element_path,
+            model_scope_path,
+            true,
+            abort,
+        )
     }
 
     fn resolve_scoped_model(
@@ -3149,7 +3326,8 @@ impl<'a> Flattener<'a> {
         element_path: &str,
         model_scope_path: &str,
         preserve_unresolved: bool,
-    ) -> Result<String, ParseError> {
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ParseWithAbortError> {
         let Some((source_model_index, model_def)) = self
             .models
             .iter()
@@ -3182,18 +3360,21 @@ impl<'a> Flattener<'a> {
                 replace_model_param(&mut scoped_model, name);
                 scoped_model.expr_params.push((
                     name.clone(),
-                    self.prepare_spectre_statistical_expression(expr, scope, element_path)?,
+                    self.prepare_spectre_statistical_expression(expr, scope, element_path, abort)?,
                 ));
                 continue;
             }
             if let Some((real_expr, imag_expr)) = super::parse_deferred_xspice_complex(expr) {
                 let value = self.resolve_deferred_xspice_model_complex_string(
-                    model_name,
-                    name,
+                    ScopedModelParameter {
+                        model: model_name,
+                        parameter: name,
+                    },
                     &real_expr,
                     &imag_expr,
                     scope,
                     element_path,
+                    abort,
                 )?;
                 replace_model_param(&mut scoped_model, name);
                 scoped_model.string_params.push((name.clone(), value));
@@ -3202,11 +3383,14 @@ impl<'a> Flattener<'a> {
 
             if let Some(entries) = super::parse_deferred_xspice_complex_vector(expr) {
                 let values = self.resolve_deferred_xspice_model_complex_vector(
-                    model_name,
-                    name,
+                    ScopedModelParameter {
+                        model: model_name,
+                        parameter: name,
+                    },
                     entries,
                     scope,
                     element_path,
+                    abort,
                 )?;
                 replace_model_param(&mut scoped_model, name);
                 scoped_model
@@ -3226,7 +3410,9 @@ impl<'a> Flattener<'a> {
                 continue;
             }
 
-            match super::expr::eval_expression(expr, scope) {
+            match super::expr::eval_expression_complex_with_abort(expr, scope, abort)
+                .map(|value| value.re)
+            {
                 Ok(value) if value.is_finite() => {
                     replace_model_param(&mut scoped_model, name);
                     scoped_model.params.push((name.clone(), value));
@@ -3235,9 +3421,14 @@ impl<'a> Flattener<'a> {
                     return Err(ParseError::InvalidValue(format!(
                         "model parameter '{}' for scoped model '{}' resolved to non-finite value {}",
                         name, model_name, value
-                    )));
+                    )).into());
                 }
-                Err(err) if preserve_unresolved => {
+                Err(super::expr::ExpressionEvaluationError::Aborted) => {
+                    return Err(ParseWithAbortError::Aborted);
+                }
+                Err(super::expr::ExpressionEvaluationError::Expression(err))
+                    if preserve_unresolved =>
+                {
                     scoped_model.expr_params.push((name.clone(), expr.clone()));
                     log::debug!(
                         "Preserved unresolved expression parameter '{}'='{}' for scoped model '{}': {}",
@@ -3247,11 +3438,11 @@ impl<'a> Flattener<'a> {
                         err
                     );
                 }
-                Err(err) => {
+                Err(super::expr::ExpressionEvaluationError::Expression(err)) => {
                     return Err(ParseError::InvalidValue(format!(
                         "model parameter '{}' for scoped model '{}' could not be resolved against subcircuit instance '{}': {}",
                         name, model_name, element_path, err
-                    )));
+                    )).into());
                 }
             }
         }
@@ -3261,15 +3452,20 @@ impl<'a> Flattener<'a> {
             let mut first_error = None;
 
             for expr in exprs {
-                match super::expr::eval_expression(expr, scope) {
+                match super::expr::eval_expression_complex_with_abort(expr, scope, abort)
+                    .map(|value| value.re)
+                {
                     Ok(value) if value.is_finite() => values.push(value),
                     Ok(value) => {
                         return Err(ParseError::InvalidValue(format!(
                             "model vector parameter '{}' for scoped model '{}' expression '{}' resolved to non-finite value {}",
                             name, model_name, expr, value
-                        )));
+                        )).into());
                     }
-                    Err(err) => {
+                    Err(super::expr::ExpressionEvaluationError::Aborted) => {
+                        return Err(ParseWithAbortError::Aborted);
+                    }
+                    Err(super::expr::ExpressionEvaluationError::Expression(err)) => {
                         first_error.get_or_insert_with(|| (expr.clone(), err));
                         break;
                     }
@@ -3292,7 +3488,7 @@ impl<'a> Flattener<'a> {
                     return Err(ParseError::InvalidValue(format!(
                         "model vector parameter '{}' for scoped model '{}' could not resolve expression '{}' against subcircuit instance '{}': {}",
                         name, model_name, expr, element_path, err
-                    )));
+                    )).into());
                 }
             } else {
                 replace_model_param(&mut scoped_model, name);
@@ -3311,8 +3507,8 @@ fn restore_statistical_deferred_params(
     numeric: &mut Vec<(String, Value)>,
     deferred: &mut Vec<(String, String)>,
     scope: &ParamContext,
-    prepare: &impl Fn(&str) -> Result<String, ParseError>,
-) -> Result<(), ParseError> {
+    prepare: &impl Fn(&str) -> Result<String, ParseWithAbortError>,
+) -> Result<(), ParseWithAbortError> {
     for (name, expression) in authored {
         if !scope.expression_references_spectre_statistics(expression) {
             continue;
@@ -3534,21 +3730,12 @@ fn resolve_parametric_value(
     value: &ParametricValue,
     scope: &ParamContext,
     random: &RandomState,
-) -> Result<Value, ParseError> {
-    resolve_numeric_parameter_binding(value, scope, random).map(|binding| binding.value.re)
+    abort: &dyn AbortSignal,
+) -> Result<Value, ParseWithAbortError> {
+    resolve_numeric_parameter_binding(value, scope, random, abort).map(|binding| binding.value.re)
 }
 
 fn resolve_numeric_parameter_binding(
-    value: &ParametricValue,
-    scope: &ParamContext,
-    random: &RandomState,
-) -> Result<NumericParameterBinding, ParseError> {
-    finish_non_aborting_parse(resolve_numeric_parameter_binding_with_abort(
-        value, scope, random, &NoAbort,
-    ))
-}
-
-fn resolve_numeric_parameter_binding_with_abort(
     value: &ParametricValue,
     scope: &ParamContext,
     random: &RandomState,
@@ -3817,7 +4004,7 @@ fn resolve_deferred_param_expressions(
                     }
                 }
             }
-            match resolve_numeric_parameter_binding_with_abort(
+            match resolve_numeric_parameter_binding(
                 &ParametricValue::Expression(expr.clone()),
                 scope,
                 random,
@@ -3967,12 +4154,7 @@ fn resolve_subcircuit_instance_params(
                         }
                     }
                 }
-                match resolve_numeric_parameter_binding_with_abort(
-                    &value,
-                    &instance_scope,
-                    random,
-                    abort,
-                ) {
+                match resolve_numeric_parameter_binding(&value, &instance_scope, random, abort) {
                     Ok(resolved) => {
                         instance_scope.shadow_spectre_statistical_parameter(&name);
                         resolved.bind(&name, &mut instance_scope);
@@ -4627,7 +4809,7 @@ mod tests {
                 ("if(rv<100,rv,2*rv)", 90.0, 220.0),
             ] {
                 let prepared = flattener
-                    .prepare_spectre_statistical_expression(expression, &scope, "X1.R1")
+                    .prepare_spectre_statistical_expression(expression, &scope, "X1.R1", &NoAbort)
                     .expect("statistical expression prepares");
                 for (sample, expected) in [(90.0, below), (110.0, above)] {
                     let mut sampled = scope.clone();

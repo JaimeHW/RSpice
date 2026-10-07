@@ -8,9 +8,7 @@
 use crate::config::ExpressionDialect;
 
 use super::data_table::data_table_parameter_name_is_valid;
-use super::expr::{
-    behavioral_expression_references_runtime_quantity, eval_expression,
-};
+use super::expr::{behavioral_expression_references_runtime_quantity, eval_expression};
 use super::include::{ExpandedSource, ExpandedSourceItem};
 use super::lexer::{LexError, TokenKind, parse_spice_value, tokenize};
 use super::mutual_inductor::{
@@ -199,7 +197,7 @@ use scoping::*;
 pub use source_specs::{independent_source_file_dependency, parse_source_spec_text};
 pub(super) use source_specs::{
     map_source_spec_values, normalize_deferred_source_file_path,
-    parse_source_spec_text_with_direction, parse_source_spec_text_with_direction_and_abort,
+    parse_source_spec_text_with_direction_and_abort,
 };
 use state::*;
 use tlines::*;
@@ -4064,7 +4062,10 @@ fn resolve_static_model_expression_params_with_abort(
         &mut context,
         abort,
     )
-    .map_err(|_| ParseWithAbortError::Aborted)?;
+    .map_err(|error| match error {
+        crate::netlist::expr::ParameterResolutionError::Aborted => ParseWithAbortError::Aborted,
+        error => ParseError::InvalidValue(error.to_string()).into(),
+    })?;
 
     for (index, model) in state.models.iter_mut().enumerate() {
         poll_parse_abort(abort, index)?;

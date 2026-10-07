@@ -296,24 +296,21 @@ pub fn prepare_behavioral_expression(
 /// Expand scoped definitions while keeping selected parameter identities as
 /// AST leaves. Numerical placeholders are unsafe here: constant folding can
 /// consume their value or select a branch before the real coordinate is bound.
-pub(crate) fn prepare_behavioral_expression_preserving_parameters(
+pub(crate) fn prepare_behavioral_expression_preserving_parameters_with_abort(
     expression: &str,
     params: &ParamContext,
     preserved_parameters: &HashSet<String>,
-) -> Result<String, String> {
-    match prepare_behavioral_expression_impl(
-        expression,
-        params,
-        false,
-        Some(preserved_parameters),
-        &NoAbort,
-    ) {
-        Ok(expression) => Ok(expression),
-        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
-        Err(BehavioralPreparationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel behavioral preparation")
-        }
-    }
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    prepare_behavioral_expression_impl(expression, params, false, Some(preserved_parameters), abort)
+}
+
+pub(crate) fn prepare_behavioral_expression_preserving_spelling_with_abort(
+    expression: &str,
+    params: &ParamContext,
+    abort: &dyn AbortSignal,
+) -> Result<String, BehavioralPreparationError> {
+    prepare_behavioral_expression_impl(expression, params, true, None, abort)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

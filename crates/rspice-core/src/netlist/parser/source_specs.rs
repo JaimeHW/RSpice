@@ -9,10 +9,13 @@ use crate::netlist::SourceDistortionTone;
 const PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
-type SourceValueMapper<'a> = dyn Fn(&str, Value) -> Result<String, ParseError> + 'a;
+type SourceValueMapper<'a> =
+    dyn Fn(&str, Value, &dyn AbortSignal) -> Result<String, ParseWithAbortError> + 'a;
 
 struct SourceValueMapping<'a> {
     map: &'a SourceValueMapper<'a>,
+    abort: &'a dyn AbortSignal,
+    error: std::cell::RefCell<Option<ParseWithAbortError>>,
     replacements: std::cell::RefCell<Vec<(std::ops::Range<usize>, String)>>,
 }
 
@@ -40,6 +43,10 @@ fn expect_value(
     let Some(mapping) = &context.mapping else {
         return super::expect_value(stream, line_num, context.params);
     };
+    let mapping_error = || ParseError::InvalidValue("source value mapping failed".into());
+    if mapping.error.borrow().is_some() {
+        return Err(mapping_error());
+    }
     skip_commas(stream);
     let start = stream.peek().span.start;
     let sign = match stream.peek().kind {
@@ -58,7 +65,12 @@ fn expect_value(
         |sign| format!("{sign}({expression})"),
     );
     let value = super::expect_value(stream, line_num, context.params)?;
-    let mapped = (mapping.map)(&expression, value)?;
+    // Mapping can cancel independently of numeric parsing. Retain its typed
+    // error across optional-field grammar probes, which only carry ParseError.
+    let mapped = (mapping.map)(&expression, value, mapping.abort).map_err(|error| {
+        *mapping.error.borrow_mut() = Some(error);
+        mapping_error()
+    })?;
     mapping
         .replacements
         .borrow_mut()
@@ -409,17 +421,8 @@ pub fn parse_source_spec_text(
     line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
-    parse_source_spec_text_with_direction(raw, line_num, params, None)
-}
-
-pub(in crate::netlist) fn parse_source_spec_text_with_direction(
-    raw: &str,
-    line_num: usize,
-    params: &ParamContext,
-    direction: Option<&std::cell::RefCell<[Derivative; 3]>>,
-) -> Result<SourceSpec, ParseError> {
     finish_non_aborting_parse(parse_source_spec_text_with_direction_and_abort(
-        raw, line_num, params, direction, &NoAbort,
+        raw, line_num, params, None, &NoAbort,
     ))
 }
 
@@ -447,21 +450,35 @@ pub(in crate::netlist) fn parse_source_spec_text_with_direction_and_abort(
 pub(in crate::netlist) fn map_source_spec_values(
     raw: &str,
     params: &ParamContext,
+    abort: &dyn AbortSignal,
     map: &SourceValueMapper<'_>,
-) -> Result<String, ParseError> {
+) -> Result<String, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
     let tokens = tokenize(raw).map_err(|error| lex_to_parse_error(error, 0))?;
+    let abort = NumericParseAbort::new(abort);
     let context = SourceParseContext {
         params,
         direction: None,
         mapping: Some(SourceValueMapping {
             map,
+            abort: &abort,
+            error: Default::default(),
             replacements: Default::default(),
         }),
     };
-    parse_source_spec_impl(&mut TokenStream::new(tokens), 0, &context)?;
+    let result = parse_source_spec_impl(
+        &mut TokenStream::new(tokens).with_abort(&abort),
+        0,
+        &context,
+    );
+    let mapping = context.mapping.unwrap();
+    abort.finish(match mapping.error.into_inner() {
+        Some(error) => Err(error),
+        None => result.map_err(ParseWithAbortError::from),
+    })?;
     let mut mapped = String::with_capacity(raw.len());
     let mut cursor = 0;
-    for (span, replacement) in context.mapping.unwrap().replacements.into_inner() {
+    for (span, replacement) in mapping.replacements.into_inner() {
         mapped.push_str(&raw[cursor..span.start]);
         mapped.push_str(&replacement);
         cursor = span.end;
@@ -1952,6 +1969,41 @@ mod tests {
     }
 
     #[test]
+    fn source_mapping_preserves_abort_and_semantic_errors_in_optional_fields() {
+        for cancelled in [true, false] {
+            let scope = ParamContext::new();
+            let calls = std::cell::Cell::new(0);
+            let result = map_source_spec_values(
+                "SIN(0 1 1 2) AC 1",
+                &scope,
+                &NoAbort,
+                &|expression, value, _| {
+                    calls.set(calls.get() + 1);
+                    if expression == "2" {
+                        Err(if cancelled {
+                            ParseWithAbortError::Aborted
+                        } else {
+                            ParseError::InvalidValue("mapper diagnostic".into()).into()
+                        })
+                    } else {
+                        Ok(value.to_string())
+                    }
+                },
+            );
+            assert_eq!(calls.get(), 4, "a failed mapper must not run again");
+            match result {
+                Err(ParseWithAbortError::Aborted) if cancelled => {}
+                Err(ParseWithAbortError::Parse(ParseError::InvalidValue(message)))
+                    if !cancelled =>
+                {
+                    assert_eq!(message, "mapper diagnostic")
+                }
+                other => panic!("unexpected source mapping result: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn source_value_mapping_preserves_grammar_scope_and_random_draws() {
         let mut scope = ParamContext::new();
         for (name, value) in [
@@ -1964,21 +2016,30 @@ mod tests {
             scope.set(name, value);
         }
         let preserved = ["RV".to_owned()].into_iter().collect();
-        let prepare = |expression: &str, _: Value| {
-            crate::netlist::expr::prepare_behavioral_expression_preserving_parameters(
-                expression, &scope, &preserved,
+        let prepare = |expression: &str, _: Value, abort: &dyn AbortSignal| {
+            crate::netlist::expr::prepare_behavioral_expression_preserving_parameters_with_abort(
+                expression, &scope, &preserved, abort,
             )
-            .map_err(ParseError::InvalidValue)
+            .map_err(|error| match error {
+                crate::netlist::expr::BehavioralPreparationError::Aborted => {
+                    ParseWithAbortError::Aborted
+                }
+                crate::netlist::expr::BehavioralPreparationError::Semantic(error) => {
+                    ParseError::InvalidValue(error).into()
+                }
+            })
         };
         let file = map_source_spec_values(
             "DC -{rv+local} AC {pwl} file PWL(FILE=\"rv-µ.csv\" VSCALE={rv/local})",
             &scope,
+            &NoAbort,
             &prepare,
         )
         .unwrap();
         let pattern = map_source_spec_values(
             "PAT({rv+local} 0 0 1n 1n 1u b10 RB=file) DISTOF1 rv file PORTNUM file Z0 local",
             &scope,
+            &NoAbort,
             &prepare,
         )
         .unwrap();
@@ -2024,15 +2085,19 @@ mod tests {
         scope.set_random_seed(41);
         let expected_stream = scope.isolated_random_clone();
         let expected_noise = eval_expression("agauss(0,1,1)", &expected_stream).unwrap();
-        let mapped =
-            map_source_spec_values("DC {agauss(0,1,1)} AC rv", &scope, &|expression, value| {
+        let mapped = map_source_spec_values(
+            "DC {agauss(0,1,1)} AC rv",
+            &scope,
+            &NoAbort,
+            &|expression, value, _| {
                 Ok(if expression.eq_ignore_ascii_case("rv") {
                     expression.to_owned()
                 } else {
                     value.to_string()
                 })
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         assert_eq!(
             scope.random().next_uniform(),
             expected_stream.random().next_uniform()

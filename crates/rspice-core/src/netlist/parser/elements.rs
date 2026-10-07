@@ -6230,26 +6230,31 @@ pub(in crate::netlist) fn lower_deferred_rf_port(
     source: &str,
     line: usize,
     params: &ParamContext,
-) -> Result<Vec<Element>, ParseError> {
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Element>, ParseWithAbortError> {
+    ensure_parse_not_aborted(abort)?;
+    let abort = NumericParseAbort::new(abort);
     let mut stream = TokenStream::new(tokenize(source).map_err(|error| ParseError::Syntax {
         line,
         message: error.to_string(),
-    })?);
+    })?)
+    .with_abort(&abort);
     let mut elements = Vec::with_capacity(2);
     let [positive, negative] = element.nodes.as_slice() else {
         return Err(ParseError::Syntax {
             line,
             message: format!("RF port '{}' requires two terminals", element.name),
-        });
+        }
+        .into());
     };
-    parse_xyce_port_tail(
+    abort.finish(parse_xyce_port_tail(
         &mut stream,
         line,
         &mut elements,
         params,
         element.name.clone(),
         [positive.clone(), negative.clone()],
-    )?;
+    ))?;
     Ok(elements)
 }
 
