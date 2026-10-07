@@ -1096,8 +1096,9 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     model_name: &str,
     instance: XspiceInstanceParams<'_>,
 ) -> Result<ResolvedXspiceModel, SimulationError> {
+    let model_def = find_model_def(netlist, model_name);
     let materialized = instance
-        .materialize_string_aliases(&netlist.params, netlist.abort)
+        .materialize_deferred_values(&netlist.params, model_def, netlist.abort)
         .map_err(|error| {
             map_build_parse_error(
                 &format!("XSPICE model '{model_name}' instance parameters"),
@@ -1118,7 +1119,6 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         real_vector_params: instance_real_vector_params,
         real_vector_expr_params: instance_real_vector_expr_params,
     } = instance;
-    let model_def = find_model_def(netlist, model_name);
 
     if model_def.is_none()
         && let Some(code_model) = registry.get(model_name)

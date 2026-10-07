@@ -455,12 +455,13 @@ at the root and inside subcircuits without consuming samples on failed retries.
 Pending instance overrides cannot be replaced by enclosing globals or model
 defaults in sibling expressions; a self-reference may still use its enclosing
 or model value. Root expressions that read sibling fields wait for the complete
-instance context. Retained `.GLOBAL_PARAM` dependencies resolve against completed instance bindings
-at the top level and inside subcircuits. Transitive reads preserve complex values
-and pending-sibling masking; independent root expressions keep their source-order
+instance context. Retained `.GLOBAL_PARAM` dependencies resolve against completed
+instance bindings at the top level and inside subcircuits. Transitive reads
+preserve complex values and pending-sibling masking; independent root expressions keep their source-order
 statistical sampling.
 Complex instance components resolve forward parameter and function references.
-Component functions accept comma-separated arguments and whitespace inside groups.
+Numeric vector entries and complex components accept comma-separated function
+arguments and whitespace inside groups.
 Instance vectors and complex values use resolved scalar overrides; numeric
 evaluation begins only after a complete complex-literal grammar is recognized.
 Quoted vector literals reject trailing tokens instead of discarding them.
@@ -471,6 +472,11 @@ forward-defined real, integer, string and complex vectors. Numeric entries then
 use the same cancellable instance binding as inline vectors. Scoped scalar and
 vector expressions can read model defaults, with enclosing parameters retaining
 precedence and run temperature options applied consistently.
+Bare-word vectors wait for complete lexical, instance, and model scalar bindings
+before numeric or string classification, including quoted vectors and aliases.
+Literal words remain string entries in both top-level and subcircuit instances;
+quote individual entries to preserve text that also names a numeric binding or
+resembles a recognized expression function call.
 Quote individual string-vector entries that resemble `<real imag>` pairs to
 preserve them as literal text.
 

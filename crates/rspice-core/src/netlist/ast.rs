@@ -646,8 +646,9 @@ pub enum ElementKind {
         string_expr_params: Vec<(String, String)>,
         /// String-vector instance parameter overrides.
         string_vector_params: Vec<(String, Vec<String>)>,
-        /// String-vector instance parameter overrides captured as string
-        /// parameter references inside subcircuit bodies.
+        /// Deferred string-vector aliases, complex vectors, and ambiguous bare
+        /// vector literals. Internal encodings preserve their authored syntax
+        /// until the complete lexical, instance, and model bindings are known.
         string_vector_expr_params: Vec<(String, String)>,
         /// Real-vector instance parameter overrides.
         real_vector_params: Vec<(String, Vec<Value>)>,

@@ -1,8 +1,11 @@
-//! Classify deferred string aliases before numeric instance binding.
+//! Classify deferred vector literals and string aliases before numeric instance binding.
 
-use super::xspice_parser::{XspiceParamValue, parse_xspice_string_value};
-use super::{ParamContext, ParseError, ParseWithAbortError, ensure_parse_not_aborted};
+use super::xspice_parser::{
+    XspiceParamValue, parse_deferred_xspice_vector, parse_xspice_string_value,
+};
+use super::{ModelDef, ParamContext, ParseError, ParseWithAbortError, ensure_parse_not_aborted};
 use crate::abort_signal::AbortSignal;
+use std::collections::HashSet;
 
 /// One XSPICE instance card's parameters, split by the form the parser left
 /// them in: resolved scalars, unresolved scalar expressions, and the string,
@@ -21,7 +24,7 @@ pub(crate) struct XspiceInstanceParams<'a> {
     pub real_vector_expr_params: &'a [(String, Vec<String>)],
 }
 
-/// Allocate a replacement only for cards containing a bound string alias.
+/// Allocate a replacement only for a deferred vector literal or bound string alias.
 /// The common numeric-only path continues to borrow the authored slices.
 pub(crate) struct MaterializedXspiceParams {
     params: Vec<(String, f64)>,
@@ -102,15 +105,17 @@ impl MaterializedXspiceParams {
 }
 
 impl XspiceInstanceParams<'_> {
-    /// Resolve only string bindings here. Parsing retains numeric expressions
+    /// Classify ambiguous literals and string bindings. Retain numeric expressions
     /// for the ordinary instance resolver, so it cannot sample or freeze a
     /// sibling/model binding before the complete numeric context is available.
-    pub(crate) fn materialize_string_aliases(
+    pub(crate) fn materialize_deferred_values(
         self,
         scope: &ParamContext,
+        model: Option<&ModelDef>,
         abort: &dyn AbortSignal,
     ) -> Result<Option<MaterializedXspiceParams>, ParseWithAbortError> {
         let mut materialized = None;
+        let mut numeric_fields = None;
         for (name, expression) in self
             .expr_params
             .iter()
@@ -118,10 +123,35 @@ impl XspiceInstanceParams<'_> {
             .chain(self.string_vector_expr_params)
         {
             ensure_parse_not_aborted(abort)?;
-            let Some(value) = scope.get_string(expression) else {
+            let Some(value) =
+                parse_deferred_xspice_vector(expression).or_else(|| scope.get_string(expression))
+            else {
                 continue;
             };
-            let parsed = parse_xspice_string_value(name, value, scope, abort)?;
+            let numeric_fields = numeric_fields.get_or_insert_with(|| {
+                self.params
+                    .iter()
+                    .map(|(name, _)| name)
+                    // A string alias will become a string or vector channel, never
+                    // a scalar numeric binding, regardless of assignment order.
+                    .chain(
+                        self.expr_params
+                            .iter()
+                            .filter(|(_, expression)| scope.get_string(expression).is_none())
+                            .map(|(name, _)| name),
+                    )
+                    .chain(model.into_iter().flat_map(|model| {
+                        model
+                            .params
+                            .iter()
+                            .map(|(name, _)| name)
+                            .chain(model.expr_params.iter().map(|(name, _)| name))
+                            .filter(|name| !scope.has_any_parameter_binding(name))
+                    }))
+                    .map(|name| name.to_ascii_uppercase())
+                    .collect::<HashSet<_>>()
+            });
+            let parsed = parse_xspice_string_value(name, value, scope, numeric_fields, abort)?;
             materialized
                 .get_or_insert_with(|| MaterializedXspiceParams::copy_from(self))
                 .replace(name, parsed)?;

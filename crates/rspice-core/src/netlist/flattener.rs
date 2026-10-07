@@ -2185,7 +2185,18 @@ impl<'a> Flattener<'a> {
                     real_vector_params,
                     real_vector_expr_params,
                 };
-                let materialized = instance.materialize_string_aliases(scope, abort)?;
+                let model = self.resolve_xspice_scoped_model(
+                    model,
+                    scope,
+                    element_path,
+                    model_scope_path,
+                    abort,
+                )?;
+                let materialized = instance.materialize_deferred_values(
+                    scope,
+                    self.xspice_model_definition(&model),
+                    abort,
+                )?;
                 let super::XspiceInstanceParams {
                     params,
                     expr_params,
@@ -2199,13 +2210,6 @@ impl<'a> Flattener<'a> {
                     .as_ref()
                     .map(|value| value.as_ref())
                     .unwrap_or(instance);
-                let model = self.resolve_xspice_scoped_model(
-                    model,
-                    scope,
-                    element_path,
-                    model_scope_path,
-                    abort,
-                )?;
                 let needs_numeric_scope = !expr_params.is_empty()
                     || !real_vector_expr_params.is_empty()
                     || string_expr_params.iter().any(|(_, expression)| {
@@ -2932,6 +2936,13 @@ impl<'a> Flattener<'a> {
         }
     }
 
+    fn xspice_model_definition(&self, name: &str) -> Option<&ModelDef> {
+        self.scoped_models
+            .iter()
+            .chain(self.models)
+            .find(|model| model.name.eq_ignore_ascii_case(name))
+    }
+
     /// Instance fields see enclosing bindings first, then their model's scalar
     /// defaults. Reuse the construction resolver, including nominal-temperature
     /// dependencies, instead of inventing a second model precedence policy.
@@ -2946,11 +2957,7 @@ impl<'a> Flattener<'a> {
         context.set("GMIN", self.options_gmin.unwrap_or(crate::constants::GMIN));
         let temp = self.options_temperature_celsius.unwrap_or(27.0);
         let tnom = self.options_nominal_temperature_celsius.unwrap_or(27.0);
-        let model = self
-            .scoped_models
-            .iter()
-            .chain(self.models)
-            .find(|model| model.name.eq_ignore_ascii_case(model_name));
+        let model = self.xspice_model_definition(model_name);
         if let Some(model) = model {
             let mut resolved = super::expr::ModelEvaluationContext::resolve(
                 scope,
