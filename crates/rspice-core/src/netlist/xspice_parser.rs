@@ -1213,7 +1213,8 @@ fn parse_scalar_param_token_value(
                                 param_name,
                                 value,
                                 line_num,
-                                netlist_params.abort,
+                                netlist_params,
+                                defer_simple_param_refs,
                             )?
                             .unwrap_or_else(|| {
                                 xspice_string_value_from_param_preference(
@@ -1240,7 +1241,8 @@ fn parse_scalar_param_token_value(
                 param_name,
                 &value,
                 line_num,
-                netlist_params.abort,
+                netlist_params,
+                defer_simple_param_refs,
             )?
             .unwrap_or_else(|| xspice_string_value_from_param_preference(param_name, value));
             Ok(parsed)
@@ -1284,7 +1286,8 @@ fn parse_scalar_param_token_value(
                             param_name,
                             value,
                             line_num,
-                            netlist_params.abort,
+                            netlist_params,
+                            defer_simple_param_refs,
                         )?
                         .unwrap_or_else(|| XspiceParamValue::String(value.to_string()));
                         Ok(parsed)
@@ -1316,7 +1319,8 @@ fn parse_scalar_param_token_value(
                             param_name,
                             value,
                             line_num,
-                            netlist_params.abort,
+                            netlist_params,
+                            defer_simple_param_refs,
                         )?
                         .unwrap_or_else(|| {
                             xspice_string_value_from_param_preference(param_name, value.to_string())
@@ -1583,7 +1587,8 @@ fn parse_string_backed_param_value(
     param_name: &str,
     value: &str,
     line_num: usize,
-    abort: &dyn AbortSignal,
+    netlist_params: &XspiceParseContext<'_>,
+    defer_simple_param_refs: bool,
 ) -> Result<Option<XspiceParamValue>, ParseError> {
     if !value.trim_start().starts_with('[')
         || (xspice_param_prefers_string(param_name)
@@ -1597,16 +1602,26 @@ fn parse_string_backed_param_value(
         message: format!("Invalid XSPICE vector parameter literal: {err}"),
     })?;
     let mut stream = TokenStream::new(tokens);
-    let parsed = parse_vector_param_value(
-        &mut stream,
-        line_num,
-        param_name,
-        &XspiceParseContext {
-            params: &ParamContext::new(),
-            abort,
-        },
-        false,
-    )?;
+    // Quoting preserves literal-word vector detection, but numeric entries
+    // still use the deck's dialect, functions, random stream and scope timing.
+    let parsed = if vector_param_should_parse_as_string(&stream, param_name, netlist_params, false)
+    {
+        parse_string_vector_param(
+            &mut stream,
+            line_num,
+            param_name,
+            netlist_params,
+            defer_simple_param_refs,
+        )?
+    } else {
+        parse_real_vector_param(
+            &mut stream,
+            line_num,
+            param_name,
+            netlist_params,
+            defer_simple_param_refs,
+        )?
+    };
     finish_vector_literal(&mut stream, line_num, param_name)?;
     Ok(Some(parsed))
 }
