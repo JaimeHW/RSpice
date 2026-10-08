@@ -219,6 +219,14 @@ pub fn comparison_signal_names<W: AsRef<RetainedWaveform>>(
         if !exact_axis(&baseline.x, &baseline_reference.x) {
             continue;
         }
+        if candidate.unit != baseline.unit {
+            return Err(format!(
+                "Waveform '{}' has incompatible signal units (candidate: {}, baseline: {}). Compare samples expressed in the same unit.",
+                candidate.name,
+                candidate.unit.as_deref().unwrap_or("unstated"),
+                baseline.unit.as_deref().unwrap_or("unstated"),
+            ));
+        }
         if candidate.y.len() != candidate.x.len()
             || baseline.y.len() != baseline.x.len()
             || candidate.y.iter().any(|value| !value.is_finite())
@@ -242,6 +250,7 @@ pub fn comparison_signal_names<W: AsRef<RetainedWaveform>>(
 
 fn comparison_source_dataset<A, W>(
     run: &SimulationRun<A>,
+    analysis: &AnalysisResult<W>,
     signal_names: &[String],
     coordinates: &[f64],
     values: &[Vec<f64>],
@@ -275,8 +284,7 @@ where
                 signal_name,
                 ValueType::Real,
                 ColumnRole::Signal,
-                // Preserve the comparison projection's unknown signal units.
-                None,
+                unique_waveform(analysis, signal_name)?.unit.clone(),
             )
             .map_err(|error| error.to_string())?,
         );
@@ -720,6 +728,7 @@ where
         .map(str::to_owned);
     let baseline = comparison_source_dataset(
         baseline_run,
+        baseline_analysis,
         &signal_names,
         &coordinates,
         &baseline_values,
@@ -727,6 +736,7 @@ where
     )?;
     let candidate = comparison_source_dataset(
         candidate_run,
+        candidate_analysis,
         &signal_names,
         &coordinates,
         &candidate_values,

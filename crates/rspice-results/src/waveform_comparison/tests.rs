@@ -143,3 +143,61 @@ fn comparison_requires_compatible_import_coordinates_and_retains_their_units() {
         assert!(error.contains("incompatible coordinate units"), "{error}");
     }
 }
+
+#[test]
+fn comparison_rejects_signal_unit_mismatches_before_any_alignment() {
+    let mut candidate = source(1, 17, vec![0.0, 1.0, 2.0], vec![-1.0, 0.0, 1.0]);
+    candidate.analyses[0].waveforms[0].unit = Some("V".into());
+    for unit in [Some("mV"), Some("A"), Some("1"), None] {
+        let mut baseline = source(2, 29, vec![0.0, 1.0, 2.0], vec![-1.0, 0.0, 1.0]);
+        baseline.analyses[0].waveforms[0].unit = unit.map(str::to_owned);
+        for alignment in [
+            ComparisonAlignmentDraft::AbsoluteXAxis,
+            ComparisonAlignmentDraft::FirstThresholdCrossing,
+            ComparisonAlignmentDraft::CrossCorrelation,
+        ] {
+            let error = execute_comparison(
+                &candidate,
+                &candidate.analyses[0],
+                &baseline,
+                options(alignment),
+            )
+            .expect_err("identical numbers in different units are not identical quantities");
+            assert!(
+                error.contains("V(out)") && error.contains("incompatible signal units"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn comparison_source_columns_preserve_declared_signal_units() {
+    for unit in [Some("V"), Some("mV"), Some("arbitrary"), None] {
+        let mut candidate = source(1, 17, vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0]);
+        let mut baseline = source(2, 29, vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0]);
+        for run in [&mut candidate, &mut baseline] {
+            run.analyses[0].waveforms[0].unit = unit.map(str::to_owned);
+        }
+        let prepared = prepared_comparison_sources(
+            &candidate,
+            &candidate.analyses[0],
+            &baseline,
+            ComparisonAlignmentDraft::AbsoluteXAxis,
+            "V(out)",
+            0.0,
+            2,
+        )
+        .unwrap();
+        let expected = SourceColumn::new(
+            "signal:0",
+            "V(out)",
+            ValueType::Real,
+            ColumnRole::Signal,
+            unit.map(str::to_owned),
+        )
+        .unwrap();
+        assert_eq!(prepared.baseline.columns()[1], expected);
+        assert_eq!(prepared.candidate.columns()[1], expected);
+    }
+}
