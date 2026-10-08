@@ -1602,7 +1602,7 @@ fn canonical_ir_preserves_multidimensional_parameter_bounds_and_direction() {
 }
 
 #[test]
-fn parameter_array_values_keep_generated_rust_qualification_explicit() {
+fn parameter_array_values_have_executable_and_generated_storage() {
     let compiler = VerilogACompiler::default();
     let artifact = compiler
         .compile_canonical_ir(parameter_array_source())
@@ -1618,15 +1618,10 @@ fn parameter_array_values_keep_generated_rust_qualification_explicit() {
             .any(|parameter| parameter.name == "coefficients" && parameter.is_array)
     );
 
-    let rust_error = rspice_veriloga::rust_backend::RustTranspiler::default()
+    let generated = rspice_veriloga::rust_backend::RustTranspiler::default()
         .transpile(&artifact)
-        .expect_err("generated Rust must fail closed");
-    assert!(rust_error.is_unsupported());
-    assert!(
-        rust_error
-            .message
-            .contains("parameter array 'coefficients'")
-    );
+        .expect("generated Rust initializes numeric array storage");
+    assert!(!generated.files.is_empty());
 }
 
 #[test]

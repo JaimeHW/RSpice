@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 121 emits numeric parameter arrays through the generated Rust backend.
 /// Version 120 initializes read-only numeric parameter arrays for shared execution.
 /// Version 119 specializes array, packed, and structural hierarchy overrides together.
 /// Version 118 expands bounded, parameter-specialized variable array patterns.
@@ -118,7 +119,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 120;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 121;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

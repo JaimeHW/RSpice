@@ -122,7 +122,7 @@ pub use array_index::checked_discrete_value;
 /// This is intentionally independent of checkpoint and stamp-workspace
 /// versions: consumers use it to decide whether a persisted schematic binding
 /// can be reconstructed from the compiled model catalog.
-pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 4;
+pub const GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedVerilogAParameterScope {
@@ -186,6 +186,7 @@ pub struct GeneratedVerilogAParameterDescriptor {
     pub aliases: &'static [&'static str],
     pub scope: GeneratedVerilogAParameterScope,
     pub is_integer: bool,
+    pub is_array: bool,
     pub default: Option<Value>,
     pub minimum: Option<GeneratedVerilogAParameterBound>,
     pub maximum: Option<GeneratedVerilogAParameterBound>,
@@ -204,6 +205,7 @@ impl GeneratedVerilogAParameterDescriptor {
             aliases: &[],
             scope,
             is_integer: false,
+            is_array: false,
             default,
             minimum: None,
             maximum: None,
@@ -230,6 +232,14 @@ impl GeneratedVerilogAParameterDescriptor {
     #[inline]
     pub const fn integer(mut self) -> Self {
         self.is_integer = true;
+        self
+    }
+
+    /// Mark an unpacked parameter array, which has no scalar default.
+    #[inline]
+    pub const fn array(mut self) -> Self {
+        self.is_array = true;
+        self.default = None;
         self
     }
 
@@ -8117,6 +8127,7 @@ mod fixed_lane_tests {
                 aliases: &["rth"],
                 scope: GeneratedVerilogAParameterScope::Dual,
                 is_integer: true,
+                is_array: false,
                 default: Some(0.0),
                 minimum: Some(GeneratedVerilogAParameterBound {
                     value: 0.0,
@@ -8134,7 +8145,12 @@ mod fixed_lane_tests {
         const INSTANCE_PARAMETER: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("instance_only", Some(1.0));
 
-        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 4);
+        assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 5);
+        const ARRAY: GeneratedVerilogAParameterDescriptor =
+            GeneratedVerilogAParameterDescriptor::instance("coefficients", Some(0.0)).array();
+        assert!(ARRAY.is_array);
+        assert_eq!(ARRAY.default, None);
+        assert!(!PARAMETER.is_array);
         assert_eq!(TERMINALS[0].name, "FG");
         assert_eq!(TERMINALS[0].current_parameter, "ifg");
         assert_eq!(PARAMETER, EXPECTED_PARAMETER);

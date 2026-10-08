@@ -905,6 +905,7 @@ pub(super) fn generate_state_file_with_extensions(
             artifact.mir.module_name
         ));
         out.push_str("            };\n");
+        out.push_str("            if PARAMETER_ARRAY_FLAGS[index] { return Err(format!(\"parameter '{}' is an array; assign a complete array through source specialization\", PARAMETER_DISPLAY_NAMES[index])); }\n");
         out.push_str("            let value = if PARAMETER_INTEGER_FLAGS[index] { f64::from(integer::real_to_integer(assignment.value).map_err(|error| format!(\"parameter '{}': {}\", PARAMETER_DISPLAY_NAMES[index], error))?) } else { assignment.value };\n");
         out.push_str("            validate_parameter_scalar_metadata(index, value)?;\n");
         out.push_str("            let is_model = PARAMETER_MODEL_FLAGS[index];\n");
@@ -1363,6 +1364,9 @@ fn emit_public_parameter_descriptors(artifact: &CanonicalIrArtifact, out: &mut S
         if parameter.value_type == CanonicalValueType::Integer {
             descriptor.push_str(".integer()");
         }
+        if !parameter.dimensions.is_empty() {
+            descriptor.push_str(".array()");
+        }
         let aliases = parameter
             .aliases
             .iter()
@@ -1717,7 +1721,8 @@ fn finalize_checkpoint_identity_with_compatibility(
 // Version 27 preserves generated last_crossing interpolation and accepted history.
 // Version 28 preserves finite integral candidates through intermediate range loss.
 // Version 29 shares DDT candidate history with its derivatives and recovers range loss.
-const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 29;
+// Version 30 executes numeric parameter arrays in declaration storage.
+const GENERATED_MODEL_SEMANTICS_VERSION: u32 = 30;
 
 fn generated_model_semantic_identity(device: &GeneratedRustDevice) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -1865,7 +1870,11 @@ fn dependent_parameter_defaults(artifact: &CanonicalIrArtifact) -> Vec<(usize, &
         .parameters
         .iter()
         .enumerate()
-        .filter(|(_, parameter)| parameter.default.is_none() && parameter.default_expr.is_some())
+        .filter(|(_, parameter)| {
+            parameter.dimensions.is_empty()
+                && parameter.default.is_none()
+                && parameter.default_expr.is_some()
+        })
         .collect()
 }
 
@@ -2085,6 +2094,17 @@ fn emit_parameter_metadata(
     out.push_str("];\n\n");
 
     out.push_str(&format!(
+        "const PARAMETER_ARRAY_FLAGS: [bool; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        32,
+        |parameter| Ok((!parameter.dimensions.is_empty()).to_string()),
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
         "const PARAMETER_INTEGER_FLAGS: [bool; {parameter_count}] = [\n"
     ));
     emit_chunked_parameter_metadata_array(
@@ -2196,6 +2216,9 @@ fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), St
     let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
         return Err(format!("generated parameter index {} is out of range", index));
     };
+    if PARAMETER_ARRAY_FLAGS[index] && value.to_bits() != 0.0f64.to_bits() {
+        return Err(format!("parameter '{}' has array identity metadata, not a scalar value", name));
+    }
     validate_finite_parameter(name, value)?;
     if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {
         return Err(format!("parameter '{}' must be an integer, got {}", name, value));

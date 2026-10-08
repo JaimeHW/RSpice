@@ -1630,6 +1630,65 @@ for v in [-0.75_f64,0.0,1.25] {
 }
 
 #[test]
+fn generated_parameter_array_values_preserve_initialization_jacobians_and_atomic_updates() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module coefficients(p,n); inout p,n; electrical p,n;
+ parameter real gain=2.0;
+ parameter real taps[2:1][0:1]='{'{gain,gain+1.0},'{gain+2.0,gain+3.0}};
+ parameter integer weights[3:2]='{1.5,-1.5};
+ aliasparam tuning=taps;
+ real copied[4:5][-1:0];
+ integer index;
+ analog begin
+   copied=taps;
+   index=1;
+   I(p,n)<+taps[index][0]*V(p,n)*V(p,n)+copied[4][-1]*V(p,n)+weights[3];
+ end
+endmodule
+"#,
+        "generated parameter arrays",
+    );
+    run_generated_main(
+        "generated parameter arrays",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+let taps=device::state::Instance::PARAMETER_DESCRIPTORS.iter().find(|parameter| parameter.name=="taps").unwrap();
+assert!(taps.is_array);
+assert_eq!(taps.default, None);
+assert_eq!(taps.aliases, &["tuning"]);
+assert!(!device::state::Instance::PARAMETER_DESCRIPTORS[0].is_array);
+for gain in [2.0_f64,4.0] {
+    instance.set_parameter("gain",gain).unwrap();
+    for v in [0.5_f64,-0.25] {
+        let bias=[v,0.0];
+        let ctx=runtime::GeneratedEvalContext{voltages:&bias,temperature:300.15};
+        let mut sink=[0.0;32];
+        instance.stamp(&ctx,&mut runtime::GeneratedStamper{sink:Some(&mut sink)});
+        assert!(!ctx.evaluation_failed());
+        assert!((sink[10]-(2.0*(gain+2.0)*v+gain)).abs()<1e-12,"Jacobian: {sink:?}");
+        let expected_current=(gain+2.0)*v*v+gain*v+2.0;
+        assert!((sink[28]-expected_current).abs()<1e-12,"positive terminal current: {sink:?}");
+        assert!((sink[29]+expected_current).abs()<1e-12,"negative terminal current: {sink:?}");
+        let before=instance.capture_rollback_state();
+        let error=instance.apply_parameters(&[
+            runtime::GeneratedParameterAssignment::for_declared_scope("gain",99.0),
+            runtime::GeneratedParameterAssignment::for_declared_scope("tuning",0.0),
+        ]).unwrap_err();
+        assert!(error.contains("is an array"),"{error}");
+        assert_eq!(instance.params[0],gain);
+        assert_eq!(instance.capture_rollback_state(),before);
+    }
+}
+"#,
+    )
+    .expect("generated parameter arrays compile and execute");
+}
+
+#[test]
 fn generated_dynamic_expressions_preserve_small_signal_chain_rules() {
     for (index, (expression, static_real, dynamic_real, imaginary)) in [
         (
@@ -7695,6 +7754,7 @@ pub mod runtime {
         pub aliases: &'static [&'static str],
         pub scope: GeneratedVerilogAParameterScope,
         pub is_integer: bool,
+        pub is_array: bool,
         pub default: Option<Value>,
         pub minimum: Option<GeneratedVerilogAParameterBound>,
         pub maximum: Option<GeneratedVerilogAParameterBound>,
@@ -7713,6 +7773,7 @@ pub mod runtime {
                 aliases: &[],
                 scope,
                 is_integer: false,
+                is_array: false,
                 default,
                 minimum: None,
                 maximum: None,
@@ -7735,6 +7796,13 @@ pub mod runtime {
 
         pub const fn integer(mut self) -> Self {
             self.is_integer = true;
+            self
+        }
+
+        /// Mark an unpacked parameter array, which has no scalar default.
+        pub const fn array(mut self) -> Self {
+            self.is_array = true;
+            self.default = None;
             self
         }
 
