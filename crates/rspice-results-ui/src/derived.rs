@@ -21,6 +21,8 @@ pub struct DerivedSeries {
     /// Cached finite (min, max) per series key — axis autoranges must not
     /// rescan millions of samples per frame.
     ranges: std::collections::HashMap<u64, Option<(f64, f64)>>,
+    /// Gap-aware overview knots, bounded by the caller's drawing budget.
+    overview_indices: std::collections::HashMap<u64, std::sync::Arc<Vec<usize>>>,
     /// Cached windowed (min, max, rms) measurements, keyed by
     /// (series key, window-start bits, window-end bits).
     stats: std::collections::HashMap<(u64, usize), CachedWindowStats>,
@@ -45,10 +47,23 @@ impl DerivedSeries {
         if self.version != version {
             self.map.clear();
             self.ranges.clear();
+            self.overview_indices.clear();
             self.stats.clear();
             self.shapes.clear();
             self.version = version;
         }
+    }
+
+    pub fn overview_indices_or(
+        &mut self,
+        key: u64,
+        build: impl FnOnce() -> Vec<usize>,
+    ) -> std::sync::Arc<Vec<usize>> {
+        std::sync::Arc::clone(
+            self.overview_indices
+                .entry(key)
+                .or_insert_with(|| std::sync::Arc::new(build())),
+        )
     }
 
     /// Fetch or classify the monotone structure of a series' X column.

@@ -91,7 +91,7 @@ pub enum CursorMove {
 pub struct SharedXAxisResponse {
     pub viewport: Option<SharedXViewChange>,
     pub cursor: Option<CursorMove>,
-    /// Retained samples visited by this draw, including cache misses.
+    /// Retained sample visits charged to this draw, including cache construction.
     pub overview_samples_read: usize,
     pub extrema_samples_read: usize,
 }
@@ -198,33 +198,38 @@ pub fn show_shared_x_axis(
                 })
                 .unwrap_or((0.0, 1.0));
             let span = (maximum - minimum).max(f64::EPSILON);
-            // Index the stride instead of stepping an iterator over it:
-            // `step_by` has only `Iterator::nth` to skip with, and a `Zip`
-            // has no `nth` of its own, so reaching every 1 562nd sample of a
-            // quarter-million-sample sweep visited all 250 000 of them.
-            let paired = trace.x.len().min(trace.y.len());
-            let stride = (trace.x.len() / SHARED_X_OVERVIEW_POINTS).max(1);
-            output.overview_samples_read = paired.div_ceil(stride);
-            let points = (0..paired)
-                .step_by(stride)
-                .filter_map(|index| {
-                    let (x, y) = (trace.x[index], trace.y[index]);
-                    let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
-                    (fraction.is_finite() && y.is_finite()).then(|| {
-                        egui::pos2(
+            // Cache bounded source knots with explicit gap separators. Both
+            // extrema and gap discovery happen only when the source changes.
+            let indices = derived.overview_indices_or(trace_key(model, trace), || {
+                output.overview_samples_read = trace.y.len().saturating_mul(2);
+                rspice_results::waveform::RetainedWaveform::new(
+                    "overview",
+                    trace.x.clone(),
+                    trace.y.clone(),
+                )
+                .display_sample_indices(SHARED_X_OVERVIEW_POINTS)
+            });
+            output.overview_samples_read += indices.len();
+            for segment in overview_segments(&trace.x, &trace.y, &indices) {
+                let points = segment
+                    .into_iter()
+                    .filter_map(|(x, y)| {
+                        let fraction = model.x_scale.normalize(x, full_domain.0, full_domain.1);
+                        let point = egui::pos2(
                             track.left() + track.width() * fraction as f32,
                             track.bottom()
                                 - 2.0
                                 - ((y - minimum) / span) as f32 * (track.height() - 4.0),
-                        )
+                        );
+                        point.is_finite().then_some(point)
                     })
-                })
-                .collect::<Vec<_>>();
-            if points.len() >= 2 {
-                painter.add(egui::Shape::line(
-                    points,
-                    egui::Stroke::new(1.0, trace.color.gamma_multiply(0.75)),
-                ));
+                    .collect::<Vec<_>>();
+                if points.len() >= 2 {
+                    painter.add(egui::Shape::line(
+                        points,
+                        egui::Stroke::new(1.0, trace.color.gamma_multiply(0.75)),
+                    ));
+                }
             }
         }
 
@@ -550,6 +555,22 @@ pub fn show_shared_x_axis(
         "Shared X overview — drag the window or its edges, click to recenter, wheel to zoom, drag A/B, F to fit",
     );
     output
+}
+
+fn overview_segments(x: &[f64], y: &[f64], indices: &[usize]) -> Vec<Vec<(f64, f64)>> {
+    let mut segments = Vec::new();
+    let mut segment = Vec::new();
+    for &index in indices {
+        if x[index].is_finite() && y[index].is_finite() {
+            segment.push((x[index], y[index]));
+        } else if !segment.is_empty() {
+            segments.push(std::mem::take(&mut segment));
+        }
+    }
+    if !segment.is_empty() {
+        segments.push(segment);
+    }
+    segments
 }
 
 pub fn shared_axis_viewport_fraction(

@@ -14,11 +14,25 @@ pub const DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES: usize = 4_096;
 /// The cache deliberately stores extrema pairs rather than uniform samples,
 /// so narrow spikes remain visible while the source vectors keep their exact
 /// f64/complex128 values for measurement, export, and persistence.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct DisplayWaveformCache {
     pub x: Arc<Vec<f32>>,
     pub y: Arc<Vec<f32>>,
     pub source_sample_count: usize,
+}
+
+impl PartialEq for DisplayWaveformCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.source_sample_count == other.source_sample_count
+            && self.x == other.x
+            && (Arc::ptr_eq(&self.y, &other.y)
+                || (self.y.len() == other.y.len()
+                    && self
+                        .y
+                        .iter()
+                        .zip(other.y.iter())
+                        .all(|(left, right)| left == right || (left.is_nan() && right.is_nan()))))
+    }
 }
 
 /// A retained waveform with its display choices and derived cache.
@@ -246,5 +260,21 @@ mod display_cache_tests {
         let cache = waveform.display_cache.expect("display cache");
         assert_eq!(cache.x.len(), 255);
         assert_eq!(cache.y.len(), 255);
+    }
+
+    #[test]
+    fn cached_gaps_have_stable_snapshot_equality() {
+        let waveform = WaveformData::new(
+            "gaps",
+            vec![0.0, 1.0, 2.0],
+            vec![1.0, f64::NAN, 0.0],
+            "#fff",
+        )
+        .with_display_cache(3);
+        assert_eq!(waveform, waveform.clone());
+        assert_eq!(waveform, waveform.clone().with_display_cache(3));
+        let mut changed = waveform.clone();
+        Arc::make_mut(&mut changed.display_cache.as_mut().unwrap().y)[1] = 0.0;
+        assert_ne!(waveform, changed);
     }
 }
