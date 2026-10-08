@@ -98,8 +98,8 @@ operating point is run by default.
 With `.control` regions, `run` executes their commands in order, including
 regions loaded through `.include` and `-I` search paths. The current control
 host supports scalar assignments and nested loops/conditionals, `alter`,
-`op`, `dc`, `ac`, `noise`, `tf`, `pz`, `tran`, `run`, `print`, `plot`, and `settype`. A control
-`run` executes the deck's declarative OP, DC, AC, noise, TF, PZ and transient analyses,
+`op`, `dc`, `ac`, `noise`, `disto`, `tf`, `pz`, `sens`, `tran`, `run`, `print`, `plot`, and `settype`. A control
+`run` executes the deck's declarative OP, DC, AC, noise, DISTO, TF, PZ, sensitivity and transient analyses,
 including AC/noise `DATA=<table>` forms. Unsupported commands fail with their source location.
 
 Transfer-function datasets (`tf1`, `tf2`, ...) retain gain, input/output impedance
@@ -120,6 +120,18 @@ as `pz1.pole(2)` read earlier runs. Complex roots retain rad/s and gains retain
 their physical units in typed results and control presentations. Missing roots
 or gains with no finite value report an error when evaluated.
 An explicit command-line analysis mode continues to supersede authored cards.
+
+Distortion datasets (`disto1`, `disto2`, ...) retain complex sinusoidal peak phasors.
+Unqualified `v(out)` and `i(V1)` select the F1 response. Use
+`disto("2f1",i(V1))` to select a harmonic, or `disto("f1+f2",i(V1))` for a mixing
+product. Harmonic runs provide `f1`, `2f1` and `3f1`; two-tone runs provide `f1`,
+`f2`, `f1+f2`, `f1-f2` and `2f1-f2`. F2 remains fixed throughout the F1 sweep.
+Qualify the signal to read earlier runs, for example `disto("2f1",disto1.i(V1))`.
+Expressions such as `abs(disto("2f1",i(V1)))` retain the signal's units.
+The default horizontal axis is swept F1; `disto("2f1",frequency)` returns the
+product's physical frequency and can be used after `vs` in a plot or print.
+Unavailable spectra report an error, including for ground probes. Direct and
+scripted DISTO use the same result exporters, preserving all recorded products.
 
 Frequency tables retain authored row order, including repeated or decreasing
 frequencies. Typed JSON documents carry each column's parameter/device binding,

@@ -218,14 +218,14 @@
     },
     {
       "variant": "Disto",
-      "card": ".disto lin 2 1 10 .9",
+      "card": ".disto lin 3 1 10 .9",
       "route": {
         "path": "src/engine/distortion.rs",
         "symbol": "run_distortion_with_abort"
       },
-      "control_host": "missing",
+      "control_host": "implemented",
       "owner": "C04",
-      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, producer dependencies, cancellation and retained-value limits."
+      "qualification_task": "Control DISTO uses the bounded cancellable solver and retains F1, fixed F2 and all physical distortion products. tests/control_distortion.rs covers direct/run equivalence, analytical peak phasors, product frequencies, complex selection, immutable identity, units, cancellation and cumulative limits. CLI/WASM publish the shared document. Broader device, option and performance qualification remains C04 work."
     },
     {
       "variant": "Tran",

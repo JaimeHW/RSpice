@@ -1,6 +1,7 @@
 //! Resolve control output against immutable, named analysis datasets.
 
 use super::*;
+mod distortion;
 mod noise;
 mod pole_zero;
 mod sensitivity;
@@ -126,6 +127,7 @@ enum Column {
     Transfer(transfer::TransferColumn),
     PoleZero(pole_zero::PoleZeroColumn),
     Sensitivity(sensitivity::SensitivityColumn),
+    Distortion(distortion::DistortionColumn),
 }
 
 struct Selected<'a> {
@@ -160,6 +162,7 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => points.len(),
             ControlAnalysisResult::Noise(points)
             | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => points.len(),
+            ControlAnalysisResult::Distortion(result) => result.points.len(),
             ControlAnalysisResult::DcSweep(result) => result.points.len(),
             ControlAnalysisResult::Transient(result) => result.time.len(),
         }
@@ -177,7 +180,8 @@ impl ControlNamedDataset {
             ControlAnalysisResult::Ac(_)
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
-            | ControlAnalysisResult::NoiseTable(_) => SignalUnit::Hertz,
+            | ControlAnalysisResult::NoiseTable(_)
+            | ControlAnalysisResult::Distortion(_) => SignalUnit::Hertz,
             ControlAnalysisResult::DcSweep(result) => result
                 .axes
                 .last()
@@ -198,7 +202,8 @@ impl ControlNamedDataset {
             ControlAnalysisResult::Ac(_)
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
-            | ControlAnalysisResult::NoiseTable(_) => "frequency",
+            | ControlAnalysisResult::NoiseTable(_)
+            | ControlAnalysisResult::Distortion(_) => "frequency",
             ControlAnalysisResult::DcSweep(result) => {
                 result.axes.last().map_or("sweep", |a| a.name.as_str())
             }
@@ -223,6 +228,10 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => {
                 points.get(row).map(|point| point.frequency)
             }
+            ControlAnalysisResult::Distortion(result) => result
+                .points
+                .get(row)
+                .map(|point| point.fundamental_f1.frequency),
             ControlAnalysisResult::DcSweep(result) => result.points.get(row).map(|p| p.sweep_value),
             ControlAnalysisResult::Transient(result) => result.time.get(row).copied(),
         }
@@ -233,6 +242,10 @@ impl ControlNamedDataset {
             ControlAnalysisResult::TransferFunction(_)
             | ControlAnalysisResult::PoleZero(_)
             | ControlAnalysisResult::Sensitivity(_) => &[],
+            ControlAnalysisResult::Distortion(result) => result
+                .points
+                .first()
+                .map_or(&[], |point| &point.fundamental_f1.branch_names),
             ControlAnalysisResult::OperatingPoint(result) => &result.branch_names,
             ControlAnalysisResult::Ac(points)
             | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
@@ -257,6 +270,22 @@ impl Selected<'_> {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::Distortion(column), ControlAnalysisResult::Distortion(result)) => {
+                column.sample(result, row)
+            }
+            (Column::Distortion(_), _) => None,
+            (Column::Node(index), ControlAnalysisResult::Distortion(result)) => {
+                let point = &result.points.get(row)?.fundamental_f1;
+                (point.node_names == result.points.first()?.fundamental_f1.node_names)
+                    .then(|| point.voltages.get(index).copied())
+                    .flatten()
+            }
+            (Column::Branch(index), ControlAnalysisResult::Distortion(result)) => {
+                let point = &result.points.get(row)?.fundamental_f1;
+                (point.branch_names == result.points.first()?.fundamental_f1.branch_names)
+                    .then(|| point.currents.get(index).copied())
+                    .flatten()
+            }
             (Column::Sensitivity(column), ControlAnalysisResult::Sensitivity(result)) => {
                 column.sample(result, row)
             }
@@ -484,6 +513,14 @@ impl ControlCircuit {
                         .ok_or_else(|| unavailable(line, dataset, name))?
                         .node_names
                 }
+                ControlAnalysisResult::Distortion(result) => {
+                    &result
+                        .points
+                        .first()
+                        .ok_or_else(|| unavailable(line, dataset, name))?
+                        .fundamental_f1
+                        .node_names
+                }
                 ControlAnalysisResult::OperatingPoint(result) => &result.node_names,
                 ControlAnalysisResult::Ac(points)
                 | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
@@ -528,6 +565,30 @@ impl ControlCircuit {
             }
             Expr::FnCall { name, args } => {
                 let (dataset, probe) = self.qualified(name, line)?;
+                if probe == "DISTO" {
+                    if name != "DISTO" {
+                        return Err(command_error(
+                            line,
+                            "qualify the signal inside DISTO, for example disto(\"2f1\",disto1.v(out))",
+                        ));
+                    }
+                    if args.len() != 2 {
+                        return Err(command_error(
+                            line,
+                            "DISTO requires a spectral label and vector",
+                        ));
+                    }
+                    let band = distortion::Band::parse(&args[0], line)?;
+                    let mut selected = distortion::select_band(
+                        self.direct(&args[1], variables, line, abort)?,
+                        band,
+                        line,
+                    )?;
+                    if let Some(unit) = self.vector_units.get(&selected.id) {
+                        selected.unit = unit.clone();
+                    }
+                    return Ok(selected);
+                }
                 if matches!(probe, "POLE" | "ZERO") {
                     if args.len() != 1 {
                         return Err(command_error(line, "a root reference requires one index"));
@@ -882,12 +943,22 @@ impl<'a> Resolver<'a> {
         expression: &mut Expr,
         inputs: &mut Vec<Selected<'a>>,
     ) -> Result<SignalUnit, ControlExecutionError> {
+        self.bind_spectrum(expression, inputs, None)
+    }
+
+    fn bind_spectrum(
+        &self,
+        expression: &mut Expr,
+        inputs: &mut Vec<Selected<'a>>,
+        band: Option<distortion::Band>,
+    ) -> Result<SignalUnit, ControlExecutionError> {
         check_abort(self.abort, self.line)?;
         let unit = match expression {
             Expr::Number(_) | Expr::ComplexNumber(_) => SignalUnit::Dimensionless,
             Expr::Param(name) => {
                 let (dataset, raw) = self.circuit.qualified(name, self.line)?;
                 if let Ok(selected) = self.circuit.select(dataset, raw, None, self.line) {
+                    let selected = self.spectrum(selected, band)?;
                     return Ok(bind_selected(expression, selected, inputs));
                 }
                 let value = self.variables.get_complex(name).ok_or_else(|| {
@@ -900,6 +971,24 @@ impl<'a> Resolver<'a> {
                 SignalUnit::Unspecified
             }
             Expr::FnCall { name, args } => {
+                if name == "DISTO" {
+                    if args.len() != 2 || band.is_some() {
+                        return Err(command_error(self.line, "DISTO requires one spectral label and vector expression; spectral selectors cannot be nested").into());
+                    }
+                    let selected_band = distortion::Band::parse(&args[0], self.line)?;
+                    let mut inner = args[1].clone();
+                    let before = inputs.len();
+                    let unit = self.bind_spectrum(&mut inner, inputs, Some(selected_band))?;
+                    if inputs.len() == before {
+                        return Err(command_error(
+                            self.line,
+                            "DISTO requires a distortion result vector",
+                        )
+                        .into());
+                    }
+                    *expression = inner;
+                    return Ok(unit);
+                }
                 let probe = name.rsplit('.').next().unwrap_or(name);
                 if matches!(
                     probe,
@@ -914,8 +1003,8 @@ impl<'a> Resolver<'a> {
                             name: name.clone(),
                             args: vec![args[1].clone()],
                         };
-                        let a = self.bind(&mut first, inputs)?;
-                        let b = self.bind(&mut second, inputs)?;
+                        let a = self.bind_spectrum(&mut first, inputs, band)?;
+                        let b = self.bind_spectrum(&mut second, inputs, band)?;
                         *expression = Expr::BinOp {
                             op: BinOpKind::Sub,
                             left: Box::new(first),
@@ -926,6 +1015,7 @@ impl<'a> Resolver<'a> {
                     let selected =
                         self.circuit
                             .direct(expression, self.variables, self.line, self.abort)?;
+                    let selected = self.spectrum(selected, band)?;
                     return Ok(bind_selected(expression, selected, inputs));
                 }
                 // Only functions whose control-vector semantics are implemented
@@ -950,15 +1040,17 @@ impl<'a> Resolver<'a> {
                     )
                     .into());
                 }
-                let unit = self.bind(&mut args[0], inputs)?;
+                let unit = self.bind_spectrum(&mut args[0], inputs, band)?;
                 *name = canonical.into();
                 unit
             }
-            Expr::BinOp { op, left, right } => {
-                binary_unit(*op, self.bind(left, inputs)?, self.bind(right, inputs)?)
-            }
+            Expr::BinOp { op, left, right } => binary_unit(
+                *op,
+                self.bind_spectrum(left, inputs, band)?,
+                self.bind_spectrum(right, inputs, band)?,
+            ),
             Expr::UnaryOp { op, operand } => {
-                let unit = self.bind(operand, inputs)?;
+                let unit = self.bind_spectrum(operand, inputs, band)?;
                 if *op == UnaryOpKind::Not {
                     SignalUnit::Dimensionless
                 } else {
@@ -970,6 +1062,21 @@ impl<'a> Resolver<'a> {
             }
         };
         Ok(unit)
+    }
+
+    fn spectrum(
+        &self,
+        selected: Selected<'a>,
+        band: Option<distortion::Band>,
+    ) -> Result<Selected<'a>, ControlError> {
+        let Some(band) = band else {
+            return Ok(selected);
+        };
+        let mut selected = distortion::select_band(selected, band, self.line)?;
+        if let Some(unit) = self.circuit.vector_units.get(&selected.id) {
+            selected.unit = unit.clone();
+        }
+        Ok(selected)
     }
 
     fn materialize(

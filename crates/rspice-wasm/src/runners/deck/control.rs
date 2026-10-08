@@ -182,6 +182,9 @@ pub(super) fn run(
             ControlAnalysisResult::PoleZero(result) => {
                 AnalysisResultDocument::from_pole_zero(dataset.analysis_id, result)
             }
+            ControlAnalysisResult::Distortion(result) => {
+                AnalysisResultDocument::from_distortion(dataset.analysis_id, result)
+            }
             ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
                 SensitivityCardResult::Dc(result) => {
                     AnalysisResultDocument::from_sensitivity(dataset.analysis_id, result)
@@ -295,6 +298,45 @@ fn source_error(mut error: WasmError, line: usize, script: &ControlScriptSource)
 #[cfg(test)]
 mod tests {
     use super::super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn distortion_control_matches_direct_documents_and_retains_spectral_presentations() {
+        let source = "Distortion\nV1 out 0 DC .5 DISTOF1 1m 30 DISTOF2 .5m -20\nD1 out 0 DM\n.model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n";
+        for (ratio, product, physical) in [
+            ("", "2f1", [2000.0, 3000.0, 4000.0]),
+            (" .9", "f1-f2", [100.0, 600.0, 1100.0]),
+        ] {
+            let command = format!("disto lin 3 1k 2k{ratio}");
+            let direct =
+                run_authored_deck_document_detailed(&format!("{source}.{command}\n.end\n"))
+                    .unwrap();
+            for cards in [
+                format!(".control\n{command}"),
+                format!(".{command}\n.control\nrun"),
+            ] {
+                let control = run_authored_deck_document_detailed(&format!(
+                    "{source}{cards}\nprint disto(\"{product}\",i(V1)) vs disto(\"{product}\",frequency)\n.endc\n.end\n"
+                )).unwrap();
+                assert_eq!(control.control_datasets, ["disto1"]);
+                assert_eq!(control.results[0].payload(), direct.results[0].payload());
+                assert_eq!(control.results[0].signals(), direct.results[0].signals());
+                assert_eq!(control.results[0].axes(), direct.results[0].axes());
+                let rspice_core::engine::ControlPresentationKind::Print(traces) =
+                    &control.control_presentations[0].kind
+                else {
+                    panic!("print")
+                };
+                assert_eq!(traces[0].y.unit, SignalUnit::Ampere);
+                assert_eq!(traces[0].x.unit, SignalUnit::Hertz);
+                assert_eq!(
+                    traces[0].x.samples,
+                    physical.map(rspice_core::ComplexValue::from)
+                );
+                assert!(traces[0].y.samples[0].im.abs() > 1e-9);
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]

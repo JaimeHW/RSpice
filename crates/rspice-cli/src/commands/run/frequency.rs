@@ -190,7 +190,14 @@ pub(super) fn run_disto(
         )
         .map_err(|source| map_frequency_error(ctx, "DISTO", source))?;
 
-    let projection = distortion_projection(ctx, &result)?;
+    finish_disto_result(ctx, &result)
+}
+
+pub(super) fn finish_disto_result(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::DistortionAnalysisResult,
+) -> Result<(), CliError> {
+    let projection = distortion_projection(ctx, result)?;
     if !ctx.quiet {
         crate::console::line(format_args!(
             "DISTO Analysis: {} F1 points, products: {}",
@@ -219,12 +226,7 @@ pub(super) fn run_disto(
             &output.path,
             analysis_id,
             schema,
-            || {
-                rspice_core::execution::AnalysisResultDocument::from_distortion(
-                    analysis_id,
-                    &result,
-                )
-            },
+            || rspice_core::execution::AnalysisResultDocument::from_distortion(analysis_id, result),
             |path, format| {
                 if matches!(format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();

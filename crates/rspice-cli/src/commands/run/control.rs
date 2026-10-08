@@ -173,6 +173,9 @@ pub(super) fn run(
                             ControlAnalysisResult::Ac(result) => {
                                 frequency::finish_ac_results(&ctx, result)?
                             }
+                            ControlAnalysisResult::Distortion(result) => {
+                                frequency::finish_disto_result(&ctx, result)?;
+                            }
                             ControlAnalysisResult::TransferFunction(result) => {
                                 frequency::finish_tf_result(&ctx, result)?;
                             }

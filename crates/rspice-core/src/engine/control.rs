@@ -51,6 +51,7 @@ pub enum ControlAnalysisResult {
     OperatingPoint(Box<crate::solver::SimulationResult>),
     Ac(Vec<AcResult>),
     AcTable(FrequencyDataResult<AcResult>),
+    Distortion(Box<crate::analysis::DistortionAnalysisResult>),
     Noise(Vec<crate::analysis::NoiseResult>),
     NoiseTable(FrequencyDataResult<crate::analysis::NoiseResult>),
     DcSweep(Box<super::DcSweepResult>),
@@ -99,7 +100,9 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" => Self::Analysis,
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" => {
+                Self::Analysis
+            }
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             _ => {
@@ -355,7 +358,9 @@ impl ControlCircuit {
                     count,
                 )
             }
-            AnalysisCommand::Ac { .. } | AnalysisCommand::Noise { .. } => {
+            AnalysisCommand::Ac { .. }
+            | AnalysisCommand::Noise { .. }
+            | AnalysisCommand::Disto { .. } => {
                 let (result, count) =
                     analysis::frequency(&bounded, &netlist, &analysis, line, abort)?;
                 (kind, result, count)

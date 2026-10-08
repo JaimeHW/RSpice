@@ -95,6 +95,25 @@ pub struct DistortionAnalysisResult {
 }
 
 impl DistortionAnalysisResult {
+    /// Numeric response storage, including each tone's physical frequency.
+    pub fn retained_value_count(&self) -> usize {
+        self.points.iter().fold(0usize, |count, point| {
+            std::iter::once(&point.fundamental_f1)
+                .chain(point.fundamental_f2.iter())
+                .chain(point.products.iter().map(|product| &product.response))
+                .fold(count, |count, response| {
+                    count.saturating_add(
+                        response
+                            .voltages
+                            .len()
+                            .saturating_add(response.currents.len())
+                            .saturating_mul(2)
+                            .saturating_add(1),
+                    )
+                })
+        })
+    }
+
     pub fn is_two_tone(&self) -> bool {
         self.f2_over_f1.is_some()
     }

@@ -186,7 +186,7 @@ fn analysis_inventory_parses_and_matches_control_execution() {
         assert!(variants.insert(name), "duplicate analysis {name}");
         let card = row["card"].as_str().unwrap();
         let source = format!(
-            "Core requirements\n.param r=1k\nV1 in 0 1 AC 1\nR1 in out {{r}}\nR2 out 0 1k\n.data grid freq\n1\n10\n.enddata\n{card}\n.end\n"
+            "Core requirements\n.param r=1k\nV1 in 0 1 AC 1 DISTOF1 1m DISTOF2 1m\nR1 in out {{r}}\nR2 out 0 1k\n.data grid freq\n1\n10\n.enddata\n{card}\n.end\n"
         );
         let netlist =
             crate::Netlist::parse(&source).unwrap_or_else(|error| panic!("{name}: {error}"));

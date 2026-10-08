@@ -24,7 +24,7 @@ impl ControlCircuit {
         identity(analysis, line).map(|_| ())
     }
 
-    /// Parse one OP, DC, AC, NOISE, TF, PZ or TRAN request using the execution grammar and limits.
+    /// Parse a supported analysis request using the execution grammar and limits.
     /// Arguments must already be literal or substituted. No analysis is run.
     pub fn parse_analysis_command(
         command: &ControlCommand,
@@ -33,11 +33,9 @@ impl ControlCircuit {
     ) -> Result<AnalysisCommand, ControlExecutionError> {
         let line = command.line;
         if !matches!(CommandKind::parse(command)?, CommandKind::Analysis) {
-            return Err(command_error(
-                line,
-                "expected an OP, DC, AC, NOISE, TF, PZ or TRAN analysis command",
-            )
-            .into());
+            return Err(
+                command_error(line, "expected a supported electrical analysis command").into(),
+            );
         }
         if command.arguments.contains(['\r', '\n']) {
             return Err(command_error(
@@ -98,6 +96,7 @@ pub(super) fn identity(
         AnalysisCommand::Tf { .. } => ("tf", crate::identity::AnalysisKind::TransferFunction),
         AnalysisCommand::PoleZero { .. } => ("pz", crate::identity::AnalysisKind::PoleZero),
         AnalysisCommand::Sensitivity { .. } => ("sens", crate::identity::AnalysisKind::Sensitivity),
+        AnalysisCommand::Disto { .. } => ("disto", crate::identity::AnalysisKind::Distortion),
         _ => {
             return Err(command_error(
                 line,
@@ -122,7 +121,7 @@ pub(super) fn frequency_error(
 }
 
 /// Keep frequency setup/retention outside the generic control dispatch frame.
-/// Both result families use the same bounded, cancellable physical grid.
+/// These result families use the same bounded, cancellable physical grid.
 pub(super) fn frequency(
     engine: &Engine,
     netlist: &Netlist,
@@ -143,8 +142,19 @@ pub(super) fn frequency(
             start_freq,
             stop_freq,
             ..
+        }
+        | AnalysisCommand::Disto {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            ..
         } => (*variation, *points, *start_freq, *stop_freq),
-        _ => return Err(command_error(line, "expected AC or NOISE frequency analysis").into()),
+        _ => {
+            return Err(
+                command_error(line, "expected AC, NOISE or DISTO frequency analysis").into(),
+            );
+        }
     };
     let frequencies = crate::analysis::ac::try_ac_sweep_frequencies_bounded_with_abort(
         variation,
@@ -155,6 +165,13 @@ pub(super) fn frequency(
         abort,
     )
     .map_err(|error| frequency_error(line, error))?;
+    if let AnalysisCommand::Disto { f2_over_f1, .. } = command {
+        let result = engine
+            .run_distortion_with_abort(netlist, &frequencies, *f2_over_f1, abort)
+            .map_err(|error| simulation_error(line, error))?;
+        let count = result.retained_value_count();
+        return Ok((ControlAnalysisResult::Distortion(Box::new(result)), count));
+    }
     if let AnalysisCommand::Noise {
         output_node,
         reference_node,
