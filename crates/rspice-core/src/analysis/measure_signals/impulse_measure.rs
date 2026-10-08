@@ -1,21 +1,21 @@
 //! Sparse charge accumulation at the same accepted row as live measurements.
 
 use super::*;
-use current_observation::{CurrentImpulseContribution, CurrentObservationError};
+use impulse_observation::{ImpulseContribution, ImpulseObservationError};
 
 mod boundary;
 mod consumers;
 pub(super) use boundary::Boundary;
 pub(super) use consumers::bind as bind_consumers;
 
-fn invalid(detail: impl Into<String>) -> CurrentObservationError {
-    CurrentObservationError::Invalid {
+fn invalid(detail: impl Into<String>) -> ImpulseObservationError {
+    ImpulseObservationError::Invalid {
         detail: detail.into(),
     }
 }
 
 struct Cursor<'a> {
-    term: CurrentImpulseContribution<'a>,
+    term: ImpulseContribution<'a>,
     next: usize,
 }
 
@@ -33,19 +33,19 @@ impl Integral<'_> {
         lower: Value,
         upper: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<Option<Boundary>, CurrentObservationError> {
+    ) -> Result<Option<Boundary>, ImpulseObservationError> {
         let mut previous = lower.max(self.window.0);
         let stop = upper.min(self.window.1);
         loop {
             if abort.is_aborted() {
-                return Err(CurrentObservationError::Aborted);
+                return Err(ImpulseObservationError::Aborted);
             }
             let mut next = None;
             for cursor in &self.cursors {
                 if abort.is_aborted() {
-                    return Err(CurrentObservationError::Aborted);
+                    return Err(ImpulseObservationError::Aborted);
                 }
-                let points = &cursor.term.trace.derivatives;
+                let points = cursor.term.trace.derivatives();
                 let index = points.partition_point(|point| point.time <= previous);
                 if let Some(point) = points.get(index).filter(|point| point.time <= stop) {
                     next = Some(next.map_or(point.time, |old: Value| old.min(point.time)));
@@ -63,7 +63,7 @@ impl Integral<'_> {
         &self,
         time: Value,
         abort: &dyn AbortSignal,
-    ) -> Result<Option<Boundary>, CurrentObservationError> {
+    ) -> Result<Option<Boundary>, ImpulseObservationError> {
         if time <= self.window.0 {
             return Ok(None);
         }
@@ -80,7 +80,7 @@ impl Integral<'_> {
         axis: Value,
         finite_result: Option<Value>,
         abort: &dyn AbortSignal,
-    ) -> Result<Option<Value>, CurrentObservationError> {
+    ) -> Result<Option<Value>, ImpulseObservationError> {
         let LiveMeasureState::IntegralStatistic {
             integral,
             width,
@@ -90,7 +90,7 @@ impl Integral<'_> {
         } = state
         else {
             return Err(invalid(
-                "current integral has no integral measurement state",
+                "impulse integral has no integral measurement state",
             ));
         };
         if finite_result.is_none() || previous.is_none() {
@@ -106,11 +106,11 @@ impl Integral<'_> {
         if let Some(start) = previous_axis {
             for cursor in &mut self.cursors {
                 if abort.is_aborted() {
-                    return Err(CurrentObservationError::Aborted);
+                    return Err(ImpulseObservationError::Aborted);
                 }
-                while let Some(point) = cursor.term.trace.points.get(cursor.next) {
+                while let Some(point) = cursor.term.trace.point(cursor.next) {
                     if cursor.next.is_multiple_of(64) && abort.is_aborted() {
-                        return Err(CurrentObservationError::Aborted);
+                        return Err(ImpulseObservationError::Aborted);
                     }
                     if point.time > axis {
                         break;
@@ -123,14 +123,12 @@ impl Integral<'_> {
                         continue;
                     }
                     let charge = crate::numerics::scaled_exp_product(
-                        &[point.charge_coulombs, cursor.term.weight],
+                        &[point.coefficient, cursor.term.weight],
                         &[],
                         0.0,
                     );
                     if !charge.is_finite() || (charge == 0.0 && cursor.term.weight != 0.0) {
-                        return Err(invalid(
-                            "weighted current impulse charge is not representable",
-                        ));
+                        return Err(invalid("weighted impulse coefficient is not representable"));
                     }
                     crate::numerics::compensated_add(
                         &mut self.charge,
@@ -150,12 +148,12 @@ impl Integral<'_> {
             LiveIntegralMode::Integral { direction } => total * *direction,
             _ => {
                 return Err(invalid(
-                    "charge impulses require an integral or average measurement",
+                    "impulses require an integral or average measurement",
                 ));
             }
         };
         if !value.is_finite() {
-            return Err(invalid("current integral or average is non-finite"));
+            return Err(invalid("impulse integral or average is non-finite"));
         }
         Ok(Some(value))
     }
@@ -197,8 +195,8 @@ pub(super) fn compile<'a>(
     statement: &MeasureStatement,
     state: &LiveMeasureState,
     abort: &dyn AbortSignal,
-) -> Result<Option<Integral<'a>>, CurrentObservationError> {
-    if result.current_impulses.is_none() {
+) -> Result<Option<Integral<'a>>, ImpulseObservationError> {
+    if result.current_impulses.is_none() && result.voltage_impulses.is_none() {
         return Ok(None);
     }
     let full = result
@@ -211,31 +209,31 @@ pub(super) fn compile<'a>(
     };
     let regular = |spec: &str,
                    window: Option<(Value, Value)>|
-     -> Result<(), CurrentObservationError> {
+     -> Result<(), ImpulseObservationError> {
         let Some(window) = window else {
             return Ok(());
         };
-        let terms = current_observation::resolve(Some(netlist), result, spec, window, abort)?;
+        let terms = impulse_observation::resolve(Some(netlist), result, spec, window, abort)?;
         if terms.is_empty() {
             Ok(())
         } else if terms.iter().any(|term| {
             term.trace
-                .derivatives
+                .derivatives()
                 .iter()
                 .any(|point| point.time > window.0 && point.time <= window.1)
         }) {
             Err(invalid(format!(
-                "measurement '{}' requires a finite-valued signal: '{spec}' has current impulse derivatives in its observation window",
+                "measurement '{}' requires a finite-valued signal: '{spec}' has impulse derivatives in its observation window",
                 statement.name
             )))
         } else {
             Err(invalid(format!(
-                "measurement '{}' requires a finite-valued signal: '{spec}' has charge impulses in its observation window; use INTEG or AVG for total current",
+                "measurement '{}' requires a finite-valued signal: '{spec}' has impulses in its observation window; use INTEG or AVG for integrated signals",
                 statement.name
             )))
         }
     };
-    let condition = |condition: &LiveCondition, window| -> Result<(), CurrentObservationError> {
+    let condition = |condition: &LiveCondition, window| -> Result<(), ImpulseObservationError> {
         regular(&condition.left.authored, window)?;
         if let LiveConditionOperand::Waveform(signal) = &condition.right {
             regular(&signal.authored, window)?;
@@ -260,7 +258,7 @@ pub(super) fn compile<'a>(
                 return Ok(None);
             };
             let start = start_below.next_up();
-            let terms = current_observation::resolve(
+            let terms = impulse_observation::resolve(
                 Some(netlist),
                 result,
                 &signal.authored,
@@ -281,7 +279,7 @@ pub(super) fn compile<'a>(
             let mut cursors = Vec::new();
             cursors
                 .try_reserve_exact(terms.len())
-                .map_err(|_| invalid("cannot allocate current integral cursors"))?;
+                .map_err(|_| invalid("cannot allocate impulse integral cursors"))?;
             cursors.extend(terms.into_iter().map(|term| Cursor { term, next: 0 }));
             return Ok(Some(Integral {
                 cursors,
@@ -415,6 +413,7 @@ mod tests {
             }],
             store_traces: vec![],
             fft_results: vec![],
+            voltage_impulses: None,
             current_impulses: Some(vec![
                 CurrentImpulseTrace {
                     derivatives: Vec::new(),
@@ -472,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_integral_average_and_affine_lead_charge_are_physical() {
+    fn impulse_measure_integral_average_and_affine_lead_charge_are_physical() {
         let netlist = deck(
             ".meas tran charge INTEG I(V1) FROM=0 TO=1\n.meas tran mean AVG I(V1) FROM=0 TO=1\n.meas tran middle INTEG I(V1) FROM=.25 TO=.75\n.meas tran middle_avg AVG I(V1) FROM=.25 TO=.75\n.meas tran lead INTEG IC(Q1)\n.meas tran affine INTEG {2*I(V1)+IC(Q1)}",
         );
@@ -486,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_impulse_derivatives_are_not_silently_dropped() {
+    fn impulse_measure_impulse_derivatives_are_not_silently_dropped() {
         let mut result = fixture();
         let trace = &mut result.current_impulses.as_mut().unwrap()[0];
         trace.points.clear();
@@ -520,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_charge_reaches_same_row_and_forward_dependencies() {
+    fn impulse_measure_charge_reaches_same_row_and_forward_dependencies() {
         let netlist = deck(
             ".meas tran before EQN {charge}\n.meas tran charge INTEG I(V1)\n.meas tran after EQN {charge}\n.meas tran picked FIND charge AT=.5\n.meas tran final PARAM {charge}",
         );
@@ -539,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_missing_coverage_propagates_only_through_actual_reads() {
+    fn impulse_measure_missing_coverage_propagates_only_through_actual_reads() {
         let netlist = deck(
             ".meas tran charge INTEG I(V1)\n.meas tran used EQN {charge+1}\n.meas tran unused EQN {IF(0,charge,7)}\n.meas tran unused_param PARAM {IF(0,charge,7)}\n.meas tran good AVG V(out)",
         );
@@ -563,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_nonlinear_and_at_impulse_refuse_but_regular_points_work() {
+    fn impulse_measure_nonlinear_and_at_impulse_refuse_but_regular_points_work() {
         let netlist = deck(
             ".meas tran rms RMS I(V1)\n.meas tran peak MAX I(V1)\n.meas tran at_jump FIND I(V1) AT=.5\n.meas tran away FIND I(V1) AT=.625\n.meas tran bad_product INTEG {I(V1)*I(V1)}",
         );
@@ -579,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_window_resume_and_legacy_sampled_contracts_agree() {
+    fn impulse_measure_window_resume_and_legacy_sampled_contracts_agree() {
         let netlist = deck(
             ".meas tran charge INTEG I(V1) FROM=.5 TO=1\n.meas tran mean AVG I(V1) FROM=.5 TO=1",
         );
@@ -603,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_aliases_keep_finite_and_impulse_owners_together() {
+    fn impulse_measure_aliases_keep_finite_and_impulse_owners_together() {
         for (probe, expected) in [
             ("IR(V1)", 1.008),
             ("IC(Q1)", -0.002),
@@ -620,26 +619,20 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_vector_point_refusals_preserve_unrelated_records() {
+    fn impulse_measure_vector_point_refusals_preserve_unrelated_records() {
         let netlist = deck(
             ".meas tran_cont bad FIND I(V1) WHEN TIME=.5\n.meas tran_cont good FIND V(out) WHEN TIME=.5",
         );
         let results = evaluate_tran_continuous_measurements(&netlist, &fixture());
         assert_eq!(results.len(), 2);
-        assert!(
-            results[0]
-                .failure
-                .as_ref()
-                .unwrap()
-                .contains("charge impulses")
-        );
+        assert!(results[0].failure.as_ref().unwrap().contains("impulses"));
         assert!(results[0].records.is_empty());
         assert!(results[1].passed(), "{:?}", results[1]);
         assert_eq!(results[1].records.len(), 1);
     }
 
     #[test]
-    fn current_measure_contracts_apply_to_total_charge_and_cancellation_is_typed() {
+    fn impulse_measure_contracts_apply_to_total_charge_and_cancellation_is_typed() {
         let netlist = Netlist::parse_with_options(
             "* measurement contract\nV1 out 0 0\nR1 out 0 1k\n.meas tran checked INTEG I(V1) GOAL=1.008 FAILVALUE=1.005\n.end\n",
             crate::netlist::NetlistParseOptions {
@@ -660,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_complete_zero_allows_nonlinear_but_requires_finite_samples() {
+    fn impulse_measure_complete_zero_allows_nonlinear_but_requires_finite_samples() {
         let netlist = deck(
             ".meas tran nonlinear INTEG {I(V1)*I(V1)}\n.meas tran rms RMS I(V1)\n.meas tran charge INTEG I(V1)",
         );
@@ -679,7 +672,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_rejects_partial_malformed_and_unrepresentable_charge() {
+    fn impulse_measure_rejects_partial_malformed_and_unrepresentable_charge() {
         let netlist = deck(".meas tran charge INTEG {2*I(V1)}\n.meas tran good AVG V(out)");
         for mutation in 0..4 {
             let mut result = fixture();
@@ -700,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_impulse_endpoints_are_exact_even_between_samples() {
+    fn impulse_measure_impulse_endpoints_are_exact_even_between_samples() {
         let netlist = deck(".meas tran charge INTEG I(V1) FROM=.25 TO=.75");
         let mut result = fixture();
         result.current_impulses.as_mut().unwrap()[0].points = [
@@ -724,7 +717,7 @@ mod tests {
     }
 
     #[test]
-    fn current_measure_device_parameter_operand_requires_balanced_brackets() {
+    fn impulse_measure_device_parameter_operand_requires_balanced_brackets() {
         for operand in ["@Q1", "@Q1[", "@Q1[]", "@Q1[ic", "@[ic]"] {
             assert!(
                 Netlist::parse(&format!(

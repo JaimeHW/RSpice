@@ -13,18 +13,18 @@ impl std::fmt::Display for Boundary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "INTEG/AVG boundary at time {} contains a current impulse primitive of derivative order {}; no finite scalar exists there",
+            "INTEG/AVG boundary at time {} contains an impulse primitive of derivative order {}; no finite scalar exists there",
             self.time, self.primitive_order
         )
     }
 }
 
 fn derivative_at<'a>(
-    term: CurrentImpulseContribution<'a>,
+    term: ImpulseContribution<'a>,
     time: Value,
     order: u32,
 ) -> Option<&'a crate::CurrentImpulseDerivative> {
-    let points = &term.trace.derivatives;
+    let points = term.trace.derivatives();
     let index = points
         .partition_point(|point| point.time < time || (point.time == time && point.order < order));
     points.get(index).filter(|point| point.time == time)
@@ -33,19 +33,19 @@ fn derivative_at<'a>(
 /// Test the exact weighted distribution, not each owner independently: two
 /// physical currents may cancel at the same time and derivative order.
 pub(super) fn at<'a>(
-    terms: impl Iterator<Item = CurrentImpulseContribution<'a>> + Clone,
+    terms: impl Iterator<Item = ImpulseContribution<'a>> + Clone,
     time: Value,
     abort: &dyn AbortSignal,
-) -> Result<Option<Boundary>, CurrentObservationError> {
+) -> Result<Option<Boundary>, ImpulseObservationError> {
     let mut minimum_order = 1;
     if abort.is_aborted() {
-        return Err(CurrentObservationError::Aborted);
+        return Err(ImpulseObservationError::Aborted);
     }
     loop {
         let mut order = None;
         for (index, term) in terms.clone().enumerate() {
             if index.is_multiple_of(64) && abort.is_aborted() {
-                return Err(CurrentObservationError::Aborted);
+                return Err(ImpulseObservationError::Aborted);
             }
             if let Some(point) = derivative_at(term, time, minimum_order) {
                 order = Some(order.map_or(point.order, |old: u32| old.min(point.order)));
@@ -71,10 +71,10 @@ pub(super) fn at<'a>(
             [[one; 3]].into_iter(),
         );
         if abort.is_aborted() {
-            return Err(CurrentObservationError::Aborted);
+            return Err(ImpulseObservationError::Aborted);
         }
         let sum = sum.map_err(|_| {
-            invalid("current integral boundary accumulation exceeds its numerical precision")
+            invalid("impulse integral boundary accumulation exceeds its numerical precision")
         })?;
         if !sum.is_zero() {
             return Ok(Some(Boundary {
@@ -110,8 +110,8 @@ mod tests {
         let visits = std::cell::Cell::new(0);
         let terms = (0..4096).map(|_| {
             visits.set(visits.get() + 1);
-            CurrentImpulseContribution {
-                trace: &trace,
+            ImpulseContribution {
+                trace: crate::transient_observation::ImpulseTraceRef::Current(&trace),
                 weight: 1.0,
             }
         });
@@ -120,13 +120,13 @@ mod tests {
         let abort = crate::abort_signal::CountingAbort::new(65);
         assert!(matches!(
             at(terms, 0.5, &abort),
-            Err(CurrentObservationError::Aborted)
+            Err(ImpulseObservationError::Aborted)
         ));
         assert!(visits.get() <= 4097, "visited {} terms", visits.get());
         assert_eq!(
             at(
-                std::iter::once(CurrentImpulseContribution {
-                    trace: &trace,
+                std::iter::once(ImpulseContribution {
+                    trace: crate::transient_observation::ImpulseTraceRef::Current(&trace),
                     weight: 1.0
                 }),
                 0.5,

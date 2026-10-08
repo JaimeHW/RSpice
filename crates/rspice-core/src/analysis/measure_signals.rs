@@ -33,8 +33,8 @@ pub(crate) use parameters::MeasureParameters;
 mod continuous;
 pub use continuous::*;
 
-mod current_measure;
-pub(crate) mod current_observation;
+mod impulse_measure;
+pub(crate) mod impulse_observation;
 
 /// Whether the first adjacent pair that differs is ascending.
 ///
@@ -629,8 +629,8 @@ struct LiveMeasureProgram<'a> {
     valid: Vec<bool>,
     store_trace: bool,
     requires_live_evaluation: bool,
-    observation: Option<current_measure::Integral<'a>>,
-    singular: Option<current_measure::Boundary>,
+    observation: Option<impulse_measure::Integral<'a>>,
+    singular: Option<impulse_measure::Boundary>,
     primitive_sources: Vec<usize>,
     strict_failures: bool,
     failure: Option<String>,
@@ -649,7 +649,7 @@ struct LiveMeasureReadContext<'program, 'netlist> {
     axis: &'program [Value],
     query_axis: Option<Value>,
     primitive_window: Option<(Value, Value)>,
-    boundary: Option<current_measure::Boundary>,
+    boundary: Option<impulse_measure::Boundary>,
     abort: &'program dyn AbortSignal,
     cancelled: bool,
 }
@@ -2257,7 +2257,7 @@ fn output_column_kind(signal: &SaveSignal) -> OutputColumnKind {
     match signal {
         SaveSignal::Voltage(_) | SaveSignal::VoltageDiff(_, _) => OutputColumnKind::Voltage,
         SaveSignal::Current(_) => OutputColumnKind::Current,
-        SaveSignal::DeviceParam { param, .. } if current_observation::current_parameter(param) => {
+        SaveSignal::DeviceParam { param, .. } if impulse_observation::current_parameter(param) => {
             OutputColumnKind::Current
         }
         SaveSignal::DeviceParam { .. } => OutputColumnKind::Scalar,
@@ -2959,7 +2959,8 @@ fn evaluate_equation_measurements_with_observations(
     if abort.is_aborted() {
         return Err(EquationMeasurementEvaluationError::Aborted);
     }
-    let current_result = current_result.filter(|result| result.current_impulses.is_some());
+    let current_result = current_result
+        .filter(|result| result.current_impulses.is_some() || result.voltage_impulses.is_some());
     let mut programs = Vec::new();
     for statement in netlist
         .measurements
@@ -2983,9 +2984,9 @@ fn evaluate_equation_measurements_with_observations(
             Err(error) => return Err(EquationMeasurementEvaluationError::Detail(error)),
         };
         let observation = if let (Some(result), Some(state)) = (current_result, state.as_ref()) {
-            match current_measure::compile(netlist, result, statement, state, abort) {
+            match impulse_measure::compile(netlist, result, statement, state, abort) {
                 Ok(observation) => observation,
-                Err(current_observation::CurrentObservationError::Aborted) => {
+                Err(impulse_observation::ImpulseObservationError::Aborted) => {
                     return Err(EquationMeasurementEvaluationError::Aborted);
                 }
                 Err(error) => {
@@ -3061,7 +3062,7 @@ fn evaluate_equation_measurements_with_observations(
         .map(|program| matches!(program.state, Some(LiveMeasureState::FileError { .. })))
         .collect::<Vec<_>>();
     if current_result.is_some() {
-        current_measure::bind_consumers(
+        impulse_measure::bind_consumers(
             &mut programs,
             &all_dependencies,
             &program_indices,
@@ -3132,7 +3133,7 @@ fn evaluate_equation_measurements_with_observations(
                     row,
                     axis,
                     query_axis,
-                    primitive_window: current_measure::scalar_window(&state, axis),
+                    primitive_window: impulse_measure::scalar_window(&state, axis),
                     boundary: None,
                     abort,
                     cancelled: false,
@@ -3160,7 +3161,7 @@ fn evaluate_equation_measurements_with_observations(
                 (Some(observation), Ok(value)) => {
                     match observation.advance(&state, previous_axis, axis_value, value, abort) {
                         Ok(value) => Ok(value),
-                        Err(current_observation::CurrentObservationError::Aborted) => {
+                        Err(impulse_observation::ImpulseObservationError::Aborted) => {
                             return Err(EquationMeasurementEvaluationError::Aborted);
                         }
                         Err(error) => Err(error.to_string()),
@@ -7375,6 +7376,7 @@ mod tests {
 
     fn tran_result() -> TransientResult {
         TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
             step_sizes: vec![0.0; 4],
@@ -7395,6 +7397,7 @@ mod tests {
     fn tran_waveform(time: Vec<Value>, voltage: Vec<Value>) -> TransientResult {
         assert_eq!(time.len(), voltage.len());
         TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             step_sizes: vec![0.0; time.len()],
             time,
@@ -7581,6 +7584,7 @@ mod tests {
         ));
 
         let empty_result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: result.time.clone(),
             step_sizes: result.step_sizes.clone(),
@@ -7939,6 +7943,7 @@ mod tests {
         )
         .expect("sparse numeric measurements parse");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
             step_sizes: vec![0.0; 4],
@@ -7997,6 +8002,7 @@ mod tests {
         )
         .expect("hierarchical measurement deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],
             step_sizes: vec![0.0; 2],
@@ -8042,6 +8048,7 @@ mod tests {
         )
         .expect("FRAC_MAX deck parses");
         let frac_result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0],
             step_sizes: vec![0.0; 5],
@@ -8073,6 +8080,7 @@ mod tests {
         )
         .expect("legacy global window deck parses");
         let window_result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
             step_sizes: vec![0.0; 6],
@@ -8116,6 +8124,7 @@ mod tests {
         )
         .expect("live ERR IEEE deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],
             step_sizes: vec![0.0; 2],
@@ -8314,6 +8323,7 @@ mod tests {
         )
         .expect("syntactic parser retains recursive hierarchy");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],
             step_sizes: vec![0.0; 2],
@@ -8416,6 +8426,7 @@ mod tests {
         )
         .expect("ordered live-measure deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 0.5, 1.0],
             step_sizes: vec![0.0; 3],
@@ -8775,6 +8786,7 @@ mod tests {
         )
         .expect("FIND LAST recovery deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
             step_sizes: vec![0.0; 4],
@@ -8872,6 +8884,7 @@ mod tests {
         )
         .expect("raw-vs-braced consumer deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
             step_sizes: vec![0.0; 4],
@@ -8979,6 +8992,7 @@ mod tests {
         )
         .expect("raw NaN WHEN deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
             step_sizes: vec![0.0; 6],
@@ -9074,6 +9088,7 @@ mod tests {
         )
         .expect("raw delay history deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
             step_sizes: vec![0.0; 6],
@@ -9140,6 +9155,7 @@ mod tests {
         )
         .expect("terminal undefined LAST deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0],
             step_sizes: vec![0.0; 4],
@@ -9207,6 +9223,7 @@ mod tests {
         )
         .expect("DERIV -2 recovery deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
             step_sizes: vec![0.0; 6],
@@ -9642,6 +9659,7 @@ mod tests {
         ))
         .expect("raw-NaN ERROR dependency deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0; 3],
@@ -9730,6 +9748,7 @@ mod tests {
         )
         .expect("issue 277 deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 0.5, 1.0],
             step_sizes: vec![0.0; 3],
@@ -10268,6 +10287,7 @@ mod tests {
         )
         .expect("typed raw-current deck parses");
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0; 3],

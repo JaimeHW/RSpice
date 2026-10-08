@@ -276,22 +276,22 @@ fn evaluate_one(
     let impulses = if status.is_complete()
         && let Some((netlist, result)) = current_record
     {
-        use crate::analysis::measure_signals::current_observation;
+        use crate::analysis::measure_signals::impulse_observation;
         let spec = match &analysis.output {
             crate::netlist::FftOutput::Probe(spec) => spec.clone(),
             crate::netlist::FftOutput::Expression(expression) => format!("{{{expression}}}"),
         };
-        let observation = current_observation::resolve_with_coverage(
+        let observation = impulse_observation::resolve_with_coverage(
             Some(netlist),
             result,
             &spec,
             (start, stop),
             abort,
         )
-        .map_err(|error| current_observation_error(index, error))?;
+        .map_err(|error| impulse_observation_error(index, error))?;
         // Finite DFT samples stop one spacing before STOP. Complete current
         // coverage additionally needs every accepted event through STOP.
-        if observation.observes_current && stop > history_stop {
+        if observation.observes_signal && stop > history_stop {
             return Err(request_error(index,
                 "current impulse history does not cover the entire requested (START, STOP] interval".into()));
         }
@@ -393,7 +393,7 @@ fn evaluate_one(
             coherent_gain,
             abort,
         )
-        .map_err(|error| current_observation_error(index, error))?;
+        .map_err(|error| impulse_observation_error(index, error))?;
         window_derivatives::add_to_bins(
             &mut input,
             &impulses,
@@ -847,12 +847,12 @@ fn request_error(index: usize, detail: String) -> SimulationError {
     SimulationError::Circuit(format!(".FFT request {}: {detail}", index + 1))
 }
 
-fn current_observation_error(
+fn impulse_observation_error(
     index: usize,
-    error: crate::analysis::measure_signals::current_observation::CurrentObservationError,
+    error: crate::analysis::measure_signals::impulse_observation::ImpulseObservationError,
 ) -> SimulationError {
     match error {
-        crate::analysis::measure_signals::current_observation::CurrentObservationError::Aborted => {
+        crate::analysis::measure_signals::impulse_observation::ImpulseObservationError::Aborted => {
             SimulationError::Aborted
         }
         error => request_error(index, error.to_string()),

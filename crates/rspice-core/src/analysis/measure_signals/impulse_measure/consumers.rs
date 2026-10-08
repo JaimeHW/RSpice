@@ -97,13 +97,13 @@ pub(in super::super) fn bind(
                 if abort.is_aborted() {
                     return Err(EquationMeasurementEvaluationError::Aborted);
                 }
-                owns_primitives |= !cursor.term.trace.derivatives.is_empty();
+                owns_primitives |= !cursor.term.trace.derivatives().is_empty();
             }
         }
         if owns_primitives {
             program.primitive_sources.try_reserve(1).map_err(|_| {
                 EquationMeasurementEvaluationError::Detail(
-                    "cannot allocate current primitive dependencies".into(),
+                    "cannot allocate impulse primitive dependencies".into(),
                 )
             })?;
             program.primitive_sources.push(index);
@@ -152,7 +152,7 @@ pub(in super::super) fn bind(
                 };
                 let missing = || {
                     EquationMeasurementEvaluationError::Detail(
-                        "invalid current primitive dependency index".into(),
+                        "invalid impulse primitive dependency index".into(),
                     )
                 };
                 let count = programs
@@ -176,7 +176,7 @@ pub(in super::super) fn bind(
                     if !destination.contains(&primitive) {
                         destination.try_reserve(1).map_err(|_| {
                             EquationMeasurementEvaluationError::Detail(
-                                "cannot allocate current primitive dependencies".into(),
+                                "cannot allocate impulse primitive dependencies".into(),
                             )
                         })?;
                         destination.push(primitive);

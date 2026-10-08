@@ -8,24 +8,24 @@
 //! the unsampled final interval. Rectangular windows cover the whole interval.
 
 use super::*;
-use crate::analysis::measure_signals::current_observation::{
-    CurrentImpulseContribution, CurrentObservationError,
+use crate::analysis::measure_signals::impulse_observation::{
+    ImpulseContribution, ImpulseObservationError,
 };
 use crate::numerics::{compensated_add, scaled_exp_product};
 
 pub(super) fn add_to_bins(
     bins: &mut [Complex<Value>],
-    terms: &[CurrentImpulseContribution<'_>],
+    terms: &[ImpulseContribution<'_>],
     analysis: &FftAnalysis,
     mode: XyceFftMode,
     transient_stop: Value,
     coherent_gain: Value,
     abort: &dyn AbortSignal,
-) -> Result<(), CurrentObservationError> {
+) -> Result<(), ImpulseObservationError> {
     if terms.is_empty() {
         return Ok(());
     }
-    let invalid = |detail: &str| CurrentObservationError::Invalid {
+    let invalid = |detail: &str| ImpulseObservationError::Invalid {
         detail: detail.into(),
     };
     let start = analysis.start.unwrap_or(0.0);
@@ -40,7 +40,7 @@ pub(super) fn add_to_bins(
     let last_sample = sample_time(analysis, transient_stop, analysis.points - 1);
     for (bin, coefficient) in bins.iter_mut().enumerate() {
         if abort.is_aborted() {
-            return Err(CurrentObservationError::Aborted);
+            return Err(ImpulseObservationError::Aborted);
         }
         let one_sided = if bin == 0 || bin == analysis.points / 2 {
             1.0
@@ -52,9 +52,9 @@ pub(super) fn add_to_bins(
         let mut real_correction = 0.0;
         let mut imaginary_correction = 0.0;
         for term in terms {
-            for (index, point) in term.trace.points.iter().enumerate() {
+            for (index, point) in term.trace.points().enumerate() {
                 if index.is_multiple_of(64) && abort.is_aborted() {
-                    return Err(CurrentObservationError::Aborted);
+                    return Err(ImpulseObservationError::Aborted);
                 }
                 if point.time <= start {
                     continue;
@@ -84,23 +84,21 @@ pub(super) fn add_to_bins(
                     continue;
                 }
                 let rate = scaled_exp_product(
-                    &[point.charge_coulombs, term.weight, window, one_sided],
+                    &[point.coefficient, term.weight, window, one_sided],
                     &[duration, coherent_gain],
                     0.0,
                 );
                 if !rate.is_finite() || (rate == 0.0 && term.weight != 0.0) {
-                    return Err(invalid(
-                        "windowed current impulse coefficient is not representable",
-                    ));
+                    return Err(invalid("windowed impulse coefficient is not representable"));
                 }
                 let phase = -2.0 * PI * (bin as Value * fraction).fract();
                 let (sine, cosine) = phase.sin_cos();
                 compensated_add(&mut real, &mut real_correction, rate * cosine);
                 compensated_add(&mut imaginary, &mut imaginary_correction, rate * sine);
             }
-            for (index, point) in term.trace.derivatives.iter().enumerate() {
+            for (index, point) in term.trace.derivatives().iter().enumerate() {
                 if index.is_multiple_of(64) && abort.is_aborted() {
-                    return Err(CurrentObservationError::Aborted);
+                    return Err(ImpulseObservationError::Aborted);
                 }
                 if analysis.window != FftWindow::Rectangular
                     || point.time <= start
@@ -115,7 +113,7 @@ pub(super) fn add_to_bins(
                         duration,
                         coherent_gain / one_sided,
                     )
-                    .map_err(|detail| CurrentObservationError::Invalid { detail })?;
+                    .map_err(|detail| ImpulseObservationError::Invalid { detail })?;
                 let fraction = (point.time - start) / duration;
                 let (sine, cosine) = (-2.0 * PI * (bin as Value * fraction).fract()).sin_cos();
                 let (real_phase, imaginary_phase) = match point.order % 4 {
@@ -134,7 +132,7 @@ pub(super) fn add_to_bins(
         }
         *coefficient = Complex::new(real + real_correction, imaginary + imaginary_correction);
         if !coefficient.re.is_finite() || !coefficient.im.is_finite() {
-            return Err(invalid("current FFT coefficient is non-finite"));
+            return Err(invalid("impulse FFT coefficient is non-finite"));
         }
     }
     Ok(())

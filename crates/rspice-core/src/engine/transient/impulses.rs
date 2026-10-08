@@ -357,6 +357,7 @@ mod tests {
             voltages: vec![vec![0.0]],
             branch_names: vec!["Vdrive".into(), "Rzero".into(), "Cderived".into()],
             branch_currents: vec![vec![0.0]; 3],
+            voltage_impulses: None,
             current_impulses: Some(
                 ["Vdrive", "Rzero"]
                     .into_iter()

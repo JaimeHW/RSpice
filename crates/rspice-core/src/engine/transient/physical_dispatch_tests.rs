@@ -159,7 +159,7 @@ fn run_with_configuration(
         outcome.as_ref().map(|(r, _)| (r.time.len(), r.time.last()))
     );
     let (result, checkpoints) = outcome.unwrap();
-    result.validate_current_impulses().unwrap();
+    result.validate_impulses().unwrap();
     let mut impulses = result
         .current_impulses
         .as_ref()

@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 mod derivative;
+mod trace;
+mod voltage;
+pub(crate) use trace::ImpulseTraceRef;
+pub use voltage::{VoltageImpulsePoint, VoltageImpulseTrace};
+pub(crate) use voltage::{validate_voltage_impulse_traces, voltage_impulse_value_count};
 
 /// A current's physical identity, independent of its displayed probe spelling.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -91,19 +96,25 @@ pub struct CurrentImpulsePoint {
     pub charge_coulombs: Value,
 }
 
-/// A nonzero coefficient of a derivative of a current Dirac impulse.
+/// A nonzero coefficient of a derivative of a signal's Dirac impulse.
 ///
-/// This contributes `coefficient * delta^(order)(t - time)` to the current.
-/// Its SI units are ampere * second^(order + 1), not coulombs or amperes.
-/// `order` is strictly positive; ordinary charge impulses use
-/// [`CurrentImpulsePoint`]. These terms must never be put on a sample grid.
+/// This contributes `coefficient * delta^(order)(t - time)` to its signal.
+/// The coefficient's units are the signal unit times second^(order + 1).
+/// The owning current or voltage trace supplies that physical identity.
+/// `order` is strictly positive; zeroth-order impulses use the trace's
+/// ordinary impulse points. These terms must never be put on a sample grid.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CurrentImpulseDerivative {
+pub struct ImpulseDerivative {
     pub time: Value,
     pub order: u32,
     pub coefficient: Value,
 }
+
+/// A current impulse derivative, with coefficient units A*s^(order+1).
+pub type CurrentImpulseDerivative = ImpulseDerivative;
+/// A voltage impulse derivative, with coefficient units V*s^(order+1).
+pub type VoltageImpulseDerivative = ImpulseDerivative;
 
 /// Newly accepted impulses and coverage for one current in a run segment.
 ///
@@ -191,49 +202,63 @@ impl CurrentImpulseTrace {
     /// Validate the trace against its result's time extent.
     pub fn validate(&self, start: Value, stop: Value) -> Result<(), String> {
         self.owner.validate()?;
-        if self.points.is_empty() && self.derivatives.is_empty() && !self.complete {
-            return Err(
-                "current impulse trace has neither observations nor complete coverage".into(),
-            );
-        }
-        if !start.is_finite() || !stop.is_finite() || start < 0.0 || stop < start {
-            return Err("current impulse trace has an invalid time extent".into());
-        }
-        let mut previous = None;
-        for point in &self.points {
-            if !point.time.is_finite()
-                || point.time < start
-                || point.time > stop
-                || previous.is_some_and(|time| point.time <= time)
-                || !point.charge_coulombs.is_finite()
-                || point.charge_coulombs == 0.0
-            {
-                return Err(format!(
-                    "current impulse trace '{}' has an invalid time or charge",
-                    self.owner
-                ));
-            }
-            previous = Some(point.time);
-        }
-        let mut previous = None;
-        for point in &self.derivatives {
-            if !point.time.is_finite()
-                || point.time < start
-                || point.time > stop
-                || point.order == 0
-                || !point.coefficient.is_finite()
-                || point.coefficient == 0.0
-                || previous.is_some_and(|pair| (point.time, point.order) <= pair)
-            {
-                return Err(format!(
-                    "current impulse trace '{}' has an invalid derivative",
-                    self.owner
-                ));
-            }
-            previous = Some((point.time, point.order));
-        }
-        Ok(())
+        validate_impulse_series(
+            &format!("current impulse trace '{}'", self.owner),
+            self.complete,
+            self.points
+                .iter()
+                .map(|point| (point.time, point.charge_coulombs)),
+            &self.derivatives,
+            start,
+            stop,
+        )
     }
+}
+
+fn validate_impulse_series(
+    identity: &str,
+    complete: bool,
+    points: impl ExactSizeIterator<Item = (Value, Value)>,
+    derivatives: &[ImpulseDerivative],
+    start: Value,
+    stop: Value,
+) -> Result<(), String> {
+    if points.len() == 0 && derivatives.is_empty() && !complete {
+        return Err(format!(
+            "{identity} has neither observations nor complete coverage"
+        ));
+    }
+    if !start.is_finite() || !stop.is_finite() || start < 0.0 || stop < start {
+        return Err(format!("{identity} has an invalid time extent"));
+    }
+    let mut previous = None;
+    for (time, coefficient) in points {
+        if !time.is_finite()
+            || time < start
+            || time > stop
+            || previous.is_some_and(|previous| time <= previous)
+            || !coefficient.is_finite()
+            || coefficient == 0.0
+        {
+            return Err(format!("{identity} has an invalid time or coefficient"));
+        }
+        previous = Some(time);
+    }
+    let mut previous = None;
+    for point in derivatives {
+        if !point.time.is_finite()
+            || point.time < start
+            || point.time > stop
+            || point.order == 0
+            || !point.coefficient.is_finite()
+            || point.coefficient == 0.0
+            || previous.is_some_and(|pair| (point.time, point.order) <= pair)
+        {
+            return Err(format!("{identity} has an invalid derivative"));
+        }
+        previous = Some((point.time, point.order));
+    }
+    Ok(())
 }
 
 /// Validate typed ownership and preserve the distinction between missing

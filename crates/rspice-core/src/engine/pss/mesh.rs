@@ -1247,6 +1247,7 @@ mod tests {
                 num_nodes: 1,
                 node_names: vec!["far".into()],
                 branch_names: vec![],
+                voltage_impulses: None,
                 current_impulses: None,
                 digital_traces: vec![],
                 digital_buses: vec![],

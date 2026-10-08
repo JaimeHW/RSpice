@@ -1145,6 +1145,9 @@ pub struct TransientResult {
     /// trace proves no impulses for that owner in this run segment.
     /// Omitted owners provide no coverage claim, even when this is `Some`.
     pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
+    /// Sparse node-voltage actions, retained separately from finite samples.
+    pub voltage_impulses: Option<Vec<crate::VoltageImpulseTrace>>,
+
     /// XSPICE digital node histories captured at accepted transient points.
     pub digital_traces: Vec<DigitalTrace>,
     /// Buses declared over `digital_traces`, in declaration order.
@@ -1173,6 +1176,17 @@ impl TransientResult {
             self.time.first().copied(),
             self.time.last().copied(),
             self.branch_names.iter().map(String::as_str),
+        )
+    }
+
+    /// Validate all singular observations without conflating current and voltage units.
+    pub fn validate_impulses(&self) -> Result<(), String> {
+        self.validate_current_impulses()?;
+        crate::transient_observation::validate_voltage_impulse_traces(
+            self.voltage_impulses.as_deref(),
+            self.time.first().copied(),
+            self.time.last().copied(),
+            self.node_names.iter().map(String::as_str),
         )
     }
 
@@ -1206,6 +1220,7 @@ impl TransientResult {
             node_voltages: &self.voltages,
             branch_names: &self.branch_names,
             branch_currents: &self.branch_currents,
+            voltage_impulses: self.voltage_impulses.as_deref(),
             current_impulses: self.current_impulses.as_deref(),
             digital_values,
             digital_buses,
@@ -1716,6 +1731,7 @@ impl TransientResultCompressed {
         }
 
         Ok(TransientResult {
+            voltage_impulses: self.voltage_impulses,
             current_impulses: self.current_impulses,
             time: self.time,
             step_sizes: self.step_sizes,
@@ -1749,6 +1765,7 @@ mod tests {
     fn result_on_grid(time: Vec<Value>) -> TransientResult {
         let values = time.iter().map(|time| 2.0 * time).collect::<Vec<_>>();
         TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             step_sizes: vec![0.0; time.len()],
             time,
@@ -2183,6 +2200,7 @@ mod bus_tests {
         // producer does not. A test that asserts it here fails the day a
         // boundary starts declaring buses without the rest of the chain.
         let result = TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0],
             step_sizes: vec![0.0],

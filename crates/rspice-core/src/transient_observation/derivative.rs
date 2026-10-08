@@ -1,7 +1,7 @@
 //! Range-preserving coefficients for periodic distributional observations.
 use super::*;
 
-impl CurrentImpulseDerivative {
+impl ImpulseDerivative {
     /// Signed coefficient times `(2*pi*f)^order`, normalized to the period.
     /// Keep the binary exponent separate so a large derivative factor can be
     /// cancelled by a small authored coefficient without intermediate overflow.
@@ -23,7 +23,7 @@ impl CurrentImpulseDerivative {
             || self.coefficient == 0.0
             || self.order == 0
         {
-            return Err("invalid periodic current impulse derivative".into());
+            return Err("invalid periodic impulse derivative".into());
         }
         if frequency == 0.0 || weight == 0.0 {
             return Ok(0.0);
@@ -59,7 +59,7 @@ impl CurrentImpulseDerivative {
             product.1.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
         );
         if !value.is_finite() || value == 0.0 {
-            return Err("periodic current impulse derivative is not representable".into());
+            return Err("periodic impulse derivative is not representable".into());
         }
         Ok(value)
     }

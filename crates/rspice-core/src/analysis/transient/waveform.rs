@@ -816,6 +816,9 @@ pub struct TransientResultCompressed {
     /// decimation. `None` means their history was unavailable or unrecorded.
     /// Each trace retains its owner's coverage; omitted owners remain unknown.
     pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
+    /// Sparse node-voltage actions, retained separately from finite samples.
+    pub voltage_impulses: Option<Vec<crate::VoltageImpulseTrace>>,
+
     /// Retained time points, a subset of the accepted solver grid with their
     /// exact IEEE-754 values.
     pub time: Vec<Value>,
@@ -1005,6 +1008,17 @@ impl TransientResultCompressed {
                 .iter()
                 .filter_map(|channel| match channel.descriptor.role() {
                     TransientChannelRole::BranchCurrent { branch } => Some(branch.as_str()),
+                    _ => None,
+                }),
+        )?;
+        crate::transient_observation::validate_voltage_impulse_traces(
+            self.voltage_impulses.as_deref(),
+            self.time.first().copied(),
+            self.time.last().copied(),
+            self.channels
+                .iter()
+                .filter_map(|channel| match channel.descriptor.role() {
+                    TransientChannelRole::NodeVoltage { node, .. } => Some(node.as_str()),
                     _ => None,
                 }),
         )?;
@@ -1547,6 +1561,7 @@ mod tests {
     ) -> TransientResultCompressed {
         let config = CompressionConfig::none();
         TransientResultCompressed {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0, 2.0],
             step_sizes: vec![0.0, 1.0, 1.0],

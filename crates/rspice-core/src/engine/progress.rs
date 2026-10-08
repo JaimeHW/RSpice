@@ -134,6 +134,7 @@ mod tests {
             node_voltages: &[],
             branch_names: &[],
             branch_currents: &[],
+            voltage_impulses: None,
             current_impulses: None,
             digital_values: &[],
             digital_buses: &[],

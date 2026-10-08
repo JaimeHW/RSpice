@@ -1,44 +1,45 @@
-//! Resolve the singular part of a retained current using the output grammar.
+//! Resolve the singular part of a retained signal using the output grammar.
 //!
 //! `None` retains the historical sampled-waveform contract. Once a result
-//! carries an impulse section, every requested current must have explicit,
+//! carries an impulse section, every requested signal of that kind must have explicit,
 //! complete coverage. Empty complete histories and missing histories differ.
 
 use super::*;
 use crate::netlist::expr::{BinOpKind, UnaryOpKind};
+use crate::transient_observation::ImpulseTraceRef;
 use crate::{CurrentImpulseOwner, CurrentImpulseTrace};
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CurrentObservationError {
-    #[error("current observation evaluation aborted")]
+pub(crate) enum ImpulseObservationError {
+    #[error("impulse observation evaluation aborted")]
     Aborted,
     #[error("{detail}")]
     Invalid { detail: String },
 }
 
-impl From<CurrentObservationError> for crate::analysis::fourier::FourierError {
-    fn from(error: CurrentObservationError) -> Self {
+impl From<ImpulseObservationError> for crate::analysis::fourier::FourierError {
+    fn from(error: ImpulseObservationError) -> Self {
         match error {
-            CurrentObservationError::Aborted => Self::Aborted,
-            CurrentObservationError::Invalid { detail } => Self::CurrentObservation { detail },
+            ImpulseObservationError::Aborted => Self::Aborted,
+            ImpulseObservationError::Invalid { detail } => Self::CurrentObservation { detail },
         }
     }
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct CurrentImpulseContribution<'a> {
-    pub(crate) trace: &'a CurrentImpulseTrace,
+pub(crate) struct ImpulseContribution<'a> {
+    pub(crate) trace: ImpulseTraceRef<'a>,
     pub(crate) weight: Value,
 }
 
 #[derive(Default)]
-pub(crate) struct ResolvedCurrentObservation<'a> {
-    pub(crate) terms: Vec<CurrentImpulseContribution<'a>>,
-    pub(crate) observes_current: bool,
+pub(crate) struct ResolvedImpulseObservation<'a> {
+    pub(crate) terms: Vec<ImpulseContribution<'a>>,
+    pub(crate) observes_signal: bool,
 }
 
-fn failure(detail: impl Into<String>) -> CurrentObservationError {
-    CurrentObservationError::Invalid {
+fn failure(detail: impl Into<String>) -> ImpulseObservationError {
+    ImpulseObservationError::Invalid {
         detail: detail.into(),
     }
 }
@@ -48,16 +49,16 @@ struct Form<'a> {
     // Some only for a time-independent, real, finite expression. A sampled
     // voltage or an impulse-free current is still time dependent.
     constant: Option<Value>,
-    terms: Vec<CurrentImpulseContribution<'a>>,
+    terms: Vec<ImpulseContribution<'a>>,
 }
 
 impl Form<'_> {
-    fn scale(&mut self, weight: Value) -> Result<(), CurrentObservationError> {
+    fn scale(&mut self, weight: Value) -> Result<(), ImpulseObservationError> {
         for term in &mut self.terms {
             let scaled = term.weight * weight;
             if !scaled.is_finite() || (scaled == 0.0 && term.weight != 0.0 && weight != 0.0) {
                 return Err(failure(
-                    "current impulse expression coefficient is not representable",
+                    "impulse expression coefficient is not representable",
                 ));
             }
             term.weight = scaled;
@@ -69,26 +70,143 @@ impl Form<'_> {
 
 struct Resolver<'a, 'b> {
     traces: &'a [CurrentImpulseTrace],
+    current_recorded: bool,
+    voltage_traces: Option<&'a [crate::VoltageImpulseTrace]>,
+    voltage_aliases: HashMap<String, Option<usize>>,
+    ground: crate::netlist::GroundPolicy,
     // None denotes an ambiguous alias, independent of insertion order.
     aliases: HashMap<String, Option<usize>>,
     retained_currents: HashSet<String>,
     retained_voltages: HashSet<String>,
     params: &'b crate::netlist::ParamContext,
+    netlist: Option<&'b Netlist>,
     abort: &'b dyn AbortSignal,
     extent: (Value, Value),
     window: (Value, Value),
-    observes_current: std::cell::Cell<bool>,
+    observes_signal: std::cell::Cell<bool>,
 }
 
 impl<'a> Resolver<'a, '_> {
-    fn probe(&self, authored: &str) -> Result<Form<'a>, CurrentObservationError> {
+    fn voltage(&self, prefix: &str, nodes: &[String]) -> Result<Form<'a>, ImpulseObservationError> {
+        if !(1..=2).contains(&nodes.len()) {
+            return Err(failure("voltage impulse probes require one or two nodes"));
+        }
+        let Some(traces) = self.voltage_traces else {
+            return Ok(Form::default());
+        };
+        self.observes_signal.set(true);
+        // Resolve only requested interface ports. A retained physical node wins
+        // over an identically spelled formal port, just as in finite output.
+        let requested = nodes
+            .iter()
+            .filter(|node| {
+                !self
+                    .retained_voltages
+                    .contains(&canonical_measure_signal_name(&format!("V({node})")))
+                    && !self.ground.is_ground(node)
+            })
+            .cloned()
+            .collect::<HashSet<_>>();
+        let interfaces = if let Some(netlist) = self.netlist {
+            collect_requested_interface_node_aliases_with_abort(netlist, &requested, self.abort)
+                .map_err(|error| match error {
+                    crate::netlist::ParseWithAbortError::Aborted => {
+                        ImpulseObservationError::Aborted
+                    }
+                    crate::netlist::ParseWithAbortError::Parse(error) => failure(error.to_string()),
+                })?
+        } else {
+            InterfaceNodeAliases::default()
+        };
+        let nodes = nodes
+            .iter()
+            .map(|node| {
+                if requested.contains(node) {
+                    interfaces.resolve(node).unwrap_or(node)
+                } else {
+                    node
+                }
+            })
+            .collect::<Vec<_>>();
+        let canonical = |node: &str| {
+            canonical_measure_signal_name(&format!("V({})", self.ground.canonical_node(node)))
+        };
+        if nodes.len() == 2 && canonical(nodes[0]) == canonical(nodes[1])
+            || nodes.iter().all(|node| self.ground.is_ground(node))
+        {
+            return Ok(Form {
+                constant: Some(0.0),
+                terms: Vec::new(),
+            });
+        }
+        let mut form = Form::default();
+        form.terms
+            .try_reserve_exact(nodes.len())
+            .map_err(|_| failure("cannot allocate voltage impulse terms"))?;
+        for (side, node) in nodes.iter().enumerate() {
+            if self.abort.is_aborted() {
+                return Err(ImpulseObservationError::Aborted);
+            }
+            if self.ground.is_ground(node) {
+                continue;
+            }
+            let name = canonical(node);
+            let trace = match self.voltage_aliases.get(&name) {
+                Some(Some(index)) => &traces[*index],
+                Some(None) => {
+                    return Err(failure(format!(
+                        "voltage impulse alias '{name}' is ambiguous"
+                    )));
+                }
+                None => {
+                    return Err(failure(format!(
+                        "voltage '{name}' has no complete impulse history"
+                    )));
+                }
+            };
+            if !trace.complete {
+                return Err(failure(format!(
+                    "voltage '{name}' has an incomplete impulse history"
+                )));
+            }
+            trace
+                .validate(self.extent.0, self.extent.1)
+                .map_err(failure)?;
+            if trace.has_impulses_in_window(self.window.0, self.window.1) {
+                if !matches!(prefix, "V" | "VR") {
+                    return Err(failure(format!(
+                        "voltage projection '{prefix}({})' is not defined for voltage impulses",
+                        nodes.join(",")
+                    )));
+                }
+                form.terms.push(ImpulseContribution {
+                    trace: ImpulseTraceRef::Voltage(trace),
+                    weight: if side == 0 { 1.0 } else { -1.0 },
+                });
+            }
+        }
+        Ok(form)
+    }
+
+    fn probe(&self, authored: &str) -> Result<Form<'a>, ImpulseObservationError> {
         let canonical = canonical_measure_signal_name(authored);
         if n_probe_voltage_name(&canonical)
             .is_some_and(|voltage| self.retained_voltages.contains(&voltage))
         {
-            // N(...) names the node before consulting an identically named
-            // device parameter. A voltage has no current impulse history.
-            return Ok(Form::default());
+            // A retained node takes precedence over a same-named device output.
+            let (_, arguments) = split_equation_output_operator(&canonical).unwrap();
+            return self.voltage("V", &arguments);
+        }
+        if let Some((prefix, nodes)) = split_equation_output_operator(&canonical)
+            && is_equation_voltage_accessor(&prefix.to_ascii_uppercase())
+        {
+            return self.voltage(&prefix.to_ascii_uppercase(), &nodes);
+        }
+        if self
+            .retained_voltages
+            .contains(&canonical_measure_signal_name(&format!("V({authored})")))
+        {
+            return self.voltage("V", &[authored.to_owned()]);
         }
         let (lookup, projection) = match split_equation_output_operator(&canonical) {
             Some((prefix, args))
@@ -123,7 +241,7 @@ impl<'a> Resolver<'a, '_> {
                     Some(SaveSignal::DeviceParam { param, .. }) => current_parameter(&param),
                     _ => self.retained_currents.contains(&canonical),
                 };
-            if current {
+            if current && self.current_recorded {
                 return Err(failure(format!(
                     "current '{authored}' has no complete impulse history"
                 )));
@@ -137,7 +255,7 @@ impl<'a> Resolver<'a, '_> {
             }
             return Ok(Form::default());
         };
-        self.observes_current.set(true);
+        self.observes_signal.set(true);
         if !trace.complete {
             return Err(failure(format!(
                 "current '{authored}' has an incomplete impulse history"
@@ -160,16 +278,18 @@ impl<'a> Resolver<'a, '_> {
         if has_impulses {
             form.terms
                 .try_reserve_exact(1)
-                .map_err(|_| failure("cannot allocate current impulse terms"))?;
-            form.terms
-                .push(CurrentImpulseContribution { trace, weight: 1.0 });
+                .map_err(|_| failure("cannot allocate impulse terms"))?;
+            form.terms.push(ImpulseContribution {
+                trace: ImpulseTraceRef::Current(trace),
+                weight: 1.0,
+            });
         }
         Ok(form)
     }
 
-    fn expression(&self, expression: &NetExpr) -> Result<Form<'a>, CurrentObservationError> {
+    fn expression(&self, expression: &NetExpr) -> Result<Form<'a>, ImpulseObservationError> {
         if self.abort.is_aborted() {
-            return Err(CurrentObservationError::Aborted);
+            return Err(ImpulseObservationError::Aborted);
         }
         let mut form = match expression {
             NetExpr::Param(name) => {
@@ -214,9 +334,7 @@ impl<'a> Resolver<'a, '_> {
                         UnaryOpKind::Pos => {}
                         UnaryOpKind::Neg => child.scale(-1.0)?,
                         UnaryOpKind::Not => {
-                            return Err(failure(
-                                "logical operations on current impulses are undefined",
-                            ));
+                            return Err(failure("logical operations on impulses are undefined"));
                         }
                     }
                 }
@@ -239,7 +357,7 @@ impl<'a> Resolver<'a, '_> {
                             }
                             left.terms
                                 .try_reserve(right.terms.len())
-                                .map_err(|_| failure("cannot allocate current impulse terms"))?;
+                                .map_err(|_| failure("cannot allocate impulse terms"))?;
                             left.terms.extend(right.terms);
                         }
                         BinOpKind::Mul if left.terms.is_empty() && left.constant.is_some() => {
@@ -267,7 +385,7 @@ impl<'a> Resolver<'a, '_> {
                                 let scaled = term.weight / divisor;
                                 if !scaled.is_finite() || (scaled == 0.0 && term.weight != 0.0) {
                                     return Err(failure(
-                                        "current impulse expression coefficient is not representable",
+                                        "impulse expression coefficient is not representable",
                                     ));
                                 }
                                 term.weight = scaled;
@@ -275,7 +393,7 @@ impl<'a> Resolver<'a, '_> {
                         }
                         _ => {
                             return Err(failure(
-                                "current impulses require an affine expression with time-independent real coefficients; nonlinear or time-varying impulse operations are unsupported",
+                                "impulses require an affine expression with time-independent real coefficients; nonlinear or time-varying impulse operations are unsupported",
                             ));
                         }
                     }
@@ -295,7 +413,7 @@ impl<'a> Resolver<'a, '_> {
                     let child = self.expression(arg)?;
                     if !child.terms.is_empty() {
                         return Err(failure(
-                            "functions of current impulses are undefined; use an affine current expression",
+                            "functions of impulses are undefined; use an affine expression",
                         ));
                     }
                     all_constant &= child.constant.is_some();
@@ -309,19 +427,19 @@ impl<'a> Resolver<'a, '_> {
         // Coalesce repeated owners before the transform. Exact cancellation
         // must not leave two large terms whose rounding hides another owner.
         form.terms
-            .sort_unstable_by_key(|term| std::ptr::from_ref(term.trace));
-        let mut merged: Vec<CurrentImpulseContribution<'a>> = Vec::new();
+            .sort_unstable_by_key(|term| term.trace.identity());
+        let mut merged: Vec<ImpulseContribution<'a>> = Vec::new();
         merged
             .try_reserve_exact(form.terms.len())
-            .map_err(|_| failure("cannot allocate current impulse terms"))?;
+            .map_err(|_| failure("cannot allocate impulse terms"))?;
         for term in form.terms {
             if let Some(last) = merged.last_mut()
-                && std::ptr::eq(last.trace, term.trace)
+                && last.trace.identity() == term.trace.identity()
             {
                 last.weight += term.weight;
                 if !last.weight.is_finite() {
                     return Err(failure(
-                        "current impulse expression coefficient is not representable",
+                        "impulse expression coefficient is not representable",
                     ));
                 }
             } else {
@@ -354,7 +472,7 @@ pub(crate) fn resolve<'a>(
     spec: &str,
     window: (Value, Value),
     abort: &dyn AbortSignal,
-) -> Result<Vec<CurrentImpulseContribution<'a>>, CurrentObservationError> {
+) -> Result<Vec<ImpulseContribution<'a>>, ImpulseObservationError> {
     resolve_with_coverage(netlist, result, spec, window, abort).map(|resolved| resolved.terms)
 }
 
@@ -364,13 +482,30 @@ pub(crate) fn resolve_with_coverage<'a>(
     spec: &str,
     window: (Value, Value),
     abort: &dyn AbortSignal,
-) -> Result<ResolvedCurrentObservation<'a>, CurrentObservationError> {
+) -> Result<ResolvedImpulseObservation<'a>, ImpulseObservationError> {
     if abort.is_aborted() {
-        return Err(CurrentObservationError::Aborted);
+        return Err(ImpulseObservationError::Aborted);
     }
-    let Some(traces) = result.current_impulses.as_deref() else {
-        return Ok(ResolvedCurrentObservation::default());
-    };
+    if result.current_impulses.is_none() && result.voltage_impulses.is_none() {
+        return Ok(ResolvedImpulseObservation::default());
+    }
+    let traces = result.current_impulses.as_deref().unwrap_or_default();
+    let mut voltage_aliases = HashMap::new();
+    if let Some(traces) = &result.voltage_impulses {
+        voltage_aliases
+            .try_reserve(traces.len())
+            .map_err(|_| failure("cannot allocate voltage impulse aliases"))?;
+        for (index, trace) in traces.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(ImpulseObservationError::Aborted);
+            }
+            let name = canonical_measure_signal_name(&format!("V({})", trace.node_name));
+            voltage_aliases
+                .entry(name)
+                .and_modify(|entry| *entry = None)
+                .or_insert(Some(index));
+        }
+    }
     let mut aliases: HashMap<String, Option<usize>> = HashMap::new();
     aliases
         .try_reserve(
@@ -382,7 +517,7 @@ pub(crate) fn resolve_with_coverage<'a>(
         .map_err(|_| failure("cannot allocate current impulse aliases"))?;
     for (index, trace) in traces.iter().enumerate() {
         if abort.is_aborted() {
-            return Err(CurrentObservationError::Aborted);
+            return Err(ImpulseObservationError::Aborted);
         }
         let names = match &trace.owner {
             CurrentImpulseOwner::Branch { branch_name } => vec![format!("I({branch_name})")],
@@ -420,7 +555,7 @@ pub(crate) fn resolve_with_coverage<'a>(
         .map_err(|_| failure("cannot allocate current trace aliases"))?;
     for trace in &result.device_op_traces {
         if abort.is_aborted() {
-            return Err(CurrentObservationError::Aborted);
+            return Err(ImpulseObservationError::Aborted);
         }
         if current_parameter(&trace.parameter) {
             let device = &trace.device_name;
@@ -442,7 +577,7 @@ pub(crate) fn resolve_with_coverage<'a>(
         .map_err(|_| failure("cannot allocate retained voltage names"))?;
     for node in &result.node_names {
         if abort.is_aborted() {
-            return Err(CurrentObservationError::Aborted);
+            return Err(ImpulseObservationError::Aborted);
         }
         if !node.is_empty() {
             retained_voltages.insert(canonical_measure_signal_name(&format!("V({node})")));
@@ -450,21 +585,29 @@ pub(crate) fn resolve_with_coverage<'a>(
     }
     let resolver = Resolver {
         traces,
+        current_recorded: result.current_impulses.is_some(),
+        voltage_traces: result.voltage_impulses.as_deref(),
+        voltage_aliases,
+        ground: netlist.map_or(
+            crate::netlist::GroundPolicy::NgspiceGnd,
+            Netlist::ground_policy,
+        ),
         aliases,
         retained_currents,
         retained_voltages,
         params,
+        netlist,
         abort,
         extent: (
             result.time.first().copied().ok_or(failure(
-                "current observations require a nonempty time extent",
+                "impulse observations require a nonempty time extent",
             ))?,
             result.time.last().copied().ok_or(failure(
-                "current observations require a nonempty time extent",
+                "impulse observations require a nonempty time extent",
             ))?,
         ),
         window,
-        observes_current: std::cell::Cell::new(false),
+        observes_signal: std::cell::Cell::new(false),
     };
     let trimmed = spec.trim();
     let terms = if let Some(body) = trimmed
@@ -481,14 +624,14 @@ pub(crate) fn resolve_with_coverage<'a>(
         )
         .map_err(|error| match error {
             crate::netlist::expr::BehavioralPreparationError::Aborted => {
-                CurrentObservationError::Aborted
+                ImpulseObservationError::Aborted
             }
             crate::netlist::expr::BehavioralPreparationError::Semantic(detail) => failure(detail),
         })?;
         let parsed = crate::netlist::expr::parse_expression_with_abort(&expanded, abort).map_err(
             |error| match error {
                 crate::netlist::expr::ParseExpressionWithAbortError::Aborted => {
-                    CurrentObservationError::Aborted
+                    ImpulseObservationError::Aborted
                 }
                 crate::netlist::expr::ParseExpressionWithAbortError::Parse(error) => {
                     failure(error.to_string())
@@ -503,11 +646,11 @@ pub(crate) fn resolve_with_coverage<'a>(
         resolver.probe(trimmed)?.terms
     };
     if abort.is_aborted() {
-        return Err(CurrentObservationError::Aborted);
+        return Err(ImpulseObservationError::Aborted);
     }
-    Ok(ResolvedCurrentObservation {
+    Ok(ResolvedImpulseObservation {
         terms,
-        observes_current: resolver.observes_current.get(),
+        observes_signal: resolver.observes_signal.get(),
     })
 }
 
@@ -537,6 +680,7 @@ mod tests {
             real_traces: vec![],
             store_traces: vec![],
             fft_results: vec![],
+            voltage_impulses: None,
             current_impulses: Some(vec![
                 CurrentImpulseTrace {
                     derivatives: Vec::new(),
@@ -891,7 +1035,7 @@ mod tests {
         }
         assert!(matches!(
             resolve(None, &result, "I(X1.V1)", (1.0, 2.0), &Cancel),
-            Err(CurrentObservationError::Aborted)
+            Err(ImpulseObservationError::Aborted)
         ));
     }
 

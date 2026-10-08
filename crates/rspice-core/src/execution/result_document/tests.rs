@@ -102,6 +102,7 @@ fn ac_points() -> Vec<AcResult> {
 
 fn transient_result() -> TransientResult {
     TransientResult {
+        voltage_impulses: None,
         current_impulses: None,
         time: vec![0.0, 1.0e-6, 2.0e-6],
         step_sizes: vec![0.0, 1.0e-6, 1.0e-6],
@@ -2382,6 +2383,7 @@ fn a_series_whose_length_disagrees_with_the_point_count_is_rejected() {
     let error = AnalysisResultDocument::builder(
         instance(AnalysisKind::Tran),
         ResultPayload::Tran(TransientPayload {
+            voltage_impulses: None,
             current_impulses: None,
             step_sizes: vec![0.0, 1.0],
             store_traces: Vec::new(),

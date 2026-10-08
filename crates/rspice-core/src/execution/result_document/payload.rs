@@ -373,6 +373,10 @@ pub struct TransientPayload {
     /// device ownership and complete coverage require version 7; derivatives require version 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_impulses: Option<Vec<crate::CurrentImpulseTrace>>,
+    /// Sparse node-voltage actions, retained separately from finite samples.
+    /// Requires result document version 17.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voltage_impulses: Option<Vec<crate::VoltageImpulseTrace>>,
 
     /// Accepted integration interval for each time point. The first entry is
     /// zero; every later entry is the exact timestep that produced its sample.
@@ -447,6 +451,9 @@ impl TransientPayload {
             .saturating_add(buses)
             .saturating_add(crate::transient_observation::current_impulse_value_count(
                 self.current_impulses.as_deref(),
+            ))
+            .saturating_add(crate::transient_observation::voltage_impulse_value_count(
+                self.voltage_impulses.as_deref(),
             ))
     }
 

@@ -294,9 +294,7 @@ fn materialize(value: S) -> Result<Value> {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn add_to_bins(
     bins: &mut [Complex<Value>],
-    terms: &[crate::analysis::measure_signals::current_observation::CurrentImpulseContribution<
-        '_,
-    >],
+    terms: &[crate::analysis::measure_signals::impulse_observation::ImpulseContribution<'_>],
     analysis: &FftAnalysis,
     mode: XyceFftMode,
     transient_stop: Value,
@@ -312,7 +310,7 @@ pub(super) fn add_to_bins(
     let duration = stop - start;
     let mut corrections: Vec<Complex<Value>> = Vec::new();
     for term in terms {
-        for (index, point) in term.trace.derivatives.iter().enumerate() {
+        for (index, point) in term.trace.derivatives().iter().enumerate() {
             poll(abort, index)?;
             if point.time <= start || point.time > stop {
                 continue;

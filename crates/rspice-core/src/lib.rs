@@ -158,6 +158,7 @@ pub use resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};
 pub use transient_observation::{
     CurrentImpulseDerivative, CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace,
+    ImpulseDerivative, VoltageImpulseDerivative, VoltageImpulsePoint, VoltageImpulseTrace,
 };
 pub use xspice::{CmContext, CodeModel, CodeModelRegistry, XspiceInstance};
 

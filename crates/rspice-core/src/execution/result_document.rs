@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 16                          this build's exact version
+//!   "schemaVersion": 17                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -227,7 +227,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 16;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 17;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -280,14 +280,17 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 16;
 /// Earlier STB documents have no circuit-pole evidence; absence never denotes
 /// a qualified empty spectrum or establishes circuit stability.
 ///
+/// Version 17 adds separately typed node-voltage impulses and derivatives.
+/// Absent histories retain the legacy sampled-waveform contract.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 16] =
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 17] =
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -331,12 +334,39 @@ pub struct AnalysisResultDocument {
 }
 
 impl AnalysisResultDocument {
-    fn validate_current_impulses(&self) -> Result<(), ResultDocumentError> {
+    fn validate_impulses(&self) -> Result<(), ResultDocumentError> {
         let payload = match &self.payload {
             ResultPayload::Tran(payload) => payload,
             ResultPayload::Envelope(payload) => &payload.transient,
             _ => return Ok(()),
         };
+        if let Some(traces) = &payload.voltage_impulses {
+            let malformed = |detail| ResultDocumentError::Malformed {
+                location: "transient voltage impulses",
+                detail,
+            };
+            if self.schema_version < 17 {
+                return Err(malformed(
+                    "voltage impulse observations require document version 17".into(),
+                ));
+            }
+            let times = self
+                .axes
+                .iter()
+                .find_map(|axis| match (&axis.kind, &axis.values) {
+                    (ResultAxisKind::Time, AxisValues::Real { values }) => Some(values.as_slice()),
+                    _ => None,
+                })
+                .ok_or_else(|| malformed("voltage impulses require a real time axis".into()))?;
+            // A projected finite waveform need not retain every impulse owner.
+            crate::transient_observation::validate_voltage_impulse_traces(
+                Some(traces),
+                times.first().copied(),
+                times.last().copied(),
+                traces.iter().map(|trace| trace.node_name.as_str()),
+            )
+            .map_err(malformed)?;
+        }
         let Some(traces) = &payload.current_impulses else {
             return Ok(());
         };
@@ -704,7 +734,7 @@ impl AnalysisResultDocument {
         check_abort(abort)?;
         self.payload.validate(limits, abort)?;
         quasi_periodic::validate_primary(self, limits, abort)?;
-        self.validate_current_impulses()?;
+        self.validate_impulses()?;
         frequency_table::validate(self, abort)?;
         stability::validate(self, abort)?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {

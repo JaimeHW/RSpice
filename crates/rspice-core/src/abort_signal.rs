@@ -144,6 +144,8 @@ pub struct TransientSample<'a> {
     /// `None` means unavailable/unrecorded history; a resume does not replay past events.
     /// Coverage belongs to individual traces, not to the optional section.
     pub current_impulses: Option<&'a [crate::CurrentImpulseTrace]>,
+    /// Accepted singular voltage observations, independent of finite samples.
+    pub voltage_impulses: Option<&'a [crate::VoltageImpulseTrace]>,
     /// Committed digital event state at this accepted time, as
     /// [`DigitalEventCode`]s sorted by node id.
     ///

@@ -22,7 +22,7 @@
 //! time that window may reach, so a card can refuse rather than integrate over
 //! a start-up transient it was meant to skip.
 
-use super::measure_signals::current_observation::{self, CurrentImpulseContribution};
+use super::measure_signals::impulse_observation::{self, ImpulseContribution};
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::netlist::AnalysisCommand;
@@ -336,7 +336,7 @@ impl FourierAnalysis {
         // so a charge step the card's window excludes is not counted and one
         // it includes is counted exactly once.
         let (start, stop) = self.window_bounds(&result.time)?;
-        let impulses = current_observation::resolve(netlist, result, spec, (start, stop), abort)?;
+        let impulses = impulse_observation::resolve(netlist, result, spec, (start, stop), abort)?;
         self.analyze_observation(&result.time, values, &impulses, abort)
     }
 
@@ -350,14 +350,47 @@ impl FourierAnalysis {
         trace: &crate::CurrentImpulseTrace,
         abort: &dyn AbortSignal,
     ) -> Result<FourierResult, FourierError> {
+        self.analyze_impulse_trace(
+            time,
+            values,
+            crate::transient_observation::ImpulseTraceRef::Current(trace),
+            abort,
+        )
+    }
+
+    /// Analyze sampled node voltage together with its complete singular history.
+    /// Voltage actions retain volt-seconds and higher derivative coefficients;
+    /// they are never converted into current charge or sampled voltage spikes.
+    pub fn analyze_voltage_with_abort(
+        &self,
+        time: &[Value],
+        values: &[Value],
+        trace: &crate::VoltageImpulseTrace,
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
+        self.analyze_impulse_trace(
+            time,
+            values,
+            crate::transient_observation::ImpulseTraceRef::Voltage(trace),
+            abort,
+        )
+    }
+
+    fn analyze_impulse_trace(
+        &self,
+        time: &[Value],
+        values: &[Value],
+        trace: crate::transient_observation::ImpulseTraceRef<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
         if abort.is_aborted() {
             return Err(FourierError::Aborted);
         }
         self.validate_configuration()?;
         validate_waveform(time, values, abort)?;
-        if !trace.complete {
+        if !trace.complete() {
             return Err(FourierError::CurrentObservation {
-                detail: format!("current '{}' has incomplete impulse history", trace.owner),
+                detail: format!("signal '{trace}' has incomplete impulse history"),
             });
         }
         trace
@@ -366,7 +399,7 @@ impl FourierAnalysis {
         self.analyze_observation(
             time,
             values,
-            &[CurrentImpulseContribution { trace, weight: 1.0 }],
+            &[ImpulseContribution { trace, weight: 1.0 }],
             abort,
         )
     }
@@ -375,7 +408,7 @@ impl FourierAnalysis {
         &self,
         time: &[Value],
         values: &[Value],
-        impulses: &[CurrentImpulseContribution<'_>],
+        impulses: &[ImpulseContribution<'_>],
         abort: &dyn AbortSignal,
     ) -> Result<FourierResult, FourierError> {
         if abort.is_aborted() {
@@ -626,7 +659,7 @@ impl<'a> FourierQuadrature<'a> {
         &self,
         frequency: Value,
         harmonic: usize,
-        impulses: &[CurrentImpulseContribution<'_>],
+        impulses: &[ImpulseContribution<'_>],
         abort: &dyn AbortSignal,
     ) -> Result<(Value, Value), FourierError> {
         if abort.is_aborted() {
@@ -644,7 +677,7 @@ impl<'a> FourierQuadrature<'a> {
         // contribution when that waveform is tiny or identically zero.
         let mut scale = self.scale;
         for term in impulses {
-            for (index, point) in term.trace.points.iter().enumerate() {
+            for (index, point) in term.trace.points().enumerate() {
                 if index.is_multiple_of(256) && abort.is_aborted() {
                     return Err(FourierError::Aborted);
                 }
@@ -652,19 +685,19 @@ impl<'a> FourierQuadrature<'a> {
                     continue;
                 }
                 let rate = crate::numerics::scaled_exp_product(
-                    &[point.charge_coulombs, term.weight],
+                    &[point.coefficient, term.weight],
                     &[self.duration],
                     0.0,
                 );
                 ensure_finite_coefficient(rate, harmonic, "impulse charge per period")?;
-                if rate == 0.0 && point.charge_coulombs != 0.0 && term.weight != 0.0 {
+                if rate == 0.0 && point.coefficient != 0.0 && term.weight != 0.0 {
                     return Err(FourierError::CurrentObservation {
                         detail: "impulse charge per period is below the representable range".into(),
                     });
                 }
                 scale = scale.max(rate.abs().min(1.0));
             }
-            for (index, point) in term.trace.derivatives.iter().enumerate() {
+            for (index, point) in term.trace.derivatives().iter().enumerate() {
                 if index.is_multiple_of(256) && abort.is_aborted() {
                     return Err(FourierError::Aborted);
                 }
@@ -719,7 +752,7 @@ impl<'a> FourierQuadrature<'a> {
             }
         }
         for term in impulses {
-            for (index, point) in term.trace.points.iter().enumerate() {
+            for (index, point) in term.trace.points().enumerate() {
                 if index.is_multiple_of(256) && abort.is_aborted() {
                     return Err(FourierError::Aborted);
                 }
@@ -727,7 +760,7 @@ impl<'a> FourierQuadrature<'a> {
                     continue;
                 }
                 let sample = crate::numerics::scaled_exp_product(
-                    &[point.charge_coulombs, term.weight],
+                    &[point.coefficient, term.weight],
                     &[self.duration, scale],
                     0.0,
                 );
@@ -747,7 +780,7 @@ impl<'a> FourierQuadrature<'a> {
                 }
             }
             if harmonic != 0 {
-                for (index, point) in term.trace.derivatives.iter().enumerate() {
+                for (index, point) in term.trace.derivatives().iter().enumerate() {
                     if index.is_multiple_of(256) && abort.is_aborted() {
                         return Err(FourierError::Aborted);
                     }

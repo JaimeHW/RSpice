@@ -80,6 +80,7 @@ fn fixture(
         device_op_traces: vec![],
         store_traces: vec![],
         fft_results: vec![],
+        voltage_impulses: None,
         current_impulses: Some(vec![CurrentImpulseTrace {
             owner: CurrentImpulseOwner::Branch {
                 branch_name: "V1".into(),

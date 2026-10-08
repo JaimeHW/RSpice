@@ -205,7 +205,7 @@ pub fn evaluate_tran_continuous_measurements_with_limits_and_abort(
     let mut supported = Vec::new();
     for statement in &statements {
         poll(abort, 0)?;
-        let failure = if result.current_impulses.is_some() {
+        let failure = if result.current_impulses.is_some() || result.voltage_impulses.is_some() {
             match compile_live_measure_state(
                 statement,
                 "TRAN",
@@ -215,9 +215,9 @@ pub fn evaluate_tran_continuous_measurements_with_limits_and_abort(
                 &netlist.params,
             ) {
                 Ok(state) => {
-                    match current_measure::compile(netlist, result, statement, &state, abort) {
+                    match impulse_measure::compile(netlist, result, statement, &state, abort) {
                         Ok(_) => None,
-                        Err(current_observation::CurrentObservationError::Aborted) => {
+                        Err(impulse_observation::ImpulseObservationError::Aborted) => {
                             return Err(SimulationError::Aborted);
                         }
                         Err(error) => Some(error.to_string()),

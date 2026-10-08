@@ -17,6 +17,7 @@ fn fixture() -> TransientResult {
         device_op_traces: vec![],
         store_traces: vec![],
         fft_results: vec![],
+        voltage_impulses: None,
         current_impulses: Some(vec![CurrentImpulseTrace {
             derivatives: Vec::new(),
             owner: CurrentImpulseOwner::Branch {
@@ -332,12 +333,14 @@ fn current_fft_subnormal_charge_is_scaled_without_an_intermediate_sample_peak() 
 
 #[test]
 fn current_fft_charge_accumulation_has_typed_cancellation() {
-    use crate::analysis::measure_signals::current_observation::{
-        CurrentImpulseContribution, CurrentObservationError,
+    use crate::analysis::measure_signals::impulse_observation::{
+        ImpulseContribution, ImpulseObservationError,
     };
     let result = fixture();
-    let terms = [CurrentImpulseContribution {
-        trace: &result.current_impulses.as_ref().unwrap()[0],
+    let terms = [ImpulseContribution {
+        trace: crate::transient_observation::ImpulseTraceRef::Current(
+            &result.current_impulses.as_ref().unwrap()[0],
+        ),
         weight: 1.0,
     }];
     let netlist = Netlist::parse("* FFT cancellation\n.fft I(V1) np=8\n.end\n").unwrap();
@@ -353,6 +356,6 @@ fn current_fft_charge_accumulation_has_typed_cancellation() {
             1.0,
             &abort
         ),
-        Err(CurrentObservationError::Aborted)
+        Err(ImpulseObservationError::Aborted)
     ));
 }
