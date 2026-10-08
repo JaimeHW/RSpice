@@ -68,8 +68,15 @@ impl<'a> Interpolation<'a> {
         })
     }
 
-    pub fn sample(&self, series: &[f64], index: usize, held: bool) -> Result<f64, CliError> {
+    pub fn sample(
+        &self,
+        series: &[f64],
+        validity: Option<&[bool]>,
+        index: usize,
+        held: bool,
+    ) -> Result<Option<f64>, CliError> {
         let invalid = |message: String| CliError::VerificationFailed { message };
+        let defined = |index| validity.is_none_or(|valid| valid[index]);
         let x = self.target[index];
         // Index of the first scale point >= x (the scale is sorted).
         let upper = self.source.partition_point(|&s| s < x);
@@ -77,21 +84,26 @@ impl<'a> Interpolation<'a> {
             return series
                 .first()
                 .copied()
+                .map(|value| defined(0).then_some(value))
                 .ok_or_else(|| invalid("result series is empty; cannot interpolate".to_string()));
         }
         if upper >= self.source.len() {
             return series
                 .last()
                 .copied()
+                .map(|value| defined(series.len() - 1).then_some(value))
                 .ok_or_else(|| invalid("result series is empty; cannot interpolate".to_string()));
         }
         let (x0, x1) = (self.source[upper - 1], self.source[upper]);
         let (y0, y1) = (series[upper - 1], series[upper]);
         if x == x1 {
-            return Ok(y1);
+            return Ok(defined(upper).then_some(y1));
         }
         if held {
-            return Ok(y0);
+            return Ok(defined(upper - 1).then_some(y0));
+        }
+        if !defined(upper - 1) || !defined(upper) {
+            return Ok(None);
         }
         // Evaluate (y0 * (x1 - x) + y1 * (x - x0)) / (x1 - x0)
         // with a single rounding. Both differences and intermediate products
@@ -101,6 +113,7 @@ impl<'a> Interpolation<'a> {
             [(y0, x1), (-y0, x), (y1, x), (-y1, x0)].into_iter(),
             [(x1, 1.0), (x0, -1.0)].into_iter(),
         )
+        .map(Some)
         .map_err(|error| invalid(format!("cannot interpolate at {x:e}: {error:?}")))
     }
 }

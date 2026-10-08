@@ -425,6 +425,17 @@ struct WaveformData {
     variable_types: Vec<String>,
     units: Vec<Option<String>>,
     values: Vec<Vec<f64>>,
+    /// Undefined samples have zero padding that must never enter arithmetic.
+    validity: Vec<Option<Vec<bool>>>,
+}
+
+impl WaveformData {
+    fn sample(&self, column: usize, index: usize) -> Option<f64> {
+        self.validity[column]
+            .as_ref()
+            .is_none_or(|valid| valid[index])
+            .then_some(self.values[column][index])
+    }
 }
 
 fn quantity_type(value: &str) -> Option<String> {
@@ -497,22 +508,27 @@ fn comparison_data(
     let mut variable_types = vec![table.scale_type];
     let mut units = vec![table.scale_unit];
     let mut values = vec![table.scale];
+    let mut validity = vec![None];
     for column in table.columns {
         match column.data {
-            ColumnData::NullableReal(_) => {
-                return Err(CliError::VerificationFailed {
-                    message: format!(
-                        "{} contains undefined samples in '{}'; a numeric comparison requires defined samples",
-                        path.display(),
-                        column.name
-                    ),
-                });
+            ColumnData::NullableReal(series) => {
+                variables.push(column.name);
+                variable_types.push(column.var_type);
+                units.push(column.unit);
+                validity.push(Some(series.iter().map(Option::is_some).collect()));
+                values.push(
+                    series
+                        .into_iter()
+                        .map(|value| value.unwrap_or(0.0))
+                        .collect(),
+                );
             }
             ColumnData::Real(series) => {
                 variables.push(column.name);
                 variable_types.push(column.var_type);
                 units.push(column.unit);
                 values.push(series);
+                validity.push(None);
             }
             ColumnData::Complex { real, imag } => {
                 variables.extend([
@@ -522,6 +538,7 @@ fn comparison_data(
                 variable_types.extend([column.var_type.clone(), column.var_type]);
                 units.extend([column.unit.clone(), column.unit]);
                 values.extend([real, imag]);
+                validity.extend([None, None]);
             }
         }
     }
@@ -541,6 +558,7 @@ fn comparison_data(
         variable_types,
         units,
         values,
+        validity,
     }))
 }
 
@@ -644,21 +662,55 @@ fn compare_waveforms(
             || strip_outer_call(var_name, "D").is_some()
             || strip_outer_call(var_name, "E").is_some();
 
+        let mut defined_points = 0usize;
+        let mut undefined_mismatches = 0usize;
+        let mut first_undefined_mismatch = None;
         for i in 0..num_points {
             let rv = if let Some(interpolation) = &interpolation {
                 if var_idx == 0 {
-                    interpolation.target[i]
+                    Some(interpolation.target[i])
                 } else {
-                    interpolation.sample(result_vals, i, held)?
+                    interpolation.sample(
+                        result_vals,
+                        result.validity[var_idx].as_deref(),
+                        i,
+                        held,
+                    )?
                 }
             } else {
-                result_vals[i]
+                result.sample(var_idx, i)
             };
-            let gv = golden_vals[i];
+            let gv = golden.sample(golden_idx, i);
 
-            if cmp_result.compare_number(rv, gv, var_name, i, args) && args.fail_fast {
-                return Ok(cmp_result);
+            match (rv, gv) {
+                (Some(rv), Some(gv)) => {
+                    defined_points += 1;
+                    if cmp_result.compare_number(rv, gv, var_name, i, args) && args.fail_fast {
+                        return Ok(cmp_result);
+                    }
+                }
+                (None, None) => {}
+                _ => {
+                    undefined_mismatches += 1;
+                    first_undefined_mismatch.get_or_insert(i);
+                    if args.fail_fast {
+                        break;
+                    }
+                }
             }
+        }
+        if let Some(first) = first_undefined_mismatch {
+            cmp_result.problems.push(format!(
+                "'{var_name}': {undefined_mismatches} sample(s) are undefined on only one side, first at index {first}"
+            ));
+        } else if defined_points == 0 {
+            cmp_result
+                .problems
+                .push(format!("'{var_name}': no defined samples were compared"));
+        }
+        if args.fail_fast && !cmp_result.problems.is_empty() {
+            cmp_result.passed = false;
+            return Ok(cmp_result);
         }
     }
 
@@ -789,6 +841,7 @@ mod tests {
             variable_types: vec!["time".into(), "voltage".into()],
             units: vec![None, None],
             values: vec![(0..values.len()).map(|i| i as f64).collect(), values],
+            validity: vec![None, None],
         };
         let result = waveform((2..=100_001).map(f64::from).collect());
         let golden = waveform(vec![1.0; 100_000]);

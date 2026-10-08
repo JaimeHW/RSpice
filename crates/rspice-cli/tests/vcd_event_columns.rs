@@ -20,7 +20,7 @@ fn unsupported_event_columns_cannot_publish_partial_dumps() {
     let directory = common::test_dir("vcd_event_columns");
     for name in ["D(data)", "E(sample)"] {
         for (payload, cause) in [
-            (json!({"values":[null,1]}), "undefined"),
+            (json!({"values":[1,null]}), "undefined"),
             (json!({"real":[0,1],"imag":[1,2]}), "complex"),
         ] {
             let mut event = payload;

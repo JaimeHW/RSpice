@@ -1275,7 +1275,16 @@ fn event_plots_reach_a_table_through_a_dump_with_only_the_drive_band_lost() {
     // column spelling every other RSpice surface uses.
     let table = dir.join("events.csv");
     convert(&dump, &table, "csv", &[]);
-    let (header, rows) = read_csv(&table);
+    let text = std::fs::read_to_string(&table).unwrap();
+    let mut lines = text.lines();
+    let header: Vec<_> = lines.next().unwrap().split(',').collect();
+    let rows: Vec<Vec<Option<f64>>> = lines
+        .map(|line| {
+            line.split(',')
+                .map(|field| (!field.is_empty()).then(|| field.parse().unwrap()))
+                .collect()
+        })
+        .collect();
     assert_eq!(header[0], "time");
     let digital = header
         .iter()
@@ -1297,17 +1306,37 @@ fn event_plots_reach_a_table_through_a_dump_with_only_the_drive_band_lost() {
         "one row per distinct tick: {header:?}"
     );
     let period = document.timescale.seconds();
+    let real_history = &document
+        .signals
+        .iter()
+        .find(|signal| signal.variables[0].name.eq_ignore_ascii_case("rnode"))
+        .unwrap()
+        .changes;
     for (row, tick) in rows.iter().zip(&ticks) {
-        assert_eq!(row[0], *tick as f64 * period, "time is tick times period");
+        assert_eq!(
+            row[0],
+            Some(*tick as f64 * period),
+            "time is tick times period"
+        );
+        let expected = real_history
+            .iter()
+            .rev()
+            .find(|change| change.tick <= *tick)
+            .map(|change| match change.value {
+                VcdValue::Real(value) => value,
+                _ => panic!("real event carries a real value"),
+            });
+        assert_eq!(row[real], expected, "real state at tick {tick}");
     }
     assert!(
-        rows.iter().any(|row| row[digital] == 0.0)
-            && rows.iter().any(|row| row[digital] == 1.0)
-            && rows.iter().any(|row| row[digital] == 0.5),
+        rows.iter().any(|row| row[digital] == Some(0.0))
+            && rows.iter().any(|row| row[digital] == Some(1.0))
+            && rows.iter().any(|row| row[digital] == Some(0.5)),
         "the bridged node is low, high, and unknown in turn"
     );
     assert!(
-        rows.iter().any(|row| row[real] != 0.0),
+        rows.iter()
+            .any(|row| row[real].is_some_and(|value| value != 0.0)),
         "the real node's values are carried as themselves"
     );
 

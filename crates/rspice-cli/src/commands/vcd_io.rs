@@ -619,12 +619,7 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
         };
         // Recognized event columns are part of the dump's contract. Refuse
         // unsupported samples instead of publishing only the other signals.
-        let values = match &column.data {
-            ColumnData::Real(values) => Ok(values),
-            ColumnData::NullableReal(_) => Err("undefined"),
-            ColumnData::Complex { .. } => Err("complex"),
-        }
-        .map_err(|kind| {
+        let unsupported = |kind| {
             conversion_error(
                 path,
                 format!(
@@ -632,8 +627,14 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
                     column.name
                 ),
             )
-        })?;
+        };
         if digital {
+            let values = match &column.data {
+                ColumnData::Real(values) => Ok(values),
+                ColumnData::NullableReal(_) => Err("undefined"),
+                ColumnData::Complex { .. } => Err("complex"),
+            }
+            .map_err(unsupported)?;
             let mut points: Vec<DigitalTracePoint> = Vec::new();
             for (time, value) in table.scale.iter().zip(values) {
                 let state = grid_digital_state(path, &column.name, *value)?;
@@ -651,16 +652,23 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
                 points,
             });
         } else {
-            let mut points: Vec<RealTracePoint> = Vec::new();
-            for (time, value) in table.scale.iter().zip(values) {
-                if points.last().is_some_and(|last| last.value == *value) {
-                    continue;
-                }
-                points.push(RealTracePoint {
-                    time: *time * seconds_factor,
-                    value: *value,
-                });
-            }
+            let points = match &column.data {
+                ColumnData::Real(values) => grid_real_points(
+                    path,
+                    &column.name,
+                    &table.scale,
+                    seconds_factor,
+                    values.iter().copied().map(Some),
+                )?,
+                ColumnData::NullableReal(values) => grid_real_points(
+                    path,
+                    &column.name,
+                    &table.scale,
+                    seconds_factor,
+                    values.iter().copied(),
+                )?,
+                ColumnData::Complex { .. } => return Err(unsupported("complex")),
+            };
             real_traces.push(RealTrace {
                 node_name: node.to_string(),
                 points,
@@ -682,6 +690,39 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
         digital_buses: Vec::new(),
         real_traces,
     })
+}
+
+/// A real VCD variable may remain unset before its first assignment. Once set,
+/// it holds that value until another assignment; it cannot become undefined.
+fn grid_real_points(
+    path: &Path,
+    column: &str,
+    scale: &[f64],
+    seconds_factor: f64,
+    values: impl Iterator<Item = Option<f64>>,
+) -> Result<Vec<RealTracePoint>, CliError> {
+    let mut points: Vec<RealTracePoint> = Vec::new();
+    for (index, (&time, value)) in scale.iter().zip(values).enumerate() {
+        let Some(value) = value else {
+            if !points.is_empty() {
+                return Err(conversion_error(
+                    path,
+                    format!(
+                        "event column '{column}' contains an undefined real sample at index {index} after its first defined value; VCD cannot represent this gap"
+                    ),
+                ));
+            }
+            continue;
+        };
+        if points.last().is_some_and(|last| last.value == value) {
+            continue;
+        }
+        points.push(RealTracePoint {
+            time: time * seconds_factor,
+            value,
+        });
+    }
+    Ok(points)
 }
 
 /// The logic level one grid sample names.
@@ -721,9 +762,8 @@ fn grid_digital_state(path: &Path, column: &str, value: f64) -> Result<DigitalSt
 /// rawfile and its dump would convert to two different CSVs.
 ///
 /// Before its first change a logic signal reads `0.5`, because unknown is
-/// exactly what it is. A real signal has no unknown to read, so it holds its
-/// first value backwards; that is the one value in this direction the dump did
-/// not state.
+/// exactly what it is. A real signal remains undefined until its first recorded
+/// assignment; table formats preserve those samples through nullable columns.
 pub(crate) fn load_vcd_table(
     path: &Path,
     resource_limits: ResourceLimits,
@@ -767,17 +807,22 @@ pub(crate) fn vcd_table(
 
     let mut columns = Vec::with_capacity(document.signals.len());
     for (signal, name) in document.signals.iter().zip(names) {
-        let mut values = Vec::with_capacity(ticks.len());
         let mut change = signal.changes.iter().peekable();
-        let mut held = leading_value(signal.changes.first().map(|change| &change.value));
-        for tick in &ticks {
+        let mut held = leading_value(signal.kind);
+        let values = ticks.iter().map(|tick| {
             while change.peek().is_some_and(|next| next.tick <= *tick) {
                 if let Some(next) = change.next() {
-                    held = sample_value(&next.value);
+                    held = Some(sample_value(&next.value));
                 }
             }
-            values.push(held);
-        }
+            held
+        });
+        let data = match signal.kind {
+            VcdSignalKind::Logic => {
+                ColumnData::Real(values.map(|value| value.unwrap_or(UNKNOWN_LEVEL)).collect())
+            }
+            VcdSignalKind::Real => ColumnData::optional_real(values.collect()),
+        };
         columns.push(ExportColumn {
             unit: None,
             var_type: match signal.kind {
@@ -785,7 +830,7 @@ pub(crate) fn vcd_table(
                 VcdSignalKind::Real => REAL_VARIABLE_TYPE.to_string(),
             },
             name,
-            data: ColumnData::Real(values),
+            data,
         });
     }
 
@@ -801,12 +846,10 @@ pub(crate) fn vcd_table(
 }
 
 /// What a signal reads as before its first change.
-fn leading_value(first: Option<&VcdValue>) -> f64 {
-    match first {
-        // A real net has no unknown value to show, so it holds its first one
-        // backwards; a logic net's value before it is driven is `x`.
-        Some(VcdValue::Real(value)) => *value,
-        Some(VcdValue::Logic(_)) | None => UNKNOWN_LEVEL,
+fn leading_value(kind: VcdSignalKind) -> Option<f64> {
+    match kind {
+        VcdSignalKind::Logic => Some(UNKNOWN_LEVEL),
+        VcdSignalKind::Real => None,
     }
 }
 
@@ -1114,13 +1157,9 @@ mod tests {
     }
 
     #[test]
-    fn a_signal_reads_unknown_before_it_is_driven_and_a_real_holds_its_first_value_back() {
-        assert_eq!(leading_value(None), UNKNOWN_LEVEL);
-        assert_eq!(
-            leading_value(Some(&VcdValue::Logic(vec![VcdBit::One]))),
-            UNKNOWN_LEVEL
-        );
-        assert_eq!(leading_value(Some(&VcdValue::Real(-2.5))), -2.5);
+    fn initial_values_distinguish_unknown_logic_from_unassigned_reals() {
+        assert_eq!(leading_value(VcdSignalKind::Logic), Some(UNKNOWN_LEVEL));
+        assert_eq!(leading_value(VcdSignalKind::Real), None);
     }
 
     fn grid_table(name: &str, times: &[f64], values: &[f64]) -> ExportTable {

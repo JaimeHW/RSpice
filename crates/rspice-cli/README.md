@@ -672,6 +672,11 @@ the decoded network: changing a two-port `.s2p` file to `.s1p`, or to an ambiguo
 `.ts` name, is rejected before the golden is created or replaced.
 Reports retain exact mismatch counts and
 maximum errors; JSON shows the first ten differences, and text shows five.
+Undefined samples must occur at the same positions on both sides; an undefined
+sample versus a value is a structural mismatch, regardless of numeric tolerances.
+Every compared signal must have at least one pair of defined samples. Linear
+interpolation requires two defined endpoints; held event signals retain their
+undefined state until the first recorded value.
 
 JSON, HDF5 and RSpice RAW table conversion preserve explicitly declared signal
 and coordinate units. Comparison requires matching units, including the case
@@ -792,8 +797,11 @@ converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1`
 and `0.5` become `0`, `1` and `x`, one change per level held rather than one
 per grid point, and the drive strength those columns already dropped is not
 recovered. A source with neither event timelines nor such columns is refused.
-Named event columns containing undefined or complex samples are rejected before
+Complex event columns and undefined digital samples are rejected before
 publication, so an unsupported trace cannot disappear from a successful dump.
+Real event columns may remain undefined until their first recorded value,
+including a signal that never receives a value. A real signal cannot return to
+undefined after that first value; such gaps are rejected before publication.
 Version 1 RAW event plots require real columns and a time coordinate in seconds.
 Conflicting unit metadata, complex components, malformed rows, and invalid times
 are rejected before selection or publication, including in redundant bus plots.
@@ -829,8 +837,9 @@ declared range, the same shape the
 members of a run's bus reach a table in, because a table has no place for a
 declaration saying that N of its columns are one word. Columns are named
 `D(node)` and `E(node)`, dropping the scope levels every signal shares. Before
-its first change a logic signal reads `0.5`; a real signal, which has no
-unknown to show, holds its first value backwards.
+its first change a logic signal reads `0.5`; a real signal remains undefined.
+All table formats preserve those undefined real samples, and comparison checks
+their availability as well as the recorded values.
 
 **`compile-va`** resolves includes relative to the including source first,
 then searches source directories discovered by preprocessing, `-I` directories,
