@@ -1,0 +1,19 @@
+GP feedback with intrinsic resistances
+VS supply 0 2
+VIN input 0 DC 0.78 SIN(0.78 0.02 250MEG)
+RIN input b 100
+RFB c b 10k
+RLOAD supply c 1k
+REXT e 0 20
+Q1 c b e qm
+.model qm NPN(IS=1e-16 BF=80 BR=5 IKF=1m IKR=200u VAF=15 VAR=12 RB=25 RC=5 RE=2 TF=1n PTF=90 CJE=2p CJC=1p TR=.2n TNOM=27)
+.options TEMP=27 GMIN=0 RELTOL=1e-8 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-24 METHOD=TRAP MAXORD=2
+.control
+set numdgt=17
+set wr_vecnames
+set wr_singlescale
+tran 8p 4.8n 0 8p
+wrdata npn-p90.tsv v(c) v(b) v(e) i(VS) i(VIN)
+quit
+.endc
+.end

@@ -1,0 +1,93 @@
+{
+  "reference": "ngspice 46 Windows console: feedback GP with intrinsic resistances and nonlinear charges; no clamped transistor terminal",
+  "binary_sha256": "86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453",
+  "captured_at": "2026-10-08T06:51:36.947087-05:00",
+  "format": "Captured numeric tokens unchanged; trailing whitespace stripped and LF line endings. Columns: time, v(c), v(b), v(e), i(VS), i(VIN).",
+  "reproduction": "Run ngspice_con.exe -b -o reference.log <deck> from a scratch directory. The .control block names the TSV output. The PNP deck negates VS, VIN DC, and the VIN sine offset/amplitude and replaces NPN with PNP.",
+  "runs": [
+    {
+      "regime": "constant_intrinsic_resistances",
+      "phase_degrees": 21,
+      "samples": 608,
+      "exit_code": 0,
+      "artifacts": [
+        {
+          "path": "gp_feedback_linear_p21_ngspice46.cir",
+          "sha256": "9e364ada97118f1bf0c89f3610a5be40d9c87d87a78096c88e581d2cdaa71576",
+          "capture_sha256": "9e364ada97118f1bf0c89f3610a5be40d9c87d87a78096c88e581d2cdaa71576"
+        },
+        {
+          "path": "gp_feedback_linear_p21_ngspice46.tsv",
+          "sha256": "59f5cd3498e8efa1206c155880703058b602ca2ef408525a79237d2192402aba",
+          "capture_sha256": "02d86b822883d00b15d48f7788defc121d7896fb71ceff08262fd1b21602fdbb"
+        }
+      ],
+      "pnp_capture_sha256": "4a17bfacc968583cc6fa391be683b1e3793fa2d33d546500662e7db345f5719a",
+      "pnp_deck_sha256": "cb331be2b9f870d61b4fccc1103975acc2416d4b89cd66acf1a522008c6f3362",
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+    },
+    {
+      "regime": "constant_intrinsic_resistances",
+      "phase_degrees": 90,
+      "samples": 608,
+      "exit_code": 0,
+      "artifacts": [
+        {
+          "path": "gp_feedback_linear_p90_ngspice46.cir",
+          "sha256": "e60d8a3c3b81585d070583078fa33807082c3288610c9cc71ccd71a44a9611b9",
+          "capture_sha256": "e60d8a3c3b81585d070583078fa33807082c3288610c9cc71ccd71a44a9611b9"
+        },
+        {
+          "path": "gp_feedback_linear_p90_ngspice46.tsv",
+          "sha256": "74345bf5bc49532355394d56eeea8c90de472d1e32981939ef9b5786b65db736",
+          "capture_sha256": "0c9ed0f3f47693599412bf929ecbbd82f5a9bcf73f659511418e09d429d3bba8"
+        }
+      ],
+      "pnp_capture_sha256": "2a77996c88f51fbfe90138f78490a84966a5bafb6b0321b4b51a5bfb510153c4",
+      "pnp_deck_sha256": "19039f6cadd574066f7945ae5f795e35e437da5607667e120bd6853f4bfcaa18",
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+    },
+    {
+      "regime": "nonlinear_base_resistance_and_saturation",
+      "phase_degrees": 21,
+      "samples": 608,
+      "exit_code": 0,
+      "artifacts": [
+        {
+          "path": "gp_feedback_nonlinear_p21_ngspice46.cir",
+          "sha256": "04fe701c2dde0ad0dcad9a73292cfffd4971be87b8015f264bedb74afad18440",
+          "capture_sha256": "04fe701c2dde0ad0dcad9a73292cfffd4971be87b8015f264bedb74afad18440"
+        },
+        {
+          "path": "gp_feedback_nonlinear_p21_ngspice46.tsv",
+          "sha256": "a9ec1bd2f7a95fb125f20be7cda8012c13fef05bc0966f5108b5e432d5e51015",
+          "capture_sha256": "ef02420022713e51576ffcb511c42393dd67b0ac35a884972b9bbd3c2bda3f65"
+        }
+      ],
+      "pnp_capture_sha256": "c8bbc34bead594ccf865c0c047ff9b6f815904c8bee4499cfa1d7684615390a3",
+      "pnp_deck_sha256": "319cdc70261ee9e45a2b988bc3acacaf060ca0fad645bdedf8943c6e6f66e2da",
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+    },
+    {
+      "regime": "nonlinear_base_resistance_and_saturation",
+      "phase_degrees": 90,
+      "samples": 608,
+      "exit_code": 0,
+      "artifacts": [
+        {
+          "path": "gp_feedback_nonlinear_p90_ngspice46.cir",
+          "sha256": "1f888707445b00e154b40c02067b79dc58837339d53fd2a252ad62df03301087",
+          "capture_sha256": "1f888707445b00e154b40c02067b79dc58837339d53fd2a252ad62df03301087"
+        },
+        {
+          "path": "gp_feedback_nonlinear_p90_ngspice46.tsv",
+          "sha256": "1c5f217c9fb0bcf5b2db90ae9064ace2a519d1db789fb667bcd12fe5c6b6cf51",
+          "capture_sha256": "145ea6d04fb35c760ca18b0c62258e26f1b75572fd44d87c046e3e3dc9be9c28"
+        }
+      ],
+      "pnp_capture_sha256": "f434f6cd73cadbfb178a4d99afc48cf83bef12fc10de9366890bdb4cc2fdcd67",
+      "pnp_deck_sha256": "813a38da63865c0087b39b5af799927adee834358074575aa1057ddbe92ffc60",
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+    }
+  ]
+}
