@@ -152,9 +152,21 @@ Selected packed bits and unpacked variable-array elements can cross internal
 unidirectional boundaries. Selectors are closed in the parent parameter scope;
 per-lane identities preserve merged/split grouping and the authored converter's
 loading. ADC writes retain independent driver identities on the selected bits.
-Whole-vector analog ports, unpacked net/port arrays, bidirectional lane aliases,
-inherited discipline resolution across the complete hierarchy, and library/view
-selection remain open.
+Physical vector ports and internal nodes retain authored bounds and expand into
+scalar solver lanes. Hierarchy connections bind whole vectors, part-selects and
+concatenations in declaration order with exact width checks. Parent packed buses
+can drive whole physical input vectors through per-lane authored converters;
+selected physical lanes can connect to scalar digital formals. Scalar potential
+and flow accesses resolve constant coordinates, including analog `genvar` loops
+and custom nature accesses. Shape and selector dependencies require source
+specialization when their parameters change. Artifact schema 125 and core cache
+record 107 invalidate models compiled before these checks.
+Whole physical vectors connected to packed digital formals, vector-valued/named
+branch forms, unpacked net/port arrays, bidirectional lane aliases, complete
+inherited discipline resolution, and library/view selection remain open.
+Escaped node names retain distinct lane identities; escaped ground and comma-bearing
+names still require structured branch labels, and the full escaped-identifier
+language surface remains part of language qualification.
 
 `prepare_file_runtime_source` freezes one analyzed file/include closure before
 module selection. It can describe a standalone connection library or compile

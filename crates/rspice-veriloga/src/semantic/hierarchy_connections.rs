@@ -141,8 +141,8 @@ struct BoundarySignal {
 }
 
 /// Insert at typed module boundaries after generate specialization. Concrete
-/// packed bits and unpacked elements retain their own signal identities and
-/// connecting-scope assignments. Whole vector ports require per-lane topology.
+/// physical vector lanes, packed bits and unpacked elements retain their own
+/// signal identities and connecting-scope assignments.
 pub(super) fn prepare(
     analyzed: &AnalyzedFile,
     sources: &HashMap<SmolStr, &Module>,
@@ -154,6 +154,8 @@ pub(super) fn prepare(
         return Ok(None);
     }
     let mut signals: BTreeMap<SignalIdentity, BoundarySignal> = BTreeMap::new();
+    let scope = super::node_vectors::ConnectionScope::new(source, module);
+    let mut prepared = source.clone();
     let constants = super::instance_parameters::constants(source);
     for (instance_index, instance) in source.instances.iter().enumerate() {
         let Some(child) = analyzed.modules.get(&instance.module) else {
@@ -177,8 +179,18 @@ pub(super) fn prepare(
             .map(|module| (&module.source, &module.analyzed))
             .unwrap_or((child_source, child));
         let connections =
-            super::digital_elaborate::bind_connections(instance, child, &instance.name)?;
-        for (port_index, actual) in connections.into_iter().enumerate() {
+            super::node_vectors::bind_connections(instance, child, &scope, &instance.name)?;
+        prepared.instances[instance_index].connections = child
+            .ports
+            .iter()
+            .zip(&connections)
+            .map(|(port, signal)| Connection::Named {
+                port: port.name.clone(),
+                signal: signal.clone(),
+                span: instance.span,
+            })
+            .collect();
+        for (port_index, actual) in connections.iter().enumerate() {
             let Some(actual) = actual else { continue };
             let port = &child.ports[port_index];
             let Some(lower) = endpoint(child_source, child, &port.name) else {
@@ -211,9 +223,7 @@ pub(super) fn prepare(
                     actual.span(),
                 ));
             }
-            let connection_index = instance.connections.iter().position(|connection| {
-                matches!(connection, Connection::Named { port: name, .. } if name == &port.name)
-            }).unwrap_or(port_index);
+            let connection_index = port_index;
             let boundary = signals.entry(upper.identity).or_insert_with(|| {
                 let mut signal = Signal::default();
                 signal.push(upper.segment);
@@ -240,7 +250,6 @@ pub(super) fn prepare(
     if signals.is_empty() {
         return Ok(None);
     }
-    let mut prepared = source.clone();
     let mut used = declared_names(source);
     for boundary in signals.into_values() {
         let resolved = resolve_disciplines(
@@ -311,6 +320,7 @@ pub(super) fn prepare(
                 insertion.continuous.clone()
             };
             prepared.nets.push(NetDecl {
+                range: None,
                 discipline: Some(lower_discipline),
                 names: vec![private.clone()],
                 is_ground: false,
@@ -365,6 +375,7 @@ pub(super) fn prepare(
                     tap = format!("{tap}_").into();
                 }
                 prepared.nets.push(NetDecl {
+                    range: None,
                     discipline: Some(insertion.discrete.clone()),
                     names: vec![tap.clone()],
                     is_ground: false,
@@ -443,7 +454,7 @@ pub(super) fn prepare(
     })))
 }
 
-fn declared_names(source: &Module) -> HashSet<SmolStr> {
+pub(super) fn declared_names(source: &Module) -> HashSet<SmolStr> {
     source
         .ports
         .iter()

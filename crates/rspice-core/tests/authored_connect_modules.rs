@@ -963,3 +963,70 @@ endconnectrules
         );
     }
 }
+
+
+#[test]
+fn whole_physical_vectors_preserve_lane_order_and_mixed_converter_loading() {
+    for (mode, high) in [("merged", 0.5), ("split", 0.75)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module sample(a,p);
+ input a; logic a;
+ output p; electrical p;
+ analog V(p)<+(a ? 1.0 : 0.0);
+endmodule
+module amplifier(a,p);
+ parameter integer BASE=6;
+ input [BASE:BASE+1] a; electrical [BASE:BASE+1] a;
+ output [9:8] p; electrical [9:8] p;
+ analog begin
+  I(a[BASE])<+V(a[BASE])/1000;
+  I(a[BASE+1])<+V(a[BASE+1])/1000;
+  I(p[9])<+(V(p[9])-V(a[BASE]))/1000;
+  I(p[8])<+(V(p[8])-V(a[BASE+1]))/1000;
+ end
+endmodule
+module bank(x,y);
+ input [4:3] x; electrical [4:3] x;
+ output [8:9] y; electrical [8:9] y;
+ amplifier #(.BASE(2)) nested(.a(x),.p(y));
+endmodule
+module top(p,q,r,s);
+ inout p,q,r,s; electrical p,q,r,s;
+ electrical [7:8] sense_input;
+ electrical sense_output;
+ analog begin V(sense_input[7])<+2; V(sense_input[8])<+0; I(p)<+(1.0-V(sense_output))/1000; end
+ sample selected(sense_input[7],sense_output);
+ reg [2:3] data;
+ initial begin data=2'b10; #1 data=2'b01; end
+ bank first(.x(data),.y({{p,q}}));
+ bank second(data[2:3],{{r,s}});
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectmodule sense(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+ always #0.1 d=V(a)>1.0;
+endmodule
+connectrules selected; connect drive {mode}; connect sense; endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!("* whole vector mixed hierarchy\nX1 p q r s top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\n.va \"{}\" top module=top\n.end\n", source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+        for (time, first, second) in [(0.5e-9, high, 0.0), (1.5e-9, 0.0, high)] {
+            for (node, expected) in [("p", first), ("q", second), ("r", first), ("s", second)] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{mode} {node} at {time}: {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+}

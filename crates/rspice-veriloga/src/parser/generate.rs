@@ -688,11 +688,14 @@ impl Unroller<'_> {
                     self.substitute_concat_element(element);
                 }
             }
+            Expression::BranchAccess(BranchAccess::Nodes { pos_index, neg_index, .. }) => {
+                for index in pos_index.iter_mut().chain(neg_index.iter_mut()) { self.substitute(index); }
+            }
+            Expression::BranchAccess(BranchAccess::Branch { .. }) => {}
             Expression::Digital(digital) => self.substitute_digital(digital),
             Expression::Number(_)
             | Expression::StringLit(_)
             | Expression::NullArgument(_)
-            | Expression::BranchAccess(_)
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => {}
         }

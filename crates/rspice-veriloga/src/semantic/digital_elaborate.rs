@@ -96,7 +96,7 @@ use super::{
     ElaboratedDigitalSignal,
 };
 use crate::ast::{
-    ArrayAccessExpr, Connection, ContinuousAssign, DigitalExpr, DigitalLValue, Expression,
+    ArrayAccessExpr, ContinuousAssign, DigitalExpr, DigitalLValue, Expression,
     Identifier, Module, ModuleInstance, PartSelectExpr, PortDirection,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
@@ -253,6 +253,7 @@ struct Binding {
 /// The discrete-domain names one module body resolves against.
 #[derive(Debug, Default)]
 struct Scope {
+    connections: super::node_vectors::ConnectionScope,
     signals: HashMap<SmolStr, Binding>,
     constants: super::DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
@@ -261,6 +262,7 @@ struct Scope {
 impl Scope {
     fn for_root(root: &AnalyzedModule, source: &Module) -> Self {
         let mut scope = Self {
+            connections: super::node_vectors::ConnectionScope::new(source, root),
             constants: super::DigitalConstants::from_module(source),
             time_scale: source.time_scale,
             ..Self::default()
@@ -466,9 +468,16 @@ impl DigitalElaborator<'_> {
             .map(|module| (&module.source, &module.analyzed))
             .unwrap_or((child_source, child));
 
-        let connections = bind_connections(instance, child, path)?;
-        let (signals, scope, port_drivers) =
-            self.bind_ports(instance, child, parent_scope, path, &connections)?;
+        let connections = super::node_vectors::bind_connections(
+            instance,
+            child,
+            &parent_scope.connections,
+            path,
+        )?;
+        let borrowed: Vec<_> = connections.iter().map(Option::as_ref).collect();
+        let (signals, mut scope, port_drivers) =
+            self.bind_ports(instance, child, parent_scope, path, &borrowed)?;
+        scope.connections = super::node_vectors::ConnectionScope::new(child_source, child);
 
         // A continuous assignment driving one of the child's own `input` ports
         // is *not* checked here. Semantic analysis refuses it on the module
@@ -820,74 +829,6 @@ pub(super) fn specialize_module(
 ///
 /// IEEE 1364-2005 sections 12.3.5 and 12.3.6 give the two forms, and section
 /// 12.3.6 forbids mixing them in one instance.
-pub(super) fn bind_connections<'a>(
-    instance: &'a ModuleInstance,
-    child: &AnalyzedModule,
-    path: &str,
-) -> CompileResult<Vec<Option<&'a Expression>>> {
-    let has_named = instance
-        .connections
-        .iter()
-        .any(|connection| matches!(connection, Connection::Named { .. }));
-    let has_ordered = instance
-        .connections
-        .iter()
-        .any(|connection| matches!(connection, Connection::Ordered { .. }));
-    if has_named && has_ordered {
-        return Err(semantic_error(
-            SemanticErrorKind::UnsupportedFeature(format!(
-                "instance `{path}` mixes named and ordered port connections; IEEE 1364-2005 \
-                 section 12.3.6 permits one form per instance"
-            )),
-            instance.span,
-        ));
-    }
-
-    let mut bound: Vec<Option<&Expression>> = vec![None; child.ports.len()];
-    if has_named {
-        let mut seen = vec![false; child.ports.len()];
-        for connection in &instance.connections {
-            let Connection::Named { port, signal, span } = connection else {
-                unreachable!("the connection list is all named")
-            };
-            let Some(index) = child.ports.iter().position(|entry| entry.name == *port) else {
-                return Err(semantic_error(
-                    SemanticErrorKind::UndeclaredSymbol { name: port.clone() },
-                    *span,
-                ));
-            };
-            if std::mem::replace(&mut seen[index], true) {
-                return Err(semantic_error(
-                    SemanticErrorKind::DuplicateSymbol {
-                        name: port.clone(),
-                        first_defined: *span,
-                    },
-                    *span,
-                ));
-            }
-            bound[index] = signal.as_ref();
-        }
-    } else {
-        if instance.connections.len() > child.ports.len() {
-            return Err(semantic_error(
-                SemanticErrorKind::ArgumentCountMismatch {
-                    name: path.to_string(),
-                    expected: format!("at most {} port connections", child.ports.len()),
-                    got: instance.connections.len(),
-                },
-                instance.span,
-            ));
-        }
-        for (index, connection) in instance.connections.iter().enumerate() {
-            let Connection::Ordered { signal, .. } = connection else {
-                unreachable!("the connection list is all ordered")
-            };
-            bound[index] = signal.as_ref();
-        }
-    }
-    Ok(bound)
-}
-
 /// The shapes a port connection may take.
 ///
 /// IEEE 1364-2005 section 12.3.9 permits an arbitrary expression, and reads a

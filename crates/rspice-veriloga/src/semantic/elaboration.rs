@@ -14,7 +14,7 @@ use super::{
 };
 use crate::ast::{
     AccessKind, AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
-    BinaryOp, BranchAccess, CallExpr, ConditionalExpr, Connection, Expression, Identifier, Item,
+    BinaryOp, BranchAccess, CallExpr, ConditionalExpr, Expression, Identifier, Item,
     Module, ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, UnaryOp, VarType,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
@@ -68,7 +68,7 @@ pub(crate) fn elaborate_executable_module<'a>(
         .map(|(index, frame)| (frame.path.clone(), index))
         .collect();
     elaborator.flattened.digital.instances = hierarchy.instances;
-    let root_scope = ScopeMap::for_root(selected);
+    let root_scope = ScopeMap::for_root(root, selected);
     elaborator
         .parameter_hierarchy
         .register(root, selected, &root_scope, None)?;
@@ -117,6 +117,7 @@ struct EffectiveParameterArrayShape {
 
 #[derive(Default)]
 struct ScopeMap {
+    connections: super::node_vectors::ConnectionScope,
     discrete_nets: HashSet<SmolStr>,
     nodes: HashMap<SmolStr, NodeBinding>,
     parameters: HashMap<SmolStr, SmolStr>,
@@ -144,8 +145,9 @@ impl ScopeMap {
             .map(|branch| (branch, sign))
     }
 
-    fn for_root(module: &AnalyzedModule) -> Self {
+    fn for_root(source: &Module, module: &AnalyzedModule) -> Self {
         let mut scope = Self {
+            connections: super::node_vectors::ConnectionScope::new(source, module),
             parameter_locals: module.parameter_locals.clone(),
             discrete_nets: module
                 .digital
@@ -531,6 +533,7 @@ impl<'a> HierarchyElaborator<'a> {
                 ))
             })?;
         let mut scope = ScopeMap {
+            connections: super::node_vectors::ConnectionScope::new(child_source, child),
             parameter_locals: child.parameter_locals.clone(),
             discrete_nets: child
                 .digital
@@ -1218,96 +1221,31 @@ impl<'a> HierarchyElaborator<'a> {
         parent_scope: &ScopeMap,
         path: &str,
     ) -> CompileResult<Vec<Option<NodeBinding>>> {
-        let has_named = instance
-            .connections
+        let connections = super::node_vectors::bind_connections(
+            instance,
+            child,
+            &parent_scope.connections,
+            path,
+        )?;
+        connections
             .iter()
-            .any(|connection| matches!(connection, Connection::Named { .. }));
-        let has_ordered = instance
-            .connections
-            .iter()
-            .any(|connection| matches!(connection, Connection::Ordered { .. }));
-        if has_named && has_ordered {
-            return Err(semantic_error(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "instance '{path}' mixes named and ordered port connections"
-                )),
-                instance.span,
-            ));
-        }
-        let mut bound = vec![None; child.ports.len()];
-        let mut seen = vec![false; child.ports.len()];
-        if has_named {
-            for connection in &instance.connections {
-                let Connection::Named { port, signal, span } = connection else {
-                    unreachable!()
-                };
-                let Some(index) = child
-                    .ports
-                    .iter()
-                    .position(|candidate| candidate.name == *port)
-                else {
-                    return Err(semantic_error(
-                        SemanticErrorKind::UndeclaredSymbol { name: port.clone() },
-                        *span,
-                    ));
-                };
-                if seen[index] {
-                    return Err(semantic_error(
-                        SemanticErrorKind::DuplicateSymbol {
-                            name: port.clone(),
-                            first_defined: *span,
-                        },
-                        *span,
-                    ));
-                }
-                seen[index] = true;
+            .zip(&child.ports)
+            .map(|(actual, port)| {
                 if child
                     .digital
                     .signals
                     .iter()
-                    .any(|signal| signal.name == child.ports[index].name)
+                    .any(|signal| signal.name == port.name)
                 {
-                    continue;
+                    Ok(None)
+                } else {
+                    actual
+                        .as_ref()
+                        .map(|actual| resolve_connection(actual, parent_scope, path, port))
+                        .transpose()
                 }
-                bound[index] = signal
-                    .as_ref()
-                    .map(|signal| {
-                        resolve_connection(signal, parent_scope, path, &child.ports[index])
-                    })
-                    .transpose()?;
-            }
-        } else {
-            if instance.connections.len() > child.ports.len() {
-                return Err(semantic_error(
-                    SemanticErrorKind::ArgumentCountMismatch {
-                        name: path.to_string(),
-                        expected: format!("at most {} port connections", child.ports.len()),
-                        got: instance.connections.len(),
-                    },
-                    instance.span,
-                ));
-            }
-            for (index, connection) in instance.connections.iter().enumerate() {
-                let Connection::Ordered { signal, .. } = connection else {
-                    unreachable!()
-                };
-                if child
-                    .digital
-                    .signals
-                    .iter()
-                    .any(|signal| signal.name == child.ports[index].name)
-                {
-                    continue;
-                }
-                bound[index] = signal
-                    .as_ref()
-                    .map(|signal| {
-                        resolve_connection(signal, parent_scope, path, &child.ports[index])
-                    })
-                    .transpose()?;
-            }
-        }
-        Ok(bound)
+            })
+            .collect()
     }
 
     fn digital_signal_name(&self, path: &str, local: &str) -> CompileResult<SmolStr> {
@@ -1890,6 +1828,8 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
         }
         Expression::BranchAccess(access) => {
             if let BranchAccess::Nodes {
+                pos_index: None,
+                neg_index: None,
                 access: name,
                 kind,
                 pos,
@@ -2054,8 +1994,13 @@ fn rewrite_expressions(
 }
 
 fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResult<BranchAccess> {
+    if matches!(access, BranchAccess::Nodes { pos_index: Some(_), .. } | BranchAccess::Nodes { neg_index: Some(_), .. }) {
+        return Err(internal_error("unresolved physical vector selector reached hierarchy rewriting".into()));
+    }
     Ok(match access {
         BranchAccess::Nodes {
+            pos_index: _,
+            neg_index: _,
             access,
             kind,
             pos,
@@ -2068,12 +2013,16 @@ fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResu
             span: *span,
         },
         BranchAccess::Nodes {
+            pos_index: _,
+            neg_index: _,
             access,
             kind,
             pos,
             neg,
             span,
         } => BranchAccess::Nodes {
+            pos_index: None,
+            neg_index: None,
             access: access.clone(),
             kind: *kind,
             pos: if neg.is_none() {

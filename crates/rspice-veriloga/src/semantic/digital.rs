@@ -1496,8 +1496,19 @@ impl SemanticAnalyzer {
             }) {
                 continue;
             }
+            let bounds = self.resolve_vector_range(net.range.as_ref(), "wire");
             for name in &net.names {
                 if seen.contains_key(name) {
+                    if net.range.is_some()
+                        && signals
+                            .iter()
+                            .find(|signal| signal.name == *name)
+                            .is_some_and(|signal| signal.range != bounds)
+                    {
+                        self.record_error_at(SemanticErrorKind::InvalidExpression(format!(
+                            "discrete net '{name}' has inconsistent vector ranges between its discipline and storage/port declarations"
+                        )), net.span);
+                    }
                     continue;
                 }
                 seen.insert(name.clone(), net.span);
@@ -1508,8 +1519,8 @@ impl SemanticAnalyzer {
                     name: name.clone(),
                     class: DigitalSignalClass::Net(DigitalNetKind::Wire),
                     signedness: Signedness::Unsigned,
-                    range: None,
-                    width: 1,
+                    range: bounds,
+                    width: bounds.map_or(1, VectorBounds::width),
                     redeclares_port: module.ports.iter().any(|port| port.name == *name),
                     span: net.span,
                 });
@@ -2848,6 +2859,17 @@ impl SemanticAnalyzer {
     /// Resolve the same physical access role as the analog context. The
     /// subsequent branch pass supplies solver-owned currents for flow reads.
     fn check_analog_probe(&mut self, access: &BranchAccess, index: &HashMap<SmolStr, usize>) {
+        let resolved = match self.resolve_vector_access(access) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(error.to_string()),
+                    access.span(),
+                );
+                return;
+            }
+        };
+        let access = &resolved;
         let names: Vec<&SmolStr> = match access {
             BranchAccess::Nodes { pos, neg, .. } => {
                 std::iter::once(pos).chain(neg.iter()).collect()
@@ -2924,27 +2946,7 @@ impl SemanticAnalyzer {
     }
 
     fn digital_access_call(&self, call: &CallExpr) -> Option<BranchAccess> {
-        if self.user_functions.contains_key(&call.name)
-            || self.disciplines.resolve_access(&call.name).is_none()
-            || !matches!(call.args.len(), 1 | 2)
-            || !call
-                .args
-                .iter()
-                .all(|arg| matches!(arg, Expression::Identifier(_)))
-        {
-            return None;
-        }
-        let mut names = call.args.iter().map(|arg| match arg {
-            Expression::Identifier(id) => id.name.clone(),
-            _ => unreachable!(),
-        });
-        Some(BranchAccess::Nodes {
-            access: call.name.clone(),
-            kind: None,
-            pos: names.next().unwrap(),
-            neg: names.next(),
-            span: call.span,
-        })
+        self.physical_access_call(call)
     }
 
     /// Keep the resolved nature and named-branch identity in the process AST,
@@ -2958,6 +2960,9 @@ impl SemanticAnalyzer {
                 *expression = Expression::BranchAccess(access);
             }
             if let Expression::BranchAccess(access) = expression {
+                if let Ok(resolved) = self.resolve_vector_access(access) {
+                    *access = resolved;
+                }
                 if let Ok(kind) = self.resolve_branch_access_kind(access, access.span()) {
                     let normalized = match access {
                         BranchAccess::Nodes {

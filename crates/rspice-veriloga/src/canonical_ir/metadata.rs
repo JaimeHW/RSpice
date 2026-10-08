@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 125 preserves physical vector lanes and their elaboration dependencies.
 /// Version 124 retains source assignments and hierarchy for configuration replay.
 /// Version 123 retains explicit connection libraries and selected blocks for replay.
 /// Version 122 materializes selected connect bodies inside typed HDL hierarchy.
@@ -122,7 +123,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 124;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 125;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

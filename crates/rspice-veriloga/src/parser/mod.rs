@@ -491,7 +491,9 @@ impl<'a> Parser<'a> {
                     self.check_integer_port(direction, net_type)?;
                     let discipline: Option<SmolStr> = if self.is_discipline_keyword()
                         || (self.check(TokenKind::Identifier)
-                            && self.peek_is(TokenKind::Identifier))
+                            && (self.peek_is(TokenKind::Identifier)
+                                || self.peek_is(TokenKind::EscapedIdentifier)
+                                || self.peek_is(TokenKind::LBracket)))
                     {
                         Some(self.expect_identifier("discipline")?.into())
                     } else {
@@ -801,14 +803,19 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
 
+        if self.peek_is(TokenKind::LBracket) {
+            module.nets.push(self.parse_net_decl()?);
+            return Ok(());
+        }
+
         // Net declaration with a user-defined discipline: `ident ident [, ident]* ;`
         // An instance declaration would have parentheses before the semicolon.
-        if self.peek_is(TokenKind::Identifier) {
+        if self.peek_is(TokenKind::Identifier) || self.peek_is(TokenKind::EscapedIdentifier) {
             let mut lookahead = self.pos + 1;
             let mut is_net_decl = false;
             while let Some(tok) = self.tokens.get(lookahead) {
                 match tok.kind {
-                    TokenKind::Identifier => lookahead += 1,
+                    TokenKind::Identifier | TokenKind::EscapedIdentifier => lookahead += 1,
                     TokenKind::Comma => lookahead += 1,
                     TokenKind::Semicolon => {
                         is_net_decl = true;
@@ -1073,7 +1080,10 @@ impl<'a> Parser<'a> {
         // distinguish `inout foo bar;` from `inout foo, bar;` by requiring
         // two adjacent identifiers, matching ANSI port-list parsing.
         let discipline = if self.is_discipline_keyword()
-            || (self.check(TokenKind::Identifier) && self.peek_is(TokenKind::Identifier))
+            || (self.check(TokenKind::Identifier)
+                && (self.peek_is(TokenKind::Identifier)
+                    || self.peek_is(TokenKind::EscapedIdentifier)
+                    || self.peek_is(TokenKind::LBracket)))
         {
             Some(self.expect_identifier("discipline")?)
         } else {
@@ -1509,6 +1519,7 @@ impl<'a> Parser<'a> {
     fn parse_net_decl(&mut self) -> Result<NetDecl, ParseError> {
         let start = self.current_span();
         let discipline = self.expect_identifier("discipline")?;
+        let range = self.parse_optional_vector_range()?;
 
         let mut names = Vec::new();
         loop {
@@ -1520,6 +1531,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Semicolon)?;
         Ok(NetDecl {
+            range,
             discipline: Some(discipline.into()),
             names,
             is_ground: false,
@@ -1552,6 +1564,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Semicolon)?;
         Ok(NetDecl {
+            range: None,
             discipline,
             names,
             is_ground: true,
@@ -2369,21 +2382,36 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let pos = self.expect_branch_endpoint("node")?;
-        let neg = if self.match_token(TokenKind::Comma) {
-            Some(self.expect_branch_endpoint("node")?.into())
+        let (pos, pos_index) = self.parse_node_operand()?;
+        let (neg, neg_index) = if self.match_token(TokenKind::Comma) {
+            let (name, index) = self.parse_node_operand()?;
+            (Some(name), index)
         } else {
-            None
+            (None, None)
         };
         self.expect(TokenKind::RParen)?;
 
         Ok(BranchAccess::Nodes {
+            pos_index,
+            neg_index,
             access: access.into(),
             kind: None,
             pos: pos.into(),
             neg,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    fn parse_node_operand(&mut self) -> Result<(SmolStr, Option<Box<Expression>>), ParseError> {
+        let name = self.expect_branch_endpoint("node")?.into();
+        let index = if self.match_token(TokenKind::LBracket) {
+            let index = self.parse_expression()?;
+            self.expect(TokenKind::RBracket)?;
+            Some(Box::new(index))
+        } else {
+            None
+        };
+        Ok((name, index))
     }
 
     // Expression parsing (Pratt parser / precedence climbing)
@@ -2883,7 +2911,7 @@ impl<'a> Parser<'a> {
                     span: start.extend(self.previous_span()),
                 }))
             }
-            TokenKind::Identifier => {
+            TokenKind::Identifier | TokenKind::EscapedIdentifier => {
                 let name = self.expect_identifier("identifier")?;
 
                 // Check if it's a function call or branch access
@@ -2903,14 +2931,17 @@ impl<'a> Parser<'a> {
                             }));
                         }
 
-                        let pos = self.expect_branch_endpoint("node")?;
-                        let neg = if self.match_token(TokenKind::Comma) {
-                            Some(self.expect_branch_endpoint("node")?.into())
+                        let (pos, pos_index) = self.parse_node_operand()?;
+                        let (neg, neg_index) = if self.match_token(TokenKind::Comma) {
+                            let (name, index) = self.parse_node_operand()?;
+                            (Some(name), index)
                         } else {
-                            None
+                            (None, None)
                         };
                         self.expect(TokenKind::RParen)?;
                         return Ok(Expression::BranchAccess(BranchAccess::Nodes {
+                            pos_index,
+                            neg_index,
                             access: name.into(),
                             kind: None,
                             pos: pos.into(),
@@ -3247,8 +3278,19 @@ impl<'a> Parser<'a> {
     }
 
     fn expect_identifier(&mut self, context: &str) -> Result<String, ParseError> {
-        if let TokenKind::Identifier = self.current().kind {
-            let text = self.current().text.clone().unwrap_or_default();
+        if matches!(
+            self.current().kind,
+            TokenKind::Identifier | TokenKind::EscapedIdentifier
+        ) {
+            let mut text = self.current().text.clone().unwrap_or_default();
+            if self.current().kind == TokenKind::EscapedIdentifier {
+                text = text.strip_prefix('\\').unwrap_or(&text).to_owned();
+                // These spellings need a structured branch-terminal identity;
+                // accepting them as existing labels would change connectivity.
+                if text == "0" || text.contains(',') {
+                    return Err(self.unsupported_current("escaped ground or comma-bearing identifier requires structured branch labels"));
+                }
+            }
             self.advance();
             Ok(text)
         } else if self.current().kind.is_keyword() {

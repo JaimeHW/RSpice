@@ -520,6 +520,8 @@ pub(crate) fn lower<'a>(
                             span: branch.span,
                         },
                         BranchKey::Nodes(pos, neg) => BranchAccess::Nodes {
+                            pos_index: None,
+                            neg_index: None,
                             access: "I".into(),
                             kind: Some(AccessKind::Flow),
                             pos: pos.clone(),
@@ -643,6 +645,8 @@ pub(crate) fn lower<'a>(
 
 fn potential(pos: &str, neg: &str, span: Span) -> Expression {
     Expression::BranchAccess(BranchAccess::Nodes {
+        pos_index: None,
+        neg_index: None,
         access: "V".into(),
         kind: Some(AccessKind::Potential),
         pos: pos.into(),
@@ -948,11 +952,23 @@ pub(super) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
             Expression::Digital(expr) => {
                 pending.extend(expr.children().into_iter().map(Pending::Expression))
             }
+            Expression::BranchAccess(BranchAccess::Nodes {
+                pos_index,
+                neg_index,
+                ..
+            }) => {
+                pending.extend(
+                    pos_index
+                        .iter()
+                        .chain(neg_index)
+                        .map(|value| Pending::Expression(value)),
+                );
+            }
             Expression::Number(_)
             | Expression::StringLit(_)
             | Expression::Identifier(_)
             | Expression::NullArgument(_)
-            | Expression::BranchAccess(_)
+            | Expression::BranchAccess(BranchAccess::Branch { .. })
             | Expression::AnalogOperator(AnalogOperator::LimiterArgument { .. }) => {}
         }
     }
@@ -1026,11 +1042,20 @@ pub(super) fn for_child_mut<'a>(
                 visit(&mut expr.right);
             }
         },
+        Expression::BranchAccess(BranchAccess::Nodes {
+            pos_index,
+            neg_index,
+            ..
+        }) => {
+            for value in pos_index.iter_mut().chain(neg_index) {
+                visit(value);
+            }
+        }
         Expression::Number(_)
         | Expression::StringLit(_)
         | Expression::Identifier(_)
         | Expression::NullArgument(_)
-        | Expression::BranchAccess(_)
+        | Expression::BranchAccess(BranchAccess::Branch { .. })
         | Expression::AnalogOperator(AnalogOperator::LimiterArgument { .. }) => {}
     }
 }

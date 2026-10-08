@@ -10146,6 +10146,7 @@ mod tests {
             span,
         };
         let analyzed = AnalyzedModule {
+            physical_nodes: Default::default(),
             hierarchical_connections: false,
             name: module_name.into(),
             default_transition: 1.0e-9,
@@ -10207,6 +10208,8 @@ mod tests {
 
     fn voltage_expr() -> Expression {
         Expression::BranchAccess(BranchAccess::Nodes {
+            pos_index: None,
+            neg_index: None,
             access: "V".into(),
             kind: Some(AccessKind::Potential),
             pos: "p".into(),
@@ -10847,6 +10850,8 @@ endmodule
             Expression::Binary(BinaryExpr {
                 op: BinaryOp::Shl,
                 left: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
+                    pos_index: None,
+                    neg_index: None,
                     access: "V".into(),
                     kind: Some(AccessKind::Potential),
                     pos: "p".into(),

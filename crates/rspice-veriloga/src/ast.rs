@@ -388,8 +388,7 @@ pub struct PortDeclaration {
     pub discipline: Option<SmolStr>,
     /// Packed vector range written on the port: `input [7:0] bus;`.
     ///
-    /// `None` is a scalar port, which is every port a continuous-domain
-    /// module declares.
+    /// `None` is a scalar port; continuous vectors expand into physical lanes.
     pub range: Option<VectorRange>,
     /// Whether the port was declared `signed`. Continuous-domain ports never
     /// are.
@@ -577,6 +576,8 @@ pub struct ArrayDimension {
 /// Net declaration (nodes, wires, etc.)
 #[derive(Debug, Clone)]
 pub struct NetDecl {
+    /// Authored physical/discrete vector range, resolved after parameters.
+    pub range: Option<VectorRange>,
     /// Explicit discipline (electrical, thermal, etc.). An untyped ground
     /// declaration inherits the net's discipline during semantic analysis.
     pub discipline: Option<SmolStr>,
@@ -685,6 +686,10 @@ pub enum BranchAccess {
         kind: Option<AccessKind>,
         /// Positive node
         pos: SmolStr,
+        /// Authored vector coordinate; cleared after physical lane resolution.
+        pos_index: Option<Box<Expression>>,
+        /// Authored negative-terminal vector coordinate.
+        neg_index: Option<Box<Expression>>,
         /// Negative node (None for single-ended)
         neg: Option<SmolStr>,
         /// Source span

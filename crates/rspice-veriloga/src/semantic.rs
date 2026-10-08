@@ -387,6 +387,7 @@ mod constant_dependencies;
 mod digital;
 mod digital_elaborate;
 mod hierarchy_connections;
+mod node_vectors;
 mod digital_walk;
 mod discrete_projection;
 mod elaboration;
@@ -419,6 +420,9 @@ pub use symbols::*;
 
 /// Semantic analyzer for Verilog-A modules
 pub struct SemanticAnalyzer {
+    physical_nodes: node_vectors::PhysicalNodes,
+    analog_genvar_iterations: usize,
+    physical_selectors: std::cell::RefCell<Vec<Expression>>,
     disciplines: DisciplineDb,
     functions: FunctionRegistry,
     symbols: SymbolTable,
@@ -530,6 +534,9 @@ impl SemanticAnalyzer {
 
     pub fn new() -> Self {
         Self {
+            physical_nodes: Default::default(),
+            analog_genvar_iterations: 0,
+            physical_selectors: Default::default(),
             disciplines: DisciplineDb::with_standard(),
             functions: FunctionRegistry::new(),
             symbols: SymbolTable::new(),
@@ -969,6 +976,12 @@ impl SemanticAnalyzer {
         module: &Module,
         default_transition: f64,
     ) -> CompileResult<AnalyzedModule> {
+        let original_source = module;
+        let (expanded, physical_nodes) = node_vectors::declarations(module, &self.disciplines)?;
+        self.physical_nodes = physical_nodes.clone();
+        self.physical_selectors.borrow_mut().clear();
+        self.analog_genvar_iterations = 0;
+        let module = expanded.as_ref();
         let event_lowering = module
             .has_digital_content()
             .then(|| analog_events::lower(module))
@@ -980,6 +993,7 @@ impl SemanticAnalyzer {
         self.current_time_scale = module.time_scale;
         self.digital_selector_constants = DigitalConstants::from_module(module);
         let mut analyzed = AnalyzedModule {
+            physical_nodes,
             hierarchical_connections: false,
             name: module.name.clone(),
             default_transition,
@@ -1861,6 +1875,18 @@ impl SemanticAnalyzer {
 
         let module_variable_count = analyzed.variables.len();
 
+        for declaration in &module.genvars {
+            for name in &declaration.names {
+                self.define_symbol(Symbol {
+                    name: name.clone(),
+                    kind: SymbolKind::LoopVar,
+                    value_type: ValueType::Integer,
+                    span: declaration.span,
+                    attrs: Default::default(),
+                })?;
+            }
+        }
+
         // Phase 9: Lower localparams to computed variables. Their values may
         // depend on parameters, so they are evaluated at runtime before any
         // analog-block assignment, in declaration order.
@@ -2153,6 +2179,7 @@ impl SemanticAnalyzer {
             }
         }
         analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
+        self.protect_physical_parameters(original_source, &mut analyzed)?;
         Ok(analyzed)
     }
 
@@ -3614,6 +3641,11 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
+        if self.symbols.lookup(&for_stmt.var)
+            .is_some_and(|symbol| symbol.kind == SymbolKind::LoopVar)
+        {
+            return self.unroll_analog_genvar(for_stmt, module, sink);
+        }
         let loop_var = self.resolve_substituted_name(&for_stmt.var);
         if self.symbols.lookup(&loop_var).is_none() {
             return Err(CompileError::Semantic(SemanticError::new(
@@ -5144,6 +5176,8 @@ impl SemanticAnalyzer {
         module: &AnalyzedModule,
         span: Span,
     ) -> CompileResult<(SmolStr, bool, Option<SmolStr>)> {
+        let resolved = self.resolve_vector_access(target)?;
+        let target = &resolved;
         let is_current = self.resolve_branch_access_kind(target, span)? == AccessKind::Flow;
         match target {
             BranchAccess::Nodes { pos, neg, .. } => {
@@ -5450,7 +5484,7 @@ impl SemanticAnalyzer {
 
         // Assignments may only target variables
         if let Some(sym) = self.symbols.lookup(&symbol_name)
-            && !matches!(sym.kind, SymbolKind::Variable | SymbolKind::LoopVar)
+            && sym.kind != SymbolKind::Variable
         {
             self.record_error_at(
                 SemanticErrorKind::TypeMismatch {
@@ -6787,6 +6821,14 @@ impl SemanticAnalyzer {
                 )));
             }
             Expression::Identifier(id) => {
+                if self.symbols.lookup(&id.name)
+                    .is_some_and(|symbol| symbol.kind == SymbolKind::LoopVar)
+                    && self.lookup_substitution(&id.name).is_none()
+                {
+                    return Err(node_vectors::error(
+                        format!("genvar '{}' requires an active analog for loop", id.name), id.span,
+                    ));
+                }
                 if self.parameter_arrays.contains(&id.name) {
                     return Err(CompileError::Semantic(SemanticError::new(
                         SemanticErrorKind::UnsupportedFeature(format!(
@@ -6806,7 +6848,8 @@ impl SemanticAnalyzer {
                 expr.clone()
             }
             Expression::BranchAccess(access) => {
-                let kind = self.resolve_branch_access_kind(access, access.span())?;
+                let access = self.resolve_vector_access(access)?;
+                let kind = self.resolve_branch_access_kind(&access, access.span())?;
                 Expression::BranchAccess(access.with_kind(kind))
             }
             Expression::Binary(_) | Expression::Unary(_) => {
@@ -6905,32 +6948,11 @@ impl SemanticAnalyzer {
                     self.validate_stateful_analog_operator_placement(operator, call.span)?;
                 }
 
-                // Nature access functions other than V/I (Pwr, Temp, ...)
-                // parse as calls; rewrite them into branch accesses.
-                if !self.user_functions.contains_key(&call.name)
-                    && self.disciplines.resolve_access(&call.name).is_some()
-                    && matches!(call.args.len(), 1 | 2)
-                    && call.args.iter().all(|a| {
-                        matches!(a, Expression::Identifier(id)
-                        if self.symbols.lookup(&id.name).is_some_and(|s| matches!(
-                            s.kind,
-                            SymbolKind::Port | SymbolKind::Node | SymbolKind::Branch
-                        )))
-                    })
-                {
-                    let mut nodes = call.args.iter().map(|a| match a {
-                        Expression::Identifier(id) => id.name.clone(),
-                        _ => unreachable!(),
-                    });
-                    let access_expr = BranchAccess::Nodes {
-                        access: call.name.clone(),
-                        kind: None,
-                        pos: nodes.next().unwrap(),
-                        neg: nodes.next(),
-                        span: call.span,
-                    };
-                    let kind = self.resolve_branch_access_kind(&access_expr, call.span)?;
-                    return Ok(Expression::BranchAccess(access_expr.with_kind(kind)));
+                // All nature access functions share physical lane resolution.
+                if let Some(access) = self.physical_access_call(&call) {
+                    let access = self.resolve_vector_access(&access)?;
+                    let kind = self.resolve_branch_access_kind(&access, call.span)?;
+                    return Ok(Expression::BranchAccess(access.with_kind(kind)));
                 }
 
                 if let Some(func) = self.user_functions.get(&call.name) {

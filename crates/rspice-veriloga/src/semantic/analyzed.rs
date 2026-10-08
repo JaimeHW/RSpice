@@ -53,6 +53,7 @@ pub struct SemanticWarning {
 /// Analyzed module with resolved types
 #[derive(Debug, Clone)]
 pub struct AnalyzedModule {
+    pub(crate) physical_nodes: super::node_vectors::PhysicalNodes,
     /// Automatic connect bodies were materialized from this source's rules.
     pub hierarchical_connections: bool,
     pub name: SmolStr,
