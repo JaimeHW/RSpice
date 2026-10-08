@@ -621,6 +621,7 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
             digital_traces,
             real_traces,
             current_impulses,
+            voltage_impulses,
             ..
         } => {
             let events: usize = digital_traces
@@ -632,11 +633,18 @@ fn payload_values_label(payload: &AnalysisResultPayload) -> String {
                 history
                     .traces
                     .iter()
-                    .map(|trace| trace.points.len())
+                    .map(|trace| trace.points.len().saturating_add(trace.derivatives.len()))
+                    .sum::<usize>()
+            });
+            let voltage = voltage_impulses.as_ref().map_or(0, |history| {
+                history
+                    .traces
+                    .iter()
+                    .map(|trace| trace.points.len().saturating_add(trace.derivatives.len()))
                     .sum::<usize>()
             });
             format!(
-                "{} event nodes / {events} committed events / {impulses} current impulses",
+                "{} event nodes / {events} committed events / {impulses} current impulses / {voltage} voltage impulses",
                 digital_traces.len() + real_traces.len()
             )
         }

@@ -535,6 +535,7 @@ pub fn build_event_order<W: AsRef<RetainedWaveform>>(
         real_traces,
         digital_buses,
         current_impulses,
+        ..
     }) = analysis.result_payload.as_ref()
     {
         let buses = build_bus_timelines(digital_traces, digital_buses);

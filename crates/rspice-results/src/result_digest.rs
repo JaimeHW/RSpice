@@ -1156,6 +1156,7 @@ fn encode_result_payload(
             real_traces,
             digital_buses,
             current_impulses,
+            voltage_impulses,
         } => {
             writer.u8(7);
             if encoding_version >= ResultDigestEncoding::V16 {
@@ -1198,6 +1199,28 @@ fn encode_result_payload(
                         }
                     }
                 });
+            }
+            if let Some(history) = voltage_impulses {
+                writer.string("voltage-impulse-history-v1");
+                writer.f64(history.start_time_s);
+                writer.f64(history.stop_time_s);
+                writer.bool(history.delivery_complete);
+                writer.sequence(history.traces.len());
+                for trace in &history.traces {
+                    writer.string(&trace.node_name);
+                    writer.bool(trace.complete);
+                    writer.sequence(trace.points.len());
+                    for point in &trace.points {
+                        writer.f64(point.time);
+                        writer.f64(point.volt_seconds);
+                    }
+                    writer.sequence(trace.derivatives.len());
+                    for point in &trace.derivatives {
+                        writer.f64(point.time);
+                        writer.u64(u64::from(point.order));
+                        writer.f64(point.coefficient);
+                    }
+                }
             }
             writer.sequence(digital_traces.len());
             for trace in digital_traces {

@@ -157,6 +157,7 @@ pub fn validate_result_fields_for_source_schema(
     run: &ProjectSimulationRun,
     source_schema: u32,
 ) -> Result<(), String> {
+    reject_voltage_impulses_before_schema_v41(run, source_schema)?;
     reject_optimization_units_before_schema_v39(run, source_schema)?;
     if source_schema < NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION
         && run
@@ -332,4 +333,25 @@ pub(super) fn restore_legacy_measurement_verification(run: &mut ProjectSimulatio
             measurement.failure_limit_exceeded = false;
         }
     }
+}
+
+/// Older schemas cannot authenticate a voltage history they could not produce.
+pub(super) fn reject_voltage_impulses_before_schema_v41(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema < VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION
+        && run.analyses.iter().any(|analysis| {
+            matches!(
+                analysis.result_payload.as_ref(),
+                Some(AnalysisResultPayload::TransientEvents {
+                    voltage_impulses: Some(_),
+                    ..
+                })
+            )
+        })
+    {
+        return Err("result schemas before v41 cannot contain voltage impulse histories".into());
+    }
+    Ok(())
 }

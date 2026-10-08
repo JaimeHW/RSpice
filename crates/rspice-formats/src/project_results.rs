@@ -171,6 +171,13 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        for run in &self.runs {
+            legacy_evidence::reject_voltage_impulses_before_schema_v41(run, source_schema)?;
+        }
+        if source_schema == SAMPLED_NOISE_RESULTS_SCHEMA_VERSION {
+            self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+            return self.validate();
+        }
         if source_schema < SAMPLED_NOISE_RESULTS_SCHEMA_VERSION && self.runs.iter().flat_map(|run| &run.analyses).any(|analysis| analysis.noise_summary.as_ref().and_then(|summary| summary.conversion.as_ref()).is_some_and(|conversion| conversion.sampling.is_some()) || matches!(analysis.family_metadata, Some(AnalysisResultFamilyMetadata::PeriodicNoise { output_quantity: rspice_results::family_metadata::PeriodicNoiseOutputQuantity::TimingNoisePowerSpectralDensity, .. }))) {
             return Err("result schemas before v40 cannot contain sampled periodic-noise evidence".into());
         }
@@ -2276,7 +2283,8 @@ const MEASUREMENT_UNIT_RESULTS_SCHEMA_VERSION: u32 = 37;
 const NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION: u32 = 38;
 const OPTIMIZATION_UNIT_RESULTS_SCHEMA_VERSION: u32 = 39;
 const SAMPLED_NOISE_RESULTS_SCHEMA_VERSION: u32 = 40;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = SAMPLED_NOISE_RESULTS_SCHEMA_VERSION;
+const VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 41;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION;
 
 const LEGACY_RESULT_RUN_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0xe515_12ea_10c0_58c8_8bd7_ea31_003f_f6cf);

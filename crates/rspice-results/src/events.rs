@@ -6,6 +6,7 @@ use crate::analysis_payload::AnalysisResultPayload;
 use crate::current_impulses::CurrentImpulseHistoryEvidence;
 use crate::simulation_values::{DigitalEventPoint, EventNodeHistory, RealEventPoint};
 use crate::validation::require_non_empty;
+use crate::voltage_impulses::VoltageImpulseHistoryEvidence;
 use rspice_core::engine::{DigitalTrace, DigitalTracePoint, RealTrace, RealTracePoint};
 use rspice_core::xspice::DigitalValue;
 
@@ -222,6 +223,7 @@ pub fn imported_event_payload(
         .collect();
     Some(AnalysisResultPayload::TransientEvents {
         current_impulses: None,
+        voltage_impulses: None,
         digital_traces,
         real_traces,
         digital_buses,
@@ -235,6 +237,8 @@ pub fn imported_event_payload(
 pub struct TransientEventHistory {
     /// Exact charge observations; absent means unknown, not zero charge.
     pub current_impulses: Option<CurrentImpulseHistoryEvidence>,
+    /// Integrated voltage and its derivatives, with separate coverage.
+    pub voltage_impulses: Option<VoltageImpulseHistoryEvidence>,
     pub digital: Vec<EventNodeHistory<DigitalEventPoint>>,
     pub real: Vec<EventNodeHistory<RealEventPoint>>,
     /// Buses the run declared over `digital`, in declaration order.
@@ -253,7 +257,10 @@ impl TransientEventHistory {
     /// if anything ever does.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.digital.is_empty() && self.real.is_empty() && self.current_impulses.is_none()
+        self.digital.is_empty()
+            && self.real.is_empty()
+            && self.current_impulses.is_none()
+            && self.voltage_impulses.is_none()
     }
 }
 
@@ -263,11 +270,19 @@ pub fn validate_event_history(
     real_traces: &[RealEventTraceEvidence],
     digital_buses: &[DigitalBusEvidence],
     current_impulses: Option<&CurrentImpulseHistoryEvidence>,
+    voltage_impulses: Option<&VoltageImpulseHistoryEvidence>,
 ) -> Result<(), String> {
-    if digital_traces.is_empty() && real_traces.is_empty() && current_impulses.is_none() {
+    if digital_traces.is_empty()
+        && real_traces.is_empty()
+        && current_impulses.is_none()
+        && voltage_impulses.is_none()
+    {
         return Err("event payload contains no retained event history".to_owned());
     }
     if let Some(history) = current_impulses {
+        history.validate()?;
+    }
+    if let Some(history) = voltage_impulses {
         history.validate()?;
     }
     let mut seen = std::collections::BTreeSet::new();

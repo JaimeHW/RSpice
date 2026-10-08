@@ -89,6 +89,8 @@ pub mod validation;
 pub mod viewer_catalog;
 pub mod visualization_document;
 pub mod visualization_raster;
+#[cfg(feature = "engine-evidence")]
+pub mod voltage_impulses;
 pub mod waveform;
 #[cfg(feature = "engine-evidence")]
 pub mod waveform_comparison;

@@ -124,6 +124,7 @@ fn current_impulse_derivatives_participate_in_authenticated_identity() {
             digital_traces: vec![],
             real_traces: vec![],
             digital_buses: vec![],
+            voltage_impulses: None,
             current_impulses: Some(crate::current_impulses::CurrentImpulseHistoryEvidence {
                 start_time_s: 0.0,
                 stop_time_s: 1.0,

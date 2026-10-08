@@ -31,6 +31,7 @@ use crate::transfer_function::{
     TransferFunctionQuantityEvidence, TransferFunctionRef, TransferFunctionScalarEvidence,
 };
 use crate::validation::{require_non_empty, validate_complex_values};
+use crate::voltage_impulses::VoltageImpulseHistoryEvidence;
 use std::collections::BTreeMap;
 
 mod native_scalar_units;
@@ -313,6 +314,8 @@ pub enum AnalysisResultPayload {
         /// Sparse current charge events and their independent coverage.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         current_impulses: Option<CurrentImpulseHistoryEvidence>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        voltage_impulses: Option<VoltageImpulseHistoryEvidence>,
         digital_traces: Vec<DigitalEventTraceEvidence>,
         real_traces: Vec<RealEventTraceEvidence>,
         /// Buses declared over `digital_traces`, in declaration order.
@@ -1132,6 +1135,7 @@ impl AnalysisResultPayload {
                 real_traces,
                 digital_buses,
                 current_impulses,
+                voltage_impulses,
             } => {
                 if analysis_type != AnalysisType::Transient {
                     return Err(format!(
@@ -1143,6 +1147,7 @@ impl AnalysisResultPayload {
                     real_traces,
                     digital_buses,
                     current_impulses.as_ref(),
+                    voltage_impulses.as_ref(),
                 )?;
             }
             Self::FftSpectrum { spectrum } => {
@@ -1187,9 +1192,10 @@ impl AnalysisResultPayload {
                 digital_traces,
                 real_traces,
                 current_impulses,
+                voltage_impulses,
                 ..
             } => {
-                !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some()
+                !digital_traces.is_empty() || !real_traces.is_empty() || current_impulses.is_some() || voltage_impulses.is_some()
             }
         }
     }
