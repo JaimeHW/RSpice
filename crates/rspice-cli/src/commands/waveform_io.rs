@@ -410,37 +410,6 @@ pub(crate) fn raw_read_error(path: &Path, error: rspice_core::io::RawParseError)
     }
 }
 
-/// SPICE scalar-result plots omit the reference vector. RSpice table metadata,
-/// including the explicit point/index column of older exports, takes precedence.
-fn raw_has_ordinal_axis(
-    header: &rspice_core::io::ltspice_raw::RawFileHeader,
-    variables: &[rspice_core::io::ltspice_raw::RawVariable],
-    coordinate_first: bool,
-) -> bool {
-    if coordinate_first
-        || variables.first().is_some_and(|variable| {
-            variable.var_type.eq_ignore_ascii_case("index")
-                && (variable.name.eq_ignore_ascii_case("point")
-                    || variable.name.eq_ignore_ascii_case("index"))
-        })
-    {
-        return false;
-    }
-    match header.plotname.trim().to_ascii_lowercase().as_str() {
-        "dc op"
-        | "operating point"
-        | "dc operating point"
-        | "ac operating point"
-        | "distortion operating point"
-        | "pole-zero analysis"
-        | "transfer function"
-        | "integrated noise - v^2 or a^2" => true,
-        // ngspice uses the same title for DC scalars and complex AC spectra.
-        "sensitivity analysis" => !header.is_complex,
-        _ => false,
-    }
-}
-
 /// All table coordinates are real. Validate every plot before selection so
 /// discarded imaginary axis values cannot disappear during conversion or bless.
 /// Legacy scalar plots have an implicit ordinal axis: their first variable is
@@ -450,24 +419,8 @@ pub(crate) fn validate_raw_coordinates(
     file: &rspice_core::io::ltspice_raw::RawFile,
 ) -> Result<(), CliError> {
     for plot in &file.plots {
-        if let Some(first) = plot.waveforms.first()
-            && let Some(imaginary) = &first.y_imag
-            && let Some(index) = imaginary.iter().position(|value| *value != 0.0)
-        {
-            let coordinate_first =
-                rspice_core::io::ltspice_raw::raw_table_has_coordinate(&plot.header)
-                    .map_err(|error| raw_read_error(path, error))?;
-            if raw_has_ordinal_axis(&plot.header, &plot.variables, coordinate_first) {
-                continue;
-            }
-            return Err(conversion_error(
-                path,
-                format!(
-                    "RAW plot '{}': independent coordinate '{}' has a nonzero imaginary component at point {index}; table coordinates must be real",
-                    plot.header.plotname, first.name
-                ),
-            ));
-        }
+        plot.validate_real_coordinate()
+            .map_err(|error| raw_read_error(path, error))?;
     }
     Ok(())
 }
@@ -501,7 +454,9 @@ pub(super) fn raw_result(
 
     let coordinate_first = rspice_core::io::ltspice_raw::raw_table_has_coordinate(&data.header)
         .map_err(|error| conversion_error(path, error))?;
-    let ordinal_axis = raw_has_ordinal_axis(&data.header, &data.variables, coordinate_first);
+    let ordinal_axis = data
+        .has_ordinal_axis()
+        .map_err(|error| raw_read_error(path, error))?;
     let mut waveforms = data.waveforms.into_iter().peekable();
     let Some(first) = waveforms.peek() else {
         return Err(conversion_error(path, "rawfile contains no variables"));

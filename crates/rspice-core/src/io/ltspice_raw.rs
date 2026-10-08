@@ -141,6 +141,55 @@ pub struct RawWaveformData {
     pub waveforms: Vec<RawWaveform>,
 }
 
+impl RawWaveformData {
+    /// Scalar-result plots omit the reference vector. Explicit RSpice table
+    /// layout, including older point/index columns, takes precedence over the
+    /// display title. A complex first scalar is still a signal, not an axis.
+    pub fn has_ordinal_axis(&self) -> Result<bool, RawParseError> {
+        if raw_table_has_coordinate(&self.header)?
+            || self.variables.first().is_some_and(|variable| {
+                variable.var_type.eq_ignore_ascii_case("index")
+                    && (variable.name.eq_ignore_ascii_case("point")
+                        || variable.name.eq_ignore_ascii_case("index"))
+            })
+        {
+            return Ok(false);
+        }
+        Ok(
+            match self.header.plotname.trim().to_ascii_lowercase().as_str() {
+                "dc op"
+                | "operating point"
+                | "dc operating point"
+                | "ac operating point"
+                | "distortion operating point"
+                | "pole-zero analysis"
+                | "transfer function"
+                | "integrated noise - v^2 or a^2" => true,
+                // ngspice uses the same title for DC scalars and complex spectra.
+                "sensitivity analysis" => !self.header.is_complex,
+                _ => false,
+            },
+        )
+    }
+
+    /// A waveform coordinate is real even when signals use complex storage.
+    /// Check it before projecting away imaginary coordinates; scalar-result
+    /// plots keep the first variable's complete complex value instead.
+    pub fn validate_real_coordinate(&self) -> Result<(), RawParseError> {
+        if let Some(first) = self.waveforms.first()
+            && let Some(imaginary) = &first.y_imag
+            && let Some(index) = imaginary.iter().position(|value| *value != 0.0)
+            && !self.has_ordinal_axis()?
+        {
+            return Err(RawParseError::DataError(format!(
+                "RAW plot '{}': independent coordinate '{}' has a nonzero imaginary component at point {index}; table coordinates must be real",
+                self.header.plotname, first.name
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// Every plot one .raw file declares, in file order.
 ///
 /// A rawfile is a sequence of plots: each `Plotname:` line opens a block with
