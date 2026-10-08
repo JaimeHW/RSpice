@@ -93,25 +93,31 @@ fn hdf5_and_matlab_v73_import_real_root_vectors() {
 /// `--format hdf5` and this product's own export come through, so the fixture
 /// is a file this product actually produces rather than a hand-built shape.
 fn rspice_hdf5_section(group: &str, section_type: &str) -> Vec<u8> {
+    rspice_hdf5_sections(&[(group, section_type)])
+}
+
+fn rspice_hdf5_sections(sections: &[(&str, &str)]) -> Vec<u8> {
     use rspice_core::io::{Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Table, write_hdf5};
 
     let mut document = Hdf5Document::new("fixture".to_owned());
-    document
-        .add_table(&Hdf5Table {
-            group: group.to_owned(),
-            section_type: section_type.to_owned(),
-            coordinate: Hdf5Coordinate::Independent {
-                name: "time".to_owned(),
-                values: vec![0.0, 1e-9, 2e-9],
-            },
-            columns: vec![Hdf5Column::Real {
-                name: "V(out)".to_owned(),
-                quantity: "voltage".to_owned(),
-                unit: Some("V".to_owned()),
-                values: vec![0.0, 1.0, 0.0],
-            }],
-        })
-        .expect("the fixture table stands on one coordinate");
+    for (group, section_type) in sections {
+        document
+            .add_table(&Hdf5Table {
+                group: (*group).to_owned(),
+                section_type: (*section_type).to_owned(),
+                coordinate: Hdf5Coordinate::Independent {
+                    name: "time".to_owned(),
+                    values: vec![0.0, 1e-9, 2e-9],
+                },
+                columns: vec![Hdf5Column::Real {
+                    name: "V(out)".to_owned(),
+                    quantity: "voltage".to_owned(),
+                    unit: Some("V".to_owned()),
+                    values: vec![0.0, 1.0, 0.0],
+                }],
+            })
+            .expect("the fixture table stands on one coordinate");
+    }
     let mut bytes = Vec::new();
     write_hdf5(&mut bytes, &document).expect("fixture bytes");
     bytes
@@ -150,17 +156,34 @@ fn an_hdf5_section_is_read_from_what_it_declares_not_what_it_is_called() {
     .expect("an identity-named DC sweep");
     assert_eq!(sweep.analysis_type, AnalysisType::DcSweep);
 
-    // A family this reader has no domain for is refused by name at the root
-    // rather than imported under a heading that would rename the result.
+    // A family outside the sampled domains is identified explicitly.
     let error = parse_hdf5(
         &rspice_hdf5_section("op1", "operating_point"),
         ResultImportFormat::Hdf5,
     )
     .expect_err("an operating point is not one of the three sampled domains");
     assert!(
-        error.contains("no unambiguous root coordinate dataset"),
+        error.contains("section /op1 declares \"operating_point\"")
+            && error.contains("cannot be represented as a waveform"),
         "{error}"
     );
+}
+
+#[test]
+fn hdf5_import_refuses_to_discard_sections_outside_the_waveform_domains() {
+    let error = parse_hdf5(
+        &rspice_hdf5_sections(&[("tran1", "transient"), ("noise1", "noise")]),
+        ResultImportFormat::Hdf5,
+    )
+    .expect_err("import must not discard the noise section");
+    for detail in [
+        "multiple result sections",
+        "tran1",
+        "noise1",
+        "rspice convert --section",
+    ] {
+        assert!(error.contains(detail), "{error}");
+    }
 }
 
 /// A result of one sample is a result, and reopens.
