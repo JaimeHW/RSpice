@@ -633,7 +633,14 @@ fn compare_waveforms(
             result_vals.len().min(golden_vals.len())
         };
         cmp_result.num_points = cmp_result.num_points.max(num_points);
-        let held = quantity_type(&result.variable_types[var_idx]).as_deref() == Some("logic")
+        // Either side may be an untyped CSV/TSV export. Use the available
+        // digital declaration after checking both quantity/unit contracts.
+        let held = [(result, var_idx), (golden, golden_idx)]
+            .into_iter()
+            .any(|(data, index)| {
+                quantity_type(&data.variable_types[index]).as_deref() == Some("logic")
+                    || data.units[index].as_deref() == Some("logic")
+            })
             || strip_outer_call(var_name, "D").is_some()
             || strip_outer_call(var_name, "E").is_some();
 

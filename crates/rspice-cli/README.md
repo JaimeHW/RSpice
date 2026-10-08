@@ -708,8 +708,10 @@ before selection, conversion, comparison or golden-file promotion.
 Optional table labels and quantity types accept strings or null; malformed
 declarations are rejected instead of falling back to inferred quantities.
 `--interpolate` resamples analog signals linearly and holds digital and real
-event signals until their next transition. It never extrapolates or resamples
-between differently declared coordinate units.
+event signals until their next transition. A digital quantity type or `logic`
+unit on either input preserves those transitions when the other input has no
+type metadata, as with CSV/TSV. It never extrapolates or resamples between
+differently declared coordinate units.
 
 RAW and HDF5 inputs are validated in full before any section is selected.
 RAW table coordinates must be real: complex-encoded axes may have zero imaginary
