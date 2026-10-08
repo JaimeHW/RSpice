@@ -7,7 +7,7 @@ use std::collections::HashSet;
 mod derivative;
 mod trace;
 mod voltage;
-pub(crate) use trace::ImpulseTraceRef;
+pub use trace::{ImpulsePointValue, ImpulseTraceRef};
 pub use voltage::{VoltageImpulsePoint, VoltageImpulseTrace};
 pub(crate) use voltage::{validate_voltage_impulse_traces, voltage_impulse_value_count};
 

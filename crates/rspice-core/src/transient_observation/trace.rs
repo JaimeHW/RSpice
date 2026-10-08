@@ -1,14 +1,17 @@
 //! Borrowed signal-independent arithmetic view; ownership keeps the units.
 use super::*;
 
+/// Borrowed, typed singular history for shared physical post-processing.
 #[derive(Clone, Copy)]
-pub(crate) enum ImpulseTraceRef<'a> {
+pub enum ImpulseTraceRef<'a> {
     Current(&'a CurrentImpulseTrace),
     Voltage(&'a VoltageImpulseTrace),
 }
 
+/// A signed order-zero action, in ampere-seconds or volt-seconds as
+/// determined by the typed trace that supplied it.
 #[derive(Clone, Copy)]
-pub(crate) struct ImpulsePointValue {
+pub struct ImpulsePointValue {
     pub time: Value,
     pub coefficient: Value,
 }
@@ -27,7 +30,7 @@ impl<'a> ImpulseTraceRef<'a> {
             Self::Voltage(trace) => trace.validate(start, stop),
         }
     }
-    pub fn identity(self) -> (u8, *const ()) {
+    pub(crate) fn identity(self) -> (u8, *const ()) {
         match self {
             Self::Current(trace) => (0, std::ptr::from_ref(trace).cast()),
             Self::Voltage(trace) => (1, std::ptr::from_ref(trace).cast()),

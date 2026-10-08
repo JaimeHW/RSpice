@@ -383,25 +383,75 @@ impl FourierAnalysis {
         trace: crate::transient_observation::ImpulseTraceRef<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<FourierResult, FourierError> {
+        self.analyze_impulses_with_abort(time, values, &[(trace, 1.0)], abort)
+    }
+
+    /// Analyze a finite signal and a real, time-independent linear combination
+    /// of typed singular histories. For V(a,b), pass voltage traces with weights
+    /// +1 and -1. Every supplied history must cover the full sampled extent.
+    pub fn analyze_impulses_with_abort(
+        &self,
+        time: &[Value],
+        values: &[Value],
+        traces: &[(crate::ImpulseTraceRef<'_>, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<FourierResult, FourierError> {
         if abort.is_aborted() {
             return Err(FourierError::Aborted);
         }
         self.validate_configuration()?;
         validate_waveform(time, values, abort)?;
-        if !trace.complete() {
-            return Err(FourierError::CurrentObservation {
-                detail: format!("signal '{trace}' has incomplete impulse history"),
-            });
+        let mut terms = Vec::new();
+        terms
+            .try_reserve_exact(traces.len())
+            .map_err(|_| FourierError::CurrentObservation {
+                detail: "cannot allocate impulse contributions".into(),
+            })?;
+        for &(trace, weight) in traces {
+            if abort.is_aborted() {
+                return Err(FourierError::Aborted);
+            }
+            if !weight.is_finite() {
+                return Err(FourierError::CurrentObservation {
+                    detail: "impulse weight must be finite".into(),
+                });
+            }
+            if !trace.complete() {
+                return Err(FourierError::CurrentObservation {
+                    detail: format!("signal '{trace}' has incomplete impulse history"),
+                });
+            }
+            trace
+                .validate(time[0], time[time.len() - 1])
+                .map_err(|detail| FourierError::CurrentObservation { detail })?;
+            terms.push(ImpulseContribution { trace, weight });
         }
-        trace
-            .validate(time[0], time[time.len() - 1])
-            .map_err(|detail| FourierError::CurrentObservation { detail })?;
-        self.analyze_observation(
-            time,
-            values,
-            &[ImpulseContribution { trace, weight: 1.0 }],
-            abort,
-        )
+        terms.sort_unstable_by_key(|term| term.trace.identity());
+        let mut merged: Vec<ImpulseContribution<'_>> = Vec::new();
+        merged
+            .try_reserve_exact(terms.len())
+            .map_err(|_| FourierError::CurrentObservation {
+                detail: "cannot allocate merged impulse contributions".into(),
+            })?;
+        for term in terms {
+            if abort.is_aborted() {
+                return Err(FourierError::Aborted);
+            }
+            if let Some(last) = merged.last_mut()
+                && last.trace.identity() == term.trace.identity()
+            {
+                last.weight += term.weight;
+                if !last.weight.is_finite() {
+                    return Err(FourierError::CurrentObservation {
+                        detail: "combined impulse weight is not representable".into(),
+                    });
+                }
+            } else {
+                merged.push(term);
+            }
+        }
+        merged.retain(|term| term.weight != 0.0);
+        self.analyze_observation(time, values, &merged, abort)
     }
 
     fn analyze_observation(

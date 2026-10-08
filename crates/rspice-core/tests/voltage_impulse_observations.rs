@@ -106,6 +106,26 @@ fn fourier_voltage_actions_use_exact_time_sign_and_derivative_order() {
             )
             .unwrap();
         close(direct.dc_component, 0.002);
+        let histories = result.voltage_impulses.as_ref().unwrap();
+        let weighted = FourierAnalysis::new(FourierConfig::new(1.0).with_harmonics(4))
+            .analyze_impulses_with_abort(
+                &result.time,
+                &result.voltages[0],
+                &[
+                    (rspice_core::ImpulseTraceRef::Voltage(&histories[0]), 1.0),
+                    (rspice_core::ImpulseTraceRef::Voltage(&histories[1]), -1.0),
+                ],
+                &NoAbort,
+            )
+            .unwrap();
+        close(weighted.dc_component, 0.003);
+        for (actual, expected) in weighted
+            .harmonics
+            .iter()
+            .zip(&spectra[0].spectrum.harmonics)
+        {
+            close(actual.magnitude, expected.magnitude);
+        }
     }
 }
 
