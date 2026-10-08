@@ -2,6 +2,7 @@
 
 use num_complex::Complex64;
 
+mod json_admission;
 mod json_precision;
 mod resource_counts;
 

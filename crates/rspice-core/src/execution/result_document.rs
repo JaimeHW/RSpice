@@ -174,6 +174,7 @@
 
 mod builders;
 mod frequency_table;
+mod json_admission;
 mod numeric_count;
 mod payload;
 mod quasi_periodic;
@@ -1131,7 +1132,8 @@ impl AnalysisResultDocument {
         )
     }
 
-    /// Decode with explicit numerical and byte budgets before validating evidence.
+    /// Admit numerical storage under both result and external-data value budgets
+    /// before allocating typed arrays, then decode and validate the evidence.
     pub fn from_json_with_limits_and_abort(
         json: &str,
         limits: &crate::ResourceLimits,
@@ -1166,6 +1168,7 @@ impl AnalysisResultDocument {
             });
         }
         check_abort(abort)?;
+        json_admission::check(json, limits, abort)?;
         let mut document: Self =
             crate::io::json::from_str(json, abort).map_err(|error| match error {
                 crate::io::json::JsonDecodeError::Aborted => ResultDocumentError::Aborted,

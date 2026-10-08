@@ -292,7 +292,7 @@ rspice-veriloga-models = { workspace = true, optional = true }
 # The shared typed result document in `execution::result_document` is a
 # non-optional part of the core contract, so its encoder is too.
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 blake3 = { version = "1.5", features = ["pure"] }
 flate2.workspace = true
 miniz_oxide.workspace = true
