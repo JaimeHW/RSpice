@@ -224,9 +224,10 @@ fn validate_restart_logical_name(name: &str, option: &str) -> Result<(), CliErro
         .trim_end_matches(['.', ' '])
         .to_ascii_uppercase();
     let reserved = matches!(device_stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (device_stem.len() == 4
-            && matches!(&device_stem[..3], "COM" | "LPT")
-            && matches!(device_stem.as_bytes()[3], b'1'..=b'9'));
+        || matches!(
+            device_stem.as_bytes(),
+            [b'C', b'O', b'M', b'1'..=b'9'] | [b'L', b'P', b'T', b'1'..=b'9']
+        );
     if reserved {
         return Err(restart_cli_error(format!(
             ".OPTIONS RESTART {option} uses reserved device filename '{name}'"
@@ -336,7 +337,17 @@ mod tests {
 
     #[test]
     fn restart_logical_names_are_single_portable_components() {
-        validate_restart_logical_name("trans_test2e-08", "FILE").unwrap();
+        for name in [
+            "trans_test2e-08",
+            "éé",
+            "🦀",
+            "x電",
+            "éé.chk",
+            "COM10",
+            "LPT0",
+        ] {
+            validate_restart_logical_name(name, "FILE").unwrap();
+        }
         for unsafe_name in [
             "",
             ".",
@@ -345,6 +356,10 @@ mod tests {
             "sub/state",
             "sub\\state",
             "C:state",
+            "CON",
+            "aux.chk",
+            "Com1",
+            "lpt9.chk",
         ] {
             assert!(validate_restart_logical_name(unsafe_name, "FILE").is_err());
         }

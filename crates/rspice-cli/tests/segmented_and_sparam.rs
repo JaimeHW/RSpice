@@ -262,6 +262,60 @@ fn compression_composes_with_an_authored_restart_schedule() {
 }
 
 #[test]
+fn unicode_restart_names_round_trip_through_job_and_file() {
+    // Each stem occupies four UTF-8 bytes, with byte three inside a character.
+    // Check both authored JOB names and FILE names with a dotted extension.
+    for name in ["éé", "🦀", "x電"] {
+        let dir = test_dir("unicode_restart");
+        let deck = dir.join("circuit.cir");
+        let circuit =
+            "* Unicode checkpoint namespace\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1p\n";
+        std::fs::write(
+            &deck,
+            format!(
+                "{circuit}.TRAN 50p 2n\n.OPTIONS RESTART JOB={name} INITIAL_INTERVAL=2n\n.END\n"
+            ),
+        )
+        .unwrap();
+        let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+        assert!(
+            output.status.success(),
+            "JOB={name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let checkpoint = dir.join(format!("{name}2e-09"));
+        let saved = std::fs::read(&checkpoint).expect("authored Unicode checkpoint");
+        let file_name = format!("{name}.chk");
+        let input = dir.join(&file_name);
+        std::fs::copy(&checkpoint, &input).unwrap();
+        std::fs::write(
+            &deck,
+            format!("{circuit}.TRAN 50p 4n\n.OPTIONS RESTART FILE={file_name}\n.END\n"),
+        )
+        .unwrap();
+        let csv = dir.join("resumed.csv");
+        let output = run_rspice(&[
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            csv.to_str().unwrap(),
+            "-f",
+            "csv",
+        ]);
+        assert!(
+            output.status.success(),
+            "FILE={file_name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let (time, voltage) = last_vout(&csv);
+        assert!((time - 4e-9).abs() < 1e-18, "resumed stop time: {time}");
+        assert!((voltage - 0.5).abs() < 1e-9, "resumed output: {voltage}");
+        assert_eq!(std::fs::read(input).unwrap(), saved);
+    }
+}
+
+#[test]
 fn xyce_restart_rejects_namespace_escape_and_cli_checkpoint_conflict() {
     let dir = test_dir("restart_safety");
     let escaping = dir.join("escaping.cir");
