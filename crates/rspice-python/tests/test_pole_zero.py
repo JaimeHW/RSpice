@@ -8,6 +8,21 @@ import rspice
 
 
 class TestPoleZero:
+    @pytest.mark.parametrize("damping", [0.0, 2.0**-60, -(2.0**-60), 2.0**-10])
+    def test_lossless_and_weak_damping_use_original_equation_evidence(self, engine, damping):
+        import pickle
+
+        netlist = rspice.Netlist.parse(
+            f"* Coupled LC\nL1 a 0 1\nL2 b 0 3\nC1 a 0 3\nC2 b 0 5\nCc a b 4\n"
+            f"G1 a 0 a 0 {6*damping:.17e}\nG2 b 0 b 0 {10*damping:.17e}\n"
+            f"Gc a b a b {8*damping:.17e}\n.end\n"
+        )
+        result = engine.run_pz(netlist, "a", "a", input_type="current", analysis="poles")
+        assert result.num_poles == 4
+        assert result.is_stable is (damping > 0)
+        assert result.pole_evidence.certificate.asymptotically_stable is (damping > 0)
+        assert pickle.loads(pickle.dumps(result)).is_stable is (damping > 0)
+
     def test_explicit_ports_and_analysis_modes(self, engine, rc_lowpass):
         full = engine.run_pz(
             rc_lowpass,

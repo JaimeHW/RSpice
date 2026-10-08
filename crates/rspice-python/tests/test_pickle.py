@@ -30,7 +30,7 @@ def round_trip(obj, protocol=pickle.HIGHEST_PROTOCOL):
 def synthetic_qualified_pole_zero_result():
     pole = rspice.ComplexValue._unpickle(-1.0, 0.0)
     tolerance = 128.0 * np.finfo(np.float64).eps
-    pole_certificate = (1, 0, 0.0, tolerance)
+    pole_certificate = (1, 0, 0.0, tolerance, True)
     empty_zero_certificate = (1, 1, 0.0, tolerance)
     return rspice.PoleZeroResult._unpickle(
         [pole],
@@ -326,6 +326,32 @@ class TestResults:
             assert restored.gain_unit == unit
         with pytest.raises(ValueError, match="invalid pole-zero gain unit"):
             rspice.PoleZeroResult._unpickle(*state[:5], "Hz")
+
+    def test_old_four_field_certificate_does_not_invent_stability(self):
+        state = synthetic_qualified_pole_zero_result().__reduce__()[1]
+        kind, certificate = state[4][0]
+        old_evidence = ((kind, certificate[:4]), state[4][1])
+        restored = round_trip(rspice.PoleZeroResult._unpickle(*state[:4], old_evidence))
+        assert restored.pole_evidence.is_qualified
+        assert restored.pole_evidence.certificate.asymptotically_stable is None
+        assert restored.is_stable is None
+        old_certificate = rspice.SpectrumCertificate._unpickle(*certificate[:4])
+        assert round_trip(old_certificate).asymptotically_stable is None
+
+    @pytest.mark.parametrize("proof", [False, True])
+    def test_stability_proof_survives_each_pickle_boundary(self, proof):
+        state = synthetic_qualified_pole_zero_result().__reduce__()[1]
+        kind, certificate = state[4][0]
+        evidence = ((kind, (*certificate[:4], proof)), state[4][1])
+        restored = round_trip(rspice.PoleZeroResult._unpickle(*state[:4], evidence))
+        assert restored.is_stable is proof
+        assert round_trip(restored.pole_evidence).certificate.asymptotically_stable is proof
+        assert round_trip(restored.pole_evidence.certificate).asymptotically_stable is proof
+
+    def test_empty_spectrum_cannot_claim_non_hurwitz_modes(self):
+        tolerance = 128.0 * np.finfo(np.float64).eps
+        with pytest.raises(ValueError, match="invalid spectrum certificate"):
+            rspice.SpectrumCertificate._unpickle(1, 1, 0.0, tolerance, False)
 
     def test_unknown_pole_zero_evidence_tag_is_rejected(self):
         with pytest.raises(ValueError, match="unknown root-set evidence tag"):

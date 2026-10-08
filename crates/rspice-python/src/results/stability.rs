@@ -20,6 +20,8 @@ pub struct PySpectrumCertificate {
     pub max_backward_error: f64,
     #[pyo3(get)]
     pub qualification_tolerance: f64,
+    #[pyo3(get)]
+    pub asymptotically_stable: Option<bool>,
 }
 
 impl PySpectrumCertificate {
@@ -29,16 +31,18 @@ impl PySpectrumCertificate {
             infinite_count: certificate.infinite_count,
             max_backward_error: certificate.max_backward_error,
             qualification_tolerance: certificate.qualification_tolerance,
+            asymptotically_stable: certificate.asymptotically_stable,
         }
     }
 
     fn to_state(&self) -> SpectrumCertificateState {
-        (
+        SpectrumCertificateState::WithStability((
             self.problem_order,
             self.infinite_count,
             self.max_backward_error,
             self.qualification_tolerance,
-        )
+            self.asymptotically_stable,
+        ))
     }
 }
 
@@ -69,18 +73,22 @@ impl PySpectrumCertificate {
 
     /// Rebuild from pickled state. Not part of the public API.
     #[staticmethod]
+    #[pyo3(signature = (problem_order, infinite_count, max_backward_error, qualification_tolerance, asymptotically_stable=None))]
     fn _unpickle(
         problem_order: usize,
         infinite_count: usize,
         max_backward_error: f64,
         qualification_tolerance: f64,
+        asymptotically_stable: Option<bool>,
     ) -> PyResult<Self> {
-        let certificate = spectrum_certificate_from_state((
-            problem_order,
-            infinite_count,
-            max_backward_error,
-            qualification_tolerance,
-        ))?;
+        let certificate =
+            spectrum_certificate_from_state(SpectrumCertificateState::WithStability((
+                problem_order,
+                infinite_count,
+                max_backward_error,
+                qualification_tolerance,
+                asymptotically_stable,
+            )))?;
         Ok(Self::from_core(&certificate))
     }
 
@@ -104,19 +112,10 @@ pub struct PyRootSetEvidence {
 
 impl PyRootSetEvidence {
     fn from_core(evidence: &rspice_core::analysis::RootSetEvidence) -> PyResult<Self> {
-        let (kind, certificate) = root_set_evidence_state(evidence)?;
+        let (kind, _) = root_set_evidence_state(evidence)?;
         Ok(Self {
             kind,
-            certificate: certificate.map(
-                |(problem_order, infinite_count, max_backward_error, qualification_tolerance)| {
-                    PySpectrumCertificate {
-                        problem_order,
-                        infinite_count,
-                        max_backward_error,
-                        qualification_tolerance,
-                    }
-                },
-            ),
+            certificate: evidence.certificate().map(PySpectrumCertificate::from_core),
         })
     }
 
@@ -353,21 +352,24 @@ impl PyPoleZeroResult {
             .collect()
     }
 
-    /// Check asymptotic stability: every pole is finite and strictly in the
-    /// open left half-plane. Marginal poles are not reported as stable.
+    /// Exact asymptotic-stability evidence, independent of rounded root signs.
+    /// Older results without that evidence return None.
     #[getter]
     fn is_stable(&self) -> Option<bool> {
-        if !self.pole_evidence.is_qualified() {
-            return None;
+        use rspice_core::analysis::pole_zero::{PoleSpectrum, StabilityVerdict};
+        let spectrum = PoleSpectrum {
+            poles: self
+                .poles
+                .iter()
+                .map(|pole| rspice_core::Complex64::new(pole.real, pole.imag))
+                .collect(),
+            evidence: root_set_evidence_from_state(self.pole_evidence.to_state()).ok()?,
+        };
+        match spectrum.stability_verdict() {
+            StabilityVerdict::Stable => Some(true),
+            StabilityVerdict::Unstable => Some(false),
+            StabilityVerdict::Indeterminate => None,
         }
-        if self
-            .poles
-            .iter()
-            .any(|pole| !pole.real.is_finite() || !pole.imag.is_finite())
-        {
-            return None;
-        }
-        Some(self.poles.iter().all(|pole| pole.real < 0.0))
     }
 
     /// Get the dominant pole (closest to imaginary axis with Re < 0)

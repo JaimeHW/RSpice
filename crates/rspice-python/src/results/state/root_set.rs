@@ -7,7 +7,13 @@
 use super::*;
 
 /// Stable primitive pickle state for a pole-zero spectrum certificate.
-pub(crate) type SpectrumCertificateState = (usize, usize, f64, f64);
+#[derive(Debug, Clone, pyo3::FromPyObject, pyo3::IntoPyObject)]
+pub(crate) enum SpectrumCertificateState {
+    #[pyo3(transparent)]
+    WithStability((usize, usize, f64, f64, Option<bool>)),
+    #[pyo3(transparent)]
+    Legacy((usize, usize, f64, f64)),
+}
 
 /// Stable tagged pickle state for pole/zero root-set evidence.
 pub(crate) type RootSetEvidenceState = (String, Option<SpectrumCertificateState>);
@@ -15,24 +21,35 @@ pub(crate) type RootSetEvidenceState = (String, Option<SpectrumCertificateState>
 pub(crate) fn spectrum_certificate_state(
     certificate: &rspice_core::analysis::SpectrumCertificate,
 ) -> SpectrumCertificateState {
-    (
+    SpectrumCertificateState::WithStability((
         certificate.problem_order,
         certificate.infinite_count,
         certificate.max_backward_error,
         certificate.qualification_tolerance,
-    )
+        certificate.asymptotically_stable,
+    ))
 }
 
 pub(crate) fn spectrum_certificate_from_state(
     state: SpectrumCertificateState,
 ) -> PyResult<rspice_core::analysis::SpectrumCertificate> {
-    let (problem_order, infinite_count, max_backward_error, qualification_tolerance) = state;
+    let (problem_order, infinite_count, max_backward_error, qualification_tolerance, stability) =
+        match state {
+            SpectrumCertificateState::WithStability(state) => state,
+            SpectrumCertificateState::Legacy((order, infinite, error, tolerance)) => {
+                (order, infinite, error, tolerance, None)
+            }
+        };
     rspice_core::analysis::SpectrumCertificate::new(
         problem_order,
         infinite_count,
         max_backward_error,
         qualification_tolerance,
     )
+    .and_then(|mut certificate| {
+        certificate.asymptotically_stable = stability;
+        certificate.is_valid().then_some(certificate)
+    })
     .ok_or_else(|| {
         crate::errors::value_error(
             "invalid spectrum certificate in pickled pole-zero result".to_string(),
