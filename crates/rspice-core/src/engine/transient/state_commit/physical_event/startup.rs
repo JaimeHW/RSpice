@@ -439,7 +439,7 @@ impl Engine {
             circuit.inductors.i_prev_prev_prev[index] = current;
             circuit.inductors.v_prev[index] = voltage;
         }
-        circuit.update_coupled_inductor_pair_state(&point.state.solution);
+        circuit.reset_coupled_inductor_pair_state(&point.state.solution);
         *history = outgoing;
         *solution = point.state.solution;
         Ok((

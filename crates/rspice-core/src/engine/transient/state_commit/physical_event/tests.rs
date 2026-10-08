@@ -27,6 +27,37 @@ fn close(actual: Value, expected: Value, absolute: Value) {
     );
 }
 
+/// A restarted, constant-current epoch has no mutual inductive emf, regardless
+/// of the companion chosen to inspect it. Restoring the same physical state
+/// must not change that equation.
+fn assert_flat_mutual_flux(circuit: &crate::CircuitData, solution: &[Value]) {
+    let mut restored = circuit.clone();
+    restored.restore_coupled_inductor_pair_state(solution);
+    for coefficients in [
+        CompanionCoefficients::backward_euler(),
+        CompanionCoefficients::trapezoidal(),
+        CompanionCoefficients::gear2_variable_step(0.2, 0.3),
+    ] {
+        for state in [circuit, &restored] {
+            let mut residual = vec![0.0; state.matrix_size()];
+            for pair in &state.coupled_inductor_pairs {
+                pair.device.add_transient_mutual_correction_rhs(
+                    state.num_nodes() + pair.branch1_ordinal,
+                    state.num_nodes() + pair.branch2_ordinal,
+                    &mut residual,
+                    solution,
+                    0.2,
+                    &coefficients,
+                );
+            }
+            assert!(
+                residual.iter().all(|value| value.abs() < 1e-14),
+                "constant winding currents must produce zero mutual emf: {residual:?}"
+            );
+        }
+    }
+}
+
 fn fixture(
     text: &str,
 ) -> (

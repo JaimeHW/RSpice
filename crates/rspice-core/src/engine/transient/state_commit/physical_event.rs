@@ -200,6 +200,9 @@ impl Engine {
             .inductors
             .i_prev_prev_prev
             .clone_from(&circuit.inductors.i_prev);
+        for pair in &mut circuit.coupled_inductor_pairs {
+            pair.device.restart_current_history();
+        }
         history
             .charge_q_prev_prev
             .clone_from(&history.charge_q_prev);

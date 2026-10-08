@@ -73,6 +73,24 @@ fn integration_reference_requires_unchanged_authored_forcing_and_an_integration_
 }
 
 #[test]
+fn physical_event_restart_discards_incoming_mutual_flux_history() {
+    let (_, mut circuit, _, mut solution, mut history) = fixture(
+        "Restarted mutual flux\nR1 a 0 2\nR2 b 0 3\nL1 a 0 .5\nL2 b 0 .25\nK1 L1 L2 -.4\n.end\n",
+    );
+    let nodes = circuit.num_nodes();
+    for currents in [[0.1, -0.3], [0.2, -0.1]] {
+        for (index, &branch) in circuit.inductors.branch_indices.iter().enumerate() {
+            solution[nodes + branch - 1] = currents[index];
+            circuit.inductors.i_prev_prev[index] = circuit.inductors.i_prev[index];
+            circuit.inductors.i_prev[index] = currents[index];
+        }
+        circuit.update_coupled_inductor_pair_state(&solution);
+    }
+    Engine::restart_physical_event_history(&mut circuit, &mut history);
+    assert_flat_mutual_flux(&circuit, &solution);
+}
+
+#[test]
 fn integration_reference_conserves_capacitor_current_and_mutual_flux_for_each_companion() {
     let time = 1.0;
     let dt = 0.2;

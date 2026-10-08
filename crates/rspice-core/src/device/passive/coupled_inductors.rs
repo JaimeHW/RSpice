@@ -201,6 +201,13 @@ impl CoupledInductorPair {
         [self.current2_prev, self.current2_prev_prev] = second;
     }
 
+    /// Discard the incoming integration epoch while retaining outgoing current
+    /// and finite terminal voltage. Self and mutual flux must use one stencil.
+    pub(crate) fn restart_current_history(&mut self) {
+        self.current1_prev_prev = self.current1_prev;
+        self.current2_prev_prev = self.current2_prev;
+    }
+
     /// Get turns ratio (approximate, for ideal transformer)
     pub fn turns_ratio(&self) -> Value {
         let ratio = self.l1 / self.l2;
@@ -337,8 +344,7 @@ impl CoupledInductorPair {
         branch2: NodeId,
     ) {
         self.update_state_with_branches(solution, branch1, branch2);
-        self.current1_prev_prev = self.current1_prev;
-        self.current2_prev_prev = self.current2_prev;
+        self.restart_current_history();
     }
 
     /// Update history from an accepted solution vector.

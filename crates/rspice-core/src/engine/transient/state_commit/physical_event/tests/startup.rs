@@ -429,6 +429,7 @@ fn physical_startup_preserves_mutual_flux_and_commits_winding_currents() {
     assert!(report.impulses.iter().all(|(_, impulse)| *impulse == 0.0));
     assert_eq!(circuit.inductors.i_prev, circuit.inductors.i_prev_prev);
     assert_eq!(circuit.inductors.i_prev, circuit.inductors.i_prev_prev_prev);
+    assert_flat_mutual_flux(&circuit, &solution);
 }
 
 #[test]
