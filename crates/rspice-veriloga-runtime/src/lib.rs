@@ -114,19 +114,7 @@ pub fn checked_derivative_value(primal: Value, derivative: Value) -> Result<Valu
     }
 }
 
-/// Validate a numeric read at the discrete-to-continuous boundary.
-/// A separate finite validity lane keeps unavailable values out of numeric
-/// state/checkpoints. Evaluate this operation only at an executed source read.
-#[inline]
-pub fn checked_discrete_value(validity: Value, value: Value) -> Result<Value, &'static str> {
-    if validity == 0.0 {
-        Err("analog read of discrete input has an X, Z, or non-finite value")
-    } else if validity != 1.0 || !value.is_finite() {
-        Err("analog discrete input has an invalid value/validity encoding")
-    } else {
-        Ok(value)
-    }
-}
+pub use array_index::checked_discrete_value;
 
 /// Version of the immutable catalog contract emitted beside generated models.
 ///

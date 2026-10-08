@@ -814,6 +814,26 @@ fn main() {{
     )
 }
 
+#[test]
+fn standalone_runtime_prelude_preserves_packed_bit_validation() {
+    let source = format!(
+        r#"#![allow(dead_code, unused_imports)]
+{RUNTIME_PRELUDE}
+fn main() {{
+    assert_eq!(array_index::decode_packed_bit(32769.0, 0), Ok(1.0));
+    assert_eq!(array_index::decode_packed_bit(32768.0, 0), Ok(0.0));
+    assert!(array_index::decode_packed_bit(1.0, 0).is_err());
+    assert!(array_index::decode_packed_bit(32769.0, 1).is_err());
+    assert!(array_index::decode_packed_bit(f64::NAN, 0).is_err());
+    assert!(array_index::decode_packed_bit(32769.0, 15).is_err());
+    assert_eq!(checked_discrete_value(1.0, 7.0), 7.0);
+    assert!(std::panic::catch_unwind(|| checked_discrete_value(0.0, 0.0)).is_err());
+}}
+"#
+    );
+    assert!(compile_and_run(&scratch("packed_runtime"), "packed_runtime", &source).is_empty());
+}
+
 fn compile_and_run(directory: &Path, name: &str, program: &str) -> Vec<f64> {
     let slug: String = name
         .chars()

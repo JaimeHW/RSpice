@@ -124,6 +124,20 @@ impl PackedArrayLayout {
     }
 }
 
+/// Validate a numeric read at the discrete-to-continuous boundary.
+/// A separate finite validity lane keeps unavailable values out of numeric
+/// state/checkpoints. Evaluate this operation only at an executed source read.
+#[inline]
+pub fn checked_discrete_value(validity: f64, value: f64) -> Result<f64, &'static str> {
+    if validity == 0.0 {
+        Err("analog read of discrete input has an X, Z, or non-finite value")
+    } else if validity != 1.0 || !value.is_finite() {
+        Err("analog discrete input has an invalid value/validity encoding")
+    } else {
+        Ok(value)
+    }
+}
+
 /// Decode only the selected bit. The encoded chunk is always finite; availability
 /// belongs to its selected mask bit, not to other bits in the same chunk.
 pub fn decode_packed_bit(encoded: f64, bit: u32) -> Result<f64, &'static str> {
@@ -137,7 +151,7 @@ pub fn decode_packed_bit(encoded: f64, bit: u32) -> Result<f64, &'static str> {
     let encoded = encoded as u32;
     let known = (encoded >> (PACKED_CHUNK_BITS + bit)) & 1;
     let value = (encoded >> bit) & 1;
-    crate::checked_discrete_value(f64::from(known), f64::from(value))
+    checked_discrete_value(f64::from(known), f64::from(value))
 }
 
 #[cfg(test)]

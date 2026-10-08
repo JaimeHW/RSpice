@@ -411,8 +411,8 @@ fn checked_derivative_value(primal: f64, derivative: f64) -> f64 {
     derivative
 }
 fn checked_discrete_value(validity: f64, value: f64) -> f64 {
-    assert!(validity == 1.0 && value.is_finite(), "standalone generated discrete input must be valid");
-    value
+    array_index::checked_discrete_value(validity, value)
+        .expect("standalone generated discrete input must be valid")
 }
 fn checked_array_index(raw: f64, len: usize, lower: i64) -> f64 {
     array_index::checked_array_slot(raw, 0, len, lower)
