@@ -1728,14 +1728,14 @@ fn schema_v18_rejects_tampering_and_a_smuggled_bus_table() {
 #[test]
 fn a_results_schema_from_the_future_is_refused_by_number() {
     let mut ahead = persisted_events_at_schema_v18();
-    ahead.schema_version = 42 + 1;
+    ahead.schema_version = ProjectSimulationResultsData::default().schema_version + 1;
     let error = ahead
         .migrate_to_current(ProjectId::new())
         .expect_err("a forward schema version is not migrated");
     assert!(
         error.contains(&format!(
             "unsupported simulation results schema version {}",
-            40 + 1
+            ahead.schema_version
         )),
         "{error}"
     );

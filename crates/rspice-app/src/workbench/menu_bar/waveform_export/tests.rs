@@ -565,11 +565,13 @@ fn csv_export_publishes_exact_pole_zero_evidence_without_pseudo_waveforms() {
             "pole_infinite_count,,,,0\n",
             "pole_max_backward_error,,,,9.99999999999999999e-15\n",
             "pole_qualification_tolerance,,,,2.84217094304040074e-14\n",
+            "pole_asymptotically_stable,,,,\n",
             "zero_evidence,,,,qualified\n",
             "zero_problem_order,,,,1\n",
             "zero_infinite_count,,,,0\n",
             "zero_max_backward_error,,,,2.00000000000000000e-14\n",
             "zero_qualification_tolerance,,,,2.84217094304040074e-14\n",
+            "zero_asymptotically_stable,,,,\n",
             "pole,0,-1.00000000000000000e0,2.00000000000000000e0,\n",
             "zero,0,-3.00000000000000000e0,0.00000000000000000e0,\n",
         )
@@ -616,6 +618,7 @@ fn csv_export_marks_unavailable_pole_zero_gain_explicitly() {
             "pole_infinite_count,,,,0\n",
             "pole_max_backward_error,,,,9.99999999999999999e-15\n",
             "pole_qualification_tolerance,,,,2.84217094304040074e-14\n",
+            "pole_asymptotically_stable,,,,\n",
             "zero_evidence,,,,not requested\n",
             "pole,0,-1.00000000000000000e0,2.00000000000000000e0,\n",
         )
