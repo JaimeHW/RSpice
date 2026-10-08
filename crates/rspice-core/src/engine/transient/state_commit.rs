@@ -1021,15 +1021,23 @@ impl Engine {
         for l_idx in 0..circuit.inductors.names.len() {
             let br = circuit.inductors.branch_indices[l_idx];
             if br > 0 {
-                let br_idx = circuit.num_nodes() + br - 1;
-                let i_new = accepted_solution[br_idx];
+                let (i_new, v_new) = if let Some(event) = physical_event {
+                    let winding = &event.windings[l_idx];
+                    (winding.current, winding.voltage)
+                } else {
+                    (
+                        accepted_solution[circuit.num_nodes() + br - 1],
+                        Self::differential_voltage(
+                            accepted_solution,
+                            circuit.inductors.node_pos[l_idx],
+                            circuit.inductors.node_neg[l_idx],
+                        ),
+                    )
+                };
                 circuit.inductors.i_prev_prev_prev[l_idx] = circuit.inductors.i_prev_prev[l_idx];
                 circuit.inductors.i_prev_prev[l_idx] = circuit.inductors.i_prev[l_idx];
                 circuit.inductors.i_prev[l_idx] = i_new;
 
-                let np = circuit.inductors.node_pos[l_idx];
-                let nn = circuit.inductors.node_neg[l_idx];
-                let v_new = Self::differential_voltage(accepted_solution, np, nn);
                 circuit.inductors.v_prev[l_idx] = v_new;
             }
         }

@@ -35,27 +35,6 @@ impl Engine {
             self.config.transient_event_flux_abstol,
             abort,
         )?;
-        let mut inductors = Vec::with_capacity(circuit.inductors.len());
-        for (index, &ordinal) in circuit.inductors.branch_indices.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let voltage = sum([
-                (
-                    Self::node_voltage(&point.state.solution, circuit.inductors.node_pos[index]),
-                    1.0,
-                ),
-                (
-                    Self::node_voltage(&point.state.solution, circuit.inductors.node_neg[index]),
-                    -1.0,
-                ),
-            ]
-            .into_iter())?;
-            inductors.push((
-                point.state.solution[circuit.num_nodes() + ordinal - 1],
-                voltage,
-            ));
-        }
         // Append the event to the history preceding the incoming interval.
         // The ordinary PSS acceptance may already have sampled its left limit.
         self.ensure_transport_history_copy(incoming_history, history.transport_allocated_bytes())?;
@@ -79,9 +58,9 @@ impl Engine {
             circuit.capacitors.v_prev[index] = value.voltage;
             circuit.capacitors.i_prev[index] = value.current;
         }
-        for (index, (current, voltage)) in inductors.into_iter().enumerate() {
-            circuit.inductors.i_prev[index] = current;
-            circuit.inductors.v_prev[index] = voltage;
+        for (index, winding) in point.windings.into_iter().enumerate() {
+            circuit.inductors.i_prev[index] = winding.current;
+            circuit.inductors.v_prev[index] = winding.voltage;
         }
         circuit.update_coupled_inductor_pair_state(&point.state.solution);
         *history = outgoing_history;
@@ -93,6 +72,50 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pss_boundary_commits_coupled_winding_currents_and_finite_voltages() {
+        let engine = Engine::default();
+        let deck = Netlist::parse(
+            "magnetic boundary\nV1 s1 0 DC .4 PWL(0 .4 1 .4 1 1)\nV2 s2 0 DC -.3 PWL(0 -.3 1 -.3 1 -.5)\nR1 s1 a 2\nR2 s2 b 3\nL1 a 0 .5\nL2 b 0 .25\nK1 L1 L2 .4\n.end\n",
+        ).unwrap();
+        let mut circuit = engine.build_circuit(&deck).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let incoming = engine
+            .solve_dc_operating_point(&deck, &mut circuit, &mut matrix)
+            .unwrap();
+        for (index, &ordinal) in circuit.inductors.branch_indices.iter().enumerate() {
+            circuit.inductors.i_prev[index] = incoming[circuit.num_nodes() + ordinal - 1];
+        }
+        circuit.reset_coupled_inductor_pair_state(&incoming);
+        let old =
+            Engine::initialize_bjt_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
+        let mut history = old.clone();
+        let outgoing = engine
+            .transition_pss_boundary(
+                &mut circuit,
+                &mut history,
+                &old,
+                &incoming,
+                1.0,
+                0.25,
+                Default::default(),
+                &NoAbort,
+            )
+            .unwrap();
+        // Finite applied voltage preserves both independent flux linkages.
+        // The two resistors then set the outgoing finite winding voltages.
+        for (index, (current, voltage)) in [(0.2, 0.6), (-0.1, -0.2)].into_iter().enumerate() {
+            let branch = circuit.num_nodes() + circuit.inductors.branch_indices[index] - 1;
+            assert!((outgoing[branch] - current).abs() < 1e-12);
+            assert!((circuit.inductors.i_prev[index] - current).abs() < 1e-12);
+            assert!((circuit.inductors.v_prev[index] - voltage).abs() < 1e-12);
+        }
+        assert_eq!(circuit.inductors.i_prev, circuit.inductors.i_prev_prev);
+        assert_eq!(circuit.inductors.i_prev, circuit.inductors.i_prev_prev_prev);
+    }
 
     #[test]
     fn pss_boundary_transition_conserves_charge_and_solves_finite_line_rates() {

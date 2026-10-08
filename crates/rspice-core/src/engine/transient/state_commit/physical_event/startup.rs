@@ -356,22 +356,6 @@ impl Engine {
             flux_tolerance,
             abort,
         )?;
-        let mut inductors = Vec::with_capacity(circuit.inductors.len());
-        for (index, &ordinal) in circuit.inductors.branch_indices.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let voltage = |node| Self::node_voltage(&point.state.solution, node);
-            let voltage = sum([
-                (voltage(circuit.inductors.node_pos[index]), 1.0),
-                (voltage(circuit.inductors.node_neg[index]), -1.0),
-            ]
-            .into_iter())?;
-            inductors.push((
-                point.state.solution[circuit.num_nodes() + ordinal - 1],
-                voltage,
-            ));
-        }
         let impulses: Vec<_> = point.impulses().collect();
         let observation = prepare_observation(&point)?;
         self.ensure_transport_history_copy(history, 0)?;
@@ -433,11 +417,11 @@ impl Engine {
             circuit.capacitors.v_prev_prev_prev[index] = value.voltage;
             circuit.capacitors.i_prev[index] = value.current;
         }
-        for (index, (current, voltage)) in inductors.into_iter().enumerate() {
-            circuit.inductors.i_prev[index] = current;
-            circuit.inductors.i_prev_prev[index] = current;
-            circuit.inductors.i_prev_prev_prev[index] = current;
-            circuit.inductors.v_prev[index] = voltage;
+        for (index, winding) in point.windings.into_iter().enumerate() {
+            circuit.inductors.i_prev[index] = winding.current;
+            circuit.inductors.i_prev_prev[index] = winding.current;
+            circuit.inductors.i_prev_prev_prev[index] = winding.current;
+            circuit.inductors.v_prev[index] = winding.voltage;
         }
         circuit.reset_coupled_inductor_pair_state(&point.state.solution);
         *history = outgoing;

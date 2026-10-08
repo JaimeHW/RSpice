@@ -36,10 +36,78 @@ pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     dt: Value,
     pub(super) bjt: PreparedBjtHistory,
     pub(super) capacitors: Vec<CapacitorAcceptedState>,
+    pub(super) windings: Vec<AcceptedWinding>,
     pub(super) lines: Vec<lines::PreparedLineEvent>,
     left_limits: Vec<Option<Value>>,
     phase_anchors: Vec<Option<(usize, Value, Value)>>,
     device_impulses: PhysicalDeviceImpulses,
+}
+
+pub(super) struct AcceptedWinding {
+    pub(super) current: Value,
+    pub(super) voltage: Value,
+}
+
+fn validate_winding_history(circuit: &crate::CircuitData) -> Result<(), SimulationError> {
+    let windings = &circuit.inductors;
+    if [
+        windings.i_prev.len(),
+        windings.i_prev_prev.len(),
+        windings.i_prev_prev_prev.len(),
+        windings.v_prev.len(),
+    ]
+    .into_iter()
+    .any(|length| length != windings.len())
+    {
+        return Err(failure("unaligned physical winding history"));
+    }
+    Ok(())
+}
+
+fn prepare_windings(
+    circuit: &crate::CircuitData,
+    solution: &[Value],
+    options: &charge_event::EventOptions,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<AcceptedWinding>, SimulationError> {
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ResultValues,
+        circuit
+            .matrix_size()
+            .saturating_mul(64)
+            .saturating_add(circuit.inductors.len().saturating_mul(2)),
+        options.limits.max_result_values,
+    )?;
+    let mut prepared = Vec::new();
+    prepared
+        .try_reserve_exact(circuit.inductors.len())
+        .map_err(|source| SimulationError::Allocation {
+            object: "physical event winding history",
+            source,
+        })?;
+    for (index, &ordinal) in circuit.inductors.branch_indices.iter().enumerate() {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        // The event sampler validated the MNA coordinates and solved state.
+        // Finish every potentially unrepresentable voltage before acceptance.
+        let voltage = sum([
+            (
+                Engine::node_voltage(solution, circuit.inductors.node_pos[index]),
+                1.0,
+            ),
+            (
+                Engine::node_voltage(solution, circuit.inductors.node_neg[index]),
+                -1.0,
+            ),
+        ]
+        .into_iter())?;
+        prepared.push(AcceptedWinding {
+            current: solution[circuit.num_nodes() + ordinal - 1],
+            voltage,
+        });
+    }
+    Ok(prepared)
 }
 
 fn phase_anchors(history: &BjtTransientHistory) -> Vec<Option<(usize, Value, Value)>> {
@@ -131,6 +199,7 @@ impl PreparedPhysicalEvent {
         context: bjt::BjtPhaseContext<'_>,
     ) -> Result<(), SimulationError> {
         context.bind(history)?;
+        validate_winding_history(circuit)?;
         if self.dt == 0.0
             || self.time.to_bits() != step.accepted_time.to_bits()
             || self.dt.to_bits() != step.dt.to_bits()
@@ -143,6 +212,7 @@ impl PreparedPhysicalEvent {
                 .all(|(a, b)| a.to_bits() == b.to_bits())
             || self.bjt.values.len() != circuit.bjts.len()
             || self.capacitors.len() != circuit.capacitors.len()
+            || self.windings.len() != circuit.inductors.len()
             || self.lines.len() != circuit.tlines.len()
             || context.incoming_arrival
             || context.input_left_limits != Some(self.left_limits.as_slice())
@@ -234,6 +304,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        validate_winding_history(circuit)?;
         let startup = matches!(step.phase_events, PhysicalEventOrders::Startup(_));
         let valid_interval = if startup {
             step.time == 0.0 && step.dt == 0.0
@@ -427,6 +498,7 @@ impl Engine {
                 .into_iter())?,
             });
         }
+        let windings = prepare_windings(circuit, &state.solution, options, abort)?;
         let mut values = Vec::with_capacity(circuit.bjts.len());
         let mut left_limits = Vec::with_capacity(circuit.bjts.len());
         for (index, model) in sampler.models().iter().enumerate() {
@@ -623,6 +695,7 @@ impl Engine {
             dt: step.dt,
             bjt,
             capacitors,
+            windings,
             lines,
             left_limits,
             phase_anchors: phase_anchors(history),

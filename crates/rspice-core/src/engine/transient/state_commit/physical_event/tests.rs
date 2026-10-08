@@ -358,6 +358,68 @@ fn physical_event_acceptance_keeps_native_gp_charge_rates_and_total_lead_current
 }
 
 #[test]
+fn physical_event_acceptance_rejects_incomplete_winding_history_before_rotation() {
+    for damaged in 0..4 {
+        let (engine, mut circuit, mut matrix, incoming, mut history) = fixture(
+            "atomic winding event\nVc c 0 2\nVb b 0 DC .6 PWL(0 .6 1 .6 1 .64)\nQ1 c b 0 qm\nC1 b 0 1p\nR1 c l 10\nL1 l 0 .1\n.model qm NPN(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p)\n.end\n",
+        );
+        let point = engine
+            .prepare_physical_event(
+                &circuit,
+                &history,
+                PhysicalEventStep {
+                    integration_coefficients: None,
+                    incoming: &incoming,
+                    time: 1.0,
+                    dt: 1.0,
+                    phase_events: PhysicalEventOrders::Declared(&[Some(DelayEventOrder::Unknown)]),
+                },
+                &options(),
+                1e-20,
+                &NoAbort,
+            )
+            .unwrap();
+        match damaged {
+            0 => circuit.inductors.i_prev.clear(),
+            1 => circuit.inductors.i_prev_prev.clear(),
+            2 => circuit.inductors.i_prev_prev_prev.clear(),
+            3 => circuit.inductors.v_prev.clear(),
+            _ => unreachable!(),
+        }
+        let mut solution = point.state.solution.clone();
+        let before = format!(
+            "{solution:?}{history:?}{:?}{:?}",
+            circuit.capacitors, circuit.inductors
+        );
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            accept(
+                &engine,
+                &mut circuit,
+                &mut matrix,
+                &mut history,
+                &point,
+                &mut solution,
+            )
+        }));
+        assert!(
+            outcome.is_ok(),
+            "history {damaged} must be rejected without a panic"
+        );
+        assert!(
+            outcome.unwrap().is_err(),
+            "history {damaged} must be rejected"
+        );
+        assert_eq!(
+            before,
+            format!(
+                "{solution:?}{history:?}{:?}{:?}",
+                circuit.capacitors, circuit.inductors
+            )
+        );
+    }
+}
+
+#[test]
 fn physical_event_acceptance_rejects_stale_state_and_phase_without_history_rotation() {
     let (engine, mut circuit, mut matrix, incoming, mut history) = fixture(
         "stale physical event\nVc c 0 2\nVb b 0 DC .6 PWL(0 .6 1 .6 1 .64)\nQ1 c b 0 qm\nC1 b 0 1p\n.model qm NPN(IS=1e-16 TF=1n PTF=30 CJE=1p CJC=.2p)\n.end\n",
