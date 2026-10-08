@@ -1378,6 +1378,7 @@ impl XspiceInstance {
         self.model.name()
     }
 
+    #[cfg(feature = "veriloga")]
     pub(crate) fn analog_input_thresholds(&self) -> CmResult<Vec<super::AnalogInputThreshold>> {
         let thresholds = self.model.analog_input_thresholds(&self.context)?;
         for threshold in &thresholds {
@@ -1417,6 +1418,7 @@ impl XspiceInstance {
         Ok(thresholds)
     }
 
+    #[cfg(feature = "veriloga")]
     pub(crate) fn bind_mixed_input_thresholds(&mut self) {
         self.mixed_input_thresholds_bound = true;
     }
@@ -1425,6 +1427,7 @@ impl XspiceInstance {
         self.mixed_input_thresholds_bound
     }
 
+    #[cfg(feature = "veriloga")]
     pub(crate) fn analog_threshold_sample(&self, port: &str, element: usize) -> Option<Value> {
         let spec = self
             .port_indices
@@ -1796,6 +1799,7 @@ impl XspiceInstance {
         }
     }
 
+    #[cfg(any(feature = "veriloga", test))]
     pub(crate) fn observe_other_digital_drivers(
         &mut self,
         port_name: &str,
