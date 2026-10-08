@@ -725,12 +725,29 @@ impl<'a> HierarchyElaborator<'a> {
             let (mapped_name, names) = loop {
                 let mapped_name = self.fresh_name(name);
                 let mut names = Vec::with_capacity(array.len);
+                let dimensions = if array.dimensions.is_empty() {
+                    vec![(
+                        array.lower,
+                        array
+                            .lower
+                            .checked_add(array.len as i64 - 1)
+                            .ok_or_else(|| {
+                                internal_error("hierarchy array index overflow".into())
+                            })?,
+                    )]
+                } else {
+                    array.dimensions.clone()
+                };
+                let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65536)
+                    .map_err(|_| {
+                        internal_error("hierarchy array shape exceeds supported storage".into())
+                    })?;
                 for offset in 0..array.len {
-                    let index = array
-                        .lower
-                        .checked_add(offset as i64)
-                        .ok_or_else(|| internal_error("hierarchy array index overflow".into()))?;
-                    names.push(SmolStr::from(format!("{mapped_name}[{index}]")));
+                    let mut name = mapped_name.to_string();
+                    for index in layout.indices(offset).expect("array element") {
+                        name.push_str(&format!("[{index}]"));
+                    }
+                    names.push(SmolStr::from(name));
                 }
                 if names.iter().all(|name| !self.used_names.contains(name)) {
                     break (mapped_name, names);
@@ -753,6 +770,7 @@ impl<'a> HierarchyElaborator<'a> {
             self.flattened.arrays.insert(
                 mapped_name,
                 AnalyzedArray {
+                    dimensions: array.dimensions.clone(),
                     base: variable_base + array.base,
                     lower: array.lower,
                     len: array.len,

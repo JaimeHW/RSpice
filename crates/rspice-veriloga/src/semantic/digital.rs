@@ -418,6 +418,8 @@ pub struct AnalyzedDigitalSignal {
     pub range: Option<VectorBounds>,
     /// Unpacked element bounds, distinct from each element's packed range.
     pub unpacked: Option<VectorBounds>,
+    /// Authored unpacked axes; storage bounds above are flat for rank > 1.
+    pub dimensions: Vec<VectorBounds>,
     /// Declared width in bits.
     ///
     /// Zero for a `wreal`, which has no bit width at all: Verilog-AMS LRM 2.4
@@ -560,6 +562,8 @@ pub struct ElaboratedDigitalSignal {
 #[derive(Debug, Clone)]
 pub struct AnalyzedProcessLocal {
     pub unpacked: Option<VectorBounds>,
+    /// Authored unpacked axes; storage bounds above are flat for rank > 1.
+    pub dimensions: Vec<VectorBounds>,
     pub name: SmolStr,
     pub kind: ProcessLocalKind,
     /// Packed range of a `reg`, `None` for a scalar or a non-vector type.
@@ -833,14 +837,33 @@ impl SemanticAnalyzer {
                     layout.clone()
                 } else {
                     let layout = super::AnalyzedArray {
+                        dimensions: signal
+                            .dimensions
+                            .iter()
+                            .filter(|_| signal.dimensions.len() > 1)
+                            .map(|axis| (axis.msb, axis.lsb))
+                            .collect(),
                         base: analyzed.variables.len(),
                         lower: bounds.msb.min(bounds.lsb),
                         len: bounds.width() as usize,
                     };
+                    let axes: Vec<_> = signal
+                        .dimensions
+                        .iter()
+                        .map(|axis| (axis.msb, axis.lsb))
+                        .collect();
+                    let shape = crate::array_index::UnpackedArrayLayout::new(
+                        &axes,
+                        Self::MAX_ARRAY_ELEMENTS,
+                    )
+                    .expect("analyzed array");
                     for offset in 0..layout.len {
+                        let mut name = signal.name.to_string();
+                        for index in shape.indices(offset).expect("array element") {
+                            name.push_str(&format!("[{index}]"));
+                        }
                         analyzed.variables.push(super::AnalyzedVariable {
-                            name: format!("{}[{}]", signal.name, layout.lower + offset as i64)
-                                .into(),
+                            name: name.into(),
                             var_type: if is_real {
                                 VarType::Real
                             } else {
@@ -945,6 +968,7 @@ impl SemanticAnalyzer {
                     continue;
                 }
                 super::AnalyzedArray {
+                    dimensions: array.dimensions.clone(),
                     base: array.base,
                     lower: bounds.msb.min(bounds.lsb),
                     len: array.len,
@@ -957,6 +981,7 @@ impl SemanticAnalyzer {
                     continue;
                 }
                 super::AnalyzedArray {
+                    dimensions: Vec::new(),
                     base: slot,
                     lower: 0,
                     len: 1,
@@ -981,6 +1006,7 @@ impl SemanticAnalyzer {
                 .insert(signal.name.clone(), validity_name.clone());
             if signal.unpacked.is_some() {
                 let validity_layout = super::AnalyzedArray {
+                    dimensions: Vec::new(),
                     base: validity_base,
                     lower: layout.lower,
                     len: layout.len,
@@ -1253,7 +1279,8 @@ impl SemanticAnalyzer {
                     );
                     continue;
                 }
-                let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+                let (unpacked, dimensions) =
+                    self.resolve_unpacked_range(&item.dimensions, &item.name);
                 if !item.dimensions.is_empty() && unpacked.is_none() {
                     continue;
                 }
@@ -1261,6 +1288,7 @@ impl SemanticAnalyzer {
                 signals.push(AnalyzedDigitalSignal {
                     initializer: item.init.clone(),
                     unpacked,
+                    dimensions,
                     name: item.name.clone(),
                     class: DigitalSignalClass::Variable(kind),
                     signedness,
@@ -1432,6 +1460,7 @@ impl SemanticAnalyzer {
                 signals.push(AnalyzedDigitalSignal {
                     initializer: None,
                     unpacked: None,
+                    dimensions: Vec::new(),
                     name: name.clone(),
                     class: DigitalSignalClass::Net(DigitalNetKind::Wire),
                     signedness: declaration.signedness,
@@ -1460,6 +1489,7 @@ impl SemanticAnalyzer {
                 signals.push(AnalyzedDigitalSignal {
                     initializer: None,
                     unpacked: None,
+                    dimensions: Vec::new(),
                     name: name.clone(),
                     class: DigitalSignalClass::Net(DigitalNetKind::Wire),
                     signedness: Signedness::Unsigned,
@@ -1529,7 +1559,7 @@ impl SemanticAnalyzer {
             );
             return;
         }
-        let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+        let (unpacked, dimensions) = self.resolve_unpacked_range(&item.dimensions, &item.name);
         if !item.dimensions.is_empty() && unpacked.is_none() {
             return;
         }
@@ -1543,6 +1573,7 @@ impl SemanticAnalyzer {
                 .flatten(),
             name: item.name.clone(),
             unpacked,
+            dimensions,
             class,
             signedness,
             range,
@@ -1561,24 +1592,46 @@ impl SemanticAnalyzer {
         &mut self,
         dimensions: &[ArrayDimension],
         name: &str,
-    ) -> Option<VectorBounds> {
+    ) -> (Option<VectorBounds>, Vec<VectorBounds>) {
         if dimensions.is_empty() {
-            return None;
+            return (None, Vec::new());
         }
-        let [dimension] = dimensions else {
-            self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
-                "multidimensional discrete array `{name}` requires multidimensional storage lowering"
-            )), dimensions[0].span);
-            return None;
+        let mut axes = Vec::with_capacity(dimensions.len());
+        for dimension in dimensions {
+            let Some(axis) = self.resolve_vector_range(
+                Some(&VectorRange {
+                    msb: dimension.start.clone(),
+                    lsb: dimension.end.clone(),
+                    span: dimension.span,
+                }),
+                &format!("unpacked array {name}"),
+            ) else {
+                return (None, Vec::new());
+            };
+            axes.push(axis);
+        }
+        let bounds: Vec<_> = axes.iter().map(|axis| (axis.msb, axis.lsb)).collect();
+        let Ok(layout) =
+            crate::array_index::UnpackedArrayLayout::new(&bounds, Self::MAX_ARRAY_ELEMENTS)
+        else {
+            self.record_error_at(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "unpacked array `{name}` exceeds the supported {} elements",
+                    Self::MAX_ARRAY_ELEMENTS
+                )),
+                dimensions[0].span,
+            );
+            return (None, Vec::new());
         };
-        self.resolve_vector_range(
-            Some(&VectorRange {
-                msb: dimension.start.clone(),
-                lsb: dimension.end.clone(),
-                span: dimension.span,
-            }),
-            &format!("unpacked array {name}"),
-        )
+        let flat = if axes.len() == 1 {
+            axes[0]
+        } else {
+            VectorBounds {
+                msb: 0,
+                lsb: layout.len() as i64 - 1,
+            }
+        };
+        (Some(flat), axes)
     }
 
     /// Resolve a packed range to constant bounds.
@@ -1881,7 +1934,8 @@ impl SemanticAnalyzer {
                 VarType::String => ProcessLocalKind::String,
             };
             for item in &declaration.items {
-                let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+                let (unpacked, dimensions) =
+                    self.resolve_unpacked_range(&item.dimensions, &item.name);
                 if !item.dimensions.is_empty() && unpacked.is_none() {
                     continue;
                 }
@@ -1889,6 +1943,7 @@ impl SemanticAnalyzer {
                     &mut scope,
                     AnalyzedProcessLocal {
                         unpacked,
+                        dimensions,
                         name: item.name.clone(),
                         kind,
                         range: None,
@@ -1904,7 +1959,8 @@ impl SemanticAnalyzer {
         for declaration in &block.digital_variables {
             let range = self.resolve_vector_range(declaration.range.as_ref(), "reg");
             for item in &declaration.items {
-                let unpacked = self.resolve_unpacked_range(&item.dimensions, &item.name);
+                let (unpacked, dimensions) =
+                    self.resolve_unpacked_range(&item.dimensions, &item.name);
                 if !item.dimensions.is_empty() && unpacked.is_none() {
                     continue;
                 }
@@ -1912,6 +1968,7 @@ impl SemanticAnalyzer {
                     &mut scope,
                     AnalyzedProcessLocal {
                         unpacked,
+                        dimensions,
                         name: item.name.clone(),
                         kind: ProcessLocalKind::Reg,
                         range,
@@ -2090,12 +2147,39 @@ impl SemanticAnalyzer {
         })
     }
 
+    fn unpacked_rank(
+        &self,
+        name: &SmolStr,
+        signals: &[AnalyzedDigitalSignal],
+        index: &HashMap<SmolStr, usize>,
+    ) -> usize {
+        match self.resolve_digital_name(name, index) {
+            Resolution::ProcessLocal(local) => local.dimensions.len(),
+            Resolution::Digital(position) => signals[position].dimensions.len(),
+            Resolution::Analog(SymbolKind::Variable) => self
+                .arrays
+                .get(name)
+                .map_or(0, |array| array.dimensions.len().max(1)),
+            _ => 0,
+        }
+    }
+
     fn check_array_packed_select(
         &mut self,
         select: &ArraySelectExpr,
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
     ) {
+        let rank = self.unpacked_rank(&select.name, signals, index);
+        let Some((_, packed)) = select.split(rank) else {
+            self.record_error_at(SemanticErrorKind::InvalidExpression(format!(
+                "array `{}` requires {rank} unpacked indices before an optional packed selection", select.name
+            )), select.span);
+            return;
+        };
+        if packed.is_none() {
+            return;
+        }
         let range = match self.resolve_digital_name(&select.name, index) {
             Resolution::ProcessLocal(local)
                 if local.unpacked.is_some() && local.kind.is_selectable() =>
@@ -2281,6 +2365,13 @@ impl SemanticAnalyzer {
         index: &HashMap<SmolStr, usize>,
         bound: SelectBound,
     ) -> Option<(VectorBounds, i64)> {
+        let rank = self.unpacked_rank(name, signals, index);
+        if rank > 1 {
+            self.record_error_at(SemanticErrorKind::InvalidExpression(format!(
+                "array `{name}` requires {rank} unpacked indices; a partial array is not a scalar value"
+            )), expression.span());
+            return None;
+        }
         let unpacked = match self.resolve_digital_name(name, index) {
             Resolution::ProcessLocal(local) => local.unpacked.is_some(),
             Resolution::Digital(position) => signals[position].unpacked.is_some(),

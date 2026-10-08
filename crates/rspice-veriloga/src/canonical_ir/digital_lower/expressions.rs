@@ -290,13 +290,26 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
                 signed: false,
                 real: false,
             },
-            Expression::Digital(DigitalExpr::ArraySelect(value)) => Shape {
-                width: match &value.select {
-                    PackedSelect::Bit(_) => 1,
-                    PackedSelect::Part { msb, lsb } => result.part_width(msb, lsb),
-                },
-                signed: false,
-                real: false,
+            Expression::Digital(DigitalExpr::ArraySelect(value)) => {
+                if lowerer.selects_array_element(value) {
+                    let array = lowerer
+                        .digital_array(&value.name)
+                        .expect("resolved array element");
+                    Shape {
+                        width: lowerer.width_of(array.base),
+                        signed: lowerer.signed_signal(array.base),
+                        real: lowerer.real_signal(array.base),
+                    }
+                } else {
+                    Shape {
+                        width: match &value.select {
+                            PackedSelect::Bit(_) => 1,
+                            PackedSelect::Part { msb, lsb } => result.part_width(msb, lsb),
+                        },
+                        signed: false,
+                        real: false,
+                    }
+                }
             },
             _ => Shape {
                 width: lowerer.self_width_leaf(expression),
@@ -347,6 +360,7 @@ enum Work<'a> {
     Element(BlockId, &'a ArrayLiteralElement),
     Concat(BlockId, usize, u32),
     ArrayRead(BlockId, &'a SmolStr, Span, bool),
+    ArrayOffset(BlockId, Vec<(i64, i64)>, Vec<bool>),
     BitSelect(BlockId, ValueId, VectorBounds, bool),
     ArraySelect(BlockId, &'a crate::ast::ArraySelectExpr, VectorBounds),
     LogicalLeft(BlockId, LogicalOp, &'a Expression),
@@ -453,6 +467,18 @@ pub(super) fn lower_prepared(
                         CfgValueKind::DigitalConcat { parts: repeated },
                     ));
                 }
+                continue;
+            }
+            Work::ArrayOffset(block, dimensions, signed) => {
+                let coordinates = values.split_off(values.len() - signed.len());
+                values.push(lowerer.builder.push(
+                    block,
+                    CfgValueType::FourState { width: 64 },
+                    CfgValueKind::DigitalArrayOffset {
+                        dimensions,
+                        indices: coordinates.into_iter().zip(signed).collect(),
+                    },
+                ));
                 continue;
             }
             Work::ArrayRead(block, name, span, signed) => {
@@ -659,8 +685,17 @@ pub(super) fn lower_prepared(
                 values.push(value);
             }
             Expression::Digital(DigitalExpr::ArraySelect(access)) => {
+                let rank = lowerer.array_rank(&access.name);
+                let Some((indices, packed)) = access.split(rank) else {
+                    lowerer.error(
+                        "array subscript count does not match its declaration",
+                        access.span,
+                    );
+                    values.push(lowerer.unknown(1));
+                    continue;
+                };
                 let range = if let Some(array) = lowerer.digital_array(&access.name) {
-                    if lowerer.real_signal(array.base) {
+                    if packed.is_some() && lowerer.real_signal(array.base) {
                         lowerer.error(
                             "packed selection requires integral array elements",
                             access.span,
@@ -677,22 +712,37 @@ pub(super) fn lower_prepared(
                 {
                     INTEGER_BOUNDS
                 } else {
-                    lowerer.error("packed selection requires an unpacked array of four-state or integer elements", access.span);
+                    lowerer.error("selection requires a supported unpacked array", access.span);
                     values.push(lowerer.unknown(1));
                     continue;
                 };
-                pending.push(Work::ArraySelect(block, access, range));
+                if packed.is_some() {
+                    pending.push(Work::ArraySelect(block, access, range));
+                }
                 pending.push(Work::ArrayRead(
                     block,
                     &access.name,
                     access.span,
-                    shapes.get(&access.index).signed,
+                    rank == 1 && shapes.get(indices[0]).signed,
                 ));
-                pending.push(Work::Expression(
-                    block,
-                    &access.index,
-                    value_mode(shapes.get(&access.index)),
-                ));
+                if rank > 1 {
+                    let dimensions = lowerer
+                        .array_declaration(&access.name)
+                        .expect("discrete array")
+                        .dimensions
+                        .clone();
+                    let signed = indices
+                        .iter()
+                        .map(|index| shapes.get(index).signed)
+                        .collect();
+                    pending.push(Work::ArrayOffset(block, dimensions, signed));
+                }
+                pending.extend(
+                    indices
+                        .into_iter()
+                        .rev()
+                        .map(|index| Work::Expression(block, index, value_mode(shapes.get(index)))),
+                );
             }
             Expression::Conditional(value) => {
                 let domain = if real {

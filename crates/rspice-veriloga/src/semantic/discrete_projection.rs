@@ -10,6 +10,7 @@ struct SignalShape {
     /// Distinguish a declared one-bit vector from an un-ranged scalar.
     selectable: bool,
     unpacked: Option<VectorBounds>,
+    unpacked_rank: usize,
     real: bool,
 }
 
@@ -40,6 +41,7 @@ impl ProjectionBuilder {
                     range: signal.range.unwrap_or(VectorBounds::SCALAR),
                     selectable: signal.range.is_some(),
                     unpacked: signal.unpacked,
+                    unpacked_rank: signal.dimensions.len(),
                     real: signal.class.is_real(),
                 },
             )
@@ -73,6 +75,11 @@ impl SemanticAnalyzer {
                 "packed analog read of `{name}` requires discrete storage"
             )));
         };
+        if shape.unpacked_rank > 1 {
+            return Err(error(format!(
+                "analog read of multidimensional array '{name}' requires continuous coordinate lowering"
+            )));
+        }
         if shape.real || shape.unpacked.is_some() != word.is_some() {
             return Err(error(format!(
                 "packed analog read of `{name}` requires a four-state scalar or a selected unpacked element"
@@ -284,6 +291,7 @@ impl SemanticAnalyzer {
                     self.arrays.insert(
                         name.clone(),
                         AnalyzedArray {
+                            dimensions: Vec::new(),
                             base: 0,
                             lower,
                             len: cells,
@@ -354,7 +362,12 @@ impl SemanticAnalyzer {
                 (&projection.validity, validity_base),
             ] {
                 if is_array {
-                    let layout = AnalyzedArray { base, lower, len };
+                    let layout = AnalyzedArray {
+                        dimensions: Vec::new(),
+                        base,
+                        lower,
+                        len,
+                    };
                     self.arrays.insert(name.clone(), layout.clone());
                     module.arrays.insert(name.clone(), layout);
                 }

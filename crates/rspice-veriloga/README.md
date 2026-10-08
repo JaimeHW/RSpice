@@ -251,8 +251,8 @@ rollback and checkpoint restoration. Custom digital stores must initialize from
 `DigitalSignal::initial_value` when present. Packed initializers retain signed
 extension, truncation, ascending ranges and X/Z values. This follows the
 VAMS-2023 pre-simulation contract (8.2), including when a variable has no process
-writer. One-dimensional unpacked variable arrays use the same ownership and
-initial-storage contract.
+writer. Digitally owned unpacked variable arrays use the same ownership and
+initial-storage contract, including multidimensional declarations.
 
 Digital processes can read elements of one-dimensional analog-owned `real` and
 `integer` arrays using constant or runtime indices. Reads retain the element
@@ -261,7 +261,8 @@ analog evaluation's published storage and sampling barrier; resumption preserves
 the chosen index and does not replay earlier digital writes. Real indices use
 the shared nearest-integer conversion. Unknown, unrepresentable, and out-of-range
 indices produce an explicit diagnostic, consistent with the current analog array
-runtime. Multidimensional array storage still requires work.
+runtime. Multidimensional analog-owned arrays and direct analog reads of
+multidimensional discrete arrays still require continuous coordinate lowering.
 Canonical schema 67 versions this indexed-read contract.
 Schema 68 requires finite integral declaration bounds, preserves integer-valued
 constant indices without floating-point narrowing, and checks extents before
@@ -671,8 +672,23 @@ Exact parameters whose overrides change their numeric/elaboration
 classification still require the corresponding general parameter typing work;
 this pass does not freeze numeric slots to hide that gap.
 
+Digitally owned multidimensional `reg`, `integer`, and `real` arrays execute
+from source in module scope and static process locals. Each unpacked coordinate
+is checked independently before flattening; negative/descending bounds, exact
+wide integer indices, nested declaration-order initializers, typed element
+reads/writes, packed selections, delayed assignment targets, event waits, and
+parameterized hierarchy share the existing scalar-cell runtime. The rightmost
+axis varies fastest. Invalid four-state coordinates preserve the existing
+unknown-read/no-write policy, while real-array invalid access retains its
+explicit diagnostic. Local shadowing and source element names survive linking.
+These digital arrays can control analog equations through scalar discrete state;
+direct multidimensional analog access remains explicitly unsupported. Canonical
+schema 113 carries the shape and checked coordinate operation. This execution
+coverage uses the portable digital runtime; native/generated digital execution
+and the remaining platform/restart qualification are separate requirements.
+
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
-initializer patterns, multidimensional shapes, full parameter-dependent
+initializer patterns, multidimensional analog access, full parameter-dependent
 shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
 are still open.
 

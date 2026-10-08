@@ -2854,12 +2854,12 @@ fn no_digital_lowering_refusal_reaches_the_author_as_an_internal_error() {
             "process-local `string`",
             "Unsupported feature: ",
         ),
-        // One-dimensional local arrays execute; multidimensional layout is pending.
+        // A partial multidimensional array is not a scalar expression.
         (
             "    reg q;\n\
-             \x20   initial begin : work reg [1:0] m [0:3][0:1]; q = 1'b0; end",
-            "multidimensional discrete array `m`",
-            "Unsupported feature: ",
+             \x20   initial begin : work reg [1:0] m [0:3][0:1]; q = m[0]; end",
+            "requires 2 unpacked indices",
+            "Invalid expression: ",
         ),
         // `@*` over a statement that reads nothing would never resume.
         (
@@ -8477,4 +8477,191 @@ fn iterative_concat_zero_count_preserves_operand_errors() {
         "x",
         "failed operand must not publish the assignment"
     );
+}
+
+#[test]
+fn multidimensional_arrays_execute_source_coordinates_initializers_and_waits() {
+    use rspice_veriloga::canonical_ir::digital::DigitalInitialValue;
+    let mut h = Harness::from_source(
+        r#"
+module matrix;
+ reg signed [7:0] memory[1:0][-1:1]='{'{8'h80,2,3},'{4,5,6}};
+ integer codes[3:2][0:1]='{'{-1,2.5},'{7,8}};
+ real weights[1:0][4:5]='{'{0.25,0.5},'{1.5,2.0}};
+ integer row, col; reg [31:0] wide, rounded, local_value;
+ reg [7:0] part, invalid, captured, observed, event_value, exact_value;
+ reg real_index_ok, code_sign; real result;
+ initial begin : work
+   integer cube[1:0][-1:0][2:1]='{'{'{1,2},'{3,4}},'{'{5,6},'{7,8}}};
+   real local_weights[2:1][-2:-1]='{'{0.5,0.75},'{1.0,1.25}};
+   reg [7:0] exact[64'sd9007199254740992:64'sd9007199254740993][-1:0];
+   codes[3][0]=codes[3][0]; weights[1][4]=weights[1][4];
+   wide=memory[1][-1]; rounded=codes[3][1]; code_sign=codes[3][0][31];
+   local_value=cube[0][0][1]; result=weights[0][5]+local_weights[1][-1];
+   exact[64'sd9007199254740992][-1]=12;
+   exact[64'sd9007199254740993][-1]=34;
+   exact_value=exact[64'sd9007199254740992][-1];
+   part=memory[1][-1][7:4]; real_index_ok=(memory[0.6][-0.6]===8'h80);
+   memory[0][2]=99; memory[1'bx][0]=99; invalid=memory[0][2];
+   row=1; col=-1; memory[row][col]<=#3 8'ha5; row=0; col=1;
+   local_weights[1][-1]<=0.75;
+   memory[0][0][3:0]=9;
+   captured=#4 memory[1][-1]; observed=memory[1][-1];
+   result=weights[0][5]+local_weights[1][-1];
+   @(memory[row][col]); event_value=memory[row][col];
+ end
+endmodule
+"#,
+    );
+    h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
+    h.plan.validate().unwrap();
+    for signal in &h.plan.signals {
+        match &signal.initial_value {
+            Some(DigitalInitialValue::FourState(value)) => {
+                h.store.values[usize::from(signal.id)] = value.clone()
+            }
+            Some(DigitalInitialValue::Real(value)) => {
+                h.store.reals[usize::from(signal.id)] = *value
+            }
+            None => {}
+        }
+    }
+    let wait = expect_suspended(h.start(0));
+    assert_eq!(h.get("wide"), format!("{:032b}", -128i32 as u32));
+    assert_eq!(h.get("rounded"), format!("{:032b}", 3));
+    assert_eq!(h.get("local_value"), format!("{:032b}", 8));
+    assert_eq!(h.get("code_sign"), "1");
+    assert_eq!(h.get("part"), "00001000");
+    assert_eq!(h.get("real_index_ok"), "1");
+    assert_eq!(h.get("exact_value"), "00001100");
+    assert_eq!(h.get_real("result"), 3.25);
+    assert_eq!(h.get("invalid"), "xxxxxxxx");
+    assert_eq!(
+        h.get("memory[0][1]"),
+        "00000110",
+        "out-of-range axis must not alias a different row"
+    );
+    let updates = std::mem::take(&mut h.store.deferred);
+    assert_eq!(updates.len(), 2);
+    for update in &updates {
+        apply_deferred(&h.plan, &mut h.store, update).unwrap();
+    }
+    let wait = expect_suspended(h.resume(0, wait.resume_state()));
+    assert_eq!(h.get_real("result"), 2.75);
+    assert_eq!(h.get("memory[0][0]"), "00001001");
+    assert_eq!(h.get("captured"), "10000000");
+    assert_eq!(
+        h.get("observed"),
+        "10100101",
+        "NBA captures both original coordinates"
+    );
+    let (DigitalWaitRequest::Expressions(mut event), state) = wait.into_parts() else {
+        panic!("array event")
+    };
+    h.set("memory[0][1]", "00110011");
+    let mut scratch = rspice_veriloga::canonical_ir::digital_eval::DigitalEvalScratch::new();
+    let element = h.signal("memory[0][1]");
+    assert!(
+        event
+            .observe(&h.plan, element, &mut h.store, &mut scratch)
+            .unwrap()
+    );
+    expect_finished(h.resume(0, &state));
+    assert_eq!(h.get("event_value"), "00110011");
+}
+
+#[test]
+fn multidimensional_arrays_preserve_hierarchy_parameters_and_local_shadowing() {
+    let mut h = Harness::from_module(
+        r#"
+module child(output reg [31:0] q);
+ parameter integer LAST=1;
+ reg [7:0] memory[LAST:0][-1:0];
+ initial begin : work
+   integer memory[1:0][3:2]='{'{10,11},'{20,21}};
+   #1; q=memory[LAST][2]; memory[LAST][2]=q+1;
+   #1; q=memory[LAST][2];
+ end
+ initial begin memory[LAST][-1]=99; memory[0][0]=88; end
+endmodule
+module top; child a(); child #(.LAST(0)) b(); endmodule
+"#,
+        Some("top"),
+    );
+    h.plan.validate().unwrap();
+    let mut waiting = Vec::new();
+    for process in 0..h.plan.processes.len() {
+        if let DigitalProcessOutcome::Suspended(wait) = h.start(process) {
+            waiting.push((process, wait.resume_state().clone()));
+        }
+    }
+    assert_eq!(waiting.len(), 2);
+    for (process, state) in &mut waiting {
+        *state = expect_suspended(h.resume(*process, state))
+            .resume_state()
+            .clone();
+    }
+    assert_eq!(h.get("a.q"), format!("{:032b}", 11));
+    assert_eq!(h.get("b.q"), format!("{:032b}", 21));
+    for (process, state) in waiting {
+        expect_finished(h.resume(process, &state));
+    }
+    assert_eq!(h.get("a.q"), format!("{:032b}", 12));
+    assert_eq!(h.get("b.q"), format!("{:032b}", 22));
+    assert_eq!(h.get("a.memory[1][-1]"), "01100011");
+    assert_eq!(h.get("b.memory[0][-1]"), "01100011");
+}
+
+#[test]
+fn multidimensional_arrays_diagnose_rank_shape_and_storage_errors() {
+    for (body, expected) in [
+        (
+            "reg [7:0] m[0:1][0:2]; reg q; initial q=m[0];",
+            "requires 2 unpacked indices",
+        ),
+        (
+            "reg m[0:1][0:2]; initial m[0]=1;",
+            "requires 2 unpacked indices",
+        ),
+        (
+            "reg m[0:1][0:2][0:1]; reg q; initial q=m[0][0];",
+            "requires 3 unpacked indices",
+        ),
+        (
+            "reg m[0:1][0:2]; reg q; initial q=m[0][0][0][0];",
+            "requires 2 unpacked indices",
+        ),
+        (
+            "reg m[0:1][0:2]='{'{1,0},'{0,1}};",
+            "dimension 2 requires 3 elements",
+        ),
+        (
+            "initial begin : b real m[0:1][0:1]='{'{1.0,2.0},3.0}; end",
+            "dimension 2 requires an array literal",
+        ),
+        ("reg m[0:256][0:256];", "65536 elements"),
+        (
+            "electrical p; reg [7:0] m[0:1][0:1]; initial m[0][0]=1; analog I(p)<+m[0][0];",
+            "continuous coordinate lowering",
+        ),
+        (
+            "electrical p; reg [7:0] m[0:1][0:1]; initial m[0][0]=1; analog I(p)<+m[0][0][7:4];",
+            "continuous coordinate lowering",
+        ),
+        (
+            "parameter N=2; initial begin : b integer N; reg m[0:N][0:1]; end",
+            "bounds must be constant",
+        ),
+    ] {
+        let source = format!("module invalid; {body} endmodule");
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(&source)
+            .expect_err(body)
+            .to_string();
+        assert!(
+            error.contains(expected),
+            "{body}: expected {expected}: {error}"
+        );
+        assert!(!error.contains("Internal error"), "{error}");
+    }
 }

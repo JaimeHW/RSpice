@@ -1032,20 +1032,29 @@ impl Parser<'_> {
         index: Expression,
         start: crate::Span,
     ) -> Result<ArraySelectExpr, ParseError> {
-        self.expect(TokenKind::LBracket)?;
-        let first = self.parse_expression()?;
-        let select = if self.match_token(TokenKind::Colon) {
-            PackedSelect::Part {
-                msb: Box::new(first),
-                lsb: Box::new(self.parse_expression()?),
+        let mut additional_indices = Vec::new();
+        let select = loop {
+            self.expect(TokenKind::LBracket)?;
+            let first = self.parse_expression()?;
+            if self.match_token(TokenKind::Colon) {
+                let lsb = self.parse_expression()?;
+                self.expect(TokenKind::RBracket)?;
+                break PackedSelect::Part {
+                    msb: Box::new(first),
+                    lsb: Box::new(lsb),
+                };
             }
-        } else {
-            PackedSelect::Bit(Box::new(first))
+            self.expect(TokenKind::RBracket)?;
+            if self.check(TokenKind::LBracket) {
+                additional_indices.push(first);
+            } else {
+                break PackedSelect::Bit(Box::new(first));
+            }
         };
-        self.expect(TokenKind::RBracket)?;
         Ok(ArraySelectExpr {
             name,
             index: Box::new(index),
+            additional_indices,
             select,
             span: start.extend(self.previous_span()),
         })

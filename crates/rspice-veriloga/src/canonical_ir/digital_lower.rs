@@ -558,7 +558,7 @@ fn lower_with_analog_variables(
     // already literals.
     let array_storage: HashMap<_, _> = arrays
         .iter()
-        .map(|array| (array.storage.base, array.storage))
+        .map(|array| (array.storage.base, array.clone()))
         .collect();
     let no_constants = ResolvedConstants::default();
     let no_analog_variables = HashMap::new();
@@ -920,7 +920,7 @@ fn reject_overdriven_real_nets(
 fn lower_continuous_assign(
     assignment: &crate::semantic::AnalyzedContinuousAssign,
     signals: &mut Vec<DigitalSignal>,
-    arrays: &HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
+    arrays: &HashMap<DigitalSignalId, super::digital::DigitalArray>,
     index: &HashMap<&str, DigitalSignalId>,
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
@@ -1060,20 +1060,32 @@ fn append_signal(
             lower: bounds.msb.min(bounds.lsb),
             len: bounds.width(),
         };
+        let array = super::digital::DigitalArray {
+            dimensions: if signal.dimensions.len() > 1 {
+                signal
+                    .dimensions
+                    .iter()
+                    .map(|axis| (axis.msb, axis.lsb))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            name,
+            bounds: (bounds.msb, bounds.lsb),
+            storage,
+        };
+        let layout = array.layout().expect("analyzed array layout");
         for offset in 0..storage.len {
             let id = DigitalSignalId::from(signals.len());
             signals.push(lower_signal(
                 signal,
                 id,
-                format!("{name}[{}]", storage.lower + i64::from(offset)).into(),
+                array
+                    .element_name_with_layout(&layout, offset as usize)
+                    .expect("array element"),
             ));
         }
-        arrays.push(super::digital::DigitalArray {
-            dimensions: Vec::new(),
-            name,
-            bounds: (bounds.msb, bounds.lsb),
-            storage,
-        });
+        arrays.push(array);
     } else {
         signals.push(lower_signal(signal, base, name));
     }
@@ -1150,7 +1162,7 @@ fn lower_process(
     process: &AnalyzedDigitalProcess,
     id: DigitalProcessId,
     signals: &mut Vec<DigitalSignal>,
-    arrays: &HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
+    arrays: &HashMap<DigitalSignalId, super::digital::DigitalArray>,
     local_arrays: &mut Vec<super::digital::DigitalArray>,
     index: &HashMap<&str, DigitalSignalId>,
     constants: &ResolvedConstants,
@@ -1471,7 +1483,7 @@ struct ProcessLowerer<'a> {
     constant_expression: bool,
     time_scale: crate::time_scale::ModuleTimeScale,
     signals: &'a mut Vec<DigitalSignal>,
-    arrays: &'a HashMap<DigitalSignalId, super::digital::DigitalArrayRef>,
+    arrays: &'a HashMap<DigitalSignalId, super::digital::DigitalArray>,
     index: &'a HashMap<&'a str, DigitalSignalId>,
     /// The elaboration-time constants a name in this body may denote.
     ///
@@ -2592,17 +2604,55 @@ impl ProcessLowerer<'_> {
                     );
                     return;
                 };
-                let signed = self.self_signed(&access.index);
-                let index = self.array_index_value(block, &access.index);
+                let rank = self.array_rank(&access.name);
+                let Some((indices, packed)) = access.split(rank) else {
+                    self.error(
+                        "array subscript count does not match its declaration",
+                        access.span,
+                    );
+                    return;
+                };
+                // Capture each coordinate once, in source order, before a delayed NBA.
+                let (index, signed) = if rank == 1 {
+                    (
+                        self.array_index_value(block, indices[0]),
+                        self.self_signed(indices[0]),
+                    )
+                } else {
+                    let dimensions = self
+                        .array_declaration(&access.name)
+                        .expect("discrete array")
+                        .dimensions
+                        .clone();
+                    let indices = indices
+                        .into_iter()
+                        .map(|index| {
+                            let signed = self.self_signed(index);
+                            (self.array_index_value(block, index), signed)
+                        })
+                        .collect();
+                    (
+                        self.builder.push(
+                            block,
+                            CfgValueType::FourState { width: 64 },
+                            CfgValueKind::DigitalArrayOffset {
+                                dimensions,
+                                indices,
+                            },
+                        ),
+                        false,
+                    )
+                };
                 let range = self.signals[usize::from(array.base)].declared_range();
-                let select = match &access.select {
-                    crate::ast::PackedSelect::Bit(bit) => {
+                let select = match packed {
+                    None => super::digital::DigitalArrayWriteSelect::Whole,
+                    Some(crate::ast::PackedSelect::Bit(bit)) => {
                         super::digital::DigitalArrayWriteSelect::Bit {
                             signed: self.self_signed(bit),
                             index: self.array_index_value(block, bit),
                         }
                     }
-                    crate::ast::PackedSelect::Part { msb, lsb } => {
+                    Some(crate::ast::PackedSelect::Part { msb, lsb }) => {
                         let Some(selected) = self.part_select_bounds(msb, lsb, range, access.span)
                         else {
                             return;
@@ -2613,8 +2663,15 @@ impl ProcessLowerer<'_> {
                         }
                     }
                 };
-                let width = self.packed_select_width(&access.select);
-                let value = self.resize(block, value, width, false);
+                let value = if packed.is_none() && self.real_signal(array.base) {
+                    value
+                } else {
+                    let width = packed.map_or_else(
+                        || self.width_of(array.base),
+                        |select| self.packed_select_width(select),
+                    );
+                    self.resize(block, value, width, false)
+                };
                 let kind = if nonblocking {
                     CfgValueKind::DigitalArrayNonblockingWrite {
                         array,
@@ -2917,7 +2974,14 @@ impl ProcessLowerer<'_> {
 
     fn lvalue_width(&mut self, target: &DigitalLValue) -> u32 {
         match target {
-            DigitalLValue::ArraySelect(access) => self.packed_select_width(&access.select),
+            DigitalLValue::ArraySelect(access) => {
+                if self.selects_array_element(access) {
+                    self.digital_array(&access.name)
+                        .map_or(1, |array| self.width_of(array.base))
+                } else {
+                    self.packed_select_width(&access.select)
+                }
+            }
             DigitalLValue::Identifier { name, .. } => match self.lookup_local(name) {
                 Some(local) => self.local_width(local),
                 None => self
@@ -3120,7 +3184,7 @@ impl ProcessLowerer<'_> {
                     if !self.retained_analog_read(&source,None) {
                         self.error(format!("analog array `{source}` is not assigned exclusively in analog event statements"),term.span);
                     }
-                    return self.arrays[&signal].cell_range().expect("validated occurrence array")
+                    return self.arrays[&signal].storage.cell_range().expect("validated occurrence array")
                         .map(|signal| DigitalSensitivityTerm { signal: DigitalSignalId::new(signal), edge: None }).collect();
                 }
                 vec![DigitalSensitivityTerm { signal, edge: term.edge.map(|edge| match edge {
@@ -3254,16 +3318,33 @@ impl ProcessLowerer<'_> {
         }
     }
 
-    fn digital_array(&self, name: &str) -> Option<super::digital::DigitalArrayRef> {
+    fn array_declaration(&self, name: &str) -> Option<&super::digital::DigitalArray> {
         if let Some(local) = self.lookup_local(name) {
-            return self.locals[usize::from(local)]
-                .array
-                .map(|(_, array)| array);
+            let (_, array) = self.locals[usize::from(local)].array?;
+            return self
+                .local_arrays
+                .iter()
+                .find(|item| item.storage.base == array.base)
+                .or_else(|| self.arrays.get(&array.base));
         }
-        self.index
-            .get(name)
-            .and_then(|id| self.arrays.get(id))
-            .copied()
+        self.index.get(name).and_then(|id| self.arrays.get(id))
+    }
+
+    fn digital_array(&self, name: &str) -> Option<super::digital::DigitalArrayRef> {
+        self.array_declaration(name).map(|array| array.storage)
+    }
+
+    fn array_rank(&self, name: &str) -> usize {
+        self.array_declaration(name).map_or_else(
+            || usize::from(self.analog_array(name).is_some()),
+            |array| array.dimensions.len().max(1),
+        )
+    }
+
+    fn selects_array_element(&self, access: &crate::ast::ArraySelectExpr) -> bool {
+        access
+            .split(self.array_rank(&access.name))
+            .is_some_and(|(_, packed)| packed.is_none())
     }
 
     fn read_dependencies(&self, name: &str) -> Vec<DigitalSignalId> {
@@ -3291,6 +3372,7 @@ impl ProcessLowerer<'_> {
             || vec![signal],
             |array| {
                 array
+                    .storage
                     .cell_range()
                     .expect("validated array shape")
                     .map(DigitalSignalId::new)
@@ -3473,6 +3555,12 @@ impl ProcessLowerer<'_> {
     /// Whether an assignment target holds a real.
     fn lvalue_is_real(&self, target: &DigitalLValue) -> bool {
         match target {
+            DigitalLValue::ArraySelect(access) => {
+                self.selects_array_element(access)
+                    && self
+                        .digital_array(&access.name)
+                        .is_some_and(|array| self.real_signal(array.base))
+            }
             DigitalLValue::Identifier { name, .. } => match self.lookup_local(name) {
                 Some(local) => self.local_is_real(local),
                 None => self

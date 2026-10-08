@@ -595,32 +595,25 @@ pub(super) fn initializers(
             signal.span.into(),
         )]
     };
-    let Expression::ArrayLiteral(literal) = expression else {
-        return Err(refuse("requires an array literal".into()));
-    };
-    if literal.first_replication().is_some() {
-        return Err(refuse(
-            "replicated array initialization requires element-pattern expansion".into(),
-        ));
-    }
-    if literal.elements.len() != len {
-        return Err(refuse(format!(
-            "requires {len} elements, found {}",
-            literal.elements.len()
-        )));
-    }
+    let axes: Vec<_> = signal
+        .dimensions
+        .iter()
+        .map(|axis| (axis.msb, axis.lsb))
+        .collect();
+    let layout =
+        crate::array_index::UnpackedArrayLayout::new(&axes, 65536).expect("analyzed array layout");
+    let elements =
+        super::local_arrays::initializer_elements(expression, &layout).map_err(refuse)?;
     let mut element = signal.clone();
     element.unpacked = None;
-    let mut values = Vec::with_capacity(len);
-    for value in &literal.elements {
-        let ArrayLiteralElement::Value(value) = value else {
-            unreachable!("replication rejected");
-        };
+    element.dimensions.clear();
+    let mut values = vec![None; len];
+    for (ordinal, value) in elements.into_iter().enumerate() {
         element.initializer = Some(value.clone());
-        values.push(initializer(&element, constants, time_scale)?);
-    }
-    if bounds.msb > bounds.lsb {
-        values.reverse();
+        let slot = layout
+            .declaration_slot(ordinal)
+            .expect("initializer element");
+        values[slot] = initializer(&element, constants, time_scale)?;
     }
     Ok(values)
 }

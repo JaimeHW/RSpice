@@ -1051,7 +1051,7 @@ impl DigitalExpr {
         match self {
             Self::FourState(_) => "four-state literal",
             Self::PartSelect(_) => "part-select",
-            Self::ArraySelect(_) => "packed array-element select",
+            Self::ArraySelect(_) => "array element or packed select",
             Self::Xnor(_) => "bitwise XNOR operator",
             Self::CaseEquality(_) => "case equality operator",
             Self::Reduction(_) => "reduction operator",
@@ -1193,27 +1193,52 @@ pub enum PackedSelect {
     },
 }
 
-/// `name[index][bit]` or `name[index][msb:lsb]`.
+/// Multiple subscripts, resolved against the declaration's unpacked rank.
+/// The final bracket may select an unpacked element or packed bits.
 #[derive(Debug, Clone)]
 pub struct ArraySelectExpr {
     pub name: SmolStr,
     pub index: Box<Expression>,
+    pub additional_indices: Vec<Expression>,
     pub select: PackedSelect,
     pub span: Span,
 }
 
 impl ArraySelectExpr {
-    pub fn children(&self) -> Vec<&Expression> {
-        match &self.select {
-            PackedSelect::Bit(bit) => vec![&self.index, bit],
-            PackedSelect::Part { msb, lsb } => vec![&self.index, msb, lsb],
+    /// Resolve the brackets without confusing an unpacked coordinate with a bit.
+    pub fn split(&self, rank: usize) -> Option<(Vec<&Expression>, Option<&PackedSelect>)> {
+        let mut indices = vec![self.index.as_ref()];
+        indices.extend(&self.additional_indices);
+        if rank == indices.len() {
+            Some((indices, Some(&self.select)))
+        } else if rank == indices.len() + 1 {
+            let PackedSelect::Bit(last) = &self.select else {
+                return None;
+            };
+            indices.push(last);
+            Some((indices, None))
+        } else {
+            None
         }
     }
-    pub fn children_mut(&mut self) -> Vec<&mut Expression> {
-        match &mut self.select {
-            PackedSelect::Bit(bit) => vec![&mut self.index, bit],
-            PackedSelect::Part { msb, lsb } => vec![&mut self.index, msb, lsb],
+
+    pub fn children(&self) -> Vec<&Expression> {
+        let mut children = vec![self.index.as_ref()];
+        children.extend(&self.additional_indices);
+        match &self.select {
+            PackedSelect::Bit(bit) => children.push(bit),
+            PackedSelect::Part { msb, lsb } => children.extend([msb.as_ref(), lsb.as_ref()]),
         }
+        children
+    }
+    pub fn children_mut(&mut self) -> Vec<&mut Expression> {
+        let mut children = vec![self.index.as_mut()];
+        children.extend(&mut self.additional_indices);
+        match &mut self.select {
+            PackedSelect::Bit(bit) => children.push(bit),
+            PackedSelect::Part { msb, lsb } => children.extend([msb.as_mut(), lsb.as_mut()]),
+        }
+        children
     }
 }
 

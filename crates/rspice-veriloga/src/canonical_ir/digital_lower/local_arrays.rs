@@ -13,50 +13,50 @@ impl ProcessLowerer<'_> {
         if dimensions.is_empty() {
             return;
         }
-        let [dimension] = dimensions else {
-            self.error(
-                "multidimensional process-local arrays require multidimensional storage lowering",
-                dimensions[0].span,
-            );
-            return;
-        };
-        let mut reads = BTreeSet::new();
-        collect_expression_reads(&dimension.start, &mut reads);
-        collect_expression_reads(&dimension.end, &mut reads);
-        let bounds = if reads.iter().any(|name| scope_names.contains(name)) {
-            None
-        } else {
-            self.constant(&dimension.start)
-                .zip(self.constant(&dimension.end))
-        };
-        let Some((msb, lsb)) = bounds else {
-            self.error(
-                "process-local array bounds must be constant signed 64-bit integers",
-                dimension.span,
-            );
-            return;
-        };
-        let Some(len) = msb
-            .abs_diff(lsb)
-            .checked_add(1)
-            .and_then(|len| u32::try_from(len).ok())
-        else {
-            self.error(
-                "process-local array extent exceeds supported storage",
-                dimension.span,
-            );
-            return;
-        };
-        if let Some(signal) = self.analog_local_signal(local) {
-            let Some(array) = self.arrays.get(&signal).copied() else {
-                self.invariant("analog local array has no shared layout", dimension.span);
-                return;
+        let span = dimensions[0].span;
+        let mut axes = Vec::with_capacity(dimensions.len());
+        for dimension in dimensions {
+            let mut reads = BTreeSet::new();
+            collect_expression_reads(&dimension.start, &mut reads);
+            collect_expression_reads(&dimension.end, &mut reads);
+            let bounds = if reads.iter().any(|name| scope_names.contains(name)) {
+                None
+            } else {
+                self.constant(&dimension.start)
+                    .zip(self.constant(&dimension.end))
             };
-            if array.lower != msb.min(lsb) || array.len != len {
-                self.invariant(
-                    "analog local array disagrees with its shared layout",
+            let Some(bounds) = bounds else {
+                self.error(
+                    "process-local array bounds must be constant signed 64-bit integers",
                     dimension.span,
                 );
+                return;
+            };
+            axes.push(bounds);
+        }
+        let Ok(layout) = crate::array_index::UnpackedArrayLayout::new(&axes, 65536) else {
+            self.error(
+                "process-local arrays support at most 65536 elements with representable indices",
+                span,
+            );
+            return;
+        };
+        let len = layout.len() as u32;
+        let (msb, lsb) = if axes.len() == 1 {
+            axes[0]
+        } else {
+            (0, i64::from(len) - 1)
+        };
+        let dimensions = if axes.len() > 1 { axes } else { Vec::new() };
+        if let Some(signal) = self.analog_local_signal(local) {
+            let Some(declared) = self.arrays.get(&signal) else {
+                self.invariant("analog local array has no shared layout", span);
+                return;
+            };
+            let array = declared.storage;
+            if array.lower != msb.min(lsb) || array.len != len || declared.dimensions != dimensions
+            {
+                self.invariant("analog local array disagrees with its shared layout", span);
                 return;
             }
             let initial = self.read_local(block, local);
@@ -83,7 +83,7 @@ impl ProcessLowerer<'_> {
         let Some(base) = u32::try_from(self.signals.len()).ok() else {
             self.error(
                 "process-local array signal IDs exceed supported storage",
-                dimension.span,
+                span,
             );
             return;
         };
@@ -94,8 +94,8 @@ impl ProcessLowerer<'_> {
         };
         if array.cell_range().is_none() {
             self.error(
-                "process-local arrays support at most 65536 elements with representable indices",
-                dimension.span,
+                "process-local array signal IDs exceed supported storage",
+                span,
             );
             return;
         }
@@ -117,6 +117,12 @@ impl ProcessLowerer<'_> {
             }
             storage_name.insert(0, '$');
         }
+        let metadata = DigitalArray {
+            dimensions,
+            name: storage_name.into(),
+            bounds: (msb, lsb),
+            storage: array,
+        };
         for offset in 0..len {
             let index = array.lower + i64::from(offset);
             let signal = DigitalSignalId::new(base + offset);
@@ -129,7 +135,9 @@ impl ProcessLowerer<'_> {
                 }),
                 initial_value: None,
                 id: signal,
-                name: format!("{storage_name}[{index}]").into(),
+                name: metadata
+                    .element_name_with_layout(&layout, offset as usize)
+                    .expect("local array element"),
                 kind: if declaration.real {
                     DigitalSignalKind::Real(DigitalRealResolution::Single)
                 } else {
@@ -157,12 +165,7 @@ impl ProcessLowerer<'_> {
             );
         }
         let bounds = VectorBounds { msb, lsb };
-        self.local_arrays.push(DigitalArray {
-            dimensions: Vec::new(),
-            name: storage_name.into(),
-            bounds: (msb, lsb),
-            storage: array,
-        });
+        self.local_arrays.push(metadata);
         self.locals[usize::from(local)].array = Some((bounds, array));
         // Shared marks this declaration as stored across waits; it is never
         // carried as a scalar resume argument or promoted a second time.
@@ -175,43 +178,28 @@ impl ProcessLowerer<'_> {
         local: DigitalLocalId,
         expression: &Expression,
     ) {
-        let (bounds, array) = self.locals[usize::from(local)].array.expect("local array");
-        let Expression::ArrayLiteral(literal) = expression else {
-            self.error(
-                "process-local array initializer requires an array literal",
-                expression.span(),
-            );
-            return;
+        let (_, array) = self.locals[usize::from(local)].array.expect("local array");
+        let declaration = self
+            .local_arrays
+            .iter()
+            .find(|declared| declared.storage.base == array.base)
+            .or_else(|| self.arrays.get(&array.base))
+            .expect("local array metadata");
+        let layout = declaration.layout().expect("validated local array");
+        let elements = match initializer_elements(expression, &layout) {
+            Ok(elements) => elements,
+            Err(message) => {
+                self.error(message, expression.span());
+                return;
+            }
         };
-        if literal.first_replication().is_some() {
-            self.error(
-                "replicated array initialization requires element-pattern expansion",
-                expression.span(),
-            );
-            return;
-        }
-        if literal.elements.len() != array.len as usize {
-            self.error(
-                format!(
-                    "process-local array initializer requires {} elements, found {}",
-                    array.len,
-                    literal.elements.len()
-                ),
-                expression.span(),
-            );
-            return;
-        }
         let real = self.local_is_real(local);
         let width = self.local_width(local);
         // Evaluate the complete pattern before publishing it. Bounds preserve
         // authored order even though the element store uses increasing indices.
-        let values: Vec<_> = literal
-            .elements
-            .iter()
-            .map(|element| {
-                let ArrayLiteralElement::Value(value) = element else {
-                    unreachable!("replication rejected")
-                };
+        let values: Vec<_> = elements
+            .into_iter()
+            .map(|value| {
                 if real {
                     self.real_expression(block, value)
                 } else {
@@ -221,14 +209,10 @@ impl ProcessLowerer<'_> {
             })
             .collect();
         for (offset, value) in values.into_iter().enumerate() {
-            let index = if bounds.msb <= bounds.lsb {
-                bounds.msb + offset as i64
-            } else {
-                bounds.msb - offset as i64
-            };
-            let signal = array
-                .element(index)
-                .expect("initializer index in declared bounds");
+            let slot = layout
+                .declaration_slot(offset)
+                .expect("initializer element");
+            let signal = DigitalSignalId::from(usize::from(array.base) + slot);
             self.builder.push(
                 block,
                 CfgValueType::Effect,
@@ -255,4 +239,46 @@ impl ProcessLowerer<'_> {
             declaration.shared.into_iter().collect()
         }
     }
+}
+
+/// Read nested patterns in authored dimension order. Leaf expressions may themselves
+/// be packed concatenations; only the unpacked rank determines the pattern depth.
+pub(super) fn initializer_elements<'a>(
+    expression: &'a Expression,
+    layout: &crate::array_index::UnpackedArrayLayout,
+) -> Result<Vec<&'a Expression>, String> {
+    let mut elements = Vec::with_capacity(layout.len());
+    let mut pending = vec![(expression, 0)];
+    while let Some((expression, depth)) = pending.pop() {
+        if depth == layout.axes().len() {
+            elements.push(expression);
+            continue;
+        }
+        let Expression::ArrayLiteral(literal) = expression else {
+            return Err(format!(
+                "array initializer dimension {} requires an array literal",
+                depth + 1
+            ));
+        };
+        let expected = layout.axes()[depth].len();
+        if literal.first_replication().is_some() {
+            return Err(
+                "replicated array initialization requires element-pattern expansion".into(),
+            );
+        }
+        if literal.elements.len() != expected {
+            return Err(format!(
+                "array initializer dimension {} requires {expected} elements, found {}",
+                depth + 1,
+                literal.elements.len()
+            ));
+        }
+        for element in literal.elements.iter().rev() {
+            let ArrayLiteralElement::Value(value) = element else {
+                unreachable!("replication rejected")
+            };
+            pending.push((value, depth + 1));
+        }
+    }
+    Ok(elements)
 }

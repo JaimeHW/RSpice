@@ -1935,6 +1935,19 @@ impl SemanticAnalyzer {
         // declarations do not choose a domain; their procedural writers do.
         self.assignment_events.register_arrays(&analyzed.arrays);
         self.analyze_digital(module, &mut analyzed);
+        for (name, array) in &analyzed.arrays {
+            if !array.dimensions.is_empty()
+                && !analyzed
+                    .digital
+                    .signals
+                    .iter()
+                    .any(|signal| signal.name == *name)
+            {
+                self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
+                    "multi-dimensional analog-owned array '{name}' requires continuous coordinate lowering"
+                )), module.span);
+            }
+        }
         if let Some(lowered) = &event_lowering {
             analyzed.digital.analog_events = lowered.bindings.clone();
             for (process, inputs) in analyzed
@@ -2360,108 +2373,101 @@ impl SemanticAnalyzer {
         storage_name: &SmolStr,
         analyzed: &mut AnalyzedModule,
     ) -> Option<AnalyzedArray> {
-        if item.dimensions.len() != 1 {
+        let mut axes = Vec::with_capacity(item.dimensions.len());
+        for dim in &item.dimensions {
+            // Bind before evaluating so a lexical variable cannot capture a parameter.
+            let start = constant_dependencies::bound_expression(self, &dim.start);
+            let end = constant_dependencies::bound_expression(self, &dim.end);
+            let bounds = [start.as_ref(), end.as_ref()];
+            let evaluate = |expression: Option<&Expression>| {
+                crate::canonical_ir::digital_lower::elaboration_constant(
+                    expression?,
+                    &self.digital_selector_constants,
+                    self.current_time_scale,
+                )
+                .map(|value| match value {
+                    crate::numeric_literal::NumericLiteralValue::Integer(value) => {
+                        ConstantValue::Integer(value)
+                    }
+                    crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                        ConstantValue::Real(value)
+                    }
+                })
+            };
+            let (Some(start), Some(end)) = (evaluate(bounds[0]), evaluate(bounds[1])) else {
+                self.record_error_at(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "array '{}' bounds must be compile-time constants",
+                        item.name
+                    )),
+                    dim.span,
+                );
+                return None;
+            };
+            let (Some(start), Some(end)) = (start.as_exact_i64(), end.as_exact_i64()) else {
+                self.record_error_at(SemanticErrorKind::InvalidExpression(format!(
+                    "array '{}' bounds must be finite integers in the signed 64-bit index range", item.name
+                )), dim.span);
+                return None;
+            };
+            let dependencies = crate::canonical_ir::digital_lower::expression_dependencies(
+                &self.digital_selector_constants,
+                self.current_time_scale,
+                bounds.into_iter().flatten(),
+            );
+            match dependencies {
+                Ok(dependencies) => {
+                    if let Err(error) =
+                        constant_dependencies::protect(analyzed, &dependencies, dim.span)
+                    {
+                        self.errors.push(error);
+                        return None;
+                    }
+                }
+                Err(message) => {
+                    self.record_error_at(SemanticErrorKind::InvalidExpression(message), dim.span);
+                    return None;
+                }
+            }
+            axes.push((start, end));
+        }
+        let Ok(shape) =
+            crate::array_index::UnpackedArrayLayout::new(&axes, Self::MAX_ARRAY_ELEMENTS)
+        else {
+            let detail = if let [(left, right)] = axes.as_slice() {
+                format!("has {} elements", u128::from(left.abs_diff(*right)) + 1)
+            } else {
+                "exceeds the supported element count".into()
+            };
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "multi-dimensional array '{}' is not supported",
-                    item.name
+                    "array '{}' {detail} (limit {})",
+                    item.name,
+                    Self::MAX_ARRAY_ELEMENTS
                 )),
                 item.span,
             );
             return None;
-        }
-        let dim = &item.dimensions[0];
-        // Reject lexical variable reads before consulting the module's
-        // parameter constants, so shadowing cannot change the selected scope.
-        let start = constant_dependencies::bound_expression(self, &dim.start);
-        let end = constant_dependencies::bound_expression(self, &dim.end);
-        let bounds = [start.as_ref(), end.as_ref()];
-        let evaluate = |expression: Option<&Expression>| {
-            crate::canonical_ir::digital_lower::elaboration_constant(
-                expression?,
-                &self.digital_selector_constants,
-                self.current_time_scale,
-            )
-            .map(|value| match value {
-                crate::numeric_literal::NumericLiteralValue::Integer(value) => {
-                    ConstantValue::Integer(value)
-                }
-                crate::numeric_literal::NumericLiteralValue::Real(value) => {
-                    ConstantValue::Real(value)
-                }
-            })
-        };
-        let (Some(start), Some(end)) = (evaluate(bounds[0]), evaluate(bounds[1])) else {
-            self.record_error_at(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "array '{}' bounds must be compile-time constants",
-                    item.name
-                )),
-                dim.span,
-            );
-            return None;
-        };
-        let (Some(start), Some(end)) = (start.as_exact_i64(), end.as_exact_i64()) else {
-            self.record_error_at(
-                SemanticErrorKind::InvalidExpression(format!(
-                    "array '{}' bounds must be finite integers in the signed 64-bit index range",
-                    item.name
-                )),
-                dim.span,
-            );
-            return None;
-        };
-        let dependencies = crate::canonical_ir::digital_lower::expression_dependencies(
-            &self.digital_selector_constants,
-            self.current_time_scale,
-            bounds.into_iter().flatten(),
-        );
-        match dependencies {
-            Ok(dependencies) => {
-                if let Err(error) =
-                    constant_dependencies::protect(analyzed, &dependencies, dim.span)
-                {
-                    self.errors.push(error);
-                    return None;
-                }
-            }
-            Err(message) => {
-                self.record_error_at(SemanticErrorKind::InvalidExpression(message), dim.span);
-                return None;
-            }
-        }
-        // The LRM writes ranges [lo:hi]; accept either order
-        let (lower, upper) = if start <= end {
-            (start, end)
-        } else {
-            (end, start)
-        };
-        // The full signed index domain spans 2^64 elements. Check its extent
-        // before narrowing to the target's allocation size (including Wasm).
-        let shape =
-            crate::array_index::UnpackedArrayLayout::new(&[(start, end)], Self::MAX_ARRAY_ELEMENTS);
-        let Ok(shape) = shape else {
-            let len = i128::from(upper) - i128::from(lower) + 1;
-            self.record_error_at(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "array '{}' has {len} elements (limit {})",
-                    item.name,
-                    Self::MAX_ARRAY_ELEMENTS
-                )),
-                dim.span,
-            );
-            return None;
         };
         let len = shape.len();
+        let lower = if axes.len() == 1 {
+            axes[0].0.min(axes[0].1)
+        } else {
+            0
+        };
         let value_type = match var_type {
             VarType::Real => ValueType::Real,
             VarType::Integer => ValueType::Integer,
             VarType::String => ValueType::String,
         };
         let base = analyzed.variables.len();
-        for k in lower..=upper {
+        for offset in 0..len {
+            let mut name = storage_name.to_string();
+            for index in shape.indices(offset).expect("array element") {
+                name.push_str(&format!("[{index}]"));
+            }
             analyzed.variables.push(AnalyzedVariable {
-                name: SmolStr::from(format!("{storage_name}[{k}]")),
+                name: name.into(),
                 var_type,
                 value_type,
                 is_state: false,
@@ -2469,7 +2475,12 @@ impl SemanticAnalyzer {
                 is_event_controlled: false,
             });
         }
-        Some(AnalyzedArray { base, lower, len })
+        Some(AnalyzedArray {
+            dimensions: if axes.len() > 1 { axes } else { Vec::new() },
+            base,
+            lower,
+            len,
+        })
     }
 
     /// Fold the active guard stack into a single condition expression
@@ -5385,6 +5396,14 @@ impl SemanticAnalyzer {
                     );
                     return Ok(());
                 };
+                if !layout.dimensions.is_empty() {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "array '{array_name}' requires all unpacked indices"
+                        )),
+                        *span,
+                    )));
+                }
                 self.symbols.mark_used(&array_name);
                 let index = self.lower_expression_with_side_effects(index, module, sink)?;
                 if let Some(k) = self.constant_array_index(&index, &array_name)? {
@@ -6673,6 +6692,21 @@ impl SemanticAnalyzer {
     }
 
     fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
+        if let Expression::ArrayAccess(access) = expr {
+            if self
+                .arrays
+                .get(&access.array)
+                .is_some_and(|array| !array.dimensions.is_empty())
+            {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "array '{}' requires all unpacked indices",
+                        access.array
+                    )),
+                    access.span,
+                )));
+            }
+        }
         Ok(match expr {
             Expression::Digital(DigitalExpr::PartSelect(select)) => self.lower_packed_analog_read(
                 &select.name,
@@ -6683,13 +6717,28 @@ impl SemanticAnalyzer {
                 },
                 select.span,
             )?,
-            Expression::Digital(DigitalExpr::ArraySelect(select)) => self
-                .lower_packed_analog_read(
+            Expression::Digital(DigitalExpr::ArraySelect(select)) => {
+                if !select.additional_indices.is_empty()
+                    || self
+                        .arrays
+                        .get(&select.name)
+                        .is_some_and(|array| !array.dimensions.is_empty())
+                {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "analog read of multidimensional array '{}' requires continuous coordinate lowering",
+                            select.name
+                        )),
+                        select.span,
+                    )));
+                }
+                self.lower_packed_analog_read(
                     &select.name,
                     Some(&select.index),
                     &select.select,
                     select.span,
-                )?,
+                )?
+            }
             // Other discrete syntax still requires its own continuous-domain contract.
             Expression::Digital(digital) => {
                 return Err(CompileError::Semantic(SemanticError::new(

@@ -247,6 +247,8 @@ pub enum AnalyzedRegion {
 /// variable storage starting at `base`
 #[derive(Debug, Clone)]
 pub struct AnalyzedArray {
+    /// Authored multidimensional axes; empty for an existing one-dimensional layout.
+    pub dimensions: Vec<(i64, i64)>,
     /// First element's index in the variables list
     pub base: usize,
     /// Declared lower bound (`x[lo:hi]` indexes from `lo`)

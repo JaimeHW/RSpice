@@ -4335,3 +4335,55 @@ A1 [%vd[0 sensed]] [d] detector
         );
     }
 }
+
+#[test]
+fn multidimensional_discrete_arrays_drive_loaded_mixed_hierarchy() {
+    let model = ModelFile::new(
+        "matrix_controller",
+        r#"
+`timescale 1ns/1ps
+module controller(p);
+ inout p; electrical p;
+ parameter integer ROW=1;
+ real matrix[1:0][-1:0]='{'{2.0,3.0},'{4.0,5.0}};
+ real command;
+ initial begin : control
+   integer offsets[1:0][3:2]='{'{0,1},'{2,3}};
+   matrix[ROW][-1]=matrix[ROW][-1];
+   command=matrix[ROW][-1]+offsets[ROW][2];
+   #1; matrix[ROW][-1]<=matrix[ROW][-1]+2.0;
+   #0; command=matrix[ROW][-1]+offsets[ROW][2];
+   #1; command=matrix[ROW][-1]+offsets[ROW][2];
+ end
+ analog I(p)<+(V(p)-command)/1000;
+endmodule
+module top(p); inout p; electrical p;
+ parameter integer ROW=1;
+ controller #(.ROW(ROW)) u(p);
+endmodule
+"#,
+    );
+    let result = run(
+        &format!(
+            "* multidimensional mixed controller\nXa a top ROW=1\nXb b top ROW=0\nRa a 0 1k\nRb b 0 1k\n.va \"{}\" top module=top\n.end\n",
+            model.deck_path()
+        ),
+        3e-9,
+        0.1e-9,
+    );
+    for (node, initial) in [("a", 1.5), ("b", 3.5)] {
+        for (&time, value) in result.time.iter().zip(waveform(&result, node)) {
+            let expected = if time < 0.9e-9 {
+                initial
+            } else if time > 2.1e-9 {
+                initial + 1.0
+            } else {
+                continue;
+            };
+            assert!(
+                (value - expected).abs() < 1e-8,
+                "{node} at {time}: {value} != {expected}"
+            );
+        }
+    }
+}
