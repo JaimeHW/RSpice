@@ -724,6 +724,21 @@ impl CircuitData {
         self.invalidate_xspice_event_dispatch();
     }
 
+    /// Separate a constructed connect module's event endpoint from its physical
+    /// node before simulation starts. Rebuild every derived connection index.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn rebind_xspice_digital_node(&mut self, from: usize, to: usize) {
+        self.xspice_event_loads.clear();
+        for instance in &mut self.xspice_instances {
+            instance.make_mut().rebind_digital_node(from, to);
+            instance.for_each_event_load_contribution(|node, load| {
+                *self.xspice_event_loads.entry(node).or_insert(0.0) += load;
+            });
+        }
+        self.rebuild_net_kinds();
+        self.invalidate_xspice_event_dispatch();
+    }
+
     /// Check if any XSPICE instance participates in event-driven scheduling.
     #[inline]
     pub fn has_xspice_event_driven_devices(&self) -> bool {

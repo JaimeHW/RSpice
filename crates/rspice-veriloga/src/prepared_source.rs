@@ -73,6 +73,15 @@ impl PreparedRuntimeSource {
     pub fn connect_specification(&self) -> ConnectSpecification {
         ConnectSpecification {
             source_identity: crate::canonical_ir::source_identity(&self.source),
+            source: self
+                .analyzed
+                .connect_rules
+                .has_declarations()
+                .then(|| std::sync::Arc::from(self.source.as_str())),
+            builtin_delegations: crate::connect::library::equivalent_declarations(
+                &self.source,
+                &self.analyzed.source,
+            ),
             rules: self.analyzed.connect_rules.clone(),
             disciplines: self.analyzed.disciplines.clone(),
             declares_module: !self.analyzed.modules.is_empty(),

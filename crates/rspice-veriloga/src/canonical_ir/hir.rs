@@ -807,6 +807,9 @@ pub struct HirModel {
     /// Value/validity state slot pairs for numeric discrete reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discrete_inputs: Vec<[VariableId; 2]>,
+    /// Explicit digital signal identity for every numeric input value slot.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub discrete_bindings: std::collections::BTreeMap<VariableId, SmolStr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discrete_selections: Vec<HirDiscreteSelection>,
     /// Sorted names whose values must be published during ordinary analog
@@ -1090,6 +1093,20 @@ impl HirModel {
                     width: selection.width,
                 })
                 .collect(),
+            discrete_bindings: module
+                .discrete_inputs
+                .iter()
+                .map(|&(value, _)| {
+                    let signal = module
+                        .discrete_selections
+                        .iter()
+                        .find(|selection| selection.value == value)
+                        .map(|selection| &selection.signal)
+                        .or_else(|| module.discrete_bindings.get(&value))
+                        .unwrap_or(&module.variables[value].name);
+                    (VariableId::from(value), signal.clone())
+                })
+                .collect(),
             discrete_inputs: module
                 .discrete_inputs
                 .iter()
@@ -1196,11 +1213,23 @@ impl HirModel {
             ));
         }
         let input_values: HashSet<_> = self.discrete_inputs.iter().map(|pair| pair[0]).collect();
+        if self.discrete_bindings.len() != input_values.len()
+            || input_values.iter().any(|value| {
+                self.discrete_bindings
+                    .get(value)
+                    .is_none_or(|name| name.is_empty())
+            })
+        {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "every discrete input must name exactly one digital signal binding",
+            ));
+        }
         let mut selected = HashSet::new();
         if self.discrete_selections.iter().any(|selection| {
             !input_values.contains(&selection.value)
                 || !selected.insert(selection.value)
-                || selection.signal.is_empty()
+                || self.discrete_bindings.get(&selection.value) != Some(&selection.signal)
                 || !(1..=if selection.encoded {
                     crate::array_index::PACKED_CHUNK_BITS
                 } else {

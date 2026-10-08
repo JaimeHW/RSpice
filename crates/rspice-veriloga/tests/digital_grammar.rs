@@ -2000,7 +2000,7 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             vec!["Circular dependency", "loop -> loop"],
         ),
         (
-            "a continuous-domain module inside a digital one",
+            "a continuous port connected directly to a discrete net",
             hierarchy(
                 "module res(p, n);\n\
                  \x20   inout p, n;\n     electrical p, n;\n\
@@ -2012,7 +2012,7 @@ fn unelaborated_instance_constructs_refuse_by_name() {
                  endmodule\n",
                 "    wire x, z;\n     gate g1(z, x);",
             ),
-            vec!["inside a discrete-domain module", "mixed-signal"],
+            vec!["discrete net", "without a connect module"],
         ),
     ];
 

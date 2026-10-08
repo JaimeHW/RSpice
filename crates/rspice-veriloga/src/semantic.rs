@@ -981,6 +981,7 @@ impl SemanticAnalyzer {
             symbol_table: SymbolTable::new(),
             digital: AnalyzedDigital::default(),
             discrete_inputs: Vec::new(),
+            discrete_bindings: HashMap::new(),
             discrete_selections: Vec::new(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
@@ -1166,6 +1167,22 @@ impl SemanticAnalyzer {
                         },
                     })?;
                     analyzed.ground_nodes.push(name.clone());
+                    continue;
+                }
+
+                if self.disciplines.get_discipline(&discipline)
+                    .is_some_and(|discipline| discipline.domain == Domain::Discrete)
+                {
+                    self.define_symbol(Symbol {
+                        name: name.clone(),
+                        kind: SymbolKind::Node,
+                        value_type: ValueType::NatureAccess,
+                        span: net.span,
+                        attrs: SymbolAttrs {
+                            discipline: Some(discipline.clone()),
+                            ..Default::default()
+                        },
+                    })?;
                     continue;
                 }
 

@@ -86,6 +86,8 @@ mod veriloga_sources;
 
 #[cfg(feature = "veriloga")]
 mod connect_modules;
+#[cfg(feature = "veriloga")]
+mod connect_execution;
 #[cfg(all(test, feature = "veriloga"))]
 mod elaboration_scan;
 #[cfg(feature = "veriloga")]
@@ -2566,6 +2568,10 @@ fn collect_flat_analog_nodes(
     circuit: &CircuitData,
     flat_elements: &[Element],
 ) {
+    #[cfg(feature = "veriloga")]
+    for host in &circuit.mixed_signal_hosts {
+        nodes.extend(host.electrical_terminal_nodes().filter(|node| *node > 0));
+    }
     // Generated bridge subcircuits are absent from the source element list.
     // Include their R/C/L terminals so a template cannot make an electrically
     // loaded event endpoint look like a direct event net.
@@ -4794,6 +4800,16 @@ fn add_planned_xspice_auto_bridge(
     if let Some(template) = find_xspice_auto_bridge_template(templates, bridge, family_enabled) {
         let bridges = [bridge];
         return add_template_xspice_auto_bridge(circuit, &bridges, template, context, abort);
+    }
+
+    #[cfg(feature = "veriloga")]
+    if let Some(selected) = &bridge.connect_module
+        && let Some(execution) = selected.execution.as_deref()
+        && let connect_execution::ConnectExecution::Authored(body) = execution
+    {
+        return connect_execution::materialize(
+            circuit, bridge, selected, body, context.temperature, abort,
+        );
     }
 
     let event_node = bridge.event_node.unwrap_or(bridge.node);

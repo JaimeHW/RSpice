@@ -54,7 +54,7 @@ pub(super) fn plan_conversions(
             let selected =
                 rules.select_for_boundary_node(kind, &node_label, host.instance_name(), signal)?;
             if let Some(selected) = &selected {
-                connect_modules::check_delegable(selected, kind, &node_label)?;
+                connect_modules::check_execution(selected, kind, &node_label)?;
             }
             let scoped = metadata.get(&port.node);
             let (vcc, supply) = if port.bit.is_some() {

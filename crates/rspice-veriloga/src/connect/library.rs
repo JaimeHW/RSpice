@@ -16,70 +16,21 @@
 //! figures because that is what a deck author will write in a `connectrules`
 //! block.
 //!
-//! # Why they are signatures and carry no behavioural body
+//! # Execution
 //!
-//! Because this compiler cannot analyze one, and shipping source it refuses
-//! would be shipping a comment with quotation marks around it. Both refusals
-//! are the front end's own, both are by name, and both are pinned in
-//! [`tests`] so that the day either lifts, the pin fails and this decision is
-//! revisited rather than forgotten:
+//! These shipped signatures select the existing XSPICE ADC, DAC and bidirectional
+//! bridge implementations. The compiler proves delegation by comparing the full
+//! token sequence of the declaration, including parameters. Comments and spacing
+//! may differ; a familiar name alone never replaces an authored body.
 //!
-//! * an analog-sensing discrete process — `always @(above(V(a) - vhi))`, which
-//!   is how every published `a2d` is written — is refused for what it *waits
-//!   on*: "call to `above` inside a discrete-domain expression is not supported
-//!   yet", and "sensitivity-list term names no signal, so nothing can trigger
-//!   it". Reading `V(a)` from the process is no longer among the refusals —
-//!   Verilog-AMS LRM 2.4 section 7.3.3's probe of a continuous net from a
-//!   discrete context is compiled and executed, and
-//!   [`tests::a_connect_module_process_may_probe_its_continuous_port`] pins
-//!   that half. What is missing is section 7.3.5's other half, the
-//!   `event_expression` production that admits `analog_event_functions`:
-//!   nothing subscribes a process to an analog event yet, so an `a2d` can read
-//!   the analog side but cannot be *woken* by it;
-//! * a discrete process setting a `real` that an `analog` block contributes
-//!   through `transition` uses a canonical state-variable input. The mixed
-//!   host supplies that input from the discrete store during each trial.
+//! Other declarations execute through the ordinary mixed runtime with their own
+//! parameters, hierarchy and transactional instance state. Discrete processes can
+//! sample analog nodes and variables; analog-event subscriptions in discrete
+//! sensitivity lists remain a separate language requirement.
 //!
-//! The remaining event-subscription refusal is not about time. The host that runs a connect
-//! module's discrete half (`rspice_core`'s
-//! `xspice::verilog::MixedSignalHost`) floors an LTE-controlled trial time onto
-//! its tick grid and runs both domains at it. Arbitrary analog-event functions
-//! in discrete sensitivity lists still require an event subscription route.
-//!
-//! # Where the behaviour is instead
-//!
-//! In the XSPICE bridge code models the engine already ships, which each of
-//! these three delegates to. The delegation is name-for-name and the map is
-//! written on each constant below; `rspice-core` pins the other half of it.
-//! Delegating rather than transcribing is deliberate — two independent
-//! transcriptions of one bridge semantics is how the estate acquired two
-//! answers to the same question once already.
-//!
-//! # Supply sensitivity
-//!
-//! Section 7.7.3 lets a `connect` statement pass parameters to the connect
-//! module it names, so a supply-sensitive connect module is a module with a
-//! supply *parameter*: `connect a2d #(.vsup(1.8));`. That is what `vsup` is on
-//! all three, and every level the delegation stamps is derived from it, so
-//! overriding it moves all of them together.
-//!
-//! Two things are refused, each for its own reason.
-//!
-//! * **A connect module that reads a supply *net*.** Section 7.6 gives a
-//!   connect module exactly two ports, one per domain, and
-//!   [`super::ConnectError::ConnectModulePortCount`] enforces it, so there is
-//!   no third port a supply rail could arrive on.
-//! * **Thresholds settable independently of the supply** — a `vlo`/`vhi` pair
-//!   defaulting to `vsup / 2.0`. A parameter whose default names another
-//!   parameter does not fold in this compiler:
-//!   [`crate::semantic::AnalyzedParameter::default`] is `None` for it and only
-//!   the unevaluated `default_expr` survives, so the delegation would have to
-//!   grow an evaluator for [`crate::ast::Expression`] on the engine side —
-//!   a second implementation of something this crate already owns, which is
-//!   the shape of drift this library exists to avoid. The supply is therefore
-//!   the one level knob this wave, and the derivation lives in exactly one
-//!   place: the engine's delegation, where the auto-bridge's identical
-//!   derivation from `vcc` already lives.
+//! The shipped signatures expose `vsup` and derive levels from that parameter.
+//! An authored body can declare its own threshold and loading parameters. Clause
+//! 7.6's two-port shape still applies to connection declarations.
 
 /// `a2d` — Table 7-2 row 1, continuous `input` and discrete `output`.
 ///
@@ -203,6 +154,39 @@ pub fn builtin_connect_library_source() -> String {
     }
     source.push_str(BUILTIN_CONNECT_RULES);
     source
+}
+
+/// Conservative delegation proof: comments and whitespace may differ, but
+/// every declaration token, parameter default and body token must match the
+/// shipped signature. A familiar module name alone grants no delegation.
+pub(crate) fn equivalent_declarations(
+    source: &str,
+    file: &crate::ast::SourceFile,
+) -> std::collections::BTreeSet<String> {
+    let tokens = |source: &str| {
+        crate::lexer::Lexer::new(source, crate::source::SourceId::new(0))
+            .collect_tokens()
+            .ok()
+            .map(|tokens| {
+                tokens
+                    .into_iter()
+                    .map(|token| (token.kind, token.text))
+                    .collect::<Vec<_>>()
+            })
+    };
+    file.items
+        .iter()
+        .filter_map(|item| {
+            let crate::ast::Item::ConnectModule(module) = item else {
+                return None;
+            };
+            let (_, reference) = BUILTIN_CONNECT_MODULES
+                .iter()
+                .find(|(name, _)| module.name == *name)?;
+            let declaration = source.get(module.span.start as usize..module.span.end as usize)?;
+            (tokens(declaration)? == tokens(reference)?).then(|| module.name.to_string())
+        })
+        .collect()
 }
 
 #[cfg(test)]

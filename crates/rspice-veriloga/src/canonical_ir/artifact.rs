@@ -184,18 +184,26 @@ impl CanonicalIrArtifact {
                 ));
             }
         }
-        for variable in self
-            .hir
-            .variables
+        let signals: std::collections::HashMap<_, _> = self
+            .digital
+            .signals
             .iter()
-            .filter(|variable| variable.is_state)
-        {
-            let Some(signal) = self
-                .digital
-                .signals
-                .iter()
-                .find(|signal| signal.name == variable.name)
-            else {
+            .map(|signal| (&signal.name, signal))
+            .collect();
+        let selections: std::collections::HashSet<_> = self
+            .hir
+            .discrete_selections
+            .iter()
+            .map(|selection| selection.value)
+            .collect();
+        for [value, _] in &self.hir.discrete_inputs {
+            let Some(name) = self.hir.discrete_bindings.get(value) else {
+                continue;
+            };
+            let Some(signal) = signals.get(name) else {
+                diagnostics.push(artifact_error(format!(
+                    "analog input '{name}' has no digital signal"
+                )));
                 continue;
             };
             let expected = if signal.kind.is_real() {
@@ -203,29 +211,19 @@ impl CanonicalIrArtifact {
             } else {
                 super::hir::CanonicalValueType::Integer
             };
-            if variable.value_type != expected
-                || (!signal.kind.is_real() && !signal.integer && signal.width > 31)
+            if self
+                .hir
+                .variables
+                .get(usize::from(*value))
+                .is_none_or(|variable| variable.value_type != expected)
+                || (selections.contains(value) && signal.kind.is_real())
+                || (!selections.contains(value)
+                    && !signal.kind.is_real()
+                    && !signal.integer
+                    && signal.width > 31)
             {
                 diagnostics.push(artifact_error(format!(
-                    "analog input `{}` has an incompatible digital type or bit grouping",
-                    variable.name
-                )));
-            }
-        }
-        let signals: std::collections::HashMap<_, _> = self
-            .digital
-            .signals
-            .iter()
-            .map(|signal| (&signal.name, signal))
-            .collect();
-        for selection in &self.hir.discrete_selections {
-            if signals
-                .get(&selection.signal)
-                .is_none_or(|signal| signal.kind.is_real())
-            {
-                diagnostics.push(artifact_error(format!(
-                    "packed analog input `{}` must bind four-state digital storage",
-                    selection.signal
+                    "analog input '{name}' has an incompatible digital type or bit grouping"
                 )));
             }
         }

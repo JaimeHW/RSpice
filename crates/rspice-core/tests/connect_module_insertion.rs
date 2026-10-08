@@ -8,19 +8,9 @@
 //! selects the module for that node's direction, and the bridge the engine
 //! stamps carries the module's own supply rather than the deck's.
 //!
-//! # What this cannot check yet, and why
-//!
-//! That the connect module's *body* ran. It did not: the engine delegates each
-//! built-in connect module to the XSPICE bridge code model that implements it.
-//! Running a connect module's own body needs the Verilog-AMS mixed host with
-//! executable connect-body elaboration and insertion, which this boundary route
-//! does not implement — so a module the delegation does not cover is refused by
-//! name rather than silently bridged, which
-//! `a_connect_module_outside_the_library_is_refused` pins against the engine's
-//! own wording. What the delegation makes checkable is that the module's
-//! parameters reached the boundary and changed the conversion, which is what
-//! `a_supplied_connect_module_moves_the_threshold` does by moving the threshold
-//! far enough that the digital edge lands at a different time.
+//! Shipped signatures use the shared bridge models. Authored declarations
+//! execute their own bodies; the separate authored_connect_modules cases cover
+//! parameters, hierarchy, loading, sampling, and the shared event wheel.
 
 use std::path::{Path, PathBuf};
 
@@ -230,10 +220,9 @@ fn a_connect_library_needs_no_device_module() {
     assert!(!waveform.is_empty());
 }
 
-/// A connect module RSpice cannot execute is refused by name, with the reason,
-/// rather than silently bridged as if the deck had asked for nothing.
+/// An empty authored body leaves its output undriven, even with a built-in name.
 #[test]
-fn a_connect_module_outside_the_library_is_refused() {
+fn an_empty_authored_connect_body_is_not_replaced_by_a_builtin() {
     let directory = TempDirectory::new("refused");
     let path = directory.path().join("connect_lib.va");
     std::fs::write(
@@ -259,30 +248,6 @@ endconnectrules
     )
     .expect("write the connect library");
 
-    let netlist = Netlist::parse(&deck(&path)).expect("deck parses");
-    let error = Engine::default()
-        .run_tran(&netlist, 100.0e-9, 1.0e-9)
-        .expect_err("an unrunnable connect module is refused");
-    let error = format!("{error}");
-    assert!(error.contains("my_a2d"), "names the module: {error}");
-    assert!(
-        error.contains("DIN__my_a2d__logic"),
-        "names section 7.8.5's generated instance: {error}"
-    );
-    assert!(
-        error.contains("which RSpice cannot execute"),
-        "says the module is what cannot run, not the deck: {error}"
-    );
-    // Both halves of the reason: what the engine does support, and what
-    // executing this module's body would take. A refusal that named only the
-    // module would leave a reader no way to tell this case from a node whose
-    // connect rules do not settle, which fails on the same route.
-    assert!(
-        error.contains("only the built-in library"),
-        "names the blocker -- delegation covers the library and nothing else: {error}"
-    );
-    assert!(
-        error.contains("Verilog-AMS mixed host"),
-        "names what executing an arbitrary body would need: {error}"
-    );
+    let waveform = transient_waveform(&deck(&path), "dout");
+    assert!(waveform.iter().all(|(_, voltage)| voltage.abs() < 1e-8), "an empty body must not acquire a built-in driver: {waveform:?}");
 }

@@ -1532,17 +1532,15 @@ impl MixedSignalHost {
             .discrete_inputs
             .iter()
             .map(|[value, validity]| {
-                let variable = canonical_ir
-                    .hir
-                    .variables
-                    .get(usize::from(*value))
-                    .ok_or_else(|| MixedSignalError::Compile {
-                        detail: "discrete input variable is missing".into(),
-                    })?;
                 let selection = selections.get(value);
-                let signal_name = selection.map_or(variable.name.as_str(), |selection| {
-                    selection.signal.as_str()
-                });
+                let signal_name = canonical_ir
+                    .hir
+                    .discrete_bindings
+                    .get(value)
+                    .ok_or_else(|| MixedSignalError::Compile {
+                        detail: "discrete input signal binding is missing".into(),
+                    })?
+                    .as_str();
                 let signal =
                     signals_by_name
                         .get(signal_name)

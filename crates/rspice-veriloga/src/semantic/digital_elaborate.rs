@@ -8,15 +8,10 @@
 //! instance, so that the canonical-IR lowering sees a list of frames rather
 //! than a tree and produces one plan.
 //!
-//! It is the discrete counterpart of [`elaboration`](super::elaboration), and
-//! deliberately not part of it. The analog flattening rewrites a child's
-//! equations into the parent's *names* — a child node becomes a synthesized
-//! parent node, a child variable a synthesized parent variable — because the
-//! analog body is a system of equations with no notion of where a term came
-//! from. Nothing here is rewritten. A frame keeps the child's own statements
-//! verbatim and carries the *scope* they resolve in, because a process has an
-//! identity a scheduler will name and a driver has an identity a resolver will
-//! name, and both would be destroyed by folding two instances into one body.
+//! The analog and digital lowerings share concrete specialized occurrences.
+//! This pass binds digital nets and retains each occurrence's source and analysis;
+//! analog elaboration consumes that same specialization and supplies its relocated
+//! state and probe bindings. A mixed child therefore retains both domains.
 //!
 //! # What a port connection means
 //!
@@ -93,21 +88,12 @@
 //! * an output or inout port connected to a variable, or to anything the
 //!   connecting scope sees as an input port, because either would let the
 //!   instance drive what it must not (section 12.3.9.1);
-//! * a port of a digital module that reaches here with no discrete-domain
-//!   declaration at all. Section 12.3.3's implicit net covers every port the
-//!   author did not declare, so this is a residual guard rather than a
-//!   language restriction: what can still reach it is a port the analyzer
-//!   deliberately left out of the digital table, such as one declared with a
-//!   discipline;
 //! * a repeating specialization on one ancestor path, or a hierarchy exceeding
-//!   the documented resource limits, as a source-located error;
-//! * a module that mixes discrete and continuous content, and an analog module
-//!   instantiated inside a digital one — mixed-signal elaboration is a later
-//!   wave, and both directions refuse rather than dropping one half.
+//!   the documented resource limits, as a source-located error.
 
 use super::{
     AnalyzedContinuousAssign, AnalyzedFile, AnalyzedModule, ElaboratedDigitalInstance,
-    ElaboratedDigitalSignal, reject_digital_content,
+    ElaboratedDigitalSignal,
 };
 use crate::ast::{
     ArrayAccessExpr, Connection, ContinuousAssign, DigitalExpr, DigitalLValue, Expression,
@@ -129,24 +115,109 @@ pub(crate) fn elaborate_digital_hierarchy(
     source_modules: &HashMap<SmolStr, &Module>,
     root_source: &Module,
     root: &AnalyzedModule,
-) -> CompileResult<Vec<ElaboratedDigitalInstance>> {
+) -> CompileResult<ElaboratedHierarchy> {
     let mut elaborator = DigitalElaborator {
         analyzed,
         source_modules,
         instances: Vec::new(),
+        occurrences: HashMap::new(),
+        required: digital_subtrees(analyzed, source_modules),
         specializations: HashMap::new(),
     };
     elaborator.append_instances(root_source, Scope::for_root(root, root_source))?;
-    Ok(elaborator.instances)
+    Ok(ElaboratedHierarchy {
+        instances: elaborator.instances,
+        occurrences: elaborator.occurrences,
+    })
 }
 
-/// Whether the analog flattening should leave this child to this pass.
-///
-/// The one predicate both passes consult, so that no instance can be claimed
-/// by both or by neither. A child with no discrete-domain content is an analog
-/// child and the analog pass flattens it as it always has.
-pub(crate) fn is_digital_child(child: &AnalyzedModule) -> bool {
-    child.digital.has_executable_content()
+/// One specialization per occurrence, shared by both domain lowerings.
+pub(super) struct ElaboratedHierarchy {
+    pub instances: Vec<ElaboratedDigitalInstance>,
+    pub occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
+}
+
+/// Include analog containers of digital descendants, including currently inactive
+/// generate arms. Pure analog subtrees keep their symbolic parameter-array path.
+fn digital_subtrees(
+    analyzed: &AnalyzedFile,
+    sources: &HashMap<SmolStr, &Module>,
+) -> HashSet<SmolStr> {
+    use crate::ast::GenerateConstruct;
+    let mut required = HashSet::new();
+    let mut parents: HashMap<SmolStr, Vec<SmolStr>> = HashMap::new();
+    for (name, source) in sources {
+        let mut modules = vec![*source];
+        while let Some(module) = modules.pop() {
+            if module.has_digital_content()
+                || module
+                    .nets
+                    .iter()
+                    .filter_map(|net| net.discipline.as_ref())
+                    .chain(
+                        module
+                            .port_declarations
+                            .iter()
+                            .filter_map(|port| port.discipline.as_ref()),
+                    )
+                    .any(|name| {
+                        analyzed
+                            .disciplines
+                            .get_discipline(name)
+                            .is_some_and(|discipline| {
+                                discipline.domain == crate::disciplines::Domain::Discrete
+                            })
+                    })
+            {
+                required.insert(name.clone());
+            }
+            for instance in &module.instances {
+                parents
+                    .entry(instance.module.clone())
+                    .or_default()
+                    .push(name.clone());
+            }
+            if let Some(template) = &module.generate_template {
+                modules.push(&template.module);
+            }
+            let mut constructs: Vec<_> = module.generates.iter().collect();
+            while let Some(construct) = constructs.pop() {
+                let blocks: Vec<_> = match construct {
+                    GenerateConstruct::Loop(value) => vec![&value.body],
+                    GenerateConstruct::Conditional(value) => std::iter::once(&value.then_block)
+                        .chain(value.else_block.iter())
+                        .collect(),
+                    GenerateConstruct::Case(value) => value
+                        .items
+                        .iter()
+                        .map(|item| &item.block)
+                        .chain(value.default.iter())
+                        .collect(),
+                    GenerateConstruct::Block(block) => vec![block],
+                };
+                for block in blocks {
+                    modules.push(&block.items);
+                    constructs.extend(&block.nested);
+                }
+            }
+        }
+        if analyzed
+            .modules
+            .get(name)
+            .is_some_and(|module| module.digital.has_executable_content())
+        {
+            required.insert(name.clone());
+        }
+    }
+    let mut pending: Vec<_> = required.iter().cloned().collect();
+    while let Some(name) = pending.pop() {
+        for parent in parents.get(&name).into_iter().flatten() {
+            if required.insert(parent.clone()) {
+                pending.push(parent.clone());
+            }
+        }
+    }
+    required
 }
 
 /// How the elaborated scope sees one name.
@@ -203,6 +274,8 @@ struct DigitalElaborator<'a> {
     analyzed: &'a AnalyzedFile,
     source_modules: &'a HashMap<SmolStr, &'a Module>,
     instances: Vec<ElaboratedDigitalInstance>,
+    occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
+    required: HashSet<SmolStr>,
     specializations: HashMap<SpecializationKey, std::sync::Arc<SpecializedModule>>,
 }
 
@@ -225,9 +298,10 @@ fn check_hierarchy_capacity(
     ))
 }
 
-struct SpecializedModule {
-    source: Module,
-    analyzed: AnalyzedModule,
+#[derive(Debug, Clone)]
+pub(super) struct SpecializedModule {
+    pub source: Module,
+    pub analyzed: AnalyzedModule,
 }
 
 /// These bounds apply to the discrete hierarchy below the compiled root.
@@ -251,7 +325,6 @@ struct HierarchyFrame {
     scope: Scope,
     pending: std::vec::IntoIter<ModuleInstance>,
     seen: HashSet<SmolStr>,
-    analog_children_allowed: bool,
 }
 
 impl DigitalElaborator<'_> {
@@ -265,7 +338,6 @@ impl DigitalElaborator<'_> {
             scope,
             pending: source.instances.clone().into_iter(),
             seen: HashSet::new(),
-            analog_children_allowed: true,
         }];
         // Depth-first source order is retained, including signal/process IDs.
         // Finished siblings leave the stack, so sharing their specialization
@@ -290,22 +362,9 @@ impl DigitalElaborator<'_> {
                 )
             })?;
             let path = qualify(&frame.path, &instance.name);
-            let analog_children_allowed = frame.analog_children_allowed;
             stack.push(frame);
-            if !is_digital_child(child) {
-                if analog_children_allowed {
-                    // The analog pass owns this subtree of the compiled root.
-                    continue;
-                }
-                return Err(semantic_error(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "instance `{path}` puts the continuous-domain module `{}` inside a \
-                         discrete-domain module; a mixed-signal hierarchy has no elaborated \
-                         form yet",
-                        instance.module
-                    )),
-                    instance.span,
-                ));
+            if !self.required.contains(&instance.module) {
+                continue;
             }
             check_hierarchy_capacity(stack.len(), self.instances.len(), &path, instance.span)?;
             let next = self.append_instance(&instance, child, &stack, &path)?;
@@ -359,9 +418,6 @@ impl DigitalElaborator<'_> {
             .as_deref()
             .map(|specialized| (&specialized.source, &specialized.analyzed))
             .unwrap_or((child_source, child));
-        if has_analog_content(child, child_source) {
-            reject_digital_content(child)?;
-        }
 
         let connections = bind_connections(instance, child, path)?;
         let (signals, scope, port_drivers) =
@@ -376,7 +432,20 @@ impl DigitalElaborator<'_> {
         // inout port connected to something the connecting scope receives
         // through an input port, which `bind_ports` refuses above.
 
+        let retained = specialized.clone().unwrap_or_else(|| {
+            self.specializations
+                .entry(key.clone())
+                .or_insert_with(|| {
+                    std::sync::Arc::new(SpecializedModule {
+                        source: child_source.clone(),
+                        analyzed: child.clone(),
+                    })
+                })
+                .clone()
+        });
+        self.occurrences.insert(path.into(), retained);
         self.instances.push(ElaboratedDigitalInstance {
+            analog_variables: HashMap::new(),
             time_scale: child.digital.time_scale,
             elaboration_parameters: child.digital.elaboration_parameters.clone(),
             path: path.into(),
@@ -395,7 +464,6 @@ impl DigitalElaborator<'_> {
             scope,
             pending: child_source.instances.clone().into_iter(),
             seen: HashSet::new(),
-            analog_children_allowed: false,
         })
     }
 
@@ -508,18 +576,9 @@ impl DigitalElaborator<'_> {
                 .iter()
                 .find(|signal| signal.name == port.name)
             else {
-                return Err(semantic_error(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "port `{}` of the digital module `{}` has no discrete-domain \
-                         declaration; IEEE 1364-2005 section 12.3.3's implicit net covers a \
-                         port the author did not declare, so a port reaching here is one the \
-                         analyzer left out of the digital table — a port carrying a \
-                         discipline, which is a continuous-domain port and cannot be \
-                         connected to a digital instance",
-                        port.name, instance.module
-                    )),
-                    instance.span,
-                ));
+                // Continuous ports are bound by the analog lowering of this
+                // same occurrence. They never become discrete signal storage.
+                continue;
             };
             let is_variable = declared.class.is_variable();
             if is_variable && port.direction != PortDirection::Output {
@@ -711,42 +770,6 @@ impl DigitalElaborator<'_> {
 }
 
 /// Whether the module has continuous-domain content to flatten.
-fn has_analog_content(module: &AnalyzedModule, source: &Module) -> bool {
-    // Numeric declarations remain in the symbol table after digital ownership
-    // is established. Those entries are not a second, continuous-domain body.
-    let digital_names: HashSet<_> = module
-        .digital
-        .signals
-        .iter()
-        .map(|signal| &signal.name)
-        .collect();
-    let digital_array_slots: HashSet<usize> = module
-        .digital
-        .signals
-        .iter()
-        .filter(|signal| signal.unpacked.is_some())
-        .filter_map(|signal| module.arrays.get(&signal.name))
-        .flat_map(|array| array.base..array.base + array.len)
-        .collect();
-    !module.contributions.is_empty()
-        || !module.body.is_empty()
-        || module
-            .statements
-            .iter()
-            .enumerate()
-            .any(|(index, _)| !module.prologue_statements.contains(&index))
-        || !module.branches.is_empty()
-        || !module.internal_nodes.is_empty()
-        || module.variables.iter().enumerate().any(|(slot, variable)| {
-            !digital_names.contains(&variable.name)
-                && !digital_array_slots.contains(&slot)
-                && !source
-                    .localparams
-                    .iter()
-                    .any(|parameter| parameter.name == variable.name)
-        })
-}
-
 /// Match an instance's connections to the child's ports.
 ///
 /// IEEE 1364-2005 sections 12.3.5 and 12.3.6 give the two forms, and section

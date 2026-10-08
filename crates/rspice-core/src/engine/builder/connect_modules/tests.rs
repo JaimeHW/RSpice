@@ -191,29 +191,31 @@ endconnectrules
     assert!(format!("{error}").contains("vlo"), "unexpected: {error}");
 }
 
-/// An authored connect body needs executable insertion into the mixed circuit.
+/// Authored declarations retain their source instead of a name-based fallback.
 #[test]
-fn a_connect_module_outside_the_library_is_refused_with_the_blocker() {
-    let source = "\
-connectmodule my_a2d(a, d);
-    input a;
-    output d;
-    electrical a;
-    logic d;
-endmodule
-connectrules mine;
-    connect my_a2d;
-endconnectrules
-";
-    let selected = select(Kind::Adc, source);
-    assert_eq!(selected.name, "my_a2d");
-    let error = check_delegable(&selected, Kind::Adc, "din").expect_err("refused");
-    let error = format!("{error}");
-    assert!(error.contains("my_a2d"), "names the module: {error}");
-    assert!(
-        error.contains("executable connect-body elaboration and insertion"),
-        "names the blocker: {error}"
-    );
+fn an_authored_connect_module_selects_its_executable_body() {
+    let source = "connectmodule my_a2d(a,d); input a; output d; electrical a; logic d; endmodule\nconnectrules mine; connect my_a2d; endconnectrules";
+    let mut design = DesignConnectRules::default();
+    design
+        .register(
+            std::path::Path::new("library.va"),
+            VerilogACompiler::default()
+                .connect_specification_from_preprocessed(source)
+                .unwrap(),
+        )
+        .unwrap();
+    design.finish_selection().unwrap();
+    let selected = design
+        .select_for_boundary_node(Kind::Adc, "din", "a1", "in")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        selected.execution.as_deref(),
+        Some(super::super::connect_execution::ConnectExecution::Authored(
+            _
+        ))
+    ));
+    check_execution(&selected, Kind::Adc, "din").unwrap();
 }
 
 /// A design whose rules do not cover the boundary is an error naming the net

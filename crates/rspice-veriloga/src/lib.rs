@@ -195,6 +195,11 @@ pub use virtual_source::{
 pub struct ConnectSpecification {
     /// Identity of the exact preprocessed closure used to interpret the rules.
     pub source_identity: String,
+    /// Exact prepared source for executable connect-body elaboration. No later
+    /// file read or preprocessing pass may replace the selected closure.
+    pub source: Option<std::sync::Arc<str>>,
+    /// Declarations token-equivalent to the shipped delegation signatures.
+    pub builtin_delegations: std::collections::BTreeSet<String>,
     /// Validated `connectmodule` declarations and named `connectrules` blocks.
     /// Use `rules.select_block(name)` to choose among alternative configurations.
     pub rules: connect::ConnectRuleTable,
@@ -735,6 +740,52 @@ impl VerilogACompiler {
         )
     }
 
+    /// Compile a selected connection declaration from its prepared source.
+    /// Parameter overrides precede hierarchy, generate and digital folding.
+    pub fn compile_connect_runtime(
+        &self,
+        source_package: &str,
+        preprocessed: &str,
+        module: &str,
+        parameters: &[(&str, f64)],
+        control: &dyn PipelineControl,
+    ) -> CompileResult<RuntimeCompileReport> {
+        let parameters: Vec<_> = parameters
+            .iter()
+            .map(|&(name, value)| (name, ScalarParameterValue::Real(value)))
+            .collect();
+        let mut measurements = metrics::MetricsRecorder::with_control(
+            preprocessed.len(),
+            self.options.performance_budget.clone(),
+            control,
+        );
+        let analyzed = self.analyze_preprocessed_with_parameters(
+            source_package,
+            preprocessed,
+            Some(module),
+            &parameters,
+            &mut measurements,
+        )?;
+        if !analyzed
+            .source
+            .items
+            .iter()
+            .any(|item| matches!(item, ast::Item::ConnectModule(body) if body.name == module))
+        {
+            return Err(CompileError::ModuleSelection(format!(
+                "'{module}' does not name a connect module"
+            )));
+        }
+        self.compile_runtime_analyzed_measured(
+            source_package,
+            preprocessed,
+            &analyzed,
+            Some(module),
+            RuntimeQualificationOptions::default(),
+            &mut measurements,
+        )
+    }
+
     /// Elaborate one mixed instance from its authenticated source, applying
     /// numeric overrides before ranges, hierarchy, and digital constants fold.
     pub fn specialize_mixed_runtime(
@@ -1055,7 +1106,8 @@ impl VerilogACompiler {
                 .items
                 .iter_mut()
                 .find_map(|item| match item {
-                    ast::Item::Module(module) if Some(module.name.as_str()) == module_name => {
+                    ast::Item::Module(module) | ast::Item::ConnectModule(module)
+                        if Some(module.name.as_str()) == module_name => {
                         Some(module)
                     }
                     _ => None,
@@ -1300,6 +1352,39 @@ impl VerilogACompiler {
         analyzed: &'a semantic::AnalyzedFile,
         module_name: Option<&str>,
     ) -> CompileResult<std::borrow::Cow<'a, semantic::AnalyzedModule>> {
+        // Connect declarations participate in selection without executing every
+        // library body. Promote only the selected AST into the ordinary module
+        // pipeline, preserving its exact source, timing directives and helpers.
+        if let Some(name) = module_name
+            && let Some((index, module)) =
+                analyzed
+                    .source
+                    .items
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, item)| match item {
+                        ast::Item::ConnectModule(module) if module.name == name => {
+                            Some((index, module))
+                        }
+                        _ => None,
+                    })
+        {
+            if analyzed.modules.contains_key(name) {
+                return Err(CompileError::ModuleSelection(format!(
+                    "'{name}' names both an ordinary module and a connect module"
+                )));
+            }
+            let mut source = analyzed.source.clone();
+            source
+                .items
+                .insert(index + 1, ast::Item::Module(module.clone()));
+            let promoted = SemanticAnalyzer::new().analyze(&source)?;
+            let selected = self.select_analyzed_module(&promoted, Some(name))?;
+            return semantic::retain_packed_parameters(semantic::lower_flow_probes(
+                semantic::elaborate_executable_module(&promoted, selected)?,
+            )?)
+            .map(|module| std::borrow::Cow::Owned(module.into_owned()));
+        }
         let selected = self.select_analyzed_module(analyzed, module_name)?;
         semantic::retain_packed_parameters(semantic::lower_flow_probes(
             semantic::elaborate_executable_module(analyzed, selected)?,
@@ -1432,6 +1517,8 @@ impl VerilogACompiler {
         }) {
             return Ok(ConnectSpecification {
                 source_identity: canonical_ir::source_identity(source),
+                source: None,
+                builtin_delegations: Default::default(),
                 declares_module: source_file
                     .items
                     .iter()
@@ -1444,6 +1531,8 @@ impl VerilogACompiler {
         let analyzed = analyzer.analyze(&source_file)?;
         Ok(ConnectSpecification {
             source_identity: canonical_ir::source_identity(source),
+            source: Some(std::sync::Arc::from(source)),
+            builtin_delegations: connect::library::equivalent_declarations(source, &source_file),
             declares_module: !analyzed.modules.is_empty(),
             rules: analyzed.connect_rules,
             disciplines: analyzed.disciplines,

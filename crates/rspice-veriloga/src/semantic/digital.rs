@@ -479,6 +479,8 @@ pub struct AnalyzedContinuousAssign {
 /// their processes and drivers separately addressable.
 #[derive(Debug, Clone)]
 pub struct ElaboratedDigitalInstance {
+    /// Local analog variable/array names mapped to their relocated storage.
+    pub analog_variables: HashMap<SmolStr, SmolStr>,
     pub time_scale: crate::time_scale::ModuleTimeScale,
     /// Exact constants retained in this instance's own specialization scope.
     pub elaboration_parameters: Vec<AnalyzedPackedParameter>,
@@ -616,7 +618,23 @@ impl SemanticAnalyzer {
     /// `integer` or `real`.
     pub(super) fn analyze_digital(&mut self, module: &Module, analyzed: &mut AnalyzedModule) {
         analyzed.digital.time_scale = module.time_scale;
-        if !module.has_digital_content() {
+        let discrete_discipline = |name: &SmolStr| {
+            self.disciplines
+                .get_discipline(name)
+                .is_some_and(|discipline| discipline.domain == crate::disciplines::Domain::Discrete)
+        };
+        let typed_discrete = module
+            .nets
+            .iter()
+            .filter_map(|net| net.discipline.as_ref())
+            .chain(
+                module
+                    .port_declarations
+                    .iter()
+                    .filter_map(|port| port.discipline.as_ref()),
+            )
+            .any(discrete_discipline);
+        if !module.has_digital_content() && !typed_discrete {
             return;
         }
         self.digital_selector_constants = self.digital_constants(module);
@@ -1361,11 +1379,9 @@ impl SemanticAnalyzer {
     /// section 12.3.4 still wins: `output q; reg q;` has already put `q` in as
     /// a variable, and this adds nothing.
     ///
-    /// A port carrying a *discipline* is a continuous-domain port and is not a
-    /// digital net, so it is skipped — as is a port that appears in an analog
-    /// net declaration, which is the other spelling of the same thing. Without
-    /// both exclusions a mixed module's `electrical p, n;` would gain a
-    /// four-state wire apiece.
+    /// Continuous disciplines stay in the analog domain. A discrete discipline
+    /// such as `logic` still declares a wire when no explicit storage type is
+    /// present, for both ports and internal nets.
     fn push_implicit_port_nets(
         &mut self,
         module: &Module,
@@ -1375,10 +1391,25 @@ impl SemanticAnalyzer {
         let analog: std::collections::HashSet<&SmolStr> = module
             .nets
             .iter()
+            .filter(|net| {
+                net.discipline.as_ref().is_some_and(|name| {
+                    self.disciplines
+                        .get_discipline(name)
+                        .is_some_and(|discipline| {
+                            discipline.domain == crate::disciplines::Domain::Continuous
+                        })
+                })
+            })
             .flat_map(|net| net.names.iter())
             .collect();
         for declaration in &module.port_declarations {
-            if declaration.discipline.is_some() {
+            if declaration.discipline.as_ref().is_some_and(|name| {
+                self.disciplines
+                    .get_discipline(name)
+                    .is_some_and(|discipline| {
+                        discipline.domain == crate::disciplines::Domain::Continuous
+                    })
+            }) {
                 continue;
             }
             let bounds = self.resolve_vector_range(declaration.range.as_ref(), "wire");
@@ -1397,6 +1428,34 @@ impl SemanticAnalyzer {
                     width: bounds.map_or(1, VectorBounds::width),
                     redeclares_port: true,
                     span: declaration.span,
+                });
+            }
+        }
+        for net in &module.nets {
+            if !net.discipline.as_ref().is_some_and(|name| {
+                self.disciplines
+                    .get_discipline(name)
+                    .is_some_and(|discipline| {
+                        discipline.domain == crate::disciplines::Domain::Discrete
+                    })
+            }) {
+                continue;
+            }
+            for name in &net.names {
+                if seen.contains_key(name) {
+                    continue;
+                }
+                seen.insert(name.clone(), net.span);
+                signals.push(AnalyzedDigitalSignal {
+                    initializer: None,
+                    unpacked: None,
+                    name: name.clone(),
+                    class: DigitalSignalClass::Net(DigitalNetKind::Wire),
+                    signedness: Signedness::Unsigned,
+                    range: None,
+                    width: 1,
+                    redeclares_port: module.ports.iter().any(|port| port.name == *name),
+                    span: net.span,
                 });
             }
         }
@@ -1428,7 +1487,16 @@ impl SemanticAnalyzer {
         if let Some(existing) = self.symbols.lookup(&item.name) {
             if existing.kind == SymbolKind::Port {
                 redeclares_port = true;
-            } else {
+            } else if !(existing.kind == SymbolKind::Node
+                && existing
+                    .attrs
+                    .discipline
+                    .as_ref()
+                    .and_then(|name| self.disciplines.get_discipline(name))
+                    .is_some_and(|discipline| {
+                        discipline.domain == crate::disciplines::Domain::Discrete
+                    }))
+            {
                 self.record_error_at(
                     SemanticErrorKind::DuplicateSymbol {
                         name: item.name.clone(),

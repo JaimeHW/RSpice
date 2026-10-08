@@ -33,22 +33,9 @@ pub(crate) fn elaborate_executable_module<'a>(
     analyzed: &'a AnalyzedFile,
     selected: &'a AnalyzedModule,
 ) -> CompileResult<Cow<'a, AnalyzedModule>> {
-    // The selected module's own digital content is no longer refused here.
-    // Processes have a canonical form, and each executable path now refuses
-    // at the point it would have to run one — the bytecode IR builder because
-    // it has no representation for a process at all, the Rust backend because
-    // it emits a device the solver calls rather than a coroutine the event
-    // kernel resumes.
-    //
-    // A *digital child* instance is no longer refused either: it is elaborated
-    // by [`digital_elaborate`](super::digital_elaborate), which runs first so
-    // that its refusals reach the author before any analog one. The two passes
-    // partition the instance tree with one shared predicate — a child with
-    // discrete-domain content belongs to that pass and to this one otherwise —
-    // so no instance can be claimed by both, and none by neither. Below the
-    // compiled module the analog flattening owns everything, and a digital
-    // module found there is refused as it always was, because a mixed-signal
-    // hierarchy has no elaborated form yet.
+    // Resolve the discrete hierarchy first, retaining the concrete occurrence
+    // specializations. The analog pass consumes the same source and analysis,
+    // then binds that occurrence's processes to the relocated analog storage.
     let source_modules = source_modules(analyzed)?;
     let root = source_modules.get(&selected.name).copied().ok_or_else(|| {
         internal_error(format!(
@@ -60,7 +47,7 @@ pub(crate) fn elaborate_executable_module<'a>(
         return Ok(Cow::Borrowed(selected));
     }
 
-    let digital_instances = super::digital_elaborate::elaborate_digital_hierarchy(
+    let hierarchy = super::digital_elaborate::elaborate_digital_hierarchy(
         analyzed,
         &source_modules,
         root,
@@ -68,19 +55,20 @@ pub(crate) fn elaborate_executable_module<'a>(
     )?;
 
     let mut elaborator = HierarchyElaborator::new(analyzed, source_modules, selected.clone());
-    elaborator.flattened.digital.instances = digital_instances;
+    elaborator.shared_occurrences = hierarchy.occurrences;
+    elaborator.digital_frames = hierarchy
+        .instances
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| (frame.path.clone(), index))
+        .collect();
+    elaborator.flattened.digital.instances = hierarchy.instances;
     let root_scope = ScopeMap::for_root(selected);
     elaborator
         .parameter_hierarchy
         .register(root, selected, &root_scope, None)?;
     let mut module_stack = vec![selected.name.clone()];
-    elaborator.append_instances(
-        root,
-        &root_scope,
-        &mut module_stack,
-        selected.name.as_str(),
-        true,
-    )?;
+    elaborator.append_instances(root, &root_scope, &mut module_stack, selected.name.as_str())?;
     Ok(Cow::Owned(elaborator.finish()?))
 }
 
@@ -124,6 +112,7 @@ struct EffectiveParameterArrayShape {
 
 #[derive(Default)]
 struct ScopeMap {
+    discrete_nets: HashSet<SmolStr>,
     nodes: HashMap<SmolStr, NodeBinding>,
     parameters: HashMap<SmolStr, SmolStr>,
     parameter_given: HashMap<SmolStr, bool>,
@@ -153,9 +142,18 @@ impl ScopeMap {
     fn for_root(module: &AnalyzedModule) -> Self {
         let mut scope = Self {
             parameter_locals: module.parameter_locals.clone(),
+            discrete_nets: module
+                .digital
+                .signals
+                .iter()
+                .map(|signal| signal.name.clone())
+                .collect(),
             ..Self::default()
         };
         for port in &module.ports {
+            if scope.discrete_nets.contains(&port.name) {
+                continue;
+            }
             scope.nodes.insert(
                 port.name.clone(),
                 NodeBinding {
@@ -226,6 +224,9 @@ impl ScopeMap {
 }
 
 struct HierarchyElaborator<'a> {
+    shared_occurrences:
+        HashMap<SmolStr, std::sync::Arc<super::digital_elaborate::SpecializedModule>>,
+    digital_frames: HashMap<SmolStr, usize>,
     analyzed: &'a AnalyzedFile,
     source_modules: HashMap<SmolStr, &'a Module>,
     flattened: AnalyzedModule,
@@ -267,6 +268,8 @@ impl<'a> HierarchyElaborator<'a> {
         let specialization_modules = parameters::specialization_modules(&source_modules, analyzed);
         Self {
             analyzed,
+            shared_occurrences: HashMap::new(),
+            digital_frames: HashMap::new(),
             source_modules,
             flattened,
             used_names,
@@ -411,21 +414,14 @@ impl<'a> HierarchyElaborator<'a> {
         }
     }
 
-    /// Flatten one module's instances.
-    ///
-    /// `digital_children_elaborated` says whether a child with discrete-domain
-    /// content is one [`super::digital_elaborate`] has already taken. It is
-    /// true only for the compiled module's own instances — that pass walks the
-    /// digital tree from there — and false everywhere below, where a digital
-    /// module is refused rather than skipped, because nothing would elaborate
-    /// it and skipping it would drop it.
+    /// Flatten the analog content of each concrete occurrence. Digital processes
+    /// remain in independently named frames with bindings to this same storage.
     fn append_instances(
         &mut self,
         source_module: &Module,
         parent_scope: &ScopeMap,
         module_stack: &mut Vec<SmolStr>,
         parent_path: &str,
-        digital_children_elaborated: bool,
     ) -> CompileResult<()> {
         let mut instance_names = HashSet::new();
         for instance in &source_module.instances {
@@ -439,14 +435,7 @@ impl<'a> HierarchyElaborator<'a> {
                 ));
             }
             let path = format!("{parent_path}.{}", instance.name);
-            self.append_instance(
-                instance,
-                source_module,
-                parent_scope,
-                module_stack,
-                &path,
-                digital_children_elaborated,
-            )?;
+            self.append_instance(instance, source_module, parent_scope, module_stack, &path)?;
         }
         Ok(())
     }
@@ -458,7 +447,6 @@ impl<'a> HierarchyElaborator<'a> {
         parent_scope: &ScopeMap,
         module_stack: &mut Vec<SmolStr>,
         path: &str,
-        digital_children_elaborated: bool,
     ) -> CompileResult<()> {
         let child_source = self
             .source_modules
@@ -476,17 +464,16 @@ impl<'a> HierarchyElaborator<'a> {
                 instance.module
             ))
         })?;
-        // A digital child of the compiled module belongs to the digital
-        // elaboration, which has already taken it. Anywhere else it is as
-        // unexecutable as it ever was, and flattening would otherwise drop it
-        // without a word.
-        if super::digital_elaborate::is_digital_child(child) {
-            if digital_children_elaborated {
-                return Ok(());
-            }
-            super::reject_digital_content(child)?;
-        }
-        if module_stack.contains(&instance.module) {
+        let relative = path
+            .strip_prefix(self.flattened.name.as_str())
+            .and_then(|suffix| suffix.strip_prefix('.'))
+            .ok_or_else(|| {
+                internal_error("hierarchy path does not name the selected root".into())
+            })?;
+        let shared = self.shared_occurrences.get(relative).cloned();
+        // Shared occurrences already passed specialization-aware cycle and
+        // resource checks, so finite parameter-recursive hierarchies are legal.
+        if shared.is_none() && module_stack.contains(&instance.module) {
             let mut cycle = module_stack.iter().map(SmolStr::as_str).collect::<Vec<_>>();
             cycle.push(instance.module.as_str());
             return Err(semantic_error(
@@ -500,17 +487,19 @@ impl<'a> HierarchyElaborator<'a> {
 
         let overrides = bind_parameter_overrides(instance, child, path)?;
         self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
-        let specialized =
-            self.specialize_parameters(child_source, child, parent_source, &overrides, path)?;
-        let (child_source, child) = specialized
-            .as_deref()
-            .map(|value| (&value.source, &value.analyzed))
-            .unwrap_or((child_source, child));
-        // Generate specialization may change the child's domain. Never flatten
-        // newly discrete work into an analog body and silently omit it.
-        if super::digital_elaborate::is_digital_child(child) {
-            super::reject_digital_content(child)?;
-        }
+        let specialized = if shared.is_none() {
+            self.specialize_parameters(child_source, child, parent_source, &overrides, path)?
+        } else {
+            None
+        };
+        let (child_source, child) = if let Some(shared) = shared.as_deref() {
+            (&shared.source, &shared.analyzed)
+        } else {
+            specialized
+                .as_deref()
+                .map(|value| (&value.source, &value.analyzed))
+                .unwrap_or((child_source, child))
+        };
         let branch_inventory = super::flow_probes::hierarchy_branches(child);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let noise_process_base = self.next_noise_process;
@@ -524,6 +513,12 @@ impl<'a> HierarchyElaborator<'a> {
             })?;
         let mut scope = ScopeMap {
             parameter_locals: child.parameter_locals.clone(),
+            discrete_nets: child
+                .digital
+                .signals
+                .iter()
+                .map(|signal| signal.name.clone())
+                .collect(),
             ground_nodes: child.ground_nodes.clone(),
             instance_path: Some(path.into()),
             noise_process_range: Some((noise_process_base, child.noise_process_count)),
@@ -549,6 +544,14 @@ impl<'a> HierarchyElaborator<'a> {
             },
         );
         for (port, connection) in child.ports.iter().zip(connections) {
+            if child
+                .digital
+                .signals
+                .iter()
+                .any(|signal| signal.name == port.name)
+            {
+                continue;
+            }
             let (mut binding, connected) = match connection {
                 Some(binding) => (binding, true),
                 None => {
@@ -794,15 +797,25 @@ impl<'a> HierarchyElaborator<'a> {
             self.flattened
                 .discrete_inputs
                 .push((variable_base + value, variable_base + validity));
+            let signal = child
+                .discrete_selections
+                .iter()
+                .find(|selection| selection.value == value)
+                .map(|selection| &selection.signal)
+                .or_else(|| child.discrete_bindings.get(&value))
+                .unwrap_or(&child.variables[value].name);
+            let mapped = self.digital_signal_name(relative, signal)?;
+            self.flattened
+                .discrete_bindings
+                .insert(variable_base + value, mapped);
         }
         for selection in &child.discrete_selections {
             let mut selection = selection.clone();
             selection.value += variable_base;
-            selection.signal = scope
-                .variables
-                .get(&selection.signal)
-                .cloned()
-                .unwrap_or(selection.signal);
+            selection.signal = self.digital_signal_name(relative, &selection.signal)?;
+            self.flattened
+                .discrete_bindings
+                .insert(selection.value, selection.signal.clone());
             self.flattened.discrete_selections.push(selection);
         }
         self.flattened.event_state_variables.sort_unstable();
@@ -922,8 +935,33 @@ impl<'a> HierarchyElaborator<'a> {
                 .map(|contribution| rewrite_contribution(contribution, &scope, base, true))
                 .collect::<CompileResult<Vec<_>>>()?,
         );
+        if let Some(&index) = self.digital_frames.get(relative) {
+            let frame = &mut self.flattened.digital.instances[index];
+            frame.analog_variables = scope
+                .variables
+                .iter()
+                .chain(&scope.arrays)
+                .map(|(local, global)| (local.clone(), global.clone()))
+                .collect();
+            let mut result = Ok(());
+            let mut rewrite = |expression: &mut Expression| {
+                if result.is_ok() {
+                    result = rewrite_digital_probes(expression, &scope);
+                }
+            };
+            for process in &mut frame.processes {
+                super::digital_walk::rewrite_roots(&mut process.body, &mut rewrite);
+            }
+            for assign in &mut frame.continuous_assigns {
+                rewrite(&mut assign.assignment.value);
+                if let Some(delay) = &mut assign.assignment.delay {
+                    rewrite(delay);
+                }
+            }
+            result?;
+        }
         module_stack.push(instance.module.clone());
-        let nested = self.append_instances(child_source, &scope, module_stack, path, false);
+        let nested = self.append_instances(child_source, &scope, module_stack, path);
         module_stack.pop();
         nested
     }
@@ -1144,6 +1182,14 @@ impl<'a> HierarchyElaborator<'a> {
                     ));
                 }
                 seen[index] = true;
+                if child
+                    .digital
+                    .signals
+                    .iter()
+                    .any(|signal| signal.name == child.ports[index].name)
+                {
+                    continue;
+                }
                 bound[index] = signal
                     .as_ref()
                     .map(|signal| {
@@ -1166,6 +1212,14 @@ impl<'a> HierarchyElaborator<'a> {
                 let Connection::Ordered { signal, .. } = connection else {
                     unreachable!()
                 };
+                if child
+                    .digital
+                    .signals
+                    .iter()
+                    .any(|signal| signal.name == child.ports[index].name)
+                {
+                    continue;
+                }
                 bound[index] = signal
                     .as_ref()
                     .map(|signal| {
@@ -1175,6 +1229,30 @@ impl<'a> HierarchyElaborator<'a> {
             }
         }
         Ok(bound)
+    }
+
+    fn digital_signal_name(&self, path: &str, local: &str) -> CompileResult<SmolStr> {
+        let frame = self
+            .digital_frames
+            .get(path)
+            .map(|&index| &self.flattened.digital.instances[index])
+            .ok_or_else(|| {
+                internal_error(format!("mixed occurrence '{path}' has no digital frame"))
+            })?;
+        for signal in &frame.signals {
+            if local == signal.declared.name {
+                return Ok(signal.name.clone());
+            }
+            if signal.declared.unpacked.is_some()
+                && let Some(suffix) = local.strip_prefix(signal.declared.name.as_str())
+                && suffix.starts_with('[')
+            {
+                return Ok(format!("{}{suffix}", signal.name).into());
+            }
+        }
+        Err(internal_error(format!(
+            "mixed occurrence '{path}' has no signal '{local}'"
+        )))
     }
 
     fn fresh_name(&mut self, leaf: &str) -> SmolStr {
@@ -1352,6 +1430,15 @@ fn resolve_connection(
             ));
         }
     };
+    if parent_scope.discrete_nets.contains(source_name) {
+        return Err(semantic_error(
+            SemanticErrorKind::UnsupportedFeature(format!(
+                "analog port '{}' of instance '{path}' connects discrete net '{source_name}' without a connect module",
+                child_port.name
+            )),
+            expression.span(),
+        ));
+    }
     let binding = parent_scope
         .nodes
         .get(source_name)
@@ -1726,11 +1813,10 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
                     scope.unnamed_branch(pos, neg.as_deref().unwrap_or("0"))
             {
                 super::flow_probes::signed(
-                    Expression::BranchAccess(BranchAccess::Nodes {
+                    Expression::BranchAccess(BranchAccess::Branch {
                         access: name.clone(),
                         kind: *kind,
-                        pos: branch.name.clone(),
-                        neg: None,
+                        name: branch.name.clone(),
                         span: *span,
                     }),
                     sign,
@@ -1815,6 +1901,20 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
     Ok(rewritten)
 }
 
+/// Relocate only analog probes. Digital names retain lexical/process scope and
+/// are resolved by the frame's existing signal and constant tables.
+fn rewrite_digital_probes(expression: &mut Expression, scope: &ScopeMap) -> CompileResult<()> {
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        if matches!(expression, Expression::BranchAccess(_)) {
+            *expression = rewrite_expression(expression, scope)?;
+        } else {
+            super::flow_probes::for_child_mut(expression, &mut |child| pending.push(child));
+        }
+    }
+    Ok(())
+}
+
 fn qualify_noise_call_name(name: &str, arguments: &mut [Expression], scope: &ScopeMap) {
     let Some(path) = &scope.instance_path else {
         return;
@@ -1866,6 +1966,18 @@ fn rewrite_expressions(
 
 fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResult<BranchAccess> {
     Ok(match access {
+        BranchAccess::Nodes {
+            access,
+            kind,
+            pos,
+            neg: None,
+            span,
+        } if scope.branches.contains_key(pos) => BranchAccess::Branch {
+            access: access.clone(),
+            kind: *kind,
+            name: scope.branches[pos].clone(),
+            span: *span,
+        },
         BranchAccess::Nodes {
             access,
             kind,

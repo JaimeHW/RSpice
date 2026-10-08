@@ -160,10 +160,22 @@ pub(super) fn hierarchy_branches(module: &AnalyzedModule) -> HierarchyBranches {
         inspect(&contribution.expression);
     }
     visit_statements(&module.statements, &mut inspect);
-    for process in &module.digital.processes {
+    for process in module.digital.processes.iter().chain(
+        module
+            .digital
+            .instances
+            .iter()
+            .flat_map(|frame| &frame.processes),
+    ) {
         super::digital_walk::visit_roots(&process.body, &mut inspect);
     }
-    for assign in &module.digital.continuous_assigns {
+    for assign in module.digital.continuous_assigns.iter().chain(
+        module
+            .digital
+            .instances
+            .iter()
+            .flat_map(|frame| &frame.continuous_assigns),
+    ) {
         inspect(&assign.assignment.value);
         if let Some(delay) = &assign.assignment.delay {
             inspect(delay);
@@ -220,12 +232,24 @@ pub(super) fn expand_port_flows(
     let rewrite =
         |expression: &mut Expression| rewrite_expression(expression, &branches, &resolver, ports);
     rewrite_statements(&mut module.statements, &rewrite);
-    for process in &mut module.digital.processes {
+    for process in module.digital.processes.iter_mut().chain(
+        module
+            .digital
+            .instances
+            .iter_mut()
+            .flat_map(|frame| &mut frame.processes),
+    ) {
         super::digital_walk::rewrite_roots(&mut process.body, &mut |expression| {
             rewrite(expression)
         });
     }
-    for assign in &mut module.digital.continuous_assigns {
+    for assign in module.digital.continuous_assigns.iter_mut().chain(
+        module
+            .digital
+            .instances
+            .iter_mut()
+            .flat_map(|frame| &mut frame.continuous_assigns),
+    ) {
         rewrite(&mut assign.assignment.value);
         if let Some(delay) = &mut assign.assignment.delay {
             rewrite(delay);
@@ -334,10 +358,22 @@ pub(crate) fn lower<'a>(
         inspect(&contribution.expression);
     }
     visit_statements(&module.statements, &mut inspect);
-    for process in &module.digital.processes {
+    for process in module.digital.processes.iter().chain(
+        module
+            .digital
+            .instances
+            .iter()
+            .flat_map(|frame| &frame.processes),
+    ) {
         super::digital_walk::visit_roots(&process.body, &mut inspect);
     }
-    for assign in &module.digital.continuous_assigns {
+    for assign in module.digital.continuous_assigns.iter().chain(
+        module
+            .digital
+            .instances
+            .iter()
+            .flat_map(|frame| &frame.continuous_assigns),
+    ) {
         inspect(&assign.assignment.value);
         if let Some(delay) = &assign.assignment.delay {
             inspect(delay);
@@ -505,12 +541,24 @@ pub(crate) fn lower<'a>(
         rewrite_expression(expression, &branches, &resolver, &port_values);
     };
     rewrite_statements(&mut target.statements, &rewrite);
-    for process in &mut target.digital.processes {
+    for process in target.digital.processes.iter_mut().chain(
+        target
+            .digital
+            .instances
+            .iter_mut()
+            .flat_map(|frame| &mut frame.processes),
+    ) {
         super::digital_walk::rewrite_roots(&mut process.body, &mut |expression| {
             rewrite(expression)
         });
     }
-    for assign in &mut target.digital.continuous_assigns {
+    for assign in target.digital.continuous_assigns.iter_mut().chain(
+        target
+            .digital
+            .instances
+            .iter_mut()
+            .flat_map(|frame| &mut frame.continuous_assigns),
+    ) {
         rewrite(&mut assign.assignment.value);
         if let Some(delay) = &mut assign.assignment.delay {
             rewrite(delay);

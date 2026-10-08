@@ -281,8 +281,9 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
     })
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct AnalogVariable {
+    target: SmolStr,
     quantity: super::digital::DigitalAnalogQuantity,
     array: Option<(i64, u32)>,
 }
@@ -311,6 +312,7 @@ pub(crate) fn lower_module(
             Some((
                 variable.name.clone(),
                 AnalogVariable {
+                    target: variable.name.clone(),
                     quantity,
                     array: None,
                 },
@@ -319,11 +321,12 @@ pub(crate) fn lower_module(
         .collect();
     for (name, array) in &module.arrays {
         if let Some(element) = module.variables.get(array.base)
-            && let Some(variable) = variables.get(&element.name).copied()
+            && let Some(variable) = variables.get(&element.name).cloned()
         {
             variables.insert(
                 name.clone(),
                 AnalogVariable {
+                    target: name.clone(),
                     quantity: variable.quantity,
                     array: Some((array.lower, array.len as u32)),
                 },
@@ -561,6 +564,15 @@ fn lower_with_analog_variables(
         .zip(&frame_scopes)
         .zip(&instance_constants)
     {
+        let frame_variables: HashMap<_, _> = instance
+            .analog_variables
+            .iter()
+            .filter_map(|(local, global)| {
+                analog_variables
+                    .get(global)
+                    .map(|variable| (local.clone(), variable.clone()))
+            })
+            .collect();
         for process in &instance.processes {
             match lower_process(
                 process,
@@ -570,7 +582,7 @@ fn lower_with_analog_variables(
                 &mut arrays,
                 scope,
                 constants,
-                &no_analog_variables,
+                &frame_variables,
                 &mut probes,
                 instance.time_scale,
             ) {
@@ -585,7 +597,7 @@ fn lower_with_analog_variables(
                 &array_storage,
                 scope,
                 constants,
-                &no_analog_variables,
+                &frame_variables,
                 allocate(),
                 &mut drivers,
                 &mut probes,
@@ -3289,7 +3301,7 @@ impl ProcessLowerer<'_> {
 
     fn analog_variable(&mut self, block: BlockId, name: &str, span: Span) -> ValueId {
         use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
-        let variable = self.analog_variables[name];
+        let variable = self.analog_variables[name].clone();
         if variable.array.is_some() {
             self.error(
                 format!("analog array `{name}` requires an element index"),
@@ -3297,7 +3309,9 @@ impl ProcessLowerer<'_> {
             );
         }
         let quantity = variable.quantity;
-        let target = DigitalAnalogProbeTarget::Variable { name: name.into() };
+        let target = DigitalAnalogProbeTarget::Variable {
+            name: variable.target,
+        };
         let id = match self
             .probes
             .iter()
@@ -3353,7 +3367,8 @@ impl ProcessLowerer<'_> {
     ) -> ValueId {
         use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
         let (quantity, lower, len) = self.analog_array(name).expect("array classified");
-        let first = format!("{name}[{lower}]");
+        let target_name = &self.analog_variables[name].target;
+        let first = format!("{target_name}[{lower}]");
         let target = DigitalAnalogProbeTarget::Variable { name: first.into() };
         // Reserve one contiguous binding group, shared by every read of this
         // array. Selection is O(1); no conditional chain or analog re-evaluation.
@@ -3366,7 +3381,8 @@ impl ProcessLowerer<'_> {
         } else {
             let base = self.probes.len();
             for offset in 0..len {
-                let name: SmolStr = format!("{}[{}]", name, lower + i64::from(offset)).into();
+                let name: SmolStr =
+                    format!("{}[{}]", target_name, lower + i64::from(offset)).into();
                 self.probes.push(DigitalAnalogProbe {
                     id: DigitalAnalogProbeId::from(self.probes.len()),
                     access: name.clone(),

@@ -4,7 +4,7 @@
 //! mixed-discipline connection. Those decisions are `rspice_veriloga::connect`'s
 //! and are made there; this module is the two ends of the wire:
 //! it hands that planner a boundary the engine found, and it turns the module
-//! the planner names into parameters the engine's existing bridge stamps.
+//! the planner names into a built-in bridge or an executable authored body.
 //!
 //! # Why the boundary is the auto-bridge planner's and not a second pass
 //!
@@ -37,17 +37,9 @@
 //! derived from the port types — two independent routes to one answer, checked
 //! rather than assumed.
 //!
-//! # What is refused
-//!
-//! A connect module this engine cannot execute. Delegation is what makes a
-//! connect module runnable at all: `a2d`, `d2a` and `bidir` become the XSPICE
-//! bridge code models that already implement them. A connect module named by a
-//! `connectrules` block and *not* in that library has a body only a
-//! Verilog-AMS mixed host could run, and the one this crate has
-//! (`crate::xspice::verilog::MixedSignalHost`) already executes mixed device
-//! instances. Arbitrary connect bodies still need their own executable
-//! elaboration and insertion into the circuit. Until that exists, selection
-//! reports the missing connect-body execution path by name.
+//! Selected authored declarations compile through the ordinary mixed module
+//! pipeline. Delegation is restricted to token-equivalent shipped signatures;
+//! a matching module name never substitutes for its authored body.
 
 use rspice_veriloga::ast::PortDirection;
 use rspice_veriloga::connect::{
@@ -75,12 +67,8 @@ const DECK_DISCIPLINE: &str = "electrical";
 /// The discrete discipline an XSPICE event net has.
 const EVENT_DISCIPLINE: &str = "logic";
 
-/// A connect module selected for one boundary, reduced to what the engine
-/// stamps.
-///
-/// The name is kept so materialization can say which module it is delegating,
-/// and so a module outside the library can be refused by that name. The
-/// parameters are section 7.7.3's, already folded — see
+/// A selected boundary declaration, its execution binding and its parameters.
+/// The parameters are section 7.7.3's, already folded — see
 /// [`rspice_veriloga::connect::InsertionRule::numeric_parameters`], which folds
 /// them in the crate that owns the expression.
 #[derive(Debug, Clone)]
@@ -90,6 +78,7 @@ pub(super) struct PlannedConnectModule {
     /// the boundary in the vocabulary the deck author wrote, not the engine's.
     pub(super) instance: String,
     pub(super) parameters: Vec<(String, f64)>,
+    pub(super) execution: Option<std::sync::Arc<super::connect_execution::ConnectExecution>>,
 }
 
 impl PlannedConnectModule {
@@ -207,6 +196,7 @@ pub(super) fn select_for_boundary(
         name: insertion.connect_module.to_string(),
         instance: insertion.instance,
         parameters,
+        execution: None,
     }))
 }
 
@@ -306,9 +296,6 @@ fn delegated_timing(kind: super::XspiceAutoBridgeKind) -> &'static [(&'static st
 }
 
 /// Which built-in connect module a bridge kind delegates to.
-///
-/// A `connectrules` block that names anything else is refused: see this
-/// module's documentation for why there is no route to execute one.
 pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Option<&'static str> {
     use super::XspiceAutoBridgeKind as Kind;
     match kind {
@@ -319,27 +306,19 @@ pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Opti
     }
 }
 
-/// Refuse a connect module that is not one the delegation implements.
-pub(super) fn check_delegable(
+/// Selection must carry an authenticated execution decision from its source.
+pub(super) fn check_execution(
     selected: &PlannedConnectModule,
-    kind: super::XspiceAutoBridgeKind,
+    _kind: super::XspiceAutoBridgeKind,
     node_label: &str,
 ) -> Result<(), SimulationError> {
-    let expected = expected_library_module(kind);
-    if expected.is_some_and(|expected| selected.name.eq_ignore_ascii_case(expected)) {
+    if selected.execution.is_some() {
         return Ok(());
     }
     Err(connect_refusal(format!(
-        "node '{node_label}' selects connect module '{}' (instance '{}'), which RSpice cannot \
-         execute: a connect module runs here by delegating to the XSPICE bridge code model \
-         that implements it, and only the built-in library — a2d, d2a and bidir — has such a \
-         delegation. Executing an arbitrary connect module's body needs the Verilog-AMS mixed \
-         host with executable connect-body elaboration and insertion, which this \
-         boundary route does not yet implement",
+        "node '{node_label}' selects connect module '{}' (instance '{}') without its prepared source execution binding",
         selected.name, selected.instance
-    ))
-    .module(selected.name.as_str())
-    .into())
+    )).module(selected.name.as_str()).into())
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +340,14 @@ pub(super) struct DesignConnectRules {
     matches: usize,
     table: ConnectRuleTable,
     disciplines: DisciplineDb,
+    source: Option<std::sync::Arc<str>>,
+    builtin_delegations: std::collections::BTreeSet<String>,
+    executions: std::cell::RefCell<
+        std::collections::HashMap<
+            String,
+            std::sync::Arc<super::connect_execution::ConnectExecution>,
+        >,
+    >,
 }
 
 impl DesignConnectRules {
@@ -453,6 +440,8 @@ impl DesignConnectRules {
                     })?;
                 self.declared_in = Some(path.to_path_buf());
                 self.disciplines = specification.disciplines.clone();
+                self.source = specification.source.clone();
+                self.builtin_delegations = specification.builtin_delegations.clone();
             }
         }
         Ok(())
@@ -560,7 +549,53 @@ impl DesignConnectRules {
         let Some((table, db)) = self.selected() else {
             return Ok(None);
         };
-        select_for_boundary(table, db, kind, node_label, instance_name, port_name)
+        let Some(mut selected) =
+            select_for_boundary(table, db, kind, node_label, instance_name, port_name)?
+        else {
+            return Ok(None);
+        };
+        let rule = table
+            .select(
+                DECK_DISCIPLINE,
+                EVENT_DISCIPLINE,
+                boundary_direction(kind).expect("selected logic boundary").1,
+                db,
+            )
+            .map_err(|error| connect_error(node_label, &error))?;
+        let key = format!(
+            "{}:{:?}",
+            selected.name,
+            selected
+                .parameters
+                .iter()
+                .map(|(name, value)| (name, value.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        let mut executions = self.executions.borrow_mut();
+        let execution = executions.entry(key).or_insert_with(|| {
+            std::sync::Arc::new(
+                if self.builtin_delegations.contains(&selected.name)
+                    && expected_library_module(kind) == Some(selected.name.as_str())
+                {
+                    super::connect_execution::ConnectExecution::Delegated
+                } else {
+                    super::connect_execution::ConnectExecution::Authored(
+                        super::connect_execution::AuthoredConnectBody::new(
+                            self.source.clone().expect("selected source retained"),
+                            self.declared_in
+                                .as_ref()
+                                .expect("selected source path")
+                                .to_string_lossy()
+                                .into_owned(),
+                            rule.continuous.name.to_string(),
+                            rule.discrete.name.to_string(),
+                        ),
+                    )
+                },
+            )
+        });
+        selected.execution = Some(std::sync::Arc::clone(execution));
+        Ok(Some(selected))
     }
 }
 
@@ -607,9 +642,9 @@ pub(super) fn attach_to_planned_bridges(
     if bridges.is_empty() {
         return Ok(());
     }
-    let Some((table, db)) = rules.selected() else {
+    if rules.selected().is_none() {
         return Ok(());
-    };
+    }
 
     let node_names = circuit.node_names_sorted();
     let owners = digital_port_owners(circuit);
@@ -623,18 +658,12 @@ pub(super) fn attach_to_planned_bridges(
             .get(&bridge.node)
             .cloned()
             .unwrap_or_else(|| (node_label.clone(), "d".to_string()));
-        let Some(selected) = select_for_boundary(
-            table,
-            db,
-            bridge.kind,
-            &node_label,
-            &instance_name,
-            &port_name,
-        )?
+        let Some(selected) =
+            rules.select_for_boundary_node(bridge.kind, &node_label, &instance_name, &port_name)?
         else {
             continue;
         };
-        check_delegable(&selected, bridge.kind, &node_label)?;
+        check_execution(&selected, bridge.kind, &node_label)?;
         log::info!(
             "Node '{}' bridges through connect module '{}' as instance '{}'",
             node_label,

@@ -138,6 +138,8 @@ pub struct AnalyzedModule {
     pub digital: AnalyzedDigital,
     /// Numeric discrete inputs: (value slot, validity slot), both transactional.
     pub discrete_inputs: Vec<(usize, usize)>,
+    /// Source signal of relocated numeric storage; root slots default to their name.
+    pub discrete_bindings: HashMap<usize, SmolStr>,
     /// Explicit packed selection behind a numeric input; whole-value inputs omit it.
     pub discrete_selections: Vec<AnalyzedDiscreteSelection>,
 }
