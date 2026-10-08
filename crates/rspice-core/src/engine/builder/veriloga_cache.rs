@@ -1881,7 +1881,7 @@ pub(super) fn resolve_cached_or_compile_veriloga(
 /// on an analog-only module is a no-op — so the `CompiledModel` and the
 /// canonical artifact a deck's analog `.va` produces are the ones it produced
 /// before.
-#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+#[cfg(feature = "veriloga")]
 pub(super) fn deck_include_compiler_options() -> rspice_veriloga::CompilerOptions {
     rspice_veriloga::CompilerOptions {
         enable_ams: true,
