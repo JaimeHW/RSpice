@@ -109,7 +109,13 @@ fn invalid_distortion_frequencies_cannot_replace_existing_exports() {
                 "--to",
                 format,
             ]);
-            assert!(!result.status.success(), "{defect}, {format}: {result:?}");
+            assert_eq!(
+                result.status.code(),
+                Some(1),
+                "{defect}, {format}: {result:?}"
+            );
+            let report: Value = serde_json::from_slice(&result.stderr).unwrap();
+            assert_eq!(report["error"]["code"], "conversion_error", "{report}");
             assert!(
                 String::from_utf8_lossy(&result.stderr).contains(diagnostic),
                 "{defect}, {format}: {result:?}"
@@ -440,8 +446,16 @@ fn malformed_rf_payload_coordinates_cannot_replace_results() {
     let dir = test_dir("invalid_pac_payload");
     let input = run_document(&dir, "pac");
     let original = read_json(&input);
-    let output = dir.join("protected.json");
-    for defect in ["duplicate", "out_of_range", "offset", "length"] {
+    for defect in [
+        "duplicate",
+        "out_of_range",
+        "offset",
+        "length",
+        "absolute",
+        "carrier",
+        "path",
+        "qualifier",
+    ] {
         let mut changed = original.clone();
         match defect {
             "duplicate" => {
@@ -454,6 +468,14 @@ fn malformed_rf_payload_coordinates_cannot_replace_results() {
                 changed["payload"]["conversionMatrix"]["entries"][0]["frequencyIndex"] = 2.into()
             }
             "offset" => changed["payload"]["sidebands"][0]["frequencyOffsets"][0] = 123.0.into(),
+            "absolute" => {
+                changed["payload"]["sidebands"][0]["absoluteFrequencies"][0] = 1234.0.into()
+            }
+            "carrier" => changed["payload"]["fundamentalFrequency"] = (-1000.0).into(),
+            "path" => {
+                changed["payload"]["conversionMatrix"]["entries"][0]["outputSideband"] = 99.into()
+            }
+            "qualifier" => changed["signals"][0]["qualifier"]["sideband"] = 99.into(),
             "length" => {
                 changed["payload"]["sidebands"][0]["frequencyOffsets"]
                     .as_array_mut()
@@ -467,15 +489,24 @@ fn malformed_rf_payload_coordinates_cannot_replace_results() {
             _ => unreachable!(),
         }
         std::fs::write(&input, serde_json::to_vec(&changed).unwrap()).unwrap();
-        std::fs::write(&output, "predecessor").unwrap();
-        let result = cli(&[
-            "convert",
-            input.to_str().unwrap(),
-            output.to_str().unwrap(),
-            "--to",
-            "json",
-        ]);
-        assert!(!result.status.success(), "{defect}: {result:?}");
-        assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+        for format in ["json", "csv", "tsv", "ascii", "raw", "hdf5"] {
+            let output = dir.join(format!("protected.{format}"));
+            std::fs::write(&output, "predecessor").unwrap();
+            let result = cli(&[
+                "convert",
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+                "--to",
+                format,
+            ]);
+            assert_eq!(
+                result.status.code(),
+                Some(1),
+                "{defect}, {format}: {result:?}"
+            );
+            let report: Value = serde_json::from_slice(&result.stderr).unwrap();
+            assert_eq!(report["error"]["code"], "conversion_error", "{report}");
+            assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+        }
     }
 }
