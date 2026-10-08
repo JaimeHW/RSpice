@@ -26,7 +26,7 @@ result-vcd = ["dep:rspice-core", "dep:rspice-results"]
 result-waveform = ["dep:rspice-results"]
 # Reuse the core HDF5 writer without widening the standalone HDF5 reader.
 result-hdf5 = ["hdf5", "result-waveform", "dep:rspice-core"]
-native-bundle = ["dep:sha2"]
+native-bundle = ["dep:sha2", "serde_json/raw_value"]
 monte-carlo-checkpoint = ["dep:rspice-results"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
 fst = ["dep:fst-reader"]

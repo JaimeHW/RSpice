@@ -6,6 +6,8 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
+mod json_samples;
+
 /// Bounds supplied by the importing transaction.
 #[derive(Debug, Clone, Copy)]
 pub struct NativeBundleReadLimits {
@@ -38,6 +40,7 @@ struct NativeCoordinate {
     name: String,
     #[serde(default)]
     unit: Option<String>,
+    #[serde(deserialize_with = "json_samples::coordinates")]
     values: Vec<f64>,
 }
 
@@ -47,24 +50,18 @@ struct NativeSignal {
     name: String,
     #[serde(default)]
     unit: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "crate::numeric::sample_serde::deserialize_optional"
-    )]
+    #[serde(default, deserialize_with = "json_samples::optional_signal")]
     values: Option<Vec<f64>>,
-    #[serde(
-        default,
-        deserialize_with = "crate::numeric::sample_serde::deserialize_optional"
-    )]
+    #[serde(default, deserialize_with = "json_samples::optional_signal")]
     real: Option<Vec<f64>>,
-    #[serde(
-        default,
-        deserialize_with = "crate::numeric::sample_serde::deserialize_optional"
-    )]
+    #[serde(default, deserialize_with = "json_samples::optional_signal")]
     imag: Option<Vec<f64>>,
 }
 
 /// Verify the bounded container and digest before decoding the versioned file fields.
+/// Numeric source spellings are checked before conversion: nonzero decimals
+/// cannot underflow to zero, and integer literals must be exactly representable
+/// in binary64. Explicit null signal samples remain unavailable.
 pub fn decode_native_bundle(
     bytes: &[u8],
     kind: NativeBundleKind,

@@ -4,6 +4,8 @@ use super::reader::read_zip_member;
 use super::*;
 use std::io::{Cursor, Write as _};
 
+mod numeric_precision;
+
 const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 
 fn limits() -> NativeBundleReadLimits {
