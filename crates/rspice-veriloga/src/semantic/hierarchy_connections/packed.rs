@@ -57,35 +57,14 @@ impl Connections<'_> {
             .expect("a packed discrete formal has a signal declaration");
         let bounds = declared.range.expect("a packed formal has bounds");
         let span = instance.span;
-        let mut proxy: SmolStr = format!("__rspice_bus_{}_{}", instance_index, port_index).into();
-        while !self.used.insert(proxy.clone()) {
-            proxy = format!("{proxy}_").into();
-        }
-        let range = crate::ast::VectorRange {
-            msb: super::super::exact_integer_expression(bounds.msb, span),
-            lsb: super::super::exact_integer_expression(bounds.lsb, span),
+        let proxy = inputs::temporary_net(
+            self.prepared,
+            self.used,
+            format!("__rspice_bus_{}_{}", instance_index, port_index).into(),
+            lower,
+            declared,
             span,
-        };
-        self.prepared.nets.push(NetDecl {
-            range: Some(range.clone()),
-            discipline: lower.segment.declared.clone(),
-            names: vec![proxy.clone()],
-            is_ground: false,
-            is_internal: true,
-            span,
-        });
-        self.prepared.digital_nets.push(DigitalNetDecl {
-            kind: lower.net_kind.expect("discrete formal"),
-            signedness: declared.signedness,
-            range: Some(range),
-            items: vec![DigitalDeclItem {
-                name: proxy.clone(),
-                dimensions: Vec::new(),
-                init: None,
-                span,
-            }],
-            span,
-        });
+        );
         match &mut self.prepared.instances[instance_index].connections[port_index] {
             Connection::Named { signal, .. } | Connection::Ordered { signal, .. } => {
                 *signal = Some(Expression::Identifier(Identifier {

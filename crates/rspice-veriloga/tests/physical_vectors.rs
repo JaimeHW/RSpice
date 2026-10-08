@@ -566,3 +566,52 @@ connectrules selected; connect bidirectional; endconnectrules
         assert!(error.contains(expected), "expected {expected}: {error}");
     }
 }
+
+#[test]
+fn computed_input_connections_specialize_and_replay_without_connect_rules() {
+    let source = r#"
+module leaf(d,p);
+ parameter integer K=99;
+ input [7:0] d; wire [7:0] d;
+ output p; electrical p;
+ analog V(p)<+d;
+endmodule
+module top(p);
+ parameter integer K=2;
+ output p; electrical p;
+ reg [3:0] value;
+ initial value=4'd15;
+ leaf child(value+K,p);
+endmodule
+"#;
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    assert_eq!(
+        compiled
+            .canonical_ir
+            .hir
+            .parameters
+            .iter()
+            .find(|p| p.name == "K")
+            .unwrap()
+            .elaboration_value,
+        Some(2.0)
+    );
+    let assigned = compiler
+        .specialize_mixed_runtime(&compiled.canonical_ir, &[("K", 5.0)], &NoPipelineControl)
+        .unwrap();
+    assert_ne!(
+        compiled.canonical_ir.digital.content_identity,
+        assigned.canonical_ir.digital.content_identity
+    );
+    let replayed = compiler
+        .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        assigned.canonical_ir.digital.content_identity,
+        replayed.canonical_ir.digital.content_identity
+    );
+    replayed.canonical_ir.validate().unwrap();
+}

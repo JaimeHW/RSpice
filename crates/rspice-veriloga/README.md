@@ -159,8 +159,8 @@ can drive whole physical input vectors through per-lane authored converters;
 selected physical lanes can connect to scalar digital formals. Scalar potential
 and flow accesses resolve constant coordinates, including analog `genvar` loops
 and custom nature accesses. Shape and selector dependencies require source
-specialization when their parameters change. Artifact schema 129 and core cache
-record 111 invalidate models compiled before these checks.
+specialization when their parameters change. Artifact schema 130 and core cache
+record 112 invalidate models compiled before these checks.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.
@@ -177,9 +177,16 @@ combine physical lanes with four-state scalar, packed and selected variable-arra
 lanes on packed digital ports. Input/output digital lanes use one grouped assignment;
 inout wire lanes retain driver identities through normalized bit aliases. Output
 and inout lanes require writable parent nets, and replications remain input-only
-(VAMS-2023 4.2.13). General input expressions/constants, vector-valued/named branch
-forms, unpacked net/port arrays, complete inherited discipline resolution, and
-library/view selection remain open.
+(VAMS-2023 4.2.13). Discrete input expressions execute through parent-side assignments
+with the formal's width and value type. Constants, arithmetic, concatenations,
+conditional values, dynamic bit/array selections and width/type conversions retain
+the parent's parameter and time scope, without requiring connect rules. Existing
+type/coordinate-compatible net bindings and constant selections retain their direct
+binding path. Equal-width inputs with different signedness or bit numbering use
+assignment conversion to retain the child's declared interpretation.
+General expressions interleaved with physical net lanes in one concatenation,
+vector-valued/named branch forms, unpacked net/port arrays, complete inherited
+discipline resolution, and library/view selection remain open.
 Escaped node names retain distinct lane identities; escaped ground and comma-bearing
 names still require structured branch labels, and the full escaped-identifier
 language surface remains part of language qualification.
@@ -544,7 +551,7 @@ port forms. Input/inout integer variables, conflicting declarations, incompatibl
 ranges and nonconstant initializers are rejected. Analog-written integer output
 ports remain an explicit unsupported continuous-to-discrete port-driving case;
 variables written in both domains remain errors. Time ports, unpacked port
-arrays and general unequal-width net-port connections remain open.
+arrays and unequal-width collapsed output/inout net connections remain open.
 This uses the existing schema 86 storage and Wasm helper ABI 20.
 Source: [VAMS-2023, 6.5.2, 7.2.2 and A.2.1.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 

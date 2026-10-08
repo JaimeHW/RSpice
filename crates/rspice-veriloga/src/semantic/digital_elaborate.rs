@@ -19,8 +19,13 @@
 //! 1364-2005 section 12.3.9 gives a port connection two readings, and the
 //! standard uses both: a connection can be a *net collapse*, joining the two
 //! nets into one, or an *implicit continuous assignment* from one side to the
-//! other. Which reading applies here is decided by the port's own declared
-//! class, not by its direction:
+//! other. The port class, direction and connection form determine the binding:
+//!
+//! * **Computed inputs become parent-side continuous assignments.** Input
+//!   expressions, dynamic selections and width/type conversions are prepared
+//!   before binding, with the formal's type and the parent's parameters, arrays
+//!   and time scale. The resulting temporary net binds through the ordinary
+//!   net path below. Existing constant selections keep their direct path.
 //!
 //! * **A port declared as a net collapses.** The port and the net it is
 //!   connected to become one elaborated signal, named by the connecting scope.
@@ -70,14 +75,13 @@
 //!
 //! Every refusal names the construct and the clause. Nothing is dropped.
 //!
-//! * a port connection that is neither a declared net nor a bit- or
-//!   part-select of one — an arbitrary expression, a constant, a concatenation
-//!   (section 12.3.9);
+//! * output/inout connection forms not normalized by mixed-boundary preparation
+//!   that are neither declared nets nor bit/part selections (section 12.3.9);
 //! * a connection naming something that is not a declared discrete-domain
 //!   signal, because this compiler does not create implicit nets (section
 //!   4.5);
-//! * a net port whose width differs from the net it is connected to, because two
-//!   collapsed nets are one net and one net has one width (section 12.3.9);
+//! * an output/inout net collapse whose widths differ; input conversions and
+//!   variable outputs instead use assignment sizing (section 12.3.9);
 //! * an `input` or `inout` port declared as a variable (section 12.3.3);
 //! * an output or inout port connected to a variable, or to anything the
 //!   connecting scope sees as an input port, because either would let the
@@ -870,8 +874,8 @@ pub(super) fn specialize_module(
 /// connection two ways depending on what it is. These are the two this compiler
 /// can build something honest out of, and they take the two different readings:
 /// a whole net collapses; selected inouts alias bits and other selections assign.
-/// Everything else — a concatenation, a constant, an arithmetic expression —
-/// is refused where it is written.
+/// Computed input expressions have already become parent-side assignments.
+/// Other unprepared connection forms are refused where they are written.
 enum ConnectionForm<'a> {
     /// `.a(bus)` — the whole of a declared net.
     Net(&'a Identifier),

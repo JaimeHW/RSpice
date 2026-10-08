@@ -55,10 +55,7 @@ impl ConnectionScope {
         }
     }
 
-    pub fn physical_selection(
-        &self,
-        actual: &Expression,
-    ) -> CompileResult<Option<Vec<Expression>>> {
+    pub fn contains_physical(&self, actual: &Expression) -> bool {
         fn elements(scope: &ConnectionScope, values: &[ArrayLiteralElement], depth: usize) -> bool {
             if depth > MAX_REPLICATION_NESTING {
                 return true;
@@ -82,7 +79,14 @@ impl ConnectionScope {
             };
             scope.nodes.contains_key(name) || scope.physical.contains(name)
         }
-        if !contains(self, actual, 0) {
+        contains(self, actual, 0)
+    }
+
+    pub fn physical_selection(
+        &self,
+        actual: &Expression,
+    ) -> CompileResult<Option<Vec<Expression>>> {
+        if !self.contains_physical(actual) {
             return Ok(None);
         }
         let mut lanes = Vec::new();

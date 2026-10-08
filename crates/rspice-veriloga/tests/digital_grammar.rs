@@ -1914,11 +1914,6 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             vec!["at most 0 parameter overrides"],
         ),
         (
-            "an expression in a port connection",
-            hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a & b, b);"),
-            vec!["connected to an expression", "12.3.9"],
-        ),
-        (
             "a runtime bit-select connected to an inout port",
             hierarchy(
                 "module pass(io, a);\n\
@@ -1933,18 +1928,6 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             "an undeclared connection name",
             hierarchy(NAND2, "    wire a, b;\n     nand2 g1(y, a, b);"),
             vec!["not a declared discrete-domain signal", "section 4.5"],
-        ),
-        (
-            "a width mismatch",
-            hierarchy(
-                "module bus1(y, a);\n\
-                 \x20   output y;\n     input [3:0] a;\n\
-                 \x20   wire y;\n     wire [3:0] a;\n\
-                 \x20   assign y = a[0];\n\
-                 endmodule\n",
-                "    wire x, z;\n     bus1 g1(z, x);",
-            ),
-            vec!["4-bit connection", "12.3.9"],
         ),
         (
             "an input port declared a variable",
@@ -2876,4 +2859,15 @@ endmodule
             "nonconstant initializer {expression}"
         );
     }
+}
+
+#[test]
+fn computed_and_resized_input_connections_elaborate() {
+    let computed = hierarchy(NAND2, "    wire a, b, y;\n     nand2 g1(y, a & b, b);");
+    plan(&computed, "top").validate().unwrap();
+    let resized = hierarchy(
+        "module bus1(y,a); output y; input [3:0] a; wire y; wire [3:0] a; assign y=a[0]; endmodule",
+        "    wire x,z; bus1 g1(z,x);",
+    );
+    plan(&resized, "top").validate().unwrap();
 }

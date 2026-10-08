@@ -1488,3 +1488,73 @@ connectrules selected; connect bidirectional; endconnectrules
         }
     }
 }
+
+#[test]
+fn computed_inputs_keep_parent_types_arrays_parameters_and_time_scope() {
+    let source = Source::new(
+        r#"
+`timescale 10ps/1ps
+module receiver(bits,sample,p);
+ parameter real K=99;
+ input signed [7:0] bits; wire signed [7:0] bits;
+ input sample; wreal sample;
+ output p; electrical p;
+ wire negative;
+ assign negative=(bits<0) && bits[7];
+ // Table 7-1 zero-extends a packed read in analog; decode its sign digitally.
+ analog V(p)<+bits-(negative ? 256.0 : 0.0)+sample;
+endmodule
+module decode(d,p);
+ input [1:0] d; wire [1:0] d;
+ output p; electrical p;
+ wire expected;
+ assign expected=(d===2'bxz);
+ analog V(p)<+(expected ? 7.0 : 9.0);
+endmodule
+`timescale 1ns/1ps
+module bank(p,q,r,s,t,u);
+ parameter real K=2;
+ output p,q,r,s,t,u; electrical p,q,r,s,t,u;
+ reg [3:0] values[2:1];
+ reg [8:15] same_width;
+ integer pick;
+ real level;
+ initial begin
+  pick=2; values[2]=4'd15; values[1]=4'd2; level=1.5; same_width=8'hff;
+  #1 pick=1; level=2.5; same_width=8'h80;
+ end
+ receiver arithmetic(values[pick]+4'd1,level+K+$realtime,p);
+ receiver constant(8'shff,0.25,q);
+ receiver concatenated({values[pick][3:2],2'b01,4'b0011},0.5,r);
+ receiver resized(values[pick],-0.5,s);
+ decode unknown(2'bxz,t);
+ receiver converted_type(same_width,0.0,u);
+endmodule
+module top(p,q,r,s,t,u);
+ output p,q,r,s,t,u; electrical p,q,r,s,t,u;
+ bank #(.K(3)) child(p,q,r,s,t,u);
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!("* parent-scoped digital input expressions\nX1 p q r s t u top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\nRt t 0 1k\nRu u 0 1k\n.va \"{}\" top module=top\n.end\n", source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+    for (time, p, r, s, u) in [
+        (0.5e-9, 20.5, -44.5, 14.5, -1.0),
+        (1.5e-9, 9.5, 19.5, 1.5, -128.0),
+    ] {
+        for (node, expected) in [
+            ("p", p),
+            ("q", -0.75),
+            ("r", r),
+            ("s", s),
+            ("t", 7.0),
+            ("u", u),
+        ] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node} at {time}: {actual}, expected {expected}"
+            );
+        }
+    }
+}

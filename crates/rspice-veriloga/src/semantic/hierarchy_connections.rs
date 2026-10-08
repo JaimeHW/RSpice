@@ -5,6 +5,7 @@
 //! this adapter supplies typed segments and ordinary executable module bodies.
 
 mod actual;
+mod inputs;
 mod packed;
 
 use super::digital_elaborate::{SpecializationKey, SpecializedModule, specialize_module};
@@ -161,9 +162,11 @@ pub(super) fn prepare(
     module: &AnalyzedModule,
     bodies: &mut ConnectionModules,
 ) -> CompileResult<Option<Arc<SpecializedModule>>> {
-    if analyzed.connect_rules.insertions().is_empty() || source.instances.is_empty() {
+    if source.instances.is_empty() {
         return Ok(None);
     }
+    let has_rules = !analyzed.connect_rules.insertions().is_empty();
+    let mut prepared_inputs = false;
     let mut signals: BTreeMap<SignalIdentity, BoundarySignal> = BTreeMap::new();
     let scope = super::node_vectors::ConnectionScope::new(source, module);
     let mut prepared = source.clone();
@@ -174,6 +177,9 @@ pub(super) fn prepare(
         let Some(child) = analyzed.modules.get(&instance.module) else {
             continue;
         };
+        if !has_rules && child.digital.signals.is_empty() {
+            continue;
+        }
         let Some(child_source) = sources.get(&instance.module) else {
             continue;
         };
@@ -209,6 +215,30 @@ pub(super) fn prepare(
             let Some(lower) = endpoint(child_source, child, &port.name) else {
                 continue;
             };
+            if port.direction == PortDirection::Input
+                && lower.net_kind.is_some()
+                && !scope.contains_physical(actual)
+                && let Some(declared) = child
+                    .digital
+                    .signals
+                    .iter()
+                    .find(|signal| signal.name == port.name)
+                && inputs::requires_assignment(actual, module, declared)
+            {
+                inputs::insert(
+                    &mut prepared,
+                    &mut used,
+                    child,
+                    &lower,
+                    (instance_index, port_index),
+                    actual,
+                );
+                prepared_inputs = true;
+                continue;
+            }
+            if !has_rules {
+                continue;
+            }
             if lower.net_kind.is_some()
                 && lower.width > 1
                 && let Some(lanes) = scope.physical_selection(actual)?
@@ -288,7 +318,8 @@ pub(super) fn prepare(
             );
         }
     }
-    if signals.is_empty() {
+    let has_boundaries = !signals.is_empty();
+    if !has_boundaries && !prepared_inputs {
         return Ok(None);
     }
     for boundary in signals.into_values() {
@@ -512,7 +543,7 @@ pub(super) fn prepare(
                 parameter.elaboration_given.or(original.elaboration_given);
         }
     }
-    analyzed.hierarchical_connections = true;
+    analyzed.hierarchical_connections = module.hierarchical_connections || has_boundaries;
     analyzed.digital.bit_aliases = aliases;
     Ok(Some(Arc::new(SpecializedModule {
         source: prepared,
