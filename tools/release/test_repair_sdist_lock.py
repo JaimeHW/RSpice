@@ -10,6 +10,7 @@ from repair_sdist_lock import (  # noqa: E402
     _embedded_workspace_files,
     _external_package_identities,
     _missing_embedded_files,
+    _missing_local_patch_files,
     _validate_reconciliation,
 )
 
@@ -80,6 +81,12 @@ class ReconciliationTests(unittest.TestCase):
     def test_lock_parser_rejects_invalid_utf8(self) -> None:
         with self.assertRaisesRegex(RepairError, "not valid UTF-8"):
             _external_package_identities(b"\xff")
+
+    def test_unused_patch_does_not_overwrite_preceding_registry_identity(self) -> None:
+        original = lockfile(REGISTRY_PACKAGE)
+        repaired = original + b'\n[[patch.unused]]\nname = "zip"\nversion = "8.6.0"\n'
+        _validate_reconciliation(original, repaired)
+        self.assertEqual(_external_package_identities(original), _external_package_identities(repaired))
 
 
 def write(root: Path, relative: str, text: str) -> None:
@@ -172,6 +179,54 @@ class EmbeddedFileTests(unittest.TestCase):
             )
 
             self.assertEqual(_missing_embedded_files(root, checkout), {})
+
+
+class LocalPatchTests(unittest.TestCase):
+    def fixture(self, temporary: str) -> tuple[Path, Path]:
+        root = Path(temporary) / "archive"
+        checkout = Path(temporary) / "checkout"
+        write(root, "Cargo.toml", '[patch.crates-io]\nzip = { path = "vendor/zip" }\n')
+        write(checkout, "vendor/zip/Cargo.toml", '[package]\nname = "zip"\n')
+        write(checkout, "vendor/zip/src/lib.rs", "// patched library\n")
+        write(checkout, "vendor/zip/LICENSE", "license\n")
+        return root, checkout
+
+    def test_restores_patch_tree_without_build_or_git_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, checkout = self.fixture(temporary)
+            write(checkout, "vendor/zip/target/debug/stale", "build artifact")
+            write(checkout, "vendor/zip/.git/config", "git artifact")
+            self.assertEqual(
+                set(_missing_local_patch_files(root, checkout)),
+                {PurePosixPath(f"vendor/zip/{name}") for name in ("Cargo.toml", "src/lib.rs", "LICENSE")},
+            )
+
+    def test_existing_identical_files_are_not_added_again(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, checkout = self.fixture(temporary)
+            write(root, "vendor/zip/LICENSE", "license\n")
+            self.assertNotIn(PurePosixPath("vendor/zip/LICENSE"), _missing_local_patch_files(root, checkout))
+            write(root, "vendor/zip/LICENSE", "different snapshot\n")
+            with self.assertRaisesRegex(RepairError, "differs from checkout"):
+                _missing_local_patch_files(root, checkout)
+
+    def test_missing_patch_and_unsafe_paths_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, checkout = self.fixture(temporary)
+            (checkout / "vendor/zip/Cargo.toml").unlink()
+            with self.assertRaisesRegex(RepairError, "no checkout manifest"):
+                _missing_local_patch_files(root, checkout)
+            for path in ("../outside", "/absolute", "C:/drive", r"C:\\drive", "."):
+                with self.subTest(path=path):
+                    write(root, "Cargo.toml", f"[patch.crates-io]\nzip = {{ path = '{path}' }}\n")
+                    with self.assertRaisesRegex(RepairError, "unsafe local patch path"):
+                        _missing_local_patch_files(root, checkout)
+
+    def test_no_local_patch_needs_no_checkout_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write(root, "Cargo.toml", '[patch.crates-io]\nzip = { git = "https://example.invalid/zip" }\n')
+            self.assertEqual(_missing_local_patch_files(root, root), {})
 
 
 class RepositorySourceDistributionTests(unittest.TestCase):

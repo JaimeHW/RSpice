@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Repair maturin's Cargo-workspace source distribution so consumers can build it.
 
-Maturin's Cargo sdist generator leaves the archive unbuildable in two ways.  It
+Maturin's Cargo sdist generator can leave the archive unbuildable. It
 fills the archive from ``cargo package --list``, which never reports a file
 outside a package directory, so a crate that ``include_str!``s an asset from the
 workspace root ships an archive whose compile fails on a missing file; and it
 prunes unrelated workspace members but copies the original workspace Cargo.lock
 unchanged, so Cargo rejects the archive under ``--locked``.  This utility adds
-the embedded files the compiled sources name, asks Cargo to reconcile the copied
+the embedded files the compiled sources name and local Cargo patch packages
+omitted from the archive, asks Cargo to reconcile the copied
 lockfile against the pruned workspace, validates the result under ``--locked``,
 and rewrites the archive once with both corrections.
 """
@@ -17,7 +18,6 @@ from __future__ import annotations
 import argparse
 import gzip
 import io
-import json
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -26,16 +26,13 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 from typing import Iterable
 
 
 class RepairError(RuntimeError):
     """Raised when an sdist cannot be repaired safely."""
 
-
-_LOCK_STRING = re.compile(
-    r'^(name|version|source|checksum)\s*=\s*("(?:[^"\\]|\\.)*")\s*$'
-)
 
 # Installing an sdist compiles each package's `src` tree and nothing else, so an
 # embed reached from `tests`, `benches` or `examples` is out of scope: those
@@ -54,28 +51,10 @@ def _external_package_identities(lockfile: bytes) -> frozenset[tuple[str, str, s
     except UnicodeDecodeError as exc:
         raise RepairError("Cargo.lock is not valid UTF-8") from exc
 
-    packages: list[dict[str, str]] = []
-    package: dict[str, str] | None = None
-    for line in text.splitlines():
-        if line.strip() == "[[package]]":
-            if package is not None:
-                packages.append(package)
-            package = {}
-            continue
-        if package is None:
-            continue
-        match = _LOCK_STRING.match(line.strip())
-        if match is None:
-            continue
-        try:
-            value = json.loads(match.group(2))
-        except json.JSONDecodeError as exc:
-            raise RepairError(f"invalid quoted value in Cargo.lock: {line!r}") from exc
-        if not isinstance(value, str):
-            raise RepairError(f"non-string package identity in Cargo.lock: {line!r}")
-        package[match.group(1)] = value
-    if package is not None:
-        packages.append(package)
+    try:
+        packages = tomllib.loads(text).get("package", [])
+    except tomllib.TOMLDecodeError as exc:
+        raise RepairError("Cargo.lock is not valid TOML") from exc
 
     identities: set[tuple[str, str, str, str | None]] = set()
     for fields in packages:
@@ -89,6 +68,10 @@ def _external_package_identities(lockfile: bytes) -> frozenset[tuple[str, str, s
             raise RepairError(
                 f"external Cargo.lock package is missing {exc.args[0]!r}: {fields!r}"
             ) from exc
+        if not all(isinstance(value, str) for value in identity[:3]) or (
+            identity[3] is not None and not isinstance(identity[3], str)
+        ):
+            raise RepairError(f"non-string package identity in Cargo.lock: {fields!r}")
         if identity in identities:
             raise RepairError(f"duplicate external Cargo.lock package identity: {identity!r}")
         identities.add(identity)
@@ -245,6 +228,50 @@ def _missing_embedded_files(root: Path, checkout: Path) -> dict[PurePosixPath, P
     return missing
 
 
+def _missing_local_patch_files(root: Path, checkout: Path) -> dict[PurePosixPath, Path]:
+    """Restore declared local patches, including ones outside the sdist closure.
+
+    Cargo resolves root patches even when no surviving workspace member uses
+    them. Refuse to combine archived package files with a different checkout.
+    """
+
+    manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
+    missing: dict[PurePosixPath, Path] = {}
+    for packages in manifest.get("patch", {}).values():
+        for package, spec in packages.items():
+            if not isinstance(spec, dict) or "path" not in spec:
+                continue
+            raw = spec["path"]
+            if not isinstance(raw, str):
+                raise RepairError(f"local patch {package} has an invalid path")
+            relative = PurePosixPath(raw)
+            # Also reject Windows drive/UNC spellings on Linux release hosts.
+            if (relative.is_absolute() or "\\" in raw or ":" in raw
+                    or not relative.parts or ".." in relative.parts):
+                raise RepairError(f"unsafe local patch path: {raw!r}")
+            source_root = checkout.joinpath(*relative.parts)
+            if not (source_root / "Cargo.toml").is_file():
+                raise RepairError(f"local patch {package} has no checkout manifest: {raw}")
+            for directory, dirs, files in os.walk(source_root, followlinks=False):
+                dirs[:] = sorted(name for name in dirs if name not in {"target", ".git"})
+                for name in [*dirs, *sorted(files)]:
+                    source = Path(directory) / name
+                    if source.is_symlink() or not source.resolve().is_relative_to(checkout.resolve()):
+                        raise RepairError(f"local patch contains an unsafe link: {source}")
+                for name in sorted(files):
+                    source = Path(directory) / name
+                    if not source.is_file():
+                        raise RepairError(f"local patch contains a non-regular file: {source}")
+                    target = PurePosixPath(source.relative_to(checkout).as_posix())
+                    existing = root.joinpath(*target.parts)
+                    if existing.exists():
+                        if not existing.is_file() or existing.read_bytes() != source.read_bytes():
+                            raise RepairError(f"local patch differs from checkout: {target}")
+                    else:
+                        missing[target] = source
+    return missing
+
+
 def _run_cargo_metadata(root: Path, cargo: str, offline: bool, locked: bool) -> None:
     command = [
         cargo,
@@ -349,13 +376,16 @@ def repair_archive(archive: Path, cargo: str, offline: bool, checkout: Path) -> 
         root_name, root = _workspace_root(extraction_root, members)
         original_lock = (root / "Cargo.lock").read_bytes()
 
-        # Restore the embedded files before Cargo runs, so the tree Cargo
-        # validates below is the tree the archive ships.
-        missing = _missing_embedded_files(root, checkout)
-        for target, source in missing.items():
-            destination = root.joinpath(*target.parts)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
+        # Restore patches before scanning embeds so both their manifests and
+        # any out-of-package embedded assets participate in validation.
+        missing: dict[PurePosixPath, Path] = {}
+        for discover in (_missing_local_patch_files, _missing_embedded_files):
+            additions = discover(root, checkout)
+            for target, source in additions.items():
+                destination = root.joinpath(*target.parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+            missing.update(additions)
 
         # The first command is intentionally unlocked: it removes stale workspace
         # packages from the copied lockfile. The identity comparison proves it did
@@ -419,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
                 checkout=checkout,
             )
             print(f"repaired and validated {archive}")
-    except (OSError, tarfile.TarError, RepairError) as exc:
+    except (OSError, tarfile.TarError, tomllib.TOMLDecodeError, RepairError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
