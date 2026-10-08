@@ -106,6 +106,7 @@ impl Hdf5Signal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5WaveformSection {
     pub independent_name: String,
+    pub coordinate_unit: Option<String>,
     pub independent_values: Vec<f64>,
     pub signals: Vec<Hdf5Signal>,
 }
@@ -114,6 +115,7 @@ impl Hdf5WaveformSection {
     pub fn new(independent_name: impl Into<String>, independent_values: Vec<f64>) -> Self {
         Self {
             independent_name: independent_name.into(),
+            coordinate_unit: None,
             independent_values,
             signals: Vec::new(),
         }
@@ -212,6 +214,8 @@ impl Hdf5ComplexSignal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5AcSection {
+    pub independent_name: String,
+    pub coordinate_unit: Option<String>,
     pub frequency: Vec<f64>,
     pub signals: Vec<Hdf5ComplexSignal>,
 }
@@ -219,6 +223,8 @@ pub struct Hdf5AcSection {
 impl Hdf5AcSection {
     pub fn new(frequency: Vec<f64>) -> Self {
         Self {
+            independent_name: "frequency".into(),
+            coordinate_unit: None,
             frequency,
             signals: Vec::new(),
         }
@@ -489,7 +495,6 @@ pub struct Hdf5ResultIdentity {
 /// A general result projection with explicit coordinate and quantity types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5TableSection {
-    pub coordinate_unit: Option<String>,
     pub analysis: String,
     pub coordinate_type: String,
     pub waveform: Hdf5WaveformSection,
@@ -576,6 +581,7 @@ pub(crate) fn table_data(
     let encoded = table.dense_encoding();
     let table = encoded.as_ref();
     let mut waveform = Hdf5WaveformSection::new(table.scale_name.clone(), table.scale.clone());
+    waveform.coordinate_unit = table.scale_unit.clone();
     for column in &table.columns {
         match &column.data {
             ColumnData::NullableReal(_) | ColumnData::NullableComplex(_) => {
@@ -607,7 +613,6 @@ pub(crate) fn table_data(
         title: table.plot_name.clone(),
         identity,
         table: Some(Hdf5TableSection {
-            coordinate_unit: table.scale_unit.clone(),
             analysis: table.analysis.clone(),
             coordinate_type: table.scale_type.clone(),
             waveform,
@@ -706,9 +711,6 @@ fn build_hdf5(data: &Hdf5SimulationData) -> Result<Hdf5Document> {
         let name = section_name("table");
         add_waveform_section(&mut document, &name, "table", &table.waveform)?;
         if let Some(group) = document.groups.last_mut() {
-            if let Some(unit) = &table.coordinate_unit {
-                group.set_attr("coordinate_unit", Hdf5Attribute::Text(unit.clone()));
-            }
             group.set_attr("analysis", Hdf5Attribute::Text(table.analysis.clone()));
             group.set_attr(
                 "coordinate_type",
@@ -868,10 +870,6 @@ pub(crate) fn read_hdf5_sections_from_file_with_limits(
             "fft" => section.fft = Some(read_fft_section(file, group_name)?),
             "table" => {
                 section.table = Some(Hdf5TableSection {
-                    coordinate_unit: read_string_attr(
-                        &file.group(group_name)?.attrs()?,
-                        "coordinate_unit",
-                    )?,
                     analysis: read_required_string_attr(
                         &file.group(group_name)?.attrs()?,
                         "analysis",
@@ -922,6 +920,13 @@ fn add_waveform_section(
             })
             .collect(),
     })?;
+    if let Some(unit) = &section.coordinate_unit {
+        document
+            .groups
+            .last_mut()
+            .expect("table was added")
+            .set_attr("coordinate_unit", Hdf5Attribute::Text(unit.clone()));
+    }
     Ok(())
 }
 
@@ -954,6 +959,7 @@ fn read_waveform_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5Wavefo
 
     let section = Hdf5WaveformSection {
         independent_name,
+        coordinate_unit: read_string_attr(&attrs, "coordinate_unit")?,
         independent_values,
         signals,
     };
@@ -977,6 +983,16 @@ fn add_ac_section(document: &mut Hdf5Document, name: &str, section: &Hdf5AcSecti
             })
             .collect(),
     })?;
+    let group = document.groups.last_mut().expect("table was added");
+    if section.independent_name != "frequency" {
+        group.set_attr(
+            "independent_name",
+            Hdf5Attribute::Text(section.independent_name.clone()),
+        );
+    }
+    if let Some(unit) = &section.coordinate_unit {
+        group.set_attr("coordinate_unit", Hdf5Attribute::Text(unit.clone()));
+    }
     Ok(())
 }
 
@@ -999,7 +1015,13 @@ fn read_ac_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5AcSection> {
         signals.push(Hdf5ComplexSignal::new(name, unit, real, imag));
     }
 
-    let section = Hdf5AcSection { frequency, signals };
+    let section = Hdf5AcSection {
+        independent_name: read_string_attr(&attrs, "independent_name")?
+            .unwrap_or_else(|| "frequency".into()),
+        coordinate_unit: read_string_attr(&attrs, "coordinate_unit")?,
+        frequency,
+        signals,
+    };
     section.validate()?;
     Ok(section)
 }

@@ -4,6 +4,37 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+fn native_sections_round_trip_independent_coordinate_metadata() {
+    let directory = TestDirectory::new("coordinate-metadata");
+    let destination = directory.0.join("result.h5");
+    let mut transient = Hdf5WaveformSection::new("Elapsed time", vec![0.0, 2.0]);
+    transient.coordinate_unit = Some("ns".into());
+    transient.add_signal("out", vec![-0.0, 3.0]);
+    let mut dc = Hdf5WaveformSection::new("bias", vec![0.0, 1.0]);
+    dc.coordinate_unit = Some("A".into());
+    dc.add_signal("out", vec![1.0, 2.0]);
+    let mut ac = Hdf5AcSection::new(vec![1.0, 2.0]);
+    ac.independent_name = "Test frequency".into();
+    ac.coordinate_unit = Some("MHz".into());
+    ac.add_signal("out", None, vec![1.0, 2.0], vec![3.0, 4.0]);
+    let mut data = Hdf5SimulationData {
+        transient: Some(transient),
+        dc_sweep: Some(dc),
+        ac: Some(ac),
+        ..Hdf5SimulationData::default()
+    };
+    for declared in [true, false] {
+        if !declared {
+            data.transient.as_mut().unwrap().coordinate_unit = None;
+            data.dc_sweep.as_mut().unwrap().coordinate_unit = None;
+            data.ac.as_mut().unwrap().coordinate_unit = None;
+        }
+        write_hdf5(&destination, &data).unwrap();
+        assert_eq!(read_hdf5(&destination).unwrap(), data);
+    }
+}
+
+#[test]
 fn legacy_empty_text_is_readable_without_accepting_nonempty_string_arrays() {
     let mut builder = rustyhdf5::FileBuilder::new();
     builder.set_attr("title", AttrValue::String(String::new()));

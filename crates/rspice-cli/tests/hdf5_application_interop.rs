@@ -5,6 +5,98 @@ use rspice_formats::hdf5::{Hdf5Limits, decode_hdf5};
 use serde_json::json;
 use std::process::Command;
 
+#[test]
+fn native_sections_preserve_coordinate_identity_through_cli_conversion() {
+    use rspice_core::io::{Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Table};
+
+    for (family, label, unit, quantity) in [
+        ("transient", "Elapsed time", Some("ns"), "time"),
+        ("transient", "Clock", None, "time"),
+        ("dc_sweep", "bias", Some("A"), "value"),
+        ("dc_sweep", "ambient", Some("K"), "value"),
+        ("dc_sweep", "control", None, "value"),
+        ("ac", "Test frequency", Some("MHz"), "frequency"),
+        ("ac", "Tone", None, "frequency"),
+    ] {
+        let mut document = Hdf5Document::new("Retained coordinate");
+        document
+            .add_table(&Hdf5Table {
+                group: "selected".into(),
+                section_type: family.into(),
+                coordinate: if family == "ac" {
+                    Hdf5Coordinate::Frequency(vec![1.0, 2.0])
+                } else {
+                    Hdf5Coordinate::Independent {
+                        name: label.into(),
+                        values: vec![1.0, 2.0],
+                    }
+                },
+                columns: vec![if family == "ac" {
+                    Hdf5Column::Complex {
+                        name: "out".into(),
+                        unit: None,
+                        real: vec![-0.0, 4.0],
+                        imag: vec![2.0, -1.0],
+                    }
+                } else {
+                    Hdf5Column::Real {
+                        name: "out".into(),
+                        quantity: "value".into(),
+                        unit: None,
+                        values: vec![-0.0, 4.0],
+                    }
+                }],
+            })
+            .unwrap();
+        let group = document.groups.last_mut().unwrap();
+        if family == "ac" {
+            group.set_attr("independent_name", Hdf5Attribute::Text(label.into()));
+        }
+        if let Some(unit) = unit {
+            group.set_attr("coordinate_unit", Hdf5Attribute::Text(unit.into()));
+        }
+        let directory = common::test_dir("native_hdf5_coordinate");
+        let source = directory.join("source.h5");
+        let mut bytes = Vec::new();
+        rspice_core::io::write_hdf5(&mut bytes, &document).unwrap();
+        std::fs::write(&source, bytes).unwrap();
+        let json_path = directory.join("converted.json");
+        let roundtrip = directory.join("converted.h5");
+        let restored = directory.join("restored.json");
+        for (input, output, format) in [
+            (&source, &json_path, "json"),
+            (&source, &roundtrip, "hdf5"),
+            (&roundtrip, &restored, "json"),
+        ] {
+            let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args(["--quiet", "convert"])
+                .arg(input)
+                .arg(output)
+                .args(["--to", format])
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{family} {label}: {result:?}");
+        }
+        let original: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(json_path).unwrap()).unwrap();
+        let decoded: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(restored).unwrap()).unwrap();
+        assert_eq!(decoded, original);
+        assert_eq!(decoded["scale"]["name"], label);
+        assert_eq!(decoded["scale"]["unit"], json!(unit), "{family} {label}");
+        assert_eq!(decoded["scale"]["type"], quantity);
+        assert_eq!(decoded["scale"]["values"], json!([1.0, 2.0]));
+        let values = if family == "ac" { "real" } else { "values" };
+        assert_eq!(
+            decoded["signals"][0][values][0].as_f64().unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        if family == "ac" {
+            assert_eq!(decoded["signals"][0]["imag"], json!([2.0, -1.0]));
+        }
+    }
+}
+
 fn decode_export(document: serde_json::Value) -> rspice_formats::numeric::DecodedNumericDataset {
     let directory = common::test_dir("hdf5_application_interop");
     let source = directory.join("source.json");

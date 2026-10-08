@@ -1087,14 +1087,18 @@ fn hdf5_result(
 
 fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<ExportTable, CliError> {
     let from_section = |section: crate::hdf5::Hdf5WaveformSection, analysis: &str| ExportTable {
-        scale_unit: None,
+        scale_unit: section.coordinate_unit,
         analysis: analysis.to_string(),
         plot_name: if data.title.is_empty() {
             "Converted Data".to_string()
         } else {
             data.title.clone()
         },
-        scale_type: scale_var_type(&section.independent_name),
+        scale_type: match analysis {
+            "transient" => "time".into(),
+            "noise" => "frequency".into(),
+            _ => scale_var_type(&section.independent_name),
+        },
         scale_name: section.independent_name,
         scale: section.independent_values,
         columns: decode_hdf5_columns(section.signals),
@@ -1102,7 +1106,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
 
     if let Some(table) = data.table {
         return Ok(ExportTable {
-            scale_unit: table.coordinate_unit,
+            scale_unit: table.waveform.coordinate_unit,
             analysis: table.analysis,
             plot_name: data.title,
             scale_name: table.waveform.independent_name,
@@ -1197,14 +1201,14 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
     }
     if let Some(ac) = data.ac.clone() {
         return Ok(ExportTable {
-            scale_unit: None,
+            scale_unit: ac.coordinate_unit,
             analysis: "ac".to_string(),
             plot_name: if data.title.is_empty() {
                 "AC Analysis".to_string()
             } else {
                 data.title.clone()
             },
-            scale_name: "frequency".to_string(),
+            scale_name: ac.independent_name,
             scale_type: "frequency".to_string(),
             scale: ac.frequency,
             columns: ac
