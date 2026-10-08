@@ -445,6 +445,7 @@ pub struct SemanticAnalyzer {
     /// module without reconstructing the correspondence.
     next_analog_site: u32,
     in_analog_initial: bool,
+    assignment_events: analog_events::AssignmentEvents,
     /// Constant parameter default values (compile-time diagnostics only:
     /// instances may override parameters, so these must never influence
     /// generated code)
@@ -535,6 +536,7 @@ impl SemanticAnalyzer {
             local_counter: 0,
             next_analog_site: 0,
             in_analog_initial: false,
+            assignment_events: Default::default(),
             param_consts: HashMap::new(),
             external_parameter_names: HashMap::new(),
             exact_parameter_constants: Default::default(),
@@ -961,6 +963,7 @@ impl SemanticAnalyzer {
             .has_digital_content()
             .then(|| analog_events::lower(module))
             .transpose()?;
+        self.assignment_events = analog_events::AssignmentEvents::new(event_lowering.as_ref());
         let module = event_lowering
             .as_ref()
             .map_or(module, |lowered| &lowered.module);
@@ -1930,8 +1933,6 @@ impl SemanticAnalyzer {
         self.analyze_digital(module, &mut analyzed);
         if let Some(lowered) = &event_lowering {
             analyzed.digital.analog_events = lowered.bindings.clone();
-            analyzed.digital.event_assigned_variables = lowered.event_assigned_variables.clone();
-            analyzed.digital.immutable_analog_variables = lowered.immutable_variables.clone();
         }
 
         // Phase 10: Module-level variable initializers run before the
@@ -2155,7 +2156,7 @@ impl SemanticAnalyzer {
         analyzed.symbol_table = self.symbols.clone();
         analyzed.noise_process_count = self.next_noise_process;
         retained_inputs::record(&mut analyzed);
-        analog_events::filter_immutable_variables(&mut analyzed);
+        self.assignment_events.finish(&mut analyzed)?;
         analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
         Ok(analyzed)
     }
@@ -3493,7 +3494,9 @@ impl SemanticAnalyzer {
                     self.unfiltered_initial_step_guards.push(name);
                 }
                 self.dynamic_analog_operator_guard_depth += 1;
+                self.assignment_events.event_depth += 1;
                 let body_result = self.analyze_statement(&event_ctrl.statement, module, sink);
+                self.assignment_events.event_depth -= 1;
                 self.dynamic_analog_operator_guard_depth -= 1;
                 body_result?;
                 let then_body = self.close_region();
@@ -3762,6 +3765,18 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
+        self.analyze_assignment(
+            &AssignmentStmt {
+                target: LValue::Variable {
+                    name: for_stmt.var.clone(),
+                    span: for_stmt.span,
+                },
+                value: Self::number_expr(init_value, for_stmt.span),
+                span: for_stmt.span,
+            },
+            module,
+            sink,
+        )?;
         let mut value = init_value;
         let mut iterations = 0usize;
         loop {
@@ -3802,6 +3817,15 @@ impl SemanticAnalyzer {
             };
             self.subst_stack.pop();
 
+            self.analyze_assignment(
+                &AssignmentStmt {
+                    target: for_stmt.update.target.clone(),
+                    value: Self::number_expr(next_value, for_stmt.update.span),
+                    span: for_stmt.update.span,
+                },
+                module,
+                sink,
+            )?;
             value = next_value;
             iterations += 1;
             if iterations > Self::MAX_UNROLL_ITERATIONS {
@@ -3815,21 +3839,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Unrolling substitutes reads in the body, but the authored integer
-        // remains observable after the loop, including a zero-iteration loop.
-        // Preserve its final assignment under the enclosing event/branch guard.
-        self.analyze_assignment(
-            &AssignmentStmt {
-                target: LValue::Variable {
-                    name: for_stmt.var.clone(),
-                    span: for_stmt.span,
-                },
-                value: Self::number_expr(value, for_stmt.span),
-                span: for_stmt.span,
-            },
-            module,
-            sink,
-        )
+        Ok(())
     }
 
     /// Materialize a guard expression into a synthesized variable assigned
@@ -5452,7 +5462,7 @@ impl SemanticAnalyzer {
 
         // Record the assignment for code generation
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
-            target: target_name,
+            target: target_name.clone(),
             var_index,
             index: None,
             expression,
@@ -5463,6 +5473,12 @@ impl SemanticAnalyzer {
             unfiltered_initial_step_guard: self.unfiltered_initial_step_guards.last().cloned(),
         }));
 
+        if let Some(increment) =
+            self.assignment_events
+                .record(&target_name, self.in_analog_initial, span)
+        {
+            self.analyze_statement(&increment, module, sink)?;
+        }
         Ok(())
     }
 

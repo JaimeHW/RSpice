@@ -327,6 +327,22 @@ fn continuously_evaluated_variables_cannot_silently_freeze_a_digital_driver() {
             begin result=value; relay=0; end
         endfunction
         analog unused=relay(sample,V(a));"#,
+        r#"real unused;
+        analog function real relay;
+            output result; input value;
+            real result,value;
+            begin result=value; relay=0; end
+        endfunction
+        analog @(timer(1n)) sample=0.5;
+        analog unused=relay(sample,V(a));"#,
+        r#"real unused;
+        analog function real relay;
+            output result; input value;
+            real result,value;
+            begin result=value; relay=0; end
+        endfunction
+        analog @(timer(1n)) unused=relay(sample,0.5);
+        analog sample=V(a);"#,
     ] {
         let source = format!(
             r#"
@@ -349,5 +365,64 @@ endmodule
                 .contains("not assigned exclusively in analog event statements"),
             "{error}"
         );
+    }
+}
+
+#[test]
+fn function_copy_outs_publish_guarded_assignment_events_without_local_shadows() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module function_events(p,q);
+ inout p,q; electrical p,q;
+ real sample=0.25, accum=0, unused;
+ integer calls=0, seen=0, ready=0, accum_seen=0;
+ wreal held_value;
+ analog function real relay;
+   output result; input value;
+   real result,value;
+   begin result=value; relay=0; end
+ endfunction
+ analog function real add;
+   inout result; input value;
+   real result,value;
+   begin result=result+value; add=0; end
+ endfunction
+ analog @(timer(125p,250p)) begin
+   calls=calls+1;
+   unused=(calls<3) ? relay(sample,0.75) : 0;
+   unused=(calls==2) ? add(accum,0.5) : 0;
+   begin : shadow
+     real sample;
+     sample=12;
+     unused=relay(sample,14);
+   end
+ end
+ always @(sample) seen=seen+1;
+ initial ready=repeat(2) @(sample) 1;
+ always @(accum) accum_seen=accum_seen+1;
+ assign held_value=sample;
+ analog I(p)<+(V(p)-(seen+10*ready+100*held_value))/1000;
+ analog I(q)<+(V(q)-(accum+10*accum_seen))/1000;
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* function assignment occurrences\nX1 p q function_events\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" function_events\n.end\n", source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 0.8e-9, 70e-12).unwrap();
+    for (time, p, q) in [
+        (0.05e-9, 12.5, 0.0),
+        (0.2e-9, 38.0, 0.0),
+        (0.4e-9, 43.5, 5.25),
+        (0.7e-9, 43.5, 5.25),
+    ] {
+        for (name, expected) in [("p", p), ("q", q)] {
+            let actual = voltage(&result, name, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{name}@{time}: {actual} != {expected}"
+            );
+        }
     }
 }
