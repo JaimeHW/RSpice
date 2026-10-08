@@ -957,12 +957,13 @@ impl SemanticAnalyzer {
         module: &Module,
         default_transition: f64,
     ) -> CompileResult<AnalyzedModule> {
-        let event_lowering = (!module.digital_processes.is_empty())
+        let event_lowering = module
+            .has_digital_content()
             .then(|| analog_events::lower(module))
             .transpose()?;
         let module = event_lowering
             .as_ref()
-            .map_or(module, |(lowered, _)| lowered);
+            .map_or(module, |lowered| &lowered.module);
         self.current_time_scale = module.time_scale;
         self.digital_selector_constants = DigitalConstants::from_module(module);
         let mut analyzed = AnalyzedModule {
@@ -1927,8 +1928,10 @@ impl SemanticAnalyzer {
         // Establish ownership before routing declaration initialization. Numeric
         // declarations do not choose a domain; their procedural writers do.
         self.analyze_digital(module, &mut analyzed);
-        if let Some((_, bindings)) = &event_lowering {
-            analyzed.digital.analog_events = bindings.clone();
+        if let Some(lowered) = &event_lowering {
+            analyzed.digital.analog_events = lowered.bindings.clone();
+            analyzed.digital.event_assigned_variables = lowered.event_assigned_variables.clone();
+            analyzed.digital.immutable_analog_variables = lowered.immutable_variables.clone();
         }
 
         // Phase 10: Module-level variable initializers run before the
@@ -2152,6 +2155,7 @@ impl SemanticAnalyzer {
         analyzed.symbol_table = self.symbols.clone();
         analyzed.noise_process_count = self.next_noise_process;
         retained_inputs::record(&mut analyzed);
+        analog_events::filter_immutable_variables(&mut analyzed);
         analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
         Ok(analyzed)
     }
@@ -3811,7 +3815,21 @@ impl SemanticAnalyzer {
             }
         }
 
-        Ok(())
+        // Unrolling substitutes reads in the body, but the authored integer
+        // remains observable after the loop, including a zero-iteration loop.
+        // Preserve its final assignment under the enclosing event/branch guard.
+        self.analyze_assignment(
+            &AssignmentStmt {
+                target: LValue::Variable {
+                    name: for_stmt.var.clone(),
+                    span: for_stmt.span,
+                },
+                value: Self::number_expr(value, for_stmt.span),
+                span: for_stmt.span,
+            },
+            module,
+            sink,
+        )
     }
 
     /// Materialize a guard expression into a synthesized variable assigned

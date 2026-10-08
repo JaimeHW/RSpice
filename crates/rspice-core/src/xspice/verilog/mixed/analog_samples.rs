@@ -141,31 +141,50 @@ impl AnalogModelParticipant<'_> {
             return Ok(());
         }
 
+        let evaluate = self.probes.iter().enumerate().any(|(index, probe)| {
+            matches!(
+                probe,
+                AnalogProbeWiring::Variable {
+                    retained: false,
+                    ..
+                }
+            ) && requested.contains(&probe_id(index))
+        });
         let result = (|| -> Result<(), MixedSignalError> {
             let analog = self.analog.make_mut();
-            for input in self.inputs {
-                let signal = self
-                    .signals
-                    .map_or(input.signal, |map| map[usize::from(input.signal)]);
-                let value = if input.real {
-                    exchange.read_real_signal(signal)
-                } else {
-                    exchange
-                        .read_signal(signal)
-                        .and_then(|value| input.four_state_value(value))
+            if evaluate {
+                for input in self.inputs {
+                    let signal = self
+                        .signals
+                        .map_or(input.signal, |map| map[usize::from(input.signal)]);
+                    let value = if input.real {
+                        exchange.read_real_signal(signal)
+                    } else {
+                        exchange
+                            .read_signal(signal)
+                            .and_then(|value| input.four_state_value(value))
+                    }
+                    .filter(|value| value.is_finite());
+                    input.sample(analog, value)?;
                 }
-                .filter(|value| value.is_finite());
-                input.sample(analog, value)?;
+                self.prepared
+                    .prepare(analog, self.inputs, self.solution, analog_accepted_error)?;
+            } else {
+                // Immutable and event-assigned variables hold their last assignment. At
+                // startup that includes declaration/analog initialization, but
+                // not numerical equations whose digital drivers may still be
+                // waiting for this value to initialize themselves.
+                analog
+                    .try_initialize_analysis()
+                    .map_err(|error| analog_accepted_error(&error))?;
             }
-            // Whatever this refuses is wrapped into a `DigitalRunError` two
-            // lines below and ends the run, so wording it as a rejectable
-            // iterate would describe an outcome that does not happen.
-            self.prepared
-                .prepare(analog, self.inputs, self.solution, analog_accepted_error)?;
             // The retained assignment roots are published by this evaluation.
             // Do not call observe_variables: it may replay the model body.
             for (index, probe) in self.probes.iter().enumerate() {
-                if let AnalogProbeWiring::Variable { name } = probe {
+                if let AnalogProbeWiring::Variable { name, retained } = probe {
+                    if !evaluate && !retained {
+                        continue;
+                    }
                     let value =
                         analog
                             .variable(name)

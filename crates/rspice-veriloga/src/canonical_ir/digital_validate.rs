@@ -413,6 +413,7 @@ impl CanonicalDigitalPlan {
                         )
                 });
                 if probe.quantity != DigitalAnalogQuantity::IntegerVariable
+                    || !probe.retained
                     || !event_signals.insert(signal)
                     || !valid_signal
                     || self.drivers_of(signal).next().is_some()
@@ -426,6 +427,11 @@ impl CanonicalDigitalPlan {
                 probe.quantity,
                 DigitalAnalogQuantity::RealVariable | DigitalAnalogQuantity::IntegerVariable
             );
+            if probe.retained && !variable {
+                return Err(error(
+                    "only an analog variable can retain a last-assigned value",
+                ));
+            }
             if variable != matches!(probe.target, DigitalAnalogProbeTarget::Variable { .. }) {
                 return Err(error("analog read quantity does not match its target kind"));
             }

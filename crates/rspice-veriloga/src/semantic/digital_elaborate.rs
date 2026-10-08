@@ -446,6 +446,8 @@ impl DigitalElaborator<'_> {
         self.occurrences.insert(path.into(), retained);
         self.instances.push(ElaboratedDigitalInstance {
             analog_events: child.digital.analog_events.clone(),
+            event_assigned_variables: child.digital.event_assigned_variables.clone(),
+            immutable_analog_variables: child.digital.immutable_analog_variables.clone(),
             analog_variables: HashMap::new(),
             time_scale: child.digital.time_scale,
             elaboration_parameters: child.digital.elaboration_parameters.clone(),

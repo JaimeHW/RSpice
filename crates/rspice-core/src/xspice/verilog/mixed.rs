@@ -798,6 +798,7 @@ enum AnalogProbeWiring {
     },
     Variable {
         name: String,
+        retained: bool,
     },
 }
 
@@ -4533,6 +4534,7 @@ fn wire_analog_probes(
                     }
                     return Ok(AnalogProbeWiring::Variable {
                         name: name.to_string(),
+                        retained: probe.retained,
                     });
                 }
                 DigitalAnalogProbeTarget::Nodes { positive, negative } => {

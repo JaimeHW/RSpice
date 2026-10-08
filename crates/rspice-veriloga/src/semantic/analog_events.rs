@@ -9,16 +9,46 @@ use smol_str::SmolStr;
 
 #[derive(Debug, Clone)]
 pub struct AnalogEventBinding {
+    /// Authored event-assigned variable, absent for an event-function site.
+    pub source_variable: Option<SmolStr>,
     pub variable: SmolStr,
     pub signal: SmolStr,
     pub span: Span,
 }
 
-pub(super) fn lower(source: &Module) -> CompileResult<(Module, Vec<AnalogEventBinding>)> {
+pub(super) struct LoweredAnalogEvents {
+    pub module: Module,
+    pub bindings: Vec<AnalogEventBinding>,
+    pub event_assigned_variables: Vec<SmolStr>,
+    pub immutable_variables: Vec<SmolStr>,
+}
+
+pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
     let mut module = source.clone();
     let mut writes = BTreeMap::<SmolStr, (bool, bool)>::new();
     let mut analog_local_names = BTreeSet::new();
     if let Some(block) = &source.analog_block {
+        for statement in &block.statements {
+            collect_writes(
+                statement,
+                false,
+                &BTreeSet::new(),
+                &mut writes,
+                &mut analog_local_names,
+            );
+        }
+    }
+    // A variable with no numerical-body writer is constant after startup.
+    // Declaration and analog-initial assignments still run before it is read.
+    // Digital ownership is resolved later and excludes digital-written names.
+    let immutable_variables = source
+        .variables
+        .iter()
+        .flat_map(|decl| &decl.items)
+        .filter(|item| item.dimensions.is_empty() && !writes.contains_key(&item.name))
+        .map(|item| item.name.clone())
+        .collect();
+    if let Some(block) = &source.analog_initial {
         for statement in &block.statements {
             collect_writes(
                 statement,
@@ -73,8 +103,27 @@ pub(super) fn lower(source: &Module) -> CompileResult<(Module, Vec<AnalogEventBi
     for process in &mut module.digital_processes {
         lower.statement(&mut process.body, &BTreeSet::new())?;
     }
+    // A declaration initializer on a net is a continuous assignment too.
+    for value in module
+        .continuous_assigns
+        .iter()
+        .map(|assign| &assign.value)
+        .chain(
+            module
+                .digital_nets
+                .iter()
+                .flat_map(|decl| decl.items.iter().filter_map(|item| item.init.as_ref())),
+        )
+    {
+        lower.continuous_reads(value);
+    }
     if lower.bindings.is_empty() {
-        return Ok((module, Vec::new()));
+        return Ok(LoweredAnalogEvents {
+            module,
+            bindings: Vec::new(),
+            event_assigned_variables: lower.eligible.into_iter().collect(),
+            immutable_variables,
+        });
     }
     if let Some(block) = &mut module.analog_block {
         for statement in &mut block.statements {
@@ -123,7 +172,12 @@ pub(super) fn lower(source: &Module) -> CompileResult<(Module, Vec<AnalogEventBi
             span,
         });
     }
-    Ok((module, lower.bindings))
+    Ok(LoweredAnalogEvents {
+        module,
+        bindings: lower.bindings,
+        event_assigned_variables: lower.eligible.into_iter().collect(),
+        immutable_variables,
+    })
 }
 
 struct Lower {
@@ -134,7 +188,7 @@ struct Lower {
     eligible: BTreeSet<SmolStr>,
 }
 impl Lower {
-    fn binding(&mut self, span: Span) -> AnalogEventBinding {
+    fn binding(&mut self, span: Span, source_variable: Option<SmolStr>) -> AnalogEventBinding {
         let mut index = self.bindings.len();
         loop {
             let variable: SmolStr = format!("$rspice$analog_event${index}$count").into();
@@ -143,6 +197,7 @@ impl Lower {
                 self.names.insert(variable.clone());
                 self.names.insert(signal.clone());
                 let binding = AnalogEventBinding {
+                    source_variable,
                     variable,
                     signal,
                     span,
@@ -152,6 +207,23 @@ impl Lower {
             }
             index += 1;
         }
+    }
+    fn variable_binding(&mut self, name: &SmolStr, span: Span) -> AnalogEventBinding {
+        if let Some(binding) = self.variable_events.get(name) {
+            return binding.clone();
+        }
+        let binding = self.binding(span, Some(name.clone()));
+        self.variable_events.insert(name.clone(), binding.clone());
+        binding
+    }
+    fn continuous_reads(&mut self, expression: &Expression) {
+        super::flow_probes::visit_expression(expression, &mut |expression| {
+            if let Expression::Identifier(id) = expression {
+                if self.eligible.contains(&id.name) {
+                    self.variable_binding(&id.name, id.span);
+                }
+            }
+        });
     }
     fn timing(
         &mut self,
@@ -188,7 +260,7 @@ impl Lower {
                         term.span,
                     );
                 }
-                let binding = self.binding(term.span);
+                let binding = self.binding(term.span, None);
                 self.functions.push((event, binding.clone()));
                 Some(binding)
             } else if let Expression::Identifier(id) = &term.signal {
@@ -199,14 +271,7 @@ impl Lower {
                             term.span,
                         );
                     }
-                    Some(if let Some(binding) = self.variable_events.get(&id.name) {
-                        binding.clone()
-                    } else {
-                        let binding = self.binding(term.span);
-                        self.variable_events
-                            .insert(id.name.clone(), binding.clone());
-                        binding
-                    })
+                    Some(self.variable_binding(&id.name, term.span))
                 } else {
                     None
                 }
@@ -400,16 +465,15 @@ fn collect_writes(
             }
         }
         AnalogStatement::For(control) => {
-            // Loop-control updates need their own assignment occurrence binding.
-            // Do not mistake them for an event-only scalar assignment.
-            if !shadowed.contains(&control.var) {
-                writes.entry(control.var.clone()).or_default().1 = true;
-            }
-            if !shadowed.contains(control.update.target_name()) {
-                writes
-                    .entry(control.update.target_name().clone())
-                    .or_default()
-                    .1 = true;
+            for name in [&control.var, control.update.target_name()] {
+                if !shadowed.contains(name) {
+                    let entry = writes.entry(name.clone()).or_default();
+                    if event {
+                        entry.0 = true;
+                    } else {
+                        entry.1 = true;
+                    }
+                }
             }
             collect_writes(&control.body, event, shadowed, writes, reserved);
         }
@@ -470,7 +534,37 @@ fn instrument(
                 instrument(statement, bindings, shadowed);
             }
         }
-        AnalogStatement::For(control) => instrument(&mut control.body, bindings, shadowed),
+        AnalogStatement::For(control) => {
+            instrument(&mut control.body, bindings, shadowed);
+            // Preserve the for loop and its bounded-loop lowering. The private
+            // counters are observed after this analog evaluation completes.
+            if let Some(binding) = bindings
+                .get(control.update.target_name())
+                .filter(|_| !shadowed.contains(control.update.target_name()))
+            {
+                control.body = Box::new(AnalogStatement::Block(BlockStmt {
+                    name: None,
+                    variables: Vec::new(),
+                    span: control.span,
+                    statements: vec![
+                        *control.body.clone(),
+                        increment(&binding.variable, control.update.span),
+                    ],
+                }));
+            }
+            if let Some(binding) = bindings
+                .get(&control.var)
+                .filter(|_| !shadowed.contains(&control.var))
+            {
+                let span = control.span;
+                *statement = AnalogStatement::Block(BlockStmt {
+                    name: None,
+                    variables: Vec::new(),
+                    span,
+                    statements: vec![increment(&binding.variable, span), statement.clone()],
+                });
+            }
+        }
         AnalogStatement::While(control) => instrument(&mut control.body, bindings, shadowed),
         AnalogStatement::Repeat(control) => instrument(&mut control.body, bindings, shadowed),
         _ => {}
@@ -519,4 +613,28 @@ fn invalid<T>(message: impl Into<String>, span: Span) -> CompileResult<T> {
 }
 fn unsupported<T>(message: impl Into<String>, span: Span) -> CompileResult<T> {
     Err(SemanticError::new(SemanticErrorKind::UnsupportedFeature(message.into()), span).into())
+}
+
+/// Function output/inout arguments become explicit writes during semantic
+/// lowering. They must not leave an apparently unwritten source variable marked
+/// immutable merely because its name was absent from an authored assignment LHS.
+pub(super) fn filter_immutable_variables(module: &mut super::AnalyzedModule) {
+    let mut pending = vec![module.statements.as_slice()];
+    let mut written = BTreeSet::new();
+    while let Some(statements) = pending.pop() {
+        for statement in statements {
+            match statement {
+                super::AnalyzedStatement::Assignment(assignment) => {
+                    written.insert(assignment.target.clone());
+                }
+                super::AnalyzedStatement::Loop(loop_) => pending.push(&loop_.body),
+                super::AnalyzedStatement::Initialization { .. }
+                | super::AnalyzedStatement::Task(_) => {}
+            }
+        }
+    }
+    module
+        .digital
+        .immutable_analog_variables
+        .retain(|name| !written.contains(name));
 }

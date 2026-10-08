@@ -507,6 +507,10 @@ pub struct DigitalAnalogProbe {
     /// Private occurrence counter signal for an analog event subscription.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_signal: Option<DigitalSignalId>,
+    /// Read a constant-after-startup or event-assigned value from its last
+    /// assignment, without a new numerical evaluation (VAMS 7.3.6.3).
+    #[serde(default)]
+    pub retained: bool,
     pub id: DigitalAnalogProbeId,
     /// Authored nature access function, resolved to its physical role.
     pub access: SmolStr,

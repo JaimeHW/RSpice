@@ -284,6 +284,9 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
 #[derive(Clone)]
 struct AnalogVariable {
     target: SmolStr,
+    event_signal: Option<SmolStr>,
+    event_assigned: bool,
+    immutable: bool,
     quantity: super::digital::DigitalAnalogQuantity,
     array: Option<(i64, u32)>,
 }
@@ -313,6 +316,15 @@ pub(crate) fn lower_module(
                 variable.name.clone(),
                 AnalogVariable {
                     target: variable.name.clone(),
+                    event_signal: None,
+                    event_assigned: module
+                        .digital
+                        .event_assigned_variables
+                        .contains(&variable.name),
+                    immutable: module
+                        .digital
+                        .immutable_analog_variables
+                        .contains(&variable.name),
                     quantity,
                     array: None,
                 },
@@ -327,13 +339,47 @@ pub(crate) fn lower_module(
                 name.clone(),
                 AnalogVariable {
                     target: name.clone(),
+                    event_signal: None,
+                    event_assigned: false,
+                    immutable: false,
                     quantity: variable.quantity,
                     array: Some((array.lower, array.len as u32)),
                 },
             );
         }
     }
+    bind_variable_events(
+        &mut variables,
+        &module.digital.analog_events,
+        &module.digital.event_assigned_variables,
+        &module.digital.immutable_analog_variables,
+    );
     lower_with_analog_variables(&module.digital, &variables)
+}
+
+fn bind_variable_events(
+    variables: &mut HashMap<SmolStr, AnalogVariable>,
+    bindings: &[crate::semantic::AnalogEventBinding],
+    event_assigned: &[SmolStr],
+    immutable: &[SmolStr],
+) {
+    for name in immutable {
+        if let Some(variable) = variables.get_mut(name) {
+            variable.immutable = true;
+        }
+    }
+    for name in event_assigned {
+        if let Some(variable) = variables.get_mut(name) {
+            variable.event_assigned = true;
+        }
+    }
+    for binding in bindings {
+        if let Some(source) = &binding.source_variable {
+            if let Some(variable) = variables.get_mut(source) {
+                variable.event_signal = Some(binding.signal.clone());
+            }
+        }
+    }
 }
 
 fn lower_with_analog_variables(
@@ -564,7 +610,7 @@ fn lower_with_analog_variables(
         .zip(&frame_scopes)
         .zip(&instance_constants)
     {
-        let frame_variables: HashMap<_, _> = instance
+        let mut frame_variables: HashMap<_, _> = instance
             .analog_variables
             .iter()
             .filter_map(|(local, global)| {
@@ -573,6 +619,12 @@ fn lower_with_analog_variables(
                     .map(|variable| (local.clone(), variable.clone()))
             })
             .collect();
+        bind_variable_events(
+            &mut frame_variables,
+            &instance.analog_events,
+            &instance.event_assigned_variables,
+            &instance.immutable_analog_variables,
+        );
         for process in &instance.processes {
             match lower_process(
                 process,
@@ -645,6 +697,7 @@ fn lower_with_analog_variables(
                 continue;
             };
             probes.push(DigitalAnalogProbe {
+                retained: true,
                 event_signal: Some(signal),
                 id: DigitalAnalogProbeId::from(probes.len()),
                 access: "$analog_event".into(),
@@ -857,6 +910,20 @@ fn lower_continuous_assign(
 
     let mut reads = BTreeSet::new();
     collect_expression_reads(&assignment.assignment.value, &mut reads);
+    for name in &reads {
+        if let Some(variable) = lowerer.analog_variables.get(name.as_str()) {
+            if variable.event_signal.is_none() && !variable.immutable {
+                lowerer.error(
+                    if variable.array.is_some() {
+                        format!("continuous assignment reads analog array `{name}`, whose event dependency requires per-element occurrence binding")
+                    } else {
+                        format!("continuous assignment reads analog variable `{name}` which is not assigned exclusively in analog event statements")
+                    },
+                    assignment.assignment.value.span(),
+                );
+            }
+        }
+    }
     let terms: Vec<DigitalSensitivityTerm> = reads
         .into_iter()
         .flat_map(|name| lowerer.read_dependencies(&name))
@@ -3142,7 +3209,17 @@ impl ProcessLowerer<'_> {
                 .map(DigitalSignalId::new)
                 .collect()
         } else {
-            self.index.get(name).copied().into_iter().collect()
+            self.index
+                .get(name)
+                .or_else(|| {
+                    self.analog_variables
+                        .get(name)
+                        .and_then(|variable| variable.event_signal.as_ref())
+                        .and_then(|signal| self.index.get(signal.as_str()))
+                })
+                .copied()
+                .into_iter()
+                .collect()
         }
     }
 
@@ -3326,6 +3403,7 @@ impl ProcessLowerer<'_> {
             None => {
                 let id = DigitalAnalogProbeId::from(self.probes.len());
                 self.probes.push(DigitalAnalogProbe {
+                    retained: false,
                     event_signal: None,
                     id,
                     access: function,
@@ -3365,6 +3443,7 @@ impl ProcessLowerer<'_> {
             None => {
                 let id = DigitalAnalogProbeId::from(self.probes.len());
                 self.probes.push(DigitalAnalogProbe {
+                    retained: variable.event_assigned || variable.immutable,
                     event_signal: None,
                     id,
                     access: name.into(),
@@ -3429,6 +3508,7 @@ impl ProcessLowerer<'_> {
                 let name: SmolStr =
                     format!("{}[{}]", target_name, lower + i64::from(offset)).into();
                 self.probes.push(DigitalAnalogProbe {
+                    retained: false,
                     event_signal: None,
                     id: DigitalAnalogProbeId::from(self.probes.len()),
                     access: name.clone(),
