@@ -122,9 +122,14 @@ artifact retains the active preprocessed closure with a separate integrity
 identity. The core uses that closure and its discipline definitions for
 connection selection after file loading, cache reuse, or sealed virtual
 registration. Multiple selected modules from one closure share its rules.
-Retaining authored connect bodies does not yet provide their executable
-insertion; the current engine boundary route still uses supported built-in
-delegations.
+Selected authored connect bodies execute through the shared mixed runtime at
+deck boundaries and typed scalar HDL hierarchy boundaries. Internal insertion
+uses the source closure's rules after parameter/generate specialization and
+preserves merged/split grouping, authored loading, and real-net resolution.
+Vector/array connection insertion, inherited discipline resolution across the
+complete hierarchy, and rebinding internal connections to separately selected
+external rule libraries remain implementation work. A deck selection that differs
+from already compiled internal connection rules reports an explicit error.
 
 `prepare_file_runtime_source` freezes one analyzed file/include closure before
 module selection. It can describe a standalone connection library or compile

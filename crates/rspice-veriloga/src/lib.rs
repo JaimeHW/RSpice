@@ -1284,7 +1284,11 @@ impl VerilogACompiler {
                 ast::Item::ConnectModule(_) | ast::Item::ConnectRules(_)
             )
         }) {
-            artifact = artifact.with_connection_source(source);
+            artifact = if module.hierarchical_connections {
+                artifact.with_elaborated_connection_source(source)
+            } else {
+                artifact.with_connection_source(source)
+            };
         } else if (!artifact.digital.is_empty()
             && (!artifact.hir.parameters.is_empty()
                 || !artifact.digital.elaboration_parameters.is_empty()))

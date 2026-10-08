@@ -10146,6 +10146,7 @@ mod tests {
             span,
         };
         let analyzed = AnalyzedModule {
+            hierarchical_connections: false,
             name: module_name.into(),
             default_transition: 1.0e-9,
             default_discipline: None,

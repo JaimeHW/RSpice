@@ -122,10 +122,22 @@ pub(crate) fn elaborate_digital_hierarchy(
         instances: Vec::new(),
         occurrences: HashMap::new(),
         required: digital_subtrees(analyzed, source_modules),
-        specializations: HashMap::new(),
+        connections: Default::default(),
     };
+    let prepared_root = super::hierarchy_connections::prepare(
+        analyzed,
+        source_modules,
+        root_source,
+        root,
+        &mut elaborator.connections,
+    )?;
+    let (root_source, root) = prepared_root
+        .as_deref()
+        .map(|root| (&root.source, &root.analyzed))
+        .unwrap_or((root_source, root));
     elaborator.append_instances(root_source, Scope::for_root(root, root_source))?;
     Ok(ElaboratedHierarchy {
+        root: prepared_root,
         instances: elaborator.instances,
         occurrences: elaborator.occurrences,
     })
@@ -133,6 +145,7 @@ pub(crate) fn elaborate_digital_hierarchy(
 
 /// One specialization per occurrence, shared by both domain lowerings.
 pub(super) struct ElaboratedHierarchy {
+    pub root: Option<std::sync::Arc<SpecializedModule>>,
     pub instances: Vec<ElaboratedDigitalInstance>,
     pub occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
 }
@@ -271,12 +284,12 @@ impl Scope {
 }
 
 struct DigitalElaborator<'a> {
+    connections: super::hierarchy_connections::ConnectionModules,
     analyzed: &'a AnalyzedFile,
     source_modules: &'a HashMap<SmolStr, &'a Module>,
     instances: Vec<ElaboratedDigitalInstance>,
     occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
     required: HashSet<SmolStr>,
-    specializations: HashMap<SpecializationKey, std::sync::Arc<SpecializedModule>>,
 }
 
 fn check_hierarchy_capacity(
@@ -314,7 +327,7 @@ const MAX_DIGITAL_HIERARCHY_INSTANCES: usize = 65_536;
 /// different keys; this can delay cycle detection, but cannot
 /// reject a finite hierarchy or permit unbounded expansion.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct SpecializationKey {
+pub(super) struct SpecializationKey {
     module: SmolStr,
     overrides: Vec<(usize, String)>,
 }
@@ -355,15 +368,20 @@ impl DigitalElaborator<'_> {
                     instance.span,
                 ));
             }
-            let child = self.analyzed.modules.get(&instance.module).ok_or_else(|| {
-                semantic_error(
-                    SemanticErrorKind::UndefinedModule(instance.module.to_string()),
-                    instance.span,
-                )
-            })?;
+            let connection = self.connections.modules.get(&instance.module).cloned();
+            let child = connection
+                .as_deref()
+                .map(|module| &module.analyzed)
+                .or_else(|| self.analyzed.modules.get(&instance.module))
+                .ok_or_else(|| {
+                    semantic_error(
+                        SemanticErrorKind::UndefinedModule(instance.module.to_string()),
+                        instance.span,
+                    )
+                })?;
             let path = qualify(&frame.path, &instance.name);
             stack.push(frame);
-            if !self.required.contains(&instance.module) {
+            if connection.is_none() && !self.required.contains(&instance.module) {
                 continue;
             }
             check_hierarchy_capacity(stack.len(), self.instances.len(), &path, instance.span)?;
@@ -381,10 +399,11 @@ impl DigitalElaborator<'_> {
         path: &str,
     ) -> CompileResult<HierarchyFrame> {
         let parent_scope = &ancestors.last().expect("instance parent").scope;
-        let child_source = self
-            .source_modules
-            .get(&instance.module)
-            .copied()
+        let connection = self.connections.modules.get(&instance.module).cloned();
+        let child_source = connection
+            .as_deref()
+            .map(|module| &module.source)
+            .or_else(|| self.source_modules.get(&instance.module).copied())
             .ok_or_else(|| {
                 internal_error(format!(
                     "digital module '{}' was analyzed but not retained",
@@ -392,8 +411,16 @@ impl DigitalElaborator<'_> {
                 ))
             })?;
 
-        let (key, specialized) =
-            self.specialize(instance, child_source, child, parent_scope, path)?;
+        let (key, specialized) = specialize_module(
+            self.analyzed,
+            &mut self.connections.specializations,
+            instance,
+            child_source,
+            child,
+            &parent_scope.constants,
+            parent_scope.time_scale,
+            path,
+        )?;
         if let Some(first) = ancestors.iter().position(|frame| frame.key == key) {
             let mut cycle: Vec<_> = ancestors[first..]
                 .iter()
@@ -419,6 +446,26 @@ impl DigitalElaborator<'_> {
             .map(|specialized| (&specialized.source, &specialized.analyzed))
             .unwrap_or((child_source, child));
 
+        let connected = if let Some(prepared) = self.connections.prepared.get(&key) {
+            prepared.clone()
+        } else {
+            let prepared = super::hierarchy_connections::prepare(
+                self.analyzed,
+                self.source_modules,
+                child_source,
+                child,
+                &mut self.connections,
+            )?;
+            self.connections
+                .prepared
+                .insert(key.clone(), prepared.clone());
+            prepared
+        };
+        let (child_source, child) = connected
+            .as_deref()
+            .map(|module| (&module.source, &module.analyzed))
+            .unwrap_or((child_source, child));
+
         let connections = bind_connections(instance, child, path)?;
         let (signals, scope, port_drivers) =
             self.bind_ports(instance, child, parent_scope, path, &connections)?;
@@ -432,17 +479,21 @@ impl DigitalElaborator<'_> {
         // inout port connected to something the connecting scope receives
         // through an input port, which `bind_ports` refuses above.
 
-        let retained = specialized.clone().unwrap_or_else(|| {
-            self.specializations
-                .entry(key.clone())
-                .or_insert_with(|| {
-                    std::sync::Arc::new(SpecializedModule {
-                        source: child_source.clone(),
-                        analyzed: child.clone(),
+        let retained = connected
+            .clone()
+            .or_else(|| specialized.clone())
+            .unwrap_or_else(|| {
+                self.connections
+                    .specializations
+                    .entry(key.clone())
+                    .or_insert_with(|| {
+                        std::sync::Arc::new(SpecializedModule {
+                            source: child_source.clone(),
+                            analyzed: child.clone(),
+                        })
                     })
-                })
-                .clone()
-        });
+                    .clone()
+            });
         self.occurrences.insert(path.into(), retained);
         self.instances.push(ElaboratedDigitalInstance {
             analog_events: child.digital.analog_events.clone(),
@@ -468,79 +519,6 @@ impl DigitalElaborator<'_> {
             pending: child_source.instances.clone().into_iter(),
             seen: HashSet::new(),
         })
-    }
-
-    fn specialize(
-        &mut self,
-        instance: &ModuleInstance,
-        source: &Module,
-        child: &AnalyzedModule,
-        parent: &Scope,
-        path: &str,
-    ) -> CompileResult<(SpecializationKey, Option<std::sync::Arc<SpecializedModule>>)> {
-        if instance.parameters.is_empty() {
-            validate_parameter_ranges(source, path)?;
-            return Ok((
-                SpecializationKey {
-                    module: instance.module.clone(),
-                    overrides: Vec::new(),
-                },
-                None,
-            ));
-        }
-        let mut overrides: Vec<_> =
-            super::elaboration::bind_parameter_overrides(instance, child, path)?
-                .into_iter()
-                .collect();
-        overrides.sort_by_key(|(index, _)| *index);
-        let mut values = Vec::new();
-        let mut key = Vec::new();
-        for (index, expression) in overrides {
-            let declaration = &source.parameters[index];
-            let span = expression.span();
-            let value = super::instance_parameters::close_override(
-                declaration,
-                expression,
-                &parent.constants,
-                parent.time_scale,
-            )
-            .map_err(|message| {
-                semantic_error(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "parameter `{}` of instance `{path}`: {message}",
-                        declaration.name
-                    )),
-                    span,
-                )
-            })?;
-            let identity =
-                super::instance_parameters::override_identity(&value).map_err(internal_error)?;
-            key.push((index, identity));
-            values.push((index, value));
-        }
-        let key = SpecializationKey {
-            module: instance.module.clone(),
-            overrides: key,
-        };
-        if let Some(specialized) = self.specializations.get(&key) {
-            return Ok((key, Some(specialized.clone())));
-        }
-        let mut source = source.clone();
-        for (index, value) in values {
-            source.parameters[index].default = Some(value);
-            source.parameters[index].is_given = true;
-        }
-        validate_parameter_ranges(&source, path)?;
-        crate::parser::expand_specialized_generates(&mut source)?;
-        let mut analyzer = super::SemanticAnalyzer::new();
-        analyzer.disciplines = self.analyzed.disciplines.clone();
-        analyzer.current_default_transition = child.default_transition;
-        let mut analyzed = analyzer.analyze_module(&source, child.default_transition)?;
-        analyzed.default_discipline = child.default_discipline.clone();
-        let specialized = std::sync::Arc::new(SpecializedModule { source, analyzed });
-        self.specializations
-            .insert(key.clone(), specialized.clone());
-        Ok((key, Some(specialized)))
     }
 
     /// Resolve one instance's ports into elaborated names.
@@ -763,12 +741,86 @@ impl DigitalElaborator<'_> {
     }
 }
 
+pub(super) fn specialize_module(
+    analyzed: &AnalyzedFile,
+    cache: &mut HashMap<SpecializationKey, std::sync::Arc<SpecializedModule>>,
+    instance: &ModuleInstance,
+    source: &Module,
+    child: &AnalyzedModule,
+    constants: &super::DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    path: &str,
+) -> CompileResult<(SpecializationKey, Option<std::sync::Arc<SpecializedModule>>)> {
+    if instance.parameters.is_empty() {
+        validate_parameter_ranges(source, path)?;
+        return Ok((
+            SpecializationKey {
+                module: instance.module.clone(),
+                overrides: Vec::new(),
+            },
+            None,
+        ));
+    }
+    let mut overrides: Vec<_> =
+        super::elaboration::bind_parameter_overrides(instance, child, path)?
+            .into_iter()
+            .collect();
+    overrides.sort_by_key(|(index, _)| *index);
+    let mut values = Vec::new();
+    let mut key = Vec::new();
+    for (index, expression) in overrides {
+        let declaration = &source.parameters[index];
+        let span = expression.span();
+        let value = super::instance_parameters::close_override(
+            declaration,
+            expression,
+            constants,
+            time_scale,
+        )
+        .map_err(|message| {
+            semantic_error(
+                SemanticErrorKind::UnsupportedFeature(format!(
+                    "parameter `{}` of instance `{path}`: {message}",
+                    declaration.name
+                )),
+                span,
+            )
+        })?;
+        let identity =
+            super::instance_parameters::override_identity(&value).map_err(internal_error)?;
+        key.push((index, identity));
+        values.push((index, value));
+    }
+    let key = SpecializationKey {
+        module: instance.module.clone(),
+        overrides: key,
+    };
+    if let Some(specialized) = cache.get(&key) {
+        return Ok((key, Some(specialized.clone())));
+    }
+    let mut source = source.clone();
+    for (index, value) in values {
+        source.parameters[index].default = Some(value);
+        source.parameters[index].is_given = true;
+    }
+    validate_parameter_ranges(&source, path)?;
+    crate::parser::expand_specialized_generates(&mut source)?;
+    let mut analyzer = super::SemanticAnalyzer::new();
+    analyzer.disciplines = analyzed.disciplines.clone();
+    analyzer.current_default_transition = child.default_transition;
+    let mut analyzed = analyzer.analyze_module(&source, child.default_transition)?;
+    analyzed.default_discipline = child.default_discipline.clone();
+    let specialized = std::sync::Arc::new(SpecializedModule { source, analyzed });
+    cache.insert(key.clone(), specialized.clone());
+    Ok((key, Some(specialized)))
+}
+
 /// Whether the module has continuous-domain content to flatten.
 /// Match an instance's connections to the child's ports.
 ///
 /// IEEE 1364-2005 sections 12.3.5 and 12.3.6 give the two forms, and section
 /// 12.3.6 forbids mixing them in one instance.
-fn bind_connections<'a>(
+pub(super) fn bind_connections<'a>(
     instance: &'a ModuleInstance,
     child: &AnalyzedModule,
     path: &str,

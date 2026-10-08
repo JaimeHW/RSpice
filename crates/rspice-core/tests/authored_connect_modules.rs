@@ -50,6 +50,141 @@ endmodule
 "#;
 
 #[test]
+fn hierarchy_connect_insertion_preserves_merged_split_loading_and_sampling() {
+    for (mode, high) in [("merged", 1.5), ("split", 2.0)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module source(q);
+ parameter integer WIDTH=2;
+ output [WIDTH-1:0] q; logic q; reg [WIDTH-1:0] q;
+ initial begin q=0; #1 q=1; #1 q=0; end
+endmodule
+module observer(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 1.0 : 0.0))/100;
+endmodule
+module group(p,m);
+ inout p,m; electrical p,m;
+ parameter integer N=1;
+ source #(.WIDTH(1)) first(p);
+ generate if (N==2) begin : extra
+   source #(.WIDTH(1)) second(p);
+ end endgenerate
+ observer monitor(p,m);
+endmodule
+module top(p,m);
+ inout p,m; electrical p,m;
+ group #(.N(2)) nested(p,m);
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ parameter real level=1, resistance=100;
+ analog I(a)<+(V(a)-(d ? level : 0.0))/resistance;
+endmodule
+connectmodule sense(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ parameter real threshold=0.5;
+ initial d=0;
+ always #0.1 d=V(a)>threshold;
+endmodule
+connectrules selected;
+ connect drive {mode} #(.level(3.0),.resistance(1000));
+ connect sense #(.threshold(1.3));
+endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!(
+            "* implicit hierarchical converters\nX1 p m top\nRp p 0 1k\nRm m 0 1k\n.va \"{}\" top module=top\n.end\n", source.path(),
+        )).unwrap();
+        let result = Engine::default().run_tran(&deck, 2.5e-9, 50e-12).unwrap();
+        for (time, expected) in [(0.5e-9, 0.0), (1.5e-9, high), (2.4e-9, 0.0)] {
+            assert!(
+                (voltage(&result, "p", time) - expected).abs() < 1e-7,
+                "{mode}, t={time}"
+            );
+        }
+        assert!(
+            (voltage(&result, "m", 1.5e-9) - 1.0 / 1.1).abs() < 1e-7,
+            "{mode}"
+        );
+        assert!(voltage(&result, "m", 2.4e-9).abs() < 1e-7, "{mode}");
+        if mode == "merged" {
+            let foreign = Source::new(
+                r#"
+connectmodule replacement_driver(a,d);
+ output a; electrical a;
+ input d; logic d;
+ analog V(a)<+7.0;
+endmodule
+connectrules replacement;
+ connect replacement_driver;
+endconnectrules
+"#,
+            );
+            let override_deck=Netlist::parse(&format!(
+                "* configuration must match compiled internal connections\nX1 p m top\nRp p 0 1k\nRm m 0 1k\n.va \"{}\" top module=top\n.va \"{}\" replacement\n.options connectrules=replacement\n.end\n", source.path(),foreign.path(),
+            )).unwrap();
+            let error = Engine::default()
+                .run_tran(&override_deck, 2.5e-9, 50e-12)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("hierarchical connect instances"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn hierarchy_connect_insertion_binds_real_parent_to_loaded_analog_child() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module amplifier(a,p);
+ input a; electrical a;
+ output p; electrical p;
+ analog begin
+   I(a)<+V(a)/1000;
+   I(p)<+(V(p)-2.0*V(a))/50;
+ end
+endmodule
+module top(p);
+ inout p; electrical p;
+ wreal value;
+ real level=1.5;
+ initial #1 level=3.0;
+ assign value=level;
+ amplifier child(.a(value),.p(p));
+endmodule
+connectmodule real_drive(a,r);
+ output a; electrical a;
+ input r; logic r; wreal r;
+ parameter real resistance=100;
+ analog I(a)<+(V(a)-r)/resistance;
+endmodule
+connectrules selected;
+ connect real_drive;
+endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* reverse hierarchy domain crossing\nX1 p top\nRp p 0 1k\n.va \"{}\" top module=top\n.end\n",
+        source.path(),
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+    for (time, level) in [(0.5e-9, 1.5), (1.4e-9, 3.0)] {
+        let expected = 2.0 * level / 1.1 / 1.05;
+        assert!(
+            (voltage(&result, "p", time) - expected).abs() < 1e-7,
+            "t={time}"
+        );
+    }
+}
+
+#[test]
 fn authored_d2a_body_parameters_hierarchy_and_loading_execute() {
     let source = Source::new(&format!(
         r#"
@@ -276,5 +411,46 @@ endconnectrules
             );
         }
         assert!((voltage(&result, "physical", 1.75e-9) - 2.4).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn hierarchy_connect_insertion_keeps_bidirectional_real_drivers_and_loading() {
+    for (mode, initial) in [("merged", 2.0), ("split", 1.2)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module driver(r);
+ inout r; wrealsum r;
+ parameter real drive=1;
+ real value=drive;
+ initial #1 value=2*drive;
+ assign r=value;
+endmodule
+module top(p);
+ inout p; electrical p;
+ driver #(.drive(1.0)) first(p);
+ driver #(.drive(2.0)) second(p);
+endmodule
+connectmodule bidir(a,r);
+ inout a; electrical a;
+ inout r; logic r; wrealsum r;
+ analog I(a)<+(V(a)-r)/500;
+endmodule
+connectrules chosen;
+ connect bidir {mode};
+endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!(
+            "* internal real driver segregation\nX1 p top\nRp p 0 1k\n.va \"{}\" top module=top\n.end\n", source.path(),
+        )).unwrap();
+        let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+        for (time, expected) in [(0.5e-9, initial), (1.4e-9, 2.0 * initial)] {
+            assert!(
+                (voltage(&result, "p", time) - expected).abs() < 1e-7,
+                "{mode}, t={time}"
+            );
+        }
     }
 }

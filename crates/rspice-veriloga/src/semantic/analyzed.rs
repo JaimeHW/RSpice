@@ -50,6 +50,8 @@ pub struct SemanticWarning {
 /// Analyzed module with resolved types
 #[derive(Debug, Clone)]
 pub struct AnalyzedModule {
+    /// Automatic connect bodies were materialized from this source's rules.
+    pub hierarchical_connections: bool,
     pub name: SmolStr,
     pub default_transition: f64,
     /// The `` `default_discipline `` in effect where this module was declared

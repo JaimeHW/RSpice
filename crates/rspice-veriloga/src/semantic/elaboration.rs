@@ -54,6 +54,11 @@ pub(crate) fn elaborate_executable_module<'a>(
         selected,
     )?;
 
+    let prepared_root = hierarchy.root;
+    let (root, selected) = prepared_root
+        .as_deref()
+        .map(|module| (&module.source, &module.analyzed))
+        .unwrap_or((root, selected));
     let mut elaborator = HierarchyElaborator::new(analyzed, source_modules, selected.clone());
     elaborator.shared_occurrences = hierarchy.occurrences;
     elaborator.digital_frames = hierarchy
@@ -449,22 +454,6 @@ impl<'a> HierarchyElaborator<'a> {
         module_stack: &mut Vec<SmolStr>,
         path: &str,
     ) -> CompileResult<()> {
-        let child_source = self
-            .source_modules
-            .get(&instance.module)
-            .copied()
-            .ok_or_else(|| {
-                semantic_error(
-                    SemanticErrorKind::UndefinedModule(instance.module.to_string()),
-                    instance.span,
-                )
-            })?;
-        let child = self.analyzed.modules.get(&instance.module).ok_or_else(|| {
-            internal_error(format!(
-                "module '{}' was retained but not semantically analyzed",
-                instance.module
-            ))
-        })?;
         let relative = path
             .strip_prefix(self.flattened.name.as_str())
             .and_then(|suffix| suffix.strip_prefix('.'))
@@ -472,6 +461,28 @@ impl<'a> HierarchyElaborator<'a> {
                 internal_error("hierarchy path does not name the selected root".into())
             })?;
         let shared = self.shared_occurrences.get(relative).cloned();
+        let child_source = self
+            .source_modules
+            .get(&instance.module)
+            .copied()
+            .or_else(|| shared.as_deref().map(|module| &module.source))
+            .ok_or_else(|| {
+                semantic_error(
+                    SemanticErrorKind::UndefinedModule(instance.module.to_string()),
+                    instance.span,
+                )
+            })?;
+        let child = self
+            .analyzed
+            .modules
+            .get(&instance.module)
+            .or_else(|| shared.as_deref().map(|module| &module.analyzed))
+            .ok_or_else(|| {
+                internal_error(format!(
+                    "module '{}' was retained but not semantically analyzed",
+                    instance.module
+                ))
+            })?;
         // Shared occurrences already passed specialization-aware cycle and
         // resource checks, so finite parameter-recursive hierarchies are legal.
         if shared.is_none() && module_stack.contains(&instance.module) {
@@ -507,6 +518,7 @@ impl<'a> HierarchyElaborator<'a> {
                 .map(|value| (&value.source, &value.analyzed))
                 .unwrap_or((child_source, child))
         };
+        self.flattened.hierarchical_connections |= child.hierarchical_connections;
         let branch_inventory = super::flow_probes::hierarchy_branches(child);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let noise_process_base = self.next_noise_process;

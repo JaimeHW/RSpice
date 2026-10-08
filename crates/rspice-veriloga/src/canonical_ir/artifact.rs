@@ -61,13 +61,32 @@ pub enum CanonicalConnectionContext {
     #[default]
     None,
     Source(SmolStr),
+    /// The source's selected rules are already part of the executable hierarchy.
+    ElaboratedSource(SmolStr),
 }
 
 impl CanonicalConnectionContext {
     pub fn source(&self) -> Option<&str> {
         match self {
             Self::None => None,
-            Self::Source(source) => Some(source),
+            Self::Source(source) | Self::ElaboratedSource(source) => Some(source),
+        }
+    }
+
+    pub fn is_elaborated(&self) -> bool {
+        matches!(self, Self::ElaboratedSource(_))
+    }
+
+    fn identity(&self) -> [u8; 32] {
+        match self {
+            Self::None => [0; 32],
+            Self::Source(source) => *blake3::hash(source.as_bytes()).as_bytes(),
+            Self::ElaboratedSource(source) => {
+                let mut hash = blake3::Hasher::new();
+                hash.update(b"rspice.elaborated-connections\0");
+                hash.update(source.as_bytes());
+                *hash.finalize().as_bytes()
+            }
         }
     }
 }
@@ -132,6 +151,12 @@ impl CanonicalIrArtifact {
         self
     }
 
+    pub(crate) fn with_elaborated_connection_source(mut self, source: &str) -> Self {
+        self.connections = CanonicalConnectionContext::ElaboratedSource(source.into());
+        self.connection_identity = self.connections.identity();
+        self
+    }
+
     pub fn validate(&self) -> IrValidationResult {
         let mut diagnostics =
             validate_parts(&self.metadata, &self.hir, &self.mir, &self.noise_sources);
@@ -158,11 +183,7 @@ impl CanonicalIrArtifact {
                 "elaboration-bound parameters require retained parameter source",
             ));
         }
-        let connection_identity = self
-            .connections
-            .source()
-            .map(|source| *blake3::hash(source.as_bytes()).as_bytes())
-            .unwrap_or([0; 32]);
+        let connection_identity = self.connections.identity();
         if self.connection_identity != connection_identity {
             diagnostics.push(artifact_error(
                 "stored connection identity does not match the connection source",

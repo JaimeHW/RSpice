@@ -368,6 +368,26 @@ pub(super) struct DesignConnectRules {
 }
 
 impl DesignConnectRules {
+    /// Executable internal connections cannot be relabeled by a later deck
+    /// selection. External rule rebinding needs source re-elaboration first.
+    pub(super) fn validate_hierarchical_context(
+        &self,
+        artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+        instance: &str,
+    ) -> Result<(), SimulationError> {
+        if artifact.connections.is_elaborated()
+            && artifact.connections.source() != self.source.as_deref()
+        {
+            return Err(connect_refusal(
+                "hierarchical connect instances were elaborated with a different source configuration; re-elaboration with external deck-selected connection rules is not yet supported",
+            )
+            .instance(instance)
+            .module(artifact.hir.module_name.as_str())
+            .into());
+        }
+        Ok(())
+    }
+
     pub(super) fn for_netlist(netlist: &crate::Netlist) -> Result<Self, SimulationError> {
         let mut selected = Self {
             requested: netlist.options.connect_rules.clone(),

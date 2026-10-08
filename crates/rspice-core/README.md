@@ -64,8 +64,8 @@ is selected for the whole deck. Without an explicit selection, a single block
 is implicit; multiple blocks require a choice. An unknown or multiply declared
 selected name reports the source closures and declaration offsets. File,
 cached, and registered virtual models use the same selection path. Changing
-the option reselects connections while allowing unchanged device code to remain
-cached. The option also participates in the netlist's configuration fingerprint.
+the option reselects deck-boundary connections while allowing unchanged device
+code to remain cached. The option also participates in the netlist's configuration fingerprint.
 The optional `connectrules_source` qualifier names an explicit `.VERILOGA`
 import alias, compared case-insensitively as a SPICE name. It restricts the
 selection to that source, resolving duplicate rule names in different libraries.
@@ -73,9 +73,14 @@ Unknown aliases or an alias identifying multiple sources are errors. A qualified
 source with no rule block is also an error. The qualifier uses the source already
 resolved for the import and survives remapping to a sealed virtual source key.
 An explicitly selected empty block supplies no insertion rules; a mixed boundary
-requiring one is an error. Hierarchical library/view configuration
-binding, product workflows for standalone virtual libraries, and execution of
-arbitrary authored connect bodies remain implementation work.
+requiring one is an error. Selected authored bodies execute at deck boundaries
+and typed scalar HDL hierarchy boundaries, including merged/split loading and
+resolved real-net drivers. Internal connections currently use the rule block
+from their own source closure; selecting a different external configuration
+requires re-elaboration and reports an explicit error. Cross-source internal
+rule rebinding, vector/array insertion, complete hierarchical discipline
+resolution, library/view configuration, and product workflows for standalone
+virtual libraries remain implementation work.
 
 The public `register_project_veriloga_sources_for_session` API accepts a single
 transaction of `ProjectVerilogASourceRegistration::Runtime` and `::Connections`
