@@ -204,6 +204,7 @@ fn publish(
     } else {
         PublishedResult {
             analysis_id: artifact.analysis.tag(),
+            result_kind: None,
             schema,
             artifact: path.clone(),
             source_sample_presence: None,

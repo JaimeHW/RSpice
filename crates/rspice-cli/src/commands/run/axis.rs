@@ -583,6 +583,7 @@ fn run_implicit_step_op_table(
                 )?;
                 PublishedResult {
                     analysis_id: run.analysis_id.clone(),
+                    result_kind: None,
                     schema: run.schema.clone(),
                     artifact: path.clone(),
                     source_sample_presence: None,
@@ -667,7 +668,8 @@ struct ImplicitStepCoordinate {
 /// Version of the coordinate schema manifest.
 ///
 /// Version 3 maps typed series to their source indices and reports retained
-/// sample availability. Version 2 grouped the union by analysis instance.
+/// sample availability, grouping sibling documents by result kind. Version 2
+/// grouped the union by analysis instance.
 /// Version 1 described one
 /// implicit operating point, which could not name the several analyses a
 /// stepped physical deck publishes at each coordinate.
@@ -677,6 +679,7 @@ const STEP_SCHEMA_MANIFEST_VERSION: u32 = 3;
 /// across an axis deck's coordinates.
 struct AnalysisSchemaUnion {
     pub(super) analysis_id: String,
+    result_kind: Option<rspice_core::execution::AnalysisResultKind>,
     union: rspice_core::execution::SchemaUnion,
     coordinates: Vec<CoordinateValidity>,
 }
@@ -704,24 +707,27 @@ struct CoordinateValidity {
 fn analysis_schema_unions(
     published: &[CoordinatePublication],
 ) -> Result<Vec<AnalysisSchemaUnion>, CliError> {
-    let mut order: Vec<String> = Vec::new();
+    type ResultKey = (String, Option<rspice_core::execution::AnalysisResultKind>);
+    let mut order: Vec<ResultKey> = Vec::new();
     let mut grouped: std::collections::HashMap<
-        String,
+        ResultKey,
         Vec<(&CoordinatePublication, &PublishedResult)>,
     > = std::collections::HashMap::new();
     for coordinate in published {
         for result in &coordinate.results {
-            let entry = grouped.entry(result.analysis_id.clone()).or_default();
+            let key = (result.analysis_id.clone(), result.result_kind);
+            let entry = grouped.entry(key.clone()).or_default();
             if entry.is_empty() {
-                order.push(result.analysis_id.clone());
+                order.push(key);
             }
             entry.push((coordinate, result));
         }
     }
 
     let mut unions = Vec::with_capacity(order.len());
-    for analysis_id in order {
-        let entries = grouped.remove(&analysis_id).unwrap_or_default();
+    for key in order {
+        let entries = grouped.remove(&key).unwrap_or_default();
+        let (analysis_id, result_kind) = key;
         let union = rspice_core::execution::SignalSchema::union(entries.iter().map(
             |(coordinate, result)| {
                 rspice_core::execution::CoordinateSchema::new(
@@ -780,6 +786,7 @@ fn analysis_schema_unions(
         }
         unions.push(AnalysisSchemaUnion {
             analysis_id,
+            result_kind,
             union,
             coordinates,
         });
@@ -828,6 +835,7 @@ fn write_step_schema_manifest(
                 .collect::<Result<Vec<_>, CliError>>()?;
             Ok(serde_json::json!({
                 "analysis_id": entry.analysis_id,
+                "result_kind": entry.result_kind.map(|kind| kind.tag()),
                 "union_schema": entry
                     .union
                     .schema()

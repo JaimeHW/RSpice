@@ -36,6 +36,9 @@ use crate::commands::publish;
 pub(crate) struct PublishedResult {
     /// Canonical analysis identity the artifact was namespaced by.
     pub(crate) analysis_id: String,
+    /// Typed family distinguishes sibling results of one card, such as the
+    /// scattering and port-noise documents produced by `.SP DONOISE`.
+    pub(crate) result_kind: Option<rspice_core::execution::AnalysisResultKind>,
     /// Complete signal schema of the coordinate-local artifact.
     pub(crate) schema: SignalSchema,
     /// Path the artifact was staged at.
@@ -57,6 +60,7 @@ pub(super) fn typed_publication(
         .map_err(schema_error)?;
     Ok(PublishedResult {
         analysis_id: document.analysis().tag(),
+        result_kind: Some(document.result_kind()),
         schema: SignalSchema::new(descriptors).map_err(schema_error)?,
         artifact: path.to_path_buf(),
         source_sample_presence: Some(
@@ -94,6 +98,7 @@ pub(super) fn publish_analysis_result(
             flat(path, format)?;
             PublishedResult {
                 analysis_id: analysis_id.tag(),
+                result_kind: None,
                 schema,
                 artifact: path.to_path_buf(),
                 source_sample_presence: None,

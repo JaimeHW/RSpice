@@ -561,6 +561,9 @@ cancelled or failed run leaves either the previous complete set or nothing.
 Manifest version 3 describes one sample per series, so different point counts
 across coordinates do not change signal identity. For JSON, its inventory comes
 from each published document, including sideband and distortion qualifiers.
+Entries identify both `analysis_id` and `result_kind`, so `.SP DONOISE` publishes
+separate scattering and port-noise schemas under the same authored analysis.
+Flat artifacts use a null `result_kind` because a table may combine families.
 Each coordinate's `source_signal_indices` maps union descriptors to indices in
 that document's `signals` array; a null index means the series is absent. The
 validity bit is false when a series has no retained samples, even if its

@@ -892,8 +892,9 @@ fn publish_sparam_run(
                 rspice_core::execution::AnalysisResultDocument::from_port_noise(analysis_id, noise)
                     .map_err(|error| super::document::document_error(ctx, analysis_id, error))?;
             let document = super::document::finish(ctx, analysis_id, builder)?;
+            let publication = super::document::typed_publication(&noise_path, &document)?;
             super::document::write_document(ctx, &noise_path, &document)?;
-            ctx.record_output(noise_path.clone());
+            ctx.record_published(publication);
             if !ctx.quiet {
                 crate::console::line(format_args!(
                     "  Port noise exported to: {}",

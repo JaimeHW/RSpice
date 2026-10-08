@@ -1155,6 +1155,7 @@ pub(super) fn finish_transient_result(
         } else {
             super::PublishedResult {
                 analysis_id: analysis_id.tag(),
+                result_kind: None,
                 schema: super::document::scalar_schema(&signals)?,
                 artifact: output_path.clone(),
                 source_sample_presence: None,

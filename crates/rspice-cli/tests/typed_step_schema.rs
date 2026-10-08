@@ -190,3 +190,40 @@ fn implicit_coordinate_documents_use_their_actual_inventory() {
     let manifest = run(&dir, circuit, "");
     check_manifest(&dir, &manifest);
 }
+
+#[test]
+fn stepped_sp_noise_manifest_covers_both_result_kinds() {
+    let dir = test_dir("typed_schema_sp_noise");
+    let circuit = "* stepped port noise\n.param r=50\nV1 p1 0 DC 0 AC 1 portnum=1 z0=50\nV2 p2 0 DC 0 portnum=2 z0=50\nR1 p1 p2 {r}\n.step param r list 50 100\n";
+    let manifest = run(&dir, circuit, ".SP LIN 3 10 30 DONOISE");
+    let analyses = manifest["analyses"].as_array().unwrap();
+    assert_eq!(analyses.len(), 2, "port noise needs its own schema entry");
+    check_manifest(&dir, &manifest);
+    let kinds = analyses
+        .iter()
+        .map(|entry| entry["result_kind"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(kinds, BTreeSet::from(["sp", "port-noise"]));
+    let mut covered = BTreeSet::new();
+    for entry in analyses {
+        assert_eq!(entry["analysis_id"], "sp-001");
+        let coordinates = entry["coordinates"].as_array().unwrap();
+        assert_eq!(coordinates.len(), 2);
+        for coordinate in coordinates {
+            let artifact = coordinate["artifact"].as_str().unwrap();
+            assert!(covered.insert(artifact));
+            let document = read_json(&dir.join(artifact));
+            assert_eq!(entry["result_kind"], document["resultKind"]);
+        }
+    }
+    let published = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .filter(|path| read_json(path).get("resultKind").is_some())
+        .count();
+    assert_eq!(covered.len(), published);
+}
