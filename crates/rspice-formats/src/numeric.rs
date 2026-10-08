@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 pub mod nullable;
+pub mod sample_serde;
 
 /// Decoded real or complex samples before result validation and admission.
 #[derive(Debug)]

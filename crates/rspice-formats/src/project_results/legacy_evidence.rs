@@ -159,6 +159,7 @@ pub fn validate_result_fields_for_source_schema(
 ) -> Result<(), String> {
     reject_voltage_impulses_before_schema_v41(run, source_schema)?;
     reject_import_coordinates_before_schema_v42(run, source_schema)?;
+    reject_waveform_gaps_before_schema_v43(run, source_schema)?;
     reject_optimization_units_before_schema_v39(run, source_schema)?;
     if source_schema < NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION
         && run
@@ -222,6 +223,31 @@ pub(super) fn reject_import_coordinates_before_schema_v42(
         })
     {
         return Err("result schemas before v42 cannot contain import-coordinate metadata".into());
+    }
+    Ok(())
+}
+
+pub(super) fn reject_waveform_gaps_before_schema_v43(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema < NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION
+        && run
+            .analyses
+            .iter()
+            .flat_map(|analysis| &analysis.waveforms)
+            .any(|waveform| {
+                waveform.y.iter().any(|value| value.is_nan())
+                    || waveform.complex.as_ref().is_some_and(|complex| {
+                        complex
+                            .real
+                            .iter()
+                            .chain(complex.imag.iter())
+                            .any(|value| value.is_nan())
+                    })
+            })
+    {
+        return Err("result schemas before v43 cannot contain unavailable waveform samples".into());
     }
     Ok(())
 }

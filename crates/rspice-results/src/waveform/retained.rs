@@ -5,7 +5,7 @@ use std::sync::Arc;
 pub type SharedWaveformValues = Arc<Vec<f64>>;
 
 /// Original complex samples associated with a display trace.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ComplexWaveformComponents {
     /// Source signal name before display transformations such as magnitude.
     pub source_name: String,
@@ -18,7 +18,7 @@ pub struct ComplexWaveformComponents {
 }
 
 /// Exact retained samples and their producer-stated physical meaning.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct RetainedWaveform {
     /// Trace name (e.g., "V(out)")
     pub name: String,
@@ -26,7 +26,8 @@ pub struct RetainedWaveform {
     /// X-axis values (time or frequency)
     pub x: SharedWaveformValues,
 
-    /// Y-axis values
+    /// Y-axis values. NaN is an explicitly unavailable sample and is rendered
+    /// as a gap. Infinities are invalid; missing values never become zeroes.
     pub y: SharedWaveformValues,
 
     /// The engineering unit the retained Y samples are measured in, as the
@@ -43,6 +44,34 @@ pub struct RetainedWaveform {
     pub complex: Option<ComplexWaveformComponents>,
 }
 
+/// Sample equality treats unavailable values as the same absence. This keeps
+/// immutable snapshots and caches stable without weakening finite equality.
+pub fn samples_equal(left: &[f64], right: &[f64]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left == right || (left.is_nan() && right.is_nan()))
+}
+
+impl PartialEq for ComplexWaveformComponents {
+    fn eq(&self, other: &Self) -> bool {
+        self.source_name == other.source_name
+            && samples_equal(&self.real, &other.real)
+            && samples_equal(&self.imag, &other.imag)
+    }
+}
+
+impl PartialEq for RetainedWaveform {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.x == other.x
+            && samples_equal(&self.y, &other.y)
+            && self.unit == other.unit
+            && self.complex == other.complex
+    }
+}
+
 impl AsRef<RetainedWaveform> for RetainedWaveform {
     fn as_ref(&self) -> &RetainedWaveform {
         self
@@ -56,6 +85,15 @@ impl AsMut<RetainedWaveform> for RetainedWaveform {
 }
 
 impl RetainedWaveform {
+    /// Read a measured value, distinguishing unavailable and out-of-range rows.
+    pub fn sample(&self, index: usize) -> Option<f64> {
+        self.y.get(index).copied().filter(|value| value.is_finite())
+    }
+
+    pub fn has_missing_samples(&self) -> bool {
+        self.y.iter().any(|value| value.is_nan())
+    }
+
     /// Create a new waveform trace
     pub fn new(
         name: impl Into<String>,

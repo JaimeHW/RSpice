@@ -2,12 +2,17 @@
 
 use super::*;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectWaveformData {
     pub name: String,
     /// Exact samples share storage with immutable snapshots. A writer must
     /// detach through copy-on-write before changing a draft's samples.
     pub x: rspice_results::waveform::SharedWaveformValues,
+    /// Schema v43 uses explicit nulls for unavailable samples.
+    #[serde(
+        serialize_with = "crate::numeric::sample_serde::serialize",
+        deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
+    )]
     pub y: rspice_results::waveform::SharedWaveformValues,
     pub color: String,
     #[serde(default = "default_true")]
@@ -20,6 +25,18 @@ pub struct ProjectWaveformData {
     pub unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub complex: Option<ProjectComplexWaveformComponents>,
+}
+
+impl PartialEq for ProjectWaveformData {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.x == other.x
+            && rspice_results::waveform::samples_equal(&self.y, &other.y)
+            && self.color == other.color
+            && self.visible == other.visible
+            && self.unit == other.unit
+            && self.complex == other.complex
+    }
 }
 
 impl ProjectWaveformData {
@@ -62,19 +79,50 @@ impl ProjectWaveformData {
         }
         require_finite_values(&self.x, &format!("{prefix}.x"))?;
         require_monotonic_non_decreasing(&self.x, &format!("{prefix}.x"))?;
-        require_finite_values(&self.y, &format!("{prefix}.y"))?;
+        if self.y.iter().any(|value| value.is_infinite()) {
+            return Err(format!("{prefix}.y contains an infinite value"));
+        }
         if let Some(complex) = &self.complex {
             complex.validate(prefix, self.y.len())?;
+            if complex
+                .real
+                .iter()
+                .zip(complex.imag.iter())
+                .zip(self.y.iter())
+                .any(|((real, imag), value)| {
+                    real.is_nan() != imag.is_nan() || real.is_nan() != value.is_nan()
+                })
+            {
+                return Err(format!(
+                    "{prefix}.complex has inconsistent sample availability"
+                ));
+            }
         }
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectComplexWaveformComponents {
     pub source_name: String,
+    #[serde(
+        serialize_with = "crate::numeric::sample_serde::serialize",
+        deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
+    )]
     pub real: rspice_results::waveform::SharedWaveformValues,
+    #[serde(
+        serialize_with = "crate::numeric::sample_serde::serialize",
+        deserialize_with = "crate::numeric::sample_serde::deserialize_shared"
+    )]
     pub imag: rspice_results::waveform::SharedWaveformValues,
+}
+
+impl PartialEq for ProjectComplexWaveformComponents {
+    fn eq(&self, other: &Self) -> bool {
+        self.source_name == other.source_name
+            && rspice_results::waveform::samples_equal(&self.real, &other.real)
+            && rspice_results::waveform::samples_equal(&self.imag, &other.imag)
+    }
 }
 
 impl ProjectComplexWaveformComponents {
@@ -84,8 +132,14 @@ impl ProjectComplexWaveformComponents {
                 "{prefix}.complex has mismatched real/imag/display sample counts"
             ));
         }
-        require_finite_values(&self.real, &format!("{prefix}.complex.real"))?;
-        require_finite_values(&self.imag, &format!("{prefix}.complex.imag"))?;
+        if self
+            .real
+            .iter()
+            .chain(self.imag.iter())
+            .any(|value| value.is_infinite())
+        {
+            return Err(format!("{prefix}.complex contains an infinite value"));
+        }
         Ok(())
     }
 }

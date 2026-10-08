@@ -4,7 +4,9 @@ mod output;
 pub use output::OutputWaveform;
 
 mod retained;
-pub use retained::{ComplexWaveformComponents, RetainedWaveform, SharedWaveformValues};
+pub use retained::{
+    ComplexWaveformComponents, RetainedWaveform, SharedWaveformValues, samples_equal,
+};
 
 //=============================================================================
 // Waveform Data

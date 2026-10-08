@@ -1761,7 +1761,7 @@ fn schema_v8_digests_are_authenticated_before_v9_resealing() {
     migrated
         .migrate_to_current(ProjectId::new())
         .expect("authentic v8 results migrate");
-    assert_eq!(migrated.schema_version, 42);
+    assert_eq!(migrated.schema_version, 43);
     migrated
         .validate()
         .expect("resealed current results validate");
@@ -1843,7 +1843,7 @@ fn schema_v9_digests_are_authenticated_before_current_resealing() {
     migrated
         .migrate_to_current(ProjectId::new())
         .expect("authentic v9 results migrate");
-    assert_eq!(migrated.schema_version, 42);
+    assert_eq!(migrated.schema_version, 43);
     migrated
         .validate()
         .expect("resealed current results validate");
@@ -1986,7 +1986,7 @@ fn schema_v10_digests_are_authenticated_before_v11_tf_resealing() {
     migrated
         .migrate_to_current(ProjectId::new())
         .expect("authentic v10 results migrate");
-    assert_eq!(migrated.schema_version, 42);
+    assert_eq!(migrated.schema_version, 43);
     migrated.validate().expect("resealed v11 results validate");
     assert!(
         migrated.runs[0].analyses[1].result_payload.is_missing(),

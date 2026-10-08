@@ -72,14 +72,11 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     waveform.y.len()
                 ));
             }
-            if waveform
-                .x
-                .iter()
-                .chain(waveform.y.iter())
-                .any(|value| !value.is_finite())
+            if waveform.x.iter().any(|value| !value.is_finite())
+                || waveform.y.iter().any(|value| value.is_infinite())
             {
                 return Err(format!(
-                    "retained waveform '{}' contains a non-finite coordinate or value",
+                    "retained waveform '{}' contains a non-finite coordinate or infinite value",
                     waveform.name
                 ));
             }
@@ -114,10 +111,24 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     .real
                     .iter()
                     .chain(complex.imag.iter())
-                    .any(|value| !value.is_finite())
+                    .any(|value| value.is_infinite())
                 {
                     return Err(format!(
                         "retained waveform '{}' contains a non-finite complex component",
+                        waveform.name
+                    ));
+                }
+                if complex
+                    .real
+                    .iter()
+                    .zip(complex.imag.iter())
+                    .zip(waveform.y.iter())
+                    .any(|((real, imag), value)| {
+                        real.is_nan() != imag.is_nan() || real.is_nan() != value.is_nan()
+                    })
+                {
+                    return Err(format!(
+                        "retained waveform '{}' has inconsistent complex sample availability",
                         waveform.name
                     ));
                 }

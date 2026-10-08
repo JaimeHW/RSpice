@@ -174,10 +174,13 @@ impl ProjectSimulationResultsData {
         for run in &self.runs {
             legacy_evidence::reject_voltage_impulses_before_schema_v41(run, source_schema)?;
             legacy_evidence::reject_import_coordinates_before_schema_v42(run, source_schema)?;
+            legacy_evidence::reject_waveform_gaps_before_schema_v43(run, source_schema)?;
         }
         if matches!(
             source_schema,
-            SAMPLED_NOISE_RESULTS_SCHEMA_VERSION | VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION
+            SAMPLED_NOISE_RESULTS_SCHEMA_VERSION
+                | VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION
+                | IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION
         ) {
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -2289,7 +2292,8 @@ const OPTIMIZATION_UNIT_RESULTS_SCHEMA_VERSION: u32 = 39;
 const SAMPLED_NOISE_RESULTS_SCHEMA_VERSION: u32 = 40;
 const VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 41;
 const IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION: u32 = 42;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION;
+const NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION: u32 = 43;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION;
 
 const LEGACY_RESULT_RUN_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0xe515_12ea_10c0_58c8_8bd7_ea31_003f_f6cf);

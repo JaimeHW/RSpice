@@ -131,7 +131,7 @@ pub fn assemble_imported_waveforms(
                 ),
             ));
         }
-        validate_finite(format, &signal.name, &signal.real)?;
+        validate_signal_values(format, &signal.name, &signal.real)?;
         let mut waveform = if let Some(imag) = signal.imag {
             if imag.len() != coordinate.len() {
                 return Err(adapter_error(
@@ -144,11 +144,25 @@ pub fn assemble_imported_waveforms(
                     ),
                 ));
             }
-            validate_finite(
+            validate_signal_values(
                 format,
                 &format!("{} imaginary component", signal.name),
                 &imag,
             )?;
+            if signal
+                .real
+                .iter()
+                .zip(&imag)
+                .any(|(real, imag)| real.is_nan() != imag.is_nan())
+            {
+                return Err(adapter_error(
+                    format,
+                    format_args!(
+                        "signal '{}' complex components have inconsistent sample availability",
+                        signal.name
+                    ),
+                ));
+            }
             let magnitude = signal
                 .real
                 .iter()
@@ -220,6 +234,20 @@ fn validate_finite(
     Ok(())
 }
 
+fn validate_signal_values(
+    format: ResultImportFormat,
+    identity: &str,
+    values: &[f64],
+) -> Result<(), String> {
+    if let Some(index) = values.iter().position(|value| value.is_infinite()) {
+        return Err(adapter_error(
+            format,
+            format_args!("'{identity}' contains an infinite value at sample {index}"),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_coordinate(
     format: ResultImportFormat,
     analysis_type: AnalysisType,
@@ -262,6 +290,75 @@ fn validate_coordinate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_samples_survive_assembly_and_calculation_without_becoming_zeroes() {
+        let limits = WaveformImportLimits {
+            min_rows: 1,
+            max_rows: 5,
+            max_columns: 3,
+            max_values: 25,
+            max_signal_name_bytes: 32,
+        };
+        let make_signal = |real, imag| ImportedSignal {
+            name: "V(out)".into(),
+            real,
+            imag,
+            unit: Some("V".into()),
+        };
+        for imag in [None, Some(vec![0.0, f64::NAN, 0.0])] {
+            let imported = assemble_imported_waveforms(
+                ResultImportFormat::SpiceRaw,
+                AnalysisType::Transient,
+                "time",
+                vec![0.0, 1.0, 2.0],
+                vec![make_signal(vec![1.0, f64::NAN, -0.0], imag)],
+                limits,
+            )
+            .unwrap();
+            let waveform = &imported.waveforms[0];
+            assert!(waveform.has_missing_samples());
+            assert_eq!(waveform.sample(1), None);
+            assert_eq!(waveform.sample(0), Some(1.0));
+            assert_eq!(waveform, &waveform.clone());
+            let value = crate::calculator::retained::waveform_value(
+                waveform,
+                crate::saved_output::ComplexExpressionPolicy::Rectangular,
+            )
+            .unwrap();
+            match value {
+                crate::calculator::value::CalcValue::Real(
+                    crate::calculator::value::RealValue::Waveform(_, values),
+                ) => assert!(values[1].is_nan()),
+                crate::calculator::value::CalcValue::Complex(
+                    crate::calculator::value::ComplexValue::Waveform(_, values),
+                ) => assert!(values[1].re.is_nan() && values[1].im.is_nan()),
+                _ => panic!("expected sampled values"),
+            }
+            #[cfg(feature = "engine-evidence")]
+            crate::analysis_result::AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
+                .with_waveforms(imported.waveforms)
+                .validate_retained_evidence()
+                .unwrap();
+        }
+        for (real, imag) in [
+            (vec![f64::INFINITY], None),
+            (vec![0.0], Some(vec![f64::NAN])),
+            (vec![f64::NAN], Some(vec![0.0])),
+        ] {
+            assert!(
+                assemble_imported_waveforms(
+                    ResultImportFormat::SpiceRaw,
+                    AnalysisType::Transient,
+                    "time",
+                    vec![0.0],
+                    vec![make_signal(real, imag)],
+                    limits
+                )
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn assembly_preserves_source_buffers_and_rejects_ambiguous_identity() {
