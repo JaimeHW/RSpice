@@ -301,6 +301,52 @@ fn wide_values_survive_specialization_serialization_and_linking() {
 }
 
 #[test]
+fn integer_parameter_initialization_extends_the_rhs_signedness_in_both_domains() {
+    let compiler = compiler();
+    for (expression, expected) in [
+        ("1 == 1", 1),
+        ("1 != 1", 0),
+        ("1 < 2", 1),
+        ("1'bx === 1'bx", 1),
+        ("1 && 1", 1),
+        ("0 || 1", 1),
+        ("!0", 1),
+        ("|4'b1010", 1),
+        ("1'b1", 1),
+        ("4'hf", 15),
+        ("1'sb1", -1),
+        ("4'shf", -1),
+        ("-2", -2),
+        ("-1.5", -2),
+    ] {
+        let source = format!(
+            "module integer_assignment(p,q); inout p; electrical p; \
+             parameter integer VALUE={expression}; output reg [31:0] q=VALUE; \
+             analog I(p)<+VALUE; endmodule"
+        );
+        let report = compiler.compile_runtime(&source, None).unwrap();
+        assert_eq!(
+            initial(&report, "q"),
+            DigitalInitialValue::FourState(FourStateValue::from_integer(32, expected.into())),
+            "{expression}"
+        );
+        report.validate_integrity().unwrap();
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "integer_assignment",
+            report.model,
+            &report.canonical_ir,
+            &[1, 2],
+        )
+        .unwrap();
+        assert_eq!(
+            device.try_evaluate().unwrap()[0],
+            f64::from(expected),
+            "{expression}"
+        );
+    }
+}
+
+#[test]
 fn typed_assignments_keep_integer_precision_signedness_and_real_zero() {
     let compiler = compiler();
     let runtime = compiler

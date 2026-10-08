@@ -493,8 +493,11 @@ fn resolve_one(
         let value = lowerer.assigned_value(entry, expression, bounds.width());
         lowerer.resize(entry, value, bounds.width(), rhs_signed)
     } else if integer {
+        // The signed target does not change an unsigned RHS. Comparisons,
+        // logical operators and reductions produce a one-bit unsigned result.
+        let rhs_signed = lowerer.self_signed(expression);
         let value = lowerer.assigned_value(entry, expression, 32);
-        lowerer.resize(entry, value, 32, signed)
+        lowerer.resize(entry, value, 32, rhs_signed)
     } else if (declaration.type_is_explicit && declaration.param_type == ParamType::Real)
         || lowerer.is_real_expression(expression)
     {
@@ -504,6 +507,10 @@ fn resolve_one(
     };
     lowerer.builder.set_terminator(entry, CfgTerminator::Return);
     if !lowerer.diagnostics.is_empty() {
+        for diagnostic in &mut lowerer.diagnostics {
+            diagnostic.diagnostic.message =
+                format!("parameter `{name}`: {}", diagnostic.diagnostic.message);
+        }
         return Err(lowerer.diagnostics);
     }
     let (function, outputs) = lowerer
