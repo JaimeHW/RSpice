@@ -21,6 +21,37 @@ fn limits() -> NativeBundleReadLimits {
 }
 
 #[test]
+fn native_bundles_refuse_repeated_exact_member_names_before_selecting_a_payload() {
+    let source = serde_json::json!({
+        "schema": "rspice-waveform-dataset/1", "analysis": "tran",
+        "coordinate": { "name": "time", "values": [0, 1] },
+        "signals": [{ "name": "out", "values": [2, 3] }]
+    });
+    for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
+        let bytes = pack_source(&source.to_string(), kind);
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
+        let manifest = read_zip_member(&mut archive, "manifest.json", 4096).unwrap();
+        let dataset = read_zip_member(&mut archive, "dataset.json", 4096).unwrap();
+        for entries in [
+            vec![
+                ("manifest.json", manifest.as_slice()),
+                ("dataset.json", b"INVALID".as_slice()),
+                ("dataset.json", dataset.as_slice()),
+            ],
+            vec![
+                ("manifest.json", b"INVALID".as_slice()),
+                ("manifest.json", manifest.as_slice()),
+                ("dataset.json", dataset.as_slice()),
+            ],
+        ] {
+            let bytes = crate::zip::deterministic_stored_zip(&entries).unwrap();
+            let error = decode_native_bundle(&bytes, kind, limits()).unwrap_err();
+            assert!(error.to_string().contains("repeats member"), "{error}");
+        }
+    }
+}
+
+#[test]
 fn native_publication_checks_json_and_archive_growth_before_allocating_past_the_limit() {
     let mut dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::Transient,

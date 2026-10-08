@@ -77,16 +77,21 @@ pub fn decode_native_bundle(
     let max_members = limits.max_members;
     let max_expanded_bytes = limits.max_expanded_bytes;
     let mut archive =
-        zip::ZipArchive::new(Cursor::new(bytes)).map_err(|error| NativeBundleError::Zip {
-            context: "invalid ZIP container".into(),
-            source: error,
+        crate::zip::reader::open_unique_archive(bytes, max_members).map_err(|error| {
+            use crate::zip::reader::ArchiveReadError;
+            match error {
+                ArchiveReadError::Zip(source) => NativeBundleError::Zip {
+                    context: "invalid ZIP container".into(),
+                    source,
+                },
+                ArchiveReadError::MemberCount { members, limit } => NativeBundleError::InvalidData(
+                    format!("archive has {members} members; the limit is {limit}"),
+                ),
+                ArchiveReadError::DuplicateMember(name) => {
+                    NativeBundleError::InvalidData(format!("archive repeats member '{name}'"))
+                }
+            }
         })?;
-    if archive.len() > max_members {
-        return Err(NativeBundleError::InvalidData(format!(
-            "archive has {} members; the limit is {max_members}",
-            archive.len()
-        )));
-    }
     let mut names = HashSet::with_capacity(archive.len());
     let mut expanded = 0_u64;
     for index in 0..archive.len() {

@@ -1,7 +1,7 @@
 //! Named NumPy arrays in NPZ archives.
 
 use std::collections::{BTreeSet, HashSet};
-use std::io::{Cursor, Read};
+use std::io::Read;
 use std::path::Path;
 
 use super::reader::{NumpyReadError, NumpyReadFailure, read_error};
@@ -116,17 +116,26 @@ fn decode_npz_arrays(
     let max_members = limits.max_members;
     let max_expanded_bytes = limits.max_expanded_bytes;
     let mut remaining_values = limits.max_numeric_values;
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
-        .map_err(|error| read_error(format, NumpyReadFailure::Archive(error)))?;
-    if archive.len() > max_members {
-        return Err(read_error(
-            format,
-            NumpyReadFailure::MemberCount {
-                members: archive.len(),
-                limit: max_members,
-            },
-        ));
-    }
+    let mut archive =
+        crate::zip::reader::open_unique_archive(bytes, max_members).map_err(|error| {
+            use crate::zip::reader::ArchiveReadError;
+            read_error(
+                format,
+                match error {
+                    ArchiveReadError::Zip(error) => NumpyReadFailure::Archive(error),
+                    ArchiveReadError::MemberCount { members, limit } => {
+                        NumpyReadFailure::MemberCount { members, limit }
+                    }
+                    ArchiveReadError::DuplicateMember(name) => NumpyReadFailure::DuplicateArray(
+                        Path::new(&name)
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .unwrap_or(&name)
+                            .to_owned(),
+                    ),
+                },
+            )
+        })?;
     let mut arrays = Vec::new();
     let mut names = HashSet::new();
     let mut expanded = 0_u64;
@@ -275,6 +284,34 @@ mod tests {
         NamedArray, NpzReadLimits, NumpyReadFailure, decode_npz, decode_npz_arrays, encode_npz,
     };
     use crate::zip::deterministic_stored_zip;
+
+    #[test]
+    fn npz_refuses_repeated_exact_member_names_instead_of_selecting_the_last_array() {
+        let time = crate::numpy::encode_real_array(&[2], &[0.0, 1.0]).unwrap();
+        let first = crate::numpy::encode_real_array(&[2], &[2.0, 3.0]).unwrap();
+        let replacement = crate::numpy::encode_real_array(&[2], &[8.0, 9.0]).unwrap();
+        let bytes = deterministic_stored_zip(&[
+            ("time.npy", &time),
+            ("out.npy", &first),
+            ("out.npy", &replacement),
+        ])
+        .unwrap();
+        let error = decode_npz(
+            &bytes,
+            NpzReadLimits {
+                max_members: 3,
+                max_expanded_bytes: 4096,
+                max_numeric_values: 6,
+            },
+            &["time"],
+            "numpy_npz",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error.reason, NumpyReadFailure::DuplicateArray(ref name) if name == "out"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn numeric_decode_budget_is_shared_by_every_archive_member() {
