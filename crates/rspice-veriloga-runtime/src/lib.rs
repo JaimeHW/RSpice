@@ -18,6 +18,7 @@
 // scalar arguments so generated call sites inline without temporary arrays.
 #![allow(clippy::too_many_arguments)]
 
+pub mod absdelta;
 mod analog_effects;
 mod analog_lifecycle;
 pub mod arithmetic;
