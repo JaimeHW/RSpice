@@ -739,3 +739,98 @@ endmodule
         );
     }
 }
+
+#[test]
+fn absdelta_operand_plans_survive_hierarchy_and_circuit_linking() {
+    use rspice_veriloga::{CompilerOptions, NoPipelineControl, VerilogACompiler};
+    use rspice_veriloga::canonical_ir::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
+    use rspice_veriloga::canonical_ir::digital_link::{DigitalLinkInstance, link_digital_plans};
+    let source = r#"
+`timescale 1ns/1ps
+module observer(a);
+ input a; electrical a;
+ parameter real increment=0.1;
+ real sampled=0;
+ always @(absdelta(V(a),increment,,1u)) sampled=V(a);
+endmodule
+module wrapper(a,b);
+ input a,b; electrical a,b;
+ observer #(.increment(0.25)) first(a);
+ observer #(.increment(0.5)) second(b);
+endmodule
+"#;
+    let artifact = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(source, Some("wrapper"))
+        .unwrap();
+    let plan = &artifact.digital;
+    assert_eq!(plan.absdelta.len(), 2);
+    let linked = link_digital_plans(
+        &[
+            DigitalLinkInstance {
+                name: "left",
+                plan,
+                ports: &[],
+            },
+            DigitalLinkInstance {
+                name: "right",
+                plan,
+                ports: &[],
+            },
+        ],
+        &[],
+        &NoPipelineControl,
+    )
+    .unwrap();
+    assert_eq!(linked.plan.absdelta.len(), 4);
+    let mut signals = std::collections::BTreeSet::new();
+    let mut operands = std::collections::BTreeSet::new();
+    for observer in &linked.plan.absdelta {
+        assert!(signals.insert(observer.signal));
+        for id in observer.operands {
+            assert!(operands.insert(id));
+            let probe = linked.plan.analog_probe(id).unwrap();
+            assert_eq!(probe.quantity, DigitalAnalogQuantity::RealVariable);
+            assert!(!probe.retained && probe.event_signal.is_none());
+            let DigitalAnalogProbeTarget::Variable { name } = &probe.target else {
+                panic!("operand must name evaluated analog storage")
+            };
+            assert!(name.starts_with("left.") || name.starts_with("right."));
+        }
+    }
+    linked.plan.validate().unwrap();
+    let mut corrupted = linked.plan.clone();
+    corrupted.absdelta[0].operands[0] =
+        rspice_veriloga::canonical_ir::ids::DigitalAnalogProbeId::new(u32::MAX);
+    assert!(corrupted.validate().is_err());
+}
+
+#[test]
+fn absdelta_incomplete_execution_and_invalid_source_are_explicit() {
+    use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    let source = "module observer(a); input a; electrical a; real sampled=0; always @(absdelta(V(a),0.1)) sampled=V(a); endmodule";
+    let error =
+        MixedSignalHost::compile(source, None, "observer", &[1], SchedulerLimits::default())
+            .err()
+            .expect("unconnected observers must not silently run");
+    assert!(
+        error.to_string().contains("interpolated-event execution"),
+        "{error}"
+    );
+    for event in [
+        "absdelta(V(a))",
+        "absdelta(,0.1)",
+        "absdelta(V(a),)",
+        "absdelta(V(a),0.1,0,0,1,2)",
+        "posedge absdelta(V(a),0.1)",
+    ] {
+        let invalid = source.replace("absdelta(V(a),0.1)", event);
+        assert!(
+            VerilogACompiler::new(CompilerOptions::default())
+                .compile_canonical_ir(&invalid)
+                .is_err(),
+            "accepted {event}"
+        );
+    }
+}

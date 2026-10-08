@@ -798,6 +798,17 @@ pub struct CanonicalDigitalPlan {
     /// it decodes unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub analog_probes: Vec<DigitalAnalogProbe>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub absdelta: Vec<DigitalAbsDeltaObserver>,
+}
+
+/// An interpolated analog event site. Operands refer to normal analog evaluation
+/// slots in expr, delta, time_tol, expr_tol, enable order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalAbsDeltaObserver {
+    pub signal: DigitalSignalId,
+    pub operands: [DigitalAnalogProbeId; 5],
+    pub span: SourceSpanRef,
 }
 
 impl CanonicalDigitalPlan {
@@ -813,6 +824,7 @@ impl CanonicalDigitalPlan {
             || !self.processes.is_empty()
             || !self.drivers.is_empty()
             || !self.analog_probes.is_empty()
+            || !self.absdelta.is_empty()
     }
 
     /// The probe an id names.

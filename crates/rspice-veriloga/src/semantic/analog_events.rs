@@ -12,6 +12,9 @@ pub struct AnalogEventBinding {
     /// Authored event-assigned variable, absent for an event-function site.
     pub source_variable: Option<SmolStr>,
     pub array: bool,
+    /// Normal analog evaluation slots for expr, delta, time_tol, expr_tol, enable.
+    /// An interpolating observer owns the occurrence signal instead of an analog counter.
+    pub observation: Option<[SmolStr; 5]>,
     pub variable: SmolStr,
     pub signal: SmolStr,
     pub span: Span,
@@ -73,6 +76,7 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
             .collect(),
         bindings: Vec::new(),
         functions: Vec::new(),
+        observers: Vec::new(),
         variable_events: BTreeMap::new(),
         arrays: source
             .variables
@@ -121,6 +125,30 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
                 statement: Box::new(increment(&binding.variable, binding.span)),
             }));
     }
+    for (operands, binding) in lower.observers {
+        for (value, name) in operands.into_iter().zip(binding.observation.unwrap()) {
+            block
+                .statements
+                .push(AnalogStatement::Assignment(AssignmentStmt {
+                    target: LValue::Variable {
+                        name: name.clone(),
+                        span: binding.span,
+                    },
+                    value,
+                    span: binding.span,
+                }));
+            module.variables.push(VariableDecl {
+                var_type: VarType::Real,
+                items: vec![VariableItem {
+                    name,
+                    dimensions: Vec::new(),
+                    init: None,
+                    span: binding.span,
+                }],
+                span: binding.span,
+            });
+        }
+    }
     for binding in &lower.bindings {
         let span = binding.span;
         let dimensions = binding
@@ -130,16 +158,18 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
             .cloned()
             .unwrap_or_default();
         let init = dimensions.is_empty().then(|| number(0, span));
-        module.variables.push(VariableDecl {
-            var_type: VarType::Integer,
-            span,
-            items: vec![VariableItem {
-                name: binding.variable.clone(),
-                dimensions: dimensions.clone(),
-                init: init.clone(),
+        if binding.observation.is_none() {
+            module.variables.push(VariableDecl {
+                var_type: VarType::Integer,
                 span,
-            }],
-        });
+                items: vec![VariableItem {
+                    name: binding.variable.clone(),
+                    dimensions: dimensions.clone(),
+                    init: init.clone(),
+                    span,
+                }],
+            });
+        }
         module.digital_variables.push(DigitalVariableDecl {
             kind: DigitalVariableKind::Reg,
             signedness: Signedness::Unsigned,
@@ -168,6 +198,7 @@ struct Lower {
     names: BTreeSet<SmolStr>,
     bindings: Vec<AnalogEventBinding>,
     functions: Vec<(EventExpr, AnalogEventBinding)>,
+    observers: Vec<([Expression; 5], AnalogEventBinding)>,
     variable_events: BTreeMap<SmolStr, AnalogEventBinding>,
     candidates: BTreeSet<SmolStr>,
     arrays: BTreeMap<SmolStr, Vec<ArrayDimension>>,
@@ -178,10 +209,18 @@ impl Lower {
         loop {
             let variable: SmolStr = format!("$rspice$analog_event${index}$count").into();
             let signal: SmolStr = format!("$rspice$analog_event${index}$signal").into();
-            if !self.names.contains(&variable) && !self.names.contains(&signal) {
+            if !self.names.contains(&variable)
+                && !self.names.contains(&signal)
+                && (0..5).all(|index| {
+                    !self
+                        .names
+                        .contains(&SmolStr::from(format!("{variable}$operand{index}")))
+                })
+            {
                 self.names.insert(variable.clone());
                 self.names.insert(signal.clone());
                 let binding = AnalogEventBinding {
+                    observation: None,
                     array: source_variable
                         .as_ref()
                         .is_some_and(|name| self.arrays.contains_key(name)),
@@ -246,6 +285,39 @@ impl Lower {
             return Ok(());
         };
         for term in terms {
+            if let Expression::Call(call) = &term.signal
+                && call.name == "absdelta"
+            {
+                if term.edge.is_some() {
+                    return invalid("absdelta cannot have a digital edge qualifier", term.span);
+                }
+                validate_operand_scope(&term.signal, locals, term.span)?;
+                if !(2..=5).contains(&call.args.len())
+                    || call.args[..2]
+                        .iter()
+                        .any(|arg| matches!(arg, Expression::NullArgument(_)))
+                {
+                    return invalid(
+                        "absdelta requires expr and delta, followed by at most three optional operands",
+                        term.span,
+                    );
+                }
+                let operands = std::array::from_fn(|index| {
+                    call.args
+                        .get(index)
+                        .filter(|arg| !matches!(arg, Expression::NullArgument(_)))
+                        .cloned()
+                        .unwrap_or_else(|| number(i32::from(index == 4), term.span))
+                });
+                let mut binding = self.binding(term.span, None);
+                binding.observation = Some(std::array::from_fn(|index| {
+                    format!("{}$operand{index}", binding.variable).into()
+                }));
+                *self.bindings.last_mut().expect("new observer binding") = binding.clone();
+                self.observers.push((operands, binding.clone()));
+                term.signal = identifier(&binding.signal, term.span);
+                continue;
+            }
             if let Expression::ArrayAccess(access) = &mut term.signal {
                 if self.candidates.contains(&access.array) && !locals.contains(&access.array) {
                     if term.edge.is_some() || access.packed.is_some() {
@@ -401,6 +473,33 @@ impl Lower {
 
 fn implicit(timing: &TimingControl) -> bool {
     matches!(timing, TimingControl::Event(event) if matches!(event.sensitivity, Sensitivity::Implicit))
+}
+
+fn validate_operand_scope(
+    expression: &Expression,
+    locals: &BTreeSet<SmolStr>,
+    span: Span,
+) -> CompileResult<()> {
+    let mut local = None;
+    super::flow_probes::visit_expression(expression, &mut |expression| {
+        let name = match expression {
+            Expression::Identifier(id) => &id.name,
+            Expression::ArrayAccess(access) => &access.array,
+            _ => return,
+        };
+        if locals.contains(name) {
+            local = Some(name.clone());
+        }
+    });
+    if let Some(name) = local {
+        return unsupported(
+            format!(
+                "analog event operand uses process-local '{name}', which requires an analog subscription storage binding"
+            ),
+            span,
+        );
+    }
+    Ok(())
 }
 
 fn event_function(expression: &Expression) -> CompileResult<Option<EventExpr>> {

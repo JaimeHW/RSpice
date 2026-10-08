@@ -269,7 +269,7 @@ impl CompiledDigitalDesign {
                 module: artifact.mir.module_name.to_string(),
             });
         }
-        if !artifact.mir.equations.is_empty() {
+        if !artifact.mir.equations.is_empty() || !artifact.digital.absdelta.is_empty() {
             return Err(DigitalRunError::MixedSignalModule {
                 module: artifact.mir.module_name.to_string(),
                 equations: artifact.mir.equations.len(),

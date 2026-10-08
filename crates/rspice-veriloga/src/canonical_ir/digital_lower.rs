@@ -678,10 +678,52 @@ fn lower_with_analog_variables(
         }
     }
 
+    let mut absdelta = Vec::new();
     let mut add_events = |bindings: &[crate::semantic::AnalogEventBinding],
                           scope: &HashMap<&str, DigitalSignalId>,
                           variables: &HashMap<SmolStr, AnalogVariable>| {
         for binding in bindings {
+            if let Some(operands) = &binding.observation {
+                let Some(signal) = scope.get(binding.signal.as_str()).copied() else {
+                    diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                        "absdelta has no occurrence signal",
+                        binding.span.into(),
+                    ));
+                    continue;
+                };
+                let mut ids = [DigitalAnalogProbeId::from(0); 5];
+                let mut complete = true;
+                for (name, id) in operands.iter().zip(&mut ids) {
+                    let Some(variable) = variables.get(name) else {
+                        diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                            "absdelta operand has no relocated analog storage",
+                            binding.span.into(),
+                        ));
+                        complete = false;
+                        break;
+                    };
+                    *id = DigitalAnalogProbeId::from(probes.len());
+                    probes.push(DigitalAnalogProbe {
+                        id: *id,
+                        retained: false,
+                        event_signal: None,
+                        access: "$absdelta_operand".into(),
+                        quantity: super::digital::DigitalAnalogQuantity::RealVariable,
+                        target: super::digital::DigitalAnalogProbeTarget::Variable {
+                            name: variable.target.clone(),
+                        },
+                        span: binding.span.into(),
+                    });
+                }
+                if complete {
+                    absdelta.push(super::digital::DigitalAbsDeltaObserver {
+                        signal,
+                        operands: ids,
+                        span: binding.span.into(),
+                    });
+                }
+                continue;
+            }
             let Some(variable) = variables.get(&binding.variable) else {
                 diagnostics.push(DigitalLoweringDiagnostic::invariant(
                     "analog event counter has no relocated storage",
@@ -775,6 +817,7 @@ fn lower_with_analog_variables(
         processes,
         drivers,
         analog_probes: probes,
+        absdelta,
     }
     .seal()
     // Structural validation of the plan this pass just built, reached only

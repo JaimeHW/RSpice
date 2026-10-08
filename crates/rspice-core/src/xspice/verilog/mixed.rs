@@ -1482,6 +1482,11 @@ impl MixedSignalHost {
                 ),
             });
         }
+        if !canonical_ir.digital.absdelta.is_empty() {
+            return Err(MixedSignalError::Compile {
+                detail: "absdelta interval observers require shared interpolated-event execution, which is not yet connected".into(),
+            });
+        }
 
         // The same backend selection the device builder makes. A mixed module
         // is one more Verilog-A instance as far as the continuous half is

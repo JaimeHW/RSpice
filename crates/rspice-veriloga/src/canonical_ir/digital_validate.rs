@@ -186,6 +186,7 @@ impl CanonicalDigitalPlan {
                 &self.processes,
                 &self.drivers,
                 &self.analog_probes,
+                &self.absdelta,
             ),
         )
         .map_err(|detail| error(format!("cannot hash digital plan: {detail}")))?;
@@ -434,6 +435,31 @@ impl CanonicalDigitalPlan {
             }
             if variable != matches!(probe.target, DigitalAnalogProbeTarget::Variable { .. }) {
                 return Err(error("analog read quantity does not match its target kind"));
+            }
+        }
+        for observer in &self.absdelta {
+            let valid = self.signal(observer.signal).is_some_and(|signal| {
+                !signal.kind.is_real() && signal.width == 32 && signal.local.is_none()
+                    && matches!(&signal.initial_value, Some(super::digital::DigitalInitialValue::FourState(value)) if value.to_u64() == Some(0))
+            });
+            if !valid
+                || !event_signals.insert(observer.signal)
+                || self.drivers_of(observer.signal).next().is_some()
+                || observer.operands.iter().any(|id| {
+                    self.analog_probe(*id).is_none_or(|probe| {
+                        probe.retained
+                            || probe.event_signal.is_some()
+                            || probe.quantity != super::digital::DigitalAnalogQuantity::RealVariable
+                            || !matches!(
+                                probe.target,
+                                super::digital::DigitalAnalogProbeTarget::Variable { .. }
+                            )
+                    })
+                })
+            {
+                return Err(error(
+                    "absdelta requires an independent initialized occurrence signal and five analog operand probes",
+                ));
             }
         }
         let mut drivers = BTreeMap::new();

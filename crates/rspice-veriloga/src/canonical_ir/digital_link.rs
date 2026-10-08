@@ -390,6 +390,15 @@ pub fn link_digital_plans(
             layout.map.analog_probes.push(id);
             plan.analog_probes.push(probe);
         }
+        for observer in &source.absdelta {
+            let mut observer = observer.clone();
+            observer.signal = layout.map.signals[usize::from(observer.signal)];
+            observer.operands = observer
+                .operands
+                .map(|probe| layout.map.analog_probes[usize::from(probe)]);
+            relocate_span(&mut observer.span, &layout.map);
+            plan.absdelta.push(observer);
+        }
         for offset in 0..source.processes.len() {
             let count = plan
                 .processes
