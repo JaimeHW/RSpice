@@ -1293,8 +1293,45 @@ mod tests {
         )
         .unwrap();
         bytes.extend_from_slice(b"Flags: real\nNo. Variables: 3\nNo. Points: 3\nVariables:\n0 time time\n1 V(out) nullable_real:voltage\n2 Valid(V(out)) nullable_validity:voltage\nValues:\n0 0 1 1\n1 1 0 0\n2 2 -0 1\n");
+        assert_nullable_import_round_trip("gaps.raw", &bytes);
+    }
+
+    #[test]
+    fn nullable_hdf5_survives_review_retention_project_reload_and_reexport() {
+        use rustyhdf5::{AttrValue, FileBuilder};
+        let mut file = FileBuilder::new();
+        let mut group = file.create_group("converted");
+        for (key, value) in [
+            ("section_type", "table"),
+            ("coordinate_type", "time"),
+            ("coordinate_unit", "ns"),
+            ("independent_name", "time"),
+            ("signal_0000_name", "V(out)"),
+            ("signal_0000_type", "nullable_real:voltage"),
+            ("signal_0000_unit", "V"),
+            ("signal_0001_name", "Valid(V(out))"),
+            ("signal_0001_type", "nullable_validity:voltage"),
+            ("signal_0001_unit", "1"),
+        ] {
+            group.set_attr(key, AttrValue::String(value.to_owned()));
+        }
+        group.set_attr("signal_count", AttrValue::I64(2));
+        group
+            .create_dataset("independent")
+            .with_f64_data(&[0.0, 1e9, 2e9]);
+        group
+            .create_dataset("signal_0000")
+            .with_f64_data(&[1.0, 0.0, -0.0]);
+        group
+            .create_dataset("signal_0001")
+            .with_f64_data(&[1.0, 0.0, 1.0]);
+        file.add_group(group.finish());
+        assert_nullable_import_round_trip("gaps.h5", &file.finish().unwrap());
+    }
+
+    fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
         let mut state = loaded_project_state();
-        stage_imported_result_dataset(&mut state, "gaps.raw", &bytes).unwrap();
+        stage_imported_result_dataset(&mut state, name, bytes).unwrap();
         assert_eq!(state.workbench.result_import.waveforms.len(), 1);
         assert_eq!(state.workbench.result_import.waveforms[0].sample(1), None);
         commit_result_import_draft(&mut state).unwrap();
@@ -1310,6 +1347,7 @@ mod tests {
             crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
         let restored = &simulation.active_run().unwrap().analyses[0];
         restored.validate_retained_evidence().unwrap();
+        assert_eq!(restored.waveforms[0].x.as_ref(), &[0.0, 1.0, 2.0]);
         assert_eq!(restored.waveforms[0].sample(1), None);
         assert_eq!(restored.waveforms[0].y[2].to_bits(), (-0.0_f64).to_bits());
         let projected = rspice_formats::waveform_io::result::project_waveforms(

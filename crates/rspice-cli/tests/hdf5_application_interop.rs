@@ -1,0 +1,79 @@
+//! CLI HDF5 files must retain their meaning in the application's decoder.
+mod common;
+
+use rspice_formats::hdf5::{Hdf5Limits, decode_hdf5};
+use serde_json::json;
+use std::process::Command;
+
+fn decode_export(document: serde_json::Value) -> rspice_formats::numeric::DecodedNumericDataset {
+    let directory = common::test_dir("hdf5_application_interop");
+    let source = directory.join("source.json");
+    let output = directory.join("result.h5");
+    std::fs::write(&source, document.to_string()).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "convert"])
+        .arg(&source)
+        .arg(&output)
+        .args(["--to", "hdf5"])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    decode_hdf5(
+        &std::fs::read(output).unwrap(),
+        Hdf5Limits {
+            max_columns: 32,
+            max_values: 1000,
+            coordinate_names: &["time", "frequency", "x"],
+        },
+        "hdf5",
+    )
+    .unwrap()
+}
+
+#[test]
+fn nullable_hdf5_columns_do_not_become_zero_measurements_or_extra_signals() {
+    let decoded = decode_export(json!({
+        "scale":{"name":"time", "type":"time", "unit":"s", "values":[0.0,1.0,2.0]},
+        "signals":[
+            {"name":"voltage", "type":"voltage", "unit":"V", "values":[1.0,null,-0.0]},
+            {"name":"transfer", "type":"value", "unit":"1", "real":[2.0,null,3.0], "imag":[-4.0,null,5.0]},
+            {"name":"Valid(voltage)", "type":"current", "unit":"A", "values":[7.0,8.0,9.0]}
+        ]
+    }));
+    assert_eq!(
+        decoded.signals.len(),
+        3,
+        "validity is not a measured signal"
+    );
+    assert_eq!(decoded.signals[0].name, "voltage");
+    assert_eq!(decoded.signals[0].unit.as_deref(), Some("V"));
+    assert!(decoded.signals[0].real[1].is_nan());
+    assert_eq!(decoded.signals[0].real[2].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(decoded.signals[1].name, "transfer");
+    assert_eq!(decoded.signals[1].real[0], 2.0);
+    assert!(decoded.signals[1].real[1].is_nan());
+    let imag = decoded.signals[1].imag.as_ref().unwrap();
+    assert_eq!(imag[0], -4.0);
+    assert!(imag[1].is_nan());
+    assert_eq!(decoded.signals[2].name, "Valid(voltage)");
+    assert_eq!(decoded.signals[2].real, [7.0, 8.0, 9.0]);
+}
+
+#[test]
+fn hdf5_coordinate_units_are_normalized_before_application_use() {
+    for (kind, unit, canonical, values, expected) in [
+        ("time", "ns", "s", [0.0, 2.0], [0.0, 2e-9]),
+        ("frequency", "MHz", "Hz", [1.0, 2.0], [1e6, 2e6]),
+        ("current", "mA", "A", [-1.0, 1.0], [-1e-3, 1e-3]),
+        ("temperature", "degC", "K", [0.0, 25.0], [273.15, 298.15]),
+    ] {
+        let decoded = decode_export(json!({
+            "scale":{"name":kind, "type":kind, "unit":unit, "values":values},
+            "signals":[{"name":"out", "unit":"mV", "values":[3.0,4.0]}]
+        }));
+        assert_eq!(decoded.coordinate, expected, "{kind} [{unit}]");
+        assert_eq!(decoded.coordinate_unit.as_deref(), Some(canonical));
+        assert_eq!(decoded.signals[0].real, [3.0, 4.0]);
+        assert_eq!(decoded.signals[0].unit.as_deref(), Some("mV"));
+    }
+}

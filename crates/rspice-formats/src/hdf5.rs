@@ -3,6 +3,9 @@
 #[cfg(feature = "result-hdf5")]
 pub mod result;
 
+#[cfg(test)]
+mod table_tests;
+
 use crate::numeric::{
     DecodedNumericDataset, DecodedNumericSignal, combine_real_imag_columns, stated_coordinate_names,
 };
@@ -70,6 +73,8 @@ pub enum Hdf5ReadFailure {
     },
     InexactInteger(crate::numeric::ExactIntegerError),
     ComplexColumns(crate::numeric::ComplexColumnError),
+    Column(String),
+    Coordinate(String),
 }
 
 impl std::fmt::Display for Hdf5ReadFailure {
@@ -124,6 +129,7 @@ impl std::fmt::Display for Hdf5ReadFailure {
             ),
             Self::InexactInteger(source) => source.fmt(f),
             Self::ComplexColumns(source) => source.fmt(f),
+            Self::Column(message) | Self::Coordinate(message) => f.write_str(message),
         }
     }
 }
@@ -171,6 +177,7 @@ enum DecodedHdf5 {
     Section {
         family: Hdf5SectionFamily,
         coordinate_name: String,
+        coordinate_unit: Option<String>,
         coordinate: Vec<f64>,
         signals: Vec<DecodedNumericSignal>,
     },
@@ -219,10 +226,11 @@ pub fn decode_matlab_v73(
 }
 
 fn finish_hdf5(decoded: DecodedHdf5, format: &str) -> Result<DecodedNumericDataset, Hdf5ReadError> {
-    match decoded {
+    let mut dataset = match decoded {
         DecodedHdf5::Section {
             family,
             coordinate_name,
+            coordinate_unit,
             coordinate,
             signals,
         } => {
@@ -232,13 +240,13 @@ fn finish_hdf5(decoded: DecodedHdf5, format: &str) -> Result<DecodedNumericDatas
                 Hdf5SectionFamily::Ac => crate::WaveformDomain::Ac,
                 Hdf5SectionFamily::Table(domain) => domain,
             };
-            Ok(DecodedNumericDataset {
-                coordinate_unit: None,
+            DecodedNumericDataset {
+                coordinate_unit,
                 domain,
                 coordinate_name,
                 coordinate,
                 signals,
-            })
+            }
         }
         DecodedHdf5::Root {
             coordinate_name,
@@ -247,15 +255,19 @@ fn finish_hdf5(decoded: DecodedHdf5, format: &str) -> Result<DecodedNumericDatas
         } => {
             let signals = combine_real_imag_columns(columns)
                 .map_err(|error| adapter_error(format, Hdf5ReadFailure::ComplexColumns(error)))?;
-            Ok(DecodedNumericDataset {
+            DecodedNumericDataset {
                 coordinate_unit: None,
                 domain: crate::WaveformDomain::from_coordinate_name(&coordinate_name),
                 coordinate_name,
                 coordinate,
                 signals,
-            })
+            }
         }
-    }
+    };
+    dataset
+        .normalize_coordinate_unit()
+        .map_err(|error| adapter_error(format, Hdf5ReadFailure::Coordinate(error)))?;
+    Ok(dataset)
 }
 
 fn decode_hdf5_container(
@@ -356,6 +368,10 @@ fn parse_rspice_hdf5_section(
             error,
         )
     })?;
+    let coordinate_unit = attrs
+        .contains_key("coordinate_unit")
+        .then(|| hdf_string_attr(&attrs, "coordinate_unit", format))
+        .transpose()?;
     let signal_count = hdf_i64_attr(&attrs, "signal_count", format)?;
     let signal_count = usize::try_from(signal_count).map_err(|_| {
         adapter_error(
@@ -403,6 +419,7 @@ fn parse_rspice_hdf5_section(
         return Ok(DecodedHdf5::Section {
             family,
             coordinate_name: "frequency".to_owned(),
+            coordinate_unit,
             coordinate,
             signals,
         });
@@ -422,11 +439,13 @@ fn parse_rspice_hdf5_section(
         });
     }
     if matches!(family, Hdf5SectionFamily::Table(_)) {
+        use crate::numeric::nullable::{
+            DenseNumericColumn, decode_dense_validity, nullable_value_type,
+        };
         let mut decoded = Vec::new();
         let mut columns = signals.into_iter().enumerate().peekable();
         while let Some((index, mut signal)) = columns.next() {
-            let kind = hdf_optional_string_attr(&attrs, &format!("signal_{index:04}_type"))
-                .unwrap_or_default();
+            let mut kind = hdf_string_attr(&attrs, &format!("signal_{index:04}_type"), format)?;
             if let Some(quantity) = kind.strip_prefix("complex_real:") {
                 let name = signal
                     .name
@@ -450,13 +469,66 @@ fn parse_rspice_hdf5_section(
                     ));
                 }
                 let (_, imaginary) = columns.next().expect("validated imaginary column");
+                if imaginary.real.len() != signal.real.len()
+                    || imaginary.unit.is_some() && imaginary.unit != signal.unit
+                {
+                    return Err(adapter_error(
+                        format,
+                        Hdf5ReadFailure::Column(format!(
+                            "complex signal '{name}' has inconsistent component lengths or units"
+                        )),
+                    ));
+                }
                 signal.name = name;
                 signal.imag = Some(imaginary.real);
+                kind = quantity.to_owned();
             } else if kind.starts_with("complex_imag:") {
                 return Err(adapter_error(
                     format,
                     Hdf5ReadFailure::ComplexColumns(
                         crate::numeric::ComplexColumnError::MissingReal(signal.name),
+                    ),
+                ));
+            }
+            if nullable_value_type(&kind).is_some() {
+                let (index, mask) = columns.next().ok_or_else(|| {
+                    adapter_error(
+                        format,
+                        Hdf5ReadFailure::Column(
+                            "nullable value column has no validity column".into(),
+                        ),
+                    )
+                })?;
+                let mask_kind =
+                    hdf_string_attr(&attrs, &format!("signal_{index:04}_type"), format)?;
+                let defined = decode_dense_validity(
+                    DenseNumericColumn {
+                        kind: &kind,
+                        unit: signal.unit.as_deref(),
+                        real: &signal.real,
+                        imag: signal.imag.as_deref(),
+                    },
+                    DenseNumericColumn {
+                        kind: &mask_kind,
+                        unit: mask.unit.as_deref(),
+                        real: &mask.real,
+                        imag: None,
+                    },
+                )
+                .map_err(|error| adapter_error(format, Hdf5ReadFailure::Column(error)))?;
+                for (index, defined) in defined.into_iter().enumerate() {
+                    if !defined {
+                        signal.real[index] = f64::NAN;
+                        if let Some(imag) = &mut signal.imag {
+                            imag[index] = f64::NAN;
+                        }
+                    }
+                }
+            } else if kind.starts_with("nullable_validity:") {
+                return Err(adapter_error(
+                    format,
+                    Hdf5ReadFailure::Column(
+                        "nullable validity column has no preceding value column".into(),
                     ),
                 ));
             }
@@ -467,6 +539,7 @@ fn parse_rspice_hdf5_section(
     Ok(DecodedHdf5::Section {
         family,
         coordinate_name,
+        coordinate_unit,
         coordinate,
         signals,
     })
