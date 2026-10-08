@@ -403,6 +403,9 @@ impl DigitalSignalStore {
             }
         }
         let previous = std::mem::replace(&mut connected.resolved[net_index], resolved);
+        if previous != resolved {
+            self.trace_resolved_bit(net_index, resolved);
+        }
         if previous != resolved && topology.observed[net_index] {
             self.external_changes
                 .push(ExternalNetChange::Bits(DigitalBitChange {

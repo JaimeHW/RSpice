@@ -2250,19 +2250,26 @@ impl MixedSignalHost {
     where
         F: FnMut(usize, FourStateBit, BoundaryBitSource),
     {
+        self.boundary_trace_bindings(|node, signal, bit, source| {
+            if let Some(value) = self.state.digital.read(signal) {
+                sink(node, value.bit(bit), source);
+            }
+        });
+    }
+
+    pub(crate) fn boundary_trace_bindings(
+        &self,
+        mut sink: impl FnMut(usize, DigitalSignalId, u32, BoundaryBitSource),
+    ) {
         for port in &self.event_ports {
-            if let (Some(node), Some(bit), Some(value)) = (
-                port.trace_node,
-                port.bit,
-                self.state.digital.read(port.signal),
-            ) {
+            if let (Some(node), Some(bit)) = (port.trace_node, port.bit) {
                 let source = match port.direction {
                     rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input => {
                         BoundaryBitSource::Sampled
                     }
                     _ => BoundaryBitSource::Driven,
                 };
-                sink(node, value.bit(bit), source);
+                sink(node, port.signal, bit, source);
             }
         }
         for bridge in self
@@ -2272,22 +2279,20 @@ impl MixedSignalHost {
             .iter()
             .filter(|bridge| !bridge.root_only)
         {
-            if let Some(value) = self.state.digital.read(bridge.driven_signal()) {
-                sink(
-                    bridge.positive,
-                    value.bit(bridge.bit),
-                    BoundaryBitSource::Sampled,
-                );
-            }
+            sink(
+                bridge.positive,
+                bridge.driven_signal(),
+                bridge.bit,
+                BoundaryBitSource::Sampled,
+            );
         }
         for bridge in &self.state.bridges.dac {
-            if let Some(value) = self.state.digital.read(bridge.signal) {
-                sink(
-                    bridge.positive,
-                    value.bit(bridge.bit),
-                    BoundaryBitSource::Driven,
-                );
-            }
+            sink(
+                bridge.positive,
+                bridge.signal,
+                bridge.bit,
+                BoundaryBitSource::Driven,
+            );
         }
     }
 

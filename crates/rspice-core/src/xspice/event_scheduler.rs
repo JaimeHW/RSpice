@@ -1387,12 +1387,26 @@ impl EventScheduler {
     pub fn run_due_events<F>(
         &mut self,
         bound: Instant,
+        execute: F,
+    ) -> Result<TimeSlotReport, SchedulerError>
+    where
+        F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
+    {
+        self.run_due_events_through(bound, bound, execute)
+    }
+
+    /// Drain part of an outer acceptance interval without resetting its
+    /// settling budget. Timestamp-grouped publication uses this between groups.
+    pub(crate) fn run_due_events_through<F>(
+        &mut self,
+        bound: Instant,
+        through: Instant,
         mut execute: F,
     ) -> Result<TimeSlotReport, SchedulerError>
     where
         F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
     {
-        self.drain_due(bound, |queues, event, at| {
+        self.drain_due_through(bound, through, |queues, event, at| {
             // Rendered before the context takes the queues, which is what
             // keeps the two `String` clones off every other event path.
             let event = queues.render(event);
@@ -1455,15 +1469,25 @@ impl EventScheduler {
         Ok(())
     }
 
+    #[cfg(feature = "veriloga")]
+    fn drain_due<F>(&mut self, bound: Instant, execute: F) -> Result<TimeSlotReport, SchedulerError>
+    where
+        F: FnMut(&mut EventQueues, PendingEvent, Instant),
+    {
+        self.drain_due_through(bound, bound, execute)
+    }
+
     /// The one drain loop both due-slot modes run.
-    fn drain_due<F>(
+    fn drain_due_through<F>(
         &mut self,
         bound: Instant,
+        through: Instant,
         mut execute: F,
     ) -> Result<TimeSlotReport, SchedulerError>
     where
         F: FnMut(&mut EventQueues, PendingEvent, Instant),
     {
+        debug_assert!(through <= bound);
         self.open_due_slot(bound);
 
         loop {
@@ -1484,7 +1508,7 @@ impl EventScheduler {
                 // next one under the bound may open. This is also what picks
                 // up an event `execute` back-dated below the bound, which
                 // `SchedulerContext` routes to the future tier.
-                if self.queues.open_next_due_instant(bound) {
+                if self.queues.open_next_due_instant(through) {
                     continue;
                 }
                 break;

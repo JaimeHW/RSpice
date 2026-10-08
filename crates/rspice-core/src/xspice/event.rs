@@ -285,6 +285,38 @@ impl XspiceEventScheduler {
         Ok(())
     }
 
+    /// Publish one physical group while retaining the enclosing settle budget.
+    pub(crate) fn run_due_event_slot<F>(
+        &mut self,
+        time: Value,
+        slot: Value,
+        mut sink: F,
+    ) -> Result<(), SchedulerError>
+    where
+        F: FnMut(XspiceEvent),
+    {
+        if time == slot {
+            return self.run_due_events(time, sink);
+        }
+        let (Some(bound), Some(through)) =
+            (Instant::from_seconds(time), Instant::from_seconds(slot))
+        else {
+            return Ok(());
+        };
+        self.inner
+            .run_due_events_through(bound, through, |event, _| {
+                sink(XspiceEvent {
+                    time: event.at.seconds(),
+                    node_id: event.target.node_id,
+                    port_name: event.target.port_name,
+                    driver_index: event.target.driver_index,
+                    instance: event.target.instance,
+                    value: event.value,
+                })
+            })?;
+        Ok(())
+    }
+
     /// Mark one iteration of the settle loop at `time`.
     ///
     /// Delta settling is unbounded, so this is what turns a zero-delay loop
@@ -331,6 +363,7 @@ pub(crate) type XspiceRealDrivers = HashMap<NodeId, HashMap<XspiceDriverId, Valu
 /// behind a single [`Arc`] — see [`SharedXspiceEventValues`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct XspiceEventValues {
+    pub(crate) traces: super::event_trace::EventTraceJournal,
     /// Resolved digital value of each event-driven node.
     pub(crate) digital_values: HashMap<NodeId, DigitalValue>,
     /// Per-output digital driver values, resolved onto digital nodes.
@@ -813,6 +846,32 @@ mod tests {
         assert_eq!(drained, vec![EventValue::Digital(DigitalValue::zero())]);
         assert_eq!(scheduler.len(), 1);
         assert_eq!(scheduler.next_event_time(), Some(2.0e-9));
+    }
+
+    #[test]
+    fn event_trace_groups_preserve_the_enclosing_event_budget() {
+        let mut scheduler = XspiceEventScheduler {
+            inner: EventScheduler::new(SchedulerLimits {
+                max_events_per_tick: 2,
+                ..SchedulerLimits::default()
+            }),
+        };
+        for time in [1e-9, 2e-9, 3e-9] {
+            scheduler.schedule(
+                time,
+                1,
+                "q",
+                "driver",
+                0,
+                EventValue::Digital(DigitalValue::one()),
+            );
+        }
+        scheduler.run_due_event_slot(4e-9, 1e-9, |_| {}).unwrap();
+        scheduler.run_due_event_slot(4e-9, 2e-9, |_| {}).unwrap();
+        assert!(matches!(
+            scheduler.run_due_event_slot(4e-9, 3e-9, |_| {}),
+            Err(SchedulerError::Oscillation(_))
+        ));
     }
 
     #[test]

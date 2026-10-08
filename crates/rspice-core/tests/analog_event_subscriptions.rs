@@ -893,9 +893,11 @@ fn absdelta_digital_only_observation_does_not_force_analog_sampling_steps() {
     let source = Source::new(
         r#"
 `timescale 1ps/1ps
-module observer(a,ok,done);
+module observer(a,ok,done,r);
  input a; electrical a;
  output ok,done; reg ok=1,done=0;
+ output r; wreal r;
+ assign r=sampled;
  real derived,sampled,observed; integer count=0;
  analog derived=2*V(a);
  always @(absdelta(V(a),0.125,1p,1u)) begin
@@ -906,9 +908,9 @@ module observer(a,ok,done);
    if (count>9) ok=0;
  end
 endmodule
-module flag_reader(a,ok,done);
+module flag_reader(a,ok,done,r);
  input a; electrical a;
- input ok,done;
+ input ok,done; input r; wreal r;
  integer flags=0;
  always @(ok or done) flags=ok+2*done;
  analog I(a)<+0;
@@ -916,7 +918,7 @@ endmodule
 "#,
     );
     let deck = Netlist::parse(&format!(
-        "* pure observer\nV1 a 0 PWL(0 0 1n 1)\nX1 a ok done observer\nX2 a ok done flag_reader\n.va \"{}\" observer module=observer\n.va \"{}\" flag_reader module=flag_reader\n.end\n",
+        "* pure observer\nV1 a 0 PWL(0 0 1n 1)\nX1 a ok done r observer\nX2 a ok done r flag_reader\n.va \"{}\" observer module=observer\n.va \"{}\" flag_reader module=flag_reader\n.end\n",
         source.path(), source.path()
     ))
     .unwrap();
@@ -929,6 +931,14 @@ endmodule
         "observer must leave intervals spanning multiple sample events: {:?}",
         result.time
     );
+    let real = result.real_trace_named("r").unwrap();
+    let changes: Vec<_> = real.iter().filter(|point| point.time > 20e-12).collect();
+    assert_eq!(changes.len(), 8, "{real:?}");
+    for (index, point) in changes.iter().enumerate() {
+        let expected = (index + 1) as f64 * 0.125;
+        assert!((point.time - expected * 1e-9).abs() < 1e-15, "{real:?}");
+        assert!((point.value - expected).abs() < 1e-6, "{real:?}");
+    }
     for node in ["ok", "done"] {
         let trace = result
             .digital_traces
@@ -1004,6 +1014,31 @@ endmodule
             "physical={physical}: {:?}",
             result.digital_traces
         );
+        for (node, delay) in [
+            ("q", 0.0),
+            ("b", 17e-12),
+            (returned, 17e-12 + if physical { 1.5e-12 } else { 0.0 }),
+        ] {
+            let trace = result.digital_trace_named(node).unwrap();
+            let changes: Vec<_> = trace.iter().filter(|point| point.time > 20e-12).collect();
+            assert_eq!(changes.len(), 8, "physical={physical}, {node}: {trace:?}");
+            for (index, point) in changes.iter().enumerate() {
+                let expected_time = (index + 1) as f64 * 125e-12 + delay;
+                let expected_state = if index % 2 == 0 {
+                    rspice_core::xspice::DigitalState::Zero
+                } else {
+                    rspice_core::xspice::DigitalState::One
+                };
+                assert!(
+                    (point.time - expected_time).abs() < 1e-15,
+                    "physical={physical}, {node}: {trace:?}"
+                );
+                assert_eq!(
+                    point.value.state, expected_state,
+                    "physical={physical}, {node}: {trace:?}"
+                );
+            }
+        }
         if physical {
             for (time, expected) in [(0.2e-9, 0.0), (0.3e-9, 1.0), (0.45e-9, 0.0), (0.57e-9, 1.0)] {
                 let node = result

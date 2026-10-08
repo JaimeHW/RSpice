@@ -699,6 +699,50 @@ impl MixedDigitalCoordinator {
             .filter(|(node, _)| *node > 0)
     }
 
+    /// Match the snapshot's resolved / driven / sampled precedence. Resolve
+    /// once at capture setup, rather than scanning every net on every event.
+    pub(crate) fn configure_traces(&mut self, hosts: &[MixedSignalHost], retained: Arc<[bool]>) {
+        use super::super::store::TraceSource;
+        let mut claims = Vec::new();
+        for (net, &node) in self.event_nodes.iter().enumerate() {
+            claims.push((node, 0u8, TraceSource::ResolvedBit(net)));
+        }
+        for (host, map) in hosts.iter().zip(&self.maps) {
+            host.boundary_trace_bindings(|node, signal, bit, source| {
+                let priority = match source {
+                    BoundaryBitSource::Driven => 1,
+                    BoundaryBitSource::Sampled => 2,
+                };
+                claims.push((
+                    node,
+                    priority,
+                    TraceSource::SignalBit(map.signals[usize::from(signal)], bit),
+                ));
+            });
+        }
+        claims.sort_by_key(|&(node, priority, _)| (node, priority));
+        claims.dedup_by_key(|entry| entry.0);
+        let mut sources: Vec<_> = claims
+            .into_iter()
+            .map(|(node, _, source)| (node, source))
+            .collect();
+        sources.extend(
+            self.real_event_nodes
+                .iter()
+                .map(|&(node, signal)| (node, TraceSource::Real(signal))),
+        );
+        self.digital.make_mut().configure_traces(&sources, retained);
+    }
+
+    pub(crate) fn drain_traces(
+        &mut self,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        if self.digital.has_traces() {
+            self.digital.make_mut().drain_traces(points);
+        }
+    }
+
     pub(crate) fn real_event_values(&self) -> impl Iterator<Item = (usize, f64)> + '_ {
         self.real_event_nodes
             .iter()

@@ -44,6 +44,7 @@ mod context;
 mod data_file;
 mod digital;
 mod event;
+pub(crate) mod event_trace;
 // The discrete-event scheduler kernel for the digital substrate.
 //
 // It lives here rather than under `engine` because of what the layering

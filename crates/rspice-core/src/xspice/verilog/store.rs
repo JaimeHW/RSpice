@@ -79,6 +79,8 @@
 //! already holds produces no transition, which is what stops a level-sensitive
 //! `@*` process from re-triggering itself forever.
 
+mod traces;
+pub(crate) use traces::TraceSource;
 mod bindings;
 use bindings::ConnectedBits;
 pub(crate) use bindings::{DigitalBitChange, DigitalBitConnection, ExternalBitDriverId};
@@ -388,6 +390,7 @@ pub(crate) struct DigitalSignalStore {
     analog_variable_inputs:
         Option<Arc<std::collections::HashMap<DigitalSignalId, Vec<DigitalAnalogProbeId>>>>,
     activation_clock: Option<DigitalClock>,
+    traces: traces::StoreTraces,
 }
 
 impl DigitalSignalStore {
@@ -595,6 +598,7 @@ impl DigitalSignalStore {
             }).collect(),
             analog_variable_inputs: None,
             activation_clock: None,
+            traces: traces::StoreTraces::default(),
             plan,
             connected: None,
             external_reals: None,
@@ -889,6 +893,7 @@ impl DigitalSignalStore {
             pending.push((signal, values));
             return;
         }
+        self.trace_transition(signal, &values);
         self.invalidate_analog_variables(signal);
         let sequence = self.next_sequence();
         let expressions = self.observe_expressions(signal);

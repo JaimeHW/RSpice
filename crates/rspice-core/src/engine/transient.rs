@@ -889,10 +889,10 @@ struct TransientCaptureRequest<'a> {
 
 /// The run-lifetime buffers an accepted point's event state is taken into.
 ///
-/// Every field outlives the accepted point, so taking a snapshot costs no
-/// allocation after the first step: the snapshot vectors are cleared and
-/// refilled, and the index maps grow only when a node first appears.
+/// The snapshot and journal vectors retain their capacity across accepted
+/// points, and the index maps grow only when a node first appears.
 struct TransientEventCapture<'a> {
+    points: &'a mut Vec<crate::xspice::event_trace::EventTracePoint>,
     /// Whether this run records event traces at all.
     record_traces: bool,
     /// Committed digital values of the accepted point, refilled per point.
@@ -2516,13 +2516,14 @@ impl Engine {
     fn commit_accepted_transient_point(
         &self,
         result: &mut TransientResult,
-        circuit: &crate::circuit::CircuitData,
+        circuit: &mut crate::circuit::CircuitData,
         time: Value,
         events: TransientEventCapture<'_>,
         mut retained_result_values: usize,
         abort: &dyn AbortSignal,
     ) -> Result<usize, SimulationError> {
         let TransientEventCapture {
+            points,
             record_traces,
             digital_snapshot,
             digital_event_codes,
@@ -2533,23 +2534,46 @@ impl Engine {
             sample_buses,
         } = events;
         if record_traces {
+            use crate::xspice::EventValue;
+            use crate::xspice::event_trace::{EventTracePoint, settle_trace_points};
+            circuit.drain_event_traces(points);
             circuit.fill_xspice_digital_snapshot(digital_snapshot);
             fill_digital_event_codes(digital_snapshot, digital_event_codes);
-            retained_result_values =
-                retained_result_values.saturating_add(result.record_digital_snapshot(
-                    time,
-                    digital_snapshot,
-                    digital_trace_indices,
-                    retained_event_nodes,
-                ));
             circuit.fill_xspice_real_snapshot(real_snapshot);
-            retained_result_values =
-                retained_result_values.saturating_add(result.record_real_snapshot(
-                    time,
-                    real_snapshot,
-                    real_trace_indices,
-                    retained_event_nodes,
-                ));
+            // The accepted endpoint wins any same-time delta publications.
+            // Keep snapshots for live samples as well as complete event traces.
+            points.extend(
+                digital_snapshot
+                    .iter()
+                    .map(|&(node, value)| EventTracePoint {
+                        time,
+                        node,
+                        value: EventValue::Digital(value),
+                    }),
+            );
+            points.extend(real_snapshot.iter().map(|&(node, value)| EventTracePoint {
+                time,
+                node,
+                value: EventValue::Real(value),
+            }));
+            settle_trace_points(points);
+            for point in points.drain(..) {
+                let added = match point.value {
+                    EventValue::Digital(value) => result.record_digital_snapshot(
+                        point.time,
+                        &[(point.node, value)],
+                        digital_trace_indices,
+                        retained_event_nodes,
+                    ),
+                    EventValue::Real(value) => result.record_real_snapshot(
+                        point.time,
+                        &[(point.node, value)],
+                        real_trace_indices,
+                        retained_event_nodes,
+                    ),
+                };
+                retained_result_values = retained_result_values.saturating_add(added);
+            }
         }
         self.ensure_transient_result_limits(result, retained_result_values)?;
         abort.observe_transient_sample(result.observable_sample(
@@ -5364,6 +5388,12 @@ impl Engine {
                     .map_err(SimulationError::Circuit)?,
             );
         }
+        let mut event_trace_points = Vec::new();
+        circuit.configure_event_traces(if record_xspice_event_traces {
+            &capture_plan.event_nodes
+        } else {
+            &[]
+        });
         let mut digital_snapshot = Vec::new();
         let mut digital_event_codes = Vec::new();
         let mut real_snapshot = Vec::new();
@@ -10659,9 +10689,10 @@ impl Engine {
                     );
                     retained_result_values = self.commit_accepted_transient_point(
                         &mut result,
-                        &circuit,
+                        &mut circuit,
                         t,
                         TransientEventCapture {
+                            points: &mut event_trace_points,
                             record_traces: record_xspice_event_traces,
                             digital_snapshot: &mut digital_snapshot,
                             digital_event_codes: &mut digital_event_codes,
@@ -11244,9 +11275,10 @@ impl Engine {
                 )?);
             retained_result_values = self.commit_accepted_transient_point(
                 &mut result,
-                &circuit,
+                &mut circuit,
                 t,
                 TransientEventCapture {
+                    points: &mut event_trace_points,
                     record_traces: record_xspice_event_traces,
                     digital_snapshot: &mut digital_snapshot,
                     digital_event_codes: &mut digital_event_codes,

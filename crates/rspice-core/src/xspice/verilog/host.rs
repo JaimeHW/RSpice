@@ -1095,6 +1095,25 @@ impl DigitalHost {
         Ok(false)
     }
 
+    pub(crate) fn configure_traces(
+        &mut self,
+        sources: &[(usize, super::store::TraceSource)],
+        retained: Arc<[bool]>,
+    ) {
+        self.store.configure_traces(sources, retained);
+    }
+
+    pub(crate) fn drain_traces(
+        &mut self,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        self.store.drain_traces(points);
+    }
+
+    pub(crate) fn has_traces(&self) -> bool {
+        self.store.has_traces()
+    }
+
     fn set_event_clock(
         &mut self,
         tick: u64,

@@ -415,11 +415,60 @@ impl XspiceDigitalResolver for LocalDigitalResolver {
     }
 }
 
+// Resolve each physical publication separately. A coarse analog interval may
+// contain several queued instants; folding all of them into one driver bank
+// would erase intermediate waveform values before they can be recorded.
 fn apply_xspice_events_with_resolver(
     event_values: &mut crate::xspice::SharedXspiceEventValues,
     event_queue: &mut crate::xspice::SharedXspiceEventQueue,
     touched_digital_nodes: &mut Vec<NodeId>,
     touched_real_nodes: &mut Vec<NodeId>,
+    time: Value,
+    resolver: &mut impl XspiceDigitalResolver,
+) -> crate::xspice::CmResult<bool> {
+    let Some(first) = event_queue.next_event_time().filter(|next| *next <= time) else {
+        touched_digital_nodes.clear();
+        touched_real_nodes.clear();
+        return Ok(false);
+    };
+    let mut changed = apply_xspice_event_slot(
+        event_values,
+        event_queue,
+        touched_digital_nodes,
+        touched_real_nodes,
+        time,
+        first,
+        resolver,
+    )?;
+    let mut digital = Vec::new();
+    let mut real = Vec::new();
+    while let Some(next) = event_queue.next_event_time().filter(|next| *next <= time) {
+        let outcome = apply_xspice_event_slot(
+            event_values,
+            event_queue,
+            &mut digital,
+            &mut real,
+            time,
+            next,
+            resolver,
+        );
+        touched_digital_nodes.append(&mut digital);
+        touched_real_nodes.append(&mut real);
+        changed |= outcome?;
+    }
+    touched_digital_nodes.sort_unstable();
+    touched_digital_nodes.dedup();
+    touched_real_nodes.sort_unstable();
+    touched_real_nodes.dedup();
+    Ok(changed)
+}
+
+fn apply_xspice_event_slot(
+    event_values: &mut crate::xspice::SharedXspiceEventValues,
+    event_queue: &mut crate::xspice::SharedXspiceEventQueue,
+    touched_digital_nodes: &mut Vec<NodeId>,
+    touched_real_nodes: &mut Vec<NodeId>,
+    bound: Value,
     time: Value,
     resolver: &mut impl XspiceDigitalResolver,
 ) -> crate::xspice::CmResult<bool> {
@@ -433,6 +482,7 @@ fn apply_xspice_events_with_resolver(
     }
     let event_queue = event_queue.make_mut();
     let crate::xspice::XspiceEventValues {
+        traces,
         digital_values,
         digital_drivers,
         digital_event_times,
@@ -443,7 +493,7 @@ fn apply_xspice_events_with_resolver(
     let mut shared_drivers = Vec::new();
     let mut shared_real_drivers = Vec::new();
     event_queue
-        .run_due_events(time, |event| {
+        .run_due_event_slot(bound, time, |event| {
             let node_id = event.node_id;
             let event_time = event.time;
             let driver_key = (event.instance, event.port_name, event.driver_index);
@@ -491,7 +541,7 @@ fn apply_xspice_events_with_resolver(
             }
         })
         .map_err(|error| {
-            crate::xspice::CmError::EvaluationError(xspice_event_settling_message(time, &error))
+            crate::xspice::CmError::EvaluationError(xspice_event_settling_message(bound, &error))
         })?;
     if touched_digital_nodes.len() > 1 {
         touched_digital_nodes.sort_unstable();
@@ -515,6 +565,9 @@ fn apply_xspice_events_with_resolver(
             .unwrap_or_default();
         let previous_value = digital_values.insert(node_id, resolved);
         changed |= previous_value != Some(resolved);
+        if previous_value != Some(resolved) {
+            traces.record(time, node_id, crate::xspice::EventValue::Digital(resolved));
+        }
     }
     if !shared_drivers.is_empty() || !shared_real_drivers.is_empty() {
         let mut resolved = Vec::new();
@@ -542,6 +595,9 @@ fn apply_xspice_events_with_resolver(
             .unwrap_or(0.0);
         let previous_value = real_values.insert(node_id, resolved);
         changed |= previous_value != Some(resolved);
+        if previous_value != Some(resolved) {
+            traces.record(time, node_id, crate::xspice::EventValue::Real(resolved));
+        }
     }
     Ok(changed)
 }
@@ -1731,6 +1787,38 @@ impl CircuitData {
             .and_then(|failure| failure.get())
             .cloned()
             .or_else(|| self.xspice_evaluation_error.take())
+    }
+
+    /// Enable only the selected waveform nodes after transient initialization.
+    pub(crate) fn configure_event_traces(&mut self, retained: &[bool]) {
+        let retained: std::sync::Arc<[bool]> = retained.into();
+        self.scheduler
+            .xspice_event_values
+            .make_mut()
+            .traces
+            .configure(retained.clone());
+        #[cfg(feature = "veriloga")]
+        if let Some(coordinator) = &mut self.scheduler.mixed_digital_coordinator {
+            coordinator.configure_traces(&self.mixed_signal_hosts, retained);
+        }
+    }
+
+    pub(crate) fn drain_event_traces(
+        &mut self,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        points.clear();
+        if !self.scheduler.xspice_event_values.traces.is_empty() {
+            self.scheduler
+                .xspice_event_values
+                .make_mut()
+                .traces
+                .drain_into(points);
+        }
+        #[cfg(feature = "veriloga")]
+        if let Some(coordinator) = &mut self.scheduler.mixed_digital_coordinator {
+            coordinator.drain_traces(points);
+        }
     }
 
     /// Fill a reusable snapshot of committed event-driven digital node values.
@@ -5160,6 +5248,84 @@ endmodule"#;
         assert!(touched_real_nodes.is_empty());
         assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
         assert_eq!(touched_real_nodes.capacity(), real_capacity);
+    }
+
+    #[test]
+    fn event_trace_drain_preserves_physical_slots_and_atomic_driver_resolution() {
+        use crate::xspice::event_trace::EventTracePoint;
+        let mut values = SharedXspiceEventValues::default();
+        values
+            .make_mut()
+            .traces
+            .configure(std::sync::Arc::from([true, true, false]));
+        let mut queue = SharedXspiceEventQueue::new();
+        for (time, bit, real) in [
+            (1e-9, DigitalValue::one(), 3.0),
+            (2e-9, DigitalValue::zero(), 5.0),
+            (3e-9, DigitalValue::one(), 7.0),
+        ] {
+            for driver in ["a", "b"] {
+                queue
+                    .make_mut()
+                    .schedule(time, 1, "q", driver, 0, EventValue::Digital(bit));
+                queue
+                    .make_mut()
+                    .schedule(time, 2, "r", driver, 0, EventValue::Real(real));
+            }
+            queue
+                .make_mut()
+                .schedule(time, 3, "hidden", "c", 0, EventValue::Digital(bit));
+        }
+        let before = values.clone();
+        apply_xspice_events_at_or_before(
+            &mut values,
+            &mut queue,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            4e-9,
+        )
+        .unwrap();
+        let mut points = Vec::new();
+        values.make_mut().traces.drain_into(&mut points);
+        assert_eq!(
+            points,
+            vec![
+                EventTracePoint {
+                    time: 1e-9,
+                    node: 1,
+                    value: EventValue::Digital(DigitalValue::one())
+                },
+                EventTracePoint {
+                    time: 1e-9,
+                    node: 2,
+                    value: EventValue::Real(6.0)
+                },
+                EventTracePoint {
+                    time: 2e-9,
+                    node: 1,
+                    value: EventValue::Digital(DigitalValue::zero())
+                },
+                EventTracePoint {
+                    time: 2e-9,
+                    node: 2,
+                    value: EventValue::Real(10.0)
+                },
+                EventTracePoint {
+                    time: 3e-9,
+                    node: 1,
+                    value: EventValue::Digital(DigitalValue::one())
+                },
+                EventTracePoint {
+                    time: 3e-9,
+                    node: 2,
+                    value: EventValue::Real(14.0)
+                },
+            ]
+        );
+        assert!(
+            before.traces.is_empty(),
+            "trial capture must not mutate the accepted image"
+        );
     }
 
     #[test]

@@ -431,6 +431,8 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
     let before = circuit.mixed_signal_hosts[0]
         .read_digital("sampled")
         .unwrap();
+    circuit.configure_event_traces(&vec![true; circuit.num_nodes()]);
+    let mut trace_points = Vec::new();
     let coeff = crate::numerics::integration::CompanionCoefficients::backward_euler();
     for refuse in [true, true, false] {
         let rollback = circuit.capture_xspice_acceptance();
@@ -478,6 +480,11 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
                 solution[index] = value;
             }
             circuit.restore_xspice_acceptance(rollback).unwrap();
+            circuit.drain_event_traces(&mut trace_points);
+            assert!(
+                trace_points.is_empty(),
+                "rejected events escaped: {trace_points:?}"
+            );
             assert_eq!(*resource.value.lock().unwrap(), 0);
             assert_eq!(
                 circuit.mixed_signal_hosts[0]
@@ -502,6 +509,27 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
         } else {
             result.unwrap();
             rollback.resources().commit();
+            circuit.drain_event_traces(&mut trace_points);
+            assert!(
+                !trace_points.is_empty(),
+                "accepted trial must retain its events"
+            );
+            crate::xspice::event_trace::settle_trace_points(&mut trace_points);
+            let bus_node = circuit.get_node_by_name("bus").unwrap();
+            let bus_changes: Vec<_> = trace_points
+                .iter()
+                .filter(|point| point.node == bus_node)
+                .collect();
+            assert_eq!(
+                bus_changes.len(),
+                1,
+                "retry duplicated trace entries: {trace_points:?}"
+            );
+            assert_eq!(bus_changes[0].time, 0.0);
+            assert_eq!(
+                bus_changes[0].value,
+                crate::xspice::EventValue::Digital(crate::xspice::DigitalValue::one())
+            );
             assert!(*resource.value.lock().unwrap() > 0);
             assert_eq!(
                 circuit.mixed_signal_hosts[0]
