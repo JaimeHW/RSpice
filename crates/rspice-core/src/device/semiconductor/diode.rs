@@ -1678,12 +1678,18 @@ impl Diode {
     // Xyce Model::processParams caps bottom M at .9. Preserve the authored
     // value for the other dialects and use this same coefficient for charge,
     // recombination, temperature mapping and physical-event regularity.
-    fn bottom_grading_coefficient(&self) -> Value {
+    pub(crate) fn bottom_grading_coefficient(&self) -> Value {
         if self.xyce_dialect && self.m > 0.9 {
             0.9
         } else {
             self.m
         }
+    }
+
+    /// Resolved bottom-junction continuation boundary, shared with periodic
+    /// projection so every analysis uses the native diode's clipped law.
+    pub(crate) fn bottom_depletion_coefficient(&self) -> Value {
+        self.fc.clamp(0.0, 0.95)
     }
 
     /// Junction charge and capacitance at `vd` for transient integration
@@ -1703,7 +1709,7 @@ impl Diode {
             self.cj0,
             self.vj,
             self.bottom_grading_coefficient(),
-            self.fc,
+            self.bottom_depletion_coefficient(),
         );
         qd += bottom_q;
         capd += bottom_c;

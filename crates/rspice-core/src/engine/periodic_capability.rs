@@ -753,9 +753,9 @@ fn diode_has_representable_exact_periodic_parameters(diode: &crate::device::Diod
         && diode.vj.is_finite()
         && diode.vj > 0.0
         && diode.m.is_finite()
-        && (0.0..=1.0).contains(&diode.m)
+        && (0.0..=1.0).contains(&diode.bottom_grading_coefficient())
         && diode.fc.is_finite()
-        && (0.0..1.0).contains(&diode.fc)
+        && (0.0..1.0).contains(&diode.bottom_depletion_coefficient())
         && diode.tt.is_finite()
         && diode.tt >= 0.0
         && diode.exact_hb_breakdown_parameter_error().is_none()

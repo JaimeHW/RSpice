@@ -111,7 +111,12 @@ impl Diode {
             return false;
         }
         for (c, phi, grading, fc) in [
-            (self.cj0, self.vj, bottom_grading, self.fc),
+            (
+                self.cj0,
+                self.vj,
+                bottom_grading,
+                self.bottom_depletion_coefficient(),
+            ),
             (
                 self.sidewall_cj0 * self.sidewall_perimeter,
                 self.sidewall_vj,

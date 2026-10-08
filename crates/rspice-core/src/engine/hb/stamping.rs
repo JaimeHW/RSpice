@@ -97,7 +97,12 @@ impl Engine {
                 NonlinearDeviceInstance::diode(anode, cathode, diode.is, diode.n)
                     .with_thermal_voltage(diode.vt)
                     .with_junction_caps(
-                        DepletionCap::new(diode.cj0, diode.vj, diode.m, diode.fc),
+                        DepletionCap::new(
+                            diode.cj0,
+                            diode.vj,
+                            diode.bottom_grading_coefficient(),
+                            diode.bottom_depletion_coefficient(),
+                        ),
                         DepletionCap::none(),
                         diode.tt,
                     ),

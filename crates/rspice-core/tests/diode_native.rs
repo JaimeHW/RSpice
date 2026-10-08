@@ -904,3 +904,98 @@ fn diode_xyce_model_grading_uses_the_reference_upper_bound() {
         }
     }
 }
+
+fn assert_diode_hb_depletion_oracle(
+    dialect: SpiceDialect,
+    authored_m: f64,
+    authored_fc: f64,
+    bias: f64,
+) {
+    use rspice_core::Complex64;
+    use rspice_core::analysis::harmonic_balance::HbConfig;
+    let m = if dialect == SpiceDialect::Xyce {
+        authored_m.min(0.9)
+    } else {
+        authored_m
+    };
+    let fc = authored_fc.min(0.95);
+    let amplitude = 0.005;
+    let frequency = 1e6;
+    let omega = std::f64::consts::TAU * frequency;
+    let vt = 300.15
+        * if dialect == SpiceDialect::Xyce {
+            1.380_622_6e-23 / 1.602_191_8e-19
+        } else {
+            1.380_648_52e-23 / 1.602_176_620_8e-19
+        };
+    let deck = Netlist::parse(&format!("Resolved diode HB charge\nV1 a 0 SIN({bias} {amplitude} {frequency})\nD1 a 0 dm\n.model dm D(IS=1e-30 N=1 CJO=1n VJ=1 M={authored_m} FC={authored_fc} TT=0)\n.options GMIN=0\n.end\n")).unwrap();
+    let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+    config.convergence_config.gmin_target = 0.0;
+    let mut hb = HbConfig::new(frequency)
+        .with_harmonics(7)
+        .with_tolerance(1e-10);
+    hb.abstol = 1e-15;
+    let result = Engine::new(config).run_hb(&deck, hb).unwrap();
+    let source = &result
+        .result
+        .mna_branch_currents
+        .iter()
+        .find(|row| row.device_name.eq_ignore_ascii_case("v1"))
+        .unwrap()
+        .coefficients;
+    let diode = &result
+        .device_currents
+        .iter()
+        .find(|row| row.probe.eq_ignore_ascii_case("I(D1)"))
+        .unwrap()
+        .coefficients;
+    // Independent quadrature of I(V) + C(V)*dV/dt, using 8192 points instead
+    // of the solver's FFT grid. Compare both delivered diode and MNA currents.
+    for h in 0..=3 {
+        let mut expected = Complex64::ZERO;
+        for sample in 0..8192 {
+            let phase = std::f64::consts::TAU * sample as f64 / 8192.0;
+            let voltage = bias + amplitude * phase.sin();
+            let capacitance = if voltage < fc {
+                1e-9 * (1.0 - voltage).powf(-m)
+            } else {
+                1e-9 * (1.0 - fc).powf(-1.0 - m) * (1.0 - fc * (1.0 + m) + m * voltage)
+            };
+            let conduction = if voltage >= -3.0 * vt {
+                1e-30 * (voltage / vt).exp_m1()
+            } else {
+                -1e-30 * (1.0 + (3.0 * vt / (voltage * std::f64::consts::E)).powi(3))
+            };
+            let current = conduction + capacitance * amplitude * omega * phase.cos();
+            expected += Complex64::from_polar(current, -(h as f64) * phase);
+        }
+        expected *= if h == 0 { 1.0 / 8192.0 } else { 2.0 / 8192.0 };
+        for (name, actual) in [("I(D1)", diode[h]), ("-I(V1)", -source[h])] {
+            assert!(
+                (actual - expected).norm() < 1e-14 + 1e-8 * expected.norm(),
+                "{dialect:?} M={authored_m} FC={authored_fc} V={bias} h={h} {name}: {actual:?} vs {expected:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn diode_hb_projects_xyce_processed_grading() {
+    for m in [0.95, 1.2] {
+        assert_diode_hb_depletion_oracle(SpiceDialect::Xyce, m, 0.5, -1.0);
+    }
+}
+
+#[test]
+fn diode_hb_projects_native_cutoff_above_point_ninety_five() {
+    for dialect in [SpiceDialect::Xyce, SpiceDialect::Ngspice] {
+        assert_diode_hb_depletion_oracle(dialect, 0.5, 0.97, 0.96);
+    }
+}
+
+#[test]
+fn diode_hb_admits_finite_cutoff_normalized_by_the_native_model() {
+    for dialect in [SpiceDialect::Xyce, SpiceDialect::Ngspice] {
+        assert_diode_hb_depletion_oracle(dialect, 0.5, 1.2, 0.96);
+    }
+}
