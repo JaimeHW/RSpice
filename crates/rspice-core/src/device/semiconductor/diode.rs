@@ -1,5 +1,7 @@
 //! Diode device model
 
+mod event_regularity;
+
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::numerics::integration::{
     BranchChargeHistory, CompanionCoefficients, nonlinear_charge_companion_terms,
@@ -1917,66 +1919,6 @@ impl Diode {
         )
     }
 
-    /// Sufficient local C2 chart for continuity propagation at a physical
-    /// event. A false result retains the event; it does not omit a device term
-    /// or reject its model. Joins and composite injection/recombination laws
-    /// need their own higher-derivative proof before certifying continuity.
-    pub(crate) fn physical_event_locally_c2(&self, vd: Value) -> bool {
-        if !vd.is_finite()
-            || self.active_breakdown_voltage().is_some()
-            || self.forward_knee_current != 0.0
-            || self.reverse_knee_current != 0.0
-            || self.sidewall_knee_current != 0.0
-            || self.recombination_saturation_current != 0.0
-        {
-            return false;
-        }
-        let smooth_junction = |emission: Value| {
-            let thermal = emission.max(EPSMIN) * self.vt;
-            thermal.is_normal()
-                && thermal > 0.0
-                && vd != -3.0 * thermal
-                && vd / thermal != MAX_EXP_ARG
-        };
-        if !smooth_junction(self.n)
-            || (self.sidewall_current_given
-                && self.sidewall_emission_given
-                && !smooth_junction(self.sidewall_emission_coefficient))
-        {
-            return false;
-        }
-        if self.tunneling.bottom_given || self.tunneling.sidewall_given {
-            let thermal = self.tunneling.emission.max(EPSMIN) * self.vt;
-            if !thermal.is_normal() || thermal <= 0.0 || -vd / thermal == MAX_EXP_ARG {
-                return false;
-            }
-        }
-        for (c, phi, grading, fc) in [
-            (self.cj0, self.vj, self.m, self.fc),
-            (
-                self.sidewall_cj0 * self.sidewall_perimeter,
-                self.sidewall_vj,
-                self.sidewall_m,
-                self.sidewall_fc,
-            ),
-        ] {
-            if c != 0.0
-                && (!c.is_finite()
-                    || c < 0.0
-                    || !phi.is_finite()
-                    || phi <= 0.0
-                    || !grading.is_finite()
-                    || !fc.is_finite()
-                    || vd == fc.clamp(0.0, 0.95) * phi)
-            {
-                return false;
-            }
-        }
-        let (f, g) = self.stamped_current_and_conductance(vd);
-        let (q, c) = self.junction_charge_and_capacitance(vd);
-        [f, g, q, c].into_iter().all(Value::is_finite)
-    }
-
     /// Sufficient, bias-independent certificate for the C1 monotone law used
     /// by implicit algebraic PSS islands. Breakdown matching and recombination
     /// have dialect-specific joins; injection knees need a separate proof.
@@ -2017,30 +1959,43 @@ impl Diode {
     /// junction voltage. That distinction matters for high-injection limiting
     /// and for the sidewall current shape.
     fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        // Bottom junction. ngspice applies IKF/IKR after summing its bottom
-        // mechanisms; the Cadence PSpice law and Xyce apply the knee to the
-        // normal current and add recombination separately.
+        let [
+            (bottom_i, bottom_g),
+            (sidewall_i, sidewall_g),
+            (recombination_i, recombination_g),
+        ] = self.current_components_before_knees(vd);
+        let (mut bottom_i, mut bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
+        if !self.ngspice_dialect {
+            bottom_i += recombination_i;
+            bottom_g += recombination_g;
+        }
+        let (sidewall_i, sidewall_g) = Self::apply_forward_knee(
+            sidewall_i,
+            sidewall_g,
+            self.sidewall_knee_current * self.sidewall_perimeter,
+        );
+        (bottom_i + sidewall_i, bottom_g + sidewall_g)
+    }
+
+    /// Bottom, sidewall and recombination terms before their injection knees.
+    /// Event regularity checks use these same currents to locate the actual
+    /// switching thresholds, including the dialect's recombination ordering.
+    fn current_components_before_knees(&self, vd: Value) -> [(Value, Value); 3] {
         let (mut bottom_i, mut bottom_g) =
             self.exponential_current_and_conductance(vd, self.bottom_saturation_current(), self.n);
-        let (recombination_i, recombination_g) = self.recombination_current_and_conductance(vd);
+        let recombination = self.recombination_current_and_conductance(vd);
         if self.tunneling.bottom_given {
             let (tunnel_i, tunnel_g) =
                 self.tunnel_current_and_conductance(vd, self.tunnel_bottom());
             bottom_i += tunnel_i;
             bottom_g += tunnel_g;
         }
+        // ngspice limits the combined bottom current. PSpice/Xyce add
+        // recombination after the knee, as retained by the caller above.
         if self.ngspice_dialect {
-            bottom_i += recombination_i;
-            bottom_g += recombination_g;
-            (bottom_i, bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
-        } else {
-            (bottom_i, bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
-            bottom_i += recombination_i;
-            bottom_g += recombination_g;
+            bottom_i += recombination.0;
+            bottom_g += recombination.1;
         }
-
-        // Sidewall junction: its own exponential plus sidewall tunneling,
-        // then the IKP knee.
         let (mut sidewall_i, mut sidewall_g) = self.sidewall_current_and_conductance(vd);
         if self.tunneling.sidewall_given {
             let (tunnel_i, tunnel_g) =
@@ -2048,13 +2003,11 @@ impl Diode {
             sidewall_i += tunnel_i;
             sidewall_g += tunnel_g;
         }
-        let (sidewall_i, sidewall_g) = Self::apply_forward_knee(
-            sidewall_i,
-            sidewall_g,
-            self.sidewall_knee_current * self.sidewall_perimeter,
-        );
-
-        (bottom_i + sidewall_i, bottom_g + sidewall_g)
+        [
+            (bottom_i, bottom_g),
+            (sidewall_i, sidewall_g),
+            recombination,
+        ]
     }
 
     /// Reuse the evaluation populated by `update` only at the exact same

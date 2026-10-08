@@ -207,3 +207,119 @@ fn gp_diode_series_resistance_retains_junction_charge_and_finite_event_current()
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_diode_smooth_model_terms_do_not_create_endless_delay_events() {
+    // BV/IKF/ISR used to reset every GP arrival to order zero, even in an
+    // analytic diode region. False arrivals accumulated before the real 1 ns
+    // source jump until their rounded clocks made the transient abort.
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            let engine = engine(dialect, method);
+            for (bias, extra) in [
+                (0.2, ""),
+                (0.2, "BV=100"),
+                (0.2, "IKF=1m"),
+                (0.2, "ISR=1e-15"),
+                (-0.2, "BV=100 IKR=1m ISR=1e-15"),
+                (
+                    0.2,
+                    "BV=3 IKF=1m IKR=1m ISR=1e-15 JSW=1e-16 NS=1.2 IKP=1m JTUN=1e-18 JTUNSW=1e-18 NTUN=2 CJP=.2p TT=.1n",
+                ),
+                (
+                    -3.05,
+                    "BV=3 IKF=1m IKR=1m ISR=1e-15 JSW=1e-16 NS=1.2 IKP=1m TT=.1n",
+                ),
+            ] {
+                let deck = Netlist::parse(&format!("diode event continuity\nVD d 0 {bias}\nD1 d 0 dm PJ=1\n.model dm D(IS=1e-16 CJO=1p {extra})\nVC c 0 2\nVB b 0 DC .6 PWL(0 .6 1n .6 1n .61 20n .61)\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 BR=1 TF=.1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-6 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) v(d) i(vc) i(d1) i(vd)\n.end\n")).unwrap();
+                let (result, checkpoints) = engine
+                    .run_tran_checkpoint_schedule_with_startup_mode(
+                        &deck,
+                        20e-9,
+                        1e-9,
+                        TransientStartupMode::OperatingPoint,
+                        &[1e-9, 2e-9],
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!("{dialect:?}/{method:?}/{bias}/{extra}: {error}")
+                    });
+                // The delay is .1 ns but ordinary adaptation must span the
+                // settled tail. This count bounds event growth without a
+                // machine-dependent wall-clock threshold.
+                assert!(
+                    result.time.len() < 80,
+                    "{dialect:?}/{method:?}/{bias}/{extra}: {} samples",
+                    result.time.len()
+                );
+                let base = result.try_voltage_waveform_named("b").unwrap();
+                let collector = result.try_branch_current_waveform_named("vc").unwrap();
+                let junction = result.try_voltage_waveform_named("d").unwrap();
+                let diode_current = result.try_branch_current_waveform_named("d1").unwrap();
+                let supply = result.try_branch_current_waveform_named("vd").unwrap();
+                let at_or_after = |t: f64, event: f64| {
+                    t >= event || (t - event).abs() <= 8.0 * f64::EPSILON * event
+                };
+                let vt = thermal_voltage(dialect);
+                for (index, &time) in result.time.iter().enumerate() {
+                    let voltage = if at_or_after(time, 1e-9) { 0.61 } else { 0.6 };
+                    let delayed = if at_or_after(time, 1e-9 + 0.1e-9) {
+                        0.61
+                    } else {
+                        0.6
+                    };
+                    let expected =
+                        diode(delayed, vt, dialect).0 - 2.0 * diode(voltage - 2.0, vt, dialect).0;
+                    assert!((base[index] - voltage).abs() < 1e-10);
+                    assert!((junction[index] - bias).abs() < 1e-10);
+                    assert!(
+                        (collector[index] + expected).abs() < 2e-11,
+                        "{dialect:?}/{method:?}/{extra}: collector at {time:e}"
+                    );
+                    assert!(
+                        (diode_current[index] - diode_current[0]).abs()
+                            < 1e-15 + 1e-10 * diode_current[0].abs()
+                    );
+                    // Physical event KCL has no timestep companion or
+                    // C*V/dt cancellation allowance.
+                    if time == 0.0
+                        || time == 1e-9
+                        || (time - (1e-9 + 0.1e-9)).abs() <= 8.0 * f64::EPSILON * time
+                    {
+                        assert!(
+                            (diode_current[index] + supply[index]).abs()
+                                < 1e-15 + 1e-10 * diode_current[index].abs()
+                        );
+                    }
+                }
+                for event in [1e-9, 1e-9 + 0.1e-9] {
+                    assert!(
+                        result
+                            .time
+                            .iter()
+                            .any(|t| (*t - event).abs() <= 8.0 * f64::EPSILON * event)
+                    );
+                }
+                let trace = branch_impulses(&result, "d1");
+                assert!(
+                    trace.complete
+                        && trace
+                            .points
+                            .iter()
+                            .all(|point| point.charge_coulombs == 0.0)
+                );
+                for checkpoint in checkpoints {
+                    exact_restart(&engine, &deck, &result, &checkpoint.checkpoint, 20e-9, 1e-9);
+                }
+            }
+        }
+    }
+}
