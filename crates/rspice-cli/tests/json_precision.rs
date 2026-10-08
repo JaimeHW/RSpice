@@ -17,12 +17,14 @@ fn refuses_without_publication(literal: &str, expected: &str) {
     let missing = dir.join("missing.json");
     let baseline = waveform("0", "0", "0");
     std::fs::write(&golden, &baseline).unwrap();
-    for (coordinate, real, imag) in [
-        (literal, "0", "0"),
-        ("0", literal, "0"),
-        ("0", "0", literal),
+    for source in [
+        waveform("0", literal, "0"),
+        waveform("0", "0", literal),
+        waveform(literal, "0", "0"),
+        format!(
+            r#"{{"scale":{{"name":"time","values":[0,1]}},"signals":[{{"name":"V(out)","values":[{literal},2]}},{{"name":"D(clk)","values":[0,1]}}]}}"#
+        ),
     ] {
-        let source = waveform(coordinate, real, imag);
         std::fs::write(&input, &source).unwrap();
         std::fs::write(&output, "preserve existing output").unwrap();
         for (operation, destination) in [
@@ -76,7 +78,23 @@ fn json_decimal_underflow_cannot_be_converted_compared_or_blessed_as_zero() {
 }
 
 #[test]
-fn json_zero_and_representable_subnormals_preserve_every_bit() {
+fn json_integer_samples_cannot_be_silently_rounded() {
+    for literal in [
+        "9007199254740993",
+        "-9007199254740993",
+        "9223372036854775807",
+        "-9223372036854775809",
+        "18446744073709551615",
+        "18446744073709551617",
+        "-18446744073709551617",
+        "1234567890123456789012345678901234567890",
+    ] {
+        refuses_without_publication(literal, "cannot be represented exactly");
+    }
+}
+
+#[test]
+fn json_representable_boundary_values_preserve_every_bit() {
     let dir = common::test_dir("json_precision_boundaries");
     let input = dir.join("source.json");
     let output = dir.join("output.json");
@@ -86,6 +104,12 @@ fn json_zero_and_representable_subnormals_preserve_every_bit() {
         ("-0", -0.0_f64),
         ("5e-324", 5e-324_f64),
         ("-5e-324", -5e-324_f64),
+        ("9007199254740992", 9007199254740992.0_f64),
+        ("9007199254740994", 9007199254740994.0_f64),
+        ("-9007199254740994", -9007199254740994.0_f64),
+        ("-9223372036854775808", -9223372036854775808.0_f64),
+        ("18446744073709551616", 18446744073709551616.0_f64),
+        ("-18446744073709551616", -18446744073709551616.0_f64),
         ("1.0000000000000002", f64::from_bits(1.0_f64.to_bits() + 1)),
     ] {
         std::fs::write(&input, waveform("0", literal, literal)).unwrap();

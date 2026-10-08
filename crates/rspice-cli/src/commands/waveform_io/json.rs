@@ -81,6 +81,13 @@ impl Admission<'_> {
         {
             return Err(E::custom("JSON number underflows at binary64 precision"));
         }
+        if matches!(scope, Scope::Sample | Scope::NullableSample)
+            && numbers::integer_rounded(spelling, value)
+        {
+            return Err(E::custom(
+                "JSON integer sample cannot be represented exactly as f64",
+            ));
+        }
         Ok(())
     }
 
@@ -347,5 +354,23 @@ mod tests {
             assert!(error.to_string().contains("underflow"), "{error}");
             assert!(error.to_string().contains("line"), "{error}");
         }
+    }
+
+    #[test]
+    fn unrelated_integer_metadata_is_retained_without_float_conversion() {
+        let content = r#"{"metadata":{"count":18446744073709551615,"value":9007199254740993},"scale":{"values":[0,1]},"signals":[{"values":[null,2]}]}"#;
+        let decoded = parse(
+            std::path::Path::new("input.json"),
+            content,
+            Kind::Table,
+            ResourceLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(decoded["metadata"]["count"].as_u64(), Some(u64::MAX));
+        assert_eq!(
+            decoded["metadata"]["value"].as_u64(),
+            Some(9007199254740993)
+        );
+        assert!(decoded["signals"][0]["values"][0].is_null());
     }
 }

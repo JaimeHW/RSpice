@@ -1,5 +1,17 @@
 //! Borrow original number spellings alongside serde's authoritative parser.
 
+/// JSON integer literals promise an exact value, unlike decimal floating-point
+/// input which is rounded to binary64. serde retains i64/u64 values but already
+/// rounds integers outside that range to f64, so check the original spelling.
+pub(super) fn integer_rounded(spelling: &str, value: f64) -> bool {
+    // Include the boundary: 2^53 + 1 rounds down to 2^53. Smaller integers are
+    // all exact and need no formatting/allocation. Above it, many integers are
+    // still representable; a blanket 2^53 ceiling would reject valid samples.
+    value.abs() >= rspice_formats::numeric::MAX_EXACT_F64_INTEGER as f64
+        && !spelling.contains(['.', 'e', 'E'])
+        && spelling != format!("{value:.0}")
+}
+
 /// Advances only when serde visits a number, without retaining tokens or
 /// looking ahead through a container. JSON syntax remains serde's concern.
 /// In particular, a sample budget refusal must precede scanning its payload.
@@ -56,6 +68,40 @@ impl<'a> Numbers<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_integer_literals_include_large_powers_and_exclude_rounded_neighbors() {
+        for exponent in 0..=1023 {
+            let value = 2.0_f64.powi(exponent);
+            for value in [value, -value] {
+                let spelling = format!("{value:.0}");
+                let parsed = serde_json::from_str::<serde_json::Value>(&spelling)
+                    .unwrap()
+                    .as_f64()
+                    .unwrap();
+                assert_eq!(parsed.to_bits(), value.to_bits());
+                assert!(!integer_rounded(&spelling, parsed), "{spelling}");
+                if exponent >= 54 {
+                    // Every power of two >= 2^54 ends in 2, 4, 6 or 8. Adding
+                    // one to its magnitude changes only the final digit and
+                    // must round back to the same binary64 power of two.
+                    let mut neighbor = spelling.into_bytes();
+                    *neighbor.last_mut().unwrap() += 1;
+                    let neighbor = String::from_utf8(neighbor).unwrap();
+                    let parsed = serde_json::from_str::<serde_json::Value>(&neighbor)
+                        .unwrap()
+                        .as_f64()
+                        .unwrap();
+                    assert_eq!(parsed.to_bits(), value.to_bits());
+                    assert!(integer_rounded(&neighbor, parsed), "{neighbor}");
+                }
+            }
+        }
+        // Floating-point spellings keep ordinary correctly rounded semantics.
+        for spelling in ["9007199254740993.0", "9007199254740993e0"] {
+            assert!(!integer_rounded(spelling, 9007199254740992.0));
+        }
+    }
 
     #[test]
     fn number_spellings_skip_strings_keys_and_escaped_quotes() {
