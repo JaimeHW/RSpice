@@ -5,6 +5,8 @@
 //! still read, but never emitted: ngspice executes Command headers when loading.
 use super::*;
 
+mod admission;
+
 const PREFIX: &str = "RSpiceTableV1 ";
 const UNITS_PREFIX: &str = "RSpiceTableV2 ";
 const TEXT_PREFIX: &str = "RSpiceTableV3 ";
@@ -135,9 +137,11 @@ fn read_metadata(header: &RawFileHeader) -> Result<Option<Metadata>, RawParseErr
     } else {
         return Ok(None);
     };
-    let metadata: Metadata = serde_json::from_str(encoded).map_err(|error| {
-        RawParseError::InvalidHeader(format!("invalid RAW table metadata: {error}"))
-    })?;
+    let metadata: Metadata = admission::check(encoded, header.no_variables)
+        .and_then(|()| serde_json::from_str(encoded))
+        .map_err(|error| {
+            RawParseError::InvalidHeader(format!("invalid RAW table metadata: {error}"))
+        })?;
     if (version >= 2) != metadata.units.is_some()
         || (version < 3 && metadata.text.is_some())
         || (version == 3 && metadata.text.is_none())
