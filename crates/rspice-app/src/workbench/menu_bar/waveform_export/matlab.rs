@@ -43,6 +43,7 @@ use super::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::result_import_workflow::waveform_import_limits;
 use writer::result::{MatlabExport, prepare_matlab};
 use writer::write_mat_v5;
 
@@ -93,7 +94,8 @@ pub(super) fn export_matlab(
                     }
                 }))
             } else {
-                prepare_matlab(analysis, &waveforms).map_err(|error| error.to_string())
+                prepare_matlab(analysis, &waveforms, waveform_import_limits())
+                    .map_err(|error| error.to_string())
             }
         }
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
@@ -201,7 +203,8 @@ mod tests {
     ) -> Result<MatlabExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_matlab(&analysis, &borrowed).map_err(|error| error.to_string())
+        prepare_matlab(&analysis, &borrowed, waveform_import_limits())
+            .map_err(|error| error.to_string())
     }
 
     #[test]

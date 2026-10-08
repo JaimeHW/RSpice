@@ -34,6 +34,7 @@ use super::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::result_document::view_context::ResolvedResultView;
 use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
+use crate::workbench::workflows::result_import_workflow::waveform_import_limits;
 
 use rspice_formats::numpy::result::{NumpyExport, encode_npy, encode_npz, prepare_numpy};
 
@@ -125,7 +126,8 @@ pub(super) fn export_numpy(
                     ALL_TRACES_HIDDEN_MESSAGE.to_owned()
                 })
             } else {
-                prepare_numpy(analysis, &waveforms).map_err(|error| error.to_string())
+                prepare_numpy(analysis, &waveforms, waveform_import_limits())
+                    .map_err(|error| error.to_string())
             }
         }
         None => Err(NO_ACTIVE_ANALYSIS_MESSAGE.to_owned()),
@@ -257,7 +259,8 @@ mod tests {
     ) -> Result<NumpyExport, String> {
         let analysis = analysis(analysis_type);
         let borrowed = waveforms.iter().collect::<Vec<_>>();
-        prepare_numpy(&analysis, &borrowed).map_err(|error| error.to_string())
+        prepare_numpy(&analysis, &borrowed, waveform_import_limits())
+            .map_err(|error| error.to_string())
     }
 
     #[test]

@@ -52,6 +52,20 @@ pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
 pub(crate) const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RESULT_COLUMNS: usize = 1_024;
 const MAX_RESULT_ROWS: usize = 1_000_000;
+const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
+const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
+
+/// Shared admission policy for imports and exports intended to reopen here.
+pub(crate) fn waveform_import_limits()
+-> rspice_results::result_import::waveforms::WaveformImportLimits {
+    rspice_results::result_import::waveforms::WaveformImportLimits {
+        min_rows: MIN_RESULT_ROWS,
+        max_rows: MAX_RESULT_ROWS,
+        max_columns: MAX_RESULT_COLUMNS,
+        max_values: MAX_RESULT_VALUES,
+        max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
+    }
+}
 const MAX_HEADER_BYTES: usize = 256;
 /// The names a source may give its coordinate, in the order a reader prefers
 /// them when a file offers more than one.

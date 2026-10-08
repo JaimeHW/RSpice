@@ -6,9 +6,8 @@ use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::waveform::RetainedWaveform;
 
-// Preserve the product's existing import limits so exported files can be reopened.
-const MAX_COLUMNS: usize = 1_024;
-const MAX_ROWS: usize = 1_000_000;
+use crate::waveform_io::result::{WaveformExportError, shared_coordinate};
+use rspice_results::result_import::waveforms::WaveformImportLimits;
 
 #[derive(Debug)]
 pub enum MatlabProjectionError {
@@ -16,16 +15,7 @@ pub enum MatlabProjectionError {
         analysis: AnalysisType,
         label: String,
     },
-    NoSamples,
-    RowLimit {
-        rows: usize,
-    },
-    ColumnLimit {
-        columns: usize,
-    },
-    DifferentCoordinates {
-        signal: String,
-    },
+    Waveforms(WaveformExportError),
 }
 
 impl std::fmt::Display for MatlabProjectionError {
@@ -38,28 +28,19 @@ impl std::fmt::Display for MatlabProjectionError {
                  in which a variable could say what it is, so the file would reopen as an anonymous \
                  sweep. Export CSV, or an RSpice bundle, which carries this analysis whole."
             ),
-            Self::NoSamples => f.write_str("No waveform samples available to export."),
-            Self::RowLimit { rows } => write!(
-                f,
-                "This result has {rows} samples; RSpice reads at most {MAX_ROWS} from a MATLAB source, \
-                 so publishing it would produce a file this build could not reopen."
-            ),
-            Self::ColumnLimit { columns } => write!(
-                f,
-                "This result has {columns} columns; RSpice reads at most {MAX_COLUMNS} from a MATLAB \
-                 source. Hide traces, or export an RSpice bundle."
-            ),
-            Self::DifferentCoordinates { signal } => write!(
-                f,
-                "A MATLAB v5 export is one table: every signal stands on the same coordinate \
-                 samples. '{signal}' carries its own x-axis samples. Export this result as CSV or an \
-                 RSpice bundle instead."
-            ),
+            Self::Waveforms(source) => source.fmt(f),
         }
     }
 }
 
-impl std::error::Error for MatlabProjectionError {}
+impl std::error::Error for MatlabProjectionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Waveforms(source) => Some(source),
+            _ => None,
+        }
+    }
+}
 
 /// One prepared file, and what the reader is owed about it.
 #[derive(Debug)]
@@ -92,6 +73,7 @@ const fn coordinate_variable(analysis: AnalysisType) -> Option<&'static str> {
 pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
     waveforms: &[&W],
+    limits: WaveformImportLimits,
 ) -> Result<MatlabExport, MatlabProjectionError> {
     let Some(coordinate_name) = coordinate_variable(analysis.analysis_type) else {
         return Err(MatlabProjectionError::UnsupportedAnalysis {
@@ -99,23 +81,8 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
             label: analysis.label.clone(),
         });
     };
-    let reference = waveforms
-        .iter()
-        .map(|waveform| (*waveform).as_ref())
-        .filter(|waveform| !waveform.x.is_empty())
-        .max_by_key(|waveform| waveform.x.len())
-        .ok_or(MatlabProjectionError::NoSamples)?;
-    let coordinate = reference.x.as_ref().to_vec();
-    if coordinate.len() > MAX_ROWS {
-        return Err(MatlabProjectionError::RowLimit {
-            rows: coordinate.len(),
-        });
-    }
-    if waveforms.len() + 1 > MAX_COLUMNS {
-        return Err(MatlabProjectionError::ColumnLimit {
-            columns: waveforms.len() + 1,
-        });
-    }
+    let coordinate =
+        shared_coordinate(waveforms, limits).map_err(MatlabProjectionError::Waveforms)?;
 
     // The coordinate claims its name first: it is written first, and the
     // importer takes the first variable whose name it recognises.
@@ -123,7 +90,7 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
     let rows = coordinate.len();
     let mut variables = vec![MatVariable {
         name: coordinate_name.to_owned(),
-        real: coordinate.clone(),
+        real: coordinate.to_vec(),
         imag: None,
     }];
     let coordinate_source =
@@ -131,14 +98,6 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
     let mut entries = vec![note_entry(coordinate_name, coordinate_source, None)];
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
-        // Every variable stands on the one coordinate, because that is what
-        // the importer reads a MAT file back as. Publishing a column with its
-        // own x-axis writes a file this product would refuse.
-        if waveform.x.as_ref() != coordinate.as_slice() {
-            return Err(MatlabProjectionError::DifferentCoordinates {
-                signal: waveform.name.clone(),
-            });
-        }
         let (source, real, imag) = match &waveform.complex {
             Some(complex) => (
                 complex.source_name.clone(),
@@ -150,9 +109,6 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
         let name = names.allocate(&source);
         entries.push(note_entry(&name, &source, waveform.unit.as_deref()));
         variables.push(MatVariable { name, real, imag });
-    }
-    if variables.len() == 1 {
-        return Err(MatlabProjectionError::NoSamples);
     }
 
     // Every published variable is named, not just the first few: the unit is
@@ -174,6 +130,7 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
 mod tests {
     use super::*;
     use crate::matlab::reader::{MatlabReadLimits, decode_matlab_v5};
+    use crate::waveform_io::result::EXPORT_TEST_LIMITS;
 
     #[test]
     fn matlab_preserves_each_signal_representation_in_every_waveform_domain() {
@@ -188,8 +145,12 @@ mod tests {
                         .with_complex_components("out", vec![-0.0, 4.0], vec![2.0, -1.0]),
                     RetainedWaveform::new("scalar", vec![1.0, 2.0], vec![3.0, -0.0]),
                 ]);
-            let export =
-                prepare_matlab(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+            let export = prepare_matlab(
+                &analysis,
+                &analysis.waveforms.iter().collect::<Vec<_>>(),
+                EXPORT_TEST_LIMITS,
+            )
+            .unwrap();
             let bytes =
                 crate::matlab::write_mat_v5(&export.header_text, &export.variables).unwrap();
             let decoded = decode_matlab_v5(

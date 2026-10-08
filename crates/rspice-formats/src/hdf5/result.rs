@@ -7,9 +7,8 @@ use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::waveform::RetainedWaveform;
 
-// Preserve the product's existing import limits so exported files can be reopened.
-const MAX_COLUMNS: usize = 1_024;
-const MAX_ROWS: usize = 1_000_000;
+use crate::waveform_io::result::{WaveformExportError, shared_coordinate};
+use rspice_results::result_import::waveforms::WaveformImportLimits;
 
 #[derive(Debug)]
 pub enum Hdf5ProjectionError {
@@ -17,15 +16,10 @@ pub enum Hdf5ProjectionError {
         analysis: AnalysisType,
         label: String,
     },
-    NoSamples,
-    RowLimit {
-        rows: usize,
-    },
+    Waveforms(WaveformExportError),
     ColumnLimit {
         columns: usize,
-    },
-    DifferentCoordinates {
-        signal: String,
+        limit: usize,
     },
     InvalidTable(Hdf5Error),
 }
@@ -40,22 +34,10 @@ impl std::fmt::Display for Hdf5ProjectionError {
                  would make every reader call it something it is not. Export CSV, or an RSpice \
                  bundle, which carries this analysis whole."
             ),
-            Self::NoSamples => f.write_str("No waveform samples available to export."),
-            Self::RowLimit { rows } => write!(
+            Self::Waveforms(source) => source.fmt(f),
+            Self::ColumnLimit { columns, limit } => write!(
                 f,
-                "This result has {rows} samples; RSpice reads at most {MAX_ROWS} from an HDF5 source, \
-                 so publishing it would produce a file this build could not reopen."
-            ),
-            Self::ColumnLimit { columns } => write!(
-                f,
-                "This result has {columns} columns; RSpice reads at most {MAX_COLUMNS} from an HDF5 \
-                 source. Hide traces, or export an RSpice bundle."
-            ),
-            Self::DifferentCoordinates { signal } => write!(
-                f,
-                "An HDF5 section is one table, so every column must stand on the same \
-                 coordinate samples. '{signal}' carries its own x-axis samples. Export this result \
-                 as CSV or an RSpice bundle instead."
+                "This HDF5 table has {columns} physical columns; the import limit is {limit}. Hide traces before exporting."
             ),
             Self::InvalidTable(source) => write!(
                 f,
@@ -69,6 +51,7 @@ impl std::error::Error for Hdf5ProjectionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidTable(source) => Some(source),
+            Self::Waveforms(source) => Some(source),
             _ => None,
         }
     }
@@ -107,6 +90,7 @@ fn quantity(name: &str) -> String {
 pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
     waveforms: &[&W],
+    limits: WaveformImportLimits,
 ) -> Result<Hdf5Export, Hdf5ProjectionError> {
     let Some(section) = section_for(analysis.analysis_type) else {
         return Err(Hdf5ProjectionError::UnsupportedAnalysis {
@@ -114,23 +98,8 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
             label: analysis.label.clone(),
         });
     };
-    let reference = waveforms
-        .iter()
-        .map(|waveform| (*waveform).as_ref())
-        .filter(|waveform| !waveform.x.is_empty())
-        .max_by_key(|waveform| waveform.x.len())
-        .ok_or(Hdf5ProjectionError::NoSamples)?;
-    let coordinate = reference.x.as_ref().to_vec();
-    if coordinate.len() > MAX_ROWS {
-        return Err(Hdf5ProjectionError::RowLimit {
-            rows: coordinate.len(),
-        });
-    }
-    if waveforms.len() + 1 > MAX_COLUMNS {
-        return Err(Hdf5ProjectionError::ColumnLimit {
-            columns: waveforms.len() + 1,
-        });
-    }
+    let coordinate =
+        shared_coordinate(waveforms, limits).map_err(Hdf5ProjectionError::Waveforms)?;
 
     // The native AC layout requires complex columns. Typed tables represent
     // mixed real/complex traces on any coordinate without fabricating phase
@@ -154,21 +123,15 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
             }
         })
         .sum();
-    if column_count + 1 > MAX_COLUMNS {
+    if column_count + 1 > limits.max_columns {
         return Err(Hdf5ProjectionError::ColumnLimit {
             columns: column_count + 1,
+            limit: limits.max_columns,
         });
     }
     let mut columns = Vec::with_capacity(column_count);
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
-        // A section is one table, so a column that does not stand on the
-        // shared coordinate has no honest place in it.
-        if waveform.x.as_ref() != coordinate.as_slice() {
-            return Err(Hdf5ProjectionError::DifferentCoordinates {
-                signal: waveform.name.clone(),
-            });
-        }
         match &waveform.complex {
             Some(complex) if spectral => columns.push(Hdf5Column::Complex {
                 name: complex.source_name.clone(),
@@ -196,9 +159,6 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
             }),
         }
     }
-    if columns.is_empty() {
-        return Err(Hdf5ProjectionError::NoSamples);
-    }
 
     let coordinate_name = crate::waveform_io::result::axis_signal_for_analysis(analysis)
         .0
@@ -210,11 +170,11 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
             group: section.to_owned(),
             section_type: if typed_table { "table" } else { section }.to_owned(),
             coordinate: if spectral {
-                Hdf5Coordinate::Frequency(coordinate)
+                Hdf5Coordinate::Frequency(coordinate.to_vec())
             } else {
                 Hdf5Coordinate::Independent {
                     name: coordinate_name.clone(),
-                    values: coordinate,
+                    values: coordinate.to_vec(),
                 }
             },
             columns,
@@ -257,6 +217,7 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
 mod tests {
     use super::*;
     use crate::hdf5::{Hdf5Limits, decode_hdf5};
+    use crate::waveform_io::result::EXPORT_TEST_LIMITS;
     use rspice_results::result_import::{
         ResultImportCoordinate, ResultImportFormat, ResultImportSource,
     };
@@ -275,8 +236,12 @@ mod tests {
                         .with_unit("mA"),
                     RetainedWaveform::new("Re(out)", vec![1.0, 2.0], vec![3.0, -0.0]),
                 ]);
-            let export =
-                prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+            let export = prepare_hdf5(
+                &analysis,
+                &analysis.waveforms.iter().collect::<Vec<_>>(),
+                EXPORT_TEST_LIMITS,
+            )
+            .unwrap();
             let mut bytes = Vec::new();
             rspice_core::io::write_hdf5(&mut bytes, &export.document).unwrap();
             let decoded = decode_hdf5(
@@ -331,8 +296,12 @@ mod tests {
                     unit: unit.map(str::to_owned),
                 }),
             });
-            let export =
-                prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+            let export = prepare_hdf5(
+                &analysis,
+                &analysis.waveforms.iter().collect::<Vec<_>>(),
+                EXPORT_TEST_LIMITS,
+            )
+            .unwrap();
             let mut bytes = Vec::new();
             rspice_core::io::write_hdf5(&mut bytes, &export.document).unwrap();
             let decoded = decode_hdf5(
@@ -379,21 +348,32 @@ mod tests {
                     })
                     .collect(),
             );
-        let error =
-            prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap_err();
+        let error = prepare_hdf5(
+            &analysis,
+            &analysis.waveforms.iter().collect::<Vec<_>>(),
+            EXPORT_TEST_LIMITS,
+        )
+        .unwrap_err();
         assert!(matches!(
             error,
-            Hdf5ProjectionError::ColumnLimit { columns: 1025 }
+            Hdf5ProjectionError::ColumnLimit {
+                columns: 1025,
+                limit: 1024
+            }
         ));
         analysis.waveforms.last_mut().unwrap().complex = None;
-        let export =
-            prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+        let export = prepare_hdf5(
+            &analysis,
+            &analysis.waveforms.iter().collect::<Vec<_>>(),
+            EXPORT_TEST_LIMITS,
+        )
+        .unwrap();
         let mut bytes = Vec::new();
         rspice_core::io::write_hdf5(&mut bytes, &export.document).unwrap();
         let decoded = decode_hdf5(
             &bytes,
             Hdf5Limits {
-                max_columns: MAX_COLUMNS,
+                max_columns: EXPORT_TEST_LIMITS.max_columns,
                 max_values: 4096,
                 coordinate_names: &["time"],
             },

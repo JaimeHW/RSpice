@@ -1,6 +1,20 @@
 //! Waveform interchange projections over canonical result data.
 
+mod bounds;
 mod export;
+pub use bounds::WaveformExportError;
+pub(crate) use bounds::{check_export_shape, shared_coordinate};
+
+#[cfg(test)]
+pub(crate) const EXPORT_TEST_LIMITS:
+    rspice_results::result_import::waveforms::WaveformImportLimits =
+    rspice_results::result_import::waveforms::WaveformImportLimits {
+        min_rows: 1,
+        max_rows: 1_000_000,
+        max_columns: 1_024,
+        max_values: 8 * 1024 * 1024,
+        max_signal_name_bytes: 1_024,
+    };
 mod runtime_export;
 #[cfg(any(feature = "native-bundle", feature = "result-hdf5"))]
 pub(crate) use export::axis_signal_for_analysis;

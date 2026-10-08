@@ -9,21 +9,9 @@ use rspice_results::result_import::waveforms::ImportedSignal;
 
 const MAX_ARCHIVE_MEMBERS: usize = 1_024;
 const MAX_ARCHIVE_EXPANDED_BYTES: u64 = MAX_RESULT_DATASET_BYTES;
-const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
-const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
 
 fn adapter_error(format: ResultImportFormat, detail: impl std::fmt::Display) -> String {
     format!("{} import: {detail}", format.canonical_id())
-}
-
-fn waveform_import_limits() -> rspice_results::result_import::waveforms::WaveformImportLimits {
-    rspice_results::result_import::waveforms::WaveformImportLimits {
-        min_rows: MIN_RESULT_ROWS,
-        max_rows: MAX_RESULT_ROWS,
-        max_columns: MAX_RESULT_COLUMNS,
-        max_values: MAX_RESULT_VALUES,
-        max_signal_name_bytes: MAX_SIGNAL_NAME_BYTES,
-    }
 }
 
 fn finish_dataset(

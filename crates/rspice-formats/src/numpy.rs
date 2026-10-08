@@ -22,6 +22,8 @@ pub struct NamedArray<'a> {
 
 #[derive(Debug)]
 pub enum NumpyWriteError {
+    #[cfg(feature = "result-waveform")]
+    PublicationBounds(crate::waveform_io::result::WaveformExportError),
     Io(std::io::Error),
     Zip(crate::zip::StoredZipError),
     MatrixColumnLimit {
@@ -50,6 +52,8 @@ pub enum NumpyWriteError {
 impl std::fmt::Display for NumpyWriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "result-waveform")]
+            Self::PublicationBounds(source) => source.fmt(f),
             Self::Io(source) => write!(f, "The NumPy array could not be written: {source}"),
             Self::Zip(source) => source.fmt(f),
             Self::MatrixColumnLimit { columns: None } => {
@@ -109,6 +113,8 @@ impl std::fmt::Display for NumpyWriteError {
 impl std::error::Error for NumpyWriteError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            #[cfg(feature = "result-waveform")]
+            Self::PublicationBounds(source) => Some(source),
             Self::Io(source) => Some(source),
             Self::Zip(source) => Some(source),
             _ => None,

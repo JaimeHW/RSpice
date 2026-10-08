@@ -1,58 +1,13 @@
 //! NumPy array projections from already-selected retained waveforms.
 
-use super::{MAX_COLUMNS, NamedArray, NumpyWriteError};
+use super::{NamedArray, NumpyWriteError};
+use crate::waveform_io::result::{WaveformExportError, check_export_shape, shared_coordinate};
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
+use rspice_results::result_import::waveforms::WaveformImportLimits;
 use rspice_results::waveform::RetainedWaveform;
 
-#[derive(Debug)]
-pub enum NumpyProjectionError {
-    NoSamples,
-    DifferentCoordinates {
-        signal: String,
-    },
-    SampleCount {
-        signal: String,
-        real: usize,
-        imag: Option<usize>,
-        coordinate: usize,
-    },
-    ColumnLimit {
-        columns: usize,
-    },
-}
-
-impl std::fmt::Display for NumpyProjectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoSamples => f.write_str("No waveform samples available to export."),
-            Self::DifferentCoordinates { signal } => write!(
-                f,
-                "A NumPy export is one rectangular table, so every column must stand on the same \
-                 coordinate samples. '{signal}' carries its own x-axis samples. Export this result as \
-                 CSV or an RSpice bundle instead."
-            ),
-            Self::SampleCount {
-                signal,
-                real,
-                coordinate,
-                ..
-            } => write!(
-                f,
-                "'{signal}' has {real} samples against {coordinate} coordinate samples; the export is refused rather \
-                 than padded or truncated."
-            ),
-            Self::ColumnLimit { columns } => write!(
-                f,
-                "This result has {columns} columns; RSpice reads at most {MAX_COLUMNS} from a NumPy source, \
-                 so publishing it would produce a file this build could not reopen. Hide traces, or \
-                 export an RSpice bundle."
-            ),
-        }
-    }
-}
-
-impl std::error::Error for NumpyProjectionError {}
+pub type NumpyProjectionError = WaveformExportError;
 
 #[derive(Debug)]
 pub struct NumpySignal {
@@ -64,6 +19,7 @@ pub struct NumpySignal {
 /// One rectangular table, with the complex signals still complex.
 #[derive(Debug)]
 pub struct NumpyExport {
+    limits: WaveformImportLimits,
     pub coordinate_name: &'static str,
     pub coordinate: Vec<f64>,
     pub signals: Vec<NumpySignal>,
@@ -95,25 +51,12 @@ fn coordinate_name(analysis_type: AnalysisType) -> &'static str {
 pub fn prepare_numpy<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
     waveforms: &[&W],
+    limits: WaveformImportLimits,
 ) -> Result<NumpyExport, NumpyProjectionError> {
-    let reference = waveforms
-        .iter()
-        .map(|waveform| (*waveform).as_ref())
-        .filter(|waveform| !waveform.x.is_empty())
-        .max_by_key(|waveform| waveform.x.len())
-        .ok_or(NumpyProjectionError::NoSamples)?;
-    let coordinate = reference.x.as_ref().to_vec();
-
+    let coordinate = shared_coordinate(waveforms, limits)?;
     let mut signals = Vec::with_capacity(waveforms.len());
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
-        // A NumPy array is rectangular, so a column that does not stand on the
-        // shared coordinate has no honest place in it.
-        if waveform.x.as_ref() != coordinate.as_slice() {
-            return Err(NumpyProjectionError::DifferentCoordinates {
-                signal: waveform.name.clone(),
-            });
-        }
         if let Some(complex) = &waveform.complex {
             signals.push(NumpySignal {
                 name: complex.source_name.clone(),
@@ -128,35 +71,12 @@ pub fn prepare_numpy<W: AsRef<RetainedWaveform>>(
             });
         }
     }
-    if signals.is_empty() {
-        return Err(NumpyProjectionError::NoSamples);
-    }
-    for signal in &signals {
-        if signal.real.len() != coordinate.len()
-            || signal
-                .imag
-                .as_ref()
-                .is_some_and(|imag| imag.len() != coordinate.len())
-        {
-            return Err(NumpyProjectionError::SampleCount {
-                signal: signal.name.clone(),
-                real: signal.real.len(),
-                imag: signal.imag.as_ref().map(Vec::len),
-                coordinate: coordinate.len(),
-            });
-        }
-    }
-    let export = NumpyExport {
+    Ok(NumpyExport {
+        limits,
         coordinate_name: coordinate_name(analysis.analysis_type),
-        coordinate,
+        coordinate: coordinate.to_vec(),
         signals,
-    };
-    if export.columns() > MAX_COLUMNS {
-        return Err(NumpyProjectionError::ColumnLimit {
-            columns: export.columns(),
-        });
-    }
-    Ok(export)
+    })
 }
 
 fn borrowed_arrays(export: &NumpyExport) -> Vec<NamedArray<'_>> {
@@ -173,13 +93,104 @@ fn borrowed_arrays(export: &NumpyExport) -> Vec<NamedArray<'_>> {
 
 /// One 2-D array, C order, coordinate first.
 pub fn encode_npy(export: &NumpyExport) -> Result<Vec<u8>, NumpyWriteError> {
+    // One complex column promotes the entire NPY matrix, including originally
+    // real signals. Reopening retains three arrays per promoted signal.
+    let retained_columns = export
+        .signals
+        .len()
+        .checked_mul(if export.is_complex() { 3 } else { 1 })
+        .and_then(|count| count.checked_add(1));
+    check_export_shape(
+        export.coordinate.len(),
+        export.columns(),
+        retained_columns,
+        export.limits,
+    )
+    .map_err(NumpyWriteError::PublicationBounds)?;
     crate::numpy::matrix::encode_npy(&export.coordinate, &borrowed_arrays(export))
 }
 
 pub fn encode_npz(export: &NumpyExport) -> Result<Vec<u8>, NumpyWriteError> {
+    let retained_columns = export.signals.iter().try_fold(1usize, |count, signal| {
+        count.checked_add(if signal.imag.is_some() { 3 } else { 1 })
+    });
+    check_export_shape(
+        export.coordinate.len(),
+        export.columns(),
+        retained_columns,
+        export.limits,
+    )
+    .map_err(NumpyWriteError::PublicationBounds)?;
     crate::numpy::archive::encode_npz(
         export.coordinate_name,
         &export.coordinate,
         &borrowed_arrays(export),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::waveform_io::result::EXPORT_TEST_LIMITS;
+
+    #[test]
+    fn complex_matrix_promotion_counts_every_imported_magnitude_and_component() {
+        let analysis = AnalysisResult::new(1, AnalysisType::Transient, "Mixed", 0.0)
+            .with_waveforms(vec![
+                RetainedWaveform::new("magnitude", vec![0.0, 1.0], vec![5.0, 5.0])
+                    .with_complex_components("out", vec![3.0, 4.0], vec![4.0, 3.0]),
+                RetainedWaveform::new("real", vec![0.0, 1.0], vec![-0.0, 2.0]),
+            ]);
+        for max_values in [10, 13, 14] {
+            let limits = WaveformImportLimits {
+                max_values,
+                ..EXPORT_TEST_LIMITS
+            };
+            let export = prepare_numpy(
+                &analysis,
+                &analysis.waveforms.iter().collect::<Vec<_>>(),
+                limits,
+            )
+            .unwrap();
+            // NPZ retains each signal's own dtype and needs ten values.
+            let archive = encode_npz(&export).unwrap();
+            let decoded = crate::numpy::archive::decode_npz(
+                &archive,
+                crate::numpy::archive::NpzReadLimits {
+                    max_members: 3,
+                    max_expanded_bytes: 4096,
+                    max_numeric_values: max_values,
+                },
+                &["time"],
+                "numpy_npz",
+            )
+            .unwrap();
+            assert_eq!(decoded.signals.len(), 2);
+            assert_eq!(
+                decoded.signals.iter().filter(|s| s.imag.is_some()).count(),
+                1
+            );
+            // NPY's single complex dtype promotes the real signal as well.
+            let matrix = encode_npy(&export);
+            if max_values < 14 {
+                assert!(
+                    matrix
+                        .map(|bytes| bytes.len())
+                        .unwrap_err()
+                        .to_string()
+                        .contains("retains 14 numeric values")
+                );
+            } else {
+                let array =
+                    crate::numpy::reader::decode_npy(&matrix.unwrap(), max_values, "numpy_npy")
+                        .unwrap();
+                let decoded =
+                    crate::numpy::reader::npy_matrix_to_dataset(array, 2, 3, "numpy_npy").unwrap();
+                assert_eq!(decoded.coordinate, [0.0, 1.0]);
+                assert_eq!(decoded.signals.len(), 2);
+                assert!(decoded.signals.iter().all(|s| s.imag.is_some()));
+                assert_eq!(decoded.signals[1].real[0].to_bits(), (-0.0_f64).to_bits());
+            }
+        }
+    }
 }

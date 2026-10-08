@@ -1886,6 +1886,49 @@ fn numpy_stacked_binary_export_does_not_omit_other_analyses() {
 }
 
 #[test]
+fn binary_waveform_exports_enforce_reimport_budget_before_destination_selection() {
+    // Shared source arrays keep the fixture small, while a clone-per-column
+    // projection would allocate more than the application's 64 MiB admission limit.
+    let prototype = waveform(
+        "prototype",
+        (0..10_000).map(f64::from).collect(),
+        vec![1.0; 10_000],
+    );
+    let analysis = AnalysisResult::new(1, AnalysisType::Transient, "Wide result").with_waveforms(
+        (0..840)
+            .map(|index| {
+                let mut trace = prototype.clone();
+                trace.data.name = format!("signal{index}");
+                trace
+            })
+            .collect(),
+    );
+    for preference in [6, 7, 8, 9] {
+        let mut state = state_with_typed_result(analysis.clone());
+        state
+            .ui
+            .preferences
+            .set_choice(
+                crate::workbench::ChoicePreference::EngineeringExport,
+                preference,
+            )
+            .unwrap();
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+        assert!(
+            io.dialog_titles.borrow().is_empty(),
+            "preference {preference}"
+        );
+        assert!(io.byte_files.borrow().is_empty());
+        let message = last_log_message(&state);
+        assert!(
+            message.contains("retains 8410000 numeric values") && message.contains("8388608"),
+            "{message}"
+        );
+    }
+}
+
+#[test]
 fn vcd_stacked_binary_export_does_not_omit_other_event_schedules() {
     assert_stacked_binary_export_is_not_silently_truncated(&[5]);
 }
