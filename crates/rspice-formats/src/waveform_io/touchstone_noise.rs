@@ -184,10 +184,10 @@ fn validate_parameters(
 /// Preserve the independent noise sweep as ordinary traces. Translate
 /// Gamma_opt to network port 1's reference: [Reference] does not apply to
 /// the wire noise values, which always use the option-line resistance.
+/// Record frequencies have already been normalized to Hz by the reader.
 pub(super) fn append_noise_signals(
     dataset: &mut WaveformDataset,
     records: &[[f64; 5]],
-    frequency_scale: f64,
     option_reference: f64,
     network_reference: f64,
     version: u32,
@@ -202,7 +202,7 @@ pub(super) fn append_noise_signals(
     let new = network_reference / scale;
     let shift = (old - new) / (old + new);
     for [frequency, db, magnitude, angle, resistance] in records {
-        frequencies.push(frequency * frequency_scale);
+        frequencies.push(*frequency);
         let factor = 10.0_f64.powf(db / 10.0);
         let normalized_resistance = if version < 2 {
             resistance * option_reference

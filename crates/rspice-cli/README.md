@@ -816,7 +816,10 @@ including explicit matrix dimensions, frequency count, and per-port references.
 These generic names therefore also support unequal port reference impedances.
 Touchstone import and export preserve valid DC (0 Hz) samples. Frequency grids
 must be finite, non-negative, and strictly increasing; references must be finite
-and positive. Export rejects nonfinite coefficients or an encoding that would
+and positive. Import applies frequency units before decimal rounding and rejects
+nonzero values or finite dB coefficients that would underflow to zero. Authored
+zero and representable subnormal samples remain supported. Export rejects
+nonfinite coefficients or an encoding that would
 overflow or collapse distinct frequency coordinates. Invalid numbered port-count
 extensions in v1 inputs or simulation outputs are rejected before an existing
 destination is replaced. V2 imports use the required `[Number of Ports]`

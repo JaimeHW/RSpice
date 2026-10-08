@@ -160,7 +160,9 @@ impl EngineeringUnit {
         self.bias == 0.0 && crate::numeric::decimal_underflowed(decimal, after)
     }
 }
-fn decimal_power_scaled(value: &str, scale: f64) -> Option<f64> {
+/// Apply an exact power-of-ten scale before rounding a decimal to binary64.
+/// Callers must validate decimal syntax before using the result.
+pub(crate) fn decimal_power_scaled(value: &str, scale: f64) -> Option<f64> {
     let scale_exponent = [
         (1e-15, -15),
         (1e-12, -12),
@@ -176,7 +178,7 @@ fn decimal_power_scaled(value: &str, scale: f64) -> Option<f64> {
     ]
     .into_iter()
     .find_map(|(candidate, exponent)| (scale == candidate).then_some(exponent))?;
-    let (mantissa, source_exponent) = if let Some(separator) = value.find(['e', 'E']) {
+    let (mantissa, source_exponent) = if let Some(separator) = value.find(['e', 'E', 'd', 'D']) {
         (
             &value[..separator],
             value[separator + 1..].parse::<i32>().ok()?,

@@ -5,6 +5,7 @@
 //! is rejected explicitly so it cannot be mistaken for single-ended records.
 
 use super::{MAX_TOUCHSTONE_PORTS, SignalType, TouchstoneError, WaveformDataset, WaveformSignal};
+use crate::delimited::unit::decimal_power_scaled;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy)]
@@ -93,7 +94,9 @@ pub fn read_touchstone_bytes_with_limit(
     // so far are held here until one per port has been read.
     let mut pending_reference: Option<Vec<f64>> = None;
     let mut expected_reference_len = 0usize;
-    let mut numeric_tokens = Vec::new();
+    // Borrow spellings until record dimensions identify the frequency fields.
+    // Rounding them first can erase a frequency still representable in Hz.
+    let mut numeric_tokens: Vec<&str> = Vec::new();
     let mut saw_network_data = false;
     let mut saw_end = false;
     let mut in_information = false;
@@ -350,11 +353,12 @@ pub fn read_touchstone_bytes_with_limit(
             .split_whitespace()
             .filter(|token| *token != "+")
             .map(|token| {
-                parse_numeric_token(token, || {
+                parse_finite_token(token, || {
                     format!("Touchstone line {line_number}: expected a finite numeric token, got '{token}'")
-                })
+                })?;
+                Ok(token)
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, TouchstoneError>>()?;
         // V1 marks the noise boundary by restarting the frequency sweep.
         // Only a complete two-port record can precede a five-column noise line.
         if version == 1
@@ -363,14 +367,25 @@ pub fn read_touchstone_bytes_with_limit(
             && declared_ports.is_none_or(|ports| ports == 2)
             && !numeric_tokens.is_empty()
             && numeric_tokens.len().is_multiple_of(9)
-            && values[0] <= numeric_tokens[numeric_tokens.len() - 9]
+            && parse_frequency(values[0], options.frequency_scale_hz)?
+                <= parse_frequency(
+                    numeric_tokens[numeric_tokens.len() - 9],
+                    options.frequency_scale_hz,
+                )?
         {
             in_noise = true;
             declared_ports = Some(2);
         }
         if in_noise {
-            let record: [f64; 5] = values.try_into().map_err(|_| format!("Touchstone line {line_number}: a noise record requires exactly five values on one line"))?;
-            noise_records.push(record);
+            let record: [&str; 5] = values.try_into().map_err(|_| format!("Touchstone line {line_number}: a noise record requires exactly five values on one line"))?;
+            let mut values = [0.0; 5];
+            values[0] = parse_frequency(record[0], options.frequency_scale_hz)?;
+            for field in 1..5 {
+                values[field] = parse_numeric_token(record[field], || {
+                    format!("Touchstone line {line_number}: invalid noise field {field}")
+                })?;
+            }
+            noise_records.push(values);
         } else {
             numeric_tokens.extend(values);
         }
@@ -484,7 +499,7 @@ pub fn read_touchstone_bytes_with_limit(
     let mut matrix_imag = vec![vec![vec![0.0; frequency_count]; num_ports]; num_ports];
     let mut offset = 0;
     for frequency_index in 0..frequency_count {
-        let frequency_hz = numeric_tokens[offset] * options.frequency_scale_hz;
+        let frequency_hz = parse_frequency(numeric_tokens[offset], options.frequency_scale_hz)?;
         offset += 1;
         if !frequency_hz.is_finite() || frequency_hz < 0.0 {
             return Err(format!(
@@ -506,8 +521,12 @@ pub fn read_touchstone_bytes_with_limit(
         let positions = matrix_positions(num_ports, matrix_format, two_port_order);
         for (row, column) in positions {
             let (real, imag) = pair_to_complex(
-                numeric_tokens[offset],
-                numeric_tokens[offset + 1],
+                parse_numeric_token(numeric_tokens[offset], || {
+                    format!("Touchstone frequency point {frequency_index}: invalid coefficient")
+                })?,
+                parse_numeric_token(numeric_tokens[offset + 1], || {
+                    format!("Touchstone frequency point {frequency_index}: invalid coefficient")
+                })?,
                 options.data_format,
             )
             .map_err(|error| format!("Touchstone frequency point {frequency_index}: {error}"))?;
@@ -579,7 +598,6 @@ pub fn read_touchstone_bytes_with_limit(
     super::touchstone_noise::append_noise_signals(
         &mut dataset,
         &noise_records,
-        options.frequency_scale_hz,
         options.reference_ohms,
         reference_by_port[0],
         version,
@@ -643,13 +661,17 @@ fn values_per_frequency(ports: usize, matrix: MatrixFormat) -> Option<usize> {
     pairs.checked_mul(2)?.checked_add(1)
 }
 
-fn infer_ports(tokens: &[f64], matrix: MatrixFormat) -> Result<Option<usize>, TouchstoneError> {
+fn infer_ports(tokens: &[&str], matrix: MatrixFormat) -> Result<Option<usize>, TouchstoneError> {
     let candidates = (1..=MAX_TOUCHSTONE_PORTS)
         .filter(|ports| {
             values_per_frequency(*ports, matrix).is_some_and(|width| {
                 tokens.len() >= width
                     && tokens.len().is_multiple_of(width)
-                    && (0..tokens.len() / width).all(|index| tokens[index * width] >= 0.0)
+                    && (0..tokens.len() / width).all(|index| {
+                        // Syntax and finiteness were checked while reading.
+                        parse_finite_token(tokens[index * width], String::new)
+                            .is_ok_and(|value| value >= 0.0)
+                    })
             })
         })
         .collect::<Vec<_>>();
@@ -813,6 +835,30 @@ fn parse_numeric_token(
     token: &str,
     detail: impl FnOnce() -> String,
 ) -> Result<f64, TouchstoneError> {
+    let value = parse_finite_token(token, detail)?;
+    reject_underflow(token, value)?;
+    Ok(value)
+}
+
+fn parse_frequency(token: &str, scale: f64) -> Result<f64, TouchstoneError> {
+    let parsed = parse_finite_token(token, || format!("Invalid Touchstone frequency '{token}'"))?;
+    let value = decimal_power_scaled(token, scale).unwrap_or(parsed * scale);
+    reject_underflow(token, value)?;
+    Ok(value)
+}
+
+fn reject_underflow(token: &str, value: f64) -> Result<(), TouchstoneError> {
+    if crate::numeric::decimal_underflowed(token, value) {
+        Err(format!("Touchstone numeric value '{token}' underflows at binary64 precision").into())
+    } else {
+        Ok(())
+    }
+}
+
+fn parse_finite_token(
+    token: &str,
+    detail: impl FnOnce() -> String,
+) -> Result<f64, TouchstoneError> {
     match token.replace(['D', 'd'], "e").parse::<f64>() {
         Ok(parsed) if parsed.is_finite() => Ok(parsed),
         Ok(_) => Err(TouchstoneError::InvalidData(detail())),
@@ -867,6 +913,12 @@ fn pair_to_complex(
         }
         DataFormat::Db => {
             let magnitude = 10.0_f64.powf(first / 20.0);
+            if magnitude == 0.0 {
+                return Err(format!(
+                    "S-parameter magnitude {first} dB underflows at binary64 precision"
+                )
+                .into());
+            }
             let angle = second.to_radians();
             (magnitude * angle.cos(), magnitude * angle.sin())
         }
