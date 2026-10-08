@@ -40,6 +40,33 @@ pub(crate) struct PublishedResult {
     pub(crate) schema: SignalSchema,
     /// Path the artifact was staged at.
     pub(crate) artifact: std::path::PathBuf,
+    /// For typed JSON, one bit per source document series. The schema keeps
+    /// their order, including descriptors whose samples were not retained.
+    pub(crate) source_sample_presence: Option<Vec<bool>>,
+}
+
+pub(super) fn typed_publication(
+    path: &Path,
+    document: &AnalysisResultDocument,
+) -> Result<PublishedResult, CliError> {
+    let descriptors = document
+        .signals()
+        .iter()
+        .map(crate::commands::result_signal::point_descriptor)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(schema_error)?;
+    Ok(PublishedResult {
+        analysis_id: document.analysis().tag(),
+        schema: SignalSchema::new(descriptors).map_err(schema_error)?,
+        artifact: path.to_path_buf(),
+        source_sample_presence: Some(
+            document
+                .signals()
+                .iter()
+                .map(|signal| signal.has_any_sample())
+                .collect(),
+        ),
+    })
 }
 
 /// Publish one analysis result and record its coordinate-local schema.
@@ -55,19 +82,25 @@ pub(super) fn publish_analysis_result(
     document: impl FnOnce() -> Result<AnalysisResultDocumentBuilder, ResultDocumentError>,
     flat: impl FnOnce(&Path, OutputFormat) -> Result<(), CliError>,
 ) -> Result<(), CliError> {
-    match ctx.format {
+    let published = match ctx.format {
         OutputFormat::Json => {
             let builder = document().map_err(|error| document_error(ctx, analysis_id, error))?;
             let built = finish(ctx, analysis_id, builder)?;
+            let published = typed_publication(path, &built)?;
             write_document(ctx, path, &built)?;
+            published
         }
-        format => flat(path, format)?,
-    }
-    ctx.record_published(PublishedResult {
-        analysis_id: analysis_id.tag(),
-        schema,
-        artifact: path.to_path_buf(),
-    });
+        format => {
+            flat(path, format)?;
+            PublishedResult {
+                analysis_id: analysis_id.tag(),
+                schema,
+                artifact: path.to_path_buf(),
+                source_sample_presence: None,
+            }
+        }
+    };
+    ctx.record_published(published);
     Ok(())
 }
 

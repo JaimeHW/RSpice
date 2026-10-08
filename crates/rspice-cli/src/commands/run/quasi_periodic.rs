@@ -199,10 +199,16 @@ fn publish(
             .expect("flat quasiperiodic projection")
             .write(path, format)?,
     }
-    ctx.record_published(PublishedResult {
-        analysis_id: artifact.analysis.tag(),
-        schema,
-        artifact: path.clone(),
-    });
+    let published = if ctx.format == OutputFormat::Json {
+        super::document::typed_publication(path, &document)?
+    } else {
+        PublishedResult {
+            analysis_id: artifact.analysis.tag(),
+            schema,
+            artifact: path.clone(),
+            source_sample_presence: None,
+        }
+    };
+    ctx.record_published(published);
     Ok(())
 }

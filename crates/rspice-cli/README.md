@@ -558,6 +558,16 @@ coordinate or fabricated as zero. The whole set, every coordinate artifact plus
 the schema manifest and the set manifest, is published as one transaction, so a
 cancelled or failed run leaves either the previous complete set or nothing.
 
+Manifest version 3 describes one sample per series, so different point counts
+across coordinates do not change signal identity. For JSON, its inventory comes
+from each published document, including sideband and distortion qualifiers.
+Each coordinate's `source_signal_indices` maps union descriptors to indices in
+that document's `signals` array; a null index means the series is absent. The
+validity bit is false when a series has no retained samples, even if its
+descriptor is present. Flat formats retain their exported column schema and
+set `source_signal_indices` to null. Scalar metrics and family payloads remain
+in the result document, outside this series manifest.
+
 An implicit axis sweep whose topology and complete signal schema are identical
 at every coordinate keeps the single wide aggregated table instead.
 

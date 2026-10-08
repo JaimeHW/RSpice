@@ -546,7 +546,7 @@ fn run_implicit_step_op_table(
             let coordinate_path =
                 tag_output_path(&base_output, &sanitize_run_tag(&run.coordinate_tag));
             let path = tag_output_path(&coordinate_path, &run.analysis_id);
-            if ctx.format == OutputFormat::Json {
+            let publication = if ctx.format == OutputFormat::Json {
                 // A coordinate-local implicit operating point is a result like
                 // any other: it publishes the shared typed document, naming the
                 // coordinate and topology that produced it.
@@ -563,7 +563,9 @@ fn run_implicit_step_op_table(
                     run.topology,
                     builder,
                 )?;
+                let publication = document::typed_publication(&path, &built)?;
                 document::write_document(&ctx, &path, &built)?;
+                publication
             } else {
                 basic::write_dc_op_output(
                     &path,
@@ -579,15 +581,17 @@ fn run_implicit_step_op_table(
                         topology_fingerprint: Some(run.topology.to_string()),
                     }),
                 )?;
-            }
-            coordinate_publications.push(CoordinatePublication {
-                coordinate: run.canonical.clone(),
-                topology: run.topology,
-                results: vec![PublishedResult {
+                PublishedResult {
                     analysis_id: run.analysis_id.clone(),
                     schema: run.schema.clone(),
                     artifact: path.clone(),
-                }],
+                    source_sample_presence: None,
+                }
+            };
+            coordinate_publications.push(CoordinatePublication {
+                coordinate: run.canonical.clone(),
+                topology: run.topology,
+                results: vec![publication],
             });
             set_coordinates.push(AxisSetCoordinate {
                 identity: ArtifactCoordinate::from_run_coordinate(&run.canonical),
@@ -662,10 +666,12 @@ struct ImplicitStepCoordinate {
 
 /// Version of the coordinate schema manifest.
 ///
-/// Version 2 groups the union by analysis instance. Version 1 described one
+/// Version 3 maps typed series to their source indices and reports retained
+/// sample availability. Version 2 grouped the union by analysis instance.
+/// Version 1 described one
 /// implicit operating point, which could not name the several analyses a
 /// stepped physical deck publishes at each coordinate.
-const STEP_SCHEMA_MANIFEST_VERSION: u32 = 2;
+const STEP_SCHEMA_MANIFEST_VERSION: u32 = 3;
 
 /// The union schema and per-coordinate validity of one analysis instance
 /// across an axis deck's coordinates.
@@ -683,6 +689,10 @@ struct CoordinateValidity {
     pub(super) topology: rspice_core::execution::TopologyFingerprint,
     pub(super) artifact: PathBuf,
     pub(super) validity: Vec<bool>,
+    /// Union descriptor to the actual typed document's `signals` array.
+    /// Null entries identify series absent at this coordinate; the entire
+    /// field is null for flat artifacts without a typed series array.
+    source_signal_indices: Option<Vec<Option<usize>>>,
 }
 
 /// Union each analysis instance's coordinate-local schemas and record, per
@@ -728,6 +738,15 @@ fn analysis_schema_unions(
         })?;
         let mut coordinates = Vec::with_capacity(entries.len());
         for (coordinate, result) in entries {
+            if let Some(presence) = &result.source_sample_presence
+                && presence.len() != result.schema.descriptors().len()
+            {
+                return Err(CliError::InternalError {
+                    message: format!(
+                        "{analysis_id} source availability does not match its signal schema"
+                    ),
+                });
+            }
             let indices = union
                 .source_indices()
                 .get(&coordinate.coordinate.stable_id())
@@ -742,7 +761,21 @@ fn analysis_schema_unions(
                 assignment: canonical_coordinate_description(&coordinate.coordinate),
                 topology: coordinate.topology,
                 artifact: result.artifact.clone(),
-                validity: indices.iter().map(Option::is_some).collect(),
+                validity: indices
+                    .iter()
+                    .map(|index| {
+                        index.is_some_and(|index| {
+                            result
+                                .source_sample_presence
+                                .as_ref()
+                                .is_none_or(|presence| presence[index])
+                        })
+                    })
+                    .collect(),
+                source_signal_indices: result
+                    .source_sample_presence
+                    .as_ref()
+                    .map(|_| indices.clone()),
             });
         }
         unions.push(AnalysisSchemaUnion {
@@ -788,6 +821,7 @@ fn write_step_schema_manifest(
                         "assignment": coordinate.assignment,
                         "topology_fingerprint": coordinate.topology.to_string(),
                         "validity": coordinate.validity,
+                        "source_signal_indices": coordinate.source_signal_indices,
                         "artifact": artifact,
                     }))
                 })
@@ -862,6 +896,7 @@ fn execution_signal_unit_name(unit: &rspice_core::execution::SignalUnit) -> Stri
         SignalUnit::Radian => "radian".to_string(),
         SignalUnit::RadianPerSecond => "radian_per_second".to_string(),
         SignalUnit::Dimensionless => "dimensionless".to_string(),
+        SignalUnit::Unspecified => "unspecified".to_string(),
         SignalUnit::Logic => "logic".to_string(),
         SignalUnit::Custom(name) => format!("custom:{name}"),
         _ => "unknown".to_string(),

@@ -26,6 +26,7 @@ pub(crate) mod input;
 pub mod models;
 pub(crate) mod preflight;
 pub(crate) mod publish;
+mod result_signal;
 pub mod run;
 mod run_signals;
 pub(crate) mod vcd_io;

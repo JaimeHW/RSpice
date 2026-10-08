@@ -1150,10 +1150,15 @@ pub(super) fn finish_transient_result(
                 }
             }
         };
-        let publication = super::PublishedResult {
-            analysis_id: analysis_id.tag(),
-            schema: super::document::scalar_schema(&signals)?,
-            artifact: output_path.clone(),
+        let publication = if let TransientOutputDocument::Typed(typed) = &document {
+            super::document::typed_publication(&output_path, typed)?
+        } else {
+            super::PublishedResult {
+                analysis_id: analysis_id.tag(),
+                schema: super::document::scalar_schema(&signals)?,
+                artifact: output_path.clone(),
+                source_sample_presence: None,
+            }
         };
 
         let fft_output_path = if result.fft_results.is_empty() {

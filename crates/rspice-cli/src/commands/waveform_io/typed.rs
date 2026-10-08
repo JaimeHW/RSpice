@@ -3,6 +3,7 @@
 use super::{conversion_error, enforce_table_value_limits};
 use crate::cli::CliError;
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
+use crate::commands::result_signal::qualified_name;
 use std::path::Path;
 
 /// Project signed or unsigned 64-bit integers only when binary64 is exact.
@@ -12,31 +13,6 @@ fn exact_integer_sample(value: impl Into<i128>) -> Option<f64> {
     let integer = value.into();
     let sample = integer as f64;
     (sample as i128 == integer).then_some(sample)
-}
-
-/// A descriptor alone does not identify a response: several sidebands or
-/// distortion products deliberately share it. Preserve the qualifier using
-/// the direct PAC/DISTO export spellings where applicable.
-fn result_signal_name(signal: &rspice_core::execution::result_document::ResultSignal) -> String {
-    use rspice_core::execution::result_document::{DistortionTone, SeriesQualifier};
-    let name = signal.descriptor().display_name();
-    match signal.qualifier() {
-        None => name.to_string(),
-        Some(SeriesQualifier::PacSideband { sideband }) => format!("{name}:sb{sideband}"),
-        Some(SeriesQualifier::DistortionFundamental { tone }) => {
-            let tone = match tone {
-                DistortionTone::F1 => "f1",
-                DistortionTone::F2 => "f2",
-            };
-            format!("peak({tone}:{name})")
-        }
-        Some(SeriesQualifier::DistortionProduct { product }) => {
-            format!("peak({}:{name})", product.label())
-        }
-        Some(SeriesQualifier::PxfConversion { input, output }) => {
-            format!("{name}:sb{input}->sb{output}")
-        }
-    }
 }
 
 /// Append numeric payloads whose coordinates fit this table. Allocation is
@@ -312,7 +288,7 @@ pub(in crate::commands) fn result_document_table(
         }
     }
     for signal in document.signals() {
-        let name = result_signal_name(signal);
+        let name = qualified_name(signal);
         let data = match signal.values() {
             SeriesValues::Real { samples } => ColumnData::optional_real(samples.clone()),
             SeriesValues::Complex { samples } => ColumnData::optional_complex(
