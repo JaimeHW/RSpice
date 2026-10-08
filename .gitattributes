@@ -104,3 +104,7 @@ crates/rspice-core/tests/testdata/timestep_goldens/** text eol=lf
 # platform is a deck whose measurement is platform-dependent in principle, and
 # these numbers are meant to be the same everywhere.
 crates/rspice-core/tests/testdata/xspice_nand_ripple_adder_8bit.cir text eol=lf
+
+# GP feedback oracle hashes describe canonical LF decks and numeric traces.
+crates/rspice-core/tests/testdata/gp_feedback_*.cir text eol=lf
+crates/rspice-core/tests/testdata/gp_feedback_*.tsv text eol=lf

@@ -2,7 +2,7 @@
   "reference": "ngspice 46 Windows console: feedback GP with intrinsic resistances and nonlinear charges; no clamped transistor terminal",
   "binary_sha256": "86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453",
   "captured_at": "2026-10-08T06:51:36.947087-05:00",
-  "format": "Captured numeric tokens unchanged; trailing whitespace stripped and LF line endings. Columns: time, v(c), v(b), v(e), i(VS), i(VIN).",
+  "format": "Captured numeric tokens unchanged; trailing whitespace stripped and LF line endings. Artifact hashes cover these normalized files; capture hashes retain the original simulator-output/deck bytes.",
   "reproduction": "Run ngspice_con.exe -b -o reference.log <deck> from a scratch directory. The .control block names the TSV output. The PNP deck negates VS, VIN DC, and the VIN sine offset/amplitude and replaces NPN with PNP.",
   "runs": [
     {
@@ -13,12 +13,12 @@
       "artifacts": [
         {
           "path": "gp_feedback_linear_p21_ngspice46.cir",
-          "sha256": "9e364ada97118f1bf0c89f3610a5be40d9c87d87a78096c88e581d2cdaa71576",
+          "sha256": "57b7d1afeb6b31fd77edc0354cc2d4e5ae865bd09de285704213cc6bca4e538d",
           "capture_sha256": "9e364ada97118f1bf0c89f3610a5be40d9c87d87a78096c88e581d2cdaa71576"
         },
         {
           "path": "gp_feedback_linear_p21_ngspice46.tsv",
-          "sha256": "59f5cd3498e8efa1206c155880703058b602ca2ef408525a79237d2192402aba",
+          "sha256": "ec7c31996b1e0107962f4f198bfe371faefa27104503da80c475e32d2bfa6090",
           "capture_sha256": "02d86b822883d00b15d48f7788defc121d7896fb71ceff08262fd1b21602fdbb"
         }
       ],
@@ -35,12 +35,12 @@
       "artifacts": [
         {
           "path": "gp_feedback_linear_p90_ngspice46.cir",
-          "sha256": "e60d8a3c3b81585d070583078fa33807082c3288610c9cc71ccd71a44a9611b9",
+          "sha256": "397cc454a2a59b4392c344536476fb9b6f330e1490e86e49e37740a35fad7fbb",
           "capture_sha256": "e60d8a3c3b81585d070583078fa33807082c3288610c9cc71ccd71a44a9611b9"
         },
         {
           "path": "gp_feedback_linear_p90_ngspice46.tsv",
-          "sha256": "74345bf5bc49532355394d56eeea8c90de472d1e32981939ef9b5786b65db736",
+          "sha256": "22251260e1563292602013ceeb1b699c5ce77a626cabc85259bd8151946d30f2",
           "capture_sha256": "0c9ed0f3f47693599412bf929ecbbd82f5a9bcf73f659511418e09d429d3bba8"
         }
       ],
@@ -57,12 +57,12 @@
       "artifacts": [
         {
           "path": "gp_feedback_nonlinear_p21_ngspice46.cir",
-          "sha256": "04fe701c2dde0ad0dcad9a73292cfffd4971be87b8015f264bedb74afad18440",
+          "sha256": "e5b6ebe24f919e47662a44a36f0e3b26c9f02719f6ee190ce1951b31929bbf7e",
           "capture_sha256": "04fe701c2dde0ad0dcad9a73292cfffd4971be87b8015f264bedb74afad18440"
         },
         {
           "path": "gp_feedback_nonlinear_p21_ngspice46.tsv",
-          "sha256": "a9ec1bd2f7a95fb125f20be7cda8012c13fef05bc0966f5108b5e432d5e51015",
+          "sha256": "8c0de6aa28baa0509c7435bdbce23cae51e241458a86c42fda48e169aadd06d6",
           "capture_sha256": "ef02420022713e51576ffcb511c42393dd67b0ac35a884972b9bbd3c2bda3f65"
         }
       ],
@@ -79,12 +79,12 @@
       "artifacts": [
         {
           "path": "gp_feedback_nonlinear_p90_ngspice46.cir",
-          "sha256": "1f888707445b00e154b40c02067b79dc58837339d53fd2a252ad62df03301087",
+          "sha256": "87fb3474e46187d5404b5b8f62e4c0d65b40268fa957de984eae6036c636287b",
           "capture_sha256": "1f888707445b00e154b40c02067b79dc58837339d53fd2a252ad62df03301087"
         },
         {
           "path": "gp_feedback_nonlinear_p90_ngspice46.tsv",
-          "sha256": "1c5f217c9fb0bcf5b2db90ae9064ace2a519d1db789fb667bcd12fe5c6b6cf51",
+          "sha256": "381b42165d3988bb1aceb97e74358407940a6110e4d7081f7aa303afa164d230",
           "capture_sha256": "145ea6d04fb35c760ca18b0c62258e26f1b75572fd44d87c046e3e3dc9be9c28"
         }
       ],
