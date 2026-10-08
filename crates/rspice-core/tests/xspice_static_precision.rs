@@ -31,6 +31,81 @@ fn relative_component(actual: f64, expected: f64) {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn constant_rational_transfer_retains_common_coefficient_scales() {
+    use rspice_core::xspice::XspiceSmallSignalDescriptor;
+    use rspice_core::{Engine, Netlist};
+
+    for scale in [1e-100, 1e-310, f64::from_bits(1), 1e300] {
+        for sign in [-1.0, 1.0] {
+            let mut context = rational_context(1.0, &[2.0 * scale], &[sign * scale]);
+            context.set_input_analog("in", 10.0);
+            SXfer.evaluate(&mut context).unwrap();
+            relative_component(context.output("out"), sign * 20.0);
+            relative_component(context.partial("out"), sign * 2.0);
+            relative_component(SXfer.ac_gain(&context)[0], sign * 2.0);
+            assert!(matches!(
+                SXfer.small_signal_descriptor(&context).unwrap(),
+                XspiceSmallSignalDescriptor::AffineAc
+            ));
+
+            let netlist = Netlist::parse(&format!(
+                "Constant rational scale\nV1 in 0 dc 10 ac 1\nA1 in out filt\n.model filt s_xfer(num_coeff=[{:e}] den_coeff=[{:e}])\nRload out 0 1\nRpole out rc 1\nCpole rc 0 1\n.end\n",
+                2.0 * scale, sign * scale
+            )).unwrap();
+            let engine = Engine::default();
+            let op = engine.run_dc_op(&netlist).unwrap();
+            let output = op
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            relative_component(op.node_voltages[output], sign * 20.0);
+            for point in engine.run_ac(&netlist, &[0.0, 1.0, 1e200]).unwrap() {
+                let output = point
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                relative_component(point.voltages[output].re, sign * 2.0);
+                assert!(point.voltages[output].im.abs() < 1e-12);
+            }
+            let spectrum = engine.run_pole_spectrum(&netlist).unwrap();
+            assert!(spectrum.evidence.is_qualified());
+            assert_eq!(spectrum.poles.len(), 1);
+            relative_component(spectrum.poles[0].re, -1.0);
+            relative_component(spectrum.poles[0].im, 0.0);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn constant_rational_output_rounds_after_all_factors_and_the_input_offset() {
+    use rspice_core::xspice::AnalysisType;
+    let huge = 2.0f64.powi(1023);
+    let tiny = 2.0f64.powi(-600);
+    for (gain, numerator, denominator, input, offset, output, partial) in [
+        (1e308, 1e-308, 1.0, 10.0, 0.0, 10.0, 1.0),
+        (1e-300, 1e300, 1.0, 1e-100, 0.0, 1e-100, 1.0),
+        (tiny, tiny, 1.0, 1.0 / tiny, 0.0, tiny, 0.0),
+        (0.5, 1.0, 1.0, huge, huge, huge, 0.5),
+        (1.0, 1.0, 2.0, huge, huge, huge, 0.5),
+    ] {
+        for analysis in [AnalysisType::DcOp, AnalysisType::Transient] {
+            let mut context = rational_context(gain, &[numerator], &[denominator]);
+            context.analysis = analysis;
+            context.set_input_analog("in", input);
+            context.set_param("in_offset", offset);
+            SXfer.evaluate(&mut context).unwrap();
+            relative_component(context.output("out"), output);
+            relative_component(context.partial("out"), partial);
+            relative_component(SXfer.output_input_partials(&context, "out")[0].1, partial);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn rational_ac_retains_finite_quotients_beyond_intermediate_float_range() {
     use rspice_core::{Complex64, Engine, Netlist};
     let large_frequency = 1e200;

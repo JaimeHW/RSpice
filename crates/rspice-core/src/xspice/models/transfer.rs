@@ -819,6 +819,22 @@ fn s_xfer_coefficients(ctx: &CmContext) -> CmResult<SXferCoefficients> {
         ));
     }
 
+    let mut gain = finite_s_xfer_param(ctx, "gain")?;
+    if denominator_desc.len() == 1 {
+        if denominator_desc[0] == 0.0 {
+            return Err(s_xfer_error(
+                "highest-order denominator coefficient must be non-zero",
+            ));
+        }
+        // A constant transfer has no integrator states to normalize. Keep
+        // its factors separate until the complete response is evaluated.
+        return Ok(SXferCoefficients {
+            numerator: numerator_desc.to_vec(),
+            denominator: denominator_desc.to_vec(),
+            gain,
+        });
+    }
+
     let mut numerator = descending_to_denormalized_ascending(numerator_desc, denormalized_freq);
     let mut denominator = descending_to_denormalized_ascending(denominator_desc, denormalized_freq);
     let leading = denominator.last().copied().unwrap_or(0.0);
@@ -828,7 +844,6 @@ fn s_xfer_coefficients(ctx: &CmContext) -> CmResult<SXferCoefficients> {
         ));
     }
 
-    let mut gain = ctx.param("gain");
     if leading != 1.0 {
         for coefficient in &mut denominator {
             *coefficient /= leading;
@@ -1000,19 +1015,6 @@ fn s_xfer_dc_gain(ctx: &CmContext) -> Value {
     }
 }
 
-fn s_xfer_feedthrough(coefficients: &SXferCoefficients) -> Value {
-    let order = coefficients.denominator.len().saturating_sub(1);
-    if order == 0 {
-        return coefficients.numerator.first().copied().unwrap_or(0.0);
-    }
-
-    if coefficients.numerator.len() == order + 1 {
-        coefficients.numerator[order]
-    } else {
-        0.0
-    }
-}
-
 fn ensure_s_xfer_transient_scratch(ctx: &mut CmContext) {
     if ctx
         .resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
@@ -1071,14 +1073,21 @@ fn s_xfer_ngspice_transient_eval(
     state: &mut Vec<Value>,
 ) -> CmResult<(Value, Value)> {
     let order = coefficients.denominator.len() - 1;
-    let input = ctx.input("in") + finite_s_xfer_param(ctx, "in_offset")?;
-    let u = coefficients.gain * input;
+    let offset = finite_s_xfer_param(ctx, "in_offset")?;
 
     if order == 0 {
-        let feedthrough = s_xfer_feedthrough(coefficients);
-        return Ok((feedthrough * u, feedthrough * coefficients.gain));
+        let gain = ScaledProduct::ONE
+            .multiply(coefficients.gain)
+            .multiply(coefficients.numerator[0])
+            .without_factor(coefficients.denominator[0]);
+        let input = ScaledProduct::ONE
+            .multiply(ctx.input("in"))
+            .add(ScaledProduct::ONE.multiply(offset));
+        return Ok((gain.multiply_scaled(input).value(), gain.value()));
     }
 
+    let input = ctx.input("in") + offset;
+    let u = coefficients.gain * input;
     resize_s_xfer_values("transient state scratch", state, order + 1)?;
 
     state[order] = u;
@@ -1211,6 +1220,11 @@ pub struct SXfer;
 impl CodeModel for SXfer {
     fn small_signal_descriptor(&self, ctx: &CmContext) -> CmResult<XspiceSmallSignalDescriptor> {
         Ok(match s_xfer_coefficients_for_context(ctx)? {
+            // A constant quotient has no private state. Its range-safe AC
+            // derivative is the complete descriptor, without an extra row.
+            Some(coefficients) if coefficients.denominator.len() == 1 => {
+                XspiceSmallSignalDescriptor::AffineAc
+            }
             Some(coefficients) => XspiceSmallSignalDescriptor::Rational {
                 input_port: "in",
                 output_port: "out",
