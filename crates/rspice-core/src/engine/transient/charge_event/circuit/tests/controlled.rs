@@ -93,3 +93,120 @@ fn prepared_controlled_sources_refuse_invalid_topology_and_coefficients() {
         ));
     }
 }
+
+#[test]
+fn resistive_ccvs_feedback_preserves_original_constraint_current_rate_and_impulse() {
+    let circuit = build(
+        "CCVS feedback\nV1 ref 0 PWL(0 1 1 2)\nRC b ref 2\nH1 b 0 RC 1\nCB b 0 1u\nRB b 0 1k\n.options device zeroresistancetol=2\n.end\n",
+    );
+    let options = options();
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let topology = sampler
+        .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+        .unwrap();
+    let result = topology
+        .solve(
+            &vec![0.0; circuit.matrix_size()],
+            &vec![0.0; circuit.matrix_size()],
+            &options,
+            &NoAbort,
+            |state, abort| {
+                sampler.sample(0.0, SourceTimeSide::RightLimit, state, &[], &options, abort)
+            },
+        )
+        .unwrap();
+    let b = circuit.get_node_by_name("b").unwrap() - 1;
+    let rc = circuit.num_nodes() + circuit.resistor_branches.branch_indices[0] - 1;
+    let h = circuit.num_nodes() + circuit.ccvs.branch_indices[0] - 1;
+    close(result.solution[b], -1.0, 1e-12);
+    close(result.solution[rc], -1.0, 1e-12);
+    close(result.coordinate_rates[b].unwrap(), -1.0, 1e-12);
+    close(result.coordinate_rates[rc].unwrap(), -1.0, 1e-12);
+    close(result.solution[h], 1.001001, 1e-12);
+    let index = topology
+        .source_branches()
+        .position(|branch| branch == h)
+        .unwrap();
+    close(result.source_impulses[index], 1e-6, 1e-20);
+}
+
+#[test]
+fn ccvs_event_admission_rejects_unowned_controls_and_invalid_metadata() {
+    let circuit = build(
+        "CCVS validation\nV1 c 0 1\nRC c 0 1\nH1 b 0 RC 2\nR1 b 0 1k\n.options device zeroresistancetol=2\n.end\n",
+    );
+    for mutation in 0..13 {
+        let mut candidate = circuit.clone();
+        match mutation {
+            0 => candidate.ccvs.node_pos.clear(),
+            1 => candidate.ccvs.node_neg.clear(),
+            2 => candidate.ccvs.branch_indices.clear(),
+            3 => candidate.ccvs.ctrl_branch.clear(),
+            4 => candidate.ccvs.transresistances.clear(),
+            5 => candidate.ccvs.node_pos[0] = candidate.num_nodes() + 1,
+            6 => candidate.ccvs.branch_indices[0] = 0,
+            7 => candidate.ccvs.ctrl_branch[0] = 0,
+            8 => candidate.ccvs.ctrl_branch[0] = candidate.num_branches() + 1,
+            9 => candidate.ccvs.transresistances[0] = Value::NAN,
+            10 => candidate.resistor_branches.resistances[0] = 0.0,
+            11 => candidate.ccvs.ctrl_branch[0] = candidate.voltage_sources.branch_indices[0],
+            _ => candidate.ccvs.branch_indices[0] = candidate.resistor_branches.branch_indices[0],
+        }
+        assert!(
+            PreparedEventCircuit::new(&candidate, 1e-20, &options(), &NoAbort).is_err(),
+            "mutation {mutation}"
+        );
+    }
+    let mut zero = circuit.clone();
+    zero.ccvs.transresistances[0] = 0.0;
+    zero.ccvs.ctrl_branch[0] = zero.voltage_sources.branch_indices[0];
+    assert!(PreparedEventCircuit::new(&zero, 1e-20, &options(), &NoAbort).is_ok());
+}
+
+#[test]
+fn line_event_selection_checks_ccvs_control_ownership() {
+    let mut circuit = build(
+        "CCVS line eligibility\nV1 c 0 1\nRC c 0 1\nH1 near 0 RC 2\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\n.options device zeroresistancetol=2\n.end\n",
+    );
+    assert!(PreparedEventCircuit::supports_scalar_line_events(&circuit));
+    circuit.ccvs.ctrl_branch[0] = circuit.voltage_sources.branch_indices[0];
+    assert!(!PreparedEventCircuit::supports_scalar_line_events(&circuit));
+    circuit.ccvs.transresistances[0] = 0.0;
+    assert!(PreparedEventCircuit::supports_scalar_line_events(&circuit));
+}
+
+#[test]
+fn zero_transresistance_does_not_transfer_a_control_current_impulse() {
+    let circuit =
+        build("zero CCVS\nV1 c 0 PWL(0 1 1 2)\nC1 c 0 2u\nH1 b 0 V1 0\nR1 b 0 1k\n.end\n");
+    let options = options();
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let topology = sampler
+        .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+        .unwrap();
+    let result = topology
+        .solve(
+            &vec![0.0; circuit.matrix_size()],
+            &vec![0.0; circuit.matrix_size()],
+            &options,
+            &NoAbort,
+            |state, abort| {
+                sampler.sample(0.0, SourceTimeSide::RightLimit, state, &[], &options, abort)
+            },
+        )
+        .unwrap();
+    let b = circuit.get_node_by_name("b").unwrap() - 1;
+    let h = circuit.num_nodes() + circuit.ccvs.branch_indices[0] - 1;
+    let v = circuit.num_nodes() + circuit.voltage_sources.branch_indices[0] - 1;
+    close(result.solution[b], 0.0, 1e-12);
+    close(result.solution[h], 0.0, 1e-16);
+    close(result.coordinate_rates[b].unwrap(), 0.0, 1e-12);
+    close(result.solution[v], -2e-6, 1e-16);
+    for (index, branch) in topology.source_branches().enumerate() {
+        close(
+            result.source_impulses[index],
+            if branch == h { 0.0 } else { -2e-6 },
+            1e-20,
+        );
+    }
+}

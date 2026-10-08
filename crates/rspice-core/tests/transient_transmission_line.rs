@@ -3,57 +3,65 @@ use rspice_core::netlist::Netlist;
 
 #[test]
 fn controlled_current_drive_preserves_line_waves_and_current_observations_on_resume() {
-    let source=Netlist::parse("controlled matched line\nV1 input 0 SIN(0 .5 1G)\nE1 ctrl 0 input 0 2\nG1 0 near ctrl 0 1m\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16\n.save v(far) i(g1) i(e1)\n.end\n").unwrap();
-    for dialect in [
-        SpiceDialect::Ngspice,
-        SpiceDialect::Xyce,
-        SpiceDialect::BestAvailable,
+    for (control, name) in [
+        ("E1 ctrl 0 input 0 2", "e1"),
+        (
+            "RC input 0 1\nH1 ctrl 0 RC 2\n.options device zeroresistancetol=1",
+            "h1",
+        ),
     ] {
-        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
-        config.convergence_config.gmin_target = 0.0;
-        let engine = Engine::new(config);
-        let full = engine.run_tran(&source, 2.5e-9, 2e-12).unwrap();
-        let (_, checkpoint) = engine
-            .run_tran_checkpointed(&source, 1.2e-9, 2e-12)
-            .unwrap();
-        let (resumed, _) = engine
-            .run_tran_resume(&source, &checkpoint, 2.5e-9, 2e-12)
-            .unwrap();
-        for result in [&full, &resumed] {
-            let voltage = result.try_voltage_waveform_named("far").unwrap();
-            let current = result.try_branch_current_waveform_named("g1").unwrap();
-            for (index, &time) in result.time.iter().enumerate() {
-                let phase = std::f64::consts::TAU * 1e9;
-                let wave = 0.05 * (phase * (time - 1e-9).max(0.0)).sin();
+        let source=Netlist::parse(&format!("controlled matched line\nV1 input 0 SIN(0 .5 1G)\n{control}\nG1 0 near ctrl 0 1m\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16\n.save v(far) i(g1) i({name})\n.end\n")).unwrap();
+        for dialect in [
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+            SpiceDialect::BestAvailable,
+        ] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = 0.0;
+            let engine = Engine::new(config);
+            let full = engine.run_tran(&source, 2.5e-9, 2e-12).unwrap();
+            let (_, checkpoint) = engine
+                .run_tran_checkpointed(&source, 1.2e-9, 2e-12)
+                .unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&source, &checkpoint, 2.5e-9, 2e-12)
+                .unwrap();
+            for result in [&full, &resumed] {
+                let voltage = result.try_voltage_waveform_named("far").unwrap();
+                let current = result.try_branch_current_waveform_named("g1").unwrap();
+                for (index, &time) in result.time.iter().enumerate() {
+                    let phase = std::f64::consts::TAU * 1e9;
+                    let wave = 0.05 * (phase * (time - 1e-9).max(0.0)).sin();
+                    assert!(
+                        (voltage[index] - wave).abs() < 5e-6,
+                        "{dialect:?}: far at {time:e}"
+                    );
+                    assert!((current[index] - 0.001 * (phase * time).sin()).abs() < 1e-12);
+                }
                 assert!(
-                    (voltage[index] - wave).abs() < 5e-6,
-                    "{dialect:?}: far at {time:e}"
+                    result
+                        .try_branch_current_waveform_named(name)
+                        .unwrap()
+                        .iter()
+                        .all(|&current| current.abs() < 1e-16)
                 );
-                assert!((current[index] - 0.001 * (phase * time).sin()).abs() < 1e-12);
+                assert!(
+                    result
+                        .current_impulses
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .all(|trace| trace.complete)
+                );
+                assert_eq!(result.time.last(), Some(&2.5e-9));
             }
             assert!(
-                result
-                    .try_branch_current_waveform_named("e1")
-                    .unwrap()
+                full.time
                     .iter()
-                    .all(|&current| current.abs() < 1e-16)
+                    .any(|&time| (time - 1e-9).abs() <= 8.0 * f64::EPSILON * 1e-9)
             );
-            assert!(
-                result
-                    .current_impulses
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .all(|trace| trace.complete)
-            );
-            assert_eq!(result.time.last(), Some(&2.5e-9));
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
         }
-        assert!(
-            full.time
-                .iter()
-                .any(|&time| (time - 1e-9).abs() <= 8.0 * f64::EPSILON * 1e-9)
-        );
-        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
     }
 }
 

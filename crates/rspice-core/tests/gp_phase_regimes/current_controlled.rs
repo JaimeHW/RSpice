@@ -169,3 +169,215 @@ fn gp_current_controlled_impulse_drives_the_independent_rc_response_after_restar
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_resistive_ccvs_preserves_transport_charge_currents_and_restart() {
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.gp_transient_phase_model = GpTransientPhaseModel::ExactDelay;
+        config.convergence_config.gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for polarity in [1.0, -1.0] {
+            for resistance in [1.0, -2.0] {
+                // A floating sensing resistor keeps the sign and reference-node
+                // mapping observable. Its MNA current remains a solved output.
+                let source = Netlist::parse(&format!(
+                    "resistive CCVS GP\nVC c 0 {}\nVREF ref 0 1.25\nVB ctrl ref DC {} SIN({} {} 1G)\nRC ctrl ref {resistance}\nH1 b 0 RC {}\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=2\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) i(vc) i(h1) i(vb) i(rc)\n.end\n",
+                    2.0*polarity,0.35*polarity,0.35*polarity,0.5e-6*polarity,
+                    2.0*resistance, if polarity>0.0 {"NPN"} else {"PNP"},
+                )).unwrap();
+                let check = |result: &TransientResult, uic: bool| {
+                    behavioral::check(result, dialect, polarity, None, "h1", uic);
+                    let drive = result.try_branch_current_waveform_named("vb").unwrap();
+                    let control = result.try_branch_current_waveform_named("rc").unwrap();
+                    for ((&time, &drive), &control) in result.time.iter().zip(drive).zip(control) {
+                        let expected = polarity
+                            * (0.35 + 0.5e-6 * (std::f64::consts::TAU * 1e9 * time).sin())
+                            / resistance;
+                        assert!(
+                            (control - expected).abs() < 1e-12,
+                            "{dialect:?}/{polarity}/{resistance}: control at {time:e}"
+                        );
+                        assert!((control + drive).abs() < 1e-12);
+                    }
+                    for name in ["vb", "rc"] {
+                        assert!(trace(result, name).complete);
+                        assert!(
+                            trace(result, name)
+                                .points
+                                .iter()
+                                .all(|point| point.charge_coulombs == 0.0)
+                        );
+                    }
+                    if uic {
+                        let expected =
+                            -polarity * TF * diode(0.7, thermal_voltage(dialect), dialect).0;
+                        let initial = trace(result, "h1")
+                            .points
+                            .iter()
+                            .find(|point| point.time == 0.0)
+                            .unwrap();
+                        assert!(
+                            (initial.charge_coulombs - expected).abs()
+                                < 1e-25 + expected.abs() * 1e-10
+                        );
+                    }
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                };
+                for startup in [
+                    TransientStartupMode::OperatingPoint,
+                    TransientStartupMode::Uic,
+                ] {
+                    let result = engine
+                        .run_tran_with_startup_mode(&source, 2.5e-9, 4e-12, startup)
+                        .unwrap_or_else(|error| {
+                            panic!("{dialect:?}/{polarity}/{resistance}/{startup:?}: {error}")
+                        });
+                    check(&result, startup == TransientStartupMode::Uic);
+                }
+                let (_, checkpoint) = engine
+                    .run_tran_checkpointed(&source, 1.2e-9, 4e-12)
+                    .unwrap();
+                let (resumed, _) = engine
+                    .run_tran_resume(&source, &checkpoint, 2.5e-9, 4e-12)
+                    .unwrap();
+                check(&resumed, false);
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_resistive_ccvs_step_preserves_charge_fanout_and_packed_restart() {
+    let jump = 0.5e-9;
+    let after =
+        |time: f64, event: f64| time >= event || (time - event).abs() <= 8.0 * f64::EPSILON * event;
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.gp_transient_phase_model = GpTransientPhaseModel::ExactDelay;
+            config.integration_method = method;
+            config.convergence_config.gmin_target = 0.0;
+            let engine = Engine::new(config);
+            for polarity in [1.0, -1.0] {
+                let source=Netlist::parse(&format!(
+                    "CCVS charge jump\nVC c 0 {}\nVB ctrl 0 PWL(0 {} .5n {} .5n {} 2n {})\nRC ctrl 0 1\nCC ctrl 0 1p\nH1 b 0 RC 2\nCB b 0 2p\nF1 copy 0 H1 2\nRF copy 0 1k\nCF copy 0 3p\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=2\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) v(copy) i(vc) i(h1) i(vb) i(rc) i(f1)\n.end\n",
+                    2.0*polarity,0.35*polarity,0.35*polarity,0.3505*polarity,0.3505*polarity,if polarity>0.0 {"NPN"} else {"PNP"},
+                )).unwrap();
+                let (result, checkpoints) = engine
+                    .run_tran_checkpoint_schedule_with_startup_mode(
+                        &source,
+                        2e-9,
+                        2e-12,
+                        TransientStartupMode::OperatingPoint,
+                        &[jump, 1.1e-9],
+                    )
+                    .unwrap_or_else(|error| panic!("{dialect:?}/{method:?}/{polarity}: {error}"));
+                let vt = thermal_voltage(dialect);
+                let base_current =
+                    |v: f64| diode(v, vt, dialect).0 / 100.0 + diode(v - 2.0, vt, dialect).0;
+                let charge =
+                    TF * (diode(0.701, vt, dialect).0 - diode(0.7, vt, dialect).0) + 2e-12 * 0.001;
+                let b = result.try_voltage_waveform_named("b").unwrap();
+                let copy = result.try_voltage_waveform_named("copy").unwrap();
+                let h = result.try_branch_current_waveform_named("h1").unwrap();
+                let rc = result.try_branch_current_waveform_named("rc").unwrap();
+                let ic = result.try_branch_current_waveform_named("vc").unwrap();
+                let fanout = result.try_branch_current_waveform_named("f1").unwrap();
+                for (i, &time) in result.time.iter().enumerate() {
+                    let v = if after(time, jump) { 0.701 } else { 0.7 };
+                    let delayed = if after(time, jump + DELAY) {
+                        0.701
+                    } else {
+                        0.7
+                    };
+                    let expected_copy = if after(time, jump) {
+                        2000.0 * base_current(0.701)
+                            + (2000.0 * (base_current(0.7) - base_current(0.701))
+                                + 2.0 * charge / 3e-12)
+                                * (-(time - jump) / 3e-9).exp()
+                    } else {
+                        2000.0 * base_current(0.7)
+                    };
+                    assert!((polarity * b[i] - v).abs() < 1e-10);
+                    assert!((polarity * rc[i] - v / 2.0).abs() < 1e-12);
+                    assert!(
+                        (-polarity * h[i] - base_current(v)).abs() < 2e-11,
+                        "{dialect:?}/{method:?}: finite CCVS current at {time:e}"
+                    );
+                    assert!(
+                        (-polarity * ic[i]
+                            - (diode(delayed, vt, dialect).0
+                                - 2.0 * diode(v - 2.0, vt, dialect).0))
+                            .abs()
+                            < 2e-11
+                    );
+                    assert!((fanout[i] - 2.0 * h[i]).abs() < 1e-15);
+                    // BE global integration error, at dt/tau <= 1/1500,
+                    // bounds this millivolt RC transient to two microvolts.
+                    assert!(
+                        (polarity * copy[i] - expected_copy).abs() < 2e-6,
+                        "{dialect:?}/{method:?}: copy at {time:e}"
+                    );
+                }
+                for clock in [jump, jump + DELAY] {
+                    assert!(
+                        result
+                            .time
+                            .iter()
+                            .any(|&time| (time - clock).abs() <= 8.0 * f64::EPSILON * clock)
+                    );
+                }
+                for (name, expected) in [
+                    ("h1", -polarity * charge),
+                    ("f1", -2.0 * polarity * charge),
+                    ("vb", -polarity * 0.0005 * 1e-12),
+                ] {
+                    let observation = trace(&result, name);
+                    assert!(observation.complete && observation.derivatives.is_empty());
+                    let observed = observation
+                        .points
+                        .iter()
+                        .find(|point| point.time == jump)
+                        .unwrap()
+                        .charge_coulombs;
+                    assert!(
+                        (observed - expected).abs() < 1e-25 + expected.abs() * 1e-9,
+                        "{dialect:?}/{method:?}/{name}: {observed:e} != {expected:e}"
+                    );
+                }
+                assert!(
+                    trace(&result, "rc")
+                        .points
+                        .iter()
+                        .all(|point| point.charge_coulombs == 0.0)
+                );
+                for checkpoint in checkpoints {
+                    exact_restart(
+                        &engine,
+                        &source,
+                        &result,
+                        &checkpoint.checkpoint,
+                        2e-9,
+                        2e-12,
+                    );
+                }
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}

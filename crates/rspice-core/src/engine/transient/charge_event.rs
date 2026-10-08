@@ -4,7 +4,7 @@
 //! F/Q stamps. It does not infer device support or modify accepted history.
 //! Non-nodal flux equations preserve physical linkage at finite-voltage
 //! events. CCCS fanout has weighted current/impulse conservation. Voltage
-//! impulses and CCVS constraints still need a full descriptor transition.
+//! impulses and impulsive CCVS controls still need a full descriptor transition.
 
 use super::{AbortSignal, SimulationError, Value};
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};

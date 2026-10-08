@@ -288,7 +288,7 @@ fn prepared_event_circuit_refuses_unowned_equations_and_obeys_limits_and_abort()
     assert!(
         failure
             .to_string()
-            .contains("current-controlled voltage sources"),
+            .contains("voltage-impulse descriptor"),
         "{failure}"
     );
     let mut circuit = build("event\nV1 a 0 1\nR1 a 0 1k\n.end\n");

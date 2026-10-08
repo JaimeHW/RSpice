@@ -27,7 +27,7 @@ pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     forward_charge_limits: Vec<bool>,
     ports: Vec<(usize, usize)>,
     equations: Vec<EventBranchEquation>,
-    /// Fixed-coefficient, zero-offset constraints: zero R/L branches and VCVS.
+    /// Zero-offset constraints: zero R/L branches, VCVS and resistive CCVS.
     constant_sources: Vec<EventVoltageSource>,
     current_structure: Option<Arc<CurrentConservation>>,
     flux_structure: Option<Arc<FluxConservation>>,

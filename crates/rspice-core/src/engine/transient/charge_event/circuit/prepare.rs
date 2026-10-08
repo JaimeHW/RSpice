@@ -22,12 +22,61 @@ impl<'a> PreparedEventCircuit<'a> {
                 | Vcvs
                 | Vccs
                 | Cccs
+                | Ccvs
                 | Bjt
                 | Diode
                 | InductorCoupling
                 | CoupledInductorPair
                 | TransmissionLine
         )
+    }
+
+    /// Eliminate a finite, nonzero resistive control using its authored
+    /// equation Vp - Vn = R*I. The resistor current stays in the MNA system;
+    /// only the CCVS constraint is reduced. This holds across finite voltage
+    /// jumps and for their regular rates, including nonlinear output loads.
+    /// Other controls may carry impulses and need the full descriptor owner.
+    fn ccvs_equation(circuit: &crate::CircuitData, index: usize) -> Option<EventVoltageEquation> {
+        let control_branch = *circuit.ccvs.ctrl_branch.get(index)?;
+        let transresistance = *circuit.ccvs.transresistances.get(index)?;
+        if control_branch == 0
+            || control_branch > circuit.num_branches()
+            || !transresistance.is_finite()
+        {
+            return None;
+        }
+        let control = if transresistance == 0.0 {
+            None
+        } else {
+            let resistors = &circuit.resistor_branches;
+            let index = resistors
+                .branch_indices
+                .iter()
+                .position(|&branch| branch == control_branch)?;
+            let resistance = *resistors.resistances.get(index)?;
+            if !resistance.is_finite() || resistance == 0.0 {
+                return None;
+            }
+            let gain = transresistance / resistance;
+            if !gain.is_finite() || gain == 0.0 {
+                return None;
+            }
+            let positive = *resistors.node_pos.get(index)?;
+            let negative = *resistors.node_neg.get(index)?;
+            if positive > circuit.num_nodes() || negative > circuit.num_nodes() {
+                return None;
+            }
+            Some(EventVoltageControl {
+                positive,
+                negative,
+                gain,
+            })
+        };
+        Some(EventVoltageEquation::Affine {
+            value: 0.0,
+            slope: 0.0,
+            control,
+        })
     }
 
     /// The ordinary line path can opt into physical events only when every
@@ -43,6 +92,7 @@ impl<'a> PreparedEventCircuit<'a> {
             && circuit.tlines.iter().all(|line| {
                 line.supports_sided_history_events() && line.ltra_branch_matrix_indices().is_none()
             })
+            && (0..circuit.ccvs.len()).all(|index| Self::ccvs_equation(circuit, index).is_some())
             && circuit.resistors.thermal.iter().all(Option::is_none)
             && circuit.behavioral_sources.has_smooth_physical_equations()
             && circuit
@@ -393,6 +443,49 @@ impl<'a> PreparedEventCircuit<'a> {
                     source.names[index]
                 )));
             }
+        }
+        let source = &circuit.ccvs;
+        aligned(
+            "CCVS",
+            source.len(),
+            &[
+                source.node_pos.len(),
+                source.node_neg.len(),
+                source.branch_indices.len(),
+                source.ctrl_branch.len(),
+                source.transresistances.len(),
+            ],
+        )?;
+        ResourceLimitError::ensure(
+            ResourceKind::ResultValues,
+            size.saturating_mul(64).saturating_add(
+                constant_sources
+                    .len()
+                    .saturating_add(source.len())
+                    .saturating_mul(SOURCE_STORAGE_VALUES),
+            ),
+            options.limits.max_result_values,
+        )?;
+        for index in 0..source.len() {
+            check_abort(abort)?;
+            terminals(source.node_pos[index], source.node_neg[index])?;
+            let equation = Self::ccvs_equation(circuit, index).ok_or_else(|| {
+                error(format!(
+                    "CCVS '{}' requires a finite nonzero resistive control or a voltage-impulse descriptor",
+                    source.names[index]
+                ))
+            })?;
+            claim(
+                &mut equations,
+                source.branch_indices[index],
+                EventBranchEquation::Algebraic(options.voltage_tolerance),
+            )?;
+            constant_sources.push(EventVoltageSource {
+                positive: source.node_pos[index],
+                negative: source.node_neg[index],
+                branch: nodes + source.branch_indices[index] - 1,
+                equation,
+            });
         }
         let controlled_current = &circuit.cccs;
         aligned(
