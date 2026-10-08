@@ -40,6 +40,13 @@ pub struct ControlCurrentSource {
     pub owner: crate::CurrentImpulseOwner,
 }
 
+/// A transient node whose singular history accompanies finite control samples.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlVoltageSource {
+    pub dataset: String,
+    pub node_name: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ControlVector {
     pub expression: String,
@@ -55,6 +62,9 @@ pub struct ControlVector {
     /// identities do not assert that a nonlinear expression has a defined
     /// impulse transform, or that unrecorded impulses are absent.
     pub current_sources: Vec<ControlCurrentSource>,
+    /// Source node histories remain in the named datasets' voltage_impulses.
+    /// These are provenance, not a definition of a nonlinear impulse transform.
+    pub voltage_sources: Vec<ControlVoltageSource>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -732,6 +742,7 @@ impl ControlCircuit {
                             unit: dataset.scale_unit(),
                             samples,
                             current_sources: Vec::new(),
+                            voltage_sources: Vec::new(),
                         }
                     };
                     resolver.same_grid(
@@ -1017,7 +1028,19 @@ impl<'a> Resolver<'a> {
             samples.push(value);
         }
         let mut current_sources = Vec::new();
+        let mut voltage_sources = Vec::new();
         for input in &inputs {
+            if let Column::Node(index) = input.column
+                && let ControlAnalysisResult::Transient(result) = &input.dataset.result
+            {
+                let source = ControlVoltageSource {
+                    dataset: input.dataset.name.clone(),
+                    node_name: result.node_names[index].to_ascii_lowercase(),
+                };
+                if !voltage_sources.contains(&source) {
+                    voltage_sources.push(source);
+                }
+            }
             if let Column::Branch(index) = input.column
                 && matches!(input.dataset.result, ControlAnalysisResult::Transient(_))
             {
@@ -1040,6 +1063,7 @@ impl<'a> Resolver<'a> {
                 .map_or(SignalUnit::Dimensionless, |input| input.unit.clone()),
             samples,
             current_sources,
+            voltage_sources,
         })
     }
 }

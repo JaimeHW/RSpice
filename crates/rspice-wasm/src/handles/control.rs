@@ -48,6 +48,7 @@ pub struct ControlVectorDescriptor<'a> {
     /// These result/owner pairs identify separate charge events and coverage
     /// in the result document. They do not define a nonlinear impulse transform.
     pub current_sources: Vec<ControlCurrentDescriptor<'a>>,
+    pub voltage_sources: Vec<ControlVoltageDescriptor<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -55,6 +56,13 @@ pub struct ControlVectorDescriptor<'a> {
 pub struct ControlCurrentDescriptor<'a> {
     pub result_index: usize,
     pub owner: &'a rspice_core::CurrentImpulseOwner,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlVoltageDescriptor<'a> {
+    pub result_index: usize,
+    pub node_name: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -103,6 +111,16 @@ impl WasmResultHandle {
             result_index: self.control_result_index(&vector.dataset)?,
             unit: SignalUnitView::project(&vector.unit)?,
             point_count: vector.samples.len(),
+            voltage_sources: vector
+                .voltage_sources
+                .iter()
+                .map(|source| {
+                    Ok(ControlVoltageDescriptor {
+                        result_index: self.control_result_index(&source.dataset)?,
+                        node_name: &source.node_name,
+                    })
+                })
+                .collect::<DetailedWasmResult<_>>()?,
             current_sources: vector
                 .current_sources
                 .iter()

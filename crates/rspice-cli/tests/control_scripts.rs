@@ -206,6 +206,7 @@ fn original_bjt_control_loop_publishes_six_datasets_and_its_plot() {
     }
     let plot = document(&dir.join("result.control-001.json"));
     assert_eq!(plot["schema"], "rspice.control-presentation");
+    assert_eq!(plot["version"], 3);
     assert_eq!(plot["traces"].as_array().unwrap().len(), 6);
     assert_eq!(plot["x_logarithmic"], true);
     assert_eq!(plot["y_limits"], serde_json::json!([0.1, 100.0]));
@@ -249,6 +250,13 @@ fn original_memristor_control_script_publishes_each_time_grid_and_xy_plot() {
         let trace = &current["traces"][index];
         assert_eq!(trace["x"]["dataset"], trace["y"]["dataset"]);
         assert_eq!(trace["x"]["unit"], "V");
+        assert_eq!(trace["x"]["voltage_sources"].as_array().unwrap().len(), 1);
+        assert_eq!(trace["x"]["voltage_sources"][0]["node_name"], "1");
+        assert_eq!(
+            trace["x"]["voltage_sources"][0]["dataset"],
+            trace["x"]["dataset"]
+        );
+        assert!(trace["x"]["voltage_sources"][0].get("impulses").is_some());
         assert_eq!(
             trace["y"]["current_sources"][0]["owner"]["branchName"],
             "v1"

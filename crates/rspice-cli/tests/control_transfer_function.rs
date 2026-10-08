@@ -158,7 +158,7 @@ fn unbounded_control_print_keeps_typed_evidence_and_authored_order() {
         &std::fs::read_to_string(directory.join("open.control-001.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(wire["version"], 2);
+    assert_eq!(wire["version"], 3);
     assert_eq!(wire["traces"].as_array().unwrap().len(), 2);
     for (scalar, position) in wire["scalars"].as_array().unwrap().iter().zip([1, 3]) {
         assert_eq!(scalar["position"], position);

@@ -57,7 +57,7 @@ pub use control::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlCurrentSource,
     ControlExecutionError, ControlNamedDataset, ControlPlotOptions, ControlPresentation,
     ControlPresentationKind, ControlScalar, ControlSettings, ControlTrace, ControlVector,
-    ControlVectorId,
+    ControlVectorId, ControlVoltageSource,
 };
 #[cfg(feature = "veriloga")]
 mod compiler_diagnostics;

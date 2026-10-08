@@ -25,7 +25,7 @@ pub use options::ControlSettings;
 pub(super) use options::apply_runtime_options;
 pub use presentation::{
     ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
-    ControlScalar, ControlTrace, ControlVector, ControlVectorId,
+    ControlScalar, ControlTrace, ControlVector, ControlVectorId, ControlVoltageSource,
 };
 
 #[derive(Debug, thiserror::Error)]

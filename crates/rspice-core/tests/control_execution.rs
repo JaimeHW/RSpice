@@ -666,3 +666,31 @@ fn a_transient_host_failure_is_typed_and_does_not_consume_a_dataset_identity() {
     circuit.execute(&engine, &command, &vars, &NoAbort).unwrap();
     assert_eq!(circuit.datasets()[0].analysis_id.tag(), "tran-001");
 }
+
+#[test]
+fn control_voltage_expressions_retain_unique_node_and_dataset_provenance() {
+    let (_, output) = drive(
+        "Voltage provenance\nV1 out 0 1\nV2 ref 0 2\n.control\ntran 1u 10u\nprint v(out,ref)+v(out)\n.endc\n.end\n",
+        &Engine::new(SimulationConfig::default()),
+        |_| {},
+    );
+    let ControlPresentationKind::Print(traces) = &output[0].kind else {
+        panic!("expected PRINT");
+    };
+    assert_eq!(traces.len(), 1);
+    let vector = &traces[0].y;
+    assert!(vector.current_sources.is_empty());
+    assert_eq!(vector.voltage_sources.len(), 2);
+    let mut names = vector
+        .voltage_sources
+        .iter()
+        .map(|source| {
+            assert_eq!(source.dataset, "tran1");
+            source.node_name.to_ascii_lowercase()
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, ["out", "ref"]);
+    assert!(traces[0].x.voltage_sources.is_empty());
+    assert!(vector.samples.iter().all(|value| value.norm() < 1e-12));
+}

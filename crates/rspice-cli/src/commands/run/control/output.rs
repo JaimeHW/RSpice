@@ -125,7 +125,7 @@ pub(super) fn present(
     );
     let document = PresentationDocument {
         schema: "rspice.control-presentation",
-        version: if request.scalars.is_empty() { 1 } else { 2 },
+        version: 3,
         command: &request.command.name,
         line: request.command.line,
         title: options.and_then(|options| options.title.as_deref()),
@@ -210,6 +210,7 @@ struct VectorDocument<'a> {
     /// Complex samples serialize as [real, imaginary], without projection.
     samples: &'a [rspice_core::ComplexValue],
     current_sources: Vec<CurrentDocument<'a>>,
+    voltage_sources: Vec<VoltageDocument<'a>>,
 }
 
 #[derive(Serialize)]
@@ -218,6 +219,13 @@ struct CurrentDocument<'a> {
     owner: &'a rspice_core::CurrentImpulseOwner,
     /// Null means unrecorded; only a complete empty trace proves absence.
     impulses: Option<&'a rspice_core::CurrentImpulseTrace>,
+}
+
+#[derive(Serialize)]
+struct VoltageDocument<'a> {
+    dataset: &'a str,
+    node_name: &'a str,
+    impulses: Option<&'a rspice_core::VoltageImpulseTrace>,
 }
 
 fn vector_document<'a>(
@@ -229,6 +237,32 @@ fn vector_document<'a>(
         dataset: &vector.dataset,
         unit: vector.unit.symbol(),
         samples: &vector.samples,
+        voltage_sources: vector
+            .voltage_sources
+            .iter()
+            .map(|source| {
+                let impulses = circuit
+                    .datasets()
+                    .iter()
+                    .find(|dataset| dataset.name == source.dataset)
+                    .and_then(|dataset| match &dataset.result {
+                        ControlAnalysisResult::Transient(result) => {
+                            result.voltage_impulses.as_deref()
+                        }
+                        _ => None,
+                    })
+                    .and_then(|traces| {
+                        traces
+                            .iter()
+                            .find(|trace| trace.node_name.eq_ignore_ascii_case(&source.node_name))
+                    });
+                VoltageDocument {
+                    dataset: &source.dataset,
+                    node_name: &source.node_name,
+                    impulses,
+                }
+            })
+            .collect(),
         current_sources: vector
             .current_sources
             .iter()
