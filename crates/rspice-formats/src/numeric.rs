@@ -2,10 +2,13 @@
 
 use std::collections::BTreeMap;
 
+pub mod nullable;
+
 /// Decoded real or complex samples before result validation and admission.
 #[derive(Debug)]
 pub struct DecodedNumericSignal {
     pub name: String,
+    /// Exact values; NaN marks an explicitly unavailable sample, never a zero.
     pub real: Vec<f64>,
     pub imag: Option<Vec<f64>>,
     pub unit: Option<String>,

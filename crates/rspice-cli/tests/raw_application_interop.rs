@@ -53,6 +53,42 @@ fn raw_exports_retain_explicit_signal_units_in_the_application_reader() {
 }
 
 #[test]
+fn nullable_raw_columns_are_samples_with_gaps_not_extra_validity_signals() {
+    let dir = test_dir("raw_application_nullable");
+    let source = dir.join("source.json");
+    let data = serde_json::json!({
+        "plot_name":"Nullable samples",
+        "scale":{"name":"time", "type":"time", "unit":"s", "values":[0.0,1.0,2.0]},
+        "signals":[
+            {"name":"voltage", "type":"voltage", "unit":"V", "values":[1.0,null,-0.0]},
+            {"name":"transfer", "type":"value", "unit":"1", "real":[2.0,null,3.0], "imag":[-4.0,null,5.0]},
+            {"name":"Valid(voltage)", "type":"current", "unit":"A", "values":[7.0,8.0,9.0]}
+        ]
+    });
+    std::fs::write(&source, serde_json::to_vec(&data).unwrap()).unwrap();
+    for format in ["raw", "ascii"] {
+        let output = dir.join(format!("result.{format}"));
+        convert(&source, &output, format);
+        let decoded =
+            decode_spice_raw(&std::fs::read(output).unwrap(), Default::default()).unwrap();
+        assert_eq!(decoded.coordinate, [0.0, 1.0, 2.0]);
+        assert_eq!(
+            decoded.signals.len(),
+            3,
+            "{format}: validity is not a measured signal"
+        );
+        assert_eq!(decoded.signals[0].name, "voltage");
+        assert_eq!(decoded.signals[1].name, "transfer");
+        assert_eq!(decoded.signals[2].name, "Valid(voltage)");
+        assert!(decoded.signals[0].real[1].is_nan());
+        assert_eq!(decoded.signals[0].real[2].to_bits(), (-0.0_f64).to_bits());
+        assert!(decoded.signals[1].real[1].is_nan());
+        assert!(decoded.signals[1].imag.as_ref().unwrap()[1].is_nan());
+        assert_eq!(decoded.signals[2].real, [7.0, 8.0, 9.0]);
+    }
+}
+
+#[test]
 fn raw_coordinates_use_canonical_physical_values_in_the_application_reader() {
     let dir = test_dir("raw_application_coordinate_units");
     let source = dir.join("source.json");

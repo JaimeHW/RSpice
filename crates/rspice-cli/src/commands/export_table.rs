@@ -279,58 +279,52 @@ impl ExportTable {
     }
 
     pub(crate) fn restore_nullable_columns(&mut self) -> Result<(), String> {
+        use rspice_formats::numeric::nullable::{
+            DenseNumericColumn, decode_dense_validity, nullable_value_type,
+        };
         let mut columns = Vec::new();
         let mut encoded = std::mem::take(&mut self.columns).into_iter();
         while let Some(column) = encoded.next() {
-            let representation = column
-                .var_type
-                .strip_prefix("nullable_real:")
-                .map(|kind| (kind, false))
-                .or_else(|| {
-                    column
-                        .var_type
-                        .strip_prefix("nullable_complex:")
-                        .map(|kind| (kind, true))
-                });
-            let Some((kind, complex)) = representation else {
+            let Some((kind, complex)) = nullable_value_type(&column.var_type) else {
                 if column.var_type.starts_with("nullable_validity:") {
                     return Err("nullable validity column has no preceding value column".into());
                 }
                 columns.push(column);
                 continue;
             };
-            let name = column.name;
             let validity = encoded
                 .next()
                 .ok_or("nullable value column has no validity column")?;
-            // Pairing is positional and explicitly typed; the mask label can
-            // carry a suffix to avoid collisions with authored signal names.
-            if validity.var_type != format!("nullable_validity:{kind}")
-                || validity.unit.as_deref() != Some("1")
-            {
-                return Err("nullable validity column does not match its value column".into());
+            fn numeric(column: &ExportColumn) -> Result<DenseNumericColumn<'_>, String> {
+                let (real, imag) = match &column.data {
+                    ColumnData::Real(real) => (real.as_slice(), None),
+                    ColumnData::Complex { real, imag } => (real.as_slice(), Some(imag.as_slice())),
+                    _ => {
+                        return Err(
+                            "nullable dense column representation does not match its type".into(),
+                        );
+                    }
+                };
+                Ok(DenseNumericColumn {
+                    kind: &column.var_type,
+                    unit: column.unit.as_deref(),
+                    real,
+                    imag,
+                })
             }
-            let ColumnData::Real(flags) = validity.data else {
-                return Err("nullable validity columns must be real".into());
-            };
-            let restore = |values: Vec<f64>| -> Result<Vec<Option<f64>>, String> {
-                if values.len() != flags.len() {
-                    return Err("nullable value/validity lengths differ".into());
-                }
+            let defined = decode_dense_validity(numeric(&column)?, numeric(&validity)?)?;
+            let name = column.name;
+            let restore = |values: Vec<f64>| -> Vec<Option<f64>> {
                 values
                     .into_iter()
-                    .zip(&flags)
-                    .map(|(value, &flag)| match flag {
-                        0.0 if value == 0.0 => Ok(None),
-                        1.0 if value.is_finite() => Ok(Some(value)),
-                        _ => Err("invalid nullable value or validity flag".to_owned()),
-                    })
+                    .zip(&defined)
+                    .map(|(value, &defined)| defined.then_some(value))
                     .collect()
             };
             let data = match (complex, column.data) {
-                (false, ColumnData::Real(values)) => ColumnData::optional_real(restore(values)?),
+                (false, ColumnData::Real(values)) => ColumnData::optional_real(restore(values)),
                 (true, ColumnData::Complex { real, imag }) => {
-                    ColumnData::optional_complex_parts(restore(real)?, restore(imag)?)?
+                    ColumnData::optional_complex_parts(restore(real), restore(imag))?
                 }
                 _ => {
                     return Err(

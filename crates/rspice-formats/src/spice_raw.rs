@@ -9,6 +9,7 @@ pub enum RawReadError {
     Parse(RawParseError),
     NoVariables,
     Coordinate(String),
+    Column(String),
 }
 
 impl std::fmt::Display for RawReadError {
@@ -16,7 +17,7 @@ impl std::fmt::Display for RawReadError {
         match self {
             Self::Parse(source) => source.fmt(f),
             Self::NoVariables => f.write_str("rawfile contains no variables"),
-            Self::Coordinate(message) => f.write_str(message),
+            Self::Coordinate(message) | Self::Column(message) => f.write_str(message),
         }
     }
 }
@@ -25,7 +26,7 @@ impl std::error::Error for RawReadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Parse(source) => Some(source),
-            Self::NoVariables | Self::Coordinate(_) => None,
+            Self::NoVariables | Self::Coordinate(_) | Self::Column(_) => None,
         }
     }
 }
@@ -78,7 +79,43 @@ pub fn decode_spice_raw(
         (scale.name, scale.y, unit)
     };
     let mut signals = Vec::new();
-    for (waveform, unit) in waveforms {
+    let mut columns = waveforms.zip(parsed.variables.iter().skip(usize::from(!ordinal)));
+    while let Some(((mut waveform, unit), variable)) = columns.next() {
+        use crate::numeric::nullable::{
+            DenseNumericColumn, decode_dense_validity, nullable_value_type,
+        };
+        if nullable_value_type(&variable.var_type).is_some() {
+            let ((mask, mask_unit), mask_variable) = columns.next().ok_or_else(|| {
+                RawReadError::Column("nullable value column has no validity column".into())
+            })?;
+            let defined = decode_dense_validity(
+                DenseNumericColumn {
+                    kind: &variable.var_type,
+                    unit: unit.as_deref(),
+                    real: &waveform.y,
+                    imag: waveform.y_imag.as_deref(),
+                },
+                DenseNumericColumn {
+                    kind: &mask_variable.var_type,
+                    unit: mask_unit.as_deref(),
+                    real: &mask.y,
+                    imag: mask.y_imag.as_deref(),
+                },
+            )
+            .map_err(RawReadError::Column)?;
+            for (index, defined) in defined.into_iter().enumerate() {
+                if !defined {
+                    waveform.y[index] = f64::NAN;
+                    if let Some(imag) = &mut waveform.y_imag {
+                        imag[index] = f64::NAN;
+                    }
+                }
+            }
+        } else if variable.var_type.starts_with("nullable_validity:") {
+            return Err(RawReadError::Column(
+                "nullable validity column has no preceding value column".into(),
+            ));
+        }
         signals.push(DecodedNumericSignal {
             name: waveform.name,
             real: waveform.y,
