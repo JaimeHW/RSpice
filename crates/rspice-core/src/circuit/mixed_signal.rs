@@ -121,11 +121,18 @@ impl CircuitData {
                     return Err(error);
                 }
             };
+            for (node, real) in coordinator.event_domains() {
+                self.net_kinds.register(
+                    node,
+                    if real {
+                        super::NetKind::Real
+                    } else {
+                        super::NetKind::Digital
+                    },
+                );
+            }
             self.scheduler.mixed_digital_coordinator = Some(coordinator);
             self.scheduler.mixed_xspice_bindings = bindings.map(std::sync::Arc::new);
-            for &node in event_nodes {
-                self.net_kinds.register(node, super::NetKind::Digital);
-            }
         }
         Ok(())
     }
@@ -139,6 +146,22 @@ impl CircuitData {
         event_nodes: &std::collections::BTreeSet<usize>,
     ) -> Result<(), SimulationError> {
         for host in &self.mixed_signal_hosts {
+            host.validate_direct_event_ports(event_nodes)
+                .map_err(|error| {
+                    crate::ElaborationError::new(
+                        crate::ElaborationErrorKind::PortDiscipline,
+                        error.to_string(),
+                    )
+                    .instance(host.instance_name())
+                })?;
+            for node in host.direct_real_nodes() {
+                if self.net_kinds.kind(node).is_discrete() {
+                    return Err(crate::ElaborationError::new(
+                        crate::ElaborationErrorKind::PortDiscipline,
+                        "a real-valued HDL port and an XSPICE event port require shared typed driver resolution; this boundary is not implemented yet",
+                    ).instance(host.instance_name()).into());
+                }
+            }
             for (signal, node) in host.boundary_connections() {
                 let kind = self.net_kinds.kind(node);
                 if !kind.is_discrete()

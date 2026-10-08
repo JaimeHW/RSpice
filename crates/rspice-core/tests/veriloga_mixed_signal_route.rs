@@ -3489,3 +3489,153 @@ endmodule
         }
     }
 }
+
+#[test]
+fn typed_event_boundaries_resolve_real_drivers_and_feed_loaded_analog_instances() {
+    let model = ModelFile::new(
+        "linked_real_ports",
+        r#"
+`timescale 1ns/1ps
+module real_source(q);
+ output q; wrealsum q;
+ parameter real LEVEL=1;
+ real value=0;
+ initial begin value=LEVEL; #1 value=2*LEVEL; end
+ assign q=value;
+endmodule
+module real_load(q,p);
+ input q; wrealsum q;
+ inout p; electrical p;
+ analog I(p)<+(V(p)-q)/1000;
+endmodule
+"#,
+    );
+    for reverse in [false, true] {
+        let mut cards = vec![
+            "Xa data real_source LEVEL=1",
+            "Xb data real_source LEVEL=2",
+            "Xc data out real_load",
+        ];
+        if reverse {
+            cards.reverse();
+        }
+        let deck = format!(
+            "* shared real-valued mixed ports\n{}\nRload out 0 1k\n.va \"{}\" real_source module=real_source\n.va \"{}\" real_load module=real_load\n.end\n",
+            cards.join("\n"),
+            model.deck_path(),
+            model.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.1e-9);
+        let trace = result
+            .real_trace_named("data")
+            .expect("shared real net is recorded");
+        assert_eq!(trace.first().unwrap().value, 3.0);
+        assert_eq!(trace.last().unwrap().value, 6.0);
+        assert!((trace.last().unwrap().time - 1e-9).abs() < 1e-15);
+        assert!(result.digital_trace_named("data").is_none());
+        assert_eq!(
+            result.event_only_node_kind("data"),
+            Some(rspice_core::analysis::transient::EventOnlyNetKind::Real)
+        );
+        for (&time, value) in result.time.iter().zip(waveform(&result, "out")) {
+            if (time - 1e-9).abs() < 1e-15 {
+                continue;
+            }
+            let expected = if time < 1e-9 { 1.5 } else { 3.0 };
+            assert!(
+                (value - expected).abs() < 1e-8,
+                "reverse={reverse}, t={time}: {value} != {expected}"
+            );
+        }
+    }
+    let single = ModelFile::new(
+        "single_real_ports",
+        "module real_source(q); output q; wreal q; assign q=1.0; endmodule",
+    );
+    let deck = format!(
+        "* conflicting single-driver real nets\nXa data real_source\nXb data real_source\nR1 out 0 1k\n.va \"{}\" real_source\n.end\n",
+        single.deck_path()
+    );
+    let error = error_for(&deck, 1e-9, 0.1e-9);
+    assert!(
+        error.contains("driver") && error.contains("resolution"),
+        "{error}"
+    );
+}
+
+#[test]
+fn typed_event_boundaries_resolve_bidirectional_contention_and_release() {
+    let model = ModelFile::new(
+        "linked_inout_ports",
+        r#"
+`timescale 1ns/1ps
+module shared_io(io,p);
+ inout [1:0] io; wire [1:0] io;
+ inout p; electrical p;
+ parameter integer DRIVE=0;
+ reg [1:0] value=2'bzz;
+ integer seen=0;
+ initial begin value=DRIVE; #1 value=2'bzz; end
+ assign io=value;
+ always @(io) begin
+  if(io===2'bxx) seen=4;
+  else if(io===2'bzz) seen=2;
+  else seen=0;
+ end
+ analog I(p)<+(V(p)-seen)/1000;
+endmodule
+"#,
+    );
+    for reverse in [false, true] {
+        let cards = if reverse {
+            "Xb hi lo pb shared_io DRIVE=3\nXa hi lo pa shared_io DRIVE=0"
+        } else {
+            "Xa hi lo pa shared_io DRIVE=0\nXb hi lo pb shared_io DRIVE=3"
+        };
+        let deck = format!(
+            "* shared bidirectional ports\n{cards}\nRa pa 0 1k\nRb pb 0 1k\n.va \"{}\" shared_io\n.end\n",
+            model.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.1e-9);
+        for net in ["hi", "lo"] {
+            let trace = result.digital_trace_named(net).expect("resolved bit trace");
+            assert_eq!(
+                trace.first().unwrap().value.state,
+                rspice_core::xspice::DigitalState::Unknown
+            );
+            assert_eq!(
+                trace.last().unwrap().value.state,
+                rspice_core::xspice::DigitalState::HighZ
+            );
+        }
+        for node in ["pa", "pb"] {
+            let values = waveform(&result, node);
+            assert!((values[0] - 2.0).abs() < 1e-8, "{node}: {values:?}");
+            assert!((values.last().unwrap() - 1.0).abs() < 1e-8);
+        }
+    }
+}
+
+#[test]
+fn typed_event_boundaries_sample_grounded_and_tied_logic_inputs() {
+    let model = ModelFile::new(
+        "tied_logic_ports",
+        r#"
+`timescale 1ns/1ps
+module tied(a,b,p);
+ input a,b; wire a,b;
+ inout p; electrical p;
+ integer sample=9;
+ initial begin #1 sample=a+b; end
+ analog I(p)<+(V(p)-sample)/1000;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* grounded and tied mixed inputs\nV1 high 0 3.3\nXa 0 0 low tied\nXb high high both tied\nRa low 0 1k\nRb both 0 1k\n.va \"{}\" tied\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    assert!(waveform(&result, "low").last().unwrap().abs() < 1e-8);
+    assert!((waveform(&result, "both").last().unwrap() - 1.0).abs() < 1e-8);
+}

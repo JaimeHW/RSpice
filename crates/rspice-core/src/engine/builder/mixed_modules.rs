@@ -25,9 +25,12 @@
 //!   boundary is analog-to-discrete. It takes an A/D bridge.
 //! * `output` — the module drives the net, so the boundary is
 //!   discrete-to-analog. It takes a D/A bridge.
-//! * `inout` — bidirectional, which needs a bridge that arbitrates who is
-//!   driving. The host has A/D and D/A and no third kind, so this is refused by
-//!   name rather than approximated with one of them.
+//! * `inout` — joins the shared event resolver when all endpoints are discrete.
+//!   An electrical bidirectional boundary still requires an explicit converter.
+//!
+//! Real-valued ports also join the shared event resolver, retaining the authored
+//! real net's driver policy. They require explicit conversion to electrical or
+//! XSPICE event domains; the completed topology validates this after loading.
 //!
 //! # A vector boundary port
 //!
@@ -117,6 +120,7 @@ enum BoundaryDirection {
     AnalogToDiscrete,
     /// The module drives and the analog side reads.
     DiscreteToAnalog,
+    Bidirectional,
 }
 
 impl BoundaryDirection {
@@ -124,6 +128,16 @@ impl BoundaryDirection {
         match self {
             Self::AnalogToDiscrete => super::XspiceAutoBridgeKind::Adc,
             Self::DiscreteToAnalog => super::XspiceAutoBridgeKind::Dac,
+            Self::Bidirectional => super::XspiceAutoBridgeKind::Bidi,
+        }
+    }
+
+    fn link_direction(self) -> rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection {
+        use rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection as Direction;
+        match self {
+            Self::AnalogToDiscrete => Direction::Input,
+            Self::DiscreteToAnalog => Direction::Output,
+            Self::Bidirectional => Direction::Inout,
         }
     }
 }
@@ -142,6 +156,7 @@ struct BoundaryPort {
     bit: u32,
     node: usize,
     direction: BoundaryDirection,
+    real: bool,
 }
 
 /// What one boundary port declared, once its bits are deck nodes.
@@ -298,6 +313,23 @@ pub(super) fn try_build_mixed_signal_instance(
 
     let node_names = circuit.node_names_sorted();
     for port in boundary {
+        if port.real || port.direction == BoundaryDirection::Bidirectional {
+            host.declare_event_port(
+                &port.signal,
+                (!port.real).then_some(port.bit),
+                port.node,
+                port.direction.link_direction(),
+            )
+            .map_err(|error| {
+                refuse(
+                    &element.name,
+                    subckt_name,
+                    host_failure_kind(&error),
+                    error.to_string(),
+                )
+            })?;
+            continue;
+        }
         let node_label = super::xspice_auto_bridge_node_label(Some(&node_names), port.node);
         let kind = port.direction.auto_bridge_kind();
         let selected = connect_rules.select_for_boundary_node(
@@ -365,6 +397,7 @@ pub(super) fn try_build_mixed_signal_instance(
                     MIXED_DAC_SOURCE_RESISTANCE,
                 )
             }
+            BoundaryDirection::Bidirectional => unreachable!("direct port declared above"),
         }
         .map_err(|error| {
             refuse(
@@ -406,9 +439,7 @@ pub(super) fn try_build_mixed_signal_instance(
 /// the deck names one node"), and this is that sentence answered rather than
 /// refused.
 ///
-/// A `wreal` port counts as one, not as its zero-bit width: it is refused by
-/// name in [`classify_boundary_ports`], and counting it as nothing here would
-/// make the node count disagree first and refuse it for the wrong reason.
+/// A real-valued port occupies one event net, despite having no bit width.
 fn declared_node_count(artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact) -> usize {
     artifact
         .hir
@@ -481,22 +512,10 @@ fn classify_boundary_ports(
         let Some(signal) = signal else {
             continue;
         };
-        if signal.kind.is_real() {
-            return Err(refuse(
-                &element.name,
-                subckt_name,
-                ElaborationErrorKind::PortDiscipline,
-                format!(
-                    "declares real-valued port '{}'. A `wreal` boundary carries a real number \
-                     rather than a discipline's potential and flow, so it is not the A/D or D/A \
-                     boundary this route bridges",
-                    port.name
-                ),
-            ));
-        }
         let direction = match port.direction.as_str() {
             "input" => BoundaryDirection::AnalogToDiscrete,
             "output" => BoundaryDirection::DiscreteToAnalog,
+            "inout" => BoundaryDirection::Bidirectional,
             other => {
                 return Err(refuse(
                     &element.name,
@@ -512,7 +531,12 @@ fn classify_boundary_ports(
                 ));
             }
         };
-        let bits = boundary_bit_order(signal).ok_or_else(|| {
+        let bits = (if signal.kind.is_real() {
+            Some(vec![0])
+        } else {
+            boundary_bit_order(signal)
+        })
+        .ok_or_else(|| {
             refuse(
                 &element.name,
                 subckt_name,
@@ -532,23 +556,12 @@ fn classify_boundary_ports(
         for (offset, bit) in bits.iter().copied().enumerate() {
             let deck_index = first + offset;
             let node = terminal_nodes[deck_index];
-            if node == 0 {
-                return Err(refuse(
-                    &element.name,
-                    subckt_name,
-                    ElaborationErrorKind::PortDiscipline,
-                    format!(
-                        "connects discrete port '{}' to ground; a boundary net carries a logic \
-                         value and ground is the voltage reference, not a net",
-                        port.name
-                    ),
-                ));
-            }
             layout.ports.push(BoundaryPort {
                 signal: port.name.to_string(),
                 bit,
                 node,
                 direction,
+                real: signal.kind.is_real(),
             });
         }
         if let Some((msb, lsb)) = signal.bounds {

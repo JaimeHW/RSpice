@@ -222,6 +222,7 @@ pub(crate) struct MixedDigitalCoordinator {
     instance_of_process: Vec<usize>,
     port_signals: Vec<Vec<DigitalSignalId>>,
     event_nodes: Vec<usize>,
+    real_event_nodes: Vec<(usize, DigitalSignalId)>,
     resolution: TimeResolution,
     enabled: bool,
     accepted_time: Option<f64>,
@@ -287,7 +288,10 @@ impl MixedDigitalCoordinator {
         }
         let mut ports = Vec::with_capacity(hosts.len());
         let mut private_nets = Vec::new();
+        let mut real_nets = std::collections::BTreeMap::<usize, Vec<(String, String)>>::new();
+        let mut node_domains = std::collections::BTreeMap::new();
         for host in hosts.iter() {
+            host.validate_direct_event_ports(event_nodes)?;
             let mut directions = std::collections::BTreeMap::new();
             for (signal, positive, negative, direction) in host
                 .state
@@ -310,6 +314,11 @@ impl MixedDigitalCoordinator {
                         DigitalLinkDirection::Output,
                     )
                 }))
+                .chain(
+                    host.event_ports
+                        .iter()
+                        .map(|port| (port.signal, port.node, 0, port.direction)),
+                )
             {
                 if !event_nodes.contains(&positive) {
                     continue;
@@ -318,6 +327,17 @@ impl MixedDigitalCoordinator {
                     return Err(MixedSignalError::InvalidBridge {
                         detail: "a differential electrical bridge cannot become an event net"
                             .into(),
+                    });
+                }
+                let real = host.state.digital.is_real(signal);
+                if node_domains
+                    .insert(positive, real)
+                    .is_some_and(|previous| previous != real)
+                {
+                    return Err(MixedSignalError::InvalidBridge {
+                        detail: format!(
+                            "event node {positive} connects real-valued and four-state ports without a conversion"
+                        ),
                     });
                 }
                 directions
@@ -340,10 +360,23 @@ impl MixedDigitalCoordinator {
                         .unwrap()
                         .name
                         .to_string();
-                    private_nets.push(DigitalLinkNet {
-                        name: port_net_name(&host.instance, signal),
-                        ports: vec![(host.instance.clone(), name.clone())],
-                    });
+                    if host.state.digital.is_real(signal) {
+                        let node = host
+                            .event_ports
+                            .iter()
+                            .find(|port| port.signal == signal)
+                            .unwrap()
+                            .node;
+                        real_nets
+                            .entry(node)
+                            .or_default()
+                            .push((host.instance.clone(), name.clone()));
+                    } else {
+                        private_nets.push(DigitalLinkNet {
+                            name: port_net_name(&host.instance, signal),
+                            ports: vec![(host.instance.clone(), name.clone())],
+                        });
+                    }
                     DigitalLinkPort {
                         name,
                         signal,
@@ -353,6 +386,10 @@ impl MixedDigitalCoordinator {
                 .collect();
             ports.push(instance_ports);
         }
+        private_nets.extend(real_nets.iter().map(|(&node, ports)| DigitalLinkNet {
+            name: format!("@real:{node}"),
+            ports: ports.clone(),
+        }));
         let instances: Vec<_> = hosts
             .iter()
             .zip(&ports)
@@ -394,8 +431,18 @@ impl MixedDigitalCoordinator {
             .map(|((host, map), ports)| {
                 let mut signals = map.signals.clone();
                 for port in ports {
-                    signals[usize::from(port.signal)] =
-                        linked.signal_names[&port_net_name(&host.instance, port.signal)];
+                    let net = if host.state.digital.is_real(port.signal) {
+                        let node = host
+                            .event_ports
+                            .iter()
+                            .find(|binding| binding.signal == port.signal)
+                            .unwrap()
+                            .node;
+                        format!("@real:{node}")
+                    } else {
+                        port_net_name(&host.instance, port.signal)
+                    };
+                    signals[usize::from(port.signal)] = linked.signal_names[&net];
                 }
                 signals
             })
@@ -418,6 +465,11 @@ impl MixedDigitalCoordinator {
                         .iter()
                         .map(|bridge| (bridge.signal, bridge.bit, bridge.positive)),
                 )
+                .chain(
+                    host.event_ports
+                        .iter()
+                        .filter_map(|port| port.bit.map(|bit| (port.signal, bit, port.node))),
+                )
             {
                 if event_nodes.contains(&node) {
                     bit_nets.entry(node).or_default().push(
@@ -430,6 +482,10 @@ impl MixedDigitalCoordinator {
             }
         }
         let (event_node_ids, bit_groups): (Vec<_>, Vec<_>) = bit_nets.into_iter().unzip();
+        let real_event_nodes = real_nets
+            .keys()
+            .map(|&node| (node, linked.signal_names[&format!("@real:{node}")]))
+            .collect();
         let views: Vec<_> = hosts
             .iter()
             .map(|host| {
@@ -504,6 +560,7 @@ impl MixedDigitalCoordinator {
             instance_of_process,
             port_signals,
             event_nodes: event_node_ids,
+            real_event_nodes,
             resolution,
             enabled: false,
             accepted_time: None,
@@ -521,6 +578,7 @@ impl MixedDigitalCoordinator {
             instance_of_process: self.instance_of_process.clone(),
             port_signals: self.port_signals.clone(),
             event_nodes: self.event_nodes.clone(),
+            real_event_nodes: self.real_event_nodes.clone(),
             resolution: self.resolution,
             enabled: false,
             accepted_time: None,
@@ -587,10 +645,29 @@ impl MixedDigitalCoordinator {
         for node in &mut self.event_nodes {
             *node = remap(*node);
         }
+        for (node, _) in &mut self.real_event_nodes {
+            *node = remap(*node);
+        }
     }
 
+    #[cfg(test)]
     pub(crate) fn event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
-        self.event_nodes.iter().copied().filter(|node| *node > 0)
+        self.event_domains().map(|(node, _)| node)
+    }
+
+    pub(crate) fn event_domains(&self) -> impl Iterator<Item = (usize, bool)> + '_ {
+        self.event_nodes
+            .iter()
+            .copied()
+            .map(|node| (node, false))
+            .chain(self.real_event_nodes.iter().map(|(node, _)| (*node, true)))
+            .filter(|(node, _)| *node > 0)
+    }
+
+    pub(crate) fn real_event_values(&self) -> impl Iterator<Item = (usize, f64)> + '_ {
+        self.real_event_nodes
+            .iter()
+            .filter_map(|&(node, signal)| self.digital.read_real(signal).map(|value| (node, value)))
     }
 
     pub(crate) fn event_values(

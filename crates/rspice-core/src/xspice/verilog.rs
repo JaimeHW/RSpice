@@ -41,13 +41,15 @@
 //! carries *one bit* of one discrete signal, so a vector port is one bridge per
 //! conductor — the deck names one node per bit — while the discrete half still
 //! sees whole-vector transitions, because the A/D settle composes a port's bit
-//! drives into one write. Bidirectional coercion remains fail-closed until its
-//! resolution semantics are represented directly.
+//! drives into one write. Event-only bidirectional ports share the resolved
+//! driver store; electrical bidirectional conversion remains unimplemented.
 //!
 //! # Where a `wreal` meets an analog node
 //!
-//! Not here yet, and the boundary's rulings are recorded here because they
-//! have a right answer worth writing down before somebody guesses one. The
+//! Direct HDL real-valued connections use the linked runtime's authored driver
+//! resolution and publish accepted real event traces. Electrical and XSPICE
+//! real-valued conversion remain unimplemented. The boundary's rulings below
+//! describe the timing and resolution requirements for that integration. The
 //! mixed host above now implements the time half of them —
 //! [`Instant::floor_tick`](super::event_scheduler::Instant::floor_tick)
 //! is the floor, and the crossing an A/D bridge is dated by is interpolated

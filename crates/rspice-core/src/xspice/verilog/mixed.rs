@@ -818,6 +818,16 @@ struct Bridges {
     dac: Vec<DacBridge>,
 }
 
+/// A typed port that connects directly to the shared event domain. Electrical
+/// conversion, when required, must be elaborated explicitly before enrollment.
+#[derive(Clone)]
+struct EventPort {
+    signal: DigitalSignalId,
+    bit: Option<u32>,
+    node: usize,
+    direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
+}
+
 /// One vector boundary port, as a bus over the deck nodes its bits landed on.
 ///
 /// Declared where the module is wired, because that is the only place that
@@ -1241,6 +1251,7 @@ pub struct MixedSignalHost {
     /// never read by one, so it sits beside the probe table rather than inside
     /// [`MixedState`].
     boundary_buses: Vec<BoundaryBus>,
+    event_ports: Vec<EventPort>,
     event_nodes: Vec<usize>,
     max_circuit_node: usize,
     max_bridge_iterations: u32,
@@ -1588,6 +1599,7 @@ impl MixedSignalHost {
             analog_probes,
             discrete_inputs,
             boundary_buses: Vec::new(),
+            event_ports: Vec::new(),
             event_nodes: Vec::new(),
             max_circuit_node,
             max_bridge_iterations,
@@ -1858,6 +1870,9 @@ impl MixedSignalHost {
         for node in &mut self.event_nodes {
             *node = remap(*node);
         }
+        for port in &mut self.event_ports {
+            port.node = remap(port.node);
+        }
         self.event_nodes.sort_unstable();
         self.event_nodes.dedup();
         self.max_circuit_node = analog_solver_nodes(&self.analog)
@@ -1898,6 +1913,8 @@ impl MixedSignalHost {
     /// Called only at fresh circuit elaboration after all connection validation.
     fn strip_event_boundaries(&mut self, nodes: &std::collections::BTreeSet<usize>) {
         let bridges = self.state.bridges.make_mut();
+        self.event_nodes
+            .extend(self.event_ports.iter().map(|port| port.node));
         self.event_nodes.extend(
             bridges
                 .adc
@@ -1997,7 +2014,65 @@ impl MixedSignalHost {
             .iter()
             .map(|bridge| bridge.positive)
             .chain(self.state.bridges.dac.iter().map(|bridge| bridge.positive))
+            .chain(self.event_ports.iter().map(|port| port.node))
             .filter(|node| *node > 0)
+    }
+
+    /// Verify direct ports after all electrical loads and event endpoints are
+    /// known. A physical boundary must never be silently treated as an event net.
+    pub(crate) fn validate_direct_event_ports(
+        &self,
+        nodes: &std::collections::BTreeSet<usize>,
+    ) -> Result<(), MixedSignalError> {
+        for port in &self.event_ports {
+            if !nodes.contains(&port.node) {
+                let signal = self.state.digital.plan().signal(port.signal).unwrap();
+                return Err(MixedSignalError::InvalidBridge {
+                    detail: format!(
+                        "{} port '{}' requires an explicit electrical conversion at this boundary; direct event linking requires connected event endpoints without a continuous load",
+                        if port.bit.is_none() {
+                            "real-valued"
+                        } else {
+                            "bidirectional"
+                        },
+                        signal.name,
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn direct_real_nodes(&self) -> impl Iterator<Item = usize> + '_ {
+        self.event_ports
+            .iter()
+            .filter(|port| port.bit.is_none())
+            .map(|port| port.node)
+    }
+
+    pub(crate) fn declare_event_port(
+        &mut self,
+        signal: &str,
+        bit: Option<u32>,
+        node: usize,
+        direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
+    ) -> Result<(), MixedSignalError> {
+        self.require_idle("declare an event port")?;
+        let id = self.state.digital.signal(signal)?;
+        if let Some(bit) = bit {
+            self.signal_bit(signal, bit)?;
+        } else if !self.state.digital.is_real(id) {
+            return Err(MixedSignalError::InvalidBridge {
+                detail: format!("event port '{signal}' requires a real-valued signal"),
+            });
+        }
+        self.event_ports.push(EventPort {
+            signal: id,
+            bit,
+            node,
+            direction,
+        });
+        Ok(())
     }
 
     /// Signal names and electrical endpoints of the built-in boundaries.
@@ -2019,6 +2094,18 @@ impl MixedSignalHost {
                     (bridge.signal_name.as_str(), bridge.positive),
                     (bridge.signal_name.as_str(), bridge.negative),
                 ]
+            }))
+            .chain(self.event_ports.iter().map(|port| {
+                (
+                    self.state
+                        .digital
+                        .plan()
+                        .signal(port.signal)
+                        .unwrap()
+                        .name
+                        .as_str(),
+                    port.node,
+                )
             }))
     }
 

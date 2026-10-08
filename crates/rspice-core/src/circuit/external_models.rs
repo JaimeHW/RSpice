@@ -731,8 +731,15 @@ impl CircuitData {
         }
         #[cfg(feature = "veriloga")]
         if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
-            for node in digital.event_nodes() {
-                self.net_kinds.register(node, NetKind::Digital);
+            for (node, real) in digital.event_domains() {
+                self.net_kinds.register(
+                    node,
+                    if real {
+                        NetKind::Real
+                    } else {
+                        NetKind::Digital
+                    },
+                );
             }
         }
         // Renumbered connections move the nets the sensitivity map is keyed
@@ -1620,6 +1627,10 @@ impl CircuitData {
                 .iter()
                 .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
         );
+        #[cfg(feature = "veriloga")]
+        if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
+            snapshot.extend(digital.real_event_values());
+        }
         snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
     }
 
