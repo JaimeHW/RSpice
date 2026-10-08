@@ -1086,9 +1086,9 @@ impl<'a> Lexer<'a> {
         lookahead
             .next()
             .is_some_and(|(_, character)| character == '\'')
-            && !lookahead
+            && lookahead
                 .peek()
-                .is_some_and(|(_, character)| *character == '{')
+                .is_none_or(|(_, character)| *character != '{')
     }
 
     fn scan_string(&mut self, start: usize) -> Result<Token, LexerError> {
