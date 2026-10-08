@@ -48,6 +48,9 @@ impl From<ExportTable> for ImportedResult {
 
 /// Guess a format from the file extension; rawfile when unknown.
 pub(crate) fn detect_format(path: &Path) -> InputFormat {
+    if crate::commands::touchstone_name::is_touchstone(path) {
+        return InputFormat::Touchstone;
+    }
     match path
         .extension()
         .and_then(|e| e.to_str())
@@ -59,17 +62,6 @@ pub(crate) fn detect_format(path: &Path) -> InputFormat {
         Some("json") => InputFormat::Json,
         Some("h5") | Some("hdf5") => InputFormat::Hdf5,
         Some("vcd") => InputFormat::Vcd,
-        Some(ext)
-            if ext == "ts"
-                || ext
-                    .strip_prefix('s')
-                    .and_then(|ext| ext.strip_suffix('p'))
-                    .is_some_and(|ports| {
-                        !ports.is_empty() && ports.bytes().all(|byte| byte.is_ascii_digit())
-                    }) =>
-        {
-            InputFormat::Touchstone
-        }
         _ => InputFormat::Raw,
     }
 }

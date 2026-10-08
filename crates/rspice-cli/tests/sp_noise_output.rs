@@ -460,17 +460,19 @@ fn capable_formats_retain_noise_identity_and_hdf5_round_trips() {
 #[test]
 fn touchstone_refuses_to_silently_drop_requested_noise_data() {
     let dir = test_dir("touchstone");
-    let path = dir.join("sp.s2p");
-    let output = run(&fixture("sp_donoise_keyword.cir"), Some(&path), None);
-    assert!(!output.status.success());
-    let diagnostic = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        diagnostic.contains("cannot retain the full .SP DONOISE covariance"),
-        "{diagnostic}"
-    );
-    assert!(!path.exists(), "lossy Touchstone artifact was published");
+    for extension in ["s2p", "snp", "ts"] {
+        let path = dir.join(format!("sp.{extension}"));
+        let output = run(&fixture("sp_donoise_keyword.cir"), Some(&path), None);
+        assert!(!output.status.success());
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            diagnostic.contains("cannot retain the full .SP DONOISE covariance"),
+            "{diagnostic}"
+        );
+        assert!(!path.exists(), "lossy Touchstone artifact was published");
+    }
 }

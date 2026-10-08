@@ -9,8 +9,8 @@
 //! solves the N ports the deck declares with `PORT` voltage sources (`sp`
 //! tag); `--sparam` drives four explicitly named nodes as a two-port over the
 //! deck's `.AC` sweep (`sparam` tag). Both write Touchstone when the `-o`
-//! extension matches the port count, and the standard complex tables
-//! otherwise.
+//! extension matches the port count or names generic `.snp`/`.ts` output,
+//! and the standard complex tables otherwise.
 //!
 //! Corner sweeps re-elaborate the deck per corner on `--jobs` workers,
 //! tagging each corner's output so workers never collide.
@@ -844,14 +844,18 @@ fn publish_sparam_run(
     };
     let analysis_id = resolved.analysis(kind)?;
     let output_path = &resolved.path;
-    if touchstone_extension_matches(output_path, run.ports.len())? {
+    if let Some(version) =
+        crate::commands::touchstone_name::output_version(output_path, run.ports.len())?
+    {
         if run.port_noise.is_some() {
             return Err(CliError::InvalidArgument {
                 message: format!(
                     "{} cannot retain the full .SP DONOISE covariance and normalization provenance",
                     output_path.display()
                 ),
-                suggestion: Some("use CSV, TSV, raw, or HDF5 output for .SP DONOISE".to_string()),
+                suggestion: Some(
+                    "use JSON, CSV, TSV, raw, or HDF5 output for .SP DONOISE".to_string(),
+                ),
             });
         }
         let publication = super::PublishedResult {
@@ -861,7 +865,7 @@ fn publish_sparam_run(
             artifact: output_path.clone(),
             source_sample_presence: None,
         };
-        write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering)?;
+        write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering, version)?;
         ctx.record_published(publication);
     } else {
         let (table, schema) = sparameter_export_table(run, frequencies, &scattering, kind)?;
@@ -1118,36 +1122,7 @@ fn touchstone_schema(ports: usize) -> Result<SignalSchema, CliError> {
     }))
 }
 
-fn touchstone_extension_matches(
-    path: &std::path::Path,
-    num_ports: usize,
-) -> Result<bool, CliError> {
-    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
-        return Ok(false);
-    };
-    if extension.eq_ignore_ascii_case("snp") {
-        return Ok(true);
-    }
-    let Some(ports) = extension
-        .strip_prefix(['s', 'S'])
-        .and_then(|value| value.strip_suffix(['p', 'P']))
-        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
-    else {
-        return Ok(false);
-    };
-    if ports.parse::<usize>().ok() == Some(num_ports) && num_ports > 0 {
-        return Ok(true);
-    }
-    Err(CliError::InvalidArgument {
-        message: format!(
-            "Touchstone output '{}' declares {ports} ports, but the result has {num_ports}",
-            path.display()
-        ),
-        suggestion: Some(format!("use an .s{num_ports}p extension for this network")),
-    })
-}
-
-/// Write an N-port Touchstone v1 file through the shared core writer.
+/// Write an N-port Touchstone file through the shared core writer.
 ///
 /// Formatting, the option line, and the mixed-reference-impedance refusal all
 /// live in `rspice_core`, so a deck exported here and through the Python
@@ -1157,13 +1132,14 @@ fn write_touchstone_nport(
     ports: &[s_param::SParameterPort],
     frequencies: &[f64],
     s: &[Vec<Vec<rspice_core::Complex64>>],
+    version: s_param::TouchstoneVersion,
 ) -> Result<(), CliError> {
     if ports.is_empty() {
         return Ok(());
     }
     let reference_impedances: Vec<f64> = ports.iter().map(|port| port.z0).collect();
     let comments = vec![format!("{}-port S-parameters", ports.len())];
-    let document = s_param::touchstone(
+    let document = s_param::touchstone_with_version(
         &s_param::TouchstoneInput {
             frequencies,
             parameters: s,
@@ -1172,10 +1148,11 @@ fn write_touchstone_nport(
         },
         s_param::TouchstoneFormat::RealImaginary,
         s_param::TouchstoneFrequencyUnit::Hz,
+        version,
     )
     .map_err(|message| CliError::InvalidArgument {
         message,
-        suggestion: Some("use CSV, JSON, or HDF5 output for per-port z0 values".to_string()),
+        suggestion: Some("use .ts, CSV, JSON, or HDF5 output for per-port z0 values".to_string()),
     })?;
     publish::artifact(path, |writer| {
         writer

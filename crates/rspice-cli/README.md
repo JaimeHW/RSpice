@@ -768,7 +768,7 @@ With `--to vcd --section`, a RAW event or bus plot keeps its event encoding and
 bus declaration; an ordinary analysis plot uses its sampled `D(node)`/`E(node)`
 columns. Bus expansion, variable selection, and clipping apply in either case.
 
-Touchstone `.sNp` and `.ts` inputs are auto-detected; `convert --from touchstone`
+Touchstone `.sNp`, `.snp`, and `.ts` inputs are auto-detected; `convert --from touchstone`
 selects the parser for another extension. RI, magnitude/angle and dB/angle
 values become complex coefficients on a hertz coordinate. Port references
 remain numeric `Z0(port)` columns, so two equal coefficient arrays with
@@ -777,6 +777,11 @@ also retains these reference columns; direct flat `.SP` and `--sparam` output
 appends them after the coefficient and noise columns. Formats with quantity
 metadata retain dimensionless scattering coefficients, covariance in A²/Hz,
 temperature in K, thermal normalization in J, and noise resistance in ohms.
+For `.SP` and `--sparam`, a numbered `.sNp` output writes Touchstone v1 and must
+match the network's port count. Generic `.snp` and `.ts` outputs write
+[Touchstone 2.0](https://www.ibis.org/touchstone_ver2.0/touchstone_ver2_0.pdf),
+including explicit matrix dimensions, frequency count, and per-port references.
+These generic names therefore also support unequal port reference impedances.
 If a Touchstone file carries noise,
 select `--section network` or `--section noise`: the latter keeps its own
 frequency grid, noise resistance in ohms, optimum complex reflection, and

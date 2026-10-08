@@ -1,15 +1,12 @@
-//! Touchstone v1.1 serialization for N-port scattering results.
+//! Touchstone v1.1 and v2.0 serialization for N-port scattering results.
 //!
 //! One writer, shared by every front-end. The CLI previously emitted a
 //! fixed `# HZ S RI R <z0>` line of its own while the Python bindings carried
 //! this richer implementation, so the same result exported through two
 //! products produced two different files.
 //!
-//! A result whose ports do not all share one reference impedance is refused
-//! rather than written with a silently wrong `R`. Touchstone v1 has a single
-//! global `R` option and no way to express per-port normalization, so any
-//! value written for a mixed-impedance network would be a lie that reads as
-//! authoritative in whatever tool consumes the file.
+//! Version 1 requires one shared reference impedance. Version 2 retains each
+//! port's reference explicitly, along with the matrix dimensions and ordering.
 
 use std::fmt::Write as _;
 
@@ -135,6 +132,15 @@ pub struct TouchstoneInput<'a> {
     pub comments: &'a [String],
 }
 
+/// File syntax and port-normalization metadata to publish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchstoneVersion {
+    /// The port count is supplied by the `.sNp` filename; one shared reference.
+    V1,
+    /// Explicit port count, frequency count, matrix order and per-port references.
+    V2,
+}
+
 /// Touchstone v1 permits at most four complex pairs on one physical line.
 pub(crate) const MAX_PAIRS_PER_LINE: usize = 4;
 
@@ -143,6 +149,18 @@ pub fn touchstone(
     input: &TouchstoneInput<'_>,
     format: TouchstoneFormat,
     unit: TouchstoneFrequencyUnit,
+) -> Result<String, String> {
+    touchstone_with_version(input, format, unit, TouchstoneVersion::V1)
+}
+
+/// Render a network using the selected Touchstone syntax. Version 2 includes
+/// the declarations required by the IBIS Touchstone 2.0 specification, so a
+/// generic filename does not require a reader to infer the matrix dimensions.
+pub fn touchstone_with_version(
+    input: &TouchstoneInput<'_>,
+    format: TouchstoneFormat,
+    unit: TouchstoneFrequencyUnit,
+    version: TouchstoneVersion,
 ) -> Result<String, String> {
     let ports = input.parameters.len();
     if ports == 0 {
@@ -172,11 +190,12 @@ pub fn touchstone(
     // Writing one anyway for a mixed-impedance network would produce a file
     // whose S-parameters mean something other than what was simulated.
     let reference = input.reference_impedances[0];
-    if let Some((index, mismatched)) = input
-        .reference_impedances
-        .iter()
-        .enumerate()
-        .find(|(_, z0)| z0.to_bits() != reference.to_bits())
+    if version == TouchstoneVersion::V1
+        && let Some((index, mismatched)) = input
+            .reference_impedances
+            .iter()
+            .enumerate()
+            .find(|(_, z0)| z0.to_bits() != reference.to_bits())
     {
         return Err(format!(
             "Touchstone v1 supports one reference impedance, but port 1 uses {reference} ohm and \
@@ -191,12 +210,31 @@ pub fn touchstone(
             let _ = writeln!(output, "! {line}");
         }
     }
+    if version == TouchstoneVersion::V2 {
+        let _ = writeln!(output, "[Version] 2.0");
+    }
     let _ = writeln!(
         output,
         "# {} S {} R {reference}",
         unit.keyword(),
         format.keyword()
     );
+    if version == TouchstoneVersion::V2 {
+        let _ = writeln!(output, "[Number of Ports] {ports}");
+        if ports == 2 {
+            let _ = writeln!(output, "[Two-Port Data Order] 21_12");
+        }
+        let _ = writeln!(
+            output,
+            "[Number of Frequencies] {}",
+            input.frequencies.len()
+        );
+        let _ = write!(output, "[Reference]");
+        for impedance in input.reference_impedances {
+            let _ = write!(output, " {}", format_float(*impedance));
+        }
+        let _ = writeln!(output, "\n[Matrix Format] Full\n[Network Data]");
+    }
 
     let divisor = unit.divisor();
     for (frequency_index, frequency) in input.frequencies.iter().enumerate() {
@@ -257,6 +295,9 @@ pub fn touchstone(
         }
     }
 
+    if version == TouchstoneVersion::V2 {
+        let _ = writeln!(output, "[End]");
+    }
     Ok(output)
 }
 

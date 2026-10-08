@@ -29,6 +29,7 @@ pub(crate) mod publish;
 mod result_signal;
 pub mod run;
 mod run_signals;
+mod touchstone_name;
 pub(crate) mod vcd_io;
 pub(crate) mod waveform_io;
 
