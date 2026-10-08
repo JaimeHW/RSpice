@@ -227,3 +227,33 @@ fn waveform_coordinates_cannot_silently_discard_imaginary_values() {
         "{error}"
     );
 }
+
+#[test]
+fn multiple_raw_plots_cannot_be_imported_as_a_successful_partial_dataset() {
+    let first = "Title: first\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0 1\n1 1 2\n";
+    let second = first
+        .replace("Title: first", "Title: second")
+        .replace("1 1 2", "1 1 3");
+    let combined = format!("{first}{second}");
+    let error = decode_spice_raw(combined.as_bytes(), Default::default())
+        .expect_err("one dataset cannot silently discard a second plot");
+    assert!(error.to_string().contains("2 plots"), "{error}");
+    assert!(error.to_string().contains("--section"), "{error}");
+    let broken = format!("{first}Title: incomplete second plot\n");
+    assert!(decode_spice_raw(broken.as_bytes(), Default::default()).is_err());
+
+    let directory = test_dir("raw_select_for_application");
+    let source = directory.join("multiple.raw");
+    let selected = directory.join("selected.raw");
+    std::fs::write(&source, combined).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "convert"])
+        .arg(source)
+        .arg(&selected)
+        .args(["--to", "raw", "--section", "2"])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    let decoded = decode_spice_raw(&std::fs::read(selected).unwrap(), Default::default()).unwrap();
+    assert_eq!(decoded.signals[0].real, [1.0, 3.0]);
+}

@@ -2,12 +2,12 @@
 
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
 use rspice_core::io::RawParseError;
-use std::io::Cursor;
 
 #[derive(Debug)]
 pub enum RawReadError {
     Parse(RawParseError),
     NoVariables,
+    MultiplePlots(usize),
     Coordinate(String),
     Column(String),
 }
@@ -17,6 +17,10 @@ impl std::fmt::Display for RawReadError {
         match self {
             Self::Parse(source) => source.fmt(f),
             Self::NoVariables => f.write_str("rawfile contains no variables"),
+            Self::MultiplePlots(count) => write!(
+                f,
+                "rawfile contains {count} plots; select one analysis with rspice convert --section before importing"
+            ),
             Self::Coordinate(message) | Self::Column(message) => f.write_str(message),
         }
     }
@@ -26,7 +30,9 @@ impl std::error::Error for RawReadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Parse(source) => Some(source),
-            Self::NoVariables | Self::Coordinate(_) | Self::Column(_) => None,
+            Self::NoVariables | Self::MultiplePlots(_) | Self::Coordinate(_) | Self::Column(_) => {
+                None
+            }
         }
     }
 }
@@ -35,8 +41,14 @@ pub fn decode_spice_raw(
     bytes: &[u8],
     limits: rspice_core::ResourceLimits,
 ) -> Result<DecodedNumericDataset, RawReadError> {
-    let parsed = rspice_core::io::parse_raw_reader_with_limits(&mut Cursor::new(bytes), limits)
+    // A result import admits one dataset. Parse the complete bounded file so
+    // further plots (including corrupt ones) cannot disappear behind success.
+    let mut file = rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(bytes, limits)
         .map_err(RawReadError::Parse)?;
+    if file.plots.len() > 1 {
+        return Err(RawReadError::MultiplePlots(file.plots.len()));
+    }
+    let parsed = file.plots.pop().ok_or(RawReadError::NoVariables)?;
     parsed
         .validate_real_coordinate()
         .map_err(RawReadError::Parse)?;
