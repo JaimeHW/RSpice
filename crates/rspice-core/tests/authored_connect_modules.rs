@@ -819,3 +819,147 @@ fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
         );
     }
 }
+
+
+#[test]
+fn selected_bus_lanes_preserve_grouping_loading_and_adc_driver_bits() {
+    for (mode, expected) in [("merged", 0.5), ("split", 0.75)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module load(a,p);
+ input a; electrical a;
+ output p; electrical p;
+ analog begin
+  I(a)<+V(a)/1000;
+  I(p)<+(V(p)-V(a))/1000;
+ end
+endmodule
+module stimulus(a);
+ output a; electrical a;
+ parameter real level=0;
+ analog V(a)<+level;
+endmodule
+module bank(p,q,r,m,s,t);
+ parameter integer INDEX=4;
+ output p,q,r,m,s,t; electrical p,q,r,m,s,t;
+ reg [2:5] bus;
+ reg [8:8] single;
+ wire [2:5] sampled;
+ reg valid;
+ initial begin bus=4'b1001; single=1; valid=0; #1 bus=4'b0100; single=0; end
+ load first(bus[INDEX],p);
+ load second(.a(bus[2:2]),.p(q));
+ load third(bus[INDEX+1],r);
+ load fourth(single,s);
+ load fifth(single[8],t);
+ stimulus #(.level(2.0)) high(sampled[INDEX]);
+ stimulus #(.level(0.0)) low(sampled[5:5]);
+ always @(sampled) valid = (sampled[2] === 1'b1) && (sampled[5] === 1'b0)
+                           && (sampled[3] === 1'bz) && (sampled[4] === 1'bz);
+ analog V(m)<+(valid ? 1.0 : 0.0);
+endmodule
+module top(p,q,r,m,s,t);
+ inout p,q,r,m,s,t; electrical p,q,r,m,s,t;
+ bank #(.INDEX(2)) child(p,q,r,m,s,t);
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectmodule sense(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+ always #0.1 d=V(a)>1.0;
+endmodule
+connectrules chosen;
+ connect drive {mode};
+ connect sense;
+endconnectrules
+"#
+        ));
+        let deck=Netlist::parse(&format!("* selected bus lanes\nX1 p q r m s t top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\nRt t 0 1k\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+        for node in ["p", "q", "s", "t"] {
+            assert!(
+                (voltage(&result, node, 0.5e-9) - expected).abs() < 1e-7,
+                "{mode}, {node}"
+            );
+            assert!(
+                voltage(&result, node, 1.4e-9).abs() < 1e-7,
+                "{mode}, {node} after edge"
+            );
+        }
+        assert!(voltage(&result, "r", 0.5e-9).abs() < 1e-7);
+        assert!((voltage(&result, "r", 1.4e-9) - 0.75).abs() < 1e-7);
+        assert!(
+            (voltage(&result, "m", 0.5e-9) - 1.0).abs() < 1e-7,
+            "ADC must drive exactly its selected bits"
+        );
+    }
+}
+
+#[test]
+fn mixed_connections_read_real_and_packed_elements_of_multidimensional_arrays() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module load(a,p);
+ input a; electrical a;
+ output p; electrical p;
+ analog begin
+  I(a)<+V(a)/1000;
+  I(p)<+(V(p)-V(a))/1000;
+ end
+endmodule
+module bank(p,q,r);
+ parameter integer ROW=5, COLUMN=1;
+ output p,q,r; electrical p,q,r;
+ real levels[5:4][2:1];
+ reg [6:3] words[2:1][0:1];
+ initial begin
+  levels[5][1]=2.0; levels[4][2]=9.0;
+  words[2][1]=4'b1000; words[1][0]=4'b0010;
+  #1 levels[5][1]=4.0; words[2][1]=0; words[1][0]=0;
+ end
+ load first(levels[ROW][COLUMN],p);
+ load second(words[2][1][6],q);
+ load third(words[1][0][4:4],r);
+endmodule
+module top(p,q,r);
+ inout p,q,r; electrical p,q,r;
+ bank child(p,q,r);
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectmodule real_drive(a,r);
+ output a; electrical a;
+ input r; logic r; wreal r;
+ analog I(a)<+(V(a)-r)/1000;
+endmodule
+connectrules chosen;
+ connect drive;
+ connect real_drive;
+endconnectrules
+"#,
+    );
+    let deck=Netlist::parse(&format!("* selected array elements\nX1 p q r top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+    assert!((voltage(&result, "p", 0.5e-9) - 0.5).abs() < 1e-7);
+    assert!((voltage(&result, "p", 1.4e-9) - 1.0).abs() < 1e-7);
+    for node in ["q", "r"] {
+        assert!(
+            (voltage(&result, node, 0.5e-9) - 0.75).abs() < 1e-7,
+            "{node}"
+        );
+        assert!(
+            voltage(&result, node, 1.4e-9).abs() < 1e-7,
+            "{node} after edge"
+        );
+    }
+}

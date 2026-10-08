@@ -148,8 +148,13 @@ device/library input obeys `max_expanded_bytes`; the device's original dependenc
 graph stays separate from the library retained in the canonical artifact. The
 virtual runtime contract includes that selection, and external error diagnostics
 carry the exact retained library text labeled as preprocessed coordinates.
-Vector/array connection insertion, inherited discipline resolution across the
-complete hierarchy, and library/view selection remain open.
+Selected packed bits and unpacked variable-array elements can cross internal
+unidirectional boundaries. Selectors are closed in the parent parameter scope;
+per-lane identities preserve merged/split grouping and the authored converter's
+loading. ADC writes retain independent driver identities on the selected bits.
+Whole-vector analog ports, unpacked net/port arrays, bidirectional lane aliases,
+inherited discipline resolution across the complete hierarchy, and library/view
+selection remain open.
 
 `prepare_file_runtime_source` freezes one analyzed file/include closure before
 module selection. It can describe a standalone connection library or compile

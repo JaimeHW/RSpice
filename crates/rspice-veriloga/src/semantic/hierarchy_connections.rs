@@ -4,11 +4,14 @@
 //! planner owns selection, merged/split grouping and generated instance names;
 //! this adapter supplies typed segments and ordinary executable module bodies.
 
+mod actual;
+
 use super::digital_elaborate::{SpecializationKey, SpecializedModule, specialize_module};
 use super::{AnalyzedFile, AnalyzedModule, DigitalSignalClass, SemanticAnalyzer};
 use crate::ast::{
-    Connection, DigitalDeclItem, DigitalNetDecl, DigitalNetKind, Expression, Identifier, Item,
-    Module, ModuleInstance, NetDecl, Signedness, WrealResolution,
+    Connection, ContinuousAssign, DigitalDeclItem, DigitalLValue, DigitalNetDecl, DigitalNetKind,
+    Expression, Identifier, Item, Module, ModuleInstance, NetDecl, PortDirection, Signedness,
+    WrealResolution,
 };
 use crate::connect::{
     ConnectModuleInsertion, ConnectValueKind, InsertionRule, NetSegment, PortLink, ResolutionMode,
@@ -29,7 +32,25 @@ pub(super) struct ConnectionModules {
     identities: HashMap<String, SmolStr>,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SignalIdentity {
+    name: SmolStr,
+    elements: Vec<i64>,
+    bits: Option<(i64, i64)>,
+}
+
+impl SignalIdentity {
+    fn whole(name: &str) -> Self {
+        Self {
+            name: name.into(),
+            elements: Vec::new(),
+            bits: None,
+        }
+    }
+}
+
 struct Endpoint {
+    identity: SignalIdentity,
     segment: NetSegment,
     net_kind: Option<DigitalNetKind>,
     width: u32,
@@ -72,6 +93,7 @@ fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endp
             DigitalSignalClass::Variable(_) => DigitalNetKind::Wire,
         };
         return Some(Endpoint {
+            identity: SignalIdentity::whole(name),
             segment: NetSegment::new(name)
                 .declared(discipline)
                 .digital_behavioral()
@@ -102,6 +124,7 @@ fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endp
                 .then(|| SmolStr::new("electrical"))
         })?;
     Some(Endpoint {
+        identity: SignalIdentity::whole(name),
         segment: NetSegment::new(name).declared(discipline),
         net_kind: None,
         width: 1,
@@ -112,14 +135,14 @@ fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endp
 struct BoundarySignal {
     signal: Signal,
     actual: Expression,
+    upper_kind: Option<DigitalNetKind>,
     // Segment -> source instance, connection, and the lower net's type.
     sites: HashMap<usize, (usize, usize, Option<DigitalNetKind>)>,
 }
 
-/// Insert at typed scalar module boundaries. Existing hierarchy diagnostics keep
-/// unsupported array/vector actual connections explicit; they are not coerced
-/// into an arbitrary scalar voltage. Preparation is repeated after generate
-/// specialization, before either domain binds the concrete occurrence.
+/// Insert at typed module boundaries after generate specialization. Concrete
+/// packed bits and unpacked elements retain their own signal identities and
+/// connecting-scope assignments. Whole vector ports require per-lane topology.
 pub(super) fn prepare(
     analyzed: &AnalyzedFile,
     sources: &HashMap<SmolStr, &Module>,
@@ -130,7 +153,7 @@ pub(super) fn prepare(
     if analyzed.connect_rules.insertions().is_empty() || source.instances.is_empty() {
         return Ok(None);
     }
-    let mut signals: BTreeMap<SmolStr, BoundarySignal> = BTreeMap::new();
+    let mut signals: BTreeMap<SignalIdentity, BoundarySignal> = BTreeMap::new();
     let constants = super::instance_parameters::constants(source);
     for (instance_index, instance) in source.instances.iter().enumerate() {
         let Some(child) = analyzed.modules.get(&instance.module) else {
@@ -157,22 +180,26 @@ pub(super) fn prepare(
             super::digital_elaborate::bind_connections(instance, child, &instance.name)?;
         for (port_index, actual) in connections.into_iter().enumerate() {
             let Some(actual) = actual else { continue };
-            let name = match actual {
-                Expression::Identifier(identifier) => identifier.name.as_str(),
-                Expression::Number(number) if number.value == 0.0 => "0",
-                _ => continue,
-            };
             let port = &child.ports[port_index];
-            let (Some(upper), Some(lower)) = (
-                endpoint(source, module, name),
-                endpoint(child_source, child, &port.name),
-            ) else {
+            let Some(lower) = endpoint(child_source, child, &port.name) else {
                 continue;
             };
+            // A selected discrete actual can only create a mixed boundary at
+            // a continuous formal. Leave ordinary digital selection semantics
+            // to the digital hierarchy binder, including dynamic expressions.
+            let selected = !matches!(actual, Expression::Identifier(_) | Expression::Number(_));
+            if selected && lower.net_kind.is_some() {
+                continue;
+            }
+            let Some((upper, actual)) = actual::endpoint(source, module, actual, &constants)?
+            else {
+                continue;
+            };
+            let name = upper.segment.name.clone();
             if upper.net_kind.is_some() == lower.net_kind.is_some() {
                 continue;
             }
-            if [(&upper, name), (&lower, port.name.as_str())]
+            if [(&upper, name.as_str()), (&lower, port.name.as_str())]
                 .iter()
                 .any(|(endpoint, _)| endpoint.width > 1 || endpoint.unpacked)
             {
@@ -187,12 +214,13 @@ pub(super) fn prepare(
             let connection_index = instance.connections.iter().position(|connection| {
                 matches!(connection, Connection::Named { port: name, .. } if name == &port.name)
             }).unwrap_or(port_index);
-            let boundary = signals.entry(name.into()).or_insert_with(|| {
+            let boundary = signals.entry(upper.identity).or_insert_with(|| {
                 let mut signal = Signal::default();
                 signal.push(upper.segment);
                 BoundarySignal {
                     signal,
                     actual: actual.clone(),
+                    upper_kind: upper.net_kind,
                     sites: HashMap::new(),
                 }
             });
@@ -321,10 +349,66 @@ pub(super) fn prepare(
                     }
                 }
             }
-            let (continuous, discrete) = if lower_kind.is_some() {
-                (boundary.actual.clone(), private_expression)
+            let upper = if lower_kind.is_none()
+                && !matches!(
+                    boundary.actual,
+                    Expression::Identifier(_) | Expression::Number(_)
+                ) {
+                if rule.discrete.direction == PortDirection::Inout {
+                    return Err(error(
+                        "bidirectional mixed connections to selected lanes require net alias elaboration",
+                        span,
+                    ));
+                }
+                let mut tap: SmolStr = format!("{}__actual", insertion.instance).into();
+                while !used.insert(tap.clone()) {
+                    tap = format!("{tap}_").into();
+                }
+                prepared.nets.push(NetDecl {
+                    discipline: Some(insertion.discrete.clone()),
+                    names: vec![tap.clone()],
+                    is_ground: false,
+                    is_internal: true,
+                    span,
+                });
+                prepared.digital_nets.push(DigitalNetDecl {
+                    kind: boundary.upper_kind.expect("selected discrete actual"),
+                    signedness: Signedness::Unsigned,
+                    range: None,
+                    items: vec![DigitalDeclItem {
+                        name: tap.clone(),
+                        dimensions: Vec::new(),
+                        init: None,
+                        span,
+                    }],
+                    span,
+                });
+                let tap_expression = Expression::Identifier(Identifier {
+                    name: tap.clone(),
+                    span,
+                });
+                let (target, value) = if rule.discrete.direction == PortDirection::Input {
+                    (
+                        DigitalLValue::Identifier { name: tap, span },
+                        boundary.actual.clone(),
+                    )
+                } else {
+                    (actual::lvalue(&boundary.actual), tap_expression.clone())
+                };
+                prepared.continuous_assigns.push(ContinuousAssign {
+                    target,
+                    value,
+                    delay: None,
+                    span,
+                });
+                tap_expression
             } else {
-                (private_expression, boundary.actual.clone())
+                boundary.actual.clone()
+            };
+            let (continuous, discrete) = if lower_kind.is_some() {
+                (upper, private_expression)
+            } else {
+                (private_expression, upper)
             };
             prepared.instances.push(ModuleInstance {
                 module: body_name,
