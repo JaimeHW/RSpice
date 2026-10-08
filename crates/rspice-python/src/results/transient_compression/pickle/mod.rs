@@ -154,6 +154,10 @@ pub(crate) fn compressed_transient_analog_state(
 /// Every refusal here names what the old state could not prove, because a
 /// compressed result whose channels, event traces or error certificate cannot
 /// be reconstructed is not a smaller result: it is a different one.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Preserves the positional pickle protocol and its legacy defaults."
+)]
 pub(crate) fn rebuild_compressed_transient(
     time: Vec<f64>,
     compression_ratio: f64,
@@ -162,6 +166,7 @@ pub(crate) fn rebuild_compressed_transient(
     analog_state: Option<VersionedCompressedTransientAnalogState>,
     compression_state: Option<CompressionReportPersistenceState>,
     impulse_state: Option<VersionedImpulseState>,
+    voltage_impulse_state: Option<VoltageImpulsePersistenceState>,
 ) -> PyResult<rspice_core::engine::TransientResultCompressed> {
     let Some(analog_state) = analog_state else {
         return Err(crate::errors::value_error(
@@ -289,6 +294,8 @@ pub(crate) fn rebuild_compressed_transient(
     })?;
     let inner = rspice_core::engine::TransientResultCompressed {
         current_impulses: restore_impulses(impulse_state).map_err(crate::errors::value_error)?,
+        voltage_impulses: restore_voltage_impulses(voltage_impulse_state)
+            .map_err(crate::errors::value_error)?,
         time,
         step_sizes,
         channels: channels

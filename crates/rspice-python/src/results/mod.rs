@@ -65,6 +65,12 @@ mod export_bridge;
 mod fft;
 mod fourier;
 mod hb;
+mod voltage_impulse_state;
+pub(crate) use voltage_impulse_state::PyVoltageImpulseTrace;
+use voltage_impulse_state::{
+    VoltageImpulsePersistenceState, restore_voltage_impulses, voltage_impulse_persistence_state,
+    voltage_impulse_rows,
+};
 mod impulse_state;
 pub(crate) use impulse_state::PyCurrentImpulseTrace;
 use impulse_state::{

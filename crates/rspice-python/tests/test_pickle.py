@@ -1034,7 +1034,7 @@ class TestCompressedTransientResult:
         )
         unpickler, state = original.__reduce__()
         # Exercise the pre-impulse shape and its independent analog contract.
-        state = state[:-1]
+        state = state[:-2]
 
         with pytest.raises(ValueError, match="predates lossless analog inventory"):
             unpickler(*state[:-2])

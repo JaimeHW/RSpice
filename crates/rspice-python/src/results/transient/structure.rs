@@ -26,6 +26,7 @@ pub(super) type TransientPersistenceState = (
     TransientFftPersistenceState,
     TransientEventPersistenceState,
     ImpulsePersistenceState,
+    VoltageImpulsePersistenceState,
 );
 
 /// Rebuild a transient result from the state `_unpickle` was handed.
@@ -46,12 +47,15 @@ pub(super) fn restore_transient_result(
     fft_state: Option<TransientFftPersistenceState>,
     event_state: Option<VersionedTransientEventState>,
     impulse_state: Option<VersionedImpulseState>,
+    voltage_impulse_state: Option<VoltageImpulsePersistenceState>,
 ) -> PyResult<TransientResult> {
     let (digital_traces, digital_buses, real_traces) =
         rebuild_transient_event_traces(event_state).map_err(crate::errors::value_error)?;
     let (node_names, branch_names) = names;
     let restored = TransientResult {
         current_impulses: restore_impulses(impulse_state).map_err(crate::errors::value_error)?,
+        voltage_impulses: restore_voltage_impulses(voltage_impulse_state)
+            .map_err(crate::errors::value_error)?,
         time,
         step_sizes,
         voltages,
@@ -120,6 +124,7 @@ pub(super) fn transient_persistence_state(
             &result.digital_buses,
         ),
         impulse_persistence_state(result.current_impulses.as_deref()),
+        voltage_impulse_persistence_state(result.voltage_impulses.as_deref()),
     ))
 }
 
@@ -130,7 +135,7 @@ pub(super) fn transient_persistence_state(
 /// that was persisted: a caller reading `voltage_waveform("out")` must get the
 /// samples the solver produced or an error, never a truncated array.
 pub(crate) fn validate_transient_state(result: &TransientResult) -> Result<(), String> {
-    result.validate_current_impulses()?;
+    result.validate_impulses()?;
     let points = result.time.len();
     if result.step_sizes.len() != points {
         return Err(format!(
@@ -298,8 +303,20 @@ pub(crate) fn clip_transient_to_start(
         }
     }
 
-    result.validate_current_impulses()?;
+    result.validate_impulses()?;
     if let Some(traces) = &mut result.current_impulses {
+        for trace in traces.iter_mut() {
+            // Impulses are newly accepted actions, never held state at TSTART.
+            trace.points.retain(|point| point.time >= retained_start);
+            trace
+                .derivatives
+                .retain(|point| point.time >= retained_start);
+        }
+        traces.retain(|trace| {
+            trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
+        });
+    }
+    if let Some(traces) = &mut result.voltage_impulses {
         for trace in traces.iter_mut() {
             // Impulses are newly accepted actions, never held state at TSTART.
             trace.points.retain(|point| point.time >= retained_start);
@@ -369,6 +386,7 @@ mod structural_tests {
 
     fn two_point_result() -> TransientResult {
         TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0e-9],
             step_sizes: vec![0.0, 1.0e-9],
@@ -440,7 +458,7 @@ mod structural_tests {
                 charge_coulombs: 3e-12
             },]
         );
-        result.validate_current_impulses().unwrap();
+        result.validate_impulses().unwrap();
         assert_eq!(
             result.current_impulses.as_ref().unwrap()[0].derivatives,
             vec![CurrentImpulseDerivative {

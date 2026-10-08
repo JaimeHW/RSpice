@@ -16,7 +16,7 @@ def result(request, engine, rc_lowpass):
 
 def with_impulses(result, rows, version=1):
     restore, state = result.__reduce__()
-    return restore(*state[:-1], (version, rows))
+    return restore(*state[:-2], (version, rows), state[-1])
 
 
 def test_fourier_current_includes_charge_after_pickle(engine):
@@ -74,7 +74,7 @@ def test_current_measurements_include_charge_before_dependent_equations(engine):
 def test_current_impulses_pickle_preserves_availability_and_legacy_shape(result):
     assert result.current_impulses is None
     restore, state = result.__reduce__()
-    assert restore(*state[:-1]).current_impulses is None
+    assert restore(*state[:-2]).current_impulses is None
     for version in [1, 2, 3]:
         for rows in [None, []]:
             recorded = with_impulses(result, rows, version)
@@ -128,7 +128,7 @@ def test_current_impulses_preserve_typed_coverage_and_readonly_snapshots(result)
         ("device_lead", "Q1", "ib", True, []),
     ]
     restored = pickle.loads(pickle.dumps(with_impulses(result, rows, 2)))
-    assert restored.__reduce__()[1][-1] == (3, [(*row, []) for row in rows])
+    assert restored.__reduce__()[1][-2] == (3, [(*row, []) for row in rows])
     assert [(t.owner_kind, t.name, t.parameter, t.complete, t.points)
             for t in restored.current_impulses] == rows
     trace = restored.current_impulses[1]
@@ -172,7 +172,7 @@ def test_current_impulse_derivatives_preserve_units_order_and_pickle_shape(resul
     derivatives = [(time, 1, -2e-21), (time, 3, 4e-39)]
     rows = [("branch", branch, None, True, [], derivatives)]
     restored = pickle.loads(pickle.dumps(with_impulses(result, rows, 3)))
-    assert restored.__reduce__()[1][-1] == (3, rows)
+    assert restored.__reduce__()[1][-2] == (3, rows)
     trace = restored.current_impulses[0]
     assert trace.derivatives == derivatives
     assert trace.points == []

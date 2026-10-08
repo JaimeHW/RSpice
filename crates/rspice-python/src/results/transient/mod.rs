@@ -123,6 +123,12 @@ impl PyTransientResult {
         impulse_rows(self.inner.current_impulses.as_deref())
     }
 
+    /// Singular node-to-ground voltage: (seconds, volt-seconds), plus derivatives.
+    #[getter]
+    fn voltage_impulses(&self) -> Option<Vec<PyVoltageImpulseTrace>> {
+        voltage_impulse_rows(self.inner.voltage_impulses.as_deref())
+    }
+
     /// Get the time points array
     ///
     /// Returns:
@@ -755,7 +761,7 @@ impl PyTransientResult {
     /// charge observations; older states restore unavailable impulse history.
     #[staticmethod]
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None, event_state=None, impulse_state=None))]
+    #[pyo3(signature = (time, step_sizes, voltages, branch_currents, num_nodes, names, device_op_traces, store_traces, fft_state=None, event_state=None, impulse_state=None, voltage_impulse_state=None))]
     fn _unpickle(
         time: Vec<f64>,
         step_sizes: Vec<f64>,
@@ -768,6 +774,7 @@ impl PyTransientResult {
         fft_state: Option<TransientFftPersistenceState>,
         event_state: Option<VersionedTransientEventState>,
         impulse_state: Option<VersionedImpulseState>,
+        voltage_impulse_state: Option<VoltageImpulsePersistenceState>,
     ) -> PyResult<Self> {
         Ok(Self::restored(restore_transient_result(
             time,
@@ -781,6 +788,7 @@ impl PyTransientResult {
             fft_state,
             event_state,
             impulse_state,
+            voltage_impulse_state,
         )?))
     }
 

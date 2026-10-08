@@ -150,6 +150,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyTransientResult>()?;
     m.add_class::<results::PyDigitalEvent>()?;
     m.add_class::<results::PyCurrentImpulseTrace>()?;
+    m.add_class::<results::PyVoltageImpulseTrace>()?;
     m.add_class::<results::PyDigitalBus>()?;
     m.add_class::<results::PyBusEvent>()?;
     m.add_class::<results::PyProjectedSignal>()?;

@@ -42,6 +42,12 @@ impl PyCompressedTransientResult {
         impulse_rows(self.inner.current_impulses.as_deref())
     }
 
+    /// Singular node-to-ground voltage: (seconds, volt-seconds), plus derivatives.
+    #[getter]
+    fn voltage_impulses(&self) -> Option<Vec<PyVoltageImpulseTrace>> {
+        voltage_impulse_rows(self.inner.voltage_impulses.as_deref())
+    }
+
     /// Typed inventory of every signal in this result's shared document.
     ///
     /// The descriptors are the ones the CLI, the WASM build and the engine
@@ -712,7 +718,11 @@ impl PyCompressedTransientResult {
     /// Rebuild from pickled state. Not part of the public API.
     ///
     #[staticmethod]
-    #[pyo3(signature = (time, compression_ratio, input_points, fft_state=None, analog_state=None, compression_state=None, impulse_state=None))]
+    #[pyo3(signature = (time, compression_ratio, input_points, fft_state=None, analog_state=None, compression_state=None, impulse_state=None, voltage_impulse_state=None))]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Preserves the positional pickle protocol and its legacy defaults."
+    )]
     fn _unpickle(
         time: Vec<f64>,
         compression_ratio: f64,
@@ -721,6 +731,7 @@ impl PyCompressedTransientResult {
         analog_state: Option<VersionedCompressedTransientAnalogState>,
         compression_state: Option<CompressionReportPersistenceState>,
         impulse_state: Option<VersionedImpulseState>,
+        voltage_impulse_state: Option<VoltageImpulsePersistenceState>,
     ) -> PyResult<Self> {
         rebuild_compressed_transient(
             time,
@@ -730,6 +741,7 @@ impl PyCompressedTransientResult {
             analog_state,
             compression_state,
             impulse_state,
+            voltage_impulse_state,
         )
         .map(Self::restored)
     }
@@ -748,6 +760,7 @@ impl PyCompressedTransientResult {
             CompressedTransientAnalogState,
             CompressionReportPersistenceState,
             ImpulsePersistenceState,
+            VoltageImpulsePersistenceState,
         ),
     )> {
         self.inner.validate().map_err(crate::errors::value_error)?;
@@ -761,6 +774,7 @@ impl PyCompressedTransientResult {
                 compressed_transient_analog_state(&self.inner),
                 compression_report_persistence_state(&self.inner.compression_report),
                 impulse_persistence_state(self.inner.current_impulses.as_deref()),
+                voltage_impulse_persistence_state(self.inner.voltage_impulses.as_deref()),
             ),
         ))
     }
