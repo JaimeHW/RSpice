@@ -770,7 +770,10 @@ columns. Bus expansion, variable selection, and clipping apply in either case.
 
 Touchstone `.sNp`, `.snp`, and `.ts` inputs are auto-detected; `convert --from touchstone`
 selects the parser for another extension. RI, magnitude/angle and dB/angle
-values become complex coefficients on a hertz coordinate. Port references
+values become complex coefficients on a hertz coordinate. Option fields may be
+omitted or reordered; their defaults are GHz, S, magnitude/angle, and 50 ohms.
+Only the first option line defines the data, as required by the Touchstone
+specification. Conflicting fields within that line are rejected. Port references
 remain numeric `Z0(port)` columns, so two equal coefficient arrays with
 unequal reference impedances do not compare equal. Typed `.SP` JSON conversion
 also retains these reference columns; direct flat `.SP` and `--sparam` output

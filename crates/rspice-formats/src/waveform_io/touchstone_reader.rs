@@ -34,6 +34,16 @@ struct Options {
     reference_ohms: f64,
 }
 
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            frequency_scale_hz: 1.0e9,
+            data_format: DataFormat::Ma,
+            reference_ohms: 50.0,
+        }
+    }
+}
+
 /// Parse one selected Touchstone artifact without touching project state.
 pub fn read_touchstone_bytes(
     source_name: &str,
@@ -62,12 +72,8 @@ pub fn read_touchstone_bytes_with_limit(
     };
     let mut input_values = 0usize;
     let text = std::str::from_utf8(bytes).map_err(TouchstoneError::Encoding)?;
-    let mut options = Options {
-        // Touchstone v1 defaults.
-        frequency_scale_hz: 1.0e9,
-        data_format: DataFormat::Ma,
-        reference_ohms: 50.0,
-    };
+    let mut options = Options::default();
+    let mut saw_option_line = false;
     let mut version = 1_u32;
     let mut matrix_format = MatrixFormat::Full;
     let mut declared_two_port_order = None;
@@ -107,6 +113,12 @@ pub fn read_touchstone_bytes_with_limit(
             }
             continue;
         }
+        // Only the first option line defines the data. The Touchstone
+        // specification requires later option lines to be ignored, including
+        // between samples or within a continued reference list.
+        if saw_option_line && trimmed.starts_with('#') {
+            continue;
+        }
         // `[Reference]` arguments may begin on the line following the keyword
         // and may span multiple lines, so plain numeric lines belong to it
         // until every port has an impedance. Anything else closes the list and
@@ -133,6 +145,7 @@ pub fn read_touchstone_bytes_with_limit(
                 .into());
             }
             options = parse_option_line(trimmed, line_number)?;
+            saw_option_line = true;
             continue;
         }
         if trimmed.starts_with('[') {
@@ -619,65 +632,65 @@ fn matrix_positions(
 }
 
 fn parse_option_line(line: &str, line_number: usize) -> Result<Options, TouchstoneError> {
-    let fields = line[1..].split_whitespace().collect::<Vec<_>>();
-    if fields.len() < 3 {
-        return Err(format!(
-            "Touchstone line {line_number}: option line requires frequency unit, parameter type, and data format"
-        ).into());
-    }
-    let frequency_scale_hz = match fields[0].to_ascii_lowercase().as_str() {
-        "hz" => 1.0,
-        "khz" => 1.0e3,
-        "mhz" => 1.0e6,
-        "ghz" => 1.0e9,
-        other => {
-            return Err(format!(
-                "Touchstone line {line_number}: unsupported frequency unit '{other}'"
-            )
-            .into());
-        }
-    };
-    if !fields[1].eq_ignore_ascii_case("s") {
-        return Err(format!(
-            "Touchstone line {line_number}: only S-parameter data is supported (found '{}')",
-            fields[1]
-        )
-        .into());
-    }
-    let data_format = match fields[2].to_ascii_lowercase().as_str() {
-        "ri" => DataFormat::Ri,
-        "ma" => DataFormat::Ma,
-        "db" => DataFormat::Db,
-        other => {
-            return Err(format!(
-                "Touchstone line {line_number}: unsupported data format '{other}'"
-            )
-            .into());
-        }
-    };
-    let reference_ohms = match fields.get(3..) {
-        Some([]) | None => 50.0,
-        Some([marker, value]) if marker.eq_ignore_ascii_case("r") => {
-            parse_numeric_token(value, || {
-                format!("Touchstone line {line_number}: invalid reference impedance '{value}'")
-            })?
-        }
-        _ => {
+    let mut fields = line[1..].split_whitespace();
+    let mut options = Options::default();
+    let mut seen = [false; 4];
+    while let Some(field) = fields.next() {
+        // Fields may appear in any order; only the value after R is positional.
+        let lower = field.to_ascii_lowercase();
+        let (slot, name) = match lower.as_str() {
+            "hz" | "khz" | "mhz" | "ghz" => {
+                options.frequency_scale_hz = match lower.as_str() {
+                    "hz" => 1.0,
+                    "khz" => 1.0e3,
+                    "mhz" => 1.0e6,
+                    _ => 1.0e9,
+                };
+                (0, "frequency unit")
+            }
+            "s" => (1, "parameter type"),
+            "y" | "z" | "h" | "g" => {
+                return Err(format!(
+                    "Touchstone line {line_number}: only S-parameter data is supported (found '{field}')"
+                ).into());
+            }
+            "ri" | "ma" | "db" => {
+                options.data_format = match lower.as_str() {
+                    "ri" => DataFormat::Ri,
+                    "ma" => DataFormat::Ma,
+                    _ => DataFormat::Db,
+                };
+                (2, "data format")
+            }
+            "r" => {
+                let value = fields.next().ok_or_else(|| {
+                    format!("Touchstone line {line_number}: R requires a reference impedance")
+                })?;
+                options.reference_ohms = parse_numeric_token(value, || {
+                    format!("Touchstone line {line_number}: invalid reference impedance '{value}'")
+                })?;
+                if options.reference_ohms <= 0.0 {
+                    return Err(format!(
+                        "Touchstone line {line_number}: reference impedance must be positive"
+                    )
+                    .into());
+                }
+                (3, "reference impedance")
+            }
+            _ => {
+                return Err(format!(
+                    "Touchstone line {line_number}: unknown option field '{field}'"
+                )
+                .into());
+            }
+        };
+        if std::mem::replace(&mut seen[slot], true) {
             return Err(
-                format!("Touchstone line {line_number}: unexpected tokens in option line").into(),
+                format!("Touchstone line {line_number}: option line repeats the {name}").into(),
             );
         }
-    };
-    if reference_ohms <= 0.0 {
-        return Err(
-            format!("Touchstone line {line_number}: reference impedance must be positive").into(),
-        );
     }
-    Ok(Options {
-        frequency_scale_hz,
-        data_format,
-        reference_ohms,
-    })
+    Ok(options)
 }
 
 fn parse_section_line(line: &str, line_number: usize) -> Result<(String, &str), TouchstoneError> {
