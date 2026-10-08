@@ -1796,7 +1796,7 @@ impl MixedSignalHost {
             return false;
         };
         self.event_ports.iter().any(|port| {
-            if !port.trace_node.is_some_and(|node| node != port.node)
+            if port.trace_node.is_none_or(|node| node == port.node)
                 || port.direction
                     != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
             {
