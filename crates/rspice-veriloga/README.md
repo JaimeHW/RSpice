@@ -269,8 +269,15 @@ nested initializers follow authored axis order. Derivative storage retains full
 source element names. Direct analog numeric and packed reads of discrete matrices
 use the existing value/validity projections, so unknown unselected bits do not
 invalidate a known selection. Multidimensional analog assignment-event subscriptions
-and continuous digital drivers depending on those assignment events remain
-unimplemented and are diagnosed explicitly.
+retain complete cell identities, including selected and whole-array subscriptions.
+Implicit event dependencies and continuous digital drivers can read retained
+analog matrix cells. Ownership checks constrain partially constant selections to
+the possible cells; continuously assigned cells cannot provide assignment events.
+Selected write addresses survive self-indexing, trial rejection, and in-memory
+checkpoint restore. These paths have focused desktop transient evidence.
+Same-instant notifications from different cells currently share a publication
+batch; source-order and process rearming semantics still require qualification.
+This evidence does not establish complete mixed scheduling or platform parity.
 Schema 68 requires finite integral declaration bounds, preserves integer-valued
 constant indices without floating-point narrowing, and checks extents before
 allocation. Constant real indices use the same checked rounding as runtime
@@ -697,7 +704,7 @@ coverage uses the portable digital runtime; native/generated digital execution
 and the remaining platform/restart qualification are separate requirements.
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
-initializer patterns, multidimensional analog assignment-event dependencies,
+initializer patterns, same-instant analog assignment notification ordering,
 full parameter-dependent shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
 are still open.
 

@@ -8641,12 +8641,12 @@ fn multidimensional_arrays_diagnose_rank_shape_and_storage_errors() {
         ),
         ("reg m[0:256][0:256];", "65536 elements"),
         (
-            "real m[0:1][0:1]; reg q; analog @(initial_step) m[0][0]=1; initial @(m[0][0]) q=1;",
-            "coordinate-aware occurrence bindings",
+            "real m[0:1][0:1]; reg q; analog m[0][0]=1; initial @(m[0][0]) q=1;",
+            "not assigned exclusively",
         ),
         (
-            "real m[0:1][0:1]; wire q; analog @(initial_step) m[0][0]=1; assign q=m[0][0];",
-            "coordinate-aware occurrence bindings",
+            "real m[0:1][0:1]; wire q; analog m[0][0]=1; assign q=m[0][0];",
+            "not assigned exclusively",
         ),
         (
             "electrical p; reg [7:0] m[0:1][0:1]; initial m[0][0]=1; analog I(p)<+m[0];",

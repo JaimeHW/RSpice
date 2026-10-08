@@ -842,6 +842,8 @@ pub enum LValue {
     Variable { name: SmolStr, span: Span },
     /// Array element
     ArrayAccess {
+        /// Compiler-inserted flattened address; source assignments leave this false.
+        normalized: bool,
         name: SmolStr,
         index: Box<Expression>,
         additional_indices: Vec<Expression>,

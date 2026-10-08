@@ -2327,6 +2327,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RBracket)?;
             }
             LValue::ArrayAccess {
+                normalized: false,
                 name: name.into(),
                 index: Box::new(index),
                 additional_indices,

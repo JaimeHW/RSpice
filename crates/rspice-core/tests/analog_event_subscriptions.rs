@@ -1635,3 +1635,173 @@ endmodule
         assert_eq!(count(&host), 2);
     }
 }
+
+#[test]
+fn multidimensional_assignment_events_keep_selected_and_whole_array_occurrences() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module matrix_events(p,q,r,s);
+ inout p,q,r,s; electrical p,q,r,s;
+ real samples[1:-1][4:3]='{'{0.0,0.0},'{0.0,0.0},'{0.0,0.0}};
+ integer writer=-1, selected=-1, column=3, fixed_seen=0, selected_seen=0, all_seen=0;
+ real implicit_value=0; wreal held_value;
+ initial begin #90 column=5; #70 selected=0; column=3; #50 selected=-1; #100 selected=1; #200 selected=0; #100 selected=1; end
+ analog @(timer(125p,250p)) begin
+   samples[writer][3]=0.75; samples[writer][3]=0.75;
+   writer=writer+1; if (writer>1) writer=-1;
+ end
+ analog @(timer(175p,250p)) samples[writer][4]=0.25;
+ always @(samples[-1][3]) fixed_seen=fixed_seen+1;
+ always @(samples[selected][column]) selected_seen=selected_seen+1;
+ always @(samples) all_seen=all_seen+1;
+ always @* implicit_value=samples[selected][3];
+ assign held_value=samples[selected][3];
+ analog I(p)<+(V(p)-held_value)/1000;
+ analog I(q)<+(V(q)-(fixed_seen+10*selected_seen))/1000;
+ analog I(r)<+(V(r)-all_seen)/1000;
+ analog I(s)<+(V(s)-implicit_value)/1000;
+endmodule
+module wrapper(p,q,r,s); inout p,q,r,s; electrical p,q,r,s; matrix_events child(p,q,r,s); endmodule
+"#,
+    );
+    for module in ["matrix_events", "wrapper"] {
+        let deck = Netlist::parse(&format!(
+            "* selected matrix occurrences\nX1 p q r s {module}\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\n.va \"{}\" {module} module={module}\n.end\n",source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.8e-9, 23e-12).unwrap();
+        for (time, held, q, r) in [
+            (0.14e-9, 0.375, 1.0, 1.0),
+            (0.18e-9, 0.0, 1.0, 1.5),
+            (0.25e-9, 0.375, 1.0, 1.5),
+            (0.4e-9, 0.0, 1.0, 2.5),
+            (0.55e-9, 0.375, 1.0, 3.0),
+            (0.7e-9, 0.375, 11.0, 4.5),
+        ] {
+            for (node, expected) in [("p", held), ("q", q), ("r", r), ("s", held)] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{module} {node}@{time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn multidimensional_assignment_events_capture_addresses_and_restore_trials() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let source = r#"
+`timescale 1ps/1ps
+module matrix(a); inout a; electrical a;
+ integer address[0:1][0:1]='{'{0,0},'{0,0}};
+ integer first=0,second=0,count=0,selected=0;
+ initial #150 selected=1;
+ analog @(timer(100p,100p)) address[address[0][0]][0]=1;
+ always @(address[0][0]) first=first+1;
+ always @(address[1][0]) second=second+1;
+ always @(address[selected][0]) count=count+1;
+ analog I(a)<+V(a)/1000;
+endmodule
+"#;
+    let compile = || {
+        MixedSignalHost::compile(source, None, "matrix", &[1], SchedulerLimits::default()).unwrap()
+    };
+    let evaluate = |host: &mut MixedSignalHost, time, step| {
+        host.begin_trial(
+            time,
+            step,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap();
+        settle_standalone_observer(host, &[0.0]);
+    };
+    let values = |host: &MixedSignalHost| {
+        ["first", "second", "count"]
+            .map(|name| u32::from_str_radix(&host.read_digital(name).unwrap(), 2).unwrap())
+    };
+    let mut host = compile();
+    evaluate(&mut host, 0.0, 0.0);
+    host.accept_trial().unwrap();
+    evaluate(&mut host, 100e-12, 100e-12);
+    assert_eq!(values(&host), [1, 0, 1]);
+    host.reject_trial().unwrap();
+    assert_eq!(values(&host), [0, 0, 0]);
+    evaluate(&mut host, 100e-12, 100e-12);
+    host.accept_trial().unwrap();
+    evaluate(&mut host, 150e-12, 50e-12);
+    host.accept_trial().unwrap();
+    assert_eq!(values(&host), [1, 0, 1]);
+    let checkpoint = host.checkpoint().unwrap();
+    let mut restored = compile();
+    restored.restore(&checkpoint).unwrap();
+    for candidate in [&mut host, &mut restored] {
+        evaluate(candidate, 200e-12, 50e-12);
+        candidate.accept_trial().unwrap();
+        assert_eq!(values(candidate), [1, 1, 2]);
+        evaluate(candidate, 300e-12, 100e-12);
+        candidate.accept_trial().unwrap();
+        assert_eq!(values(candidate), [1, 2, 3]);
+    }
+}
+
+#[test]
+fn multidimensional_assignment_events_preserve_wide_coordinates_and_cell_ownership() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    let source = r#"
+`timescale 1ps/1ps
+module cells(a,p); input a; electrical a; inout p; electrical p;
+ real data[64'sh0020000000000001:64'sh0020000000000002][-1:0];
+ integer seen=0, selected=-1; wreal held;
+ initial selected=-1;
+ analog begin
+   data[64'sh0020000000000002][0]=V(a);
+   @(timer(125p)) begin data[64'sh0020000000000001][-1]=0.75; data[64'sh0020000000000001][0]=0.5; end
+   I(p)<+(V(p)-(held+seen))/1000;
+ end
+ always @(data[64'sh0020000000000001][selected]) seen=seen+1;
+ assign held=data[64'sh0020000000000001][selected];
+endmodule
+"#;
+    let input = Source::new(source);
+    let deck=Netlist::parse(&format!("* exact matrix event identities\nV1 a 0 1\nX1 a p cells\nRp p 0 1k\n.va \"{}\" cells\n.end\n",input.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 0.3e-9, 40e-12).unwrap();
+    assert!((voltage(&result, "p", 0.2e-9) - 0.875).abs() < 1e-7);
+    for invalid in [
+        source.replace(
+            "@(data[64'sh0020000000000001][selected])",
+            "@(data[64'sh0020000000000002][0])",
+        ),
+        source.replace(
+            "assign held=data[64'sh0020000000000001][selected]",
+            "assign held=data[64'sh0020000000000002][0]",
+        ),
+        source.replace(
+            "assign held=data[64'sh0020000000000001][selected]",
+            "assign held=data[64'sh0020000000000002][selected]",
+        ),
+        source.replace(
+            "assign held=data[64'sh0020000000000001][selected];",
+            "real observed; reg tick=0; always @* observed=data[64'sh0020000000000002][0]+tick;",
+        ),
+    ] {
+        let error = MixedSignalHost::compile(
+            &invalid,
+            None,
+            "invalid",
+            &[1, 2],
+            SchedulerLimits::default(),
+        )
+        .err()
+        .expect("continuous cells cannot provide assignment events");
+        assert!(
+            error.to_string().contains("not assigned exclusively"),
+            "{error}"
+        );
+    }
+}

@@ -167,12 +167,6 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
             .and_then(|name| lower.arrays.get(name))
             .cloned()
             .unwrap_or_default();
-        if dimensions.len() > 1 {
-            return invalid(
-                "multidimensional analog array event dependencies require coordinate-aware occurrence bindings",
-                span,
-            );
-        }
         let init = dimensions.is_empty().then(|| number(0, span));
         if binding.observation.is_none() {
             module.variables.push(VariableDecl {
@@ -432,18 +426,23 @@ impl Lower {
                 term.signal = identifier(&binding.signal, term.span);
                 continue;
             }
-            if let Expression::Digital(DigitalExpr::ArraySelect(access)) = &term.signal
+            if let Expression::Digital(DigitalExpr::ArraySelect(access)) = &mut term.signal
                 && self.candidates.contains(&access.name)
                 && !locals.contains(&access.name)
-                && self
-                    .arrays
-                    .get(&access.name)
-                    .is_some_and(|axes| axes.len() > 1)
             {
-                return invalid(
-                    "multidimensional analog array assignment events require coordinate-aware occurrence bindings",
-                    term.span,
-                );
+                let rank = self.arrays.get(&access.name).map_or(0, Vec::len);
+                if term.edge.is_some()
+                    || !access
+                        .split(rank)
+                        .is_some_and(|(_, packed)| packed.is_none())
+                {
+                    return invalid(
+                        "analog array assignment events require a complete unpacked element without a packed selection or edge qualifier",
+                        term.span,
+                    );
+                }
+                access.name = self.variable_binding(&access.name, term.span).signal;
+                continue;
             }
             if let Expression::ArrayAccess(access) = &mut term.signal {
                 if self.candidates.contains(&access.array) && !locals.contains(&access.array) {
@@ -731,7 +730,7 @@ pub(super) struct AssignmentEvents {
     pub event_depth: usize,
     writes: BTreeMap<SmolStr, Writes>,
     counters: BTreeMap<SmolStr, SmolStr>,
-    arrays: BTreeMap<SmolStr, (i64, usize)>,
+    arrays: BTreeMap<SmolStr, Vec<SmolStr>>,
     array_targets: BTreeMap<SmolStr, (SmolStr, i64)>,
 }
 #[derive(Default)]
@@ -739,6 +738,17 @@ struct Writes {
     initial: bool,
     event: bool,
     continuous: bool,
+}
+impl Writes {
+    fn record(&mut self, initial: bool, event: bool) {
+        if initial {
+            self.initial = true;
+        } else if event {
+            self.event = true;
+        } else {
+            self.continuous = true;
+        }
+    }
 }
 impl AssignmentEvents {
     pub fn new(lowered: Option<&LoweredAnalogEvents>) -> Self {
@@ -772,15 +782,31 @@ impl AssignmentEvents {
             if self.writes.remove(name).is_none() {
                 continue;
             }
-            self.arrays.insert(name.clone(), (layout.lower, layout.len));
+            let dimensions = if layout.dimensions.is_empty() {
+                vec![(
+                    layout.lower,
+                    layout
+                        .lower
+                        .checked_add(layout.len as i64 - 1)
+                        .expect("validated array bounds"),
+                )]
+            } else {
+                layout.dimensions.clone()
+            };
+            let shape = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65_536)
+                .expect("validated source shape");
+            let mut cells = Vec::with_capacity(layout.len);
             for offset in 0..layout.len {
                 let index = layout.lower + offset as i64;
-                let element: SmolStr = format!("{name}[{index}]").into();
+                let element: SmolStr =
+                    crate::array_index::element_name(name, &shape, offset).into();
+                cells.push(element.clone());
                 self.writes.insert(element.clone(), Writes::default());
                 if let Some(counter) = self.counters.get(name) {
                     self.array_targets.insert(element, (counter.clone(), index));
                 }
             }
+            self.arrays.insert(name.clone(), cells);
         }
     }
     pub fn has_counter(&self, name: &SmolStr) -> bool {
@@ -793,10 +819,11 @@ impl AssignmentEvents {
         initial: bool,
         span: Span,
     ) -> Option<AnalogStatement> {
-        let &(lower, len) = self.arrays.get(name)?;
-        for offset in 0..len {
-            let element: SmolStr = format!("{name}[{}]", lower + offset as i64).into();
-            self.record_write(&element, initial);
+        for element in self.arrays.get(name)? {
+            self.writes
+                .get_mut(element)
+                .expect("registered array element")
+                .record(initial, self.event_depth > 0);
         }
         if !initial && self.event_depth > 0 {
             self.counters
@@ -810,13 +837,7 @@ impl AssignmentEvents {
         let Some(writes) = self.writes.get_mut(name) else {
             return;
         };
-        if initial {
-            writes.initial = true;
-        } else if self.event_depth > 0 {
-            writes.event = true;
-        } else {
-            writes.continuous = true;
-        }
+        writes.record(initial, self.event_depth > 0);
     }
     pub fn record(&mut self, name: &SmolStr, initial: bool, span: Span) -> Option<AnalogStatement> {
         self.record_write(name, initial);
@@ -864,11 +885,10 @@ impl AssignmentEvents {
             .filter(|(_, writes)| immutable(writes))
             .map(|(name, _)| name.clone())
             .collect();
-        for (name, &(lower, len)) in &self.arrays {
-            let cells: Vec<_> = (0..len)
-                .map(|offset| {
-                    &self.writes[&SmolStr::from(format!("{name}[{}]", lower + offset as i64))]
-                })
+        for (name, elements) in &self.arrays {
+            let cells: Vec<_> = elements
+                .iter()
+                .map(|element| &self.writes[element])
                 .collect();
             if cells.iter().all(|writes| immutable(writes)) {
                 module.digital.immutable_analog_variables.push(name.clone());
@@ -890,13 +910,14 @@ fn increment_at(name: &str, index: Option<Expression>, span: Span) -> AnalogStat
     let (target, value) = if let Some(index) = index {
         (
             LValue::ArrayAccess {
+                normalized: true,
                 additional_indices: Vec::new(),
                 name: name.into(),
                 index: Box::new(index.clone()),
                 span,
             },
             Expression::ArrayAccess(ArrayAccessExpr {
-                normalized: false,
+                normalized: true,
                 array: name.into(),
                 index: Box::new(index),
                 packed: None,

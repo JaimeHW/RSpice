@@ -293,6 +293,19 @@ struct AnalogVariable {
     dimensions: Vec<(i64, i64)>,
 }
 
+impl AnalogVariable {
+    fn array_layout(&self) -> Option<crate::array_index::UnpackedArrayLayout> {
+        let (lower, len) = self.array?;
+        let dimensions = if self.dimensions.is_empty() {
+            vec![(lower, lower.checked_add(i64::from(len) - 1)?)]
+        } else {
+            self.dimensions.clone()
+        };
+        let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65_536).ok()?;
+        (layout.len() == len as usize).then_some(layout)
+    }
+}
+
 pub(crate) fn lower_module(
     module: &crate::semantic::AnalyzedModule,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
@@ -744,14 +757,20 @@ fn lower_with_analog_variables(
                 ));
                 continue;
             };
-            let (lower, len) = variable.array.unwrap_or((0, 1));
+            let (_, len) = variable.array.unwrap_or((0, 1));
+            let layout = variable.array_layout();
             for offset in 0..len {
                 let signal = DigitalSignalId::new(signal.index() + offset);
                 signals[usize::from(signal)].initial_value = Some(
                     super::digital::DigitalInitialValue::FourState(FourStateValue::from_u64(32, 0)),
                 );
                 let target = if binding.array {
-                    format!("{}[{}]", variable.target, lower + i64::from(offset)).into()
+                    crate::array_index::element_name(
+                        &variable.target,
+                        layout.as_ref().expect("validated occurrence array"),
+                        offset as usize,
+                    )
+                    .into()
                 } else {
                     variable.target.clone()
                 };
@@ -3117,18 +3136,8 @@ impl ProcessLowerer<'_> {
                     term.span,
                 );
             }
-            let assignment = if let Expression::ArrayAccess(access) = &term.signal {
-                let source = self.analog_variables.iter().find(|(_,variable)| {
-                    variable.array.is_some() && variable.event_signal.as_ref() == Some(&access.array)
-                }).map(|(name,_)| name.clone());
-                source.and_then(|source| {
-                    if !self.retained_analog_read(&source, Some(&access.index)) {
-                        self.error(format!("analog array `{source}` selection is not assigned exclusively in analog event statements"), term.span);
-                    }
-                    self.digital_array(&access.array).map(|array| (array, &*access.index, self.self_signed(&access.index)))
-                })
-            } else { None };
-            let real = assignment.as_ref().map_or_else(|| self.is_real_expression(&term.signal), |(_,index,_)| self.is_real_expression(index));
+            let assignment = self.assignment_event_selection(&term.signal);
+            let real = assignment.as_ref().map_or_else(|| self.is_real_expression(&term.signal), |(_,indices,_)| indices.len() == 1 && self.is_real_expression(indices[0]));
             if real && term.edge.is_some() {
                 self.error(
                     "posedge/negedge require a bit-valued event expression; use value-change control for a real expression",
@@ -3139,9 +3148,19 @@ impl ProcessLowerer<'_> {
             // control flow, never the surrounding process or its writes.
             let outer = std::mem::replace(&mut self.builder, ProcessBuilder::new());
             let entry = self.builder.create_block();
-            let operand = assignment.as_ref().map_or(&term.signal, |(_,index,_)| *index);
-            let value = if real { self.real_expression(entry, operand) }
-                else { self.expression(entry, operand) };
+            let value = if let Some((array, indices, _)) = &assignment {
+                if indices.len() == 1 {
+                    self.array_index_value(entry, indices[0])
+                } else {
+                    let dimensions = self.arrays[&array.base].dimensions.clone();
+                    let indices = indices.iter().map(|index| {
+                        let signed = self.self_signed(index);
+                        (self.array_index_value(entry, index), signed)
+                    }).collect();
+                    self.builder.push(entry, CfgValueType::FourState { width: 64 }, CfgValueKind::DigitalArrayOffset { dimensions, indices })
+                }
+            } else if real { self.real_expression(entry, &term.signal) }
+                else { self.expression(entry, &term.signal) };
             let ty = self.builder.value_type_of(value).expect("expression type");
             self.builder.set_terminator(entry, CfgTerminator::Return);
             self.builder.seal_all_blocks();
@@ -3163,6 +3182,34 @@ impl ProcessLowerer<'_> {
             }
         }).collect();
         DigitalWait::Expressions(expressions)
+    }
+
+    fn assignment_event_selection<'expr>(
+        &mut self,
+        expression: &'expr Expression,
+    ) -> Option<(
+        super::digital::DigitalArrayRef,
+        Vec<&'expr Expression>,
+        bool,
+    )> {
+        let (name, indices) = match expression {
+            Expression::ArrayAccess(access) => (&access.array, vec![access.index.as_ref()]),
+            Expression::Digital(crate::ast::DigitalExpr::ArraySelect(access)) => {
+                let (indices, packed) = access.split(self.array_rank(&access.name))?;
+                if packed.is_some() {
+                    return None;
+                }
+                (&access.name, indices)
+            }
+            _ => return None,
+        };
+        let source = self.assignment_array_source(name)?.clone();
+        if !self.retained_analog_coordinates(&source, &indices) {
+            self.error(format!("analog array `{source}` selection is not assigned exclusively in analog event statements"), expression.span());
+        }
+        let array = self.digital_array(name)?;
+        let signed = indices.len() == 1 && self.self_signed(indices[0]);
+        Some((array, indices, signed))
     }
 
     /// Resolve a sensitivity list to signal terms.
@@ -3393,15 +3440,26 @@ impl ProcessLowerer<'_> {
 
     fn validate_analog_event_reads(&mut self, expression: &Expression) {
         crate::semantic::visit_expression(expression, &mut |expression| {
-            let (name, index) = match expression {
+            let (name, indices) = match expression {
                 Expression::Identifier(id) => (&id.name, None),
-                Expression::ArrayAccess(access) => (&access.array, Some(&*access.index)),
+                Expression::ArrayAccess(access) => {
+                    (&access.array, Some(vec![access.index.as_ref()]))
+                }
+                Expression::Digital(crate::ast::DigitalExpr::ArraySelect(access)) => {
+                    let Some((indices, _)) = access.split(self.array_rank(&access.name)) else {
+                        return;
+                    };
+                    (&access.name, Some(indices))
+                }
                 _ => return,
             };
             if self.lookup_local(name).is_none()
                 && !self.index.contains_key(name.as_str())
                 && self.analog_variables.contains_key(name)
-                && !self.retained_analog_read(name, index)
+                && !indices.as_ref().map_or_else(
+                    || self.retained_analog_read(name, None),
+                    |indices| self.retained_analog_coordinates(name, indices),
+                )
             {
                 self.error(format!("analog variable `{name}` is not assigned exclusively in analog event statements and cannot provide an event dependency"),expression.span());
             }
@@ -3418,35 +3476,82 @@ impl ProcessLowerer<'_> {
     }
 
     fn retained_analog_read(&self, name: &str, index: Option<&Expression>) -> bool {
+        if let Some(index) = index {
+            return self.retained_analog_coordinates(name, &[index]);
+        }
+        self.analog_variables
+            .get(name)
+            .is_some_and(|variable| variable.event_assigned || variable.immutable)
+    }
+
+    fn retained_analog_coordinates(&self, name: &str, indices: &[&Expression]) -> bool {
         let Some(variable) = self.analog_variables.get(name) else {
             return false;
         };
-        if let Some(index) = index {
-            let mut reads = BTreeSet::new();
-            collect_expression_reads(index, &mut reads);
-            if !reads.iter().any(|name| {
-                self.lookup_local(name).is_some() || self.index.contains_key(name.as_str())
-            }) {
-                let index =
-                    constants::scalar(index, self.constants, self.time_scale).and_then(|value| {
-                        match value {
-                            crate::numeric_literal::NumericLiteralValue::Integer(value) => {
-                                Some(value)
-                            }
-                            crate::numeric_literal::NumericLiteralValue::Real(value) => {
-                                crate::array_index::checked_rounded_i64(value).ok()
-                            }
-                        }
-                    });
-                if let Some(index) = index {
-                    return self
-                        .analog_variables
-                        .get(&SmolStr::from(format!("{name}[{index}]")))
-                        .is_some_and(|cell| cell.event_assigned || cell.immutable);
-                }
-            }
+        let Some(layout) = variable.array_layout() else {
+            return false;
+        };
+        if layout.axes().len() != indices.len() {
+            return false;
         }
-        variable.event_assigned || variable.immutable
+        let coordinates: Vec<_> = indices
+            .iter()
+            .map(|index| {
+                let mut reads = BTreeSet::new();
+                collect_expression_reads(index, &mut reads);
+                if reads.iter().any(|name| {
+                    self.lookup_local(name).is_some() || self.index.contains_key(name.as_str())
+                }) {
+                    return None;
+                }
+                constants::scalar(index, self.constants, self.time_scale).and_then(|value| {
+                    match value {
+                        crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+                        crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                            crate::array_index::checked_rounded_i64(value).ok()
+                        }
+                    }
+                })
+            })
+            .collect();
+        if layout
+            .axes()
+            .iter()
+            .zip(&coordinates)
+            .any(|(axis, coordinate)| {
+                coordinate.is_some_and(|coordinate| {
+                    crate::array_index::checked_integer_array_slot(
+                        coordinate,
+                        0,
+                        axis.len(),
+                        axis.left.min(axis.right),
+                    )
+                    .is_err()
+                })
+            })
+        {
+            return false;
+        }
+        if variable.event_assigned || variable.immutable {
+            return true;
+        }
+        // A fixed row with a dynamic column depends only on that row. A
+        // continuously written cell outside the possible selection is irrelevant.
+        (0..layout.len())
+            .filter(|&slot| {
+                layout
+                    .indices(slot)
+                    .expect("array cell")
+                    .iter()
+                    .zip(&coordinates)
+                    .all(|(actual, expected)| expected.is_none_or(|expected| expected == *actual))
+            })
+            .all(|slot| {
+                let element: SmolStr = crate::array_index::element_name(name, &layout, slot).into();
+                self.analog_variables
+                    .get(&element)
+                    .is_some_and(|cell| cell.event_assigned || cell.immutable)
+            })
     }
 
     fn bounded_part_width(msb: i64, lsb: i64) -> Option<u32> {
@@ -3724,17 +3829,8 @@ impl ProcessLowerer<'_> {
         use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
         let (quantity, lower, len) = self.analog_array(name).expect("array classified");
         let variable = &self.analog_variables[name];
-        let dimensions = if variable.dimensions.is_empty() {
-            vec![(
-                lower,
-                lower
-                    .checked_add(i64::from(len) - 1)
-                    .expect("validated array bounds"),
-            )]
-        } else {
-            variable.dimensions.clone()
-        };
-        let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65_536)
+        let layout = variable
+            .array_layout()
             .expect("validated analog array shape");
         let element_name = |name: &str, offset: usize| -> SmolStr {
             crate::array_index::element_name(name, &layout, offset).into()

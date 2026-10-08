@@ -5361,6 +5361,7 @@ impl SemanticAnalyzer {
                 (resolved.clone(), resolved, *span, None)
             }
             LValue::ArrayAccess {
+                normalized,
                 name,
                 index,
                 additional_indices,
@@ -5378,7 +5379,9 @@ impl SemanticAnalyzer {
                     return Ok(());
                 };
                 self.symbols.mark_used(&array_name);
-                let index = if !layout.dimensions.is_empty() {
+                let index = if *normalized {
+                    self.lower_expression_with_side_effects(index, module, sink)?
+                } else if !layout.dimensions.is_empty() {
                     let indices = std::iter::once(index.as_ref())
                         .chain(additional_indices.iter())
                         .map(|index| self.materialize_output_function_calls(index, module, sink))
@@ -7974,6 +7977,7 @@ impl SemanticAnalyzer {
                     "analog function output argument index",
                 )?;
                 Ok(LValue::ArrayAccess {
+                    normalized: access.normalized,
                     additional_indices: Vec::new(),
                     name: array,
                     index: Box::new(index),
