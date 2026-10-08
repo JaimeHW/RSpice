@@ -1068,7 +1068,7 @@ pub(crate) fn parse_typed_document(
     content: &str,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<rspice_core::execution::AnalysisResultDocument, CliError> {
-    let document = rspice_core::execution::AnalysisResultDocument::from_json_with_limits_and_abort(
+    rspice_core::execution::AnalysisResultDocument::from_json_with_limits_and_abort(
         content,
         &resource_limits,
         &crate::abort::ProcessAbort,
@@ -1083,14 +1083,7 @@ pub(crate) fn parse_typed_document(
         }
         rspice_core::execution::ResultDocumentError::Aborted => CliError::Interrupted,
         error => conversion_error(path, error),
-    })?;
-    enforce_resource_limit(
-        path,
-        rspice_core::ResourceKind::ExternalDataValues,
-        document.total_value_count(),
-        resource_limits.max_external_data_values,
-    )?;
-    Ok(document)
+    })
 }
 
 fn load_hdf5(
