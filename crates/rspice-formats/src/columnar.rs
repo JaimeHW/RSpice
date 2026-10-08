@@ -373,7 +373,8 @@ fn decode_arrow_batches(
     limits: ColumnarLimits,
     batch_error: &'static str,
 ) -> Result<DecodedColumnarTable, ColumnarReadError> {
-    let mut decoded = ColumnarAccumulator::new(format, limits);
+    let mut decoded =
+        ColumnarAccumulator::new(format, limits, metadata.get("rspice.coordinate").cloned());
     for batch in batches {
         let batch = batch.map_err(|error| {
             adapter_error(
@@ -395,16 +396,18 @@ struct ColumnarAccumulator<'a> {
     schema: Option<arrow_schema::SchemaRef>,
     rows: usize,
     columns: Vec<(String, Vec<f64>)>,
+    coordinate_name: Option<String>,
 }
 
 impl<'a> ColumnarAccumulator<'a> {
-    fn new(format: &'a str, limits: ColumnarLimits) -> Self {
+    fn new(format: &'a str, limits: ColumnarLimits, coordinate_name: Option<String>) -> Self {
         Self {
             format,
             limits,
             schema: None,
             rows: 0,
             columns: Vec::new(),
+            coordinate_name,
         }
     }
 
@@ -461,6 +464,19 @@ impl<'a> ColumnarAccumulator<'a> {
         }
         for (index, array) in batch.columns().iter().enumerate() {
             let (name, column) = &mut self.columns[index];
+            let is_coordinate = self
+                .coordinate_name
+                .as_ref()
+                .map_or(index == 0, |coordinate| coordinate == name);
+            if is_coordinate && array.null_count() != 0 {
+                return Err(adapter_error(
+                    self.format,
+                    ColumnarReadFailure::NullValues {
+                        column: name.clone(),
+                        count: array.null_count(),
+                    },
+                ));
+            }
             column.extend(numeric_values(self.format, name, array.as_ref())?);
         }
         self.rows = rows;
@@ -490,35 +506,32 @@ fn numeric_values(
         BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
         UInt8Array, UInt16Array, UInt32Array, UInt64Array,
     };
-    if array.null_count() != 0 {
-        return Err(adapter_error(
-            format,
-            ColumnarReadFailure::NullValues {
-                column: name.to_owned(),
-                count: array.null_count(),
-            },
-        ));
-    }
     macro_rules! float_values {
         ($ty:ty) => {
-            array
-                .as_any()
-                .downcast_ref::<$ty>()
-                .map(|array| array.values().iter().map(|value| *value as f64).collect())
+            array.as_any().downcast_ref::<$ty>().map(|array| {
+                array
+                    .iter()
+                    .map(|value| value.map_or(f64::NAN, |value| value as f64))
+                    .collect()
+            })
         };
     }
     macro_rules! signed_values {
         ($ty:ty) => {
             array.as_any().downcast_ref::<$ty>().map(|array| {
                 array
-                    .values()
                     .iter()
                     .map(|value| {
-                        crate::numeric::exact_signed_integer(name, *value as i64).map_err(
-                            |detail| {
-                                adapter_error(format, ColumnarReadFailure::InexactInteger(detail))
-                            },
-                        )
+                        value.map_or(Ok(f64::NAN), |value| {
+                            crate::numeric::exact_signed_integer(name, value as i64).map_err(
+                                |detail| {
+                                    adapter_error(
+                                        format,
+                                        ColumnarReadFailure::InexactInteger(detail),
+                                    )
+                                },
+                            )
+                        })
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -528,14 +541,18 @@ fn numeric_values(
         ($ty:ty) => {
             array.as_any().downcast_ref::<$ty>().map(|array| {
                 array
-                    .values()
                     .iter()
                     .map(|value| {
-                        crate::numeric::exact_unsigned_integer(name, *value as u64).map_err(
-                            |detail| {
-                                adapter_error(format, ColumnarReadFailure::InexactInteger(detail))
-                            },
-                        )
+                        value.map_or(Ok(f64::NAN), |value| {
+                            crate::numeric::exact_unsigned_integer(name, value as u64).map_err(
+                                |detail| {
+                                    adapter_error(
+                                        format,
+                                        ColumnarReadFailure::InexactInteger(detail),
+                                    )
+                                },
+                            )
+                        })
                     })
                     .collect::<Result<Vec<_>, _>>()
             })
@@ -554,8 +571,13 @@ fn numeric_values(
         .or_else(|| unsigned_values!(UInt8Array))
         .or_else(|| {
             array.as_any().downcast_ref::<BooleanArray>().map(|array| {
-                Ok((0..array.len())
-                    .map(|index| if array.value(index) { 1.0 } else { 0.0 })
+                Ok(array
+                    .iter()
+                    .map(|value| match value {
+                        Some(true) => 1.0,
+                        Some(false) => 0.0,
+                        None => f64::NAN,
+                    })
                     .collect())
             })
         });
@@ -582,6 +604,144 @@ mod tests {
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use std::collections::HashMap;
     use std::sync::Arc;
+
+    #[test]
+    fn nullable_numeric_columns_preserve_gaps_and_boolean_levels() {
+        use arrow_array::{BooleanArray, Float32Array, Int8Array, UInt8Array};
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(Float32Array::from(vec![Some(1.5), None, Some(-2.0)])),
+            Arc::new(Float64Array::from(vec![Some(1.5), None, Some(-2.0)])),
+            Arc::new(Int8Array::from(vec![Some(1), None, Some(-2)])),
+            Arc::new(UInt8Array::from(vec![Some(1), None, Some(2)])),
+            Arc::new(BooleanArray::from(vec![Some(true), None, Some(false)])),
+        ];
+        for (array, expected) in columns.iter().zip([
+            [1.5, -2.0],
+            [1.5, -2.0],
+            [1.0, -2.0],
+            [1.0, 2.0],
+            [1.0, 0.0],
+        ]) {
+            let values = super::numeric_values("arrow", "signal", array.as_ref()).unwrap();
+            assert_eq!([values[0], values[2]], expected);
+            assert!(values[1].is_nan());
+        }
+    }
+
+    #[test]
+    fn coordinate_selection_allows_signal_gaps_but_refuses_null_coordinates() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("voltage", DataType::Float64, true),
+            Field::new("time", DataType::Float64, true),
+        ]));
+        let limits = ColumnarLimits {
+            max_columns: 2,
+            max_rows: 2,
+            max_values: 4,
+        };
+        for (selected, time) in [
+            (None, vec![Some(0.0), Some(1.0)]),
+            (Some("time"), vec![Some(0.0), Some(1.0)]),
+            (Some("time"), vec![Some(0.0), None]),
+        ] {
+            let valid = selected.is_some() && time[1].is_some();
+            let metadata = selected
+                .map(|name| ("rspice.coordinate".into(), name.into()))
+                .into_iter()
+                .collect();
+            let batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(Float64Array::from(vec![None, Some(2.0)])),
+                    Arc::new(Float64Array::from(time)),
+                ],
+            )
+            .unwrap();
+            let decoded =
+                decode_arrow_batches("arrow", [Ok(batch)], metadata, limits, "invalid batch");
+            if valid {
+                let decoded = super::finish_columnar_table("arrow", decoded.unwrap()).unwrap();
+                assert_eq!(decoded.coordinate_name, "time");
+                assert_eq!(decoded.coordinate, [0.0, 1.0]);
+                assert!(decoded.signals[0].real[0].is_nan());
+                assert_eq!(decoded.signals[0].real[1], 2.0);
+            } else {
+                assert!(
+                    matches!(decoded.err().expect("coordinate null refusal").reason,
+                    ColumnarReadFailure::NullValues { column, count: 1 }
+                    if column == selected.unwrap_or("voltage"))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn integer_columns_preserve_exact_large_values_in_arrow_and_parquet() {
+        use arrow_array::UInt64Array;
+        let signed = [Some(i64::MIN), None, Some(i64::MAX - 1023)];
+        let unsigned = [Some((1u64 << 53) + 2), None, Some(u64::MAX - 2047)];
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("time", DataType::Float64, false),
+            Field::new("signed", DataType::Int64, true),
+            Field::new("unsigned", DataType::UInt64, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Float64Array::from(vec![0.0, 1.0, 2.0])) as ArrayRef,
+                Arc::new(Int64Array::from(signed.to_vec())) as ArrayRef,
+                Arc::new(UInt64Array::from(unsigned.to_vec())) as ArrayRef,
+            ],
+        )
+        .unwrap();
+        let mut ipc_file = Vec::new();
+        {
+            let mut writer =
+                arrow_ipc::writer::FileWriter::try_new(&mut ipc_file, &schema).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+        }
+        let mut ipc_stream = Vec::new();
+        {
+            let mut writer =
+                arrow_ipc::writer::StreamWriter::try_new(&mut ipc_stream, &schema).unwrap();
+            writer.write(&batch).unwrap();
+            writer.finish().unwrap();
+        }
+        let mut parquet = Vec::new();
+        {
+            let mut writer =
+                parquet::arrow::ArrowWriter::try_new(&mut parquet, schema, None).unwrap();
+            writer.write(&batch).unwrap();
+            writer.close().unwrap();
+        }
+        let limits = ColumnarLimits {
+            max_columns: 3,
+            max_rows: 3,
+            max_values: 9,
+        };
+        for decoded in [
+            super::decode_arrow_ipc(&ipc_file, limits, "arrow file").unwrap(),
+            super::decode_arrow_ipc(&ipc_stream, limits, "arrow stream").unwrap(),
+            super::decode_parquet(&parquet, limits, "parquet").unwrap(),
+        ] {
+            assert_eq!(decoded.coordinate, [0.0, 1.0, 2.0]);
+            assert_eq!(decoded.signals[0].name, "signed");
+            assert_eq!(decoded.signals[1].name, "unsigned");
+            for index in [0, 2] {
+                assert_eq!(
+                    decoded.signals[0].real[index] as i128,
+                    i128::from(signed[index].unwrap())
+                );
+                assert_eq!(
+                    decoded.signals[1].real[index] as u128,
+                    u128::from(unsigned[index].unwrap())
+                );
+            }
+            assert!(decoded.signals[0].real[1].is_nan());
+            assert!(decoded.signals[1].real[1].is_nan());
+        }
+    }
 
     #[test]
     fn refuses_rows_over_limit_and_inexact_integer_columns() {
