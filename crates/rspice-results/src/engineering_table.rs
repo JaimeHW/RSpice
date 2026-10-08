@@ -471,6 +471,8 @@ pub struct EngineeringColumn {
     pub label: String,
     pub unit: Option<String>,
     pub identifier: bool,
+    /// Logical numeric type, retained even when a projection has no values.
+    pub numeric: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

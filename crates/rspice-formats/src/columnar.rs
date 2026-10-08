@@ -178,7 +178,7 @@ pub fn encode_parquet_table(
         .map(|column| {
             Field::new(
                 source.column_id(column),
-                if (0..source.row_count()).any(|row| source.numeric_value(row, column).is_some()) {
+                if source.column_is_numeric(column) {
                     DataType::Float64
                 } else {
                     DataType::Utf8
@@ -201,10 +201,7 @@ pub fn encode_parquet_table(
     let schema = Arc::new(Schema::new(fields));
     let arrays = (0..source.column_count())
         .map(|column| {
-            if schema
-                .field_with_name(source.column_id(column))
-                .is_ok_and(|field| field.data_type() == &DataType::Float64)
-            {
+            if schema.field(column).data_type() == &DataType::Float64 {
                 Arc::new(Float64Array::from(
                     (0..source.row_count())
                         .map(|row| source.numeric_value(row, column))
@@ -886,14 +883,17 @@ mod tests {
         );
     }
 
-    struct SelectedTable;
+    struct SelectedTable {
+        rows: usize,
+        missing_numbers: bool,
+    }
 
     impl EngineeringTableSource for SelectedTable {
         fn column_count(&self) -> usize {
             2
         }
         fn row_count(&self) -> usize {
-            2
+            self.rows
         }
         fn column_id(&self, column: usize) -> &str {
             ["time", "label"][column]
@@ -904,8 +904,11 @@ mod tests {
         fn column_unit(&self, column: usize) -> Option<&str> {
             (column == 0).then_some("s")
         }
+        fn column_is_numeric(&self, column: usize) -> bool {
+            column == 0
+        }
         fn numeric_value(&self, row: usize, column: usize) -> Option<f64> {
-            (column == 0).then_some(row as f64)
+            (column == 0 && !self.missing_numbers).then_some(row as f64)
         }
         fn display_value(&self, row: usize, column: usize) -> Option<&str> {
             (column == 1 && row == 0).then_some("first")
@@ -915,7 +918,10 @@ mod tests {
     #[test]
     fn parquet_writer_preserves_numeric_text_and_null_columns() {
         let bytes = encode_parquet_table(
-            &SelectedTable,
+            &SelectedTable {
+                rows: 2,
+                missing_numbers: false,
+            },
             Some(vec![(
                 "rspice.grid_id".to_owned(),
                 Some("fixture".to_owned()),
@@ -941,6 +947,29 @@ mod tests {
             .unwrap();
         assert_eq!(label.value(0), "first");
         assert!(label.is_null(1));
+    }
+
+    #[test]
+    fn parquet_writer_keeps_numeric_schema_for_empty_and_all_null_columns() {
+        for rows in [0, 2] {
+            let bytes = encode_parquet_table(
+                &SelectedTable {
+                    rows,
+                    missing_numbers: true,
+                },
+                None,
+            )
+            .unwrap();
+            let builder =
+                ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes)).unwrap();
+            assert_eq!(builder.schema().field(0).data_type(), &DataType::Float64);
+            assert_eq!(builder.schema().field(1).data_type(), &DataType::Utf8);
+            assert_eq!(builder.metadata().file_metadata().num_rows(), rows as i64);
+            for batch in builder.build().unwrap() {
+                let batch = batch.unwrap();
+                assert_eq!(batch.column(0).null_count(), batch.num_rows());
+            }
+        }
     }
 
     #[test]

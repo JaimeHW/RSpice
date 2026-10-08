@@ -105,6 +105,9 @@ mod tests {
         fn column_unit(&self, column: usize) -> Option<&str> {
             (column == 0).then_some("s")
         }
+        fn column_is_numeric(&self, column: usize) -> bool {
+            column == 0
+        }
         fn numeric_value(&self, row: usize, column: usize) -> Option<f64> {
             (column == 0).then_some([0.0, 1.5][row])
         }

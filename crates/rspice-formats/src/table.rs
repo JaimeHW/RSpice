@@ -8,6 +8,9 @@ pub trait EngineeringTableSource {
     fn column_id(&self, column: usize) -> &str;
     fn column_label(&self, column: usize) -> &str;
     fn column_unit(&self, column: usize) -> Option<&str>;
+    /// Logical column type, independent of selected rows and missing values.
+    /// Typed encoders must not infer this from the cells in a projection.
+    fn column_is_numeric(&self, column: usize) -> bool;
     fn numeric_value(&self, row: usize, column: usize) -> Option<f64>;
     fn display_value(&self, row: usize, column: usize) -> Option<&str>;
 }
@@ -272,6 +275,9 @@ mod tests {
         }
         fn column_unit(&self, column: usize) -> Option<&str> {
             (column == 0).then_some("s")
+        }
+        fn column_is_numeric(&self, column: usize) -> bool {
+            column == 0
         }
         fn numeric_value(&self, row: usize, column: usize) -> Option<f64> {
             (column == 0).then_some([1.5, 2.5][row])

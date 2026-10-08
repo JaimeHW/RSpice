@@ -26,6 +26,7 @@ pub fn active_schematic_dataset(schematic: &SchematicState) -> EngineeringDatase
         label: label.to_owned(),
         unit: unit.map(str::to_owned),
         identifier,
+        numeric: matches!(id, "x" | "y"),
     })
     .collect::<Vec<_>>();
     let mut rows = Vec::with_capacity(
@@ -364,6 +365,10 @@ impl rspice_formats::table::EngineeringTableSource for ProjectionSource<'_> {
         self.0.columns[column].unit.as_deref()
     }
 
+    fn column_is_numeric(&self, column: usize) -> bool {
+        self.0.columns[column].numeric
+    }
+
     fn numeric_value(&self, row: usize, column: usize) -> Option<f64> {
         self.0.rows[row]
             .cells
@@ -549,5 +554,48 @@ mod tests {
         assert!(xlsx.starts_with(b"PK"));
         assert!(parquet.starts_with(b"PAR1"));
         assert!(parquet.ends_with(b"PAR1"));
+    }
+
+    #[test]
+    fn export_projection_keeps_numeric_types_without_rows_values_or_units() {
+        use rspice_formats::table::EngineeringTableSource;
+
+        let mut dataset = dataset();
+        for column in &mut dataset.columns {
+            column.unit = None;
+        }
+        for row in &mut dataset.rows {
+            row.cells.remove("x");
+        }
+        let mut view = EngineeringTableView::for_dataset(&dataset);
+        view.columns.reverse();
+        let empty_selection = std::collections::BTreeSet::new();
+        for selection in [None, Some(&empty_selection)] {
+            let projection = dataset.project_selected(&view, false, selection);
+            let source = ProjectionSource(&projection);
+            for column in 0..source.column_count() {
+                assert_eq!(
+                    source.column_is_numeric(column),
+                    matches!(source.column_id(column), "x" | "y")
+                );
+                if source.column_id(column) == "x" {
+                    assert!(
+                        (0..source.row_count())
+                            .all(|row| source.numeric_value(row, column).is_none())
+                    );
+                }
+            }
+        }
+        view.filters.insert("x".to_owned(), "> 0".to_owned());
+        let projection = dataset.project(&view);
+        assert!(projection.rows.is_empty());
+        assert!(
+            projection
+                .columns
+                .iter()
+                .find(|column| column.id == "x")
+                .unwrap()
+                .numeric
+        );
     }
 }
