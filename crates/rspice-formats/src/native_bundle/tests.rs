@@ -15,6 +15,48 @@ fn limits() -> NativeBundleReadLimits {
 }
 
 #[test]
+fn native_publication_checks_json_and_archive_growth_before_allocating_past_the_limit() {
+    let mut dataset = NativeBundleDataset {
+        analysis: crate::WaveformDomain::Transient,
+        coordinate_name: "time",
+        coordinate_unit: None,
+        coordinate: &[0.0, 1.0],
+        signals: vec![NativeBundleSignal {
+            name: "out",
+            unit: None,
+            values: NativeBundleSignalValues::Real(&[1.0, 2.0]),
+        }],
+    };
+    for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
+        let bytes = encode_native_bundle(kind, &dataset, MAX_RESULT_DATASET_BYTES).unwrap();
+        let exact = bytes.len() as u64;
+        assert_eq!(encode_native_bundle(kind, &dataset, exact).unwrap(), bytes);
+        let error = encode_native_bundle(kind, &dataset, exact - 1)
+            .map(|bytes| bytes.len())
+            .unwrap_err();
+        assert!(error.to_string().contains("byte limit"), "{error}");
+        let decoded = decode_native_bundle(
+            &bytes,
+            kind,
+            NativeBundleReadLimits {
+                max_members: 2,
+                max_expanded_bytes: exact,
+                max_member_bytes: exact,
+            },
+        )
+        .unwrap();
+        assert_eq!(decoded.signals[0].real, [1.0, 2.0]);
+    }
+    let name = "a".repeat(1_000);
+    dataset.signals[0].name = &name;
+    let error = encode_native_bundle(NativeBundleKind::Dataset, &dataset, 512)
+        .map(|bytes| bytes.len())
+        .unwrap_err();
+    assert!(matches!(&error, NativeBundleError::Json { source, .. } if source.is_io()));
+    assert!(error.to_string().contains("512-byte limit"), "{error}");
+}
+
+#[test]
 fn native_coordinates_reject_both_orders_of_duplicate_signed_zero() {
     for analysis in [
         crate::WaveformDomain::Transient,

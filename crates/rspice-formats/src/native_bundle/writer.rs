@@ -5,7 +5,10 @@ use crate::WaveformDomain;
 use serde::Serialize;
 use sha2::Digest as _;
 use std::collections::HashSet;
-use std::io::{Cursor, Write as _};
+use std::io::{Cursor, Seek, Write};
+
+mod bounded_buffer;
+use bounded_buffer::BoundedBuffer;
 
 const DATASET_SCHEMA: &str = "rspice-waveform-dataset/1";
 const DATASET_MEMBER: &str = "dataset.json";
@@ -105,30 +108,57 @@ pub fn encode_native_bundle(
         },
         signals,
     };
-    let dataset_bytes =
-        serde_json::to_vec(&document).map_err(|source| NativeBundleError::Json {
+    let mut dataset_output = BoundedBuffer::new(max_bytes);
+    serde_json::to_writer(&mut dataset_output, &document).map_err(|source| {
+        NativeBundleError::Json {
             context: "native dataset serialization failed",
             source,
-        })?;
-    if dataset_bytes.len() as u64 > max_bytes {
-        return Err(NativeBundleError::InvalidData(format!(
-            "native dataset JSON is {} bytes; the limit is {max_bytes}",
-            dataset_bytes.len()
-        )));
-    }
+        }
+    })?;
+    let dataset_bytes = dataset_output.into_inner();
     let manifest = Manifest {
         schema: kind.manifest_schema(),
         dataset_member: DATASET_MEMBER,
         dataset_sha256: format!("{:x}", sha2::Sha256::digest(&dataset_bytes)),
     };
-    let manifest_bytes =
-        serde_json::to_vec(&manifest).map_err(|source| NativeBundleError::Json {
+    let mut manifest_output = BoundedBuffer::new(max_bytes);
+    serde_json::to_writer(&mut manifest_output, &manifest).map_err(|source| {
+        NativeBundleError::Json {
             context: "native manifest serialization failed",
             source,
-        })?;
+        }
+    })?;
+    let manifest_bytes = manifest_output.into_inner();
 
-    let cursor = Cursor::new(Vec::new());
-    let mut archive = zip::ZipWriter::new(cursor);
+    // Stored entries have fixed header overhead for these two fixed ASCII
+    // names. Ask the same writer for that overhead, avoiding a second full
+    // allocation or a refused ZIP whose destructor retries finalization.
+    let overhead = write_archive(Cursor::new(Vec::new()), &[], &[])?
+        .into_inner()
+        .len() as u64;
+    let archive_size = (dataset_bytes.len() as u64)
+        .checked_add(manifest_bytes.len() as u64)
+        .and_then(|size| size.checked_add(overhead))
+        .ok_or_else(|| NativeBundleError::InvalidData("native bundle size overflow".into()))?;
+    if archive_size > max_bytes {
+        return Err(NativeBundleError::InvalidData(format!(
+            "native bundle is {archive_size} bytes; the byte limit is {max_bytes}"
+        )));
+    }
+    Ok(write_archive(
+        BoundedBuffer::new(max_bytes),
+        &manifest_bytes,
+        &dataset_bytes,
+    )?
+    .into_inner())
+}
+
+fn write_archive<W: Write + Seek>(
+    output: W,
+    manifest_bytes: &[u8],
+    dataset_bytes: &[u8],
+) -> Result<W, NativeBundleError> {
+    let mut archive = zip::ZipWriter::new(output);
     // Stored members and ZIP's fixed default timestamp make publication
     // byte-for-byte deterministic across repeated encodes of the same data.
     let options = zip::write::SimpleFileOptions::default()
@@ -141,7 +171,7 @@ pub fn encode_native_bundle(
             source,
         })?;
     archive
-        .write_all(&manifest_bytes)
+        .write_all(manifest_bytes)
         .map_err(|source| NativeBundleError::Io {
             context: "could not write native manifest member".into(),
             source,
@@ -153,25 +183,15 @@ pub fn encode_native_bundle(
             source,
         })?;
     archive
-        .write_all(&dataset_bytes)
+        .write_all(dataset_bytes)
         .map_err(|source| NativeBundleError::Io {
             context: "could not write native dataset member".into(),
             source,
         })?;
-    let bytes = archive
-        .finish()
-        .map_err(|source| NativeBundleError::Zip {
-            context: "could not finish native bundle".into(),
-            source,
-        })?
-        .into_inner();
-    if bytes.len() as u64 > max_bytes {
-        return Err(NativeBundleError::InvalidData(format!(
-            "native bundle is {} bytes; the import limit is {max_bytes}",
-            bytes.len()
-        )));
-    }
-    Ok(bytes)
+    archive.finish().map_err(|source| NativeBundleError::Zip {
+        context: "could not finish native bundle".into(),
+        source,
+    })
 }
 
 fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Result<(), String> {
