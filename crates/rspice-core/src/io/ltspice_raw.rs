@@ -142,6 +142,14 @@ pub struct RawWaveformData {
 }
 
 impl RawWaveformData {
+    /// Numeric counts charged to the external-data and result-value budgets,
+    /// respectively. Result storage includes coordinate copies and imaginary
+    /// columns allocated before table metadata restores real-only variables.
+    /// Container metadata decoded by a consumer must be charged separately.
+    pub fn numeric_value_counts(&self) -> (usize, usize) {
+        numeric_value_counts(&self.header, self.header.no_points)
+    }
+
     /// Scalar-result plots omit the reference vector. Explicit RSpice table
     /// layout, including older point/index columns, takes precedence over the
     /// display title. A complex first scalar is still a signal, not an axis.
@@ -335,16 +343,9 @@ pub fn parse_raw_plots_bytes_with_limits(
             };
             in_plot(plot_number, error)
         })?;
-        external_values = external_values.saturating_add(checked_product(&[
-            plot.header.no_variables,
-            plot.header.no_points,
-            if plot.header.is_complex { 2 } else { 1 },
-        ]));
-        result_values = result_values.saturating_add(checked_product(&[
-            plot.header.no_variables,
-            plot.header.no_points,
-            if plot.header.is_complex { 3 } else { 2 },
-        ]));
+        let (external, retained) = plot.numeric_value_counts();
+        external_values = external_values.saturating_add(external);
+        result_values = result_values.saturating_add(retained);
         plots.try_reserve(1).map_err(|error| {
             RawParseError::DataError(format!("unable to retain raw plot {plot_number}: {error}"))
         })?;
@@ -684,7 +685,10 @@ fn detect_binary_encoding(
             continue;
         }
 
-        if header.no_points > 0 {
+        // Zero may request legacy size inference, but an immediately following
+        // plot header means this plot is empty. Never consume that header as
+        // binary samples, even if its byte length happens to fit a row size.
+        if header.no_points > 0 || starts_plot_header(payload) {
             let Some(consumed) = row_size.checked_mul(header.no_points) else {
                 continue;
             };
@@ -739,25 +743,33 @@ fn ensure_waveform_dimensions(
     num_points: usize,
     resource_limits: ResourceLimits,
 ) -> Result<(), RawParseError> {
+    let (external, retained) = numeric_value_counts(header, num_points);
     ResourceLimitError::ensure(
         ResourceKind::ExternalDataValues,
+        external,
+        resource_limits.max_external_data_values,
+    )?;
+    ResourceLimitError::ensure(
+        ResourceKind::ResultValues,
+        retained,
+        resource_limits.max_result_values,
+    )?;
+    Ok(())
+}
+
+fn numeric_value_counts(header: &RawFileHeader, num_points: usize) -> (usize, usize) {
+    (
         checked_product(&[
             header.no_variables,
             num_points,
             if header.is_complex { 2 } else { 1 },
         ]),
-        resource_limits.max_external_data_values,
-    )?;
-    ResourceLimitError::ensure(
-        ResourceKind::ResultValues,
         checked_product(&[
             header.no_variables,
             num_points,
             if header.is_complex { 3 } else { 2 },
         ]),
-        resource_limits.max_result_values,
-    )?;
-    Ok(())
+    )
 }
 
 fn value_buffer(capacity: usize) -> Result<Vec<f64>, RawParseError> {
@@ -898,8 +910,8 @@ fn parse_binary_data(
 ///
 /// A plot's data ends after the rows its own `No. Points` declares, so the
 /// walk stops there and leaves the bytes behind it — blank space, or the next
-/// plot's header — for the caller to account for. `wanted` of `None` consumes
-/// everything, which is what an undeclared point count means.
+/// plot's header — for the caller to account for. `wanted` of `None` infers
+/// the row count from the data up to EOF or the next plot header.
 fn collect_ascii_lines(
     payload: &[u8],
     wanted: Option<usize>,
@@ -910,7 +922,7 @@ fn collect_ascii_lines(
         let Some(rest) = payload.get(*offset..) else {
             break;
         };
-        if rest.is_empty() {
+        if rest.is_empty() || starts_plot_header(rest) {
             break;
         }
         let end = rest
