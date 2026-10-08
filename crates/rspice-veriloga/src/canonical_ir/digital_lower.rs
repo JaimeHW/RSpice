@@ -142,11 +142,13 @@ pub(crate) fn parameter_override_literal(
     constants::override_literal(declaration, source, time_scale)
 }
 
-pub(crate) fn native_parameter_types(
+pub(crate) use constants::ParameterAssignment;
+
+pub(crate) fn parameter_assignments(
     declarations: &[&crate::ast::ParameterDecl],
     time_scale: crate::time_scale::ModuleTimeScale,
-) -> Vec<crate::ast::ParamType> {
-    constants::native_parameter_types(declarations, time_scale)
+) -> Result<Vec<ParameterAssignment>, Vec<DigitalLoweringDiagnostic>> {
+    constants::parameter_assignments(declarations, time_scale)
 }
 
 /// Whether a diagnostic is the author's to fix or the compiler's.
@@ -616,6 +618,7 @@ fn lower_with_analog_variables(
                         also_model: parameter.also_model,
                         value: super::digital_value::FourStateValue::from_literal(&parameter.value),
                         signed: parameter.value.signed,
+                        bounds: parameter.bounds,
                     }
                 })
             })
@@ -1389,7 +1392,9 @@ impl ProcessLowerer<'_> {
             None => {
                 // Parameters retain their authored width; analog integers use
                 // the same [31:0] numbering as digital integer storage.
-                if let Some((value, _)) = self.constants.bits.get(name) {
+                if let Some(bounds) = self.constants.bounds.get(name) {
+                    *bounds
+                } else if let Some((value, _)) = self.constants.bits.get(name) {
                     VectorBounds {
                         msb: i64::from(value.width()) - 1,
                         lsb: 0,

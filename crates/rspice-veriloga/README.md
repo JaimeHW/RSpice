@@ -635,6 +635,25 @@ recompute dependent defaults and local prologues. Wider and unsigned packed
 values are never narrowed to signed 32-bit merely because their value is small.
 General packed analog typing/lowering and typed deck transport remain open.
 
+Schema 99 accepts packed parameter/localparam ranges and optional `signed`
+qualifiers. Assignment applies the declared width and signedness, preserves
+ascending and nonzero bit numbering, and retains exact packed metadata even
+for small known values. RHS signedness controls sign extension. Digital child
+overrides are evaluated in the parent scope and assigned in the effective child
+scope after all overrides, so changing a width and value together is independent
+of the order of named overrides.
+
+Numeric dependencies of those packed values or bounds carry their effective
+elaboration values through the canonical artifact and runtime ABI. Updating a
+compiled device to a different dependency value reports that source
+specialization is required; specialization recomputes the dependent packed
+values and widths. Ordinary numeric defaults remain symbolic and writable.
+The generated Rust parameter-update path emits the same dependency guard.
+Unimplemented packed analog-child overrides report an explicit diagnostic.
+General packed analog arithmetic, typed range constraints, and complete analog
+child source specialization remain open; retaining a declared packed constant
+does not provide those capabilities.
+
 General packed operations over mutable numeric parameters, non-scalar
 overrides, and typed range constraints remain open.
 Exact parameters whose overrides change their numeric/elaboration

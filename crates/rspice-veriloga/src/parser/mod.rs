@@ -1251,6 +1251,19 @@ impl<'a> Parser<'a> {
             (ParamType::Real, false)
         };
 
+        let signedness = if !type_is_explicit && self.check(TokenKind::Signed) {
+            let before = self.pos;
+            let signing = self.parse_signedness();
+            (self.pos != before).then_some(signing)
+        } else {
+            None
+        };
+        let packed_range = if type_is_explicit {
+            None
+        } else {
+            self.parse_optional_vector_range()?
+        };
+
         // Pull desc/units out of any preceding attribute instance
         let (description, units) = Self::extract_param_attributes(attributes);
 
@@ -1312,6 +1325,8 @@ impl<'a> Parser<'a> {
             decls.push(ParameterDecl {
                 param_type,
                 type_is_explicit,
+                signedness,
+                packed_range: packed_range.clone(),
                 name: name.into(),
                 dimensions,
                 default,

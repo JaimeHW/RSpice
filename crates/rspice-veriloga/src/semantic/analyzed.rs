@@ -310,6 +310,8 @@ pub struct AnalyzedParameter {
     pub also_model: bool,
     pub param_type: ParamType,
     pub value_type: ValueType,
+    pub elaboration_value: Option<f64>,
+    pub packed_bounds: Option<super::VectorBounds>,
     /// Ordered declaration dimensions. Bounds remain symbolic because an
     /// instance may override an earlier scalar parameter that shapes this
     /// array. No compile-time flat storage base is implied here.

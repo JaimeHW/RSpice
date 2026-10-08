@@ -2975,3 +2975,56 @@ endmodule
         assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
     }
 }
+
+#[test]
+fn declared_packed_parameters_specialize_both_halves_of_loaded_mixed_instances() {
+    let model = ModelFile::new(
+        "declared_packed_parameters",
+        r#"
+`timescale 1ns/1ps
+module declared_packed_parameters(p,q);
+ inout p; electrical p; output reg q=0;
+ parameter integer W=8;
+ parameter real BASE=273;
+ parameter [W-1:0] CODE=BASE+1;
+ parameter real LEVEL=CODE+0.0;
+ parameter real EXPECTED=18;
+ initial #1 q=(CODE==EXPECTED);
+ analog I(p)<+(V(p)-LEVEL*q)/1000;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* declared packed parameter specialization\n.param vcc=1\n\
+         Xa pa qa declared_packed_parameters\n\
+         Xb pb qb declared_packed_parameters W=4 EXPECTED=2\n\
+         Rpa pa 0 1k\nRqa qa 0 1k\nRpb pb 0 1k\nRqb qb 0 1k\n\
+         .va \"{}\" declared_packed_parameters module=declared_packed_parameters\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, settled) in [("pa", 9.0), ("pb", 1.0)] {
+        let values = waveform(&result, node);
+        for (&time, &value) in result.time.iter().zip(&values) {
+            if time < 0.9e-9 {
+                assert!(value.abs() < 1e-8, "{node} at {time}: {value}");
+            } else if time > 1.1e-9 {
+                assert!((value - settled).abs() < 1e-8, "{node} at {time}: {value}");
+            }
+        }
+        assert!((values.last().unwrap() - settled).abs() < 1e-8);
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(
+            events[0].value.state,
+            rspice_core::xspice::DigitalState::Zero
+        );
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+    }
+}

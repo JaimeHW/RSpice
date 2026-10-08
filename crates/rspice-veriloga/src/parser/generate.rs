@@ -573,6 +573,8 @@ impl Unroller<'_> {
             environment.definitions.push(ParameterDecl {
                 param_type: ParamType::Integer,
                 type_is_explicit: true,
+                signedness: None,
+                packed_range: None,
                 name: name.clone(),
                 dimensions: Vec::new(),
                 default: Some(Expression::Number(NumberLit {
@@ -595,6 +597,8 @@ impl Unroller<'_> {
         let declaration = ParameterDecl {
             param_type: ParamType::Integer,
             type_is_explicit: true,
+            signedness: None,
+            packed_range: None,
             name: "$generate_index".into(),
             dimensions: Vec::new(),
             default: Some(expression.clone()),

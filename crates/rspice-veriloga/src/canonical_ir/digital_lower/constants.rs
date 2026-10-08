@@ -11,6 +11,7 @@ use std::collections::HashSet;
 #[derive(Default)]
 pub(super) struct ResolvedConstants {
     pub bits: HashMap<SmolStr, (FourStateValue, bool)>,
+    pub bounds: HashMap<SmolStr, VectorBounds>,
     integers: HashMap<SmolStr, i64>,
     reals: HashMap<SmolStr, f64>,
     non_finite_reals: HashMap<SmolStr, f64>,
@@ -168,6 +169,7 @@ pub(super) fn resolve<'a>(
         .collect();
     let mut resolved = ResolvedConstants {
         bits: HashMap::new(),
+        bounds: HashMap::new(),
         integers: source.integers.clone(),
         reals: source.reals.clone(),
         non_finite_reals: source.non_finite_reals.clone(),
@@ -203,31 +205,64 @@ pub(super) fn resolve<'a>(
         if let Some(expression) = &declaration.default {
             collect_expression_reads(expression, &mut dependencies);
         }
+        if let Some(range) = &declaration.packed_range {
+            collect_expression_reads(&range.msb, &mut dependencies);
+            collect_expression_reads(&range.lsb, &mut dependencies);
+        }
         pending.extend(dependencies.into_iter().rev().map(|name| (name, false)));
     }
     Ok(resolved)
 }
 
-/// Infer native scalar storage using one shared declaration-order evaluation.
-/// The caller has validated ordering. Failed/unsupported values poison only
-/// their dependents, and must not reveal a same-named built-in constant.
-pub(super) fn native_parameter_types(
+/// Typed assignment evidence; numeric defaults still retain executable expressions.
+pub(crate) struct ParameterAssignment {
+    pub numeric_type: ParamType,
+    pub value: Option<Expression>,
+    pub bounds: Option<VectorBounds>,
+}
+
+pub(super) fn parameter_assignments(
     declarations: &[&ParameterDecl],
     time_scale: crate::time_scale::ModuleTimeScale,
-) -> Vec<ParamType> {
+) -> Result<Vec<ParameterAssignment>, Vec<DigitalLoweringDiagnostic>> {
     let mut resolved = ResolvedConstants::default();
     let mut unavailable = HashSet::new();
+    let source = DigitalConstants {
+        definitions: declarations.iter().map(|value| (*value).clone()).collect(),
+        ..Default::default()
+    };
     let mut result = Vec::with_capacity(declarations.len());
     for declaration in declarations {
         let mut reads = BTreeSet::new();
         if let Some(expression) = &declaration.default {
             collect_expression_reads(expression, &mut reads);
         }
+        if let Some(range) = &declaration.packed_range {
+            collect_expression_reads(&range.msb, &mut reads);
+            collect_expression_reads(&range.lsb, &mut reads);
+        }
+        let packed = declaration.packed_range.is_some() || declaration.signedness.is_some();
         let can_resolve = declaration.dimensions.is_empty()
             && declaration.param_type != ParamType::String
             && !reads.iter().any(|name| unavailable.contains(name.as_str()));
-        let resolved_value = can_resolve
+        let mut resolved_value = can_resolve
             && resolve_one(&declaration.name, declaration, &mut resolved, time_scale).is_ok();
+        if packed && !resolved_value {
+            // A packed bound can refer to a later parameter. The shared graph
+            // resolver handles that dependency and diagnoses cycles; default
+            // initializer ordering is checked separately by semantic analysis.
+            let root = Expression::Identifier(crate::ast::Identifier {
+                name: declaration.name.clone(),
+                span: declaration.span,
+            });
+            let complete = resolve(&source, time_scale, &[], &[], [&root])?;
+            resolved.bits.extend(complete.bits);
+            resolved.bounds.extend(complete.bounds);
+            resolved.integers.extend(complete.integers);
+            resolved.reals.extend(complete.reals);
+            resolved.non_finite_reals.extend(complete.non_finite_reals);
+            resolved_value = true;
+        }
         if !resolved_value {
             unavailable.insert(declaration.name.clone());
         }
@@ -241,13 +276,19 @@ pub(super) fn native_parameter_types(
         } else {
             ParamType::Real
         };
-        result.push(if declaration.type_is_explicit {
-            declaration.param_type
-        } else {
-            inferred
+        result.push(ParameterAssignment {
+            numeric_type: if declaration.type_is_explicit {
+                declaration.param_type
+            } else {
+                inferred
+            },
+            value: resolved_value
+                .then(|| resolved_literal(&declaration.name, &resolved, declaration.span).ok())
+                .flatten(),
+            bounds: resolved.bounds.get(&declaration.name).copied(),
         });
     }
-    result
+    Ok(result)
 }
 
 fn resolve_one(
@@ -292,9 +333,40 @@ fn resolve_one(
     };
     let entry = lowerer.builder.create_block();
     lowerer.builder.seal_block(entry);
+    let bounds = declaration
+        .packed_range
+        .as_ref()
+        .map(|range| {
+            let integer_bound =
+                |expression: &Expression| match scalar(expression, resolved, time_scale) {
+                    Some(crate::numeric_literal::NumericLiteralValue::Integer(value)) => Ok(value),
+                    _ => Err(refuse(format!(
+                        "parameter `{name}` packed bounds require known integer constants"
+                    ))),
+                };
+            let bounds = VectorBounds {
+                msb: integer_bound(&range.msb)?,
+                lsb: integer_bound(&range.lsb)?,
+            };
+            if bounds.width() > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH {
+                return Err(refuse(format!(
+                    "parameter `{name}` packed width exceeds the supported packed width"
+                )));
+            }
+            Ok(bounds)
+        })
+        .transpose()?;
     let integer = declaration.type_is_explicit && declaration.param_type == ParamType::Integer;
-    let signed = integer || lowerer.self_signed(expression);
-    let value = if integer {
+    let signed = integer
+        || declaration.signedness.map_or_else(
+            || bounds.is_none() && lowerer.self_signed(expression),
+            |signing| signing == crate::ast::Signedness::Signed,
+        );
+    let value = if let Some(bounds) = bounds {
+        let rhs_signed = lowerer.self_signed(expression);
+        let value = lowerer.assigned_value(entry, expression, bounds.width());
+        lowerer.resize(entry, value, bounds.width(), rhs_signed)
+    } else if integer {
         let value = lowerer.assigned_value(entry, expression, 32);
         lowerer.resize(entry, value, 32, signed)
     } else if (declaration.type_is_explicit && declaration.param_type == ParamType::Real)
@@ -322,6 +394,10 @@ fn resolve_one(
                 "parameter `{name}` cannot be evaluated as a digital constant: {error}"
             ))
         })?;
+    resolved.bounds.remove(name);
+    if let Some(bounds) = bounds {
+        resolved.bounds.insert(name.into(), bounds);
+    }
     resolved.integers.remove(name);
     resolved.reals.remove(name);
     resolved.non_finite_reals.remove(name);
@@ -647,11 +723,23 @@ pub(super) fn override_literal(
             .collect::<Vec<_>>()
             .join("; ")
     };
-    let mut resolved = resolve(source, time_scale, &[], &[], [expression]).map_err(diagnostic)?;
+    let mut required = vec![expression];
+    if let Some(range) = &declaration.packed_range {
+        required.extend([&range.msb, &range.lsb]);
+    }
+    let mut resolved = resolve(source, time_scale, &[], &[], required).map_err(diagnostic)?;
     // This name cannot shadow an operand: the expression is evaluated before
     // resolve_one publishes its result in the constant environment.
     let name = "$rspice_override";
     resolve_one(name, declaration, &mut resolved, time_scale).map_err(diagnostic)?;
+    resolved_literal(name, &resolved, declaration.span)
+}
+
+fn resolved_literal(
+    name: &str,
+    resolved: &ResolvedConstants,
+    span: crate::source::Span,
+) -> Result<Expression, String> {
     if let Some((value, signed)) = resolved.bits.get(name) {
         let raw = format!(
             "{}'{}b{}",
@@ -663,7 +751,7 @@ pub(super) fn override_literal(
         return Ok(Expression::Digital(crate::ast::DigitalExpr::FourState(
             crate::ast::FourStateLit {
                 value: literal,
-                span: declaration.span,
+                span,
             },
         )));
     }
@@ -673,6 +761,6 @@ pub(super) fn override_literal(
     Ok(Expression::Number(crate::ast::NumberLit {
         value,
         raw: format!("{value:e}").into(),
-        span: declaration.span,
+        span,
     }))
 }

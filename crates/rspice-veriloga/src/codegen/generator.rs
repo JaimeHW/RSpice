@@ -455,6 +455,7 @@ impl CodeGenerator {
                     default: p.default,
                     default_program,
                     is_integer: p.is_integer,
+                    elaboration_value: p.elaboration_value,
                     min: p.min,
                     max: p.max,
                     min_parameter: p.min_parameter.as_ref().map(resolve_bound).transpose()?,

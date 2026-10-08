@@ -997,6 +997,10 @@ struct NativeEntryDependencies<'a> {
 /// Invalid instance parameter value reported before it can enter a model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParameterValueError {
+    RequiresElaboration {
+        parameter: SmolStr,
+        value: f64,
+    },
     NonFinite {
         parameter: SmolStr,
         value: f64,
@@ -1023,6 +1027,10 @@ pub enum ParameterValueError {
 impl std::fmt::Display for ParameterValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::RequiresElaboration { parameter, value } => write!(
+                f,
+                "parameter '{parameter}' value {value} changes a packed elaboration dependency; specialize the source before updating the compiled device"
+            ),
             Self::NonFinite { parameter, value } => {
                 write!(
                     f,
@@ -3984,6 +3992,15 @@ impl VerilogADevice {
             })?;
         if !value.is_finite() {
             return Err(ParameterValueError::NonFinite {
+                parameter: parameter.name.clone(),
+                value,
+            });
+        }
+        if parameter
+            .elaboration_value
+            .is_some_and(|expected| expected.to_bits() != value.to_bits())
+        {
+            return Err(ParameterValueError::RequiresElaboration {
                 parameter: parameter.name.clone(),
                 value,
             });

@@ -73,6 +73,7 @@ pub(crate) fn retain_packed_parameters(
                     scope: parameter.scope,
                     also_model: parameter.also_model,
                     value,
+                    bounds: parameter.packed_bounds,
                 });
         } else {
             slots.push(Ok(numeric.len()));

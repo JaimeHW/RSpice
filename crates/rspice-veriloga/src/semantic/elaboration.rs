@@ -478,6 +478,23 @@ impl<'a> HierarchyElaborator<'a> {
         let branch_inventory = super::flow_probes::hierarchy_branches(child);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let overrides = bind_parameter_overrides(instance, child, path)?;
+        for &index in overrides.keys() {
+            let parameter = &child.parameters[index];
+            if parameter.elaboration_value.is_some()
+                || matches!(
+                    parameter.default_expr,
+                    Some(Expression::Digital(crate::ast::DigitalExpr::FourState(_)))
+                )
+            {
+                return Err(semantic_error(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "parameter '{}' of analog child '{path}' affects packed elaboration and requires source specialization before hierarchy flattening",
+                        parameter.name
+                    )),
+                    instance.span,
+                ));
+            }
+        }
         self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
         let noise_process_base = self.next_noise_process;
         self.next_noise_process = self

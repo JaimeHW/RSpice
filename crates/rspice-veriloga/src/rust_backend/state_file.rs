@@ -1027,6 +1027,13 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("            let value = read_parameter_slot(params, index);\n");
         out.push_str("            validate_parameter_metadata(params, index, value)?;\n");
         out.push_str("        }\n");
+        for (index, parameter) in artifact.mir.parameters.iter().enumerate() {
+            if let Some(value) = parameter.elaboration_value {
+                writeln!(out,
+                    "        if read_parameter_slot(params, {index}).to_bits() != {}u64 {{ return Err(format!(\"parameter '{{}}' changes a packed elaboration dependency; specialize the source before updating the compiled device\", PARAMETER_DISPLAY_NAMES[{index}])); }}",
+                    value.to_bits()).expect("write parameter elaboration guard");
+            }
+        }
         out.push_str("        Ok(())\n");
     }
     out.push_str("    }\n\n");

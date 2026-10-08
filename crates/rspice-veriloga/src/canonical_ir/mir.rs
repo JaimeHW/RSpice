@@ -64,6 +64,8 @@ pub struct MirParameterSlot {
     /// [`HirParameter::default`](crate::canonical_ir::hir::HirParameter).
     #[serde(with = "crate::json_float::option")]
     pub default: Option<f64>,
+    #[serde(default, with = "crate::json_float::option")]
+    pub elaboration_value: Option<f64>,
     pub default_expr: Option<HirExprRef>,
     pub range: Option<HirParamRange>,
     pub aliases: Vec<SmolStr>,
@@ -180,6 +182,7 @@ impl MirModel {
                 value_type: parameter.value_type,
                 dimensions: parameter.dimensions.clone(),
                 default: parameter.default,
+                elaboration_value: parameter.elaboration_value,
                 default_expr: parameter.default_expr.clone(),
                 range: parameter.range.clone(),
                 aliases: parameter.aliases.clone(),

@@ -553,6 +553,11 @@ fn validate_hir_mir_parameters(
             || hir_parameter.value_type != mir_parameter.value_type
             || hir_parameter.dimensions != mir_parameter.dimensions
             || hir_parameter.default != mir_parameter.default
+            || hir_parameter.elaboration_value.map(f64::to_bits)
+                != mir_parameter.elaboration_value.map(f64::to_bits)
+            || hir_parameter
+                .elaboration_value
+                .is_some_and(|value| !value.is_finite())
             || hir_parameter.default_expr != mir_parameter.default_expr
             || hir_parameter.range != mir_parameter.range
             || hir_parameter.aliases != mir_parameter.aliases
@@ -903,6 +908,9 @@ fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
         join_smol(&parameter.aliases)
     )
     .expect("write to string");
+    if let Some(value) = parameter.elaboration_value {
+        writeln!(out, "elaboration_value={}", f64_label(value)).expect("write to string");
+    }
 }
 
 fn write_hir_variable(out: &mut String, variable: &HirVariable) {
@@ -1079,6 +1087,9 @@ fn write_mir_parameter(out: &mut String, parameter: &MirParameterSlot) {
         join_smol(&parameter.aliases)
     )
     .expect("write to string");
+    if let Some(value) = parameter.elaboration_value {
+        writeln!(out, "elaboration_value={}", f64_label(value)).expect("write to string");
+    }
 }
 
 fn write_mir_branch(out: &mut String, branch: &MirBranch) {

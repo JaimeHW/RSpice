@@ -78,8 +78,14 @@ impl ScalarParameterValue {
                 parameter.name
             )));
         }
+        let expression = self.expression(&parameter.name, parameter.span)?;
+        if parameter.packed_range.is_some() || parameter.signedness.is_some() {
+            // Bounds may name another simultaneously overridden parameter.
+            // Convert after the complete effective source scope is installed.
+            return Ok(expression);
+        }
         let mut declaration = parameter.clone();
-        declaration.default = Some(self.expression(&parameter.name, parameter.span)?);
+        declaration.default = Some(expression);
         crate::canonical_ir::digital_lower::parameter_override_literal(
             &declaration,
             &DigitalConstants::default(),

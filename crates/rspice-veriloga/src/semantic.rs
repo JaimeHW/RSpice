@@ -388,6 +388,7 @@ mod flow_probes;
 mod function_effects;
 mod implicit_integrator;
 mod packed_parameters;
+mod parameter_assignments;
 mod parameter_constants;
 mod parameter_defaults;
 mod retained_inputs;
@@ -1315,13 +1316,22 @@ impl SemanticAnalyzer {
         if self.errors.len() > errors_before {
             return Err(self.errors.remove(errors_before).into());
         }
-        let (parameter_types, localparam_types) = parameter_defaults::numeric_parameter_types(module);
+        let parameter_assignments = parameter_assignments::ParameterAssignments::analyze(module)?;
+        let mut localparam_types = Vec::with_capacity(module.localparams.len());
+        for localparam in &module.localparams {
+            let mut effective = localparam.clone();
+            parameter_assignments.prepare(&mut effective);
+            localparam_types.push(effective.param_type);
+        }
         let mut localparam_defaults = vec![None; module.localparams.len()];
         let mut local_defaults = parameter_defaults::LocalDefaults::default();
         for (local, parameter_index) in declarations {
             if local {
                 let mut localparam = module.localparams[parameter_index].clone();
-                localparam.param_type = localparam_types[parameter_index];
+                parameter_assignments.prepare(&mut localparam);
+                if let Some(default) = parameter_assignments.packed_default(&localparam) {
+                    localparam.default = Some(default);
+                }
                 let localparam = &localparam;
                 let default = self.prepare_localparam_default(localparam, module)?;
                 if localparam.param_type == ParamType::String {
@@ -1358,7 +1368,7 @@ impl SemanticAnalyzer {
             }
             let original = &module.parameters[parameter_index];
             let mut expanded = original.clone();
-            expanded.param_type = parameter_types[parameter_index];
+            parameter_assignments.prepare(&mut expanded);
             expanded.default = original
                 .default
                 .as_ref()
@@ -1474,14 +1484,19 @@ impl SemanticAnalyzer {
             // the executable default must remain symbolic. Keeping those two
             // concerns separate lets a later array bound be checked through a
             // transitive chain without baking overridable values into code.
-            let normalized_default = param
-                .default
-                .as_ref()
-                .filter(|_| !is_parameter_array)
-                .map(|expression| {
-                    self.normalize_scalar_parameter_default(param, expression, module)
-                })
-                .transpose()?;
+            let normalized_default =
+                if let Some(default) = parameter_assignments.packed_default(param) {
+                    Some(default)
+                } else {
+                    param
+                        .default
+                        .as_ref()
+                        .filter(|_| !is_parameter_array)
+                        .map(|expression| {
+                            self.normalize_scalar_parameter_default(param, expression, module)
+                        })
+                        .transpose()?
+                };
             self.exact_parameter_constants
                 .retain(param, normalized_default.as_ref());
             let declared_default_value = normalized_default
@@ -1585,6 +1600,15 @@ impl SemanticAnalyzer {
                 also_model,
                 param_type: param.param_type,
                 value_type,
+                elaboration_value: if matches!(
+                    normalized_default,
+                    Some(Expression::Digital(DigitalExpr::FourState(_)))
+                ) {
+                    None
+                } else {
+                    parameter_assignments.fixed_value(param)?
+                },
+                packed_bounds: parameter_assignments.bounds(&param.name),
                 dimensions: param
                     .dimensions
                     .iter()
@@ -1822,6 +1846,7 @@ impl SemanticAnalyzer {
                         scope: ParameterScope::Model,
                         also_model: false,
                         value: literal.value.clone(),
+                        bounds: parameter_assignments.bounds(&localparam.name),
                     });
                 continue;
             }

@@ -219,6 +219,22 @@ impl RuntimeCompileReport {
                 canonical: canonical_module.to_owned(),
             });
         }
+        if self.model.parameters.len() != self.canonical_ir.hir.parameters.len()
+            || self
+                .model
+                .parameters
+                .iter()
+                .zip(&self.canonical_ir.hir.parameters)
+                .any(|(model, hir)| {
+                    model.elaboration_value.map(f64::to_bits)
+                        != hir.elaboration_value.map(f64::to_bits)
+                        || model
+                            .elaboration_value
+                            .is_some_and(|value| !value.is_finite())
+                })
+        {
+            return Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch);
+        }
         if self.abi != RuntimeAbiSummary::from_artifact(&self.canonical_ir)
             || self.abi.noise_source_count != self.model.noise_sources.len()
             || self.abi.internal_node_count != self.model.internal_nodes
@@ -349,6 +365,7 @@ impl RuntimeAbiSummary {
                     scope: parameter.scope,
                     value_type: parameter.value_type,
                     default: parameter.default,
+                    elaboration_value: parameter.elaboration_value,
                     aliases: parameter.aliases.clone(),
                 })
                 .collect(),
@@ -402,6 +419,8 @@ pub struct RuntimeAbiParameter {
     pub scope: crate::semantic::ParameterScope,
     pub value_type: CanonicalValueType,
     pub default: Option<f64>,
+    #[serde(default)]
+    pub elaboration_value: Option<f64>,
     pub aliases: Vec<SmolStr>,
 }
 

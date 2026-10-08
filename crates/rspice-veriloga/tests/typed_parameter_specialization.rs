@@ -943,3 +943,266 @@ endmodule
         verify(&restored, 4.0, true);
     }
 }
+
+#[test]
+fn declared_packed_parameters_keep_assignment_context_ranges_and_overrides() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module declared(p);
+ inout p; electrical p;
+ parameter integer W=8;
+ parameter [W+15:16] U=4'shf;
+ aliasparam PATTERN=U;
+ parameter signed [0:W-1] S=4'hf;
+ parameter signed SIGNED=8'hf0;
+ localparam [4:7] N=8'hab;
+ parameter [15:8] SUM=8'hff+8'h2;
+ parameter signed [15:0] WIDE=8'hff+8'h2;
+ parameter [0:7] R=7.5;
+ parameter real LEVEL=U+0.0+S+N;
+ reg [15:0] u=U, s=S, sign=SIGNED, n=N, sum=SUM, wide=WIDE, rounded=R;
+ reg [7:0] slices={U[W+15:W+12],N[4:7]};
+ initial begin u=U; s=S; sign=SIGNED; n=N; sum=SUM; wide=WIDE; rounded=R; end
+ analog I(p)<+LEVEL;
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    for (name, raw) in [
+        ("u", "16'hff"),
+        ("s", "16'hf"),
+        ("sign", "16'hfff0"),
+        ("n", "16'hb"),
+        ("sum", "16'h1"),
+        ("wide", "16'h101"),
+        ("rounded", "16'h8"),
+        ("slices", "8'hfb"),
+    ] {
+        assert_eq!(
+            initial(&original, name),
+            DigitalInitialValue::FourState(bits(raw)),
+            "{name}"
+        );
+    }
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "declared",
+        original.model.clone(),
+        &original.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 281.0);
+    let error = device.try_set_parameter("W", 4.0).unwrap_err().to_string();
+    assert!(error.contains("specialize the source"), "{error}");
+    assert_eq!(device.try_evaluate().unwrap()[0], 281.0);
+    assert!(!device.try_set_parameter("U", 4.0).unwrap());
+    for overrides in [
+        vec![
+            ("PATTERN", ScalarParameterValue::Integer(0x1234)),
+            ("W", ScalarParameterValue::Integer(4)),
+        ],
+        vec![
+            ("W", ScalarParameterValue::Integer(4)),
+            ("PATTERN", ScalarParameterValue::Integer(0x1234)),
+        ],
+    ] {
+        let report = compiler
+            .specialize_mixed_runtime_typed(&original.canonical_ir, &overrides, &NoPipelineControl)
+            .unwrap();
+        assert_eq!(
+            initial(&report, "u"),
+            DigitalInitialValue::FourState(bits("16'h4"))
+        );
+        assert_eq!(
+            initial(&report, "s"),
+            DigitalInitialValue::FourState(bits("16'hffff"))
+        );
+        let u = report
+            .abi
+            .elaboration_parameters
+            .iter()
+            .find(|value| value.name == "U")
+            .unwrap();
+        assert_eq!(u.value.width(), 4);
+        assert_eq!(
+            u.bounds.unwrap(),
+            rspice_veriloga::semantic::VectorBounds { msb: 19, lsb: 16 }
+        );
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "override",
+            report.model.clone(),
+            &report.canonical_ir,
+            &[1],
+        )
+        .unwrap();
+        assert_eq!(device.try_evaluate().unwrap()[0], 14.0);
+        let encoded = serde_json::to_vec(&report).unwrap();
+        let decoded: rspice_veriloga::RuntimeCompileReport =
+            serde_json::from_slice(&encoded).unwrap();
+        decoded.validate_integrity().unwrap();
+        let mut damaged = decoded.clone();
+        damaged
+            .model
+            .parameters
+            .iter_mut()
+            .find(|value| value.name == "W")
+            .unwrap()
+            .elaboration_value = None;
+        assert!(damaged.validate_integrity().is_err());
+        let mut damaged = decoded;
+        damaged
+            .canonical_ir
+            .digital
+            .elaboration_parameters
+            .iter_mut()
+            .find(|value| value.name == "U")
+            .unwrap()
+            .bounds = None;
+        assert!(damaged.validate_integrity().is_err());
+    }
+}
+
+#[test]
+fn declared_packed_parameters_guard_transitive_dependencies_and_child_scopes() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module locked(p);
+ inout p; electrical p;
+ parameter A=254;
+ parameter BASE=A+1;
+ aliasparam SOURCE=A;
+ parameter [7:0] P=BASE+1;
+ parameter real LEVEL=P+0.0;
+ analog I(p)<+LEVEL;
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "locked",
+        original.model.clone(),
+        &original.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    for (name, value) in [("A", 255.0), ("SOURCE", 255.0), ("BASE", 256.0)] {
+        assert!(
+            device
+                .try_set_parameter(name, value)
+                .unwrap_err()
+                .to_string()
+                .contains("specialize the source")
+        );
+        assert_eq!(device.try_evaluate().unwrap()[0], 0.0);
+    }
+    let report = compiler
+        .specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[("SOURCE", ScalarParameterValue::Integer(255))],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "changed",
+        report.model,
+        &report.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(device.try_evaluate().unwrap()[0], 1.0);
+    let hierarchy = compiler
+        .compile_runtime(
+            r#"
+module leaf(q);
+ parameter W=8;
+ parameter [W+3:4] P=0;
+ output reg [15:0] q=P;
+endmodule
+module parent(a,b);
+ output wire [15:0] a,b;
+ parameter W=1;
+ leaf #(.P(16'h1234),.W(4)) small(a);
+ leaf #(.W(8),.P(16'h1234)) large(b);
+endmodule
+"#,
+            Some("parent"),
+        )
+        .unwrap();
+    assert_eq!(
+        initial(&hierarchy, "small.q"),
+        DigitalInitialValue::FourState(bits("16'h4"))
+    );
+    assert_eq!(
+        initial(&hierarchy, "large.q"),
+        DigitalInitialValue::FourState(bits("16'h34"))
+    );
+    let wide = compiler
+        .compile_runtime(
+            r#"
+module wide(q,x,z,n);
+ parameter [W+3:4] P=16'h1234;
+ parameter integer W=8;
+ parameter BASE=129'h1_00000000_00000000_00000000_00000003;
+ parameter [7:0] N=BASE;
+ parameter signed [0:128] X=4'shx, Z=4'shz;
+ output reg [15:0] q=P;
+ output reg [128:0] x=X,z=Z;
+ output reg [7:0] n=N;
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    for (name, raw) in [
+        ("q", "16'h34"),
+        ("x", "129'bx"),
+        ("z", "129'bz"),
+        ("n", "8'h03"),
+    ] {
+        assert_eq!(
+            initial(&wide, name),
+            DigitalInitialValue::FourState(bits(raw)),
+            "{name}"
+        );
+    }
+    wide.validate_integrity().unwrap();
+    for (source, expected) in [
+        (
+            r#"module leaf(p); inout p; electrical p;
+ parameter W=8; parameter [W-1:0] P=16'h1234; parameter real LEVEL=P+0.0;
+ analog I(p)<+LEVEL; endmodule
+module parent(p); inout p; electrical p; leaf #(.W(4)) child(p); endmodule"#,
+            "requires source specialization before hierarchy flattening",
+        ),
+        (
+            r#"module leaf(p); inout p; electrical p;
+ parameter [7:0] P=1; parameter real LEVEL=P+0.0; analog I(p)<+LEVEL; endmodule
+module parent(p); inout p; electrical p; leaf #(.P(2)) child(p); endmodule"#,
+            "requires source specialization before hierarchy flattening",
+        ),
+        (
+            "module bad(q); parameter [1.5:0] P=0; output reg q=0; endmodule",
+            "packed bounds require known integer",
+        ),
+        (
+            "module bad(q); parameter [65536:0] P=0; output reg q=0; endmodule",
+            "supported packed width",
+        ),
+        (
+            "module bad(q); parameter [W:0] P=0; parameter W=P; output reg q=0; endmodule",
+            "cyclic",
+        ),
+    ] {
+        let error = compiler
+            .compile_runtime(source, source.contains("module parent").then_some("parent"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+}

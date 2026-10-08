@@ -739,6 +739,8 @@ pub struct DigitalElaborationParameter {
     pub also_model: bool,
     pub value: super::digital_value::FourStateValue,
     pub signed: bool,
+    #[serde(default)]
+    pub bounds: Option<crate::semantic::VectorBounds>,
 }
 
 /// The discrete-domain half of a module, lowered.

@@ -534,6 +534,9 @@ pub struct CompiledParameter {
     /// Whether the declared parameter type is `integer`.
     #[serde(default)]
     pub is_integer: bool,
+    /// Numeric value captured by a packed elaboration dependency.
+    #[serde(default, with = "crate::json_float::option")]
+    pub elaboration_value: Option<f64>,
     /// Declared literal range bounds. `from (0:inf)` does *not* put an infinity
     /// here — the parser reads `inf` in a bound as the absence of a bound — but
     /// a bound literal too large for a `f64` parses to one, so both encode

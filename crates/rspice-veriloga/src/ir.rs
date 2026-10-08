@@ -320,6 +320,7 @@ pub struct ParamDef {
     /// reference previously declared parameters)
     pub default_expr: Option<NodeId>,
     pub is_integer: bool,
+    pub elaboration_value: Option<f64>,
     pub min: Option<f64>,
     pub max: Option<f64>,
     pub min_parameter: Option<SmolStr>,
@@ -705,6 +706,7 @@ impl DeviceIR {
                 default: param.default.unwrap_or(0.0),
                 default_expr: None,
                 is_integer: param.param_type == crate::ast::ParamType::Integer,
+                elaboration_value: param.elaboration_value,
                 min: range.min,
                 max: range.max,
                 min_parameter: range.min_parameter,

@@ -71,6 +71,7 @@ pub struct AnalyzedPackedParameter {
     pub scope: super::ParameterScope,
     pub also_model: bool,
     pub value: crate::four_state::FourStateLiteral,
+    pub bounds: Option<VectorBounds>,
 }
 
 /// The elaboration-time constants a discrete-domain body may fold.
@@ -268,7 +269,7 @@ impl DigitalSignalClass {
 }
 
 /// Resolved packed bounds of a vector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VectorBounds {
     /// Left bound, exactly as written.
     pub msb: i64,

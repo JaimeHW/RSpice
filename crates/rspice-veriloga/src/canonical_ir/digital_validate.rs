@@ -209,6 +209,9 @@ impl CanonicalDigitalPlan {
         for parameter in &self.elaboration_parameters {
             if parameter.value.width() == 0
                 || parameter.value.width() > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
+                || parameter
+                    .bounds
+                    .is_some_and(|bounds| bounds.width() != parameter.value.width())
                 || std::iter::once(&parameter.name)
                     .chain(&parameter.aliases)
                     .any(|name| name.is_empty() || !parameter_names.insert(name))

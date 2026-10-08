@@ -459,6 +459,9 @@ pub struct ParameterDecl {
     /// retain the language default when this is false; parameter arrays require
     /// an explicit element type so later storage lowering cannot guess it.
     pub type_is_explicit: bool,
+    /// Optional packed signing and range, distinct from unpacked array dimensions.
+    pub signedness: Option<Signedness>,
+    pub packed_range: Option<VectorRange>,
     /// Parameter name
     pub name: SmolStr,
     /// Fixed declaration dimensions. These are retained even on compiler
