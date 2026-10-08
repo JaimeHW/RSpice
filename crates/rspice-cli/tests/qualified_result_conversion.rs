@@ -76,6 +76,50 @@ fn qualified_name(signal: &Value) -> String {
 }
 
 #[test]
+fn invalid_distortion_frequencies_cannot_replace_existing_exports() {
+    let dir = test_dir("invalid_distortion_frequency");
+    let input = run_document(&dir, "disto");
+    let original = read_json(&input);
+    for (defect, diagnostic) in [
+        ("underflow", "representable and positive"),
+        ("ratio", "strictly between 0 and 1"),
+        ("product", "disagrees with F1 and F2"),
+    ] {
+        let mut document = original.clone();
+        match defect {
+            "underflow" => {
+                document["axes"][0]["values"]["values"] =
+                    serde_json::json!([1e-200, 1.5e-200, 2e-200]);
+                document["payload"]["f2OverF1"] = serde_json::json!(1e-200);
+            }
+            "ratio" => document["payload"]["f2OverF1"] = serde_json::json!(-0.8),
+            "product" => {
+                document["payload"]["products"][0]["frequencies"][0] = serde_json::json!(1234.0)
+            }
+            _ => unreachable!(),
+        }
+        std::fs::write(&input, serde_json::to_vec(&document).unwrap()).unwrap();
+        for format in ["json", "csv", "tsv", "raw", "hdf5"] {
+            let output = dir.join(format!("preserved.{format}"));
+            std::fs::write(&output, b"predecessor").unwrap();
+            let result = cli(&[
+                "convert",
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+                "--to",
+                format,
+            ]);
+            assert!(!result.status.success(), "{defect}, {format}: {result:?}");
+            assert!(
+                String::from_utf8_lossy(&result.stderr).contains(diagnostic),
+                "{defect}, {format}: {result:?}"
+            );
+            assert_eq!(std::fs::read(&output).unwrap(), b"predecessor");
+        }
+    }
+}
+
+#[test]
 fn qualified_responses_remain_distinct_through_every_table_format() {
     let dir = test_dir("qualified_roundtrip");
     for family in ["pac", "disto", "pxf"] {
