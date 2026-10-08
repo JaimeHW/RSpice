@@ -19,13 +19,13 @@
       "id": "C02",
       "status": "in_progress",
       "requirement": "Transient decomposition",
-      "qualification_task": "Separate setup, trial, acceptance, observation and checkpoint responsibilities while preserving exact event clocks, accepted grids, retry/rollback, checkpoint identity and continuation."
+      "qualification_task": "Separate setup, trial, acceptance, observation and checkpoint responsibilities while preserving exact event clocks, accepted grids, retry/rollback, checkpoint identity and continuation. Preserve integration-error control during startup Newton recovery; tests/tran_uic.rs qualifies adaptive charge accuracy against an analytical RC law."
     },
     {
       "id": "C03",
       "status": "in_progress",
       "requirement": "GP transient excess phase",
-      "qualification_task": "Qualify exact-delay GP across polarities, dialects, bias regimes, feedback/private nodes, parameters, restart, resource limits and performance. tests/gp_feedback_weil.rs provides independent ngspice feedback oracles with intrinsic and nonlinear base resistance and packed adaptive continuation for Weil and exact delay. Complete CCVS voltage-impulse descriptors, circuit-dependent/switched/stateful behavioral providers and remaining device/instance support. Complete defined generalized interval algebra, nested integration and derived-expression propagation; diagnose undefined products and point domains. Add voltage-impulse and envelope observations, circuit assembly, nonlinear coupling and atomic acceptance. Guarded refusals do not constitute implemented support."
+      "qualification_task": "Qualify exact-delay GP across polarities, dialects, bias regimes, feedback/private nodes, parameters, restart, resource limits and performance. tests/gp_feedback_weil.rs provides independent ngspice feedback oracles with intrinsic and nonlinear base resistance and packed adaptive continuation for Weil and exact delay, including UIC startup. Complete CCVS voltage-impulse descriptors, circuit-dependent/switched/stateful behavioral providers and remaining device/instance support. Complete defined generalized interval algebra, nested integration and derived-expression propagation; diagnose undefined products and point domains. Add voltage-impulse and envelope observations, circuit assembly, nonlinear coupling and atomic acceptance. Guarded refusals do not constitute implemented support."
     },
     {
       "id": "C04",
@@ -468,6 +468,7 @@
     "tests/bjt_excess_phase_transient.rs",
     "tests/gp_phase_regimes.rs",
     "tests/gp_feedback_weil.rs",
+    "tests/tran_uic.rs",
     "tests/gp_phase_cancellation.rs",
     "tests/gp_history_resources.rs",
     "tests/transient_checkpoint.rs",

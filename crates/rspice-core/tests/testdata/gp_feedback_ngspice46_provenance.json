@@ -24,7 +24,8 @@
       ],
       "pnp_capture_sha256": "4a17bfacc968583cc6fa391be683b1e3793fa2d33d546500662e7db345f5719a",
       "pnp_deck_sha256": "cb331be2b9f870d61b4fccc1103975acc2416d4b89cd66acf1a522008c6f3362",
-      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces.",
+      "startup": "operating_point"
     },
     {
       "regime": "constant_intrinsic_resistances",
@@ -45,7 +46,8 @@
       ],
       "pnp_capture_sha256": "2a77996c88f51fbfe90138f78490a84966a5bafb6b0321b4b51a5bfb510153c4",
       "pnp_deck_sha256": "19039f6cadd574066f7945ae5f795e35e437da5607667e120bd6853f4bfcaa18",
-      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces.",
+      "startup": "operating_point"
     },
     {
       "regime": "nonlinear_base_resistance_and_saturation",
@@ -66,7 +68,8 @@
       ],
       "pnp_capture_sha256": "c8bbc34bead594ccf865c0c047ff9b6f815904c8bee4499cfa1d7684615390a3",
       "pnp_deck_sha256": "319cdc70261ee9e45a2b988bc3acacaf060ca0fad645bdedf8943c6e6f66e2da",
-      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces.",
+      "startup": "operating_point"
     },
     {
       "regime": "nonlinear_base_resistance_and_saturation",
@@ -87,7 +90,32 @@
       ],
       "pnp_capture_sha256": "f434f6cd73cadbfb178a4d99afc48cf83bef12fc10de9366890bdb4cc2fdcd67",
       "pnp_deck_sha256": "813a38da63865c0087b39b5af799927adee834358074575aa1057ddbe92ffc60",
-      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces."
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces.",
+      "startup": "operating_point"
+    },
+    {
+      "regime": "nonlinear_base_resistance_and_saturation",
+      "startup": "uic",
+      "phase_degrees": 90,
+      "samples": 710,
+      "exit_code": 0,
+      "artifacts": [
+        {
+          "path": "gp_feedback_nonlinear_p90_uic_ngspice46.cir",
+          "sha256": "3c9daa2e9ed0cc77d67a319294a495d19cbdd8d173f7d153555ab29040af0d1f",
+          "capture_sha256": "3c9daa2e9ed0cc77d67a319294a495d19cbdd8d173f7d153555ab29040af0d1f"
+        },
+        {
+          "path": "gp_feedback_nonlinear_p90_uic_ngspice46.tsv",
+          "sha256": "6aeab1077f2e717ee7b4059b4c283aebf7f234a71b0d70ecd3b52735745366c2",
+          "capture_sha256": "5cb58516d0b678ac74d23b6643db8448b34e8c23b7133beb6af3a70b9f39f613"
+        }
+      ],
+      "pnp_capture_sha256": "469f8f98d505c7fb530b78d93c1f3d6987313bfacbbff409e7cb3f344840d9ce",
+      "pnp_deck_sha256": "b09b12e6e569f044602a89a061872e9823e6ec9c6d12c4f5f309c3bc3238ef8e",
+      "pnp_validation": "An independent PNP run has bit-identical times and exactly sign-reversed voltages and currents for every captured value. The permanent test applies this verified symmetry instead of storing duplicate traces.",
+      "time_grid": "ngspice UIC output starts at the first positive-time sample. The core locked grid prepends its explicit time-zero state; only positive-time samples are compared.",
+      "captured_at": "2026-10-08T12:11:25.094468+00:00"
     }
   ]
 }

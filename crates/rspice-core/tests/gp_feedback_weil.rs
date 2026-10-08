@@ -14,28 +14,39 @@ struct Case {
     name: &'static str,
     source: &'static str,
     reference: &'static str,
+    startup: TransientStartupMode,
 }
 
-const CASES: [Case; 4] = [
+const CASES: [Case; 5] = [
     Case {
         name: "linear PTF21",
         source: include_str!("testdata/gp_feedback_linear_p21_ngspice46.cir"),
         reference: include_str!("testdata/gp_feedback_linear_p21_ngspice46.tsv"),
+        startup: TransientStartupMode::OperatingPoint,
     },
     Case {
         name: "linear PTF90",
         source: include_str!("testdata/gp_feedback_linear_p90_ngspice46.cir"),
         reference: include_str!("testdata/gp_feedback_linear_p90_ngspice46.tsv"),
+        startup: TransientStartupMode::OperatingPoint,
     },
     Case {
         name: "nonlinear PTF21",
         source: include_str!("testdata/gp_feedback_nonlinear_p21_ngspice46.cir"),
         reference: include_str!("testdata/gp_feedback_nonlinear_p21_ngspice46.tsv"),
+        startup: TransientStartupMode::OperatingPoint,
     },
     Case {
         name: "nonlinear PTF90",
         source: include_str!("testdata/gp_feedback_nonlinear_p90_ngspice46.cir"),
         reference: include_str!("testdata/gp_feedback_nonlinear_p90_ngspice46.tsv"),
+        startup: TransientStartupMode::OperatingPoint,
+    },
+    Case {
+        name: "nonlinear PTF90 UIC",
+        source: include_str!("testdata/gp_feedback_nonlinear_p90_uic_ngspice46.cir"),
+        reference: include_str!("testdata/gp_feedback_nonlinear_p90_uic_ngspice46.tsv"),
+        startup: TransientStartupMode::Uic,
     },
 ];
 
@@ -84,14 +95,23 @@ fn config(model: GpTransientPhaseModel) -> SimulationConfig {
 fn feedback_tracks_recorded_ngspice_without_clamping_a_transistor_terminal() {
     for case in &CASES {
         let rows = case.rows();
-        let grid = Arc::new(rows.iter().map(|row| row[0]).collect::<Vec<_>>());
-        assert_eq!(grid.len(), 608);
+        // ngspice UIC does not publish a time-zero row. Preserve the core's
+        // explicit initial state and compare every captured positive-time row.
+        let offset = usize::from(case.startup.is_uic());
+        assert_eq!(rows.len(), if offset == 0 { 608 } else { 710 });
+        let mut times = Vec::with_capacity(rows.len() + offset);
+        if offset != 0 {
+            assert!(rows[0][0] > 0.0);
+            times.push(0.0);
+        }
+        times.extend(rows.iter().map(|row| row[0]));
+        let grid = Arc::new(times);
         let stop = *grid.last().unwrap();
         for polarity in [1.0, -1.0] {
             let mut policy = config(GpTransientPhaseModel::NgspiceWeil);
             policy.locked_time_grid = Some(grid.clone());
             let result = Engine::new(policy)
-                .run_tran(&case.netlist(polarity), stop, 8e-12)
+                .run_tran_with_startup_mode(&case.netlist(polarity), stop, 8e-12, case.startup)
                 .unwrap_or_else(|e| panic!("{}/{polarity}: {e}", case.name));
             assert_eq!(result.time, *grid);
             let outputs = [
@@ -102,8 +122,9 @@ fn feedback_tracks_recorded_ngspice_without_clamping_a_transistor_terminal() {
                 result.try_branch_current_waveform_named("VIN").unwrap(),
             ];
             for (column, actual) in outputs.into_iter().enumerate() {
-                assert_eq!(actual.len(), rows.len());
+                assert_eq!(actual.len(), rows.len() + offset);
                 assert!(actual.iter().all(|value| value.is_finite()));
+                let actual = &actual[offset..];
                 let low = rows
                     .iter()
                     .map(|r| r[column + 1])
@@ -148,7 +169,7 @@ fn adaptive_feedback_checkpoints_preserve_the_accepted_trajectory() {
                         &netlist,
                         4.8e-9,
                         8e-12,
-                        TransientStartupMode::OperatingPoint,
+                        case.startup,
                         &[1.911e-9],
                     )
                     .unwrap_or_else(|e| panic!("{}/{polarity}/{model:?}: {e}", case.name));
