@@ -1,71 +1,12 @@
-//! Elaborating an X-card that names a mixed Verilog-AMS module.
+//! Elaborate mixed Verilog-AMS X-cards into one analog device and typed ports.
 //!
-//! The `.VERILOGA` route already turns a `.va` file into a compiled model and a
-//! canonical artifact, and an X-card into a device with its terminals bound to
-//! deck nodes. A mixed module is the same route with one branch taken
-//! differently: its canonical artifact carries a non-empty discrete plan, and
-//! that plan is what decides it goes to
-//! [`MixedSignalHost`](crate::xspice::verilog::MixedSignalHost) rather than to
-//! [`VerilogADevice`](crate::device::veriloga::VerilogADevice). Nothing else
-//! about the route changes — the same cache entry, the same compile, the same
-//! terminal binding.
-//!
-//! # Which ports are the boundary
-//!
-//! The compiled artifact's HIR lists every module port with the direction its
-//! author wrote; the discrete plan lists every signal the discrete domain
-//! declares. A port whose name is in the plan is a *boundary* port, and the
-//! plan is the authority rather than the port's declared discipline, because
-//! the plan is also what `add_adc_bridge` and `add_dac_bridge` resolve a name
-//! against — so the classification here and the lookup there cannot disagree.
-//!
-//! A boundary port faces one way, and clause 7's own vocabulary names which:
-//!
-//! * `input` — the module reads the net, so the analog side drives and the
-//!   boundary is analog-to-discrete. It takes an A/D bridge.
-//! * `output` — the module drives the net, so the boundary is
-//!   discrete-to-analog. It takes a D/A bridge.
-//! * `inout` — joins the shared event resolver when all endpoints are discrete.
-//!   An electrical bidirectional boundary still requires an explicit converter.
-//!
-//! Real-valued ports also join the shared event resolver, retaining the authored
-//! real net's driver policy for HDL and XSPICE real contributions. Electrical
-//! conversion uses explicit code-model boundaries; unlike event types require
-//! a converter. The completed topology validates these connections after loading.
-//!
-//! # A vector boundary port
-//!
-//! A discrete port may be a vector, and a vector boundary is one net per bit:
-//! the deck names N nodes for an N-bit port, in the order the port declares its
-//! bits — MSB first — and each gets its own bridge. That is not a convention
-//! invented here. It is the only spelling a deck has, because a node list is
-//! flat; it is what `rspice-ui`'s netlister already emits for a vector pin; and
-//! it is what makes the port's bits recordable at all, since every value that
-//! reaches a result is keyed by circuit node.
-//!
-//! The bits are still one word, and saying so is the bus declaration this
-//! builder attaches to the host: `<instance>.<port>`, the range the module
-//! declared, and the member nodes MSB first. The discrete half never sees the
-//! split — its own transitions stay whole-vector, because the A/D settle
-//! composes a port's bit drives into one write.
-//!
-//! # Where the bridge's numbers come from
-//!
-//! From the same two places the XSPICE auto-bridge's do, and by the same rule.
-//! With no `connectrules` block the thresholds and levels derive from the
-//! deck's supply exactly as `add_planned_xspice_auto_bridge` derives them: an
-//! A/D bridge switches at half supply, a D/A bridge drives zero and supply. A
-//! design that *does* name connect rules gets them from clause 7's selection —
-//! `connect_modules::select_for_boundary` picks the module and
-//! `connect_modules::delegated_parameters` folds section 7.7.3's overrides —
-//! which is the same delegation table the XSPICE bridges take, read here rather
-//! than re-derived.
-//!
-//! Two things the code-model bridges have and this boundary does not are
-//! transition ramps and propagation delays. `d2a`'s `trise`/`tfall` and `a2d`'s
-//! `tdrise`/`tdfall` are executed by the code models' own transition machinery,
-//! which this Thevenin bridge is not; a connect statement that asks for one is
-//! therefore refused rather than silently ignored.
+//! Discrete outputs, bidirectional ports, and real ports select electrical
+//! conversion after the entire deck is wired, using `mixed_boundaries` and the
+//! common converter materializer. Pure event connections join the shared resolver.
+//! A/D inputs currently retain the host's threshold-root and feedback-causality
+//! contract; moving that contract to shared converters is the remaining input
+//! integration work. Packed port order and the deck's trace/bus labels survive
+//! allocation of private converter endpoints.
 
 use crate::xspice::event_scheduler::SchedulerLimits;
 use crate::xspice::verilog::{BoundaryBus, MixedSignalHost};
@@ -104,15 +45,6 @@ fn host_failure_kind(error: &crate::xspice::verilog::MixedSignalError) -> Elabor
         _ => ElaborationErrorKind::Internal,
     }
 }
-
-/// The Thevenin source resistance a D/A boundary drives through.
-///
-/// `bidi_bridge`'s `r_stl`/`r_sth` — the strong-drive resistances the XSPICE
-/// bridge library already states for exactly this job — rather than a number
-/// invented here. It is small against any load a deck is likely to hang on a
-/// logic output, so the node settles to the driven level, and finite so the
-/// node's row is never singular when nothing else is attached to it.
-const MIXED_DAC_SOURCE_RESISTANCE: crate::Value = 20.0;
 
 /// Which way one boundary port faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,7 +246,7 @@ pub(super) fn try_build_mixed_signal_instance(
 
     let node_names = circuit.node_names_sorted();
     for port in boundary {
-        if port.real || port.direction == BoundaryDirection::Bidirectional {
+        if port.real || port.direction != BoundaryDirection::AnalogToDiscrete {
             host.declare_event_port(
                 &port.signal,
                 (!port.real).then_some(port.bit),
@@ -380,34 +312,17 @@ pub(super) fn try_build_mixed_signal_instance(
             None => Vec::new(),
         };
 
-        match port.direction {
-            BoundaryDirection::AnalogToDiscrete => {
-                let low = parameter_or(&parameters, "in_low", vcc / 2.0);
-                let high = parameter_or(&parameters, "in_high", vcc / 2.0);
-                host.add_adc_bridge(&port.signal, port.bit, (port.node, 0), low, high)
-            }
-            BoundaryDirection::DiscreteToAnalog => {
-                let low = parameter_or(&parameters, "out_low", 0.0);
-                let high = parameter_or(&parameters, "out_high", vcc);
-                host.add_dac_bridge(
-                    &port.signal,
-                    port.bit,
-                    (port.node, 0),
-                    low,
-                    high,
-                    MIXED_DAC_SOURCE_RESISTANCE,
+        let low = parameter_or(&parameters, "in_low", vcc / 2.0);
+        let high = parameter_or(&parameters, "in_high", vcc / 2.0);
+        host.add_adc_bridge(&port.signal, port.bit, (port.node, 0), low, high)
+            .map_err(|error| {
+                refuse(
+                    &element.name,
+                    subckt_name,
+                    host_failure_kind(&error),
+                    format!("could not bridge port '{}': {error}", port.signal),
                 )
-            }
-            BoundaryDirection::Bidirectional => unreachable!("direct port declared above"),
-        }
-        .map_err(|error| {
-            refuse(
-                &element.name,
-                subckt_name,
-                host_failure_kind(&error),
-                format!("could not bridge port '{}': {error}", port.signal),
-            )
-        })?;
+            })?;
     }
 
     for bus in layout.buses {
@@ -623,14 +538,9 @@ fn parameter_or(
         .map_or(fallback, |(_, value)| *value)
 }
 
-/// Refuse a connect statement asking for a transition time this boundary cannot
-/// produce.
-///
-/// `delegated_parameters` maps clause 7's `trise`/`tfall`/`tdrise`/`tdfall` onto
-/// the XSPICE bridge code models' own transition parameters, which those models
-/// execute. This boundary is a Thevenin source and a threshold comparator with
-/// no transition machinery of either kind, so carrying the numbers would be
-/// accepting a request and not honouring it.
+/// Input delays need to share the host's threshold-root/cause contract with
+/// the common event converter. Until that integration is complete, retain the
+/// explicit refusal rather than accept a delay without scheduling it.
 fn refuse_timed_connect_parameters(
     instance: &str,
     module: &str,
@@ -647,9 +557,8 @@ fn refuse_timed_connect_parameters(
                 ElaborationErrorKind::ConnectRule,
                 format!(
                     "port '{signal}' selects connect module '{}', whose connect statement sets a \
-                     transition time. The mixed boundary drives through a source resistance and \
-                     samples against a threshold, with no transition or delay stage to apply one \
-                     to",
+                     transition time. The mixed input boundary does not yet have a delay stage integrated \
+                     with threshold-root localization",
                     selected.name
                 ),
             ));

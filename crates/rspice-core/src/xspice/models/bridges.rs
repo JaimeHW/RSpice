@@ -184,6 +184,102 @@ impl CodeModel for AdcBridge {
 #[derive(Debug, Default)]
 pub struct DacBridge;
 
+/// A finite-impedance HDL output using the shared DAC ramp state.
+/// Keep the established mixed-port policy: 20-ohm loading, immediate edges
+/// unless configured, X at the rail midpoint, and a disconnected output for Z.
+/// Explicit XSPICE DAC instances retain their own voltage-source policy.
+#[cfg(feature = "veriloga")]
+pub(crate) struct MixedDacBridge;
+
+#[cfg(feature = "veriloga")]
+fn mixed_bridge_timing(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    let value = finite_bridge_param(ctx, "mixed bridge", name)?;
+    if value < 0.0 {
+        return Err(CmError::InvalidParameter {
+            name: name.to_owned(),
+            message: "transition times and delays must be nonnegative".into(),
+        });
+    }
+    Ok(value)
+}
+
+#[cfg(feature = "veriloga")]
+impl CodeModel for MixedDacBridge {
+    fn name(&self) -> &str {
+        "__rspice_mixed_dac"
+    }
+    fn ports(&self) -> &[PortSpec] {
+        static PORTS: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
+        PORTS.get_or_init(|| {
+            let mut ports = DacBridge.ports().to_vec();
+            ports[1].default_type = PortType::Conductance;
+            ports[1].allowed_types = vec![PortType::Conductance, PortType::DifferentialConductance];
+            ports
+        })
+    }
+    fn parameters(&self) -> &[ParamSpec] {
+        static PARAMS: std::sync::OnceLock<Vec<ParamSpec>> = std::sync::OnceLock::new();
+        PARAMS.get_or_init(|| {
+            let mut params = DacBridge.parameters().to_vec();
+            for param in &mut params {
+                if matches!(param.name.as_str(), "t_rise" | "t_fall") {
+                    param.default = 0.0;
+                }
+            }
+            params.push(ParamSpec::real("output_resistance", 20.0));
+            params
+        })
+    }
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        DacBridge.init(ctx)
+    }
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let width = bridge_vector_width(ctx, self.name())?;
+        let out_low = finite_bridge_param(ctx, self.name(), "out_low")?;
+        let out_high = finite_bridge_param(ctx, self.name(), "out_high")?;
+        let out_undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
+        let t_rise = mixed_bridge_timing(ctx, "t_rise")?;
+        let t_fall = mixed_bridge_timing(ctx, "t_fall")?;
+        let resistance = finite_bridge_param(ctx, self.name(), "output_resistance")?;
+        if resistance <= 0.0 || !(1.0 / resistance).is_finite() {
+            return Err(CmError::InvalidParameter {
+                name: "output_resistance".into(),
+                message: "output resistance must be positive with finite conductance".into(),
+            });
+        }
+        evaluate_dac_bridge(
+            ctx,
+            width,
+            DacBridgeRamp {
+                out_low,
+                out_high,
+                t_rise,
+                t_fall,
+            },
+            out_undef,
+        )?;
+        for index in 0..width {
+            let voltage = ctx.output_vector_value("out", index);
+            let conductance =
+                if digital_vector_input_value(ctx, "in", index).state == DigitalState::HighZ {
+                    0.0
+                } else {
+                    1.0 / resistance
+                };
+            ctx.set_output_vector_element_with_partial(
+                "out",
+                index,
+                -conductance * voltage,
+                conductance,
+            )?;
+        }
+        Ok(())
+    }
+    fn excludes_output_from_transient_voltage_lte(&self, port: &str) -> bool {
+        DacBridge.excludes_output_from_transient_voltage_lte(port)
+    }
+}
+
 const DAC_BRIDGE_STATE_STRIDE: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1221,114 +1317,139 @@ impl CodeModel for DacBridge {
         let out_undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
         let t_rise = bridge_timing_param(ctx, "dac_bridge", "t_rise")?;
         let t_fall = bridge_timing_param(ctx, "dac_bridge", "t_fall")?;
-        let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
-        let layout = dac_bridge_state_layout(width)?;
-
-        for index in 0..width {
-            let d_in = digital_vector_input_value(ctx, "in", index);
-            let v_target = if d_in.state.is_high() {
-                out_high
-            } else if d_in.state.is_low() {
-                out_low
-            } else {
-                out_undef
-            };
-            let base = layout.state_base(index);
-
-            if !ctx.is_transient() {
-                ctx.set_state(base, v_target);
-                ctx.set_state(base + 1, v_target);
-                ctx.set_state(base + 2, ctx.time);
-                ctx.set_state(base + 3, v_target);
-                ctx.set_output_vector_element("out", index, v_target)?;
-                continue;
-            }
-
-            let accepted_target = ctx.state_prev(base + 1);
-            let accepted_start_time = ctx.state_prev(base + 2);
-            let accepted_start_value = ctx.state_prev(base + 3);
-            let initial_uncommitted_state = accepted_start_time == 0.0
-                && (accepted_start_value - out_undef).abs() <= 1e-12
-                && (accepted_target - out_undef).abs() <= 1e-12;
-            let first_transient_point = ctx.time == 0.0;
-
-            let (transition_target, transition_start_time, transition_start_value) =
-                if first_transient_point {
-                    (v_target, ctx.time, v_target)
-                } else if (v_target - accepted_target).abs() > 1e-12 {
-                    let event_time = ctx.input_digital_vector_event_time("in", index);
-                    if initial_uncommitted_state && event_time.is_none_or(|time| time <= 0.0) {
-                        (v_target, ctx.time, v_target)
-                    } else {
-                        let event_time = event_time.unwrap_or(ctx.time);
-                        let start_value = dac_bridge_ramp_value(
-                            event_time,
-                            accepted_start_time,
-                            accepted_start_value,
-                            accepted_target,
-                            DacBridgeRamp {
-                                out_low,
-                                out_high,
-                                t_rise,
-                                t_fall,
-                            },
-                        );
-                        (v_target, event_time, start_value)
-                    }
-                } else {
-                    (accepted_target, accepted_start_time, accepted_start_value)
-                };
-
-            let v_out = dac_bridge_ramp_value(
-                ctx.time,
-                transition_start_time,
-                transition_start_value,
-                transition_target,
-                DacBridgeRamp {
-                    out_low,
-                    out_high,
-                    t_rise,
-                    t_fall,
-                },
-            );
-
-            let v_out = if first_transient_point {
-                v_target
-            } else {
-                v_out
-            };
-
-            if let Some(completion_time) = dac_bridge_completion_time(
-                transition_start_time,
-                transition_start_value,
-                transition_target,
-                DacBridgeRamp {
-                    out_low,
-                    out_high,
-                    t_rise,
-                    t_fall,
-                },
-            ) && commit_outputs
-                && completion_time > ctx.time + 1.0e-18
-            {
-                ctx.request_breakpoint(completion_time);
-            }
-
-            if commit_outputs {
-                ctx.set_state(base, v_out);
-                ctx.set_state(base + 1, transition_target);
-                ctx.set_state(base + 2, transition_start_time);
-                ctx.set_state(base + 3, transition_start_value);
-            }
-            ctx.set_output_vector_element("out", index, v_out)?;
-        }
-
-        Ok(())
+        evaluate_dac_bridge(
+            ctx,
+            width,
+            DacBridgeRamp {
+                out_low,
+                out_high,
+                t_rise,
+                t_fall,
+            },
+            out_undef,
+        )
     }
 
     fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
         output_port.eq_ignore_ascii_case("out")
     }
+}
+
+fn evaluate_dac_bridge(
+    ctx: &mut CmContext,
+    width: usize,
+    ramp: DacBridgeRamp,
+    out_undef: Value,
+) -> CmResult<()> {
+    let DacBridgeRamp {
+        out_low,
+        out_high,
+        t_rise,
+        t_fall,
+    } = ramp;
+    let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
+    let layout = dac_bridge_state_layout(width)?;
+
+    for index in 0..width {
+        let d_in = digital_vector_input_value(ctx, "in", index);
+        let v_target = if d_in.state.is_high() {
+            out_high
+        } else if d_in.state.is_low() {
+            out_low
+        } else {
+            out_undef
+        };
+        let base = layout.state_base(index);
+
+        if !ctx.is_transient() {
+            ctx.set_state(base, v_target);
+            ctx.set_state(base + 1, v_target);
+            ctx.set_state(base + 2, ctx.time);
+            ctx.set_state(base + 3, v_target);
+            ctx.set_output_vector_element("out", index, v_target)?;
+            continue;
+        }
+
+        let accepted_target = ctx.state_prev(base + 1);
+        let accepted_start_time = ctx.state_prev(base + 2);
+        let accepted_start_value = ctx.state_prev(base + 3);
+        let initial_uncommitted_state = accepted_start_time == 0.0
+            && (accepted_start_value - out_undef).abs() <= 1e-12
+            && (accepted_target - out_undef).abs() <= 1e-12;
+        let first_transient_point = ctx.time == 0.0;
+
+        let (transition_target, transition_start_time, transition_start_value) =
+            if first_transient_point {
+                (v_target, ctx.time, v_target)
+            } else if (v_target - accepted_target).abs() > 1e-12 {
+                let event_time = ctx.input_digital_vector_event_time("in", index);
+                if initial_uncommitted_state && event_time.is_none_or(|time| time <= 0.0) {
+                    (v_target, ctx.time, v_target)
+                } else {
+                    let event_time = event_time.unwrap_or(ctx.time);
+                    let start_value = dac_bridge_ramp_value(
+                        event_time,
+                        accepted_start_time,
+                        accepted_start_value,
+                        accepted_target,
+                        DacBridgeRamp {
+                            out_low,
+                            out_high,
+                            t_rise,
+                            t_fall,
+                        },
+                    );
+                    (v_target, event_time, start_value)
+                }
+            } else {
+                (accepted_target, accepted_start_time, accepted_start_value)
+            };
+
+        let v_out = dac_bridge_ramp_value(
+            ctx.time,
+            transition_start_time,
+            transition_start_value,
+            transition_target,
+            DacBridgeRamp {
+                out_low,
+                out_high,
+                t_rise,
+                t_fall,
+            },
+        );
+
+        let v_out = if first_transient_point {
+            v_target
+        } else {
+            v_out
+        };
+
+        if let Some(completion_time) = dac_bridge_completion_time(
+            transition_start_time,
+            transition_start_value,
+            transition_target,
+            DacBridgeRamp {
+                out_low,
+                out_high,
+                t_rise,
+                t_fall,
+            },
+        ) && commit_outputs
+            && completion_time > ctx.time + 1.0e-18
+        {
+            ctx.request_breakpoint(completion_time);
+        }
+
+        if commit_outputs {
+            ctx.set_state(base, v_out);
+            ctx.set_state(base + 1, transition_target);
+            ctx.set_state(base + 2, transition_start_time);
+            ctx.set_state(base + 3, transition_start_value);
+        }
+        ctx.set_output_vector_element("out", index, v_out)?;
+    }
+
+    Ok(())
 }
 
 impl CodeModel for BidiBridge {

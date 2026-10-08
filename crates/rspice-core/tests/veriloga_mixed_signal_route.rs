@@ -4024,3 +4024,88 @@ endmodule
         }
     }
 }
+
+#[test]
+fn timed_logic_outputs_preserve_loading_release_and_vector_observations() {
+    let mut source = String::from(
+        r#"
+`timescale 1ns/1ps
+module timed_output(q);
+ output [5:4] q; reg [5:4] q;
+ initial begin q=2'b00; #2 q=2'b10; #4 q=2'b01; #4 q=2'bzz; end
+endmodule
+"#,
+    );
+    for (_, module) in rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    source.push_str("\nconnectrules timed_rules;\nconnect d2a #(.vsup(2.0), .trise(1e-9), .tfall(2e-9));\nendconnectrules\n");
+    let model = ModelFile::new("timed_output", &source);
+    let result = run(
+        &format!(
+            "* loaded timed logic converters\n.param vcc=3.3\nVbias bias 0 1\nR5 bias q5 20\nR4 bias q4 20\nX1 q5 q4 timed_output\n.va \"{}\" timed_output\n.end\n",
+            model.deck_path()
+        ),
+        12e-9,
+        0.1e-9,
+    );
+    for (node, bit) in [("q5", 5), ("q4", 4)] {
+        let voltage = waveform(&result, node);
+        let mut ramp_samples = 0;
+        for (&time, &actual) in result.time.iter().zip(&voltage) {
+            let ns = time * 1e9;
+            let target = if bit == 5 {
+                if ns < 2.0 {
+                    0.0
+                } else if ns < 3.0 {
+                    2.0 * (ns - 2.0)
+                } else if ns < 6.0 {
+                    2.0
+                } else if ns < 8.0 {
+                    8.0 - ns
+                } else {
+                    0.0
+                }
+            } else {
+                (2.0 * (ns - 6.0)).clamp(0.0, 2.0)
+            };
+            // Equal 20-ohm source and load: V(q)=(1 V + V(driver))/2.
+            // Z releases the source entirely and leaves the 1 V bias.
+            let expected = if time >= 10e-9 - 1e-18 {
+                1.0
+            } else {
+                (1.0 + target) / 2.0
+            };
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node} t={time}: {actual}, expected {expected}"
+            );
+            if target > 0.1 && target < 1.9 && ns < 10.0 {
+                ramp_samples += 1;
+            }
+        }
+        assert!(ramp_samples >= 5, "{node}: must observe the requested ramp");
+        let trace = result.digital_trace_named(node).unwrap();
+        let times: &[f64] = if bit == 5 {
+            &[0.0, 2e-9, 6e-9, 10e-9]
+        } else {
+            &[0.0, 6e-9, 10e-9]
+        };
+        assert_eq!(trace.len(), times.len());
+        for (point, expected) in trace.iter().zip(times) {
+            assert!((point.time - expected).abs() < 1e-22);
+        }
+        assert_eq!(
+            trace.last().unwrap().value.state,
+            rspice_core::xspice::DigitalState::HighZ
+        );
+    }
+    let bus = result
+        .digital_buses
+        .iter()
+        .find(|bus| bus.name.eq_ignore_ascii_case("X1.q"))
+        .unwrap();
+    assert_eq!(bus.members.len(), 2);
+    assert!(bus.members[0].eq_ignore_ascii_case("q5"));
+    assert!(bus.members[1].eq_ignore_ascii_case("q4"));
+}

@@ -4887,6 +4887,16 @@ fn add_planned_xspice_auto_bridge(
         ))
     })?;
 
+    #[cfg(feature = "veriloga")]
+    let (code_model, output_branch): (std::sync::Arc<dyn crate::xspice::CodeModel>, _) =
+        match (bridge.event_node, bridge.kind) {
+            (Some(_), XspiceAutoBridgeKind::Dac) => (
+                std::sync::Arc::new(crate::xspice::models::MixedDacBridge),
+                None,
+            ),
+            _ => (code_model, output_branch),
+        };
+
     let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
         instance_name.clone(),
         code_model,
@@ -12684,9 +12694,21 @@ apull [mix] pull
                 .mixed_signal_hosts
                 .iter()
                 .flat_map(|host| host.boundary_port_nodes())
-                .filter(|candidate| *candidate == node)
+                // Direct event ports remain declared after classification;
+                // only electrical endpoints here still represent host bridges.
+                .filter(|candidate| !classified && *candidate == node)
                 .count();
-            assert_eq!(remaining, bridges, "{label}: bridges left on the net");
+            let converted = circuit.xspice_instances.iter().filter(|instance| {
+                instance.model_name() == "__rspice_mixed_dac"
+                    && instance.connections().iter().any(|connection| {
+                        matches!(connection, crate::xspice::PortConnection::AnalogVector(nodes) if nodes.contains(&node))
+                    })
+            }).count();
+            assert_eq!(
+                remaining + converted,
+                bridges,
+                "{label}: converters on the net"
+            );
 
             let claims_row = circuit
                 .mixed_signal_hosts

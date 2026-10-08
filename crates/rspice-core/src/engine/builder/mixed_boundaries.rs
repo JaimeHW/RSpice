@@ -39,6 +39,7 @@ pub(super) fn plan_conversions(
             }
             let node_label = xspice_auto_bridge_node_label(Some(&names), port.node);
             let kind = match (port.bit, port.direction) {
+                (Some(_), DigitalLinkDirection::Output) => XspiceAutoBridgeKind::Dac,
                 (Some(_), DigitalLinkDirection::Inout) => XspiceAutoBridgeKind::Bidi,
                 (None, DigitalLinkDirection::Input) => XspiceAutoBridgeKind::VToReal,
                 (None, DigitalLinkDirection::Output) => XspiceAutoBridgeKind::RealToV,
@@ -55,7 +56,7 @@ pub(super) fn plan_conversions(
                 connect_modules::check_delegable(selected, kind, &node_label)?;
             }
             let scoped = metadata.get(&port.node);
-            let (vcc, supply) = if kind == XspiceAutoBridgeKind::Bidi {
+            let (vcc, supply) = if port.bit.is_some() {
                 if let Some(level) = selected
                     .as_ref()
                     .and_then(connect_modules::PlannedConnectModule::stated_supply)

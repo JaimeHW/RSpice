@@ -826,6 +826,9 @@ pub(crate) struct EventPort {
     pub(crate) bit: Option<u32>,
     pub(crate) node: usize,
     pub(crate) direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
+    /// Existing unidirectional trace/bus label, independent of the private
+    /// converter endpoint. Qualified event traces remain available as well.
+    trace_node: Option<usize>,
 }
 
 /// One vector boundary port, as a bus over the deck nodes its bits landed on.
@@ -1767,7 +1770,7 @@ impl MixedSignalHost {
     /// change, including Z release, to the integration restart contract. A
     /// purely event-connected bit or an intermediate delta glitch adds none.
     pub(crate) fn candidate_discontinuity(&self) -> bool {
-        if self.analog.discontinuity_rising() {
+        if self.analog.discontinuity_rising() || self.converted_output_changed() {
             return true;
         }
         let Some(trial) = &self.trial else {
@@ -1782,6 +1785,32 @@ impl MixedSignalHost {
                 )
             };
             level(&trial.rollback) != level(&self.state.digital)
+        })
+    }
+
+    /// A converted output can jump, release its impedance, or start/retarget
+    /// a ramp. Preserve both integration restart and endpoint feedback dating
+    /// when the physical stamp moves from the host into a shared converter.
+    fn converted_output_changed(&self) -> bool {
+        let Some(trial) = &self.trial else {
+            return false;
+        };
+        self.event_ports.iter().any(|port| {
+            if !port.trace_node.is_some_and(|node| node != port.node)
+                || port.direction
+                    != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
+            {
+                return false;
+            }
+            port.bit.is_some_and(|bit| {
+                let before = trial.rollback.read(port.signal).map(|value| value.bit(bit));
+                let after = self
+                    .state
+                    .digital
+                    .read(port.signal)
+                    .map(|value| value.bit(bit));
+                before != after
+            })
         })
     }
 
@@ -1872,6 +1901,7 @@ impl MixedSignalHost {
         }
         for port in &mut self.event_ports {
             port.node = remap(port.node);
+            port.trace_node = port.trace_node.map(&remap);
         }
         self.event_nodes.sort_unstable();
         self.event_nodes.dedup();
@@ -2079,7 +2109,7 @@ impl MixedSignalHost {
                 .ok_or_else(|| MixedSignalError::InvalidBridge {
                     detail: format!("event port index {index} is not declared"),
                 })?;
-        if let Some(bit) = port.bit {
+        if let Some(bit) = port.bit.filter(|_| port.trace_node.is_none()) {
             let signal = self.state.digital.plan().signal(port.signal).unwrap();
             let bus_name = format!("{}.{}", self.instance, signal.name);
             for bus in &mut self.boundary_buses {
@@ -2116,6 +2146,10 @@ impl MixedSignalHost {
             bit,
             node,
             direction,
+            trace_node: (bit.is_some()
+                && direction
+                    != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Inout)
+                .then_some(node),
         });
         Ok(())
     }
@@ -2170,6 +2204,21 @@ impl MixedSignalHost {
     where
         F: FnMut(usize, FourStateBit, BoundaryBitSource),
     {
+        for port in &self.event_ports {
+            if let (Some(node), Some(bit), Some(value)) = (
+                port.trace_node,
+                port.bit,
+                self.state.digital.read(port.signal),
+            ) {
+                let source = match port.direction {
+                    rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input => {
+                        BoundaryBitSource::Sampled
+                    }
+                    _ => BoundaryBitSource::Driven,
+                };
+                sink(node, value.bit(bit), source);
+            }
+        }
         for bridge in &self.state.bridges.adc {
             if let Some(value) = self.state.digital.read(bridge.signal) {
                 sink(
@@ -2670,7 +2719,9 @@ impl MixedSignalHost {
         let Some(trial) = self.trial.as_ref() else {
             return Ok(false);
         };
-        if dac_bits_differ(&self.state, &trial.vectors.dac_at_trial_start)? {
+        if self.converted_output_changed()
+            || dac_bits_differ(&self.state, &trial.vectors.dac_at_trial_start)?
+        {
             return Ok(true);
         }
         Ok(discrete_reads_differ(
