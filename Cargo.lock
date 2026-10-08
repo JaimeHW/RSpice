@@ -5592,6 +5592,7 @@ dependencies = [
  "npyz",
  "num-complex",
  "parquet",
+ "py_literal",
  "rspice-app-types",
  "rspice-core",
  "rspice-design-model",

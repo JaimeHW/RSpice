@@ -44,6 +44,8 @@ fst-reader = { version = "0.17", optional = true }
 matfile = "0.5"
 num-complex.workspace = true
 npyz = { version = "0.9", features = ["complex"] }
+# Share npyz's literal parser to bound metadata before its allocating reader.
+py_literal = "0.4"
 # arrow-rs 59 is the first release whose parquet drops the `thrift` crate
 # (GHSA-2f9f-gq7v-9h6m); every parquet <= 58 pins the unpatched `thrift ^0.17`.
 parquet = { version = "59", default-features = false, features = ["arrow"], optional = true }

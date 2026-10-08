@@ -3,6 +3,8 @@
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
 use std::io::Cursor;
 
+mod header;
+
 /// A NumPy array/container failure or a bounded decoding refusal.
 #[derive(Debug)]
 pub struct NumpyReadError {
@@ -185,31 +187,11 @@ pub fn decode_npy(
     format: &str,
 ) -> Result<NpyArray, NumpyReadError> {
     use npyz::{DType, Order, TypeChar};
+    // npyz multiplies dimensions and allocates the declared header before it
+    // returns control. Validate those operations before entering the reader.
+    let (shape, count) = header::preflight(bytes, format)?;
     let file = npyz::NpyFile::new(Cursor::new(bytes))
         .map_err(|error| read_error(format, NumpyReadFailure::Header(error)))?;
-    let shape = file
-        .shape()
-        .iter()
-        .map(|value| {
-            usize::try_from(*value)
-                .map_err(|_| read_error(format, NumpyReadFailure::DimensionTooLarge(*value)))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if shape.is_empty() || shape.len() > 2 {
-        return Err(read_error(
-            format,
-            NumpyReadFailure::WaveformDimensions(shape),
-        ));
-    }
-    let count = shape
-        .iter()
-        .try_fold(1_usize, |count, dim| count.checked_mul(*dim))
-        .ok_or_else(|| {
-            read_error(
-                format,
-                NumpyReadFailure::ShapeProductOverflow(shape.clone()),
-            )
-        })?;
     if count > max_values {
         return Err(read_error(
             format,
@@ -450,6 +432,24 @@ pub fn npy_matrix_to_dataset(
 mod tests {
     use super::*;
     use npyz::WriterBuilder as _;
+
+    #[test]
+    fn overflowing_header_dimensions_are_refused_without_panicking() {
+        for fortran in [false, true] {
+            let text = format!(
+                "{{'descr': '<f8', 'fortran_order': {}, 'shape': (18446744073709551615, 2)}}\n",
+                if fortran { "True" } else { "False" }
+            );
+            let mut bytes = b"\x93NUMPY\x01\x00".to_vec();
+            bytes.extend_from_slice(&(text.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(text.as_bytes());
+            let error = decode_npy(&bytes, 1024, "numpy_npy").unwrap_err();
+            assert!(matches!(
+                error.reason,
+                NumpyReadFailure::ShapeProductOverflow(_) | NumpyReadFailure::DimensionTooLarge(_)
+            ));
+        }
+    }
 
     #[test]
     fn complex_coordinate_first_matrices_preserve_axes_and_rectangular_samples() {
