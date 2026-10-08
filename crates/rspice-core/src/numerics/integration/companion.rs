@@ -241,14 +241,11 @@ impl CompanionCoefficients {
         self.coeff_g * inductance / dt
     }
 
-    /// Evaluate the charge-history part of an inductor Newton correction in
-    /// DAE form.
-    ///
-    /// Forming `Q=L*i` at each state and differencing those charges before the
-    /// timestep division mirrors production SPICE time integrators. It avoids
-    /// constructing and then cancelling the much larger absolute companion
-    /// terms `R_eq*i`, while keeping the arithmetic order of the underlying
-    /// DAE instead of relying on an algebraically equivalent fused expression.
+    /// Evaluate the linear flux derivative from current differences before
+    /// inductance/timestep scaling. Subtracting separately rounded L*i
+    /// samples can create a false voltage in a perfectly coupled null mode.
+    /// This is the capacitor charge derivative with dual physical units;
+    /// callers add the separate previous-voltage contribution afterward.
     #[inline]
     pub(crate) fn inductor_charge_derivative_correction(
         &self,
@@ -258,16 +255,41 @@ impl CompanionCoefficients {
         current_prev: Value,
         current_prev_prev: Value,
     ) -> Value {
-        let charge = inductance * current;
-        let charge_prev = inductance * current_prev;
-        let first_difference = charge - charge_prev;
-        if self.needs_two_history {
-            let charge_prev_prev = inductance * current_prev_prev;
-            let previous_difference = charge_prev - charge_prev_prev;
-            (self.coeff_g * first_difference + self.coeff_v_n_minus_1 * previous_difference) / dt
-        } else {
-            self.coeff_g * (first_difference / dt)
+        let derivative = self.capacitor_current(
+            inductance,
+            dt,
+            current,
+            current_prev,
+            current_prev_prev,
+            0.0,
+        );
+        if derivative.is_finite() {
+            return derivative;
         }
+        // Opposite finite currents can overflow their difference even when
+        // the final flux derivative fits. Keep that cold path scaled.
+        use rspice_veriloga_runtime::arithmetic::ScaledValue as Scaled;
+        let difference = |a, b| {
+            Scaled::product_sum(
+                Scaled::new(a),
+                Scaled::new(1.0),
+                Scaled::new(b),
+                Scaled::new(-1.0),
+            )
+        };
+        let mut derivative = difference(current, current_prev).multiply(Scaled::new(self.coeff_g));
+        if self.needs_two_history {
+            derivative = Scaled::product_sum(
+                derivative,
+                Scaled::new(1.0),
+                difference(current_prev, current_prev_prev),
+                Scaled::new(self.coeff_v_n_minus_1),
+            );
+        }
+        derivative
+            .multiply(Scaled::new(inductance))
+            .divide(Scaled::new(dt))
+            .binary64()
     }
 
     /// Calculate the equivalent voltage-source magnitude for an inductor.
@@ -374,6 +396,55 @@ mod companion_coefficients_tests {
                 .capacitor_current(1e200, 1e-200, 1.0, 1.0, 1.0, 0.125),
             -0.125
         );
+    }
+
+    #[test]
+    fn linear_flux_derivative_retains_one_ulp_current_changes() {
+        let previous = 0.5_f64;
+        let current = previous.next_up();
+        // The exact current increment is 2^-53 and dt is 1/8. Thus the
+        // one-step derivatives are a0*L*2^-50, with no rounded flux oracle.
+        for (coefficients, a0) in [
+            (CompanionCoefficients::backward_euler(), 1.0),
+            (CompanionCoefficients::trapezoidal(), 2.0),
+            (CompanionCoefficients::gear2(), 1.5),
+        ] {
+            for inductance in [3.0, 9.0, -3.0, -9.0] {
+                let voltage = coefficients.inductor_charge_derivative_correction(
+                    inductance, 0.125, current, previous, previous,
+                );
+                assert_eq!(voltage, a0 * inductance * 2.0_f64.powi(-50));
+            }
+            let huge = 2.0_f64.powi(1023);
+            assert_eq!(
+                coefficients.inductor_charge_derivative_correction(
+                    2.0_f64.powi(-1020),
+                    1.0,
+                    huge,
+                    -huge,
+                    -huge,
+                ),
+                16.0 * a0,
+            );
+            // Two finite current changes in a perfect transformer's null
+            // flux mode must not acquire an artificial voltage.
+            let delta = 2.0_f64.powi(-48);
+            let self_voltage = coefficients.inductor_charge_derivative_correction(
+                1.0,
+                0.125,
+                0.5 + 3.0 * delta,
+                0.5,
+                0.5,
+            );
+            let mutual_voltage = coefficients.inductor_charge_derivative_correction(
+                3.0,
+                0.125,
+                0.25 - delta,
+                0.25,
+                0.25,
+            );
+            assert_eq!(self_voltage + mutual_voltage, 0.0);
+        }
     }
 
     #[test]
