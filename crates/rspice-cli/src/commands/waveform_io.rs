@@ -610,6 +610,14 @@ fn load_operating_point_report(
                 format!("non-finite value '{token}' for signal '{name}', row {line_number}"),
             ));
         }
+        if rspice_formats::numeric::decimal_underflowed(token, value) {
+            return Err(conversion_error(
+                path,
+                format!(
+                    "value '{token}' for signal '{name}', row {line_number} underflows to zero"
+                ),
+            ));
+        }
         enforce_table_value_limits(path, columns.len().saturating_add(2), resource_limits)?;
         columns.push(ExportColumn {
             unit: None,
@@ -729,6 +737,14 @@ fn parse_delimited(
                     format!(
                         "non-finite value '{}' in column '{}', row {}",
                         token, column, line_number
+                    ),
+                ));
+            }
+            if rspice_formats::numeric::decimal_underflowed(token, value) {
+                return Err(conversion_error(
+                    path,
+                    format!(
+                        "value '{token}' in column '{column}', row {line_number} underflows to zero"
                     ),
                 ));
             }
