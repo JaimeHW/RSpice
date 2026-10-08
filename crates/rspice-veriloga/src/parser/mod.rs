@@ -2396,7 +2396,7 @@ impl<'a> Parser<'a> {
             neg_index,
             access: access.into(),
             kind: None,
-            pos: pos.into(),
+            pos,
             neg,
             span: start.extend(self.previous_span()),
         })
@@ -2944,7 +2944,7 @@ impl<'a> Parser<'a> {
                             neg_index,
                             access: name.into(),
                             kind: None,
-                            pos: pos.into(),
+                            pos,
                             neg,
                             span: start.extend(self.previous_span()),
                         }));
