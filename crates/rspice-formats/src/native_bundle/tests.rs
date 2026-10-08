@@ -27,6 +27,88 @@ fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
 }
 
 #[test]
+fn native_nullable_samples_use_version_three_and_reject_ambiguous_availability() {
+    let real = [1.0, f64::NAN, -0.0];
+    let imag = [2.0, f64::NAN, 0.0];
+    let dataset = NativeBundleDataset {
+        analysis: crate::WaveformDomain::Transient,
+        coordinate_name: "time",
+        coordinate_unit: Some("s"),
+        coordinate: &[0.0, 1.0, 2.0],
+        signals: vec![
+            NativeBundleSignal {
+                name: "real",
+                unit: Some("V"),
+                values: NativeBundleSignalValues::Real(&real),
+            },
+            NativeBundleSignal {
+                name: "complex",
+                unit: Some("A"),
+                values: NativeBundleSignalValues::Complex {
+                    real: &real,
+                    imag: &imag,
+                },
+            },
+        ],
+    };
+    let kind = NativeBundleKind::Dataset;
+    let bytes = encode_native_bundle(kind, &dataset, MAX_RESULT_DATASET_BYTES).unwrap();
+    let decoded = decode_native_bundle(&bytes, kind, limits()).unwrap();
+    assert!(decoded.signals.iter().all(|signal| signal.real[1].is_nan()));
+    assert!(decoded.signals[1].imag.as_ref().unwrap()[1].is_nan());
+    assert_eq!(decoded.signals[0].real[2].to_bits(), (-0.0_f64).to_bits());
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
+    let json = read_zip_member(&mut archive, "dataset.json", MAX_RESULT_DATASET_BYTES).unwrap();
+    let original: serde_json::Value = serde_json::from_slice(&json).unwrap();
+    assert_eq!(original["schema"], "rspice-waveform-dataset/3");
+    assert!(original["signals"][0]["values"][1].is_null());
+    for case in 0..5 {
+        let mut document = original.clone();
+        match case {
+            0 => document["schema"] = "rspice-waveform-dataset/1".into(),
+            1 => document["schema"] = "rspice-waveform-dataset/2".into(),
+            2 => document["signals"][1]["imag"][1] = 0.0.into(),
+            3 => document["coordinate"]["values"][1] = serde_json::Value::Null,
+            _ => document["signals"][0]["values"]
+                .as_array_mut()
+                .unwrap()
+                .pop()
+                .map(|_| ())
+                .unwrap(),
+        }
+        let data = serde_json::to_vec(&document).unwrap();
+        use sha2::Digest as _;
+        let manifest = serde_json::to_vec(&serde_json::json!({"schema":kind.manifest_schema(),"dataset_member":"dataset.json","dataset_sha256":format!("{:x}",sha2::Sha256::digest(&data))})).unwrap();
+        assert!(
+            decode_native_bundle(
+                &zip_bytes(&[("manifest.json", &manifest), ("dataset.json", &data)]),
+                kind,
+                limits()
+            )
+            .is_err(),
+            "case {case}"
+        );
+    }
+    for values in [
+        NativeBundleSignalValues::Real(&[1.0, f64::INFINITY, 0.0]),
+        NativeBundleSignalValues::Complex {
+            real: &real,
+            imag: &[2.0, 0.0, 0.0],
+        },
+    ] {
+        let invalid = NativeBundleDataset {
+            signals: vec![NativeBundleSignal {
+                name: "bad",
+                unit: None,
+                values,
+            }],
+            ..dataset
+        };
+        assert!(encode_native_bundle(kind, &invalid, MAX_RESULT_DATASET_BYTES).is_err());
+    }
+}
+
+#[test]
 fn coordinate_units_round_trip_through_version_two_without_relabeling_samples() {
     let dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::DcSweep,

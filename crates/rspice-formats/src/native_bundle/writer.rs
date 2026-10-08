@@ -44,13 +44,16 @@ enum SignalDocument<'a> {
         name: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
         unit: Option<&'a str>,
+        #[serde(serialize_with = "crate::numeric::sample_serde::serialize")]
         values: &'a [f64],
     },
     Complex {
         name: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
         unit: Option<&'a str>,
+        #[serde(serialize_with = "crate::numeric::sample_serde::serialize")]
         real: &'a [f64],
+        #[serde(serialize_with = "crate::numeric::sample_serde::serialize")]
         imag: &'a [f64],
     },
 }
@@ -82,7 +85,14 @@ pub fn encode_native_bundle(
         })
         .collect();
     let document = DatasetDocument {
-        schema: if dataset.coordinate_unit.is_some() {
+        schema: if dataset.signals.iter().any(|signal| match signal.values {
+            NativeBundleSignalValues::Real(values) => values.iter().any(|value| value.is_nan()),
+            NativeBundleSignalValues::Complex { real, .. } => {
+                real.iter().any(|value| value.is_nan())
+            }
+        }) {
+            "rspice-waveform-dataset/3"
+        } else if dataset.coordinate_unit.is_some() {
             "rspice-waveform-dataset/2"
         } else {
             DATASET_SCHEMA
@@ -225,6 +235,16 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Res
             NativeBundleSignalValues::Complex { real, imag } => {
                 validate_component(signal.name, "real", real, dataset.coordinate.len())?;
                 validate_component(signal.name, "imag", imag, dataset.coordinate.len())?;
+                if real
+                    .iter()
+                    .zip(imag)
+                    .any(|(real, imag)| real.is_nan() != imag.is_nan())
+                {
+                    return Err(format!(
+                        "native bundle signal '{}' has inconsistent complex sample availability",
+                        signal.name
+                    ));
+                }
                 value_count = value_count
                     .checked_add(real.len())
                     .and_then(|count| count.checked_add(imag.len()))
@@ -265,9 +285,9 @@ fn validate_component(
             values.len()
         ));
     }
-    if let Some(index) = values.iter().position(|value| !value.is_finite()) {
+    if let Some(index) = values.iter().position(|value| value.is_infinite()) {
         return Err(format!(
-            "native bundle signal '{signal}' has a non-finite {component} sample at index {index}"
+            "native bundle signal '{signal}' has an infinite {component} sample at index {index}"
         ));
     }
     Ok(())

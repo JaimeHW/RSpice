@@ -47,11 +47,20 @@ struct NativeSignal {
     name: String,
     #[serde(default)]
     unit: Option<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "crate::numeric::sample_serde::deserialize_optional"
+    )]
     values: Option<Vec<f64>>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "crate::numeric::sample_serde::deserialize_optional"
+    )]
     real: Option<Vec<f64>>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "crate::numeric::sample_serde::deserialize_optional"
+    )]
     imag: Option<Vec<f64>>,
 }
 
@@ -140,7 +149,7 @@ pub fn decode_native_bundle(
         })?;
     if !matches!(
         dataset.schema.as_str(),
-        "rspice-waveform-dataset/1" | "rspice-waveform-dataset/2"
+        "rspice-waveform-dataset/1" | "rspice-waveform-dataset/2" | "rspice-waveform-dataset/3"
     ) {
         return Err(NativeBundleError::InvalidData(format!(
             "unsupported dataset schema '{}'",
@@ -170,6 +179,30 @@ pub fn decode_native_bundle(
                 });
             }
         };
+        if real.len() != dataset.coordinate.values.len()
+            || imag.as_ref().is_some_and(|imag| imag.len() != real.len())
+        {
+            return Err(NativeBundleError::InvalidData(format!(
+                "signal '{}' sample counts do not match the coordinate",
+                signal.name
+            )));
+        }
+        if imag.as_ref().is_some_and(|imag| {
+            real.iter()
+                .zip(imag)
+                .any(|(real, imag)| real.is_nan() != imag.is_nan())
+        }) {
+            return Err(NativeBundleError::InvalidData(format!(
+                "signal '{}' has inconsistent complex sample availability",
+                signal.name
+            )));
+        }
+        if dataset.schema != "rspice-waveform-dataset/3" && real.iter().any(|value| value.is_nan())
+        {
+            return Err(NativeBundleError::InvalidData(
+                "unavailable samples require rspice-waveform-dataset/3".into(),
+            ));
+        }
         signals.push(DecodedNumericSignal {
             name: signal.name,
             real,
