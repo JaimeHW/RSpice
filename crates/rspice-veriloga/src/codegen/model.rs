@@ -534,7 +534,7 @@ pub struct CompiledParameter {
     /// Whether the declared parameter type is `integer`.
     #[serde(default)]
     pub is_integer: bool,
-    /// Numeric value captured by a packed elaboration dependency.
+    /// Numeric value captured by an elaboration dependency.
     #[serde(default, with = "crate::json_float::option")]
     pub elaboration_value: Option<f64>,
     #[serde(default)]

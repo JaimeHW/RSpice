@@ -152,11 +152,21 @@ pub(crate) fn parameter_override_literal(
     constants::override_literal(declaration, source, time_scale)
 }
 
-pub(crate) fn given_dependencies<'a>(
+pub(crate) use constants::ElaborationDependencies;
+
+pub(crate) fn digital_dependencies<'a>(
     digital: &AnalyzedDigital,
-    shape_expressions: impl IntoIterator<Item = &'a Expression>,
-) -> Result<std::collections::HashSet<SmolStr>, String> {
-    constants::given_dependencies(digital, shape_expressions)
+    shapes: impl IntoIterator<Item = &'a Expression>,
+) -> Result<ElaborationDependencies, String> {
+    constants::digital_dependencies(digital, shapes)
+}
+
+pub(crate) fn expression_dependencies<'a>(
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    expressions: impl IntoIterator<Item = &'a Expression>,
+) -> Result<ElaborationDependencies, String> {
+    constants::expression_dependencies(source, time_scale, expressions)
 }
 
 pub(crate) use constants::ParameterAssignment;

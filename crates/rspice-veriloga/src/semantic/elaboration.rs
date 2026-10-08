@@ -264,7 +264,7 @@ impl<'a> HierarchyElaborator<'a> {
         used_names.extend(flattened.branches.iter().map(|item| item.name.clone()));
         used_names.extend(flattened.arrays.keys().cloned());
         let next_noise_process = flattened.noise_process_count;
-        let specialization_modules = parameters::specialization_modules(&source_modules);
+        let specialization_modules = parameters::specialization_modules(&source_modules, analyzed);
         Self {
             analyzed,
             source_modules,
@@ -712,10 +712,56 @@ impl<'a> HierarchyElaborator<'a> {
         )?;
 
         let variable_base = self.flattened.variables.len();
-        for variable in &child.variables {
+        // Backends locate array lanes by base[index]. Preserve that relationship
+        // while relocating both the semantic layout and its numeric slots.
+        // Sort maps before allocating names to keep artifact identities stable.
+        let mut child_arrays: Vec<_> = child.arrays.iter().collect();
+        child_arrays.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        let mut array_slots = HashMap::new();
+        for (name, array) in child_arrays {
+            let (mapped_name, names) = loop {
+                let mapped_name = self.fresh_name(name);
+                let mut names = Vec::with_capacity(array.len);
+                for offset in 0..array.len {
+                    let index = array
+                        .lower
+                        .checked_add(offset as i64)
+                        .ok_or_else(|| internal_error("hierarchy array index overflow".into()))?;
+                    names.push(SmolStr::from(format!("{mapped_name}[{index}]")));
+                }
+                if names.iter().all(|name| !self.used_names.contains(name)) {
+                    break (mapped_name, names);
+                }
+            };
+            for (offset, name) in names.into_iter().enumerate() {
+                let slot = array
+                    .base
+                    .checked_add(offset)
+                    .filter(|slot| *slot < child.variables.len())
+                    .ok_or_else(|| {
+                        internal_error("hierarchy array slot exceeds child storage".into())
+                    })?;
+                if array_slots.insert(slot, name.clone()).is_some() {
+                    return Err(internal_error("overlapping hierarchy array layouts".into()));
+                }
+                self.used_names.insert(name);
+            }
+            scope.arrays.insert(name.clone(), mapped_name.clone());
+            self.flattened.arrays.insert(
+                mapped_name,
+                AnalyzedArray {
+                    base: variable_base + array.base,
+                    lower: array.lower,
+                    len: array.len,
+                },
+            );
+        }
+        for (slot, variable) in child.variables.iter().enumerate() {
             let mut variable = variable.clone();
             let original = variable.name.clone();
-            variable.name = self.fresh_name(&original);
+            variable.name = array_slots
+                .remove(&slot)
+                .unwrap_or_else(|| self.fresh_name(&original));
             if let Some(task) = crate::analog_tasks::SIMULATOR_CONTROL_TASK_VARIABLES
                 .iter()
                 .position(|name| *name == original)
@@ -775,24 +821,6 @@ impl<'a> HierarchyElaborator<'a> {
         }
         self.flattened.switch_branch_variables.sort_unstable();
         self.flattened.switch_branch_variables.dedup();
-        // By name, because `fresh_name` draws from one counter shared by every
-        // renamed item: walking the child's array map would hand a different
-        // hoisted name to each array — and to everything renamed after it —
-        // on every process that flattens this hierarchy.
-        let mut child_arrays: Vec<_> = child.arrays.iter().collect();
-        child_arrays.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-        for (name, array) in child_arrays {
-            let mapped_name = self.fresh_name(name);
-            scope.arrays.insert(name.clone(), mapped_name.clone());
-            self.flattened.arrays.insert(
-                mapped_name,
-                AnalyzedArray {
-                    base: variable_base + array.base,
-                    lower: array.lower,
-                    len: array.len,
-                },
-            );
-        }
         for branch in &child.branches {
             let mapped_name = self.fresh_name(&branch.name);
             scope

@@ -8785,3 +8785,72 @@ if {supplied} {{
         .unwrap();
     }
 }
+
+#[test]
+fn generated_array_shape_guards_preserve_valid_numeric_assignments() {
+    let compiler = VerilogACompiler::default();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module array_leaf(p);
+ inout p; electrical p;
+ parameter integer N=2;
+ real cells[0:N-1];
+ analog begin cells[N-1]=N; I(p)<+cells[N-1]; end
+endmodule
+module shaped(p);
+ inout p; electrical p;
+ parameter integer N=2;
+ aliasparam SIZE=N;
+ array_leaf #(.N(N)) child(p);
+endmodule
+"#,
+            Some("shaped"),
+        )
+        .unwrap();
+    for n in [2, 5] {
+        let report = if n == 2 {
+            original.clone()
+        } else {
+            compiler
+                .specialize_mixed_runtime_typed(
+                    &original.canonical_ir,
+                    &[("SIZE", rspice_veriloga::ScalarParameterValue::Integer(n))],
+                    &rspice_veriloga::NoPipelineControl,
+                )
+                .unwrap()
+        };
+        let generated = canonical::generate_device(&report.canonical_ir, &options()).unwrap();
+        let file = |name| {
+            generated
+                .files
+                .iter()
+                .find(|file| file.relative_path == name)
+                .unwrap()
+                .contents
+                .as_str()
+        };
+        let body = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+instance.set_parameter("SIZE",{n}.0).unwrap();
+let before=instance.params.clone();
+let given=instance.param_given.clone();
+let error=instance.set_parameter("SIZE",99.0).unwrap_err();
+assert!(error.contains("specialize the source"));
+assert_eq!(instance.params.values,before.values);
+assert_eq!(instance.param_given,given);
+instance.validate_parameters().unwrap();
+"#
+        );
+        run_generated_main(
+            &format!("array shape guard {n}"),
+            file("state.rs"),
+            file("stamp.rs"),
+            file("noise.rs"),
+            &body,
+        )
+        .unwrap();
+    }
+}

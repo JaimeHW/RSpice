@@ -163,13 +163,17 @@ fn required_parameters<'a>(
     required
 }
 
-/// Presence reads in parameter constants actually consumed by a digital body.
-/// Use the same lexical read collector as constant lowering; a process-local
-/// shadow must not freeze an unrelated public analog parameter.
-pub(super) fn given_dependencies<'a>(
+/// Parameters whose values or supplied state have entered immutable content.
+#[derive(Default)]
+pub(crate) struct ElaborationDependencies {
+    pub values: HashMap<SmolStr, Option<f64>>,
+    pub given: HashSet<SmolStr>,
+}
+
+pub(super) fn digital_dependencies<'a>(
     digital: &AnalyzedDigital,
-    shape_expressions: impl IntoIterator<Item = &'a Expression>,
-) -> Result<HashSet<SmolStr>, String> {
+    shapes: impl IntoIterator<Item = &'a Expression>,
+) -> Result<ElaborationDependencies, String> {
     let mut required = required_parameters(
         &digital.processes,
         &digital.continuous_assigns,
@@ -178,18 +182,44 @@ pub(super) fn given_dependencies<'a>(
             .iter()
             .filter_map(|signal| signal.initializer.as_ref()),
     );
-    for expression in shape_expressions {
-        collect_expression_reads(expression, &mut required);
+    let mut given = HashSet::new();
+    for expression in shapes {
+        let (folded, reads) = digital.constants.given.fold(expression)?;
+        collect_expression_reads(&folded, &mut required);
+        given.extend(reads);
     }
-    let definitions: HashMap<_, _> = digital
-        .constants
+    dependencies(&digital.constants, digital.time_scale, required, given)
+}
+
+pub(super) fn expression_dependencies<'a>(
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    expressions: impl IntoIterator<Item = &'a Expression>,
+) -> Result<ElaborationDependencies, String> {
+    let mut required = BTreeSet::new();
+    let mut given = HashSet::new();
+    for expression in expressions {
+        let (folded, reads) = source.given.fold(expression)?;
+        collect_expression_reads(&folded, &mut required);
+        given.extend(reads);
+    }
+    dependencies(source, time_scale, required, given)
+}
+
+fn dependencies(
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    required: BTreeSet<String>,
+    mut given: HashSet<SmolStr>,
+) -> Result<ElaborationDependencies, String> {
+    let definitions: HashMap<_, _> = source
         .definitions
         .iter()
         .map(|value| (value.name.as_str(), value))
         .collect();
     let mut pending: Vec<_> = required.into_iter().collect();
     let mut visited = HashSet::new();
-    let mut given = HashSet::new();
+    let mut identifiers = Vec::new();
     while let Some(name) = pending.pop() {
         if !visited.insert(name.clone()) {
             continue;
@@ -197,19 +227,37 @@ pub(super) fn given_dependencies<'a>(
         let Some(declaration) = definitions.get(name.as_str()) else {
             continue;
         };
+        identifiers.push(Expression::Identifier(crate::ast::Identifier {
+            name: declaration.name.clone(),
+            span: declaration.span,
+        }));
         let mut expressions: Vec<_> = declaration.default.iter().collect();
         if let Some(range) = &declaration.packed_range {
             expressions.extend([&range.msb, &range.lsb]);
         }
         for expression in expressions {
-            let (folded, dependencies) = digital.constants.given.fold(expression)?;
-            given.extend(dependencies);
+            let (folded, reads) = source.given.fold(expression)?;
+            given.extend(reads);
             let mut reads = BTreeSet::new();
             collect_expression_reads(&folded, &mut reads);
             pending.extend(reads);
         }
     }
-    Ok(given)
+    let resolved = resolve(source, time_scale, &[], &[], &identifiers)
+        .map_err(|errors| errors[0].diagnostic.message.clone())?;
+    let values = identifiers
+        .iter()
+        .map(|expression| {
+            let Expression::Identifier(identifier) = expression else {
+                unreachable!()
+            };
+            let value = scalar(expression, &resolved, time_scale)
+                .and_then(|value| value.as_exact_f64("elaboration dependency").ok())
+                .filter(|value| value.is_finite());
+            (identifier.name.clone(), value)
+        })
+        .collect();
+    Ok(ElaborationDependencies { values, given })
 }
 
 pub(super) fn resolve<'a>(

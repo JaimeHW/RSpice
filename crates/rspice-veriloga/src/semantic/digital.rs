@@ -719,12 +719,14 @@ impl SemanticAnalyzer {
         let shapes = ranges
             .flat_map(|range| [&range.msb, &range.lsb])
             .chain(dimensions.flat_map(|range| [&range.start, &range.end]));
-        match crate::canonical_ir::digital_lower::given_dependencies(&analyzed.digital, shapes) {
-            Ok(given) => {
-                for parameter in &mut analyzed.parameters {
-                    if parameter.is_public && given.contains(&parameter.name) {
-                        parameter.elaboration_given = Some(parameter.is_given);
-                    }
+        let dependencies =
+            crate::canonical_ir::digital_lower::digital_dependencies(&analyzed.digital, shapes);
+        match dependencies {
+            Ok(dependencies) => {
+                if let Err(error) =
+                    super::constant_dependencies::protect(analyzed, &dependencies, module.span)
+                {
+                    self.errors.push(error);
                 }
             }
             Err(message) => {

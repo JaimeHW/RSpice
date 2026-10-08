@@ -11,12 +11,19 @@ pub(super) struct SpecializedModule {
 }
 
 /// Reanalyze only subtrees that need final values for typing or structure.
-/// Explicitly typed numeric-only trees keep their existing symbolic path.
-pub(super) fn specialization_modules(sources: &HashMap<SmolStr, &Module>) -> HashSet<SmolStr> {
+/// Trees without elaboration-bound inputs keep their existing symbolic path.
+pub(super) fn specialization_modules(
+    sources: &HashMap<SmolStr, &Module>,
+    analyzed: &AnalyzedFile,
+) -> HashSet<SmolStr> {
     let mut parents: HashMap<SmolStr, Vec<SmolStr>> = HashMap::new();
     let mut pending = Vec::new();
     for source in sources.values() {
-        if source.generate_template.is_some()
+        if analyzed.modules.get(&source.name).is_some_and(|module| {
+            module.parameters.iter().any(|parameter| {
+                parameter.elaboration_value.is_some() || parameter.elaboration_given.is_some()
+            })
+        }) || source.generate_template.is_some()
             || source
                 .parameters
                 .iter()

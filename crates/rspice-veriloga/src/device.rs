@@ -1037,7 +1037,7 @@ impl std::fmt::Display for ParameterValueError {
             ),
             Self::RequiresElaboration { parameter, value } => write!(
                 f,
-                "parameter '{parameter}' value {value} changes a packed elaboration dependency; specialize the source before updating the compiled device"
+                "parameter '{parameter}' value {value} changes an elaboration dependency; specialize the source before updating the compiled device"
             ),
             Self::NonFinite { parameter, value } => {
                 write!(

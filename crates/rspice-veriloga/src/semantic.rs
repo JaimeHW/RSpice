@@ -379,6 +379,7 @@ pub(crate) const MAX_DIGITAL_VECTOR_WIDTH: u32 = 65_536;
 
 mod analyzed;
 mod bounded_loop;
+mod constant_dependencies;
 mod digital;
 mod digital_elaborate;
 mod digital_walk;
@@ -456,6 +457,7 @@ pub struct SemanticAnalyzer {
     invariant_consts: HashMap<SmolStr, ConstantValue>,
     /// Authored constants for typed digital select validation in this module.
     digital_selector_constants: digital::DigitalConstants,
+    array_bound_shadows: Vec<HashSet<SmolStr>>,
     /// Current function inlining depth (recursion guard)
     inline_depth: usize,
     /// Nesting depth of runtime-bounded loops (contributions inside them
@@ -536,6 +538,7 @@ impl SemanticAnalyzer {
             exact_parameter_constants: Default::default(),
             invariant_consts: HashMap::new(),
             digital_selector_constants: Default::default(),
+            array_bound_shadows: Vec::new(),
             inline_depth: 0,
             runtime_loop_depth: 0,
             dynamic_analog_operator_guard_depth: 0,
@@ -638,6 +641,7 @@ impl SemanticAnalyzer {
                 self.exact_parameter_constants = Default::default();
                 self.invariant_consts.clear();
                 self.digital_selector_constants = Default::default();
+                self.array_bound_shadows.clear();
                 self.inline_depth = 0;
                 self.runtime_loop_depth = 0;
                 self.dynamic_analog_operator_guard_depth = 0;
@@ -952,6 +956,7 @@ impl SemanticAnalyzer {
         default_transition: f64,
     ) -> CompileResult<AnalyzedModule> {
         self.current_time_scale = module.time_scale;
+        self.digital_selector_constants = DigitalConstants::from_module(module);
         let mut analyzed = AnalyzedModule {
             name: module.name.clone(),
             default_transition,
@@ -2321,10 +2326,27 @@ impl SemanticAnalyzer {
             return None;
         }
         let dim = &item.dimensions[0];
-        let (Some(start), Some(end)) = (
-            self.eval_const_invariant_value(&dim.start),
-            self.eval_const_invariant_value(&dim.end),
-        ) else {
+        // Reject lexical variable reads before consulting the module's
+        // parameter constants, so shadowing cannot change the selected scope.
+        let start = constant_dependencies::bound_expression(self, &dim.start);
+        let end = constant_dependencies::bound_expression(self, &dim.end);
+        let bounds = [start.as_ref(), end.as_ref()];
+        let evaluate = |expression: Option<&Expression>| {
+            crate::canonical_ir::digital_lower::elaboration_constant(
+                expression?,
+                &self.digital_selector_constants,
+                self.current_time_scale,
+            )
+            .map(|value| match value {
+                crate::numeric_literal::NumericLiteralValue::Integer(value) => {
+                    ConstantValue::Integer(value)
+                }
+                crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                    ConstantValue::Real(value)
+                }
+            })
+        };
+        let (Some(start), Some(end)) = (evaluate(bounds[0]), evaluate(bounds[1])) else {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "array '{}' bounds must be compile-time constants",
@@ -2344,6 +2366,25 @@ impl SemanticAnalyzer {
             );
             return None;
         };
+        let dependencies = crate::canonical_ir::digital_lower::expression_dependencies(
+            &self.digital_selector_constants,
+            self.current_time_scale,
+            bounds.into_iter().flatten(),
+        );
+        match dependencies {
+            Ok(dependencies) => {
+                if let Err(error) =
+                    constant_dependencies::protect(analyzed, &dependencies, dim.span)
+                {
+                    self.errors.push(error);
+                    return None;
+                }
+            }
+            Err(message) => {
+                self.record_error_at(SemanticErrorKind::InvalidExpression(message), dim.span);
+                return None;
+            }
+        }
         // The LRM writes ranges [lo:hi]; accept either order
         let (lower, upper) = if start <= end {
             (start, end)
@@ -2931,6 +2972,14 @@ impl SemanticAnalyzer {
             AnalogStatement::Block(block) => {
                 self.symbols.enter_scope();
                 self.subst_stack.push(HashMap::new());
+                self.array_bound_shadows.push(
+                    block
+                        .variables
+                        .iter()
+                        .flat_map(|declaration| &declaration.items)
+                        .map(|item| item.name.clone())
+                        .collect(),
+                );
 
                 // Hoist block-local variables to module scope under unique
                 // names; expressions are rewritten through the subst frame.
@@ -3073,6 +3122,7 @@ impl SemanticAnalyzer {
                 }
 
                 self.subst_stack.pop();
+                self.array_bound_shadows.pop();
                 self.symbols.exit_scope();
             }
             AnalogStatement::Conditional(cond) => {

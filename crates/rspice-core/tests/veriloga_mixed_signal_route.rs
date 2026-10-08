@@ -3420,3 +3420,72 @@ endmodule
         }
     }
 }
+
+#[test]
+fn parameter_array_shape_specialization_preserves_analog_and_mixed_instances() {
+    for mixed in [false, true] {
+        let source = if mixed {
+            r#"
+`timescale 1ns/1ps
+module shaped(p);
+ inout p; electrical p;
+ parameter integer WIDTH=2;
+ aliasparam SIZE=WIDTH;
+ parameter real GAIN=1;
+ integer cells[0:WIDTH-1]; integer i;
+ initial begin
+  for(i=0;i<WIDTH;i=i+1) cells[i]=i+1;
+  #1 cells[WIDTH-1]=cells[WIDTH-1]+1;
+ end
+ analog I(p)<+(V(p)-GAIN*cells[WIDTH-1])/1000;
+endmodule
+"#
+        } else {
+            r#"
+module shaped_leaf(p);
+ inout p; electrical p;
+ parameter integer N=2;
+ parameter real GAIN=1;
+ real cells[0:N-1]; integer i;
+ analog begin
+  for(i=0;i<N;i=i+1) cells[i]=(i+1)*GAIN;
+  I(p)<+(V(p)-cells[N-1])/1000;
+ end
+endmodule
+module shaped(p);
+ inout p; electrical p;
+ parameter integer WIDTH=2;
+ aliasparam SIZE=WIDTH;
+ parameter real GAIN=1;
+ shaped_leaf #(.N(WIDTH),.GAIN(GAIN)) cell(p);
+endmodule
+"#
+        };
+        let model = ModelFile::new("parameter_shapes", source);
+        let deck = format!(
+            "* parameter-shaped instance storage\nXa pa shaped\nXb pb shaped size=4 GAIN=3\nXc pc shaped WIDTH=1 GAIN=2\nXd pd shaped SIZE=4 GAIN=3\nRa pa 0 1k\nRb pb 0 1k\nRc pc 0 1k\nRd pd 0 1k\n.va \"{}\" shaped module=shaped\n.end\n",
+            model.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.1e-9);
+        for (node, before, step) in [
+            ("pa", 1.0, 0.5),
+            ("pb", 6.0, 1.5),
+            ("pc", 1.0, 1.0),
+            ("pd", 6.0, 1.5),
+        ] {
+            for (&time, &value) in result.time.iter().zip(waveform(&result, node).iter()) {
+                let expected = if mixed && time > 1.1e-9 {
+                    before + step
+                } else if !mixed || time < 0.9e-9 {
+                    before
+                } else {
+                    continue;
+                };
+                assert!(
+                    (value - expected).abs() < 1e-8,
+                    "mixed={mixed}, {node} at {time}: {value} != {expected}"
+                );
+            }
+        }
+    }
+}
