@@ -137,6 +137,51 @@ pub(crate) fn event_document(
         .map_err(|error| projection_error(path, &error))
 }
 
+/// Describe the declarations actually written to an event dump. Its inventory
+/// differs from the sampled transient projection: analog columns are absent,
+/// real event nets are present, and a folded bus is one vector declaration.
+pub(crate) fn event_schema(
+    path: &Path,
+    document: &VcdDocument,
+) -> Result<rspice_core::execution::SignalSchema, CliError> {
+    use rspice_core::execution::{
+        SignalDescriptor, SignalKind, SignalOwner, SignalSchema, SignalShape, SignalUnit,
+        SignalValueType,
+    };
+    let descriptors = document
+        .signals
+        .iter()
+        .zip(column_names(document))
+        .map(|(signal, name)| {
+            let (kind, unit, value_type, owner) = match signal.kind {
+                VcdSignalKind::Logic => (
+                    SignalKind::Digital,
+                    SignalUnit::Logic,
+                    SignalValueType::Logic,
+                    SignalOwner::Node(signal.variables.first().map_or_else(
+                        || signal.identifier.clone(),
+                        |variable| variable.name.clone(),
+                    )),
+                ),
+                VcdSignalKind::Real => (
+                    SignalKind::Scalar,
+                    SignalUnit::Unspecified,
+                    SignalValueType::Real,
+                    SignalOwner::Analysis,
+                ),
+            };
+            let shape = if signal.kind == VcdSignalKind::Logic && signal.width > 1 {
+                SignalShape::Vector
+            } else {
+                SignalShape::Scalar
+            };
+            SignalDescriptor::new(&name, &name, kind, unit, value_type, shape, owner)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| conversion_error(path, error))?;
+    SignalSchema::new(descriptors).map_err(|error| conversion_error(path, error))
+}
+
 /// A failure while writing a dump, categorised by what actually failed: the
 /// stream, or a document VCD cannot express.
 pub(crate) fn write_error(path: &Path, error: rspice_core::io::VcdError) -> CliError {
@@ -995,6 +1040,26 @@ mod tests {
             kind: VcdSignalKind::Logic,
             changes: Vec::new(),
         }
+    }
+
+    #[test]
+    fn event_schema_preserves_bus_declarations_and_member_shapes() {
+        use rspice_core::execution::SignalShape;
+        let mut document = VcdDocument::new(VcdTimescale::ALL[11]);
+        document.signals = vec![
+            vector("data [3:0]", 4),
+            vector("one [7:7]", 1),
+            logic("bit[2]", &[EVENT_SCOPE], &[(0, VcdBit::Unknown)]),
+        ];
+        let schema = event_schema(Path::new("events.vcd"), &document).unwrap();
+        let declarations = schema.descriptors();
+        assert_eq!(declarations.len(), 3);
+        assert_eq!(declarations[0].display_name(), "D(data [3:0])");
+        assert_eq!(declarations[0].shape(), SignalShape::Vector);
+        assert_eq!(declarations[1].display_name(), "D(one [7:7])");
+        assert_eq!(declarations[1].shape(), SignalShape::Scalar);
+        assert_eq!(declarations[2].display_name(), "D(bit[2])");
+        assert_eq!(declarations[2].shape(), SignalShape::Scalar);
     }
 
     #[test]

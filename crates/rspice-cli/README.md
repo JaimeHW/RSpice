@@ -571,6 +571,11 @@ descriptor is present. Flat formats retain their exported column schema and
 set `source_signal_indices` to null. Scalar metrics and family payloads remain
 in the result document, outside this series manifest.
 
+For VCD, the schema describes the dump's digital and real event declarations,
+including folded buses as vectors. It does not list sampled analog columns;
+an event-free dump has an empty schema. Real event units remain unspecified,
+as they are in the dump itself.
+
 An implicit axis sweep whose topology and complete signal schema are identical
 at every coordinate keeps the single wide aggregated table instead.
 
