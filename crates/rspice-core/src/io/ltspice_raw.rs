@@ -1157,6 +1157,11 @@ fn parse_ascii_raw_value(value_str: &str) -> Result<f64, RawParseError> {
             value_str
         )));
     }
+    if super::decimal_underflowed(value_str, value) {
+        return Err(RawParseError::DataError(format!(
+            "ASCII raw value '{value_str}' underflows at binary64 precision"
+        )));
+    }
     Ok(value)
 }
 

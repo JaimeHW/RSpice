@@ -31,6 +31,17 @@ pub mod vcd;
 pub mod waveform_stream;
 pub mod xyce_prn;
 
+/// Whether converting validated decimal text erased a nonzero mantissa.
+/// This is not a syntax validator. Apply any multiplicative unit conversion
+/// first; an affine conversion can legitimately map a nonzero value to zero.
+pub fn decimal_underflowed(spelling: &str, value: f64) -> bool {
+    value == 0.0
+        && spelling
+            .split(['e', 'E'])
+            .next()
+            .is_some_and(|mantissa| mantissa.bytes().any(|digit| matches!(digit, b'1'..=b'9')))
+}
+
 pub use hdf5::{
     HDF5_SCHEMA_VERSION, HDF5_SIMULATOR, Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document,
     Hdf5Error, Hdf5Group, Hdf5Table, Hdf5Values, write_hdf5,

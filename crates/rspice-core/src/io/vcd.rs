@@ -1032,6 +1032,12 @@ fn record_change(
             if !real.is_finite() {
                 return Err(syntax(line, format!("real value '{text}' is not finite")));
             }
+            if super::decimal_underflowed(text, real) {
+                return Err(syntax(
+                    line,
+                    format!("real value '{text}' underflows at binary64 precision"),
+                ));
+            }
             VcdValue::Real(real)
         }
     };

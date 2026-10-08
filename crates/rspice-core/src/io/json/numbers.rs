@@ -1,5 +1,7 @@
 //! Borrow original number spellings alongside serde's authoritative parser.
 
+pub use crate::io::decimal_underflowed;
+
 /// JSON integer literals promise an exact value, unlike decimal floating-point
 /// input which is rounded to binary64. serde retains i64/u64 values but already
 /// rounds integers outside that range to f64, so check the original spelling.
@@ -68,15 +70,6 @@ impl<'a> Iterator for Numbers<'a> {
         self.remaining = "";
         None
     }
-}
-
-/// Whether converting a validated decimal erased a nonzero mantissa.
-pub fn decimal_underflowed(spelling: &str, value: f64) -> bool {
-    value == 0.0
-        && spelling
-            .split(['e', 'E'])
-            .next()
-            .is_some_and(|mantissa| mantissa.bytes().any(|digit| matches!(digit, b'1'..=b'9')))
 }
 
 #[cfg(test)]
