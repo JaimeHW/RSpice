@@ -68,7 +68,7 @@ use crate::xspice::verilog::{BoundaryBus, MixedSignalHost};
 use crate::{CircuitData, ElaborationError, ElaborationErrorKind, SimulationError};
 
 use super::connect_modules::{self, DesignConnectRules};
-use super::veriloga_cache::CachedVerilogAModel;
+use super::veriloga_instances::PreparedInstance;
 
 /// Every refusal this module raises is about one X-card bound to one master,
 /// so it is built once here rather than formatted at each site: the instance
@@ -109,16 +109,6 @@ fn host_failure_kind(error: &crate::xspice::verilog::MixedSignalError) -> Elabor
 /// logic output, so the node settles to the driven level, and finite so the
 /// node's row is never singular when nothing else is attached to it.
 const MIXED_DAC_SOURCE_RESISTANCE: crate::Value = 20.0;
-
-/// Per-build specialization cache. Base model Arcs remain alive in the build's
-/// model table, so their addresses identify immutable artifacts for this scope.
-pub(super) type MixedSpecializations = std::collections::HashMap<
-    (usize, usize, Vec<(String, u64)>),
-    (
-        std::sync::Arc<rspice_veriloga::CompiledModel>,
-        std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
-    ),
->;
 
 /// Which way one boundary port faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,37 +156,23 @@ struct BoundaryLayout {
 
 /// Build a mixed module instance, or report that this model is not mixed.
 ///
-/// `Ok(false)` means the model's canonical artifact carries no discrete plan,
-/// which is every analog `.va` there has ever been: the caller takes the device
-/// route it always took.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "one private step of the element loop in `builder.rs`, called from \
-              exactly one place: the parameters are that loop's own locals, and \
-              a struct to carry them would exist only for this call"
-)]
+/// `Ok(false)` means the effective artifact needs no discrete runtime. The
+/// caller builds an analog device from the same prepared instance.
 pub(super) fn try_build_mixed_signal_instance(
     circuit: &mut CircuitData,
-    netlist: &crate::Netlist,
     element: &crate::netlist::Element,
-    entry: &CachedVerilogAModel,
-    specializations: &mut MixedSpecializations,
+    prepared: &PreparedInstance<'_>,
     connect_rules: &DesignConnectRules,
     supplies: &super::boundary_supply::BoundarySupplies,
-    temperature: f64,
     // Every net the flattened deck authors, for the one check that this
     // instance's own unknowns are not about to take a name already in use.
     authored_nets: &std::collections::HashSet<String>,
     abort: &dyn crate::abort_signal::AbortSignal,
 ) -> Result<bool, SimulationError> {
-    let crate::netlist::ElementKind::Subcircuit {
-        subckt_name,
-        params,
-    } = &element.kind
-    else {
+    let crate::netlist::ElementKind::Subcircuit { subckt_name, .. } = &element.kind else {
         return Ok(false);
     };
-    let Some(artifact) = entry.canonical_ir.as_deref() else {
+    let Some(artifact) = prepared.canonical_ir.as_deref() else {
         // Only a native build can reach here without an artifact, and it has
         // already refused for its own reason; an interpreter build without one
         // simply has no plan to consult, which is the analog route.
@@ -206,113 +182,7 @@ pub(super) fn try_build_mixed_signal_instance(
         return Ok(false);
     }
 
-    let declares = |name: &str| entry.model.parameter_index(name).is_some();
-    let mut context = super::InstanceParameterContext::new(netlist, temperature);
-    // A mixed module's continuous half runs at the temperature its card
-    // names, exactly as the analog route's device does, and its parameter
-    // expressions are evaluated at that temperature.
-    let instance_temperature = super::veriloga_instance_temperature(
-        &element.name,
-        subckt_name,
-        params,
-        &declares,
-        &mut context,
-        temperature,
-    )?;
-    context.retarget(instance_temperature);
-    let mut overrides = Vec::with_capacity(params.len());
-    let mut multiplicity = None;
-    for (name, value) in params {
-        // `m` and the temperature keys are the instance parameters the
-        // analog Verilog-A route carves out of the override list
-        // (`builder.rs`), and a mixed module's continuous half must scale and
-        // heat exactly as that route's device does. A module that declares
-        // one of those names owns it and handles it itself, so the engine
-        // must not also apply it — the precedence
-        // `model_declared_m_parameter_takes_precedence` pins for the analog
-        // route.
-        if super::veriloga_instance_temperature_key(name, &declares).is_some() {
-            continue;
-        }
-        let value = super::veriloga_instance_numeric_value(
-            &element.name,
-            subckt_name,
-            name,
-            value,
-            &mut context,
-        )?;
-        if name.eq_ignore_ascii_case("m") && entry.model.parameter_index(name).is_none() {
-            if !value.is_finite() || value <= 0.0 {
-                return Err(refuse(
-                    &element.name,
-                    subckt_name,
-                    ElaborationErrorKind::ParameterValue,
-                    format!("multiplicity must be a positive finite value, got {value}"),
-                ));
-            }
-            multiplicity = Some(value);
-            continue;
-        }
-        let index = entry.model.parameter_index(name).ok_or_else(|| {
-            refuse(
-                &element.name,
-                subckt_name,
-                ElaborationErrorKind::ParameterUnknown,
-                format!("unknown parameter '{name}'"),
-            )
-        })?;
-        overrides.push((entry.model.parameters[index].name.as_str(), value));
-    }
-    overrides.sort_by(|left, right| left.0.cmp(right.0));
-    let specialized = if overrides.is_empty() {
-        None
-    } else {
-        let key = (
-            std::sync::Arc::as_ptr(&entry.model) as usize,
-            artifact as *const _ as usize,
-            overrides
-                .iter()
-                .map(|(name, value)| (name.to_string(), value.to_bits()))
-                .collect(),
-        );
-        if let Some(specialized) = specializations.get(&key) {
-            Some(specialized.clone())
-        } else {
-            let compiler =
-                rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-                    enable_ams: true,
-                    ..Default::default()
-                });
-            let runtime = compiler
-                .specialize_mixed_runtime(
-                    artifact,
-                    &overrides,
-                    &super::veriloga_cache::VerilogACompileControl { abort },
-                )
-                .map_err(|error| {
-                    if abort.is_aborted() {
-                        SimulationError::Aborted
-                    } else {
-                        refuse(
-                            &element.name,
-                            subckt_name,
-                            ElaborationErrorKind::CompileRefusal,
-                            format!("parameter elaboration failed: {error}"),
-                        )
-                    }
-                })?;
-            let specialized = (
-                std::sync::Arc::new(runtime.model),
-                std::sync::Arc::new(runtime.canonical_ir),
-            );
-            specializations.insert(key, specialized.clone());
-            Some(specialized)
-        }
-    };
-    let (model, artifact) = match &specialized {
-        Some((model, artifact)) => (model, artifact.as_ref()),
-        None => (&entry.model, artifact),
-    };
+    let model = &prepared.model;
     let declared_nodes = declared_node_count(artifact);
     if element.nodes.len() != declared_nodes {
         // `num_terminals` is one per module port and says nothing about how
@@ -382,7 +252,7 @@ pub(super) fn try_build_mixed_signal_instance(
         std::sync::Arc::clone(model),
         artifact,
         &layout.analog_terminals,
-        &overrides,
+        &prepared.overrides,
         SchedulerLimits::default(),
         circuit.generated_simulation_parameters,
         &super::veriloga_cache::VerilogACompileControl { abort },
@@ -405,7 +275,7 @@ pub(super) fn try_build_mixed_signal_instance(
     // After the setup closure has bound this instance's solver unknowns and
     // before the analysis starts, which is where the analog route applies the
     // same factor to its own device.
-    if let Some(multiplicity) = multiplicity {
+    if let Some(multiplicity) = prepared.multiplicity {
         host.set_multiplicity(multiplicity).map_err(|error| {
             refuse(
                 &element.name,
@@ -416,7 +286,7 @@ pub(super) fn try_build_mixed_signal_instance(
         })?;
     }
 
-    host.set_temperature(instance_temperature)
+    host.set_temperature(prepared.temperature)
         .map_err(|error| {
             refuse(
                 &element.name,

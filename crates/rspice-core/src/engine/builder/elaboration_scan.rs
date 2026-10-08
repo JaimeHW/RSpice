@@ -8,7 +8,7 @@
 //! one run: a refusal nothing reaches is exactly the one a formatted string
 //! would slip back into, because no test would ever render it.
 //!
-//! So this scans the seam's own text. Four of the seven files are wholly
+//! So this scans the seam's own text. Five of the eight files are wholly
 //! elaboration and may not name the untyped constructors at all. The other
 //! three — the builder, which is mostly other device families; the mixed
 //! circuit, which is mostly the transient stepper; and the trial protocol,
@@ -45,6 +45,7 @@ const UNTYPED: &[&str] = &["SimulationError::Circuit(", "SimulationError::Netlis
 fn seam_modules() -> Vec<(&'static str, &'static str)> {
     vec![
         ("mixed_modules.rs", include_str!("mixed_modules.rs")),
+        ("veriloga_instances.rs", include_str!("veriloga_instances.rs")),
         ("connect_modules.rs", include_str!("connect_modules.rs")),
         ("veriloga_sources.rs", include_str!("veriloga_sources.rs")),
         ("veriloga_cache.rs", include_str!("veriloga_cache.rs")),

@@ -3085,3 +3085,111 @@ endmodule
         assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
     }
 }
+
+#[test]
+fn instance_specialization_allocates_analog_generated_nodes_and_branches() {
+    let model = ModelFile::new(
+        "analog_generated_bank",
+        r#"
+module bank_cell(p);
+ inout p; electrical p; electrical inside;
+ parameter integer W=4;
+ parameter [W-1:0] CODE=16'h1234;
+ parameter real GAIN=1;
+ parameter real LEVEL=CODE+0.0;
+ analog begin
+  I(p,inside)<+V(p,inside)/1000;
+  V(inside)<+LEVEL*GAIN;
+ end
+endmodule
+module analog_bank(p);
+ inout p; electrical p;
+ parameter integer WIDTH=4 from [1:16];
+ aliasparam SIZE=WIDTH;
+ parameter integer COUNT=0 from [0:4];
+ parameter real GAIN=1;
+ genvar i;
+ generate for(i=0;i<COUNT;i=i+1) begin:cells
+  bank_cell #(.W(WIDTH),.GAIN(GAIN)) item(p);
+ end endgenerate
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* analog structural instance specialization\n\
+         Xa pa analog_bank\n\
+         Xb pb analog_bank SIZE=8 COUNT=2\n\
+         Xc pc analog_bank COUNT=1 WIDTH=4 GAIN=3\n\
+         Xd pd analog_bank SIZE=8 COUNT=2\n\
+         Ra pa 0 1k\nRb pb 0 1k\nRc pc 0 1k\nRd pd 0 1k\n\
+         .va \"{}\" analog_bank module=analog_bank\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 1e-9, 0.25e-9);
+    assert!(result.digital_traces.is_empty());
+    for (node, expected) in [
+        ("pa", 0.0),
+        ("pb", 104.0 / 3.0),
+        ("pc", 6.0),
+        ("pd", 104.0 / 3.0),
+    ] {
+        for value in waveform(&result, node) {
+            assert!((value - expected).abs() < 1e-8, "{node}: {value}");
+        }
+    }
+}
+
+#[test]
+fn instance_specialization_selects_the_effective_analog_or_mixed_route() {
+    // Exercise both directions from the cached source: a process absent in the
+    // default model becomes live, and a removed process leaves an AC-capable
+    // analog device. The internal integer belongs to whichever domain uses it.
+    for default in [0, 1] {
+        let model = ModelFile::new(
+            "generated_process",
+            &format!(
+                r#"
+`timescale 1ns/1ps
+module generated_process(p);
+ inout p; electrical p;
+ parameter integer ENABLE={default};
+ integer q=0;
+ generate if(ENABLE) begin:active
+  initial #1 q=1;
+ end endgenerate
+ analog I(p)<+(V(p)-q)/1000;
+endmodule
+"#
+            ),
+        );
+        for enabled in [0, 1] {
+            let deck = format!(
+                "* generated process route selection\n\
+                 X1 p generated_process ENABLE={enabled}\nR1 p 0 1k\n\
+                 .va \"{}\" generated_process module=generated_process\n.end\n",
+                model.deck_path()
+            );
+            let result = run(&deck, 2e-9, 0.1e-9);
+            let values = waveform(&result, "p");
+            for (&time, &value) in result.time.iter().zip(&values) {
+                if time < 0.9e-9 || enabled == 0 {
+                    assert!(
+                        value.abs() < 1e-8,
+                        "default={default} enabled={enabled}: {time}: {value}"
+                    );
+                } else if time > 1.1e-9 {
+                    assert!(
+                        (value - 0.5).abs() < 1e-8,
+                        "default={default}: {time}: {value}"
+                    );
+                }
+            }
+            if enabled == 0 {
+                assert!(result.digital_traces.is_empty());
+                Engine::default()
+                    .run_ac(&Netlist::parse(&deck).unwrap(), &[1e3, 1e4])
+                    .expect("removing the only digital process restores analog AC eligibility");
+            }
+        }
+    }
+}

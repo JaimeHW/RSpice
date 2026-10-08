@@ -90,6 +90,8 @@ mod connect_modules;
 mod elaboration_scan;
 #[cfg(feature = "veriloga")]
 mod mixed_modules;
+#[cfg(feature = "veriloga")]
+mod veriloga_instances;
 
 #[cfg(feature = "veriloga")]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -5597,7 +5599,7 @@ impl Engine {
             ));
         }
         #[cfg(feature = "veriloga")]
-        let mut mixed_specializations = mixed_modules::MixedSpecializations::default();
+        let mut instance_specializations = veriloga_instances::InstanceSpecializations::default();
 
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
@@ -8343,7 +8345,7 @@ impl Engine {
                     subckt_name,
                     params,
                 } => {
-                    #[cfg(not(any(feature = "veriloga-builtins-base", feature = "veriloga")))]
+                    #[cfg(not(feature = "veriloga-builtins-base"))]
                     let _ = params;
 
                     #[cfg(feature = "veriloga")]
@@ -8359,22 +8361,22 @@ impl Engine {
                                     "this name is claimed by more than one Verilog-A artifact; assign distinct explicit aliases in the .VERILOGA includes",
                                 )
                             })?;
-                            // A module whose canonical artifact carries a
-                            // discrete plan is elaborated as a mixed instance:
-                            // same cache entry, same compile, different half of
-                            // the artifact executed. Asking first is what keeps
-                            // the analog route from building a device out of the
-                            // continuous equations alone and dropping the
-                            // processes the author wrote.
-                            if mixed_modules::try_build_mixed_signal_instance(
-                                &mut circuit,
+                            // Parameters can add or remove discrete processes and solver
+                            // unknowns. Select the route only after source specialization.
+                            let prepared = veriloga_instances::prepare(
                                 netlist,
                                 element,
                                 entry,
-                                &mut mixed_specializations,
+                                &mut instance_specializations,
+                                self.config.temperature,
+                                abort,
+                            )?;
+                            if mixed_modules::try_build_mixed_signal_instance(
+                                &mut circuit,
+                                element,
+                                &prepared,
                                 &design_connect_rules,
                                 &boundary_supplies,
-                                self.config.temperature,
                                 authored_net_names
                                     .get_or_init(|| authored_net_name_set(&flat_elements)),
                                 abort,
@@ -8382,7 +8384,7 @@ impl Engine {
                                 continue;
                             }
 
-                            let model = &entry.model;
+                            let model = &prepared.model;
                             if element.nodes.len() > model.num_terminals {
                                 return Err(refuse_veriloga_instance(
                                     &element.name,
@@ -8405,57 +8407,7 @@ impl Engine {
                                 });
                             }
 
-                            // Resolve overrides before construction: range constraints apply
-                            // to the complete instance, including dependent defaults.
-                            let declares = |name: &str| model.parameter_index(name).is_some();
-                            let mut context =
-                                InstanceParameterContext::new(netlist, self.config.temperature);
-                            // The instance's own temperature first: an
-                            // expression on this card sees the temperature
-                            // this device runs at, not the circuit's, exactly
-                            // as a resistor's does.
-                            let instance_temperature = veriloga_instance_temperature(
-                                &element.name,
-                                subckt_name,
-                                params,
-                                &declares,
-                                &mut context,
-                                self.config.temperature,
-                            )?;
-                            context.retarget(instance_temperature);
-                            let mut overrides = Vec::with_capacity(params.len());
-                            let mut multiplicity = None;
-                            for (name, value) in params {
-                                if veriloga_instance_temperature_key(name, &declares).is_some() {
-                                    continue;
-                                }
-                                let resolved = veriloga_instance_numeric_value(
-                                    &element.name,
-                                    subckt_name,
-                                    name,
-                                    value,
-                                    &mut context,
-                                )?;
-                                // Model-owned names and aliases take precedence over $mfactor.
-                                if name.eq_ignore_ascii_case("m")
-                                    && model.parameter_index(name).is_none()
-                                {
-                                    if !resolved.is_finite() || resolved <= 0.0 {
-                                        return Err(refuse_veriloga_instance(
-                                            &element.name,
-                                            subckt_name,
-                                            crate::ElaborationErrorKind::ParameterValue,
-                                            format!(
-                                                "multiplicity must be a positive finite value, got {resolved}"
-                                            ),
-                                        ));
-                                    }
-                                    multiplicity = Some(resolved);
-                                } else {
-                                    overrides.push((name.as_str(), resolved));
-                                }
-                            }
-                            if entry.canonical_ir.is_none()
+                            if prepared.canonical_ir.is_none()
                                 && model.noise_process_schema >= 1
                                 && !model.noise_sources.is_empty()
                             {
@@ -8469,9 +8421,9 @@ impl Engine {
                             let mut device = crate::device::veriloga::VerilogADevice::try_new_with_simulation_parameters_and_control(
                                 element.name.clone(),
                                 std::sync::Arc::clone(model),
-                                entry.canonical_ir.as_deref(),
+                                prepared.canonical_ir.as_deref(),
                                 &node_ids,
-                                &overrides,
+                                &prepared.overrides,
                                 circuit.generated_simulation_parameters,
                                 &veriloga_cache::VerilogACompileControl { abort },
                             )
@@ -8495,7 +8447,7 @@ impl Engine {
                             // count without names falls back to the
                             // positional spelling.
                             let internal_names = veriloga_internal_node_names(
-                                entry.canonical_ir.as_deref(),
+                                prepared.canonical_ir.as_deref(),
                                 model.internal_nodes,
                             );
                             let branch_names = veriloga_branch_unknown_names(model);
@@ -8533,11 +8485,11 @@ impl Engine {
                                     error,
                                 )
                             })?;
-                            if let Some(multiplicity) = multiplicity {
+                            if let Some(multiplicity) = prepared.multiplicity {
                                 device.set_multiplicity(multiplicity);
                             }
                             device
-                                .try_set_temperature(instance_temperature)
+                                .try_set_temperature(prepared.temperature)
                                 .map_err(|err| {
                                     refuse_veriloga_instance(
                                         &element.name,
