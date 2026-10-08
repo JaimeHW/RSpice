@@ -1492,12 +1492,16 @@ fn selected_result_trace(
     let waveform_visible = waveform.visible;
     let sample_count = waveform.x.len().min(waveform.y.len());
     let statistics = finite_trace_statistics(&waveform.y);
+    let available_sample_count = waveform.y.iter().filter(|value| value.is_finite()).count();
 
     section_header(ui, "Selected trace", None);
     property_row(ui, "Name", &waveform_name);
     property_row(ui, "Analysis", &analysis_label);
     property_row(ui, "Dataset", &selected.dataset_id().to_string());
     property_row(ui, "Samples", &sample_count.to_string());
+    if available_sample_count < sample_count {
+        property_row(ui, "Available samples", &available_sample_count.to_string());
+    }
     property_row(
         ui,
         "Visibility",

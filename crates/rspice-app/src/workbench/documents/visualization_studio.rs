@@ -1245,7 +1245,7 @@ fn reconcile_document(app: &mut RSpiceApp) {
                             .x
                             .iter()
                             .position(|candidate| candidate.to_bits() == x.to_bits())?;
-                        let y = *waveform.y.get(sample_index)?;
+                        let y = waveform.sample(sample_index)?;
                         Some(VisualizationMarker {
                             id: marker.id.get(),
                             dataset_id,

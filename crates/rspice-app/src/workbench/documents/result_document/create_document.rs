@@ -824,7 +824,7 @@ fn append_component_rows(
                 }
             })?),
             TypedValue::Real(x),
-            TypedValue::Real(y),
+            TypedValue::real_sample(y),
             TypedValue::Text(analysis_id.to_owned()),
             TypedValue::Text("waveform-sample".to_owned()),
             TypedValue::Integer(0),
@@ -1433,6 +1433,40 @@ mod tests {
                 TypedValue::Integer(0),
                 TypedValue::Text("{}".to_owned()),
             ]
+        );
+    }
+
+    #[test]
+    fn source_projection_retains_unavailable_waveform_samples_as_typed_rows() {
+        let mut run = SimulationRun::new(7);
+        let mut analysis =
+            AnalysisResult::new(11, AnalysisType::Transient, "gaps").with_waveforms(vec![
+                WaveformData::new(
+                    "out",
+                    vec![0.0, 1.0, 2.0],
+                    vec![1.0, f64::NAN, -0.0],
+                    "#55aaff",
+                ),
+            ]);
+        analysis.import_source = Some(rspice_results::result_import::ResultImportSource {
+            source_name: "gaps.raw".into(),
+            format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
+            coordinate: None,
+        });
+        analysis.validate_retained_evidence().unwrap();
+        run.add_analysis(analysis);
+        let source = source_dataset(&run, &run.analyses[0]).unwrap();
+        assert_eq!(
+            source.rows()[1].values()[5],
+            TypedValue::Missing(ValueType::Real)
+        );
+        assert_eq!(source.rows()[2].values()[5], TypedValue::Real(-0.0));
+        let document = VisualizationDocument::new("gaps", vec![source]).unwrap();
+        let encoded = serde_json::to_string(&document).unwrap();
+        let restored: VisualizationDocument = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            restored.content_digest().unwrap(),
+            document.content_digest().unwrap()
         );
     }
 

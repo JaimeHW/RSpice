@@ -48,6 +48,60 @@ fn document() -> (VisualizationDocument, DatasetBinding) {
     )
 }
 
+#[test]
+fn unavailable_source_samples_are_typed_versioned_and_never_certified_as_zeroes() {
+    let baseline = binding(90);
+    let candidate = binding(91);
+    let mut source = dataset(baseline, 0.0);
+    source.rows[1].values[1] = TypedValue::real_sample(f64::NAN);
+    source.validate().unwrap();
+    let document =
+        VisualizationDocument::new("Gaps", vec![source.clone(), dataset(candidate, 0.0)]).unwrap();
+    let encoded = serde_json::to_value(&document).unwrap();
+    assert_eq!(
+        encoded["datasets"][0]["rows"][1]["values"][1],
+        serde_json::json!({"type":"missing","value":"real"})
+    );
+    let restored: VisualizationDocument = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(
+        restored.content_digest().unwrap(),
+        document.content_digest().unwrap()
+    );
+    let mut old = encoded;
+    old["schema_version"] = 7.into();
+    assert!(
+        serde_json::from_value::<VisualizationDocument>(old)
+            .unwrap_err()
+            .to_string()
+            .contains("schema 8")
+    );
+    let request = ComparisonRequest {
+        baseline,
+        candidate,
+        signal_keys: vec!["v(out)".into()],
+        policy: ComparisonPolicy {
+            row_alignment: RowAlignmentPolicy::RequireIdentical,
+            tolerance: NumericTolerance::new(0.0, 0.0).unwrap(),
+            require_identical_units: true,
+            execution: ComparisonExecutionContract::default(),
+        },
+    };
+    assert!(
+        restored
+            .compare(&request)
+            .unwrap_err()
+            .to_string()
+            .contains("unavailable")
+    );
+    source.rows[1].values[0] = TypedValue::Missing(ValueType::Real);
+    assert!(source.validate().is_err());
+    assert!(
+        TypedValue::Missing(ValueType::Real)
+            .validate("cursor.position")
+            .is_err()
+    );
+}
+
 fn long_form_analysis_dataset(
     binding: DatasetBinding,
     analysis_id: AnalysisInstanceId,

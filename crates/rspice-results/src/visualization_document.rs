@@ -500,6 +500,8 @@ pub enum ValueType {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case", tag = "type", content = "value")]
 pub enum TypedValue {
+    /// An explicitly unavailable signal sample of the declared column type.
+    Missing(ValueType),
     Real(f64),
     Integer(i64),
     Boolean(bool),
@@ -509,6 +511,7 @@ pub enum TypedValue {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "type", content = "value")]
 enum TypedValueWire {
+    Missing(ValueType),
     Real(f64),
     Integer(i64),
     Boolean(bool),
@@ -521,6 +524,7 @@ impl<'de> Deserialize<'de> for TypedValue {
         D: Deserializer<'de>,
     {
         Ok(match TypedValueWire::deserialize(deserializer)? {
+            TypedValueWire::Missing(kind) => Self::Missing(kind),
             TypedValueWire::Real(value) => Self::Real(value),
             TypedValueWire::Integer(value) => Self::Integer(value),
             TypedValueWire::Boolean(value) => Self::Boolean(value),
@@ -530,9 +534,24 @@ impl<'de> Deserialize<'de> for TypedValue {
 }
 
 impl TypedValue {
+    /// Preserve numerical gaps at the typed table boundary. Infinities remain
+    /// invalid real values and are rejected by source validation.
+    pub fn real_sample(value: f64) -> Self {
+        if value.is_nan() {
+            Self::Missing(ValueType::Real)
+        } else {
+            Self::Real(value)
+        }
+    }
+
+    pub const fn is_missing(&self) -> bool {
+        matches!(self, Self::Missing(_))
+    }
+
     #[must_use]
     pub const fn value_type(&self) -> ValueType {
         match self {
+            Self::Missing(kind) => *kind,
             Self::Real(_) => ValueType::Real,
             Self::Integer(_) => ValueType::Integer,
             Self::Boolean(_) => ValueType::Boolean,
@@ -542,6 +561,10 @@ impl TypedValue {
 
     fn validate(&self, field: &'static str) -> Result<(), VisualizationError> {
         match self {
+            Self::Missing(_) => Err(VisualizationError::InvalidValue {
+                field,
+                message: "only source signal samples may be unavailable".into(),
+            }),
             Self::Real(value) if !value.is_finite() => Err(VisualizationError::InvalidValue {
                 field,
                 message: "real values must be finite".to_owned(),
@@ -560,6 +583,7 @@ impl TypedValue {
 
     pub(crate) fn exact_eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Missing(left), Self::Missing(right)) => left == right,
             (Self::Real(left), Self::Real(right)) => left.to_bits() == right.to_bits(),
             (Self::Integer(left), Self::Integer(right)) => left == right,
             (Self::Boolean(left), Self::Boolean(right)) => left == right,
@@ -577,6 +601,7 @@ impl TypedValue {
 /// introduced while validating immutable source rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ExactCoordinateValue<'a> {
+    Missing(ValueType),
     Real(u64),
     Integer(i64),
     Boolean(bool),
@@ -586,6 +611,7 @@ enum ExactCoordinateValue<'a> {
 impl<'a> From<&'a TypedValue> for ExactCoordinateValue<'a> {
     fn from(value: &'a TypedValue) -> Self {
         match value {
+            TypedValue::Missing(kind) => Self::Missing(*kind),
             TypedValue::Real(value) => Self::Real(value.to_bits()),
             TypedValue::Integer(value) => Self::Integer(*value),
             TypedValue::Boolean(value) => Self::Boolean(*value),
@@ -691,7 +717,10 @@ impl SourceRow {
         self.values.iter().try_fold(0_usize, |total, value| {
             let bytes = match value {
                 TypedValue::Text(value) => value.len(),
-                TypedValue::Real(_) | TypedValue::Integer(_) | TypedValue::Boolean(_) => 0,
+                TypedValue::Missing(_)
+                | TypedValue::Real(_)
+                | TypedValue::Integer(_)
+                | TypedValue::Boolean(_) => 0,
             };
             total
                 .checked_add(bytes)
@@ -897,7 +926,15 @@ impl SourceDataset {
                 });
             }
             for (column, value) in self.columns.iter().zip(&row.values) {
-                value.validate("source-row.value")?;
+                if !value.is_missing() {
+                    value.validate("source-row.value")?;
+                }
+                if column.role == ColumnRole::Coordinate && value.is_missing() {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "source-row.coordinate",
+                        message: "coordinate values cannot be unavailable".into(),
+                    });
+                }
                 if value.value_type() != column.value_type {
                     return Err(VisualizationError::ColumnTypeMismatch {
                         column: column.key.clone(),
@@ -1889,6 +1926,18 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             tombstones: wire.tombstones.into_inner(),
             comparisons: wire.comparisons.into_inner(),
         };
+        if document.schema_version < 8
+            && document.datasets.iter().any(|dataset| {
+                dataset
+                    .rows
+                    .iter()
+                    .any(|row| row.values.iter().any(TypedValue::is_missing))
+            })
+        {
+            return Err(serde::de::Error::custom(
+                "unavailable source samples require visualization schema 8",
+            ));
+        }
         match document.schema_version {
             1 => {
                 document.migrate_v1_to_v2();
@@ -1921,6 +1970,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 document.migrate_v6_to_v7();
             }
             6 => document.migrate_v6_to_v7(),
+            7 => document.schema_version = Self::SCHEMA_VERSION,
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -1934,8 +1984,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
-    /// Schema 7 makes exact long-form sources safely composable when panes
-    /// consume different analyses from the same immutable simulation run.
+    /// Schema 8 preserves explicitly unavailable signal samples in source tables.
     ///
     /// V1 through V6 documents within the published resource limits retain
     /// their prior deterministic interpretation. Inputs above those limits
@@ -1944,7 +1993,7 @@ impl VisualizationDocument {
     /// Unknown extension fields remain ignored for schema-v7 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 7;
+    pub const SCHEMA_VERSION: u16 = 8;
 
     pub fn new(
         title: impl Into<String>,

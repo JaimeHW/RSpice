@@ -649,7 +649,11 @@ pub fn resolve_cartesian_line_scene(
                 continue;
             }
             let x = numeric_value(&row.values()[x_index], trace.id, x_column.key())?;
-            let y = numeric_value(&row.values()[y_index], trace.id, y_column.key())?;
+            let y = if row.values()[y_index].is_missing() {
+                f64::NAN
+            } else {
+                numeric_value(&row.values()[y_index], trace.id, y_column.key())?
+            };
             points.push(ResolvedRasterPoint { x, y });
         }
         if points.is_empty() {
@@ -693,7 +697,8 @@ pub fn resolve_cartesian_line_scene(
         y_axis.range,
         traces
             .iter()
-            .flat_map(|trace| trace.points.iter().map(|point| point.y)),
+            .flat_map(|trace| trace.points.iter().map(|point| point.y))
+            .filter(|value| !value.is_nan()),
         "vertical axis",
     )?;
     let pane_cursors = document
@@ -721,7 +726,10 @@ pub fn resolve_cartesian_line_scene(
         let x = match &cursor.position {
             TypedValue::Real(value) => *value,
             TypedValue::Integer(value) if value.abs() <= MAX_EXACT_F64_INTEGER => *value as f64,
-            TypedValue::Integer(_) | TypedValue::Boolean(_) | TypedValue::Text(_) => {
+            TypedValue::Missing(_)
+            | TypedValue::Integer(_)
+            | TypedValue::Boolean(_)
+            | TypedValue::Text(_) => {
                 return Err(VisualizationRasterError::UnsupportedOverlay(
                     "non-numeric or inexact cursor",
                 ));
@@ -806,6 +814,9 @@ pub fn rasterize_cartesian_line_scene(
             continue;
         }
         for pair in trace.points.windows(2) {
+            if pair.iter().any(|point| !point.y.is_finite()) {
+                continue;
+            }
             let Some((start, end)) = clip_segment(pair[0], pair[1], scene.x_range, scene.y_range)
             else {
                 continue;
@@ -1562,6 +1573,27 @@ mod tests {
             reference.content_digest
         );
         assert_eq!(first.metadata().dataset_bindings, vec![fixture.binding]);
+    }
+
+    #[test]
+    fn explicit_missing_samples_break_raster_segments_without_invalidating_finite_ranges() {
+        let mut fixture = fixture(ValueType::Real, AxisScale::Linear);
+        let mut wire = serde_json::to_value(&fixture.document).unwrap();
+        wire["datasets"][0]["rows"][1]["values"][1] =
+            serde_json::json!({"type":"missing","value":"real"});
+        fixture.document = serde_json::from_value(wire).unwrap();
+        let reference = reference(&fixture);
+        let profile = VisualizationRasterProfile::default();
+        let scene = resolve_cartesian_line_scene(
+            &fixture.document,
+            &reference,
+            fixture.page_id,
+            fixture.pane_id,
+        )
+        .unwrap();
+        assert!(scene.traces[0].points[1].y.is_nan());
+        assert!(scene.y_range.minimum.is_finite() && scene.y_range.maximum.is_finite());
+        rasterize_cartesian_line_scene(&scene, &profile).unwrap();
     }
 
     #[test]

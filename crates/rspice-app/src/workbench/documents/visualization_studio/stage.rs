@@ -256,7 +256,10 @@ pub(super) fn exact_source_rows(state: &AppState) -> Vec<ExactSourceRow> {
             binding: short_dataset(run.dataset_id),
             stable_row: format!("{}:{index}", analysis.id),
             coordinate: format!("x={:.17e}", waveform.x[index]),
-            value: format!("{:.17e}", waveform.y[index]),
+            value: waveform
+                .sample(index)
+                .map(|value| format!("{value:.17e}"))
+                .unwrap_or_else(|| "Unavailable".into()),
             origin: waveform.name.clone(),
         })
         .collect()
