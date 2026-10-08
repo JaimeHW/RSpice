@@ -85,9 +85,9 @@ mod source_dependencies;
 mod veriloga_sources;
 
 #[cfg(feature = "veriloga")]
-mod connect_modules;
-#[cfg(feature = "veriloga")]
 mod connect_execution;
+#[cfg(feature = "veriloga")]
+mod connect_modules;
 #[cfg(all(test, feature = "veriloga"))]
 mod elaboration_scan;
 #[cfg(feature = "veriloga")]
@@ -2413,6 +2413,7 @@ enum XspiceAutoBridgeKind {
     RealToV,
     VToReal,
     /// Bidirectional real conversion requires an authored body or template.
+    #[cfg(feature = "veriloga")]
     RealBidi,
 }
 
@@ -2499,9 +2500,9 @@ impl XspiceExplicitDigitalBridgeCoverage {
             XspiceAutoBridgeKind::Adc => self.adc = true,
             XspiceAutoBridgeKind::Dac => self.dac = true,
             XspiceAutoBridgeKind::Bidi => self.bidi = true,
-            XspiceAutoBridgeKind::RealToV
-            | XspiceAutoBridgeKind::VToReal
-            | XspiceAutoBridgeKind::RealBidi => {}
+            XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => {}
+            #[cfg(feature = "veriloga")]
+            XspiceAutoBridgeKind::RealBidi => {}
         }
     }
 
@@ -3400,6 +3401,7 @@ fn xspice_auto_bridge_kind_label(kind: XspiceAutoBridgeKind) -> &'static str {
         XspiceAutoBridgeKind::Bidi => "bidirectional digital/analog",
         XspiceAutoBridgeKind::RealToV => "real-to-voltage",
         XspiceAutoBridgeKind::VToReal => "voltage-to-real",
+        #[cfg(feature = "veriloga")]
         XspiceAutoBridgeKind::RealBidi => "bidirectional real/electrical",
     }
 }
@@ -3428,6 +3430,7 @@ fn xspice_auto_bridge_generated_card(
         XspiceAutoBridgeKind::VToReal => {
             format!("{instance_name} {node_label} {event_label} v_to_real")
         }
+        #[cfg(feature = "veriloga")]
         XspiceAutoBridgeKind::RealBidi => return None,
     })
 }
@@ -3451,9 +3454,9 @@ fn reject_disabled_xspice_auto_bridge(
 fn xspice_auto_bridge_template_type_name(kind: XspiceAutoBridgeKind) -> &'static str {
     match kind {
         XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::Bidi => "d",
-        XspiceAutoBridgeKind::RealToV
-        | XspiceAutoBridgeKind::VToReal
-        | XspiceAutoBridgeKind::RealBidi => "real",
+        XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => "real",
+        #[cfg(feature = "veriloga")]
+        XspiceAutoBridgeKind::RealBidi => "real",
     }
 }
 
@@ -3465,7 +3468,9 @@ fn xspice_auto_bridge_template_direction(kind: XspiceAutoBridgeKind) -> &'static
         // one.
         XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::VToReal => "in",
         XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::RealToV => "out",
-        XspiceAutoBridgeKind::Bidi | XspiceAutoBridgeKind::RealBidi => "inout",
+        XspiceAutoBridgeKind::Bidi => "inout",
+        #[cfg(feature = "veriloga")]
+        XspiceAutoBridgeKind::RealBidi => "inout",
     }
 }
 
@@ -4816,7 +4821,12 @@ fn add_planned_xspice_auto_bridge(
         && let connect_execution::ConnectExecution::Authored(body) = execution
     {
         return connect_execution::materialize(
-            circuit, bridge, selected, body, context.temperature, abort,
+            circuit,
+            bridge,
+            selected,
+            body,
+            context.temperature,
+            abort,
         );
     }
 
@@ -4889,6 +4899,7 @@ fn add_planned_xspice_auto_bridge(
             // carry.
             None,
         ),
+        #[cfg(feature = "veriloga")]
         XspiceAutoBridgeKind::RealBidi => {
             let label = xspice_auto_bridge_node_label(node_names, bridge.node);
             return Err(SimulationError::Circuit(format!(
