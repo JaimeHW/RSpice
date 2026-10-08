@@ -492,6 +492,7 @@ impl<'a> PreparedEventCircuit<'a> {
             equations,
             constant_sources,
             current_structure: None,
+            flux_structure: None,
         };
         if !circuit.cccs.is_empty() {
             // Coefficients and charge incidence are constant for this prepared
@@ -542,6 +543,21 @@ impl<'a> PreparedEventCircuit<'a> {
             })?;
             prepared.current_structure = Some(Arc::new(basis));
         }
+        let retained = prepared
+            .models
+            .len()
+            .saturating_mul(std::mem::size_of::<Bjt>().div_ceil(8))
+            .saturating_add(
+                prepared
+                    .constant_sources
+                    .len()
+                    .saturating_mul(SOURCE_STORAGE_VALUES),
+            )
+            .saturating_add(prepared.ports.len().saturating_mul(2))
+            .saturating_add(prepared.retained_structure_values());
+        prepared.flux_structure = with_retained_values(options, retained, |bounded| {
+            coupling::flux_constraints(circuit, bounded, abort)
+        })?;
         Ok(prepared)
     }
 }

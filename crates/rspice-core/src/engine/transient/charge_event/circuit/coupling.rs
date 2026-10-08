@@ -1,6 +1,50 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Only mutually coupled windings can make this constant flux block singular.
+/// Keep uncoupled branches on their existing, allocation-free path.
+pub(super) fn flux_constraints(
+    circuit: &crate::CircuitData,
+    options: &EventOptions,
+    abort: &dyn AbortSignal,
+) -> Result<Option<Arc<FluxConservation>>> {
+    check_abort(abort)?;
+    if circuit.coupled_inductor_pairs.is_empty() {
+        return Ok(None);
+    }
+    let pairs = &circuit.coupled_inductor_pairs;
+    ResourceLimitError::ensure(
+        ResourceKind::ResultValues,
+        circuit
+            .matrix_size()
+            .saturating_mul(64)
+            .saturating_add(pairs.len().saturating_mul(64)),
+        options.limits.max_result_values,
+    )?;
+    let mut branches = BTreeSet::new();
+    let mut couplings = Vec::with_capacity(pairs.len());
+    let nodes = circuit.num_nodes();
+    for pair in pairs {
+        check_abort(abort)?;
+        let first = nodes + pair.branch1_ordinal - 1;
+        let second = nodes + pair.branch2_ordinal - 1;
+        branches.extend([first, second]);
+        couplings.push((first, second, pair.device.k));
+    }
+    let mut windings = Vec::with_capacity(branches.len());
+    for (index, &ordinal) in circuit.inductors.branch_indices.iter().enumerate() {
+        check_abort(abort)?;
+        let branch = nodes + ordinal - 1;
+        if branches.contains(&branch) {
+            windings.push((branch, circuit.inductors.inductances[index]));
+        }
+    }
+    Ok(
+        FluxConservation::new(circuit.matrix_size(), &windings, &couplings, options, abort)?
+            .map(Arc::new),
+    )
+}
+
 /// Prove a one-to-one correspondence with retained K cards. Only the runtime
 /// overlays are stamped; the authored records never add a second mutual term.
 pub(super) fn validate(

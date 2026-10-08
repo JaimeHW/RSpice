@@ -32,10 +32,7 @@ impl PreparedEventCircuit<'_> {
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<EventSample> {
-        let retained = self
-            .current_structure
-            .as_ref()
-            .map_or(0, |basis| basis.retained_values);
+        let retained = self.retained_structure_values();
         with_retained_values(options, retained, |bounded| {
             self.sample_inner(time, source_side, state, phase, bounded, abort)
         })

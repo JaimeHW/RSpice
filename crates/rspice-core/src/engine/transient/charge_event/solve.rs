@@ -126,7 +126,8 @@ impl ChargeEventTopology {
             options,
             self.weighted
                 .as_ref()
-                .map_or(0, |basis| basis.retained_values),
+                .map_or(0, |basis| basis.retained_values)
+                .saturating_add(self.flux.as_ref().map_or(0, |basis| basis.retained_values)),
             |bounded| self.solve_coordinates_inner(coordinates, bounded, abort, sample),
         )
     }
@@ -314,7 +315,7 @@ impl ChargeEventTopology {
                 if row % 64 == 0 {
                     check_abort(abort)?;
                 }
-                if !self.is_group_row(row) && self.storage_tolerance(row, options).is_some() {
+                if self.has_storage_rate_equation(row, options) {
                     // An OP balances F against source currents; a continuous
                     // integration reference also contains finite storage current.
                     // Neither changes the matrix or the original equation audit.
@@ -357,17 +358,14 @@ impl ChargeEventTopology {
                 .map(|&(column, value)| (value, rates[column]));
             // Audit the original sampled equation, including any flux row.
             // A rate reference does not authorize a new current/voltage floor.
-            let value = if reference.is_some()
-                && !self.is_group_row(row)
-                && self.storage_tolerance(row, options).is_some()
-            {
+            let value = if reference.is_some() && self.has_storage_rate_equation(row, options) {
                 sum([(physical.f.values[row], 1.0), (physical.q_time[row], 1.0)].into_iter())?
             } else {
                 equations.values[row]
             };
             let residual = sum(products.clone().chain([(value, 1.0)]))?;
             let mut scale = products.fold(value.abs(), |old, (a, b)| old.max((a * b).abs()));
-            if !self.is_group_row(row) && self.storage_tolerance(row, options).is_some() {
+            if self.has_storage_rate_equation(row, options) {
                 // A storage rate row is original physical KCL (or flux voltage).
                 // Its static terms can cancel; preserve their current/voltage
                 // scale exactly as the separate original KCL audit does below.
@@ -403,6 +401,39 @@ impl ChargeEventTopology {
                 .max(current.abs());
             if residual.abs() > options.current_tolerance + options.relative_tolerance * scale {
                 return Err(error(format!("finite-current KCL failed at row {row}")));
+            }
+        }
+        if self.flux.is_some() {
+            // The reduced rate system differentiated the dependent voltage
+            // constraints. Independently retain every original flux-voltage
+            // equation, including rows replaced in that square system.
+            for row in self.nodes..self.size {
+                check_abort(abort)?;
+                if self.branch_equations[row - self.nodes]
+                    .flux_tolerance()
+                    .is_none()
+                {
+                    continue;
+                }
+                let current = sum(physical.q.rows[row]
+                    .iter()
+                    .map(|&(column, value)| (value, rates[column])))?;
+                let residual = sum([
+                    (physical.f.values[row], 1.0),
+                    (physical.q_time[row], 1.0),
+                    (current, 1.0),
+                ]
+                .into_iter())?;
+                let scale = physical.f.scales[row]
+                    .max(physical.q_time[row].abs())
+                    .max(current.abs());
+                let tolerance = self.branch_equations[row - self.nodes].rate_tolerance()
+                    + options.relative_tolerance * scale;
+                if !tolerance.is_finite() || residual.abs() > tolerance {
+                    return Err(error(format!(
+                        "finite-flux voltage equation failed at row {row}"
+                    )));
+                }
             }
         }
         let source_impulses = self

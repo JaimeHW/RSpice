@@ -30,6 +30,7 @@ pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     /// Fixed-coefficient, zero-offset constraints: zero R/L branches and VCVS.
     constant_sources: Vec<EventVoltageSource>,
     current_structure: Option<Arc<CurrentConservation>>,
+    flux_structure: Option<Arc<FluxConservation>>,
 }
 
 fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
@@ -43,6 +44,17 @@ fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
 }
 
 impl PreparedEventCircuit<'_> {
+    fn retained_structure_values(&self) -> usize {
+        self.current_structure
+            .as_ref()
+            .map_or(0, |basis| basis.retained_values)
+            .saturating_add(
+                self.flux_structure
+                    .as_ref()
+                    .map_or(0, |basis| basis.retained_values),
+            )
+    }
+
     pub(in crate::engine::transient) fn forward_charge_limit(&self, index: usize) -> bool {
         self.forward_charge_limits[index]
     }
@@ -76,13 +88,9 @@ impl PreparedEventCircuit<'_> {
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<ChargeEventTopology> {
-        with_retained_values(
-            options,
-            self.current_structure
-                .as_ref()
-                .map_or(0, |basis| basis.retained_values),
-            |bounded| self.topology_inner(time, source_side, bounded, abort),
-        )
+        with_retained_values(options, self.retained_structure_values(), |bounded| {
+            self.topology_inner(time, source_side, bounded, abort)
+        })
     }
 
     fn topology_inner(
@@ -170,6 +178,9 @@ impl PreparedEventCircuit<'_> {
         )?;
         if let Some(prepared) = &self.current_structure {
             topology.install_current_conservation(Arc::clone(prepared))?;
+        }
+        if let Some(prepared) = &self.flux_structure {
+            topology.install_flux_conservation(Arc::clone(prepared))?;
         }
         Ok(topology)
     }

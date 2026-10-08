@@ -4,6 +4,177 @@ use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding, Tran
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_perfect_coupling_preserves_null_flux_current_jumps_and_restart() {
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            for (scale, ratio_squared) in [
+                (1.0, 4.0),
+                (1e-6, 4.0),
+                (1.0, 9.0),
+                (1e-6, 9.0),
+                (1.0, 2.0),
+                (1e-6, 2.0),
+            ] {
+                let turns = f64::sqrt(ratio_squared);
+                for coupling in [-1.0, 1.0] {
+                    let edge = 0.5 * scale;
+                    let stop = 2.0 * scale;
+                    let step = 0.005 * scale;
+                    let deck = Netlist::parse(&format!(
+                "perfect mutual flux\nV1 in 0 PWL(0 .5 {edge:e} .5 {edge:e} 1 {stop:e} 1)\nR1 in a 1\nL1 a 0 {scale:e}\nL2 b 0 {:e}\nR2 b 0 {ratio_squared}\nK1 L1 L2 {coupling}\nVC c 0 2\nVB base 0 PWL(0 .6 {edge:e} .6 {edge:e} .601 {stop:e} .601)\nQ1 c base 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF={:e} PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-5 ABSTOL=1e-15 VNTOL=1e-10 CHGTOL={:e}\n.end\n",
+                ratio_squared * scale, 0.1 * scale, 1e-18 * scale,
+            )).unwrap();
+                    let mut config = SimulationConfig {
+                        gp_transient_phase_model: GpTransientPhaseModel::ExactDelay,
+                        integration_method: method,
+                        ..SimulationConfig::default().with_spice_dialect(dialect)
+                    };
+                    config.convergence_config.gmin_target = 0.0;
+                    let engine = Engine::new(config);
+                    let (full, checkpoints) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode(
+                    &deck,
+                    stop,
+                    step,
+                    TransientStartupMode::OperatingPoint,
+                    &[edge],
+                )
+                .unwrap_or_else(|error| {
+                    panic!("{dialect:?}/{method:?}, k={coupling}, turns={turns}, scale={scale:e}: {error}")
+                });
+                    let primary = full.try_branch_current_waveform_named("L1").unwrap();
+                    let secondary = full.try_branch_current_waveform_named("L2").unwrap();
+                    let a = full.try_voltage_waveform_named("a").unwrap();
+                    let b = full.try_voltage_waveform_named("b").unwrap();
+                    for (index, &time) in full.time.iter().enumerate() {
+                        let (i1, i2) = if time < edge {
+                            (0.5, 0.0)
+                        } else {
+                            let decay = (-(time - edge) / (2.0 * scale)).exp();
+                            (1.0 - 0.25 * decay, -coupling * 0.25 / turns * decay)
+                        };
+                        assert!(
+                            (primary[index] - i1).abs() < 3e-4,
+                            "k={coupling}, scale={scale:e}, t={time:e}: I1={} expected {i1}",
+                            primary[index]
+                        );
+                        assert!(
+                            (secondary[index] - i2).abs() < 1.5e-4,
+                            "k={coupling}, scale={scale:e}, t={time:e}: I2={} expected {i2}",
+                            secondary[index]
+                        );
+                        // The rank-one inductance matrix requires v2 = turns*k*v1 at
+                        // every finite point, including either side of the source edge.
+                        assert!((b[index] - turns * coupling * a[index]).abs() < 1e-9);
+                    }
+                    let seam = full.time.iter().position(|time| *time == edge).unwrap();
+                    // The jump lies in the nullspace of the full flux matrix. Neither
+                    // winding current alone is a conserved magnetic state.
+                    assert!((primary[seam] - 0.75).abs() < 1e-10);
+                    assert!((secondary[seam] + coupling * 0.25 / turns).abs() < 1e-10);
+                    assert!(
+                        (primary[seam] + turns * coupling * secondary[seam] - 0.5).abs() < 1e-10
+                    );
+                    let checkpoint = TransientCheckpoint::from_bytes(
+                        &checkpoints[0]
+                            .checkpoint
+                            .to_bytes(TransientCheckpointEncoding::Packed)
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let (resumed, _) = engine
+                        .run_tran_resume(&deck, &checkpoint, stop, step)
+                        .unwrap();
+                    assert_eq!(resumed.time, full.time[seam..]);
+                    for (actual, expected) in resumed
+                        .voltages
+                        .iter()
+                        .chain(&resumed.branch_currents)
+                        .zip(full.voltages.iter().chain(&full.branch_currents))
+                    {
+                        assert_eq!(actual, &expected[seam..]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_perfect_coupling_three_windings_preserve_both_voltage_constraints() {
+    for scale in [1.0, 1e-6] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            let edge = 0.5 * scale;
+            let stop = 2.0 * scale;
+            let deck = Netlist::parse(&format!(
+                "three perfect windings\nV1 in 0 PWL(0 .5 {edge:e} .5 {edge:e} 1 {stop:e} 1)\nR1 in a 1\nL1 a 0 {scale:e}\nL2 b 0 {:e}\nR2 b 0 4\nL3 d 0 {:e}\nR3 d 0 9\nK12 L1 L2 1\nK13 L1 L3 1\nK23 L2 L3 1\nVC c 0 2\nVB base 0 PWL(0 .6 {edge:e} .6 {edge:e} .601 {stop:e} .601)\nQ1 c base 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF={:e} PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-5 ABSTOL=1e-15 VNTOL=1e-10 CHGTOL={:e}\n.end\n",
+                4.0 * scale, 9.0 * scale, 0.1 * scale, 1e-18 * scale,
+            )).unwrap();
+            let mut config = SimulationConfig {
+                gp_transient_phase_model: GpTransientPhaseModel::ExactDelay,
+                integration_method: method,
+                ..SimulationConfig::default()
+            };
+            config.convergence_config.gmin_target = 0.0;
+            let engine = Engine::new(config);
+            let (full, _) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode(
+                    &deck,
+                    stop,
+                    0.005 * scale,
+                    TransientStartupMode::OperatingPoint,
+                    &[edge],
+                )
+                .unwrap_or_else(|error| panic!("{method:?}, scale={scale:e}: {error}"));
+            let currents = ["L1", "L2", "L3"]
+                .map(|name| full.try_branch_current_waveform_named(name).unwrap());
+            let voltages =
+                ["a", "b", "d"].map(|name| full.try_voltage_waveform_named(name).unwrap());
+            for (index, &time) in full.time.iter().enumerate() {
+                // The normalized rank-one matrix has one decay mode with
+                // time constant 3*scale and two algebraic voltage constraints.
+                let expected = if time < edge {
+                    [0.5, 0.0, 0.0]
+                } else {
+                    let decay = (-(time - edge) / (3.0 * scale)).exp();
+                    [1.0 - decay / 6.0, -decay / 12.0, -decay / 18.0]
+                };
+                for winding in 0..3 {
+                    assert!((currents[winding][index] - expected[winding]).abs() < 2e-4);
+                    assert!(
+                        (voltages[winding][index] - (winding + 1) as f64 * voltages[0][index])
+                            .abs()
+                            < 1e-9
+                    );
+                }
+            }
+            let seam = full.time.iter().position(|&time| time == edge).unwrap();
+            assert!((currents[0][seam] - 5.0 / 6.0).abs() < 1e-10);
+            assert!((currents[1][seam] + 1.0 / 12.0).abs() < 1e-10);
+            assert!((currents[2][seam] + 1.0 / 18.0).abs() < 1e-10);
+            assert!(
+                (currents[0][seam] + 2.0 * currents[1][seam] + 3.0 * currents[2][seam] - 0.5).abs()
+                    < 1e-10
+            );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_events_preserve_mutual_flux_modes_and_exact_checkpoint_continuation() {
     let edge = 0.5e-9;
     let stop = 3e-9;

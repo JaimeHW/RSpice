@@ -3,6 +3,72 @@ use super::*;
 mod current_coupling;
 
 #[test]
+fn dependent_flux_keeps_every_original_storage_and_voltage_audit() {
+    let (circuit, incoming) = dc(
+        "dependent flux audits\nV1 in 0 DC .5 PWL(0 .5 1 .5 1 1)\nR1 in a 1\nL1 a 0 1\nL2 b 0 4\nR2 b 0 4\nK1 L1 L2 1\n.end\n",
+    );
+    let options = options();
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let topology = sampler
+        .topology(1.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+        .unwrap();
+    let left = sampler
+        .sample(
+            1.0,
+            SourceTimeSide::LeftLimit,
+            &incoming,
+            &[],
+            &options,
+            &NoAbort,
+        )
+        .unwrap();
+    let second = circuit.num_nodes() + circuit.inductors.branch_indices[1] - 1;
+    let mut inconsistent = left.q.values.clone();
+    inconsistent[second] += 0.01;
+    let failure = topology
+        .solve(
+            &incoming,
+            &inconsistent,
+            &options,
+            &NoAbort,
+            |state, abort| {
+                sampler.sample(1.0, SourceTimeSide::RightLimit, state, &[], &options, abort)
+            },
+        )
+        .err()
+        .unwrap();
+    assert!(
+        failure
+            .to_string()
+            .contains("branch flux conservation failed"),
+        "{failure}"
+    );
+    // Simulate a constitutive derivative violating the prepared constant-flux
+    // contract. Replacing its row in the square solve must not hide the fault.
+    let failure = topology
+        .solve(
+            &incoming,
+            &left.q.values,
+            &options,
+            &NoAbort,
+            |state, abort| {
+                let mut sample =
+                    sampler.sample(1.0, SourceTimeSide::RightLimit, state, &[], &options, abort)?;
+                sample.q.rows[second][0].1 *= 1.25;
+                Ok(sample)
+            },
+        )
+        .err()
+        .unwrap();
+    assert!(
+        failure
+            .to_string()
+            .contains("finite-flux voltage equation failed"),
+        "{failure}"
+    );
+}
+
+#[test]
 fn prepared_event_circuit_solves_biased_gp_jump_with_canonical_rbi_ports() {
     for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
         let (circuit, incoming) = dc(&format!(

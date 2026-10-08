@@ -13,6 +13,8 @@ use crate::solver::{SolverOptions, StaticMatrix};
 mod stamp;
 pub(super) use stamp::{EventSample, EventStamp};
 mod conservation;
+mod flux;
+use flux::FluxConservation;
 mod rows;
 use conservation::{CurrentConservation, EventCurrentControl, with_retained_values};
 pub(super) use rows::EventBranchEquation;
@@ -150,6 +152,7 @@ pub(super) struct ChargeEventTopology {
     /// every node would make validation quadratic on source-rich circuits.
     source_incidence: Arc<Vec<Vec<(usize, Value)>>>,
     weighted: Option<Arc<CurrentConservation>>,
+    flux: Option<Arc<FluxConservation>>,
     branch_equations: Vec<EventBranchEquation>,
 }
 
@@ -335,6 +338,7 @@ impl ChargeEventTopology {
             source_columns,
             source_incidence: Arc::new(source_incidence),
             weighted: None,
+            flux: None,
             branch_equations,
         })
     }
@@ -413,6 +417,17 @@ impl ChargeEventTopology {
                     equations.add_weighted_row(row, &sample.f, node, weight)?;
                 }
                 equations.absolute[row] = options.current_tolerance;
+            } else if let Some(terms) = self.flux_constraint(row) {
+                for &(source, weight) in terms {
+                    check_abort(abort)?;
+                    equations.add_weighted_row(row, &sample.f, source, weight)?;
+                }
+                equations.absolute[row] = sum(terms.iter().map(|&(source, weight)| {
+                    (
+                        self.branch_equations[source - self.nodes].rate_tolerance(),
+                        weight.abs(),
+                    )
+                }))?;
             } else if let Some(tolerance) = self.storage_tolerance(row, options) {
                 equations.add_row(row, &sample.q, row)?;
                 equations.values[row] =
@@ -471,6 +486,16 @@ impl ChargeEventTopology {
                 equations.values[row] = sum(self
                     .conservation_terms(row)
                     .map(|(node, weight)| (sample.f_time[node], weight)))?;
+            } else if let Some(terms) = self.flux_constraint(row) {
+                for &(source, weight) in terms {
+                    check_abort(abort)?;
+                    equations.add_weighted_row(row, &sample.f, source, weight)?;
+                }
+                // Differentiate the algebraic voltage constraint in rate
+                // units. No timestep converts a voltage floor to this row.
+                equations.values[row] = sum(terms
+                    .iter()
+                    .map(|&(source, weight)| (sample.f_time[source], weight)))?;
             } else if self.storage_tolerance(row, options).is_some() {
                 equations.add_row(row, &sample.q, row)?;
                 equations.values[row] =
