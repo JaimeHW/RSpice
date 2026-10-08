@@ -91,6 +91,7 @@ pub(crate) struct ParsedResultDataset {
     pub(crate) source_format: ResultImportFormat,
     pub(crate) analysis_type: AnalysisType,
     pub(crate) coordinate_name: String,
+    pub(crate) coordinate_unit: Option<String>,
     pub(crate) sample_count: usize,
     pub(crate) waveforms: Vec<WaveformData>,
     pub(crate) family_metadata: Option<AnalysisResultFamilyMetadata>,
@@ -229,6 +230,7 @@ pub(crate) fn stage_imported_result_dataset(
         delimiter: parsed.delimiter,
         analysis_type: parsed.analysis_type,
         coordinate_name: parsed.coordinate_name,
+        coordinate_unit: parsed.coordinate_unit,
         sample_count: parsed.sample_count,
         waveforms: Arc::new(parsed.waveforms),
         family_metadata: parsed.family_metadata,
@@ -250,6 +252,11 @@ fn parsed_result_from_draft(
     if coordinate_name.is_empty() {
         return Err("Enter a coordinate name before committing the import.".to_owned());
     }
+    rspice_results::result_import::ResultImportCoordinate {
+        name: coordinate_name.to_owned(),
+        unit: draft.coordinate_unit.clone(),
+    }
+    .validate_domain(draft.analysis_type)?;
     if !matches!(
         draft.analysis_type,
         AnalysisType::Transient
@@ -329,6 +336,7 @@ fn parsed_result_from_draft(
         source_format,
         analysis_type: draft.analysis_type,
         coordinate_name: coordinate_name.to_owned(),
+        coordinate_unit: draft.coordinate_unit.clone(),
         sample_count: draft.sample_count,
         waveforms,
         family_metadata: draft.family_metadata.clone(),
@@ -393,6 +401,10 @@ fn commit_parsed_result_dataset(
     analysis.import_source = Some(ResultImportSource {
         source_name: source_name.to_owned(),
         format: parsed.source_format,
+        coordinate: Some(rspice_results::result_import::ResultImportCoordinate {
+            name: coordinate_name,
+            unit: parsed.coordinate_unit,
+        }),
     });
     analysis.validate_retained_evidence()?;
 
@@ -639,6 +651,11 @@ fn result_import_detect_page(ui: &mut egui::Ui, draft: &ResultImportDialogState)
                 analysis_domain_label(draft.analysis_type),
             );
             result_import_summary_row(ui, "Coordinate", &draft.coordinate_name);
+            result_import_summary_row(
+                ui,
+                "Coordinate unit",
+                draft.coordinate_unit.as_deref().unwrap_or("Unstated"),
+            );
             result_import_summary_row(ui, "Signals", &draft.waveforms.len().to_string());
             result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
         });
@@ -744,6 +761,11 @@ fn result_import_validate_page(ui: &mut egui::Ui, draft: &ResultImportDialogStat
             result_import_summary_row(ui, "Format", &draft.source_format_id);
             result_import_summary_row(ui, "Domain", analysis_domain_label(draft.analysis_type));
             result_import_summary_row(ui, "Coordinate", &draft.coordinate_name);
+            result_import_summary_row(
+                ui,
+                "Coordinate unit",
+                draft.coordinate_unit.as_deref().unwrap_or("Unstated"),
+            );
             result_import_summary_row(ui, "Included signals", &selected.to_string());
             result_import_summary_row(ui, "Samples per signal", &draft.sample_count.to_string());
             result_import_summary_row(
@@ -924,6 +946,7 @@ fn parse_touchstone_result_dataset(
         decoded.data,
     );
     parsed.family_metadata = Some(decoded.family_metadata);
+    parsed.coordinate_unit = Some("Hz".to_owned());
     parsed.notes = decoded.notes;
     Ok(parsed)
 }
@@ -976,6 +999,7 @@ fn parse_delimited_result_dataset(
         },
         analysis_type,
         coordinate_name: headers[0].name.clone(),
+        coordinate_unit: headers[0].canonical_unit().map(str::to_owned),
         sample_count: coordinate.len(),
         waveforms,
         family_metadata: None,
@@ -1168,10 +1192,74 @@ mod tests {
         .unwrap();
         assert_eq!(sweep.analysis_type, AnalysisType::DcSweep);
         assert_eq!(sweep.waveforms[0].x.as_slice(), &[0.0, 298.15]);
+        assert_eq!(sweep.coordinate_unit.as_deref(), Some("K"));
 
         let error =
             parse_result_dataset("overflow.csv", b"time [s],angle [rad]\n0,1e308\n").unwrap_err();
         assert!(error.contains("angle") && error.contains("overflows after unit conversion"));
+    }
+
+    #[test]
+    fn raw_coordinate_units_survive_import_review_project_reload_and_waveform_projection() {
+        for (name, kind, unit, canonical, end) in [
+            ("time", "time", "ns", "s", 1e-9),
+            ("bias", "current", "mA", "A", 1e-3),
+            ("parameter", "value", "widgets", "widgets", 1.0),
+        ] {
+            let mut bytes = b"Title: axis\nPlotname: axis\n".to_vec();
+            rspice_core::io::ltspice_raw::write_raw_table_layout_metadata(
+                &mut bytes,
+                &[],
+                &[Some(unit.to_owned()), Some("V".to_owned())],
+                None,
+            )
+            .unwrap();
+            bytes.extend_from_slice(format!("Flags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 {name} {kind}\n1 V(out) voltage\nValues:\n0 0 3\n1 1 4\n").as_bytes());
+            let mut state = loaded_project_state();
+            stage_imported_result_dataset(&mut state, "axis.raw", &bytes).unwrap();
+            assert_eq!(
+                state.workbench.result_import.coordinate_unit.as_deref(),
+                Some(canonical)
+            );
+            assert_eq!(
+                state.workbench.result_import.waveforms[0].x.as_slice(),
+                &[0.0, end]
+            );
+            commit_result_import_draft(&mut state).unwrap();
+            let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+            let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+            let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+            assert!(project.file.simulation_results_warning.is_none());
+            let simulation =
+                crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+            let restored = &simulation.active_run().unwrap().analyses[0];
+            let coordinate = restored.imported_coordinate().unwrap();
+            assert_eq!(coordinate.name, name);
+            assert_eq!(coordinate.unit.as_deref(), Some(canonical));
+            assert_eq!(restored.waveforms[0].x.as_slice(), &[0.0, end]);
+            let projected = rspice_formats::waveform_io::result::project_waveforms(
+                restored,
+                &[&restored.waveforms[0]],
+                false,
+            )
+            .unwrap();
+            let axis = projected.x_signal.unwrap();
+            assert_eq!(axis.name, name);
+            assert_eq!(axis.unit, canonical);
+            assert_eq!(axis.data, [0.0, end]);
+        }
+    }
+
+    #[test]
+    fn import_review_cannot_reinterpret_a_current_coordinate_as_time() {
+        let mut state = loaded_project_state();
+        stage_imported_result_dataset(&mut state, "bias.csv", b"bias [mA],V(out) [V]\n0,0\n1,2\n")
+            .unwrap();
+        state.workbench.result_import.analysis_type = AnalysisType::Transient;
+        let error = commit_result_import_draft(&mut state).unwrap_err();
+        assert!(error.contains("incompatible"), "{error}");
+        assert!(state.simulation.retained.runs.is_empty());
+        assert!(state.workbench.result_import.open);
     }
 
     #[test]
@@ -1256,7 +1344,7 @@ mod tests {
         apply_imported_result_dataset(
             &mut state,
             "network.ts",
-            b"[Version] 2.0\n[Number of Ports] 2\n[Number of Frequencies] 2\n# MHz S RI R 50\n[Reference] 50 75\n[Network Data]\n1 0.1 0 0.2 0 0.3 0 0.4 0\n2 0.5 0 0.6 0 0.7 0 0.8 0\n[End]\n",
+            b"[Version] 2.0\n[Number of Ports] 2\n[Number of Frequencies] 2\n# MHz S RI R 50\n[Reference] 50 75\n[Two-Port Data Order] 21_12\n[Network Data]\n1 0.1 0 0.2 0 0.3 0 0.4 0\n2 0.5 0 0.6 0 0.7 0 0.8 0\n[End]\n",
         )
         .expect("Touchstone import succeeds");
 
@@ -1626,12 +1714,8 @@ mod tests {
     #[test]
     fn remapping_zero_coordinate_data_to_ac_is_rejected_before_commit() {
         let mut state = loaded_project_state();
-        stage_imported_result_dataset(
-            &mut state,
-            "external.csv",
-            b"time [s],V(out) [V]\n0,0\n1,1\n",
-        )
-        .expect("stage succeeds");
+        stage_imported_result_dataset(&mut state, "external.csv", b"time,V(out) [V]\n0,0\n1,1\n")
+            .expect("stage succeeds");
         state.workbench.result_import.analysis_type = AnalysisType::Ac;
 
         let error = commit_result_import_draft(&mut state).expect_err("invalid frequency rejected");

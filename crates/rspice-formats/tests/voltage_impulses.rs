@@ -197,7 +197,7 @@ fn project_schema_rejects_voltage_evidence_relabelled_as_a_legacy_document() {
     });
     project.migrate_to_current(ProjectId::new()).unwrap();
     project.validate().unwrap();
-    assert_eq!(project.schema_version, 41);
+    assert_eq!(project.schema_version, 42);
     assert_eq!(
         project.runs[0].dataset_content_digest,
         legacy.dataset_content_digest

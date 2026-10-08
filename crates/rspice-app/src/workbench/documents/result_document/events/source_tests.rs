@@ -91,6 +91,7 @@ fn event_source_import_readout_survives_restoration_and_source_changes() {
         ResultImportFormat::CsvRfc4180,
     ] {
         state.simulation.retained.runs[0].analyses[0].import_source = Some(ResultImportSource {
+            coordinate: None,
             source_name: "renamed.capture".to_owned(),
             format,
         });
@@ -169,6 +170,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
     assert!(!text.contains("canonical strengths"), "{text}");
     state.simulation.retained.runs[0].analyses[0].import_source =
         Some(crate::state::ResultImportSource {
+            coordinate: None,
             source_name: "inconsistent.vcd".to_owned(),
             format: crate::state::ResultImportFormat::Vcd,
         });

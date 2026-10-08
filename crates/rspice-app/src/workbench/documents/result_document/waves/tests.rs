@@ -1276,11 +1276,7 @@ fn incompatible_family_overlay_is_visibly_rejected_without_drawing_native_x() {
         &HashSet::new(),
     );
     assert_eq!(models[0].traces.len(), models[0].signal_trace_count);
-    assert!(
-        models[0]
-            .subtitle
-            .contains("incompatible family overlay hidden")
-    );
+    assert!(models[0].subtitle.contains("incompatible overlay hidden"));
     assert!(models[0].traces.iter().all(|trace| !trace.overlay));
 }
 

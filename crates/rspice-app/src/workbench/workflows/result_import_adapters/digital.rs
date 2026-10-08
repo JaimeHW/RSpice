@@ -12,6 +12,7 @@ fn digital_import_limits() -> DigitalImportLimits {
 
 fn present_digital(format: ResultImportFormat, decoded: DecodedDigital) -> ParsedResultDataset {
     let mut parsed = present_imported_waveforms(format, AnalysisType::Transient, decoded.data);
+    parsed.coordinate_unit = Some("s".to_owned());
     parsed.notes = decoded.notes;
     parsed.event_payload = decoded.event_payload;
     parsed

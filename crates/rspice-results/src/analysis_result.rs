@@ -89,6 +89,33 @@ pub struct AnalysisResult<W = RetainedWaveform> {
 }
 
 impl<W> AnalysisResult<W> {
+    pub fn imported_coordinate(&self) -> Option<&crate::result_import::ResultImportCoordinate> {
+        self.import_source.as_ref()?.coordinate.as_ref()
+    }
+
+    /// Unit of retained waveform coordinates, with import declarations taking
+    /// precedence over analysis defaults (including an explicitly unknown unit).
+    pub fn waveform_coordinate_unit(&self) -> Option<&str> {
+        if let Some(coordinate) = self.imported_coordinate() {
+            return coordinate.unit.as_deref();
+        }
+        if let Some(AnalysisResultPayload::DcSweep { evidence }) = &self.result_payload {
+            return if evidence.source.starts_with(['I', 'i']) {
+                Some("A")
+            } else if evidence.source.starts_with(['V', 'v']) {
+                Some("V")
+            } else {
+                None
+            };
+        }
+        if self.analysis_type == AnalysisType::DcSweep {
+            // DC can sweep voltage, current, temperature or a parameter.
+            return None;
+        }
+        let unit = self.analysis_type.axis_info().1;
+        (!unit.is_empty()).then_some(unit)
+    }
+
     /// Change the waveform wrapper while retaining every analysis field and exact data owner.
     pub fn map_waveforms<V>(self, map: impl FnMut(W) -> V) -> AnalysisResult<V> {
         let Self {

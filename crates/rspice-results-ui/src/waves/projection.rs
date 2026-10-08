@@ -435,6 +435,12 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
             x_label = source;
             x_unit = unit;
         }
+        // Imported coordinates are source data. A generic DC analysis does
+        // not make an imported current or temperature sweep a voltage.
+        if let Some(coordinate) = analysis.imported_coordinate() {
+            x_label = &coordinate.name;
+            x_unit = coordinate.unit.as_deref().unwrap_or("");
+        }
         if let Some(axis) = sample_selection
             .and_then(SourceSampleSelection::family_render_plan)
             .map(FamilyRenderPlan::x_axis)
@@ -602,6 +608,14 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
             let Some(overlay_analysis) = overlay_analysis else {
                 continue;
             };
+            if (analysis.imported_coordinate().is_some()
+                || overlay_analysis.imported_coordinate().is_some())
+                && analysis.waveform_coordinate_unit()
+                    != overlay_analysis.waveform_coordinate_unit()
+            {
+                rejected_overlay_count += 1;
+                continue;
+            }
 
             let overlay_family_plan = match sample_selection
                 .map(|selection| {
@@ -757,7 +771,7 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
         }
         if rejected_overlay_count > 0 {
             subtitle = format!(
-                "{subtitle} · {rejected_overlay_count} incompatible family overlay{} hidden",
+                "{subtitle} · {rejected_overlay_count} incompatible overlay{} hidden",
                 if rejected_overlay_count == 1 { "" } else { "s" }
             );
         }

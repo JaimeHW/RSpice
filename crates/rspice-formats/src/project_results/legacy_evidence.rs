@@ -158,6 +158,7 @@ pub fn validate_result_fields_for_source_schema(
     source_schema: u32,
 ) -> Result<(), String> {
     reject_voltage_impulses_before_schema_v41(run, source_schema)?;
+    reject_import_coordinates_before_schema_v42(run, source_schema)?;
     reject_optimization_units_before_schema_v39(run, source_schema)?;
     if source_schema < NATIVE_SCALAR_UNIT_RESULTS_SCHEMA_VERSION
         && run
@@ -204,6 +205,23 @@ pub fn validate_result_fields_for_source_schema(
                 analysis.id
             ));
         }
+    }
+    Ok(())
+}
+
+pub(super) fn reject_import_coordinates_before_schema_v42(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema < IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION
+        && run.analyses.iter().any(|analysis| {
+            analysis
+                .import_source
+                .as_ref()
+                .is_some_and(|source| source.coordinate.is_some())
+        })
+    {
+        return Err("result schemas before v42 cannot contain import-coordinate metadata".into());
     }
     Ok(())
 }

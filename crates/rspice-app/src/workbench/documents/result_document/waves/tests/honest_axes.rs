@@ -99,6 +99,85 @@ fn model_axis(state: &mut AppState) -> (String, String) {
     (models[0].x_label().to_owned(), models[0].x_unit.clone())
 }
 
+#[test]
+fn imported_dc_axes_use_retained_name_and_unit_instead_of_voltage_defaults() {
+    use rspice_results::result_import::{
+        ResultImportCoordinate, ResultImportFormat, ResultImportSource,
+    };
+    for unit in [Some("A"), Some("K"), Some("1"), None] {
+        let mut state = swept_current_source();
+        state.simulation.retained.runs[0].analyses[0].import_source = Some(ResultImportSource {
+            source_name: "axis.raw".into(),
+            format: ResultImportFormat::SpiceRaw,
+            coordinate: Some(ResultImportCoordinate {
+                name: "source-axis".into(),
+                unit: unit.map(str::to_owned),
+            }),
+        });
+        assert_eq!(
+            model_axis(&mut state),
+            ("source-axis".into(), unit.unwrap_or("").to_owned())
+        );
+    }
+}
+
+#[test]
+fn imported_overlays_require_compatible_coordinate_units() {
+    use rspice_results::result_import::{
+        ResultImportCoordinate, ResultImportFormat, ResultImportSource,
+    };
+    for (overlay_unit, expected_overlay) in [(Some("A"), true), (Some("V"), false), (None, false)] {
+        let mut runs = Vec::new();
+        for (id, unit) in [(2, Some("A")), (1, overlay_unit)] {
+            let mut run = SimulationRun::new(id);
+            let mut analysis =
+                AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
+                    WaveformData::new("V(out)", vec![0.0, 1.0], vec![1.0, 2.0], "#fff"),
+                ]);
+            analysis.import_source = Some(ResultImportSource {
+                source_name: "axis.raw".into(),
+                format: ResultImportFormat::SpiceRaw,
+                coordinate: Some(ResultImportCoordinate {
+                    name: "bias".into(),
+                    unit: unit.map(str::to_owned),
+                }),
+            });
+            run.add_analysis(analysis);
+            runs.push(run);
+        }
+        let overlay_dataset = runs[1].dataset_id;
+        let simulation = SimulationState {
+            retained: crate::state::RetainedSimulationState {
+                runs: runs.into(),
+                ..Default::default()
+            },
+            view: crate::state::SimulationViewState {
+                active_run_idx: Some(0),
+                overlay_dataset_ids: vec![overlay_dataset],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let models = build_models(
+            &simulation,
+            &mut DerivedSeries::default(),
+            &Tokens::default(),
+            false,
+            ComplexNumberDisplay::MagnitudePhaseDegrees,
+            None,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            models[0].traces.iter().any(|trace| trace.overlay),
+            expected_overlay
+        );
+        assert_eq!(
+            models[0].subtitle.contains("incompatible overlay"),
+            !expected_overlay
+        );
+    }
+}
+
 /// The retained result keeps the sweep's values and not the source they came
 /// from, so the abscissa called every DC sweep volts — a swept current source
 /// read as a voltage, which is not a unit error but a quantity error. The deck

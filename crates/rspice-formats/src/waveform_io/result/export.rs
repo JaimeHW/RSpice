@@ -88,6 +88,11 @@ pub fn project_waveforms<W: AsRef<RetainedWaveform>>(
     } else {
         prepare_flat_waveform_dataset(&waveforms, x_name, x_signal_type)?
     };
+    if let Some(coordinate) = analysis.imported_coordinate()
+        && let Some(axis) = prepared.x_signal.as_mut()
+    {
+        axis.unit = coordinate.unit.clone().unwrap_or_default();
+    }
     if !touchstone
         && matches!(
             analysis.analysis_type,
@@ -256,6 +261,16 @@ pub(crate) fn validate_shared_x_axis<W: AsRef<RetainedWaveform>>(
 /// carrier. The exported quantity is a frequency in hertz either way, and
 /// which frequency it is belongs to the analysis type the file already names.
 pub(crate) fn axis_signal_for_analysis<W>(analysis: &AnalysisResult<W>) -> (&str, SignalType) {
+    if let Some(coordinate) = analysis.imported_coordinate() {
+        let kind = match coordinate.unit.as_deref() {
+            Some("s") => SignalType::Time,
+            Some("Hz") => SignalType::Frequency,
+            Some("A") => SignalType::Current,
+            Some("V") => SignalType::Voltage,
+            _ => SignalType::Unknown,
+        };
+        return (&coordinate.name, kind);
+    }
     if let Some(AnalysisResultPayload::DcSweep { evidence }) = &analysis.result_payload {
         let kind = if evidence.source.starts_with(['I', 'i']) {
             SignalType::Current

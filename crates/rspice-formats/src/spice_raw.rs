@@ -40,10 +40,31 @@ pub fn decode_spice_raw(
         .validate_real_coordinate()
         .map_err(RawReadError::Parse)?;
     let ordinal = parsed.has_ordinal_axis().map_err(RawReadError::Parse)?;
+    let domain = coordinate_domain(&parsed, ordinal)?;
     let units = rspice_core::io::ltspice_raw::raw_table_units(&parsed.header)
         .map_err(RawReadError::Parse)?
-        .unwrap_or_else(|| vec![None; parsed.variables.len()]);
-    let domain = coordinate_domain(&parsed, ordinal)?;
+        .unwrap_or_else(|| {
+            let mut units = vec![None; parsed.variables.len()];
+            if !ordinal && let Some(coordinate) = parsed.variables.first() {
+                // Ordinary SPICE RAW declares SI quantities rather than a
+                // separate unit. Explicit table metadata above may instead
+                // declare an unknown unit and must never inherit this fallback.
+                let unit = match coordinate.var_type.trim().to_ascii_lowercase().as_str() {
+                    "time" => Some("s"),
+                    "frequency" => Some("Hz"),
+                    "voltage" => Some("V"),
+                    "current" => Some("A"),
+                    "index" => Some("1"),
+                    _ => match domain {
+                        crate::WaveformDomain::Transient => Some("s"),
+                        crate::WaveformDomain::Ac => Some("Hz"),
+                        crate::WaveformDomain::DcSweep => None,
+                    },
+                };
+                units[0] = unit.map(str::to_owned);
+            }
+            units
+        });
     let mut waveforms = parsed.waveforms.into_iter().zip(units).peekable();
     let (coordinate_name, coordinate, coordinate_unit) = if ordinal {
         let (first, _) = waveforms.peek().ok_or(RawReadError::NoVariables)?;

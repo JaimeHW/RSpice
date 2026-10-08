@@ -42,6 +42,9 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
         }
         if let Some(source) = &self.import_source {
             source.validate()?;
+            if let Some(coordinate) = &source.coordinate {
+                coordinate.validate_domain(self.analysis_type)?;
+            }
             if self.provenance.is_some() || !self.saved_output_receipts.is_empty() {
                 return Err(
                     "imported results cannot carry native prepared-task or saved-output receipts"

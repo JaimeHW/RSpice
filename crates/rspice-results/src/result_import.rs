@@ -102,12 +102,82 @@ impl ResultImportFormat {
 pub struct ResultImportSource {
     pub source_name: String,
     pub format: ResultImportFormat,
+    /// The admitted coordinate, including explicit absence of a unit. Older
+    /// projects omitted this field and keep their historical interpretation.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_coordinate"
+    )]
+    pub coordinate: Option<ResultImportCoordinate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultImportCoordinate {
+    pub name: String,
+    pub unit: Option<String>,
+}
+
+fn deserialize_coordinate<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ResultImportCoordinate>, D::Error> {
+    // Present null must not masquerade as absence in an older schema.
+    <Option<ResultImportCoordinate> as serde::Deserialize>::deserialize(deserializer)?
+        .map(Some)
+        .ok_or_else(|| serde::de::Error::custom("import coordinate cannot be null"))
+}
+
+impl ResultImportCoordinate {
+    pub fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("name", Some(self.name.as_str())),
+            ("unit", self.unit.as_deref()),
+        ] {
+            if value
+                .is_some_and(|value| value.trim().is_empty() || value.chars().any(char::is_control))
+            {
+                return Err(format!(
+                    "import coordinate {field} must be non-empty and control-free"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_domain(
+        &self,
+        analysis: crate::analysis_type::AnalysisType,
+    ) -> Result<(), String> {
+        self.validate()?;
+        let required = if analysis.is_time_domain() {
+            Some("s")
+        } else if matches!(
+            analysis,
+            crate::analysis_type::AnalysisType::Ac | crate::analysis_type::AnalysisType::SParameter
+        ) {
+            Some("Hz")
+        } else {
+            None
+        };
+        if let (Some(required), Some(unit)) = (required, self.unit.as_deref())
+            && unit != required
+        {
+            return Err(format!(
+                "import coordinate unit '{unit}' is incompatible with {analysis}; expected '{required}'"
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl ResultImportSource {
     pub fn validate(&self) -> Result<(), String> {
         if self.source_name.trim().is_empty() || self.source_name.chars().any(char::is_control) {
             return Err("import source requires a non-empty control-free file name".to_owned());
+        }
+        if let Some(coordinate) = &self.coordinate {
+            coordinate.validate()?;
         }
         Ok(())
     }

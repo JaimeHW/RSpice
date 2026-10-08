@@ -26,7 +26,7 @@ fn schema_v5_migrates_to_explicit_legacy_execution_state() {
         .expect("schema v5 migrates without inventing execution evidence");
     persisted.validate().expect("migrated schema validates");
 
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     let migrated = &persisted.runs[0];
     assert_eq!(
         migrated.lifecycle,
@@ -74,7 +74,7 @@ fn schema_v17_is_authenticated_then_restores_measurement_verification_defaults()
         .migrate_to_current(ProjectId::new())
         .expect("authentic schema-v17 measurement history migrates");
 
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     let measurement = &persisted.runs[0].analyses[0].measurements[0];
     assert_eq!(measurement.raw_value, measurement.value);
     assert_eq!(measurement.failure_limit, None);
@@ -348,7 +348,7 @@ fn schema_v12_is_authenticated_with_its_unit_free_encoding_then_resealed() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v12 result history migrates");
 
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     let migrated = persisted.runs[0]
         .clone()
         .into_run()
@@ -415,7 +415,7 @@ fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
     simulation.retained.next_run_id = 34;
 
     let persisted = crate::io::capture_simulation_results(&simulation);
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     let restored = crate::io::simulation_state_from_results(persisted)
         .expect("current result history restores");
 
@@ -552,7 +552,7 @@ fn schema_v16_periodic_results_migrate_to_explicit_unknown_without_inference() {
         persisted
             .migrate_to_current(ProjectId::new())
             .expect("authentic zero-waveform schema-v16 periodic result migrates");
-        assert_eq!(persisted.schema_version, 41);
+        assert_eq!(persisted.schema_version, 42);
         let payload = persisted.runs[0].analyses[0]
             .result_payload
             .as_ref()
@@ -606,7 +606,7 @@ fn schema_v16_cannot_inject_periodic_evidence_or_overwrite_an_existing_payload()
 fn current_schema_rejects_successful_periodic_results_without_the_typed_payload() {
     for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
         let mut current = persisted_periodic_at_schema_v16(analysis_type);
-        current.schema_version = 41;
+        current.schema_version = 42;
         let error = current
             .validate()
             .expect_err("current periodic success cannot omit its typed evidence");
@@ -657,7 +657,7 @@ fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_po
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v13 prepared receipt migrates");
 
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     let PersistedField::Value(receipt) = &persisted.runs[0].prepared_receipt else {
         panic!("migrated prepared receipt remains present");
     };
@@ -1491,7 +1491,7 @@ fn v2_same_kind_results_migrate_without_guessing_source_identity() {
         .migrate_to_current(ProjectId::new())
         .expect("v2 migrates");
 
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     assert!(
         persisted.runs[0]
             .analyses
@@ -1665,7 +1665,7 @@ fn schema_v18_is_authenticated_then_resealed_with_an_empty_bus_table() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v18 event history migrates");
 
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
         persisted.runs[0].analyses[0].result_payload.as_ref()
     else {
@@ -1728,7 +1728,7 @@ fn schema_v18_rejects_tampering_and_a_smuggled_bus_table() {
 #[test]
 fn a_results_schema_from_the_future_is_refused_by_number() {
     let mut ahead = persisted_events_at_schema_v18();
-    ahead.schema_version = 41 + 1;
+    ahead.schema_version = 42 + 1;
     let error = ahead
         .migrate_to_current(ProjectId::new())
         .expect_err("a forward schema version is not migrated");
@@ -1802,7 +1802,7 @@ fn convergence_schema_v20_authenticates_before_migrating_unknown_quality() {
     let old_digest = stored.runs[0].dataset_content_digest.clone();
     stored.migrate_to_current(ProjectId::new()).unwrap();
     stored.validate().unwrap();
-    assert_eq!(stored.schema_version, 41);
+    assert_eq!(stored.schema_version, 42);
     assert_ne!(stored.runs[0].dataset_content_digest, old_digest);
     assert!(stored.runs[0].analyses[0].convergence.is_missing());
     assert!(
@@ -1901,7 +1901,7 @@ fn event_source_schema_v19_migrates_without_inventing_import_attribution() {
     let evidence = persisted.runs[0].analyses[0].result_payload.clone();
     persisted.migrate_to_current(ProjectId::new()).unwrap();
     persisted.validate().unwrap();
-    assert_eq!(persisted.schema_version, 41);
+    assert_eq!(persisted.schema_version, 42);
     assert!(persisted.runs[0].analyses[0].import_source.is_missing());
     assert_eq!(persisted.runs[0].analyses[0].result_payload, evidence);
     let restored = crate::io::simulation_state_from_results(persisted).unwrap();
@@ -1927,6 +1927,7 @@ fn event_source_old_schema_rejects_changed_samples_and_smuggled_attribution() {
         let mut altered = event_source_schema_v19();
         altered.schema_version = schema;
         altered.runs[0].analyses[0].import_source = PersistedField::Value(ResultImportSource {
+            coordinate: None,
             source_name: "forged.vcd".to_owned(),
             format: ResultImportFormat::Vcd,
         });
@@ -1946,6 +1947,7 @@ fn event_source_current_schema_seals_name_format_and_presence() {
     persisted.migrate_to_current(ProjectId::new()).unwrap();
     let mut simulation = crate::io::simulation_state_from_results(persisted).unwrap();
     simulation.retained.runs[0].analyses[0].import_source = Some(ResultImportSource {
+        coordinate: None,
         source_name: "capture.vcd".to_owned(),
         format: ResultImportFormat::Vcd,
     });
@@ -1955,14 +1957,17 @@ fn event_source_current_schema_seals_name_format_and_presence() {
         PersistedField::Missing,
         PersistedField::Null,
         PersistedField::Value(ResultImportSource {
+            coordinate: None,
             source_name: "other.vcd".to_owned(),
             format: ResultImportFormat::Vcd,
         }),
         PersistedField::Value(ResultImportSource {
+            coordinate: None,
             source_name: "capture.vcd".to_owned(),
             format: ResultImportFormat::Fst,
         }),
         PersistedField::Value(ResultImportSource {
+            coordinate: None,
             source_name: "\n".to_owned(),
             format: ResultImportFormat::Vcd,
         }),
@@ -1979,6 +1984,75 @@ fn event_source_current_schema_seals_name_format_and_presence() {
         serde_json::from_str::<ProjectSimulationResults>(&text.replace("\"vcd\"", "\"native\""))
             .is_err()
     );
+}
+
+#[test]
+fn imported_coordinate_metadata_is_sealed_and_cannot_enter_older_schemas() {
+    use rspice_results::result_import::{
+        ResultImportCoordinate, ResultImportFormat, ResultImportSource,
+    };
+    let mut legacy = event_source_schema_v19();
+    legacy.migrate_to_current(ProjectId::new()).unwrap();
+    let mut simulation = crate::io::simulation_state_from_results(legacy).unwrap();
+    simulation.retained.runs[0].analyses[0].import_source = Some(ResultImportSource {
+        source_name: "axis.vcd".into(),
+        format: ResultImportFormat::Vcd,
+        coordinate: None,
+    });
+    let historical = crate::io::capture_simulation_results(&simulation);
+    let mut v40 = historical.clone();
+    v40.schema_version = 40;
+    v40.migrate_to_current(ProjectId::new()).unwrap();
+    assert_eq!(
+        v40, historical,
+        "legacy digests and absent metadata must remain intact"
+    );
+
+    simulation.retained.runs[0].analyses[0]
+        .import_source
+        .as_mut()
+        .unwrap()
+        .coordinate = Some(ResultImportCoordinate {
+        name: "time".into(),
+        unit: Some("s".into()),
+    });
+    let stored = crate::io::capture_simulation_results(&simulation);
+    stored.validate().unwrap();
+    for schema in 1..42 {
+        let mut older = stored.clone();
+        older.schema_version = schema;
+        assert!(
+            older
+                .migrate_to_current(ProjectId::new())
+                .unwrap_err()
+                .contains("import-coordinate")
+        );
+    }
+    for coordinate in [
+        None,
+        Some(ResultImportCoordinate {
+            name: "other".into(),
+            unit: Some("s".into()),
+        }),
+        Some(ResultImportCoordinate {
+            name: "time".into(),
+            unit: None,
+        }),
+    ] {
+        let mut altered = stored.clone();
+        altered.runs[0].analyses[0]
+            .import_source
+            .as_mut()
+            .unwrap()
+            .coordinate = coordinate;
+        assert!(
+            altered.validate().is_err(),
+            "coordinate meaning is part of the sealed identity"
+        );
+    }
+    let mut wire = serde_json::to_value(&historical).unwrap();
+    wire["runs"][0]["analyses"][0]["import_source"]["coordinate"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<ProjectSimulationResults>(wire).is_err());
 }
 
 /// A container labelled before v27 cannot carry DC mismatch evidence.

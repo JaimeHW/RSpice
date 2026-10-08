@@ -1,6 +1,7 @@
 //! Exact comparison alignment and difference derivation over borrowed retained results.
 
 use crate::analysis_result::AnalysisResult;
+#[cfg(test)]
 use crate::analysis_type::AnalysisType;
 use crate::result_digest::ResultDigestEncoding;
 use crate::run::SimulationRun;
@@ -162,6 +163,10 @@ pub fn comparison_signal_names<W: AsRef<RetainedWaveform>>(
     candidate_analysis: &AnalysisResult<W>,
     baseline_analysis: &AnalysisResult<W>,
 ) -> Result<Vec<String>, String> {
+    if candidate_analysis.waveform_coordinate_unit() != baseline_analysis.waveform_coordinate_unit()
+    {
+        return Err("The selected analyses have incompatible coordinate units.".to_owned());
+    }
     let candidate_reference = candidate_analysis
         .waveforms
         .first()
@@ -233,15 +238,6 @@ pub fn comparison_signal_names<W: AsRef<RetainedWaveform>>(
     validated_analysis_axis(candidate_analysis, &signal_names)?;
     validated_analysis_axis(baseline_analysis, &signal_names)?;
     Ok(signal_names)
-}
-
-fn comparison_axis_unit(analysis_type: AnalysisType) -> &'static str {
-    match analysis_type {
-        AnalysisType::Ac | AnalysisType::Noise | AnalysisType::Pnoise => "Hz",
-        AnalysisType::Transient | AnalysisType::Soa => "s",
-        AnalysisType::DcSweep => "V",
-        _ => "",
-    }
 }
 
 fn comparison_source_dataset<A, W>(
@@ -719,8 +715,9 @@ where
         }
     };
     execution.validate().map_err(|error| error.to_string())?;
-    let axis_unit = comparison_axis_unit(candidate_analysis.analysis_type);
-    let coordinate_unit = (!axis_unit.is_empty()).then_some(axis_unit.to_owned());
+    let coordinate_unit = candidate_analysis
+        .waveform_coordinate_unit()
+        .map(str::to_owned);
     let baseline = comparison_source_dataset(
         baseline_run,
         &signal_names,

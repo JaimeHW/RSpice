@@ -92,3 +92,54 @@ fn comparison_fails_closed_for_nonmonotonic_source_coordinates() {
     .expect_err("nonmonotonic immutable data must never be resampled");
     assert!(error.contains("nonmonotonic"));
 }
+
+#[test]
+fn comparison_requires_compatible_import_coordinates_and_retains_their_units() {
+    use crate::result_import::{ResultImportCoordinate, ResultImportFormat, ResultImportSource};
+    let mut candidate = source(1, 17, vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0]);
+    let mut baseline = source(2, 29, vec![0.0, 1.0, 2.0], vec![0.0, 1.0, 2.0]);
+    for run in [&mut candidate, &mut baseline] {
+        run.analyses[0].analysis_type = AnalysisType::DcSweep;
+        run.analyses[0].import_source = Some(ResultImportSource {
+            source_name: "source.raw".into(),
+            format: ResultImportFormat::SpiceRaw,
+            coordinate: Some(ResultImportCoordinate {
+                name: "bias".into(),
+                unit: Some("A".into()),
+            }),
+        });
+    }
+    let prepared = prepared_comparison_sources(
+        &candidate,
+        &candidate.analyses[0],
+        &baseline,
+        ComparisonAlignmentDraft::AbsoluteXAxis,
+        "V(out)",
+        0.0,
+        2,
+    )
+    .unwrap();
+    assert_eq!(prepared.coordinate_unit.as_deref(), Some("A"));
+    for unit in [Some("V"), None, Some("1")] {
+        baseline.analyses[0]
+            .import_source
+            .as_mut()
+            .unwrap()
+            .coordinate
+            .as_mut()
+            .unwrap()
+            .unit = unit.map(str::to_owned);
+        let error = prepared_comparison_sources(
+            &candidate,
+            &candidate.analyses[0],
+            &baseline,
+            ComparisonAlignmentDraft::AbsoluteXAxis,
+            "V(out)",
+            0.0,
+            2,
+        )
+        .err()
+        .expect("incompatible units");
+        assert!(error.contains("incompatible coordinate units"), "{error}");
+    }
+}

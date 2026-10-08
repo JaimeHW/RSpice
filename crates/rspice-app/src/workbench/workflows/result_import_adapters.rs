@@ -53,6 +53,7 @@ pub(super) fn present_imported_waveforms(
         source_format: format,
         analysis_type,
         coordinate_name: imported.coordinate_name,
+        coordinate_unit: None,
         sample_count: imported.sample_count,
         waveforms: imported
             .waveforms
@@ -218,13 +219,15 @@ fn finish_numeric_dataset(
     format: ResultImportFormat,
     decoded: rspice_formats::numeric::DecodedNumericDataset,
 ) -> Result<ParsedResultDataset, String> {
-    finish_dataset(
+    let mut parsed = finish_dataset(
         format,
         imported_analysis_type(decoded.domain),
         decoded.coordinate_name,
         decoded.coordinate,
         imported_signals(decoded.signals),
-    )
+    )?;
+    parsed.coordinate_unit = decoded.coordinate_unit;
+    Ok(parsed)
 }
 
 // -------------------------------------------------------------------------

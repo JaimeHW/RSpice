@@ -462,6 +462,17 @@ where
                 encode_measurement_unit(&mut writer, unit);
             }
         }
+        // Optional, tagged extension: historical imports without coordinate
+        // metadata retain their sealed identities.
+        if version >= ResultDigestEncoding::V16
+            && let Some(coordinate) = self
+                .import_source
+                .and_then(|source| source.coordinate.as_ref())
+        {
+            writer.string("import-coordinate/v1");
+            writer.string(&coordinate.name);
+            writer.option(coordinate.unit.as_ref(), |writer, unit| writer.string(unit));
+        }
         writer
     }
 }
