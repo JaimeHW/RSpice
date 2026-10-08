@@ -2241,7 +2241,7 @@ fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel
             });
         }
 
-        if compiled.is_array != !canonical.dimensions.is_empty()
+        if compiled.is_array == canonical.dimensions.is_empty()
             || (compiled.is_array
                 && (compiled.default_program.is_some()
                     || compiled.default.to_bits() != 0.0f64.to_bits()))

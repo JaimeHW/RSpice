@@ -964,11 +964,11 @@ fn close_override_elements(
                 if count < 0 {
                     return Err("array override replication count must be non-negative".into());
                 }
-                replication.count = Box::new(Expression::Number(crate::ast::NumberLit {
+                *replication.count = Expression::Number(crate::ast::NumberLit {
                     value: count as f64,
                     raw: count.to_string().into(),
                     span: replication.count.span(),
-                }));
+                });
                 close_override_elements(
                     &mut replication.elements,
                     element,

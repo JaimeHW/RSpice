@@ -519,8 +519,10 @@ mod tests {
             assert_eq!(abort.polls_after_abort(), 0);
         }
         for limit in [0, 100, 500, 1000] {
-            let mut limits = ResourceLimits::default();
-            limits.max_result_values = limit;
+            let limits = ResourceLimits {
+                max_result_values: limit,
+                ..Default::default()
+            };
             assert!(matches!(
                 matrix_is_hurwitz(&matrix, limits, &NoAbort),
                 Err(ConstraintError::ResourceLimit(_))

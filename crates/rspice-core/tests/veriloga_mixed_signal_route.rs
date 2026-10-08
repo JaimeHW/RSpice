@@ -3511,7 +3511,7 @@ endmodule
 "#,
     );
     for reverse in [false, true] {
-        let mut cards = vec![
+        let mut cards = [
             "Xa data real_source LEVEL=1",
             "Xb data real_source LEVEL=2",
             "Xc data out real_load",
@@ -3660,7 +3660,7 @@ endmodule
 "#,
     );
     for reverse in [false, true] {
-        let mut cards = vec![
+        let mut cards = [
             "Xs q real_source",
             "Xr delayed out real_sink",
             "Aobs input q obs",
@@ -3836,9 +3836,10 @@ endmodule
         "* automatic bidirectional boundary\n.param vcc=3.3\nXio pad seen physical_io\nRload pad 0 1k\nRseen seen 0 1k\n.va \"{}\" physical_io\n.end\n",
         model.deck_path()
     );
+    type LastObservation = (usize, f64, Vec<(String, f64)>);
     struct Progress {
         start: std::time::Instant,
-        last: Mutex<(usize, f64, Vec<(String, f64)>)>,
+        last: Mutex<LastObservation>,
     }
     impl AbortSignal for Progress {
         fn is_aborted(&self) -> bool {
@@ -4110,7 +4111,6 @@ endmodule
     assert!(bus.members[1].eq_ignore_ascii_case("q4"));
 }
 
-
 #[test]
 fn timed_logic_inputs_deliver_localized_roots_and_replay_loaded_feedback() {
     for (rise, fall) in [(0.0, 0.0), (37e-12, 61e-12)] {
@@ -4176,7 +4176,6 @@ endmodule
     }
 }
 
-
 #[test]
 fn simultaneous_logic_inputs_publish_one_vector_decision() {
     let model = ModelFile::new(
@@ -4207,7 +4206,6 @@ endmodule
     );
     assert_eq!(bad[0].value.state, rspice_core::xspice::DigitalState::Zero);
 }
-
 
 #[test]
 fn template_adc_thresholds_preserve_unknown_bands_and_atomic_vectors() {

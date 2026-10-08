@@ -133,7 +133,7 @@ fn validate_parameters(model: &CompiledModel, mir: &MirModel) -> Result<(), Stri
                 canonical.name, compiled.name
             ));
         }
-        if compiled.is_array != !canonical.dimensions.is_empty()
+        if compiled.is_array == canonical.dimensions.is_empty()
             || (compiled.is_array
                 && (compiled.default_program.is_some()
                     || compiled.default.to_bits() != 0.0f64.to_bits()))

@@ -1,7 +1,7 @@
 #![cfg(feature = "veriloga")]
 //! Analog occurrences wake digital processes in the unified circuit transaction.
-use rspice_core::{Engine, Netlist};
 use rspice_core::engine::TransientResult;
+use rspice_core::{Engine, Netlist};
 #[derive(Default)]
 struct AcceptedEvents(
     std::sync::Mutex<Vec<(String, rspice_core::abort_signal::TransientEventChange)>>,
@@ -140,8 +140,8 @@ endmodule
 
 #[test]
 fn standalone_analog_occurrences_roll_back_with_waiting_processes() {
-    use rspice_core::xspice::verilog::MixedSignalHost;
     use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
     use rspice_veriloga::vm::IntegrationCoefficients;
     let source = r#"
 `timescale 1ps/1ps
@@ -339,8 +339,8 @@ endmodule
 
 #[test]
 fn continuously_evaluated_variables_cannot_silently_freeze_a_digital_driver() {
-    use rspice_core::xspice::verilog::MixedSignalHost;
     use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
     for assignment in [
         "analog sample=V(a);",
         "analog initial sample=0.125; analog @(timer(1n)) sample=V(a);",
@@ -394,8 +394,7 @@ endmodule
                 &[1],
                 SchedulerLimits::default(),
             )
-            .err()
-            .expect("an unclocked analog variable is not an event-driven source");
+            .expect_err("an unclocked analog variable is not an event-driven source");
             assert!(
                 error
                     .to_string()
@@ -713,8 +712,8 @@ endmodule
 
 #[test]
 fn analog_array_event_ownership_is_checked_per_selected_element() {
-    use rspice_core::xspice::verilog::MixedSignalHost;
     use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
     let source = r#"
 `timescale 1ps/1ps
 module cells(a,p);
@@ -750,8 +749,7 @@ endmodule
             &[1, 2],
             SchedulerLimits::default(),
         )
-        .err()
-        .expect("continuous cell must not acquire an assignment-event dependency");
+        .expect_err("continuous cell must not acquire an assignment-event dependency");
         assert!(
             error.to_string().contains("not assigned exclusively"),
             "{error}"
@@ -761,9 +759,9 @@ endmodule
 
 #[test]
 fn absdelta_operand_plans_survive_hierarchy_and_circuit_linking() {
-    use rspice_veriloga::{CompilerOptions, NoPipelineControl, VerilogACompiler};
     use rspice_veriloga::canonical_ir::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
     use rspice_veriloga::canonical_ir::digital_link::{DigitalLinkInstance, link_digital_plans};
+    use rspice_veriloga::{CompilerOptions, NoPipelineControl, VerilogACompiler};
     let source = r#"
 `timescale 1ns/1ps
 module observer(a);
@@ -825,9 +823,9 @@ endmodule
 
 #[test]
 fn absdelta_invalid_source_is_explicit() {
-    use rspice_veriloga::{CompilerOptions, VerilogACompiler};
     use rspice_core::xspice::event_scheduler::SchedulerLimits;
     use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_veriloga::{CompilerOptions, VerilogACompiler};
     let source = "module observer(a); input a; electrical a; real sampled=0; always @(absdelta(V(a),0.1)) sampled=V(a); endmodule";
     MixedSignalHost::compile(source, None, "observer", &[1], SchedulerLimits::default())
         .expect("standalone observers use the shared coordinator");
@@ -1206,7 +1204,7 @@ fn settle_standalone_observer(
 fn absdelta_standalone_interpolation_inputs_rollback_and_checkpoint() {
     use rspice_core::abort_signal::CountingAbort;
     use rspice_core::xspice::event_scheduler::SchedulerLimits;
-    use rspice_core::xspice::verilog::{MixedSignalHost, MixedSignalError};
+    use rspice_core::xspice::verilog::{MixedSignalError, MixedSignalHost};
     use rspice_veriloga::vm::IntegrationCoefficients;
     let source = r#"
 `timescale 1ps/1ps
@@ -1561,8 +1559,7 @@ fn local_event_operands_do_not_capture_shadowed_electrical_nodes() {
             &[1],
             SchedulerLimits::default(),
         )
-        .err()
-        .expect("a local cannot name a probe node")
+        .expect_err("a local cannot name a probe node")
         .to_string();
         assert!(
             error.contains("analog access names process-local storage"),
@@ -1796,8 +1793,7 @@ endmodule
             &[1, 2],
             SchedulerLimits::default(),
         )
-        .err()
-        .expect("continuous cells cannot provide assignment events");
+        .expect_err("continuous cells cannot provide assignment events");
         assert!(
             error.to_string().contains("not assigned exclusively"),
             "{error}"
