@@ -435,27 +435,40 @@ impl WaveformWriter {
         dataset: &WaveformDataset,
         delimiter: char,
     ) -> Result<String, WaveformWriteError> {
+        let coordinate = dataset.x_signal.as_ref().ok_or_else(|| {
+            WaveformWriteError::InvalidData("Delimited export requires a coordinate column".into())
+        })?;
+        let axis = coordinate.data.as_slice();
+        if axis.is_empty() || dataset.signals.is_empty() {
+            return Err(WaveformWriteError::InvalidData(
+                "Delimited export requires at least one sample and one signal".into(),
+            ));
+        }
         if dataset
-            .x_signal
-            .as_ref()
-            .is_some_and(|signal| signal.data.iter().any(|value| !value.is_finite()))
+            .signals
+            .iter()
+            .any(|signal| signal.x_values.as_deref().is_some_and(|x| x != axis))
+        {
+            return Err(WaveformWriteError::CoordinatesDiffer);
+        }
+        for signal in &dataset.signals {
+            if signal.data.len() != axis.len() {
+                return Err(WaveformWriteError::InvalidData(format!(
+                    "Signal '{}' has {} samples; coordinate '{}' has {}. Missing samples must be explicit gaps",
+                    signal.name,
+                    signal.data.len(),
+                    coordinate.name,
+                    axis.len()
+                )));
+            }
+        }
+        if axis.iter().any(|value| !value.is_finite())
             || dataset
                 .signals
                 .iter()
                 .any(|signal| signal.data.iter().any(|value| value.is_infinite()))
         {
             return Err(WaveformWriteError::InvalidData("Delimited export requires finite coordinates and finite or explicitly unavailable signal samples".into()));
-        }
-        let axis = dataset
-            .x_signal
-            .as_ref()
-            .map(|signal| signal.data.as_slice());
-        if dataset
-            .signals
-            .iter()
-            .any(|signal| signal.x_values.as_deref().is_some_and(|x| Some(x) != axis))
-        {
-            return Err(WaveformWriteError::CoordinatesDiffer);
         }
         let separator = delimiter.to_string();
         let mut contents = String::new();
@@ -473,7 +486,7 @@ impl WaveformWriter {
         contents.push_str(&escaped_headers.join(&separator));
         contents.push('\n');
 
-        let num_points = dataset.point_count();
+        let num_points = axis.len();
         for i in 0..num_points {
             let mut values = Vec::new();
 
@@ -507,6 +520,41 @@ impl WaveformWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delimited_export_rejects_incomplete_table_shapes_without_padding_or_truncation() {
+        for format in [WaveformFormat::Csv, WaveformFormat::Tsv] {
+            let writer = WaveformWriter::new(format);
+            let source = sample_dataset();
+            let rows = source.point_count();
+            for values in [vec![1.0; rows - 1], vec![1.0; rows + 1]] {
+                let mut malformed = source.clone();
+                malformed.signals[0].data = values;
+                assert!(writer.write_text(&malformed).is_err());
+            }
+            let mut no_coordinate = source.clone();
+            no_coordinate.x_signal = None;
+            assert!(writer.write_text(&no_coordinate).is_err());
+            let mut no_signals = source.clone();
+            no_signals.signals.clear();
+            assert!(writer.write_text(&no_signals).is_err());
+            let mut no_samples = source.clone();
+            no_samples.x_signal.as_mut().unwrap().data.clear();
+            for signal in &mut no_samples.signals {
+                signal.data.clear();
+            }
+            assert!(writer.write_text(&no_samples).is_err());
+
+            // A single sample is a complete dataset, including an explicit gap.
+            let mut single_sample = source;
+            single_sample.x_signal.as_mut().unwrap().data.truncate(1);
+            for signal in &mut single_sample.signals {
+                signal.data = vec![f64::NAN];
+            }
+            let text = writer.write_text(&single_sample).unwrap();
+            assert_eq!(text.lines().count(), 2);
+        }
+    }
 
     #[test]
     fn delimited_gaps_roundtrip_as_empty_cells_without_becoming_zeroes() {
