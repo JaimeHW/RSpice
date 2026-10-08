@@ -4,7 +4,7 @@
 //! (the result viewer's phase convention); absolute temperatures use kelvin.
 //! Missing metadata is not a dimensionless declaration.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) enum UnitDimension {
+pub(crate) enum UnitDimension {
     Dimensionless,
     Time,
     Frequency,
@@ -21,14 +21,14 @@ pub(super) enum UnitDimension {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct EngineeringUnit {
-    pub(super) dimension: UnitDimension,
+pub(crate) struct EngineeringUnit {
+    pub(crate) dimension: UnitDimension,
     scale: f64,
     bias: f64,
 }
 
 impl EngineeringUnit {
-    pub(super) fn parse(raw: &str) -> Result<Self, String> {
+    pub(crate) fn parse(raw: &str) -> Result<Self, String> {
         let symbol = raw
             .trim()
             .replace(['µ', 'μ'], "u")
@@ -116,7 +116,7 @@ impl EngineeringUnit {
         })
     }
 
-    pub(super) fn canonical_symbol(self) -> &'static str {
+    pub(crate) fn canonical_symbol(self) -> &'static str {
         match self.dimension {
             UnitDimension::Dimensionless => "1",
             UnitDimension::Time => "s",
@@ -142,6 +142,18 @@ impl EngineeringUnit {
         } else {
             value.mul_add(self.scale, self.bias)
         }
+    }
+
+    pub(crate) fn normalize_binary(self, value: f64) -> f64 {
+        if self.bias == 0.0 {
+            value * self.scale
+        } else {
+            value.mul_add(self.scale, self.bias)
+        }
+    }
+
+    pub(crate) fn lost_nonzero_sample(self, before: f64, after: f64) -> bool {
+        self.bias == 0.0 && before != 0.0 && after == 0.0
     }
 }
 fn decimal_power_scaled(value: &str, scale: f64) -> Option<f64> {

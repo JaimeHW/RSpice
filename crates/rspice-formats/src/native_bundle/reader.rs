@@ -168,6 +168,7 @@ pub fn decode_native_bundle(
         });
     }
     Ok(DecodedNumericDataset {
+        coordinate_unit: None,
         domain,
         coordinate_name: dataset.coordinate.name,
         coordinate: dataset.coordinate.values,

@@ -391,6 +391,7 @@ pub fn npy_matrix_to_dataset(
             })
             .collect();
         return Ok(DecodedNumericDataset {
+            coordinate_unit: None,
             domain: crate::WaveformDomain::DcSweep,
             coordinate_name: "sample".into(),
             coordinate,
@@ -416,6 +417,7 @@ pub fn npy_matrix_to_dataset(
         })
         .collect();
     Ok(DecodedNumericDataset {
+        coordinate_unit: None,
         domain: crate::WaveformDomain::DcSweep,
         coordinate_name: "sample".into(),
         coordinate,

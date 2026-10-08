@@ -314,6 +314,7 @@ pub fn decode_matlab_v5(
             });
         }
         return Ok(DecodedNumericDataset {
+            coordinate_unit: None,
             domain: crate::WaveformDomain::from_coordinate_name(coordinate_array.name()),
             coordinate_name: coordinate_array.name().to_owned(),
             coordinate,
@@ -361,6 +362,7 @@ pub fn decode_matlab_v5(
         })
         .collect();
     Ok(DecodedNumericDataset {
+        coordinate_unit: None,
         domain: crate::WaveformDomain::DcSweep,
         coordinate_name: "x".into(),
         coordinate,

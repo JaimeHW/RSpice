@@ -8,6 +8,7 @@ use std::io::Cursor;
 pub enum RawReadError {
     Parse(RawParseError),
     NoVariables,
+    Coordinate(String),
 }
 
 impl std::fmt::Display for RawReadError {
@@ -15,6 +16,7 @@ impl std::fmt::Display for RawReadError {
         match self {
             Self::Parse(source) => source.fmt(f),
             Self::NoVariables => f.write_str("rawfile contains no variables"),
+            Self::Coordinate(message) => f.write_str(message),
         }
     }
 }
@@ -23,7 +25,7 @@ impl std::error::Error for RawReadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Parse(source) => Some(source),
-            Self::NoVariables => None,
+            Self::NoVariables | Self::Coordinate(_) => None,
         }
     }
 }
@@ -43,15 +45,16 @@ pub fn decode_spice_raw(
         .unwrap_or_else(|| vec![None; parsed.variables.len()]);
     let domain = coordinate_domain(&parsed, ordinal)?;
     let mut waveforms = parsed.waveforms.into_iter().zip(units).peekable();
-    let (coordinate_name, coordinate) = if ordinal {
+    let (coordinate_name, coordinate, coordinate_unit) = if ordinal {
         let (first, _) = waveforms.peek().ok_or(RawReadError::NoVariables)?;
         (
             "point".to_owned(),
             (0..first.y.len()).map(|index| index as f64).collect(),
+            Some("1".to_owned()),
         )
     } else {
-        let (scale, _) = waveforms.next().ok_or(RawReadError::NoVariables)?;
-        (scale.name, scale.y)
+        let (scale, unit) = waveforms.next().ok_or(RawReadError::NoVariables)?;
+        (scale.name, scale.y, unit)
     };
     let mut signals = Vec::new();
     for (waveform, unit) in waveforms {
@@ -62,12 +65,17 @@ pub fn decode_spice_raw(
             unit,
         });
     }
-    Ok(DecodedNumericDataset {
+    let mut dataset = DecodedNumericDataset {
         domain,
         coordinate_name,
+        coordinate_unit,
         coordinate,
         signals,
-    })
+    };
+    dataset
+        .normalize_coordinate_unit()
+        .map_err(RawReadError::Coordinate)?;
+    Ok(dataset)
 }
 
 fn coordinate_domain(

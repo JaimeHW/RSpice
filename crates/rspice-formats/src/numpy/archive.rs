@@ -261,6 +261,7 @@ pub fn decode_npz(
         });
     }
     Ok(DecodedNumericDataset {
+        coordinate_unit: None,
         domain: crate::WaveformDomain::from_coordinate_name(&coordinate_name),
         coordinate_name,
         coordinate,

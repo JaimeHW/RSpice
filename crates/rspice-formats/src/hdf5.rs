@@ -233,6 +233,7 @@ fn finish_hdf5(decoded: DecodedHdf5, format: &str) -> Result<DecodedNumericDatas
                 Hdf5SectionFamily::Table(domain) => domain,
             };
             Ok(DecodedNumericDataset {
+                coordinate_unit: None,
                 domain,
                 coordinate_name,
                 coordinate,
@@ -247,6 +248,7 @@ fn finish_hdf5(decoded: DecodedHdf5, format: &str) -> Result<DecodedNumericDatas
             let signals = combine_real_imag_columns(columns)
                 .map_err(|error| adapter_error(format, Hdf5ReadFailure::ComplexColumns(error)))?;
             Ok(DecodedNumericDataset {
+                coordinate_unit: None,
                 domain: crate::WaveformDomain::from_coordinate_name(&coordinate_name),
                 coordinate_name,
                 coordinate,

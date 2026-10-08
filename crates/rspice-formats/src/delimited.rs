@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use unit::{EngineeringUnit, UnitDimension};
 
 pub mod layout;
-mod unit;
+pub(crate) mod unit;
 
 /// Limits supplied by the consumer of an already byte-bounded source.
 #[derive(Debug, Clone, Copy)]

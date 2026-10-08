@@ -16,8 +16,61 @@ pub struct DecodedNumericSignal {
 pub struct DecodedNumericDataset {
     pub domain: crate::WaveformDomain,
     pub coordinate_name: String,
+    /// Unit of the coordinate samples; absence is not a dimensionless declaration.
+    pub coordinate_unit: Option<String>,
     pub coordinate: Vec<f64>,
     pub signals: Vec<DecodedNumericSignal>,
+}
+
+impl DecodedNumericDataset {
+    /// Normalize declared engineering coordinates before time/frequency consumers
+    /// use them. Unknown sweep units remain literal; time and frequency require
+    /// a compatible known unit when one is explicitly declared.
+    pub fn normalize_coordinate_unit(&mut self) -> Result<(), String> {
+        use crate::delimited::unit::{EngineeringUnit, UnitDimension};
+        let Some(symbol) = self.coordinate_unit.as_deref() else {
+            return Ok(());
+        };
+        if symbol.trim().is_empty() || symbol.chars().any(char::is_control) {
+            return Err("coordinate unit must be non-empty and control-free".into());
+        }
+        let required = match self.domain {
+            crate::WaveformDomain::Transient => Some(UnitDimension::Time),
+            crate::WaveformDomain::Ac => Some(UnitDimension::Frequency),
+            crate::WaveformDomain::DcSweep => None,
+        };
+        let unit = match EngineeringUnit::parse(symbol) {
+            Ok(unit) => unit,
+            Err(_) if required.is_none() => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if required.is_some_and(|dimension| dimension != unit.dimension) {
+            return Err(format!(
+                "coordinate unit '{symbol}' is incompatible with the analysis domain"
+            ));
+        }
+        let values = self
+            .coordinate
+            .iter()
+            .map(|&value| unit.normalize_binary(value))
+            .collect::<Vec<_>>();
+        for (index, (&before, &after)) in self.coordinate.iter().zip(&values).enumerate() {
+            if !after.is_finite() || unit.lost_nonzero_sample(before, after) {
+                return Err(format!(
+                    "coordinate sample {index} overflows or underflows after unit conversion from '{symbol}'"
+                ));
+            }
+            if index > 0 && before != self.coordinate[index - 1] && after == values[index - 1] {
+                return Err(format!(
+                    "coordinate samples {} and {index} collapse after unit conversion from '{symbol}'",
+                    index - 1
+                ));
+            }
+        }
+        self.coordinate = values;
+        self.coordinate_unit = Some(unit.canonical_symbol().to_owned());
+        Ok(())
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -164,6 +217,60 @@ pub fn stated_coordinate_names(names: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dataset(
+        domain: crate::WaveformDomain,
+        unit: Option<&str>,
+        coordinate: Vec<f64>,
+    ) -> DecodedNumericDataset {
+        DecodedNumericDataset {
+            domain,
+            coordinate_name: "x".into(),
+            coordinate_unit: unit.map(str::to_owned),
+            coordinate,
+            signals: vec![],
+        }
+    }
+
+    #[test]
+    fn coordinate_normalization_preserves_unknown_units_and_signed_zero() {
+        use crate::WaveformDomain::{DcSweep, Transient};
+        for unit in [None, Some("widgets")] {
+            let mut data = dataset(DcSweep, unit, vec![-0.0, 1.0]);
+            data.normalize_coordinate_unit().unwrap();
+            assert_eq!(data.coordinate_unit.as_deref(), unit);
+            assert_eq!(data.coordinate[0].to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(data.coordinate[1], 1.0);
+        }
+        let mut data = dataset(Transient, Some("ns"), vec![-0.0, 2.0]);
+        data.normalize_coordinate_unit().unwrap();
+        assert_eq!(data.coordinate[0].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(data.coordinate[1], 2e-9);
+        assert_eq!(data.coordinate_unit.as_deref(), Some("s"));
+    }
+
+    #[test]
+    fn coordinate_normalization_refuses_incompatible_or_unrepresentable_axes_atomically() {
+        use crate::WaveformDomain::{Ac, DcSweep, Transient};
+        for (domain, unit, values, message) in [
+            (Transient, "mV", vec![0.0, 1.0], "incompatible"),
+            (Ac, "unknown", vec![1.0, 2.0], "unit"),
+            (Ac, "THz", vec![1e308], "overflows or underflows"),
+            (
+                Transient,
+                "fs",
+                vec![f64::from_bits(1)],
+                "overflows or underflows",
+            ),
+            (DcSweep, "degC", vec![0.0, f64::from_bits(1)], "collapse"),
+        ] {
+            let mut data = dataset(domain, Some(unit), values.clone());
+            let error = data.normalize_coordinate_unit().unwrap_err();
+            assert!(error.contains(message), "{error}");
+            assert_eq!(data.coordinate_unit.as_deref(), Some(unit));
+            assert_eq!(data.coordinate, values);
+        }
+    }
 
     #[test]
     fn complex_pairing_preserves_plain_order_sorted_pairs_and_exact_samples() {

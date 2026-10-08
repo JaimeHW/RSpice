@@ -294,6 +294,7 @@ fn finish_columnar_table(
     let signals = crate::numeric::combine_real_imag_columns(columns)
         .map_err(|error| adapter_error(format, ColumnarReadFailure::ComplexColumns(error)))?;
     Ok(crate::numeric::DecodedNumericDataset {
+        coordinate_unit: None,
         domain,
         coordinate_name,
         coordinate,

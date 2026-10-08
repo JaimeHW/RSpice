@@ -53,6 +53,44 @@ fn raw_exports_retain_explicit_signal_units_in_the_application_reader() {
 }
 
 #[test]
+fn raw_coordinates_use_canonical_physical_values_in_the_application_reader() {
+    let dir = test_dir("raw_application_coordinate_units");
+    let source = dir.join("source.json");
+    for (name, kind, unit, canonical, values, expected) in [
+        ("time", "time", "ns", "s", [0.0, 2.0], [0.0, 2e-9]),
+        (
+            "frequency",
+            "frequency",
+            "MHz",
+            "Hz",
+            [1.0, 2.0],
+            [1e6, 2e6],
+        ),
+        ("bias", "current", "mA", "A", [-1.0, 1.0], [-1e-3, 1e-3]),
+        (
+            "temperature",
+            "temperature",
+            "degC",
+            "K",
+            [0.0, 25.0],
+            [273.15, 298.15],
+        ),
+    ] {
+        let data = serde_json::json!({"plot_name":"Coordinate units", "scale":{"name":name,"type":kind,"unit":unit,"values":values}, "signals":[{"name":"out","values":[3.0,4.0]}]});
+        std::fs::write(&source, serde_json::to_vec(&data).unwrap()).unwrap();
+        for format in ["raw", "ascii"] {
+            let output = dir.join(format!("result.{format}"));
+            convert(&source, &output, format);
+            let decoded =
+                decode_spice_raw(&std::fs::read(output).unwrap(), Default::default()).unwrap();
+            assert_eq!(decoded.coordinate, expected, "{name} [{unit}], {format}");
+            assert_eq!(decoded.coordinate_unit.as_deref(), Some(canonical));
+            assert_eq!(decoded.signals[0].real, [3.0, 4.0]);
+        }
+    }
+}
+
+#[test]
 fn coordinate_meaning_precedes_plot_titles_and_signal_complexity() {
     let dir = test_dir("raw_application_domain");
     let source = dir.join("source.json");
