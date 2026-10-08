@@ -7706,6 +7706,9 @@ impl Engine {
                 dev.begin_timestep_iteration();
             }
 
+            // A provisional seed needs bounded Newton recovery, not a window
+            // without integration accuracy checks. Charge/LTE estimators and
+            // order promotion use their own accepted-history readiness below.
             let linearized_startup_recovery_points = matches!(
                 initial_solution_mode,
                 startup::InitialSolutionMode::LinearizedSeed
@@ -9272,34 +9275,31 @@ impl Engine {
             // and transmission-line limits remain independent below.
             let use_ngspice_charge_truncation =
                 Self::uses_ngspice_charge_truncation(&lte_estimator);
-            let bjt_truncation_limit = if use_ngspice_charge_truncation
-                && !linearized_startup_recovery_points
-                && !first_accepted_transient_step
-                && has_bjts
-            {
-                Self::bjt_ngspice_truncation_limit(
-                    &circuit,
-                    &new_solution,
-                    step_time,
-                    TruncationStep {
-                        method: current_method,
-                        trap_order: step_trap_order,
-                        dt,
-                    },
-                    &bjt_history,
-                    &vbic_snapshot_cache,
-                    NgspiceTruncationTolerances {
-                        reltol: transient_lte_reltol,
-                        current_abstol: self.current_abstol(),
-                        charge_abstol: self.charge_abstol(),
-                        trtol: self.transient_trtol(),
-                    },
-                    trial_phase_context,
-                )
-                .filter(|limit| limit.is_finite() && *limit > 0.0)
-            } else {
-                None
-            };
+            let bjt_truncation_limit =
+                if use_ngspice_charge_truncation && !first_accepted_transient_step && has_bjts {
+                    Self::bjt_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        step_time,
+                        TruncationStep {
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            dt,
+                        },
+                        &bjt_history,
+                        &vbic_snapshot_cache,
+                        NgspiceTruncationTolerances {
+                            reltol: transient_lte_reltol,
+                            current_abstol: self.current_abstol(),
+                            charge_abstol: self.charge_abstol(),
+                            trtol: self.transient_trtol(),
+                        },
+                        trial_phase_context,
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let capacitor_truncation_limit = if use_ngspice_charge_truncation
                 && !first_accepted_transient_step
                 && !circuit.capacitors.is_empty()
@@ -9848,13 +9848,12 @@ impl Engine {
                 || legacy_xyce_breakpoint_restart_controls_lte
                 || native_breakpoint_restart_controls_lte
                 || (!lte_estimator.uses_accepted_solution_reference()
-                    && (linearized_startup_recovery_points
-                        || defer_voltage_lte_to_bjt_truncation
+                    && (defer_voltage_lte_to_bjt_truncation
                         || defer_voltage_lte_to_jfet_truncation
                         || defer_voltage_lte_to_mosfet_truncation
                         || defer_voltage_lte_to_ngspice_device_truncation));
             let (lte, lte_accept) = if device_or_startup_controls_lte {
-                // For first/startup recovery points and decks covered by
+                // For the first point after initialization/restart and decks covered by
                 // ngspice device-local truncation (CAPtrunc, MOStrunc,
                 // BJTtrunc, generated compact-model truncation, etc.), a
                 // converged Newton solution at the imposed dt is the
@@ -10995,7 +10994,6 @@ impl Engine {
             total_middle_nanos += middle_phase_start.elapsed().as_nanos();
             let trap_trial_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             let trapezoidal_order_trial = if !first_accepted_transient_step
-                && !linearized_startup_recovery_points
                 && !lte_estimator.uses_accepted_solution_reference()
                 && matches!(
                     current_method,

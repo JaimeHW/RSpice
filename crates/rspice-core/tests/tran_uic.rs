@@ -570,3 +570,50 @@ fn diode_instance_ic_reaches_the_uic_startup_state() {
         "an ordinary .TRAN must ignore the diode IC"
     );
 }
+
+/// With MJE=0 the base/emitter depletion charge is an exact 1 pF capacitor.
+/// IS=1e-30 makes junction conduction negligible throughout this 0.1 V step,
+/// so the independent reference is the 1 ns RC charging law. Tightening LTE
+/// must improve startup itself, including the first 96 accepted intervals.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn uic_bjt_charge_accuracy_improves_with_requested_tolerance() {
+    for method in [
+        IntegrationMethod::BackwardEuler,
+        IntegrationMethod::Trapezoidal,
+        IntegrationMethod::Gear2,
+    ] {
+        for (kind, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
+            let errors = [1e-3, 1e-8].map(|reltol| {
+                let source = Netlist::parse(&format!(
+                    "BJT linear charge UIC\nV1 in 0 {}\nR1 in b 1k\nQ1 0 b 0 qm\n.model qm {kind}(IS=1e-30 BF=100 CJE=1p MJE=0)\n.options TEMP=27 GMIN=0 RELTOL={reltol} ABSTOL=1e-18 VNTOL=1e-10 CHGTOL=1e-24\n.end\n",
+                    sign * 0.1,
+                ))
+                .unwrap();
+                let mut config = SimulationConfig {
+                    integration_method: method,
+                    ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice)
+                };
+                config.convergence_config.gmin_target = 0.0;
+                let result = Engine::new(config)
+                    .run_tran_with_startup_mode(&source, 4e-9, 100e-12, TransientStartupMode::Uic)
+                    .unwrap();
+                assert_eq!(result.time.last(), Some(&4e-9));
+                let voltage = result.try_voltage_waveform_named("b").unwrap();
+                assert!(voltage.iter().all(|value| value.is_finite()));
+                result
+                    .time
+                    .iter()
+                    .zip(voltage)
+                    .map(|(&time, &value)| (sign * value + 0.1 * (-time / 1e-9).exp_m1()).abs())
+                    .fold(0.0, f64::max)
+            });
+            // Global waveform error is distinct from the local LTE tolerance.
+            // Both an absolute bound and refinement must hold over the full run.
+            assert!(
+                errors[1] < 1e-5 && errors[1] < errors[0] / 20.0,
+                "{method:?}/{kind}: loose/tight maximum errors {errors:?}"
+            );
+        }
+    }
+}

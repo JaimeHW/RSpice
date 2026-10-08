@@ -277,14 +277,12 @@ impl Engine {
     /// A t=0 transient-mode state derived from a converged DC solution, when
     /// the sources differ between DC and t=0.
     ///
-    /// The mode says how the seed was reached, and it matters: the first 96
-    /// accepted points of a `LinearizedSeed` run skip device charge
-    /// truncation and the order-two trial, so mislabelling a converged
-    /// nonlinear solve as linearized costs a third of a switching deck its
-    /// second-order integration. A seed that Newton converged on the
-    /// transient-mode equations is `DcOperatingPoint`, the same standing as
-    /// the DC solution it started from; only the warmup from a linear presolve
-    /// is `LinearizedSeed`.
+    /// The mode selects bounded Newton recovery for linearized seeds. A seed
+    /// that Newton converged on the transient-mode equations is
+    /// `DcOperatingPoint`, the same standing as the DC solution it started
+    /// from; only the warmup from a linear presolve is `LinearizedSeed`.
+    /// Integration error control and order promotion use accepted-history
+    /// readiness independently of this convergence policy.
     fn t0_transient_seed_after_dc_fallback(
         &self,
         circuit: &mut crate::circuit::CircuitData,
