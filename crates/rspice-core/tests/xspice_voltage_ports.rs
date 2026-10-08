@@ -228,3 +228,81 @@ fn vector_voltage_selection_preserves_neighboring_current_outputs() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn differential_vector_voltage_controls_preserve_both_terminals() {
+    for (input, p_gain, n_gain) in [
+        ("%vd[p n]", 2.0, -2.0),
+        ("%vd[n p]", -2.0, 2.0),
+        ("%vd[0 n]", 0.0, -2.0),
+        ("%vd[p 0]", 2.0, 0.0),
+    ] {
+        for (output, output_scale) in [
+            ("out", 1.0),
+            ("%vd[0 out]", -1.0),
+            ("%id[out 0]", -2.0),
+            ("%id[0 out]", 2.0),
+        ] {
+            for (p_ac, n_ac) in [(1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+                let netlist = Netlist::parse(&format!(
+                    "Differential vector control\nVP p 0 DC 2 AC {p_ac}\nVN n 0 DC 1 AC {n_ac}\nA1 [{input}] {output} poly\n.model poly spice2poly(coef=[0 2])\nRLOAD out 0 2\n.end\n"
+                )).unwrap();
+                let engine = Engine::default();
+                let op = engine.run_dc_op(&netlist).unwrap();
+                let out = op
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                let expected = output_scale * (2.0 * p_gain + n_gain);
+                assert!(
+                    (op.node_voltages[out] - expected).abs() < 1e-9,
+                    "{input}, {output}: expected {expected}, {op:?}"
+                );
+                let expected_ac = output_scale * (p_gain * p_ac + n_gain * n_ac);
+                for ac in engine.run_ac(&netlist, &[1.0, 1e6]).unwrap() {
+                    let out = ac
+                        .node_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("out"))
+                        .unwrap();
+                    assert!(
+                        (ac.voltages[out].re - expected_ac).abs() < 1e-9
+                            && ac.voltages[out].im.abs() < 1e-9,
+                        "{input}, {output}, AC({p_ac}, {n_ac}): expected {expected_ac}, {ac:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn mixed_voltage_vector_controls_follow_transient_inputs() {
+    // 2*p + 3*(n-p) + 4*(0-n) = -p-n. Each vector entry retains
+    // its own derivative and terminal orientation, including ground.
+    for (output, output_scale) in [("out", 1.0), ("%id[out 0]", -2.0)] {
+        let netlist = Netlist::parse(&format!(
+            "Mixed vector controls\nVP p 0 PWL(0 2 1u 4)\nVN n 0 PWL(0 1 0.5u 3 1u 3)\nA1 [p %vd[n p] %vd[0 n]] {output} poly\n.model poly spice2poly(coef=[0 2 3 4])\nRLOAD out 0 2\n.end\n"
+        )).unwrap();
+        let result = Engine::default().run_tran(&netlist, 1e-6, 5e-8).unwrap();
+        let out = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!(result.time.len() > 10);
+        assert!((result.time.last().unwrap() - 1e-6).abs() < 1e-15);
+        for (time, value) in result.time.iter().zip(&result.voltages[out]) {
+            let p = 2.0 + 2.0 * (time / 1e-6).min(1.0);
+            let n = 1.0 + 2.0 * (time / 0.5e-6).min(1.0);
+            let expected = output_scale * (-p - n);
+            assert!(
+                (value - expected).abs() < 1e-7,
+                "{output}: t={time}, expected {expected}, actual {value}"
+            );
+        }
+    }
+}

@@ -582,15 +582,20 @@ pub enum AnalogInputConnection {
 }
 
 impl AnalogInputConnection {
+    /// Terminals whose difference supplies a voltage control sample.
+    pub(crate) fn voltage_control_nodes(&self) -> Option<(usize, usize)> {
+        match self {
+            Self::Node(node) => Some((*node, 0)),
+            Self::Differential(pos, neg) | Self::VoltageOutput { pos, neg } => Some((*pos, *neg)),
+            _ => None,
+        }
+    }
+
     /// Terminals of an analog output; branch-current inputs have no output terminals.
     pub(crate) fn output_nodes(&self) -> Option<(usize, usize)> {
         match self {
-            Self::Node(node) => Some((*node, 0)),
-            Self::Differential(pos, neg)
-            | Self::VoltageOutput { pos, neg }
-            | Self::CurrentOutput { pos, neg }
-            | Self::Hybrid { pos, neg, .. } => Some((*pos, *neg)),
-            _ => None,
+            Self::CurrentOutput { pos, neg } | Self::Hybrid { pos, neg, .. } => Some((*pos, *neg)),
+            _ => self.voltage_control_nodes(),
         }
     }
 

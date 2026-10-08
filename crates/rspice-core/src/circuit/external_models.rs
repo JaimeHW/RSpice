@@ -2017,10 +2017,13 @@ impl CircuitData {
                                 num_nodes + branch_ordinal - 1,
                                 -partial,
                             );
-                        } else if let Some(node) = element.primary_node()
-                            && node > 0
-                        {
-                            add_matrix_if_present(matrix, branch_row, node - 1, -partial);
+                        } else if let Some((pos, neg)) = element.voltage_control_nodes() {
+                            if pos > 0 {
+                                add_matrix_if_present(matrix, branch_row, pos - 1, -partial);
+                            }
+                            if neg > 0 {
+                                add_matrix_if_present(matrix, branch_row, neg - 1, partial);
+                            }
                         }
                     }
                 }
@@ -2126,10 +2129,25 @@ impl CircuitData {
                                 num_nodes + branch_ordinal - 1,
                                 partial,
                             );
-                        } else if let Some(node) = element.primary_node()
-                            && node > 0
-                        {
-                            stamp_current_control_column(matrix, pos, neg, node - 1, partial);
+                        } else if let Some((ctrl_pos, ctrl_neg)) = element.voltage_control_nodes() {
+                            if ctrl_pos > 0 {
+                                stamp_current_control_column(
+                                    matrix,
+                                    pos,
+                                    neg,
+                                    ctrl_pos - 1,
+                                    partial,
+                                );
+                            }
+                            if ctrl_neg > 0 {
+                                stamp_current_control_column(
+                                    matrix,
+                                    pos,
+                                    neg,
+                                    ctrl_neg - 1,
+                                    -partial,
+                                );
+                            }
                         }
                     }
                 }

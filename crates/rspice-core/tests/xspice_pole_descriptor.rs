@@ -431,3 +431,20 @@ fn table_poles_include_all_controls_and_selected_output_types() {
         assert_feedback_pole(&netlist, bias, -1.0 - slope);
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn differential_vector_feedback_poles_include_the_negative_control_terminal() {
+    for (ports, gain) in [("[%vd[ref x]] drive", 2), ("[%vd[x ref]] drive", -2)] {
+        assert_feedback_pole(
+            &voltage_feedback(
+                &format!("spice2poly(coef=[0 {gain}])"),
+                ports,
+                "VREF ref 0 3\n",
+                2.0,
+            ),
+            2.0,
+            -4.0,
+        );
+    }
+}

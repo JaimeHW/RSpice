@@ -1132,11 +1132,14 @@ impl Engine {
                             push_current_control_row(triplets, branch, 0, pos, neg);
                             continue;
                         }
-                        if let Some(node) = element.primary_node()
-                            && node > 0
-                        {
-                            push_current_control_column(triplets, pos, neg, node - 1);
-                            push_current_control_row(triplets, node, 0, pos, neg);
+                        if let Some((ctrl_pos, ctrl_neg)) = element.voltage_control_nodes() {
+                            if ctrl_pos > 0 {
+                                push_current_control_column(triplets, pos, neg, ctrl_pos - 1);
+                            }
+                            if ctrl_neg > 0 {
+                                push_current_control_column(triplets, pos, neg, ctrl_neg - 1);
+                            }
+                            push_current_control_row(triplets, ctrl_pos, ctrl_neg, pos, neg);
                         }
                     }
                 }
@@ -1258,10 +1261,13 @@ impl Engine {
                             triplets.push((br_idx, branch - 1, 0.0));
                             continue;
                         }
-                        if let Some(node) = element.primary_node()
-                            && node > 0
-                        {
-                            triplets.push((br_idx, node - 1, 0.0));
+                        if let Some((pos, neg)) = element.voltage_control_nodes() {
+                            if pos > 0 {
+                                triplets.push((br_idx, pos - 1, 0.0));
+                            }
+                            if neg > 0 {
+                                triplets.push((br_idx, neg - 1, 0.0));
+                            }
                         }
                     }
                 }
