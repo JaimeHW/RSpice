@@ -20,26 +20,32 @@ use impulses::{PublishedCurrentImpulses, PublishedVoltageImpulses};
 /// oldest undisplayed point is replaced by newer evidence; terminal retention
 /// remains lossless and atomically replaces the live document.
 const MAX_PENDING_LIVE_TRANSIENT_SAMPLES: usize = 8_192;
+const MAX_PENDING_LIVE_EVENT_POINTS: usize = 8_192;
+fn event_delivery_complete_default() -> bool {
+    true
+}
 
 /// One fully accepted transient point published by the engine while the
 /// producing analysis is still running. Only retained analog traces are
 /// included, so the message is compact and has the same names as the final
 /// result conversion.
 ///
-/// The event fields carry only the nodes whose committed value differs from
-/// the one this run last published. The engine reports its whole committed
-/// event state at every accepted point, which for a settled net is the same
-/// value thousands of times over; a live message that repeated it would cost
-/// a name and a number per node per step to say nothing.
+/// Event fields carry newly accepted transitions on their own time axes.
+/// Legacy endpoint-only producers are change-compressed at the sample time.
+/// Delivery limits are explicit, so a preview cannot imply continuous history
+/// after an event was dropped.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransientSampleDelta {
+    /// False means live event history lost data; terminal retention is unaffected.
+    #[serde(default = "event_delivery_complete_default")]
+    pub event_delivery_complete: bool,
     pub time: f64,
     pub waveforms: Vec<TransientWaveformSample>,
-    /// Digital event nodes that changed at this accepted time.
+    /// Digital changes accepted by this sample, with independent timestamps.
     #[serde(default)]
     pub events: Vec<TransientDigitalEventSample>,
-    /// Real-valued event nodes that changed at this accepted time.
+    /// Real-valued changes accepted by this sample, with independent timestamps.
     #[serde(default)]
     pub real_events: Vec<TransientRealEventSample>,
     /// The run's digital bus declarations, published once.
@@ -78,10 +84,13 @@ pub struct TransientWaveformSample {
     pub y_unit: String,
 }
 
-/// One digital event node's newly committed value at an accepted point.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// One digital event node's newly committed value.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransientDigitalEventSample {
+    /// Physical event time; omitted legacy messages use the enclosing sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_s: Option<f64>,
     pub name: String,
     /// XSPICE 12-state event code, the same encoding the terminal result's
     /// event evidence carries.
@@ -92,6 +101,9 @@ pub struct TransientDigitalEventSample {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransientRealEventSample {
+    /// Physical event time; omitted legacy messages use the enclosing sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_s: Option<f64>,
     pub name: String,
     pub value: f64,
 }
@@ -169,7 +181,7 @@ impl LiveTransientPublisher {
                 y_unit: "A".to_owned(),
             });
         }
-        let (events, real_events) = self.changed_event_values(&sample);
+        let (events, real_events, event_delivery_complete) = self.changed_event_values(&sample);
         let buses = self.declared_buses(&sample);
         let current_impulses = match self.published_events.lock() {
             Ok(mut published) => published.currents.publish(&sample),
@@ -180,6 +192,7 @@ impl LiveTransientPublisher {
             Err(poisoned) => poisoned.into_inner().voltages.publish(&sample),
         };
         let delta = TransientSampleDelta {
+            event_delivery_complete,
             time,
             waveforms,
             events,
@@ -214,6 +227,7 @@ struct PublishedEventValues {
     real: std::collections::HashMap<rspice_core::NodeId, u64>,
     /// Whether this run has already published its bus declarations.
     buses: bool,
+    events_lost: bool,
 }
 
 /// The netlist name of an event node, or `None` when the node table does not
@@ -250,45 +264,81 @@ impl LiveTransientPublisher {
     ) -> (
         Vec<TransientDigitalEventSample>,
         Vec<TransientRealEventSample>,
+        bool,
     ) {
-        if sample.digital_values.is_empty() && sample.real_values.is_empty() {
-            return (Vec::new(), Vec::new());
-        }
+        use rspice_core::abort_signal::{TransientEventChange, TransientEventValue};
+        let Some(&endpoint) = sample.time.last() else {
+            return (Vec::new(), Vec::new(), true);
+        };
         let mut published = match self.published_events.lock() {
             Ok(published) => published,
             Err(poisoned) => poisoned.into_inner(),
         };
         let mut events = Vec::new();
-        for &(node, code) in sample.digital_values {
-            let Some(name) = event_node_name(sample.node_names, node) else {
-                continue;
-            };
-            if published.digital.insert(node, code.0) == Some(code.0) {
-                continue;
-            }
-            events.push(TransientDigitalEventSample {
-                name: name.to_owned(),
-                value_code: code.0,
-            });
-        }
         let mut real_events = Vec::new();
-        for &(node, value) in sample.real_values {
-            let Some(name) = event_node_name(sample.node_names, node) else {
-                continue;
+        let mut publish = |change: TransientEventChange| {
+            let Some(name) = event_node_name(sample.node_names, change.node) else {
+                return;
             };
-            // Compared as bits so the record is an exact account of what was
-            // published: two values that are not equal as floats are never
-            // treated as the same reported value.
-            let bits = value.to_bits();
-            if published.real.insert(node, bits) == Some(bits) {
-                continue;
+            if !change.time.is_finite() || change.time < 0.0 || change.time > endpoint {
+                published.events_lost = true;
+                return;
             }
-            real_events.push(TransientRealEventSample {
-                name: name.to_owned(),
-                value,
-            });
+            if events.len() + real_events.len() >= MAX_PENDING_LIVE_EVENT_POINTS {
+                published.events_lost = true;
+                return;
+            }
+            match change.value {
+                TransientEventValue::Digital(code) => {
+                    if code.0 > 12 {
+                        published.events_lost = true;
+                        return;
+                    }
+                    if published.digital.insert(change.node, code.0) != Some(code.0) {
+                        events.push(TransientDigitalEventSample {
+                            time_s: Some(change.time),
+                            name: name.to_owned(),
+                            value_code: code.0,
+                        });
+                    }
+                }
+                TransientEventValue::Real(value) => {
+                    if !value.is_finite() {
+                        published.events_lost = true;
+                        return;
+                    }
+                    if published.real.insert(change.node, value.to_bits()) != Some(value.to_bits())
+                    {
+                        real_events.push(TransientRealEventSample {
+                            time_s: Some(change.time),
+                            name: name.to_owned(),
+                            value,
+                        });
+                    }
+                }
+            }
+        };
+        if let Some(changes) = sample.event_changes {
+            for &change in changes {
+                publish(change);
+            }
+        } else {
+            for &(node, code) in sample.digital_values {
+                publish(TransientEventChange {
+                    time: endpoint,
+                    node,
+                    value: TransientEventValue::Digital(code),
+                });
+            }
+            for &(node, value) in sample.real_values {
+                publish(TransientEventChange {
+                    time: endpoint,
+                    node,
+                    value: TransientEventValue::Real(value),
+                });
+            }
         }
-        (events, real_events)
+        (events, real_events, !published.events_lost)
     }
 
     /// The run's bus declarations, the first time they can be stated.
@@ -362,6 +412,7 @@ mod tests {
             LiveTransientPublisher::observe(
                 &signal,
                 rspice_core::abort_signal::TransientSample {
+                    event_changes: None,
                     time: &[0.0, index as f64],
                     node_names: &[],
                     node_voltages: &[],
@@ -422,6 +473,7 @@ mod tests {
         LiveTransientPublisher::observe(
             &signal,
             rspice_core::abort_signal::TransientSample {
+                event_changes: None,
                 time: &result.time,
                 node_names: &result.node_names,
                 node_voltages: &result.voltages,
@@ -462,6 +514,7 @@ mod tests {
                        digital: &[(rspice_core::NodeId, DigitalEventCode)],
                        real: &[(rspice_core::NodeId, f64)]| {
             signal.observe(TransientSample {
+                event_changes: None,
                 time,
                 node_names: &node_names,
                 node_voltages: &voltages,
@@ -498,10 +551,12 @@ mod tests {
             queued[0].events,
             vec![
                 TransientDigitalEventSample {
+                    time_s: Some(0.0),
                     name: "clk".to_owned(),
                     value_code: 0,
                 },
                 TransientDigitalEventSample {
+                    time_s: Some(0.0),
                     name: "d".to_owned(),
                     value_code: 12,
                 },
@@ -510,6 +565,7 @@ mod tests {
         assert_eq!(
             queued[0].real_events,
             vec![TransientRealEventSample {
+                time_s: Some(0.0),
                 name: "vsense".to_owned(),
                 value: 1.5,
             }]
@@ -523,6 +579,7 @@ mod tests {
         assert_eq!(
             queued[2].events,
             vec![TransientDigitalEventSample {
+                time_s: Some(2.0e-9),
                 name: "clk".to_owned(),
                 value_code: 1,
             }]
@@ -534,12 +591,110 @@ mod tests {
     }
 
     #[test]
+    fn live_event_changes_keep_every_physical_time_and_report_queue_loss() {
+        use rspice_core::abort_signal::{
+            DigitalEventCode, TransientEventChange, TransientEventValue, TransientSample,
+        };
+        let queue = Arc::new(Mutex::new(LiveTransientQueue::default()));
+        let publisher = LiveTransientPublisher::new(Some(queue.clone()), None);
+        let names = vec!["q".into(), "r".into(), "excluded".into()];
+        let changes: Vec<_> = (0..4)
+            .flat_map(|index| {
+                [
+                    TransientEventChange {
+                        time: index as f64 * 0.25,
+                        node: 1,
+                        value: TransientEventValue::Digital(DigitalEventCode((index % 2) as u8)),
+                    },
+                    TransientEventChange {
+                        time: index as f64 * 0.25,
+                        node: 2,
+                        value: TransientEventValue::Real(index as f64),
+                    },
+                ]
+            })
+            .collect();
+        publisher.observe(TransientSample {
+            time: &[1.0],
+            node_names: &names,
+            node_voltages: &[],
+            branch_names: &[],
+            branch_currents: &[],
+            current_impulses: None,
+            voltage_impulses: None,
+            event_changes: Some(&changes),
+            digital_values: &[(1, DigitalEventCode(1)), (3, DigitalEventCode(1))],
+            real_values: &[(2, 3.0)],
+            digital_buses: &[],
+        });
+        let delivered = queue.lock().unwrap().drain().remove(0);
+        assert!(delivered.event_delivery_complete);
+        assert_eq!(
+            delivered
+                .events
+                .iter()
+                .map(|event| (event.time_s.unwrap(), event.value_code))
+                .collect::<Vec<_>>(),
+            vec![(0.0, 0), (0.25, 1), (0.5, 0), (0.75, 1)]
+        );
+        assert_eq!(
+            delivered
+                .real_events
+                .iter()
+                .map(|event| (event.time_s.unwrap(), event.value))
+                .collect::<Vec<_>>(),
+            vec![(0.0, 0.0), (0.25, 1.0), (0.5, 2.0), (0.75, 3.0)]
+        );
+        assert!(
+            delivered.events.iter().all(|event| event.name == "q"),
+            "the unretained snapshot must not leak into live history"
+        );
+        let wire = serde_json::to_string(&delivered).unwrap();
+        assert_eq!(
+            serde_json::from_str::<TransientSampleDelta>(&wire).unwrap(),
+            delivered
+        );
+        let legacy: TransientDigitalEventSample =
+            serde_json::from_str(r#"{"name":"q","value_code":1}"#).unwrap();
+        assert_eq!(legacy.time_s, None);
+
+        let mut queue = LiveTransientQueue::default();
+        for batch in 0..2 {
+            let mut message = delivered.clone();
+            message.time = (batch + 1) as f64 * 5000.0;
+            message.real_events.clear();
+            message.events = (0..5000)
+                .map(|index| TransientDigitalEventSample {
+                    time_s: Some((batch * 5000 + index) as f64),
+                    name: "q".into(),
+                    value_code: (index % 2) as u8,
+                })
+                .collect();
+            queue.push(message);
+        }
+        let retained = queue.drain();
+        assert_eq!(
+            retained.len(),
+            1,
+            "event point capacity bounds batches independently of analog point count"
+        );
+        assert!(
+            !retained[0].event_delivery_complete,
+            "lost transitions must not look like complete delivery"
+        );
+        queue.clear();
+        queue.push(delivered);
+        assert!(queue.drain()[0].event_delivery_complete);
+    }
+
+    #[test]
     fn live_transient_queue_is_bounded_for_suspended_ui_consumers() {
         let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         for index in 0..MAX_PENDING_LIVE_TRANSIENT_SAMPLES + 17 {
             push_live_transient_sample(
                 &samples,
                 TransientSampleDelta {
+                    event_delivery_complete: true,
                     voltage_impulses: None,
                     current_impulses: None,
                     time: index as f64,

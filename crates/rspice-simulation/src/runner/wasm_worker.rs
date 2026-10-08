@@ -582,6 +582,10 @@ mod browser {
                     .map_err(|error| error.to_string())
             });
         let Ok(sample) = sample else {
+            match samples.lock() {
+                Ok(mut queue) => queue.mark_event_delivery_lost(),
+                Err(poisoned) => poisoned.into_inner().mark_event_delivery_lost(),
+            }
             web_sys::console::warn_1(&JsValue::from_str(
                 "Ignoring malformed simulation worker transient sample message",
             ));

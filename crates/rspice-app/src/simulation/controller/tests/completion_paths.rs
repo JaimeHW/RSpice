@@ -1239,6 +1239,7 @@ fn live_current_impulses_reach_a_charge_only_preview_and_survive_bad_analog_colu
 #[test]
 fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
     let sample = |time, waveforms: &[(&str, f64)]| TransientSampleDelta {
+        event_delivery_complete: true,
         voltage_impulses: None,
         current_impulses: None,
         time,
@@ -1280,6 +1281,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
 
     let delta =
         |time: f64, events: &[(&str, u8)], real_events: &[(&str, f64)]| TransientSampleDelta {
+            event_delivery_complete: true,
             voltage_impulses: None,
             current_impulses: None,
             time,
@@ -1291,6 +1293,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
             events: events
                 .iter()
                 .map(|(name, value_code)| TransientDigitalEventSample {
+                    time_s: None,
                     name: (*name).to_owned(),
                     value_code: *value_code,
                 })
@@ -1298,6 +1301,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
             real_events: real_events
                 .iter()
                 .map(|(name, value)| TransientRealEventSample {
+                    time_s: None,
                     name: (*name).to_owned(),
                     value: *value,
                 })
@@ -1375,16 +1379,101 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
 }
 
 #[test]
+fn live_transient_accumulator_keeps_event_times_and_stops_at_delivery_gaps() {
+    use rspice_simulation::live_transient::{TransientDigitalEventSample, TransientRealEventSample};
+    let message = TransientSampleDelta {
+        time: 1.0,
+        event_delivery_complete: true,
+        waveforms: vec![rspice_simulation::live_transient::TransientWaveformSample {
+            name: "invalid analog".into(),
+            value: f64::NAN,
+            y_unit: "V".into(),
+        }],
+        events: vec![
+            TransientDigitalEventSample {
+                time_s: Some(0.125),
+                name: "q".into(),
+                value_code: 0,
+            },
+            TransientDigitalEventSample {
+                time_s: Some(0.25),
+                name: "q".into(),
+                value_code: 1,
+            },
+            TransientDigitalEventSample {
+                time_s: Some(0.375),
+                name: "q".into(),
+                value_code: 0,
+            },
+        ],
+        real_events: vec![
+            TransientRealEventSample {
+                time_s: Some(0.125),
+                name: "r".into(),
+                value: 1.0,
+            },
+            TransientRealEventSample {
+                time_s: Some(0.375),
+                name: "r".into(),
+                value: 2.0,
+            },
+        ],
+        buses: vec![],
+        current_impulses: None,
+        voltage_impulses: None,
+    };
+    let mut accumulator = LiveTransientAccumulator::default();
+    accumulator.ingest(vec![message.clone()]);
+    let before = accumulator.event_payload(AnalysisType::Transient).unwrap();
+    let AnalysisResultPayload::TransientEvents {
+        digital_traces,
+        real_traces,
+        ..
+    } = &before
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        digital_traces[0]
+            .points
+            .iter()
+            .map(|point| point.time_s)
+            .collect::<Vec<_>>(),
+        vec![0.125, 0.25, 0.375]
+    );
+    assert_eq!(
+        real_traces[0]
+            .points
+            .iter()
+            .map(|point| point.time_s)
+            .collect::<Vec<_>>(),
+        vec![0.125, 0.375]
+    );
+    let mut lost = message.clone();
+    lost.time = 2.0;
+    lost.event_delivery_complete = false;
+    accumulator.ingest(vec![lost, message]);
+    assert!(accumulator.take_event_loss_notice());
+    assert!(!accumulator.take_event_loss_notice());
+    assert_eq!(
+        accumulator.event_payload(AnalysisType::Transient),
+        Some(before)
+    );
+}
+
+#[test]
 fn live_transient_accumulator_bounds_the_provisional_event_history() {
     use rspice_simulation::live_transient::TransientDigitalEventSample;
 
     let deltas = (0..LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS + 64)
         .map(|index| TransientSampleDelta {
+            event_delivery_complete: true,
             voltage_impulses: None,
             current_impulses: None,
             time: index as f64,
             waveforms: Vec::new(),
             events: vec![TransientDigitalEventSample {
+                time_s: None,
                 name: "clk".to_owned(),
                 value_code: (index % 2) as u8,
             }],
@@ -1422,6 +1511,7 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
     let mut accumulator = LiveTransientAccumulator::default();
     let deltas = (0..LiveTransientAccumulator::MAX_SOURCE_SAMPLES + 1)
         .map(|index| TransientSampleDelta {
+            event_delivery_complete: true,
             voltage_impulses: None,
             current_impulses: None,
             time: index as f64,

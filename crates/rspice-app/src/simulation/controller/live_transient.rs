@@ -12,6 +12,8 @@ pub(super) struct LiveTransientAccumulator {
     /// The run's declared buses, as the runner published them once.
     digital_buses: Vec<crate::state::DigitalBusEvidence>,
     retained_event_points: usize,
+    events_lost: bool,
+    event_loss_notice: bool,
 }
 
 #[derive(Debug)]
@@ -42,6 +44,19 @@ impl LiveTransientAccumulator {
         self.real_events.clear();
         self.digital_buses.clear();
         self.retained_event_points = 0;
+        self.events_lost = false;
+        self.event_loss_notice = false;
+    }
+
+    fn mark_event_loss(&mut self) {
+        if !self.events_lost {
+            self.event_loss_notice = true;
+        }
+        self.events_lost = true;
+    }
+
+    pub(super) fn take_event_loss_notice(&mut self) -> bool {
+        std::mem::take(&mut self.event_loss_notice)
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -57,9 +72,13 @@ impl LiveTransientAccumulator {
 
     pub(super) fn ingest(&mut self, deltas: Vec<TransientSampleDelta>) {
         for delta in deltas {
+            if !delta.event_delivery_complete {
+                self.mark_event_loss();
+            }
             if !delta.time.is_finite() {
                 self.current_impulses.mark_lost();
                 self.voltage_impulses.mark_lost();
+                self.mark_event_loss();
                 continue;
             }
             // Charge has its own exact time axis; malformed or compacted
@@ -78,6 +97,10 @@ impl LiveTransientAccumulator {
                     self.voltage_impulses.mark_lost();
                 }
             }
+            if !self.events_lost {
+                self.ingest_events(delta.time, delta.events, delta.real_events);
+                self.ingest_buses(delta.buses);
+            }
             let mut samples = HashMap::with_capacity(delta.waveforms.len());
             let mut malformed = false;
             for sample in delta.waveforms {
@@ -93,11 +116,6 @@ impl LiveTransientAccumulator {
             if malformed {
                 continue;
             }
-            // Events are per-node timelines, not columns of the shared analog
-            // grid, so they are kept whenever the message itself is sound.
-            // The alignment rule below governs only the grid.
-            self.ingest_events(delta.time, delta.events, delta.real_events);
-            self.ingest_buses(delta.buses);
             if samples.is_empty() {
                 continue;
             }
@@ -147,12 +165,18 @@ impl LiveTransientAccumulator {
     /// stale message cannot corrupt the nodes beside it.
     fn ingest_events(
         &mut self,
-        time: f64,
+        endpoint: f64,
         digital: Vec<TransientDigitalEventSample>,
         real: Vec<TransientRealEventSample>,
     ) {
         for event in digital {
+            let time = event.time_s.unwrap_or(endpoint);
+            if !time.is_finite() || time < 0.0 || time > endpoint {
+                self.mark_event_loss();
+                return;
+            }
             if self.retained_event_points >= Self::MAX_LIVE_EVENT_POINTS {
+                self.mark_event_loss();
                 return;
             }
             // The typed decoder is the bound: a code is one of the thirteen
@@ -191,7 +215,13 @@ impl LiveTransientAccumulator {
             self.retained_event_points += 1;
         }
         for event in real {
+            let time = event.time_s.unwrap_or(endpoint);
+            if !time.is_finite() || time < 0.0 || time > endpoint {
+                self.mark_event_loss();
+                return;
+            }
             if self.retained_event_points >= Self::MAX_LIVE_EVENT_POINTS {
+                self.mark_event_loss();
                 return;
             }
             if event.name.trim().is_empty() || !event.value.is_finite() {

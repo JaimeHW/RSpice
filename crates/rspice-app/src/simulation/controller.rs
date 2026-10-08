@@ -1295,6 +1295,11 @@ impl SimulationController {
         if !self.current_save_policy.live_streaming_enabled() {
             return;
         }
+        if self.live_transient.take_event_loss_notice() {
+            state.push_sim_message(ConsoleMessage::warning(
+                "Live event preview stopped because some event data could not be retained or delivered. The preview ends at its last complete point. Final results use the solver's retained event history.",
+            ));
+        }
         let Some(provenance) = self.current_provenance.clone() else {
             log::error!("Accepted transient samples have no prepared-task provenance");
             return;

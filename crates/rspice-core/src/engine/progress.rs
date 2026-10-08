@@ -129,6 +129,7 @@ mod tests {
         ));
         assert_eq!(stage.abort_reason(), AbortReason::TimeLimit);
         stage.observe_transient_sample(TransientSample {
+            event_changes: None,
             time: &[0.5],
             node_names: &[],
             node_voltages: &[],

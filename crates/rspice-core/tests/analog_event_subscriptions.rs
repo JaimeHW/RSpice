@@ -2,6 +2,25 @@
 //! Analog occurrences wake digital processes in the unified circuit transaction.
 use rspice_core::{Engine, Netlist};
 use rspice_core::engine::TransientResult;
+#[derive(Default)]
+struct AcceptedEvents(
+    std::sync::Mutex<Vec<(String, rspice_core::abort_signal::TransientEventChange)>>,
+);
+impl rspice_core::abort_signal::AbortSignal for AcceptedEvents {
+    fn is_aborted(&self) -> bool {
+        false
+    }
+    fn observe_transient_sample(&self, sample: rspice_core::abort_signal::TransientSample<'_>) {
+        let changes = sample
+            .event_changes
+            .expect("engine provides accepted event history");
+        let mut events = self.0.lock().unwrap();
+        for &change in changes {
+            assert!(change.time <= *sample.time.last().unwrap());
+            events.push((sample.node_names[change.node - 1].clone(), change));
+        }
+    }
+}
 struct Source(std::path::PathBuf);
 impl Source {
     fn new(text: &str) -> Self {
@@ -922,7 +941,10 @@ endmodule
         source.path(), source.path()
     ))
     .unwrap();
-    let result = Engine::default().run_tran(&deck, 1.1e-9, 400e-12).unwrap();
+    let captured = AcceptedEvents::default();
+    let result = Engine::default()
+        .run_tran_with_abort(&deck, 1.1e-9, 400e-12, &captured)
+        .unwrap();
     assert!(
         result
             .time
@@ -932,6 +954,27 @@ endmodule
         result.time
     );
     let real = result.real_trace_named("r").unwrap();
+    let published = captured.0.lock().unwrap();
+    let live: Vec<_> = published
+        .iter()
+        .filter_map(|(name, change)| {
+            if !name.eq_ignore_ascii_case("r") {
+                return None;
+            }
+            match change.value {
+                rspice_core::abort_signal::TransientEventValue::Real(value) => {
+                    Some((change.time, value))
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    assert_eq!(
+        live,
+        real.iter()
+            .map(|point| (point.time, point.value))
+            .collect::<Vec<_>>()
+    );
     let changes: Vec<_> = real.iter().filter(|point| point.time > 20e-12).collect();
     assert_eq!(changes.len(), 8, "{real:?}");
     for (index, point) in changes.iter().enumerate() {
@@ -1000,9 +1043,33 @@ endmodule
             "* interpolated HDL/XSPICE timeline\nV1 a 0 PWL(0 0 1n 1)\nXsample a q valid sampler\nAbuf q b buffer\nXreceive a b {returned} valid receiver ADC_DELAY={adc_delay}\n.model buffer d_buffer(rise_delay=17p fall_delay=17p)\n{dac}.va \"{}\" sampler module=sampler\n.va \"{}\" receiver module=receiver\n.end\n",
             source.path(),source.path()
         )).unwrap();
+        let captured = AcceptedEvents::default();
         let result = Engine::default()
-            .run_tran(&deck, 1.1e-9, 400e-12)
+            .run_tran_with_abort(&deck, 1.1e-9, 400e-12, &captured)
             .unwrap_or_else(|error| panic!("physical={physical}: {error}"));
+        let published = captured.0.lock().unwrap();
+        for trace in &result.digital_traces {
+            let live: Vec<_> = published
+                .iter()
+                .filter_map(|(name, change)| {
+                    if name != &trace.node_name {
+                        return None;
+                    }
+                    match change.value {
+                        rspice_core::abort_signal::TransientEventValue::Digital(code) => {
+                            Some((change.time, code.0))
+                        }
+                        _ => None,
+                    }
+                })
+                .collect();
+            let retained: Vec<_> = trace
+                .points
+                .iter()
+                .map(|point| (point.time, point.value.event_code()))
+                .collect();
+            assert_eq!(live, retained, "physical={physical}, {}", trace.node_name);
+        }
         let valid = result
             .digital_traces
             .iter()

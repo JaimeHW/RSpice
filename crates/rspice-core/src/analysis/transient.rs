@@ -1213,8 +1213,10 @@ impl TransientResult {
         digital_values: &'a [(NodeId, crate::abort_signal::DigitalEventCode)],
         digital_buses: &'a [crate::abort_signal::TransientDigitalBus],
         real_values: &'a [(NodeId, Value)],
+        event_changes: Option<&'a [crate::abort_signal::TransientEventChange]>,
     ) -> crate::abort_signal::TransientSample<'a> {
         crate::abort_signal::TransientSample {
+            event_changes,
             time: &self.time,
             node_names: &self.node_names,
             node_voltages: &self.voltages,

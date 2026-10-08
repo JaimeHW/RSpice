@@ -498,6 +498,8 @@ pub struct LiveTransientQueue {
     pub(super) samples: VecDeque<TransientSampleDelta>,
     impulses: CurrentImpulseBuffer,
     voltage_impulses: VoltageImpulseBuffer,
+    event_points: usize,
+    events_lost: bool,
 }
 
 impl LiveTransientQueue {
@@ -505,10 +507,16 @@ impl LiveTransientQueue {
         *self = Self::default();
     }
 
+    /// A transport discarded a message before a typed sample was available.
+    pub fn mark_event_delivery_lost(&mut self) {
+        self.events_lost = true;
+    }
+
     pub fn push(&mut self, mut delta: TransientSampleDelta) {
         if !delta.time.is_finite() {
             self.impulses.mark_lost();
             self.voltage_impulses.mark_lost();
+            self.events_lost = true;
             return;
         }
         if let Some(impulses) = delta.current_impulses.take() {
@@ -525,18 +533,42 @@ impl LiveTransientQueue {
                 self.voltage_impulses.mark_lost();
             }
         }
-        if self.samples.len() >= MAX_PENDING_LIVE_TRANSIENT_SAMPLES {
-            self.samples.pop_front();
+        self.events_lost |= !delta.event_delivery_complete;
+        let count = delta.events.len().saturating_add(delta.real_events.len());
+        if count > super::MAX_PENDING_LIVE_EVENT_POINTS {
+            self.events_lost = true;
+            delta.events.clear();
+            delta.real_events.clear();
         }
+        let count = delta.events.len() + delta.real_events.len();
+        while self.samples.len() >= MAX_PENDING_LIVE_TRANSIENT_SAMPLES
+            || self.event_points.saturating_add(count) > super::MAX_PENDING_LIVE_EVENT_POINTS
+        {
+            let Some(discarded) = self.samples.pop_front() else {
+                break;
+            };
+            let removed = discarded.events.len() + discarded.real_events.len();
+            self.event_points = self.event_points.saturating_sub(removed);
+            self.events_lost |= removed != 0 || !discarded.buses.is_empty();
+        }
+        self.event_points += count;
+        delta.event_delivery_complete &= !self.events_lost;
         self.samples.push_back(delta);
     }
 
     pub fn drain(&mut self) -> Vec<TransientSampleDelta> {
         let mut samples: Vec<_> = self.samples.drain(..).collect();
+        self.event_points = 0;
+        if self.events_lost {
+            for sample in &mut samples {
+                sample.event_delivery_complete = false;
+            }
+        }
         if let Some(impulses) = self.impulses.take_delta() {
             // A separate event-only message preserves the interval even if
             // a later analog sample has no recorded current section.
             samples.push(TransientSampleDelta {
+                event_delivery_complete: true,
                 time: impulses.stop_time_s,
                 waveforms: vec![],
                 events: vec![],
@@ -548,6 +580,7 @@ impl LiveTransientQueue {
         }
         if let Some(impulses) = self.voltage_impulses.take_delta() {
             samples.push(TransientSampleDelta {
+                event_delivery_complete: true,
                 time: impulses.stop_time_s,
                 waveforms: vec![],
                 events: vec![],
@@ -632,6 +665,7 @@ mod tests {
                 .collect(),
         }];
         let sample = rspice_core::abort_signal::TransientSample {
+            event_changes: None,
             time: &[0.0, MAX_CURRENT_POINTS as f64],
             node_names: &[],
             node_voltages: &[],
@@ -678,6 +712,7 @@ mod tests {
                 impulse.traces.clear();
             }
             queue.push(TransientSampleDelta {
+                event_delivery_complete: true,
                 time: index as f64,
                 waveforms: vec![],
                 events: vec![],
@@ -761,6 +796,7 @@ mod tests {
         }];
         let mut publisher = PublishedCurrentImpulses::default();
         let sample = rspice_core::abort_signal::TransientSample {
+            event_changes: None,
             time: &[0.0, MAX_CURRENT_POINTS as f64],
             node_names: &[],
             node_voltages: &[],

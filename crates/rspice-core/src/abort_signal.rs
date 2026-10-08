@@ -107,6 +107,20 @@ pub struct TransientDigitalBus {
     pub members: Vec<crate::NodeId>,
 }
 
+/// An accepted event change on its own physical time axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransientEventChange {
+    pub time: crate::Value,
+    pub node: crate::NodeId,
+    pub value: TransientEventValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TransientEventValue {
+    Digital(DigitalEventCode),
+    Real(crate::Value),
+}
+
 /// One accepted transient sample, borrowed from the analysis result.
 ///
 /// A transient result is stored column-major: `time` gains one entry per
@@ -128,6 +142,11 @@ pub struct TransientDigitalBus {
 /// `digital_traces`. No second table and no lookup allocation is needed.
 #[derive(Debug, Clone, Copy)]
 pub struct TransientSample<'a> {
+    /// Newly retained event points, including changes between analog samples.
+    /// `Some` is authoritative, even when empty. It respects output retention;
+    /// `None` denotes a legacy endpoint-only producer. Rejected trials never
+    /// appear here. The first sample contains the retained initial values.
+    pub event_changes: Option<&'a [TransientEventChange]>,
     /// Accepted time points. The reported sample is the last entry.
     pub time: &'a [crate::Value],
     /// Node names, positionally aligned with `node_voltages`.
@@ -170,11 +189,7 @@ pub struct TransientSample<'a> {
     /// reads it once need not read it again. It is not filtered by output
     /// retention, for the same reason `digital_values` is not.
     ///
-    /// Empty when the run declares no bus — which today is every run: the only
-    /// boundary that could declare one is a Verilog-AMS module's vector
-    /// discrete port, and the engine refuses that port before a run starts, so
-    /// a bus reaches a result only when a frontend or an imported artifact
-    /// declares it after the fact.
+    /// Empty when the elaborated run declares no digital bus.
     pub digital_buses: &'a [TransientDigitalBus],
     /// Committed real-valued event values at this accepted time, sorted by
     /// node id.

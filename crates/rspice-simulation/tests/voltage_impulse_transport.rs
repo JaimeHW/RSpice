@@ -54,6 +54,7 @@ fn live_voltage_suffixes_preserve_exact_events_and_never_replay_points() {
     source[0].derivatives.clear();
     let publish = |source: &[VoltageImpulseTrace], time: &[f64]| {
         publisher.observe(rspice_core::abort_signal::TransientSample {
+            event_changes: None,
             time,
             node_names: &[],
             node_voltages: &[],

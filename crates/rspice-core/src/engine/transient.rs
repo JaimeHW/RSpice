@@ -892,6 +892,7 @@ struct TransientCaptureRequest<'a> {
 /// The snapshot and journal vectors retain their capacity across accepted
 /// points, and the index maps grow only when a node first appears.
 struct TransientEventCapture<'a> {
+    changes: &'a mut Vec<crate::abort_signal::TransientEventChange>,
     points: &'a mut Vec<crate::xspice::event_trace::EventTracePoint>,
     /// Whether this run records event traces at all.
     record_traces: bool,
@@ -2523,6 +2524,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<usize, SimulationError> {
         let TransientEventCapture {
+            changes,
             points,
             record_traces,
             digital_snapshot,
@@ -2533,6 +2535,7 @@ impl Engine {
             retained_event_nodes,
             sample_buses,
         } = events;
+        changes.clear();
         if record_traces {
             use crate::xspice::EventValue;
             use crate::xspice::event_trace::{EventTracePoint, settle_trace_points};
@@ -2572,6 +2575,21 @@ impl Engine {
                         retained_event_nodes,
                     ),
                 };
+                if added != 0 {
+                    use crate::abort_signal::{
+                        DigitalEventCode, TransientEventChange, TransientEventValue,
+                    };
+                    changes.push(TransientEventChange {
+                        time: point.time,
+                        node: point.node,
+                        value: match point.value {
+                            EventValue::Digital(value) => {
+                                TransientEventValue::Digital(DigitalEventCode(value.event_code()))
+                            }
+                            EventValue::Real(value) => TransientEventValue::Real(value),
+                        },
+                    });
+                }
                 retained_result_values = retained_result_values.saturating_add(added);
             }
         }
@@ -2580,6 +2598,7 @@ impl Engine {
             digital_event_codes,
             sample_buses,
             real_snapshot,
+            Some(changes),
         ));
         Ok(retained_result_values)
     }
@@ -5388,6 +5407,7 @@ impl Engine {
                     .map_err(SimulationError::Circuit)?,
             );
         }
+        let mut event_changes = Vec::new();
         let mut event_trace_points = Vec::new();
         circuit.configure_event_traces(if record_xspice_event_traces {
             &capture_plan.event_nodes
@@ -5416,6 +5436,39 @@ impl Engine {
                 &capture_plan.event_nodes,
             );
         }
+        // Initial values use the same retained-node contract as later changes.
+        for &(node, value) in &digital_snapshot {
+            if node > 0
+                && capture_plan
+                    .event_nodes
+                    .get(node - 1)
+                    .copied()
+                    .unwrap_or(false)
+            {
+                event_changes.push(crate::abort_signal::TransientEventChange {
+                    time: resume_time,
+                    node,
+                    value: crate::abort_signal::TransientEventValue::Digital(
+                        crate::abort_signal::DigitalEventCode(value.event_code()),
+                    ),
+                });
+            }
+        }
+        for &(node, value) in &real_snapshot {
+            if node > 0
+                && capture_plan
+                    .event_nodes
+                    .get(node - 1)
+                    .copied()
+                    .unwrap_or(false)
+            {
+                event_changes.push(crate::abort_signal::TransientEventChange {
+                    time: resume_time,
+                    node,
+                    value: crate::abort_signal::TransientEventValue::Real(value),
+                });
+            }
+        }
         let mut retained_result_values = Self::transient_result_value_count(&result);
         if let Some(trace) = integral_trace {
             let mut trace = trace.borrow_mut();
@@ -5434,6 +5487,7 @@ impl Engine {
                 &digital_event_codes,
                 &sample_buses,
                 &real_snapshot,
+                Some(&event_changes),
             ));
         }
         let mut t = resume_time;
@@ -6066,6 +6120,7 @@ impl Engine {
                 &digital_event_codes,
                 &sample_buses,
                 &real_snapshot,
+                Some(&event_changes),
             ));
         }
 
@@ -10692,6 +10747,7 @@ impl Engine {
                         &mut circuit,
                         t,
                         TransientEventCapture {
+                            changes: &mut event_changes,
                             points: &mut event_trace_points,
                             record_traces: record_xspice_event_traces,
                             digital_snapshot: &mut digital_snapshot,
@@ -11278,6 +11334,7 @@ impl Engine {
                 &mut circuit,
                 t,
                 TransientEventCapture {
+                    changes: &mut event_changes,
                     points: &mut event_trace_points,
                     record_traces: record_xspice_event_traces,
                     digital_snapshot: &mut digital_snapshot,
@@ -15244,7 +15301,7 @@ D1 D 0 DMOD
         assert_eq!(compressed.current_impulses, result.current_impulses);
         let expanded = compressed.clone().try_into_transient().unwrap();
         assert_eq!(expanded.current_impulses, result.current_impulses);
-        let live = result.observable_sample(&[], &[], &[]);
+        let live = result.observable_sample(&[], &[], &[], None);
         assert_eq!(live.current_impulses, result.current_impulses.as_deref());
         let mut malformed = compressed.clone();
         malformed.current_impulses.as_mut().unwrap()[0].owner =
