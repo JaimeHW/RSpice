@@ -135,8 +135,12 @@ impl ResultPayload {
                 .iter()
                 .map(NoiseContributionSeries::value_count)
                 .fold(0, usize::saturating_add),
-            Self::Sp(payload) => payload.ports.len().saturating_mul(2),
-            Self::PortNoise(payload) => payload.two_port.len().saturating_mul(5),
+            Self::Sp(payload) => payload
+                .ports
+                .len()
+                .saturating_mul(2)
+                .saturating_add(payload.angular_frequencies.len()),
+            Self::PortNoise(payload) => payload.two_port.len().saturating_mul(6),
             Self::Distortion(payload) => payload
                 .products
                 .iter()
@@ -180,7 +184,13 @@ impl ResultPayload {
                 .statistics
                 .iter()
                 .map(MonteCarloVariableStatistics::value_count)
-                .fold(0, usize::saturating_add),
+                .fold(
+                    payload
+                        .successful_trial_indices
+                        .as_ref()
+                        .map_or(0, Vec::len),
+                    usize::saturating_add,
+                ),
             Self::Pss(payload) => payload.floquet_multipliers.len().saturating_mul(2),
             Self::Pac(payload) => payload.value_count(),
             Self::Pxf(payload) => payload.value_count(),
@@ -2473,6 +2483,7 @@ impl MonteCarloVariableStatistics {
         self.samples
             .len()
             .saturating_add(self.bin_edges.len())
+            .saturating_add(self.histogram.len())
             .saturating_add(4)
     }
 }
@@ -2607,7 +2618,12 @@ impl PacPayload {
         let sidebands = self
             .sidebands
             .iter()
-            .map(|sideband| sideband.absolute_frequencies.len().saturating_mul(2))
+            .map(|sideband| {
+                sideband
+                    .absolute_frequencies
+                    .len()
+                    .saturating_add(sideband.frequency_offsets.len())
+            })
             .fold(0, usize::saturating_add);
         let conversion = self
             .conversion_matrix

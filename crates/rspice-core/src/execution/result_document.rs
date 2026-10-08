@@ -530,7 +530,19 @@ impl AnalysisResultDocument {
 
     /// Total numerical values this document retains, for resource budgets.
     pub fn total_value_count(&self) -> usize {
-        let series = self.values_per_point().saturating_mul(self.point_count);
+        // Admission must count the storage that is actually present, even in
+        // a malformed document whose series disagree with point_count.
+        let series = self
+            .axes
+            .iter()
+            .map(|axis| axis.values.len())
+            .chain(self.signals.iter().map(|signal| {
+                signal
+                    .values
+                    .len()
+                    .saturating_mul(signal.values.numeric_columns())
+            }))
+            .fold(0, usize::saturating_add);
         let scalars = self.scalars.len();
         let device_states = self
             .device_states

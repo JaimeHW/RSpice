@@ -3,6 +3,7 @@
 use num_complex::Complex64;
 
 mod json_precision;
+mod resource_counts;
 
 use super::payload::{DigitalBusSourceTag, DigitalEventBus};
 use super::*;
