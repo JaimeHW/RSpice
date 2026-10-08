@@ -10,7 +10,8 @@
 /// Coordinate cell of a version-one layout record; all other cells name kinds.
 pub const RECORD_MARKER: &str = "# RSpiceTableLayoutV1";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ColumnKind {
     Real,
     ComplexReal,
@@ -87,6 +88,17 @@ pub fn parse_layout_record(
             other => Err(format!("unknown table column kind {other:?}")),
         })
         .collect::<Result<Vec<_>, _>>()?;
+    validate_layout(headers, &kinds)?;
+    Ok(Some(kinds))
+}
+
+pub(super) fn validate_layout(
+    headers: &[impl AsRef<str>],
+    kinds: &[ColumnKind],
+) -> Result<(), String> {
+    if headers.len() != kinds.len() {
+        return Err("table layout column count does not match its headers".into());
+    }
     let mut index = 0;
     while index < kinds.len() {
         match kinds[index] {
@@ -106,7 +118,7 @@ pub fn parse_layout_record(
             }
         }
     }
-    Ok(Some(kinds))
+    Ok(())
 }
 
 #[cfg(test)]

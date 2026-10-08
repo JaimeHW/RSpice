@@ -15,19 +15,19 @@ workspace = true
 # Versioned retained history, provenance and exact executed decks.
 project-results = [
     "dep:rspice-app-types", "dep:rspice-core", "dep:rspice-design-model",
-    "dep:rspice-model-library", "dep:rspice-results", "dep:serde_json", "dep:uuid",
+    "dep:rspice-model-library", "dep:rspice-results", "dep:uuid",
 ]
 result-validation-observation = ["project-results"]
-table-schema = ["dep:serde_json"]
+table-schema = []
 # Reuse canonical retained results without enabling the engine in default codecs.
-result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results", "dep:serde_json"]
+result-csv = ["dep:rspice-app-types", "dep:rspice-core", "dep:rspice-results"]
 result-digital = ["dep:rspice-core", "dep:rspice-results"]
 result-vcd = ["dep:rspice-core", "dep:rspice-results"]
 result-waveform = ["dep:rspice-results"]
 # Reuse the core HDF5 writer without widening the standalone HDF5 reader.
 result-hdf5 = ["hdf5", "result-waveform", "dep:rspice-core"]
-native-bundle = ["dep:serde_json", "dep:sha2"]
-monte-carlo-checkpoint = ["dep:rspice-results", "dep:serde_json"]
+native-bundle = ["dep:sha2"]
+monte-carlo-checkpoint = ["dep:rspice-results"]
 columnar = ["dep:arrow-array", "dep:arrow-ipc", "dep:arrow-schema", "dep:bytes", "dep:parquet"]
 fst = ["dep:fst-reader"]
 hdf5 = ["dep:rustyhdf5"]
@@ -55,14 +55,13 @@ rspice-design-model = { workspace = true, optional = true }
 rspice-model-library = { workspace = true, optional = true }
 rspice-results = { workspace = true, optional = true, features = ["engine-evidence"] }
 serde.workspace = true
-serde_json = { workspace = true, optional = true }
+serde_json.workspace = true
 sha2 = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 time.workspace = true
 zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
-serde_json.workspace = true
 sha2.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

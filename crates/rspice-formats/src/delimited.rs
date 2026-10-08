@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use unit::{EngineeringUnit, UnitDimension};
 
 pub mod layout;
+pub mod metadata;
 pub(crate) mod unit;
 
 /// Limits supplied by the consumer of an already byte-bounded source.
@@ -20,12 +21,16 @@ pub struct DelimitedReadLimits {
 pub struct DelimitedColumn {
     pub name: String,
     unit: Option<EngineeringUnit>,
+    stated_unit: Option<String>,
 }
 
 impl DelimitedColumn {
-    /// Unit of the normalized samples; absent metadata remains absent.
-    pub fn canonical_unit(&self) -> Option<&'static str> {
-        self.unit.map(EngineeringUnit::canonical_symbol)
+    /// Unit of the decoded samples; absent metadata remains absent.
+    /// Explicit table signal units retain their original numeric representation.
+    pub fn canonical_unit(&self) -> Option<&str> {
+        self.stated_unit
+            .as_deref()
+            .or_else(|| self.unit.map(EngineeringUnit::canonical_symbol))
     }
 }
 
@@ -95,7 +100,7 @@ pub fn decode_delimited_waveforms(
         .delimiter(delimiter)
         .has_headers(true)
         .flexible(false)
-        .trim(csv::Trim::All)
+        .trim(csv::Trim::Fields)
         .from_reader(text.as_bytes());
     let raw_headers = reader
         .headers()
@@ -119,16 +124,32 @@ pub fn decode_delimited_waveforms(
         )
         .into());
     }
+    for (index, header) in raw_headers.iter().enumerate() {
+        validate_header_text(header.trim(), index + 1, limits.max_header_bytes)?;
+    }
 
+    // Metadata follows the data so general CSV consumers can skip comment
+    // records. Inspect it before interpreting unit-like text in literal labels.
+    // This bounded pass retains only one CSV record, never a second sample table.
+    let declared = declared_table_metadata(text, delimiter, &raw_headers, limits.max_rows)?;
     let mut headers = Vec::with_capacity(raw_headers.len());
     let mut unique_names = HashSet::with_capacity(raw_headers.len());
     for (index, raw) in raw_headers.iter().enumerate() {
-        let raw = if index == 0 {
+        let raw = if index == 0 && declared.is_none() {
             raw.strip_prefix('\u{feff}').unwrap_or(raw)
         } else {
             raw
         };
-        let header = parse_column_header(raw, index + 1, limits.max_header_bytes)?;
+        let header = if let Some(metadata) = &declared {
+            validate_header_text(raw, index + 1, limits.max_header_bytes)?;
+            DelimitedColumn {
+                name: raw.to_owned(),
+                unit: None,
+                stated_unit: metadata.columns[index].unit.clone(),
+            }
+        } else {
+            parse_column_header(raw, index + 1, limits.max_header_bytes)?
+        };
         let key = header.name.to_lowercase();
         if !unique_names.insert(key) {
             return Err(format!(
@@ -141,7 +162,26 @@ pub fn decode_delimited_waveforms(
         headers.push(header);
     }
 
-    let analysis_type = infer_analysis_type(&headers[0])?;
+    let analysis_type = if let Some(metadata) = &declared {
+        match metadata.columns[0].quantity.as_deref() {
+            Some("time") => WaveformDomain::Transient,
+            Some("frequency") => WaveformDomain::Ac,
+            Some(_) => WaveformDomain::DcSweep,
+            None => {
+                let coordinate = DelimitedColumn {
+                    name: headers[0].name.clone(),
+                    unit: metadata.columns[0]
+                        .unit
+                        .as_deref()
+                        .and_then(|unit| EngineeringUnit::parse(unit).ok()),
+                    stated_unit: None,
+                };
+                infer_analysis_type(&coordinate)?
+            }
+        }
+    } else {
+        infer_analysis_type(&headers[0])?
+    };
     let mut coordinate = Vec::new();
     let mut signal_values = vec![Vec::new(); headers.len() - 1];
     let mut direction = None;
@@ -173,12 +213,14 @@ pub fn decode_delimited_waveforms(
             source: error,
         })?;
         if is_layout {
-            let names: Vec<_> = headers[1..]
-                .iter()
-                .map(|header| header.name.as_str())
-                .collect();
+            let names: Vec<_> = headers.iter().map(|header| header.name.as_str()).collect();
             let fields: Vec<_> = record.iter().collect();
-            layout::parse_layout_record(&names, &fields)?;
+            let layout_headers: Vec<_> = if record.get(0) == Some(metadata::RECORD_MARKER) {
+                raw_headers.iter().collect()
+            } else {
+                names
+            };
+            metadata::parse_table_record(&layout_headers, &fields)?;
             has_layout = true;
             continue;
         }
@@ -238,6 +280,19 @@ pub fn decode_delimited_waveforms(
         .into());
     }
 
+    if declared.is_some() {
+        let mut dataset = crate::numeric::DecodedNumericDataset {
+            domain: analysis_type,
+            coordinate_name: headers[0].name.clone(),
+            coordinate_unit: headers[0].stated_unit.take(),
+            coordinate,
+            signals: Vec::new(),
+        };
+        dataset.normalize_coordinate_unit()?;
+        coordinate = dataset.coordinate;
+        headers[0].stated_unit = dataset.coordinate_unit;
+    }
+
     Ok(DecodedDelimitedWaveforms {
         domain: analysis_type,
         columns: headers,
@@ -246,19 +301,41 @@ pub fn decode_delimited_waveforms(
     })
 }
 
-fn parse_column_header(
-    raw: &str,
-    column: usize,
-    max_header_bytes: usize,
-) -> Result<DelimitedColumn, String> {
-    let raw = raw.trim();
-    if raw.is_empty() {
+fn declared_table_metadata(
+    text: &str,
+    delimiter: u8,
+    headers: &csv::StringRecord,
+    max_rows: usize,
+) -> Result<Option<metadata::TableMetadata>, String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(delimiter)
+        .has_headers(true)
+        .flexible(false)
+        .trim(csv::Trim::Fields)
+        .from_reader(text.as_bytes());
+    for record in reader.records().take(max_rows.saturating_add(1)) {
+        // The numeric pass retains the existing position-rich CSV error and
+        // row-limit refusal order for malformed records.
+        let Ok(record) = record else {
+            break;
+        };
+        if record.get(0) == Some(metadata::RECORD_MARKER) {
+            let names = headers.iter().collect::<Vec<_>>();
+            let fields = record.iter().collect::<Vec<_>>();
+            return metadata::parse_table_record(&names, &fields)
+                .map(|layout| layout.and_then(|layout| layout.metadata));
+        }
+    }
+    Ok(None)
+}
+
+fn validate_header_text(raw: &str, column: usize, max_header_bytes: usize) -> Result<(), String> {
+    if raw.trim().is_empty() {
         return Err(format!("column {column} has an empty header"));
     }
     if raw.len() > max_header_bytes {
         return Err(format!(
-            "column {column} header exceeds the {}-byte limit",
-            max_header_bytes
+            "column {column} header exceeds the {max_header_bytes}-byte limit"
         ));
     }
     if raw.chars().any(char::is_control) {
@@ -266,6 +343,16 @@ fn parse_column_header(
             "column {column} header contains a control character"
         ));
     }
+    Ok(())
+}
+
+fn parse_column_header(
+    raw: &str,
+    column: usize,
+    max_header_bytes: usize,
+) -> Result<DelimitedColumn, String> {
+    let raw = raw.trim();
+    validate_header_text(raw, column, max_header_bytes)?;
 
     let (name, unit_text) = if raw.ends_with(']') {
         let open = raw.rfind('[').ok_or_else(|| {
@@ -292,6 +379,7 @@ fn parse_column_header(
     Ok(DelimitedColumn {
         name: name.to_owned(),
         unit,
+        stated_unit: None,
     })
 }
 
