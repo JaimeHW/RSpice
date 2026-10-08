@@ -82,18 +82,14 @@ pub struct Hdf5Export {
     pub coordinate_name: String,
     pub rows: usize,
     pub columns: usize,
-    /// Columns published with a zero imaginary part because the displayed
-    /// trace retained none.
-    pub zeroed_imaginary: Vec<String>,
 }
 
-/// The section name an analysis publishes under, and whether that section is
-/// spectral (complex columns) rather than sampled (real ones).
-const fn section_for(analysis: AnalysisType) -> Option<(&'static str, bool)> {
+/// The section name an analysis publishes under.
+const fn section_for(analysis: AnalysisType) -> Option<&'static str> {
     match analysis {
-        AnalysisType::Transient => Some(("transient", false)),
-        AnalysisType::DcSweep => Some(("dc_sweep", false)),
-        AnalysisType::Ac => Some(("ac", true)),
+        AnalysisType::Transient => Some("transient"),
+        AnalysisType::DcSweep => Some("dc_sweep"),
+        AnalysisType::Ac => Some("ac"),
         _ => None,
     }
 }
@@ -112,7 +108,7 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
     waveforms: &[&W],
 ) -> Result<Hdf5Export, Hdf5ProjectionError> {
-    let Some((section, spectral)) = section_for(analysis.analysis_type) else {
+    let Some(section) = section_for(analysis.analysis_type) else {
         return Err(Hdf5ProjectionError::UnsupportedAnalysis {
             analysis: analysis.analysis_type,
             label: analysis.label.clone(),
@@ -136,8 +132,34 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
         });
     }
 
-    let mut columns = Vec::with_capacity(waveforms.len());
-    let mut zeroed_imaginary = Vec::new();
+    // The native AC layout requires complex columns. Typed tables represent
+    // mixed real/complex traces on any coordinate without fabricating phase
+    // or replacing retained rectangular samples with display magnitudes.
+    let spectral = analysis.analysis_type == AnalysisType::Ac
+        && waveforms
+            .iter()
+            .all(|waveform| waveform.as_ref().complex.is_some());
+    let typed_table = !spectral
+        && (analysis.analysis_type == AnalysisType::Ac
+            || waveforms
+                .iter()
+                .any(|waveform| waveform.as_ref().complex.is_some()));
+    let column_count: usize = waveforms
+        .iter()
+        .map(|waveform| {
+            if typed_table && waveform.as_ref().complex.is_some() {
+                2
+            } else {
+                1
+            }
+        })
+        .sum();
+    if column_count + 1 > MAX_COLUMNS {
+        return Err(Hdf5ProjectionError::ColumnLimit {
+            columns: column_count + 1,
+        });
+    }
+    let mut columns = Vec::with_capacity(column_count);
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
         // A section is one table, so a column that does not stand on the
@@ -147,31 +169,31 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
                 signal: waveform.name.clone(),
             });
         }
-        if !spectral {
-            columns.push(Hdf5Column::Real {
-                name: waveform.name.clone(),
-                quantity: quantity(&waveform.name),
-                unit: waveform.unit.clone(),
-                values: waveform.y.as_ref().to_vec(),
-            });
-            continue;
-        }
         match &waveform.complex {
-            Some(complex) => columns.push(Hdf5Column::Complex {
+            Some(complex) if spectral => columns.push(Hdf5Column::Complex {
                 name: complex.source_name.clone(),
                 unit: waveform.unit.clone(),
                 real: complex.real.as_ref().to_vec(),
                 imag: complex.imag.as_ref().to_vec(),
             }),
-            None => {
-                zeroed_imaginary.push(waveform.name.clone());
-                columns.push(Hdf5Column::Complex {
-                    name: waveform.name.clone(),
-                    unit: waveform.unit.clone(),
-                    real: waveform.y.as_ref().to_vec(),
-                    imag: vec![0.0; coordinate.len()],
-                });
+            Some(complex) => {
+                for (label, part, values) in
+                    [("Re", "real", &complex.real), ("Im", "imag", &complex.imag)]
+                {
+                    columns.push(Hdf5Column::Real {
+                        name: format!("{label}({})", complex.source_name),
+                        quantity: format!("complex_{part}:{}", quantity(&complex.source_name)),
+                        unit: waveform.unit.clone(),
+                        values: values.as_ref().to_vec(),
+                    });
+                }
             }
+            None => columns.push(Hdf5Column::Real {
+                name: waveform.name.clone(),
+                quantity: quantity(&waveform.name),
+                unit: waveform.unit.clone(),
+                values: waveform.y.as_ref().to_vec(),
+            }),
         }
     }
     if columns.is_empty() {
@@ -182,12 +204,11 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
         .0
         .to_owned();
     let rows = coordinate.len();
-    let count = columns.len();
     let mut document = Hdf5Document::new(analysis.label.clone());
     document
         .add_table(&Hdf5Table {
             group: section.to_owned(),
-            section_type: section.to_owned(),
+            section_type: if typed_table { "table" } else { section }.to_owned(),
             coordinate: if spectral {
                 Hdf5Coordinate::Frequency(coordinate)
             } else {
@@ -200,6 +221,20 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
         })
         .map_err(Hdf5ProjectionError::InvalidTable)?;
     let group = document.groups.last_mut().expect("table was added");
+    if typed_table {
+        group.set_attr("analysis", Hdf5Attribute::Text(section.to_owned()));
+        group.set_attr(
+            "coordinate_type",
+            Hdf5Attribute::Text(
+                match analysis.analysis_type {
+                    AnalysisType::Transient => "time",
+                    AnalysisType::Ac => "frequency",
+                    _ => "value",
+                }
+                .to_owned(),
+            ),
+        );
+    }
     if spectral && coordinate_name != "frequency" {
         group.set_attr(
             "independent_name",
@@ -214,8 +249,7 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
         section,
         coordinate_name,
         rows,
-        columns: count,
-        zeroed_imaginary,
+        columns: waveforms.len(),
     })
 }
 
@@ -226,6 +260,50 @@ mod tests {
     use rspice_results::result_import::{
         ResultImportCoordinate, ResultImportFormat, ResultImportSource,
     };
+
+    #[test]
+    fn hdf5_preserves_each_signal_representation_in_every_waveform_domain() {
+        for kind in [
+            AnalysisType::Transient,
+            AnalysisType::DcSweep,
+            AnalysisType::Ac,
+        ] {
+            let analysis = AnalysisResult::new(1, kind, "Mixed representations", 0.0)
+                .with_waveforms(vec![
+                    RetainedWaveform::new("|out|", vec![1.0, 2.0], vec![99.0, 99.0])
+                        .with_complex_components("out", vec![-0.0, 4.0], vec![2.0, -1.0])
+                        .with_unit("mA"),
+                    RetainedWaveform::new("Re(out)", vec![1.0, 2.0], vec![3.0, -0.0]),
+                ]);
+            let export =
+                prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+            let mut bytes = Vec::new();
+            rspice_core::io::write_hdf5(&mut bytes, &export.document).unwrap();
+            let decoded = decode_hdf5(
+                &bytes,
+                Hdf5Limits {
+                    max_columns: 10,
+                    max_values: 100,
+                    coordinate_names: &["time", "frequency", "x"],
+                },
+                "hdf5",
+            )
+            .unwrap();
+            assert_eq!(decoded.signals.len(), 2);
+            assert_eq!(decoded.signals[0].name, "out");
+            assert_eq!(decoded.signals[0].real[0].to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(decoded.signals[0].real[1], 4.0);
+            assert_eq!(
+                decoded.signals[0].imag.as_deref(),
+                Some([2.0, -1.0].as_slice())
+            );
+            assert_eq!(decoded.signals[0].unit.as_deref(), Some("mA"));
+            assert_eq!(decoded.signals[1].name, "Re(out)");
+            assert_eq!(decoded.signals[1].real[1].to_bits(), (-0.0_f64).to_bits());
+            assert!(decoded.signals[1].imag.is_none());
+            assert_eq!(decoded.signals[1].unit, None);
+        }
+    }
 
     #[test]
     fn retained_hdf5_round_trip_preserves_coordinate_identity() {

@@ -20,10 +20,9 @@
 //!
 //! # Complex data
 //!
-//! An `ac` section spells every column as a `_real` / `_imag` pair, so a
-//! displayed trace that kept no imaginary part is published with a zero one
-//! and named in the completion message. Inventing a phase quietly is the one
-//! thing a publication must not do.
+//! Real and complex traces retain their original representation in every
+//! sampled domain. An all-complex AC result uses the native spectral layout;
+//! mixed representations use the shared typed table layout.
 
 use super::{
     ALL_TRACES_HIDDEN_MESSAGE, NO_ACTIVE_ANALYSIS_MESSAGE, NO_SAMPLES_MESSAGE, exported_waveforms,
@@ -102,14 +101,6 @@ pub(super) fn export_hdf5(
             return;
         }
     };
-    if !prepared.zeroed_imaginary.is_empty() {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-            "An /ac section spells every column as a real and imaginary pair. {} carried no \
-             retained imaginary part and were published with a zero one: {}.",
-            prepared.zeroed_imaginary.len(),
-            prepared.zeroed_imaginary.join(", ")
-        )));
-    }
 
     let default_name = format!("waveforms.{EXTENSION}");
     let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
@@ -263,7 +254,6 @@ mod tests {
             vec![0.0, -0.5, -0.25],
         )];
         let export = prepared(AnalysisType::Ac, &waveforms).expect("prepares");
-        assert!(export.zeroed_imaginary.is_empty());
         let bytes = encode_hdf5(&export).expect("encodes");
         let parsed = parse_result_dataset("waveforms.h5", &bytes).expect("re-imports");
         assert_eq!(parsed.analysis_type, AnalysisType::Ac);
@@ -293,15 +283,14 @@ mod tests {
     }
 
     #[test]
-    fn an_ac_trace_with_no_retained_phase_is_published_with_zero_and_named() {
+    fn an_ac_trace_with_no_retained_phase_remains_real() {
         let waveforms = [waveform("V(out)", vec![1.0, 10.0], vec![1.0, 0.5])];
         let export = prepared(AnalysisType::Ac, &waveforms).expect("prepares");
-        assert_eq!(export.zeroed_imaginary, ["V(out)"]);
         let bytes = encode_hdf5(&export).expect("encodes");
         let parsed = parse_result_dataset("waveforms.h5", &bytes).expect("re-imports");
-        let complex = parsed.waveforms[0].complex.as_ref().expect("a pair");
-        assert_eq!(complex.source_name, "V(out)");
-        assert_eq!(complex.imag.as_slice(), [0.0, 0.0]);
+        assert_eq!(parsed.waveforms[0].name, "V(out)");
+        assert!(parsed.waveforms[0].complex.is_none());
+        assert_eq!(parsed.waveforms[0].y.as_slice(), [1.0, 0.5]);
     }
 
     #[test]
