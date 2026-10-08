@@ -155,6 +155,10 @@ impl EngineeringUnit {
     pub(crate) fn lost_nonzero_sample(self, before: f64, after: f64) -> bool {
         self.bias == 0.0 && before != 0.0 && after == 0.0
     }
+
+    pub(super) fn lost_nonzero_decimal(self, decimal: &str, after: f64) -> bool {
+        self.bias == 0.0 && crate::numeric::decimal_underflowed(decimal, after)
+    }
 }
 fn decimal_power_scaled(value: &str, scale: f64) -> Option<f64> {
     let scale_exponent = [

@@ -101,6 +101,18 @@ impl std::fmt::Display for ComplexColumnError {
 
 impl std::error::Error for ComplexColumnError {}
 
+/// Whether rounding a validated decimal to `value` erased a nonzero mantissa.
+/// This is not a syntax validator. Apply multiplicative unit conversion first;
+/// an affine conversion can legitimately map a nonzero decimal to zero.
+/// Both decimal E exponents and Fortran D exponents are recognized.
+pub fn decimal_underflowed(decimal: &str, value: f64) -> bool {
+    value == 0.0
+        && decimal
+            .split(['e', 'E', 'd', 'D'])
+            .next()
+            .is_some_and(|mantissa| mantissa.bytes().any(|digit| matches!(digit, b'1'..=b'9')))
+}
+
 pub const MAX_EXACT_F64_INTEGER: u64 = 1_u64 << 53;
 
 /// An integer refused by the existing exact-sample conversion policy.

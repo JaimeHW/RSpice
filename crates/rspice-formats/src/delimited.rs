@@ -493,9 +493,17 @@ fn parse_finite_cell(
             "row {row}, column {column} ({header:?}) overflows after unit conversion"
         ));
     }
-    if unit.is_some_and(|unit| unit.lost_nonzero_sample(parsed, scaled)) {
+    if unit.map_or_else(
+        || crate::numeric::decimal_underflowed(value, scaled),
+        |unit| unit.lost_nonzero_decimal(value, scaled),
+    ) {
+        let stage = if unit.is_some() {
+            "after unit conversion"
+        } else {
+            "at binary64 precision"
+        };
         return Err(format!(
-            "row {row}, column {column} ({header:?}) underflows after unit conversion"
+            "row {row}, column {column} ({header:?}) underflows {stage}"
         ));
     }
     Ok(scaled)
@@ -505,6 +513,46 @@ fn parse_finite_cell(
 mod tests {
     use super::*;
     use std::error::Error as _;
+
+    #[test]
+    fn decimal_underflow_cannot_become_an_authored_zero_sample() {
+        let limits = DelimitedReadLimits {
+            max_columns: 2,
+            max_rows: 1,
+            max_header_bytes: 32,
+            min_rows: 1,
+        };
+        for separator in [b',', b'\t'] {
+            for source in [
+                "time,v\n1e-999,1\n",
+                "time,v\n0,-1e-999\n",
+                "time [s],v\n1e-999,1\n",
+                "time,v [V]\n0,1e-999\n",
+                "time,v [mV]\n0,-1e-999\n",
+            ] {
+                let source = source.replace(',', &(separator as char).to_string());
+                let error = decode_delimited_waveforms(&source, separator, limits).unwrap_err();
+                assert!(error.to_string().contains("underflow"), "{error}");
+                assert!(error.to_string().contains("row 2"), "{error}");
+            }
+            for (source, expected) in [
+                ("time,v\n0,-0e-999\n", -0.0_f64),
+                ("time,v\n0,0e999\n", 0.0_f64),
+                ("time,v\n0,5e-324\n", 5e-324_f64),
+                ("time,v\n0,-5e-324\n", -5e-324_f64),
+                ("time,v [kV]\n0,1e-326\n", 1e-323_f64),
+                ("time,temperature [degC]\n0,-273.15\n", 0.0_f64),
+            ] {
+                let source = source.replace(',', &(separator as char).to_string());
+                let data = decode_delimited_waveforms(&source, separator, limits).unwrap();
+                assert_eq!(
+                    data.signal_values[0][0].to_bits(),
+                    expected.to_bits(),
+                    "{source}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn unit_conversion_cannot_replace_nonzero_samples_with_zero() {
