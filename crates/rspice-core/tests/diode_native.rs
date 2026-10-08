@@ -578,14 +578,7 @@ fn diode_xyce_scaling_preserves_injection_and_series_admittance() {
 fn diode_xyce_scaling_preserves_breakdown_voltage_and_gmin() {
     let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
     // Xyce's IBV matching operates on model densities, independently of AREA.
-    let mut xbv = 5.0 - vt * (1.0_f64 + 1e-3 / 1e-14).ln();
-    for _ in 0..25 {
-        xbv = 5.0 - vt * (1e-3 / 1e-14 + 1.0 - xbv / vt).ln();
-        let matched = 1e-14 * (((5.0 - xbv) / vt).exp_m1() + xbv / vt);
-        if (matched - 1e-3).abs() <= 1e-6 {
-            break;
-        }
-    }
+    let xbv = xyce_matched_breakdown_voltage(1e-14, 1e-3, 5.0, 1.0, vt);
     for area in [4.0, 0.25, 1.0] {
         for mult in [1.0, 3.0, 0.5] {
             for gmin in [0.0, 1e-3] {
@@ -649,4 +642,69 @@ fn diode_xyce_scaling_gmin_matches_parallel_instances() {
         (actual - expected).abs() < 1e-14 + 1e-9 * expected.abs(),
         "GMIN M=3: {actual:e} vs {expected:e}"
     );
+}
+
+// Xyce 7.10 N_DEV_Diode.C updateTemperature: model-level IBV matching.
+fn xyce_matched_breakdown_voltage(isat: f64, ibv: f64, bv: f64, nbv: f64, vt: f64) -> f64 {
+    if ibv < isat * bv / vt {
+        return bv;
+    }
+    let mut xbv = bv - nbv * vt * (1.0 + ibv / isat).ln();
+    for _ in 0..25 {
+        xbv = bv - nbv * vt * (ibv / isat + 1.0 - xbv / vt).ln();
+        let matched = isat * (((bv - xbv) / (nbv * vt)).exp_m1() + xbv / vt);
+        if (matched - ibv).abs() <= 1e-3 * ibv {
+            break;
+        }
+    }
+    xbv
+}
+
+#[test]
+fn diode_xyce_model_default_nbv_follows_processed_emission_coefficient() {
+    // N_DEV_Diode.C Model::processParams overrides the registry's NBV=1
+    // default with N; an explicitly authored NBV remains authoritative.
+    for n in [0.8, 1.0, 2.0] {
+        for authored in [None, Some(n), Some(1.3)] {
+            let nbv = authored.unwrap_or(n);
+            let parameter = authored.map_or(String::new(), |v| format!("NBV={v}"));
+            for temperature in [-23.0, 27.0, 127.0] {
+                let temp: f64 = temperature + 273.15;
+                let vt = temp * 1.380_622_6e-23 / 1.602_191_8e-19;
+                let ratio = temp / 300.15;
+                let isat = 1e-14 * ((ratio - 1.0) * 1.11 / (n * vt) + 3.0 / n * ratio.ln()).exp();
+                let xbv = xyce_matched_breakdown_voltage(isat, 1e-3, 5.0, nbv, vt);
+                let expected_i = -isat * ((5.02 - xbv) / (nbv * vt)).exp();
+                let expected_g = -expected_i / (nbv * vt);
+                let deck = Netlist::parse(&format!("Xyce processed NBV default\nV1 a 0 DC -5.02 AC 1\nD1 a 0 dm TEMP={temperature}\n.model dm D(IS=1e-14 N={n} {parameter} BV=5 IBV=1m EG=1.11 XTI=3 TNOM=27 CJO=0 TT=2n)\n.options GMIN=0\n.end\n")).unwrap();
+                let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+                config.convergence_config.gmin_target = 0.0;
+                let engine = Engine::new(config);
+                let point = engine.run_dc_op(&deck).unwrap();
+                for actual in [
+                    -branch_current(&point, "V1"),
+                    point.try_dc_observable_named("I(D1)").unwrap(),
+                ] {
+                    assert!(
+                        (actual - expected_i).abs() < 1e-14 + 1e-8 * expected_i.abs(),
+                        "N={n} NBV={authored:?} TEMP={temperature}: {actual:e} vs {expected_i:e}"
+                    );
+                }
+                let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                let index = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("v1"))
+                    .unwrap();
+                let expected = rspice_core::Complex64::new(
+                    expected_g,
+                    std::f64::consts::TAU * 1e6 * 2e-9 * expected_g,
+                );
+                assert!(
+                    (-ac[0].currents[index] - expected).norm() < 1e-13 + 1e-8 * expected.norm(),
+                    "AC N={n} NBV={authored:?} TEMP={temperature}"
+                );
+            }
+        }
+    }
 }

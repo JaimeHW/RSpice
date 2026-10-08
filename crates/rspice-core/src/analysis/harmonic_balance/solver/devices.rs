@@ -1654,8 +1654,9 @@ mod tests {
                 let exponential = (voltage / nvt).exp();
                 (isat * (exponential - 1.0), isat * exponential / nvt)
             } else if voltage < -breakdown {
-                let exponential = (-(breakdown + voltage) / vt).exp();
-                (-isat * exponential, isat * exponential / vt)
+                // Xyce Model::processParams defaults omitted NBV to N.
+                let exponential = (-(breakdown + voltage) / nvt).exp();
+                (-isat * exponential, isat * exponential / nvt)
             } else {
                 let argument = (3.0 * nvt / (voltage * std::f64::consts::E)).powi(3);
                 (-isat * (1.0 + argument), isat * 3.0 * argument / voltage)

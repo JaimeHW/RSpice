@@ -1178,7 +1178,7 @@ impl Diode {
             self.tbv2 = v;
         }
         if !self.breakdown_emission_given {
-            self.breakdown_emission_coefficient = if self.xyce_dialect { 1.0 } else { self.n };
+            self.breakdown_emission_coefficient = self.n;
         }
         // ngspice defaults the activation energy against TLEV, not against the
         // level: the TLEV=2 bandgap law is written around 1.16 eV while the
@@ -1268,12 +1268,11 @@ impl Diode {
     /// routine.  Other dialects retain ngspice's `pnjlim_new` behavior.
     pub fn set_xyce_compatibility(&mut self, enabled: bool) {
         self.xyce_dialect = enabled;
-        // Xyce 7.10's diode registry gives NBV its own default of 1.0.
-        // ngspice instead defaults NBV to N.  Model parsing occurs before the
-        // dialect is selected, so project the omitted parameter here, before
-        // temperature processing performs the IBV/BV matching loop.
+        // Xyce 7.10 Model::processParams replaces the registry default with N
+        // when NBV was omitted, just as ngspice does. Keep explicit NBV values
+        // when selecting the dialect before temperature and IBV/BV matching.
         if !self.breakdown_emission_given {
-            self.breakdown_emission_coefficient = if enabled { 1.0 } else { self.n };
+            self.breakdown_emission_coefficient = self.n;
         }
         if enabled {
             self.ngspice_dialect = false;
@@ -1568,6 +1567,7 @@ impl Diode {
     }
 
     fn rematch_temperature_breakdown_voltage(&mut self) {
+        self.candidate_eval_valid = false;
         self.temperature_breakdown_voltage = self
             .temperature_shifted_breakdown_voltage
             .and_then(|value| self.xbv_matched_breakdown_voltage(value));
@@ -3021,7 +3021,7 @@ mod tests {
     }
 
     #[test]
-    fn omitted_breakdown_emission_default_is_dialect_specific() {
+    fn omitted_breakdown_emission_defaults_to_n_in_both_dialects() {
         let params: std::collections::HashMap<String, Value> =
             [("N", 1.48), ("BV", 600.0), ("IBV", 1.0e-4)]
                 .into_iter()
@@ -3033,7 +3033,7 @@ mod tests {
         assert!(!diode.breakdown_emission_given);
 
         diode.set_xyce_compatibility(true);
-        assert_eq!(diode.breakdown_emission_coefficient, 1.0);
+        assert_eq!(diode.breakdown_emission_coefficient, 1.48);
 
         diode.set_xyce_compatibility(false);
         assert_eq!(diode.breakdown_emission_coefficient, 1.48);
@@ -3054,6 +3054,7 @@ mod tests {
     fn dialect_switch_after_temperature_processing_rematches_shifted_breakdown_knee() {
         let params: std::collections::HashMap<String, Value> = [
             ("IS", 1.0e-14),
+            ("JSW", 1.0e-12),
             ("N", 1.48),
             ("BV", 5.0),
             ("IBV", 1.0e-3),
@@ -3063,22 +3064,37 @@ mod tests {
         .map(|(name, value)| (name.to_string(), value))
         .collect();
         let mut diode = Diode::spice_defaults("d1".to_string(), 1, 0).with_model_params(&params);
+        diode.sidewall_perimeter = 1.0;
         let temp = REFTEMP + 10.0;
         diode.set_temperature_xyce_7(temp, REFTEMP);
 
         let shifted_bv = 5.0 * (1.0 + 1.0e-3 * 10.0);
-        let ngspice_default =
-            matched_breakdown_oracle(shifted_bv, diode.ibv, diode.is, 1.48, diode.vt);
+        let ngspice_default = matched_breakdown_oracle(
+            shifted_bv,
+            diode.ibv,
+            diode.total_saturation_current(),
+            1.48,
+            diode.vt,
+        );
         let before = diode.active_breakdown_voltage().unwrap();
         assert!((before - ngspice_default).abs() <= 16.0 * Value::EPSILON * shifted_bv);
 
+        diode.update(&[-5.1]);
+        let cached = diode.candidate_current_and_conductance(-5.1);
         diode.set_xyce_compatibility(true);
-        let xyce_default = matched_breakdown_oracle(shifted_bv, diode.ibv, diode.is, 1.0, diode.vt);
+        let xyce_default =
+            matched_breakdown_oracle(shifted_bv, diode.ibv, diode.is, 1.48, diode.vt);
         let after = diode.active_breakdown_voltage().unwrap();
         assert!((after - xyce_default).abs() <= 16.0 * Value::EPSILON * shifted_bv);
         assert!(
             (after - before).abs() > 0.1,
-            "changing the omitted NBV default must materially rematch the knee: {before} -> {after}"
+            "changing the breakdown matching density must rematch the knee: {before} -> {after}"
+        );
+        assert!(!diode.candidate_eval_valid);
+        assert_ne!(diode.candidate_current_and_conductance(-5.1), cached);
+        assert_eq!(
+            diode.candidate_current_and_conductance(-5.1),
+            diode.current_and_conductance(-5.1)
         );
     }
 
