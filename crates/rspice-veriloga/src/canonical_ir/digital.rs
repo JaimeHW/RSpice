@@ -370,9 +370,14 @@ impl DigitalArrayRef {
     /// Resolve in the integer domain, including indices beyond f64 precision.
     pub fn element(self, index: i64) -> Option<DigitalSignalId> {
         self.cell_range()?;
-        let offset = i128::from(index) - i128::from(self.lower);
-        (offset >= 0 && offset < i128::from(self.len))
-            .then(|| DigitalSignalId::new(self.base.index() + offset as u32))
+        let offset = rspice_veriloga_runtime::array_index::checked_integer_array_slot(
+            index,
+            0,
+            self.len as usize,
+            self.lower,
+        )
+        .ok()?;
+        Some(DigitalSignalId::new(self.base.index() + offset as u32))
     }
 }
 

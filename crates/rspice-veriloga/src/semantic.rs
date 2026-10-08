@@ -2438,8 +2438,10 @@ impl SemanticAnalyzer {
         };
         // The full signed index domain spans 2^64 elements. Check its extent
         // before narrowing to the target's allocation size (including Wasm).
-        let len = i128::from(upper) - i128::from(lower) + 1;
-        if len > Self::MAX_ARRAY_ELEMENTS as i128 {
+        let shape =
+            crate::array_index::UnpackedArrayLayout::new(&[(start, end)], Self::MAX_ARRAY_ELEMENTS);
+        let Ok(shape) = shape else {
+            let len = i128::from(upper) - i128::from(lower) + 1;
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "array '{}' has {len} elements (limit {})",
@@ -2449,8 +2451,8 @@ impl SemanticAnalyzer {
                 dim.span,
             );
             return None;
-        }
-        let len = len as usize;
+        };
+        let len = shape.len();
         let value_type = match var_type {
             VarType::Real => ValueType::Real,
             VarType::Integer => ValueType::Integer,
