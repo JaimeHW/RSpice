@@ -139,6 +139,8 @@
 mod analog_samples;
 mod analog_events;
 mod shared;
+mod standalone;
+use standalone::StandaloneExecution;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 use shared::MixedDigital;
 pub(crate) use shared::{MixedDigitalCoordinator, SharedTrialCursor};
@@ -1201,6 +1203,7 @@ pub struct MixedSignalCheckpoint {
     /// it resumed from agree about the timepoint the analog half last saw.
     analog_inputs: AnalogSolverInputs,
     state: MixedState,
+    standalone: Option<Box<StandaloneExecution>>,
 }
 
 /// One compiled mixed module integrated with an outer transient solver.
@@ -1262,6 +1265,7 @@ pub struct MixedSignalHost {
     /// The solver inputs [`Self::analog`] is currently holding.
     analog_inputs: AnalogSolverInputs,
     state: MixedState,
+    standalone: Option<Box<StandaloneExecution>>,
     /// The working vectors of the trial machinery, kept across trials.
     scratch: TrialScratch,
     /// Digital processes start only after the circuit-wide analog initialization
@@ -1413,11 +1417,6 @@ impl MixedSignalHost {
                 detail: error.to_string(),
             }
         })?;
-        if !runtime.canonical_ir.digital.absdelta.is_empty() {
-            return Err(MixedSignalError::Compile {
-                detail: "absdelta interval observers require shared interpolated-event execution; standalone execution is not yet connected".into(),
-            });
-        }
         let mut host = Self::from_compiled(
             instance,
             Arc::new(runtime.model),
@@ -1609,6 +1608,7 @@ impl MixedSignalHost {
         let source_digest = canonical_ir.metadata.source_digest.to_string();
         Ok(Self {
             prepared_analog: PreparedAnalogStamp::default(),
+            standalone: None,
             instance: instance.to_string(),
             source_digest,
             resolution,
@@ -1665,6 +1665,9 @@ impl MixedSignalHost {
         self.analog_inputs = AnalogSolverInputs::analysis_start(analysis);
         self.analog_inputs.phase = phase;
         self.state.digital = MixedCell::new(self.state.digital.fresh());
+        if let Some(standalone) = &mut self.standalone {
+            standalone.reset();
+        }
         self.state.initial_digital = None;
         self.state.accepted_adc_voltages.fill(0.0);
         self.state.accepted_adc_decisions.fill(None);
@@ -1757,11 +1760,6 @@ impl MixedSignalHost {
     /// its accepted control calls have been handled by the analysis host.
     pub(crate) fn start_digital_execution(&mut self) -> Result<(), MixedSignalError> {
         self.require_idle("start digital execution")?;
-        if !self.state.digital.is_view() && !self.state.digital.plan().absdelta.is_empty() {
-            return Err(MixedSignalError::Compile {
-                detail: "absdelta interval observers require shared interpolated-event execution; standalone execution is not yet connected".into(),
-            });
-        }
         if self.analog.has_accepted_analog_tasks() {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "analog initialization tasks must be handled before digital execution"
@@ -1769,6 +1767,14 @@ impl MixedSignalHost {
             });
         }
         if !self.digital_started {
+            if !self.state.digital.is_view() && !self.state.digital.plan().absdelta.is_empty() {
+                let coordinator = shared::MixedDigitalCoordinator::enroll(
+                    std::slice::from_mut(self),
+                    &Default::default(),
+                    &rspice_veriloga::NoPipelineControl,
+                )?;
+                self.standalone = Some(Box::new(StandaloneExecution::new(coordinator)));
+            }
             if !self.analog_probes.is_empty() {
                 self.state.initial_digital = Some(self.state.digital.clone());
             }
@@ -1780,6 +1786,9 @@ impl MixedSignalHost {
                 // Initial processes that read analog quantities must wait for
                 // the time-zero candidate, just like a later scheduled read.
                 digital.prepare_start()?;
+            }
+            if let Some(standalone) = &mut self.standalone {
+                standalone.start()?;
             }
             self.digital_started = true;
         }
@@ -2476,12 +2485,32 @@ impl MixedSignalHost {
         Ok(())
     }
 
+    /// Configure work allowed in one standalone interpolated observer trial.
+    /// Circuit-owned models use the engine's ResourceLimits instead.
+    pub fn set_observer_interval_event_limit(
+        &mut self,
+        limit: usize,
+    ) -> Result<(), MixedSignalError> {
+        self.require_idle("configure observer interval budget")?;
+        let standalone =
+            self.standalone
+                .as_mut()
+                .ok_or_else(|| MixedSignalError::TrialProtocol {
+                    detail: "this host does not own an interpolated observer coordinator".into(),
+                })?;
+        standalone.set_interval_event_limit(limit);
+        Ok(())
+    }
+
     /// Earliest exact event time the analog stepper must use as a breakpoint.
     ///
     /// A tick's seconds, not a floored analog time: this is the value D5
     /// clause 2 asks the step controller to stop bit-exactly at, and the tick
     /// is where the event actually is.
     pub fn next_event_time(&self) -> Result<Option<f64>, MixedSignalError> {
+        if let Some(standalone) = &self.standalone {
+            return standalone.next_event_time();
+        }
         self.state
             .digital
             .next_tick()
@@ -2799,6 +2828,15 @@ impl MixedSignalHost {
             bridges_quiet: false,
             vectors,
         });
+        if let Some(mut standalone) = self.standalone.take() {
+            let opened = standalone.begin(self);
+            self.standalone = Some(standalone);
+            if let Err(error) = opened {
+                let trial = self.trial.take().expect("just opened host trial");
+                self.unwind(trial);
+                return Err(error);
+            }
+        }
         Ok(())
     }
 
@@ -2868,6 +2906,11 @@ impl MixedSignalHost {
     }
 
     fn advance_trial_digital(&mut self, circuit_voltages: &[f64]) -> Result<(), MixedSignalError> {
+        if let Some(mut standalone) = self.standalone.take() {
+            let advanced = standalone.advance(self, circuit_voltages);
+            self.standalone = Some(standalone);
+            return advanced;
+        }
         let tick = self.active_tick()?;
         let start = self.trial.as_ref().is_some_and(|trial| trial.start_digital);
         if start
@@ -2939,8 +2982,10 @@ impl MixedSignalHost {
     }
 
     /// Apply co-timed external digital input drives during the active trial.
+    /// An interpolated observer host queues each bank at the candidate endpoint,
+    /// so earlier observations cannot see a future external input.
     pub fn force_digital(&mut self, drives: &[(&str, &str)]) -> Result<(), MixedSignalError> {
-        if self.state.digital.is_view() {
+        if self.state.digital.is_view() && self.standalone.is_none() {
             return Err(MixedSignalError::TrialProtocol {
                 detail:
                     "circuit-owned digital inputs must be driven through the circuit coordinator"
@@ -2956,6 +3001,11 @@ impl MixedSignalHost {
                     detail: format!("`{spelling}` is not a four-state value for `{name}`"),
                 })?;
             parsed.push((signal, value));
+        }
+        if let Some(standalone) = &mut self.standalone {
+            standalone.queue_forces(&parsed)?;
+            self.trial.as_mut().expect("validated trial").bridges_quiet = false;
+            return Ok(());
         }
         let probes = self
             .trial
@@ -3151,7 +3201,7 @@ impl MixedSignalHost {
     ///
     /// The window below is [`endpoint_root_window`], which is the one place it
     /// is derived.
-    pub(crate) fn trial_boundary_refinement_time(
+    pub fn trial_boundary_refinement_time(
         &self,
         minimum_timestep: f64,
     ) -> Result<Option<f64>, MixedSignalError> {
@@ -3249,6 +3299,21 @@ impl MixedSignalHost {
         &mut self,
         circuit_voltages: &[f64],
     ) -> Result<bool, MixedSignalError> {
+        self.settle_analog_bridges_with_abort(circuit_voltages, &crate::abort_signal::NoAbort)
+    }
+
+    /// Settle a candidate with cooperative cancellation during interpolated
+    /// observer execution. On refusal, reject the still-open trial before retry.
+    pub fn settle_analog_bridges_with_abort(
+        &mut self,
+        circuit_voltages: &[f64],
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<bool, MixedSignalError> {
+        if let Some(mut standalone) = self.standalone.take() {
+            let settled = standalone.settle(self, circuit_voltages, abort);
+            self.standalone = Some(standalone);
+            return settled;
+        }
         let tick = self.active_tick()?;
         let (time_seconds, timestep_seconds, iterations) = {
             let trial = self
@@ -3642,6 +3707,9 @@ impl MixedSignalHost {
     /// Called only with the candidate returned by prepare_trial_acceptance,
     /// while a reservation excludes any mutation of this host.
     fn apply_prepared_acceptance(&mut self, mut trial: ActiveTrial) {
+        if let Some(standalone) = &mut self.standalone {
+            standalone.commit();
+        }
         self.prepared_analog.invalidate();
         std::mem::swap(&mut self.state.adc_history, &mut self.scratch.adc_history);
         std::mem::swap(&mut self.state.dac_history, &mut self.scratch.dac_history);
@@ -3690,6 +3758,9 @@ impl MixedSignalHost {
     /// values the device was holding a moment ago; if one is, the refusal worth
     /// reporting is the caller's rather than a consequence of it.
     fn unwind(&mut self, trial: ActiveTrial) {
+        if let Some(standalone) = &mut self.standalone {
+            standalone.reject();
+        }
         self.state.digital = trial.rollback;
         for (input, value) in self
             .discrete_inputs
@@ -3766,7 +3837,7 @@ impl MixedSignalHost {
 
     /// Capture a restart image. Speculative state is never checkpointable.
     pub fn checkpoint(&self) -> Result<MixedSignalCheckpoint, MixedSignalError> {
-        if self.state.digital.is_view() {
+        if self.state.digital.is_view() && self.standalone.is_none() {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "a circuit-owned digital domain requires a circuit checkpoint".into(),
             });
@@ -3788,6 +3859,7 @@ impl MixedSignalHost {
             analog: self.analog.clone(),
             analog_inputs: self.analog_inputs,
             state: self.state.clone(),
+            standalone: self.standalone.clone(),
         })
     }
 
@@ -3795,7 +3867,9 @@ impl MixedSignalHost {
     /// host, validating analog and source identity before mutation.
     pub fn restore(&mut self, checkpoint: &MixedSignalCheckpoint) -> Result<(), MixedSignalError> {
         self.require_idle("restore a checkpoint")?;
-        if self.state.digital.is_view() || checkpoint.state.digital.is_view() {
+        if (self.state.digital.is_view() && self.standalone.is_none())
+            || (checkpoint.state.digital.is_view() && checkpoint.standalone.is_none())
+        {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "a circuit-owned digital domain requires a circuit checkpoint".into(),
             });
@@ -3808,10 +3882,15 @@ impl MixedSignalHost {
         self.analog
             .validate_checkpoint_state(&checkpoint.analog_checkpoint)
             .map_err(analog_error)?;
+        let mut standalone = checkpoint.standalone.clone();
+        if let (Some(restored), Some(current)) = (&mut standalone, &self.standalone) {
+            restored.retain_policy_from(current);
+        }
         self.analog = checkpoint.analog.clone();
         self.prepared_analog.invalidate();
         self.analog_inputs = checkpoint.analog_inputs;
         self.state = checkpoint.state.clone();
+        self.standalone = standalone;
         self.digital_started = true;
         self.scratch.ledger.clear();
         self.max_circuit_node = (0..self.analog.num_terminals())

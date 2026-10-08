@@ -61,6 +61,10 @@ impl DigitalActiveParticipant for InterpolatedParticipant<'_, '_> {
 }
 
 impl MixedDigitalCoordinator {
+    pub(crate) fn interval_event_limit(&self) -> usize {
+        self.max_interval_events
+    }
+
     pub(crate) fn set_interval_event_limit(&mut self, limit: usize) {
         self.max_interval_events = limit;
     }

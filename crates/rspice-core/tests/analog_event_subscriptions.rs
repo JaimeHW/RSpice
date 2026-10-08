@@ -824,19 +824,13 @@ endmodule
 }
 
 #[test]
-fn absdelta_incomplete_execution_and_invalid_source_are_explicit() {
+fn absdelta_invalid_source_is_explicit() {
     use rspice_veriloga::{CompilerOptions, VerilogACompiler};
     use rspice_core::xspice::event_scheduler::SchedulerLimits;
     use rspice_core::xspice::verilog::MixedSignalHost;
     let source = "module observer(a); input a; electrical a; real sampled=0; always @(absdelta(V(a),0.1)) sampled=V(a); endmodule";
-    let error =
-        MixedSignalHost::compile(source, None, "observer", &[1], SchedulerLimits::default())
-            .err()
-            .expect("unconnected observers must not silently run");
-    assert!(
-        error.to_string().contains("interpolated-event execution"),
-        "{error}"
-    );
+    MixedSignalHost::compile(source, None, "observer", &[1], SchedulerLimits::default())
+        .expect("standalone observers use the shared coordinator");
     for event in [
         "absdelta(V(a))",
         "absdelta(,0.1)",
@@ -1194,4 +1188,199 @@ endmodule
             && error.limit == 0 && error.requested == 1),
         "{error}"
     );
+}
+
+fn settle_standalone_observer(
+    host: &mut rspice_core::xspice::verilog::MixedSignalHost,
+    solution: &[f64],
+) {
+    for _ in 0..8 {
+        host.stamp(solution, |_, _, _| {}, |_, _| {}).unwrap();
+        if !host.settle_analog_bridges(solution).unwrap() {
+            return;
+        }
+    }
+    panic!("standalone observer did not settle");
+}
+
+#[test]
+fn absdelta_standalone_interpolation_inputs_rollback_and_checkpoint() {
+    use rspice_core::abort_signal::CountingAbort;
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::{MixedSignalHost, MixedSignalError};
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let source = r#"
+`timescale 1ps/1ps
+module observer(a,drive);
+ input a; electrical a; input drive; wire drive;
+ integer count=0, valid=1, early=0, edges=0, future=0;
+ real sampled;
+ initial #1500 future=1;
+ always @(posedge drive) edges=edges+1;
+ always @(absdelta(V(a),0.125,1p,1u)) begin
+   count=count+1; sampled=V(a);
+   if (sampled-$abstime*1e9>1u || $abstime*1e9-sampled>1u) valid=0;
+   if (drive===1'b1 && $abstime<999p) early=early+1;
+ end
+endmodule
+"#;
+    let compile = || {
+        MixedSignalHost::compile(source, None, "observer", &[1], SchedulerLimits::default())
+            .unwrap()
+    };
+    let count = |host: &MixedSignalHost, name| {
+        u32::from_str_radix(&host.read_digital(name).unwrap(), 2).unwrap()
+    };
+    let begin = |host: &mut MixedSignalHost, time, dt| {
+        host.begin_trial(
+            time,
+            dt,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap()
+    };
+    let mut host = compile();
+    begin(&mut host, 0.0, 0.0);
+    host.force_digital(&[("drive", "0")]).unwrap();
+    settle_standalone_observer(&mut host, &[0.0]);
+    host.accept_trial().unwrap();
+    assert_eq!(count(&host, "count"), 1);
+    let initial = host.checkpoint().unwrap();
+    assert_eq!(host.next_event_time().unwrap(), Some(1.5e-9));
+
+    begin(&mut host, 1e-9, 1e-9);
+    host.force_digital(&[("drive", "1")]).unwrap();
+    host.force_digital(&[("drive", "0")]).unwrap();
+    host.force_digital(&[("drive", "1")]).unwrap();
+    settle_standalone_observer(&mut host, &[1.0]);
+    assert_eq!(count(&host, "count"), 9);
+    assert_eq!(count(&host, "valid"), 1);
+    assert_eq!(
+        count(&host, "early"),
+        0,
+        "endpoint drives cannot leak into earlier observations"
+    );
+    assert_eq!(
+        count(&host, "edges"),
+        2,
+        "successive same-time input banks keep both edges"
+    );
+    host.reject_trial().unwrap();
+    assert_eq!(count(&host, "count"), 1);
+    assert_eq!(count(&host, "edges"), 0);
+    assert_eq!(host.next_event_time().unwrap(), Some(1.5e-9));
+
+    begin(&mut host, 1e-9, 1e-9);
+    let abort = CountingAbort::new(4);
+    let error = host
+        .settle_analog_bridges_with_abort(&[1.0], &abort)
+        .unwrap_err();
+    assert!(matches!(error, MixedSignalError::Aborted), "{error}");
+    assert_eq!(abort.polls_after_abort(), 0);
+    host.reject_trial().unwrap();
+    assert_eq!(count(&host, "count"), 1);
+
+    host.set_observer_interval_event_limit(2).unwrap();
+    begin(&mut host, 1e-9, 1e-9);
+    let error = host.settle_analog_bridges(&[1.0]).unwrap_err();
+    assert!(
+        matches!(error,MixedSignalError::ResourceLimit(error) if error.limit==2),
+        "{error}"
+    );
+    host.reject_trial().unwrap();
+    host.set_observer_interval_event_limit(100).unwrap();
+    begin(&mut host, 1e-9, 1e-9);
+    host.force_digital(&[("drive", "1")]).unwrap();
+    settle_standalone_observer(&mut host, &[1.0]);
+    host.accept_trial().unwrap();
+    let accepted = host.checkpoint().unwrap();
+    let mut restored = compile();
+    restored.restore(&accepted).unwrap();
+    for candidate in [&mut host, &mut restored] {
+        begin(candidate, 1.5e-9, 0.5e-9);
+        settle_standalone_observer(candidate, &[1.5]);
+        candidate.accept_trial().unwrap();
+        for (name, expected) in [
+            ("count", 13),
+            ("valid", 1),
+            ("early", 0),
+            ("edges", 1),
+            ("future", 1),
+        ] {
+            assert_eq!(count(candidate, name), expected, "{name}");
+        }
+        assert_eq!(candidate.next_event_time().unwrap(), None);
+    }
+    restored.set_observer_interval_event_limit(0).unwrap();
+    restored.restore(&initial).unwrap();
+    assert_eq!(count(&restored, "count"), 1);
+    assert_eq!(restored.next_event_time().unwrap(), Some(1.5e-9));
+    begin(&mut restored, 125e-12, 125e-12);
+    let error = restored.settle_analog_bridges(&[0.125]).unwrap_err();
+    assert!(
+        matches!(error,MixedSignalError::ResourceLimit(error) if error.limit==0),
+        "restore must preserve the receiver's resource policy: {error}"
+    );
+    restored.reject_trial().unwrap();
+}
+
+#[test]
+fn absdelta_standalone_feedback_reports_a_refinement_before_acceptance() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let source = r#"
+`timescale 1ps/1ps
+module observer(a,q);
+ input a; electrical a; output q; reg q=0;
+ always @(absdelta(V(a),0.125,1p,1u)) if ($abstime>0) q=~q;
+endmodule
+"#;
+    let mut host =
+        MixedSignalHost::compile(source, None, "observer", &[1], SchedulerLimits::default())
+            .unwrap();
+    host.add_dac_bridge("q", 0, (2, 0), 0.0, 1.0, 1000.0)
+        .unwrap();
+    let begin = |host: &mut MixedSignalHost, time, dt| {
+        host.begin_trial(
+            time,
+            dt,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap()
+    };
+    begin(&mut host, 0.0, 0.0);
+    settle_standalone_observer(&mut host, &[0.0, 0.0]);
+    host.accept_trial().unwrap();
+    begin(&mut host, 1e-9, 1e-9);
+    settle_standalone_observer(&mut host, &[1.0, 1.0]);
+    let root = host.trial_boundary_refinement_time(1e-15).unwrap().unwrap();
+    assert!((root - 125e-12).abs() < 1e-18, "{root}");
+    assert!(
+        host.accept_trial().is_err(),
+        "an interior analog change requires a new solve"
+    );
+    host.reject_trial().unwrap();
+    assert_eq!(host.read_digital("q").unwrap(), "0");
+    begin(&mut host, root, root);
+    settle_standalone_observer(&mut host, &[0.125, 1.0]);
+    assert_eq!(host.trial_boundary_refinement_time(1e-15).unwrap(), None);
+    let mut rhs = 0.0;
+    host.stamp(
+        &[0.125, 1.0],
+        |_, _, _| {},
+        |node, value| {
+            if node == 1 {
+                rhs += value;
+            }
+        },
+    )
+    .unwrap();
+    assert!((rhs - 1e-3).abs() < 1e-15, "{rhs}");
+    host.accept_trial().unwrap();
+    assert_eq!(host.read_digital("q").unwrap(), "1");
 }

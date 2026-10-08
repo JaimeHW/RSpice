@@ -780,6 +780,17 @@ impl DigitalHost {
         self.settle(tick)
     }
 
+    pub(crate) fn check_forces(
+        &self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+    ) -> Result<(), DigitalRunError> {
+        self.require_standalone_execution()?;
+        for (signal, value) in drives {
+            self.store.check_force(*signal, value, &self.plan)?;
+        }
+        Ok(())
+    }
+
     /// Publish a co-timed input bank and enqueue its consequences. A mixed
     /// trial may need its candidate solution before those processes can run.
     pub(crate) fn prepare_forces(
@@ -788,9 +799,7 @@ impl DigitalHost {
         tick: u64,
     ) -> Result<(), DigitalRunError> {
         self.require_standalone_execution()?;
-        for (signal, value) in drives {
-            self.store.check_force(*signal, value, &self.plan)?;
-        }
+        self.check_forces(drives)?;
         self.set_event_clock(tick, None)?;
         for (signal, value) in drives {
             self.store.force(*signal, value.clone(), &self.plan)?;

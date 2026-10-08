@@ -74,6 +74,21 @@ pub(crate) struct DigitalActiveExchange<'a> {
 }
 
 impl DigitalActiveExchange<'_> {
+    /// Publish a validated standalone input bank at the active physical slot.
+    /// The enclosing settle loop dispatches its sensitivity after this wave.
+    pub(crate) fn force_signals(
+        &mut self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+    ) -> Result<(), DigitalRunError> {
+        self.host.check_forces(drives)?;
+        for (signal, value) in drives {
+            self.host
+                .store
+                .force(*signal, value.clone(), &self.host.plan)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn require_standalone_execution(&self) -> Result<(), DigitalRunError> {
         self.host.require_standalone_execution()
     }

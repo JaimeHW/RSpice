@@ -630,6 +630,24 @@ impl MixedDigitalCoordinator {
         error.into()
     }
 
+    /// Translate and validate an external input bank for a one-host adapter.
+    pub(super) fn standalone_input_bank(
+        &self,
+        drives: &[(DigitalSignalId, FourStateValue)],
+    ) -> Result<Vec<(DigitalSignalId, FourStateValue)>, MixedSignalError> {
+        let [map] = &*self.maps else {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "standalone input requires exactly one enrolled instance".into(),
+            });
+        };
+        let bank = drives
+            .iter()
+            .map(|(local, value)| (map.signals[usize::from(*local)], value.clone()))
+            .collect::<Vec<_>>();
+        self.digital.check_forces(&bank)?;
+        Ok(bank)
+    }
+
     pub(crate) fn start(&mut self) -> Result<(), MixedSignalError> {
         if !self.enabled {
             self.digital.make_mut().prepare_start()?;
@@ -916,6 +934,7 @@ impl MixedDigitalCoordinator {
 /// [`MixedDigitalCoordinator::rollback_trial`] on every exit that is not an
 /// explicit [`MixedDigitalCoordinator::commit_trial`] — the same discipline,
 /// enforced in the one place that owns both halves.
+#[derive(Clone)]
 pub(crate) struct SharedTrialCursor {
     observers: Vec<AbsDeltaState>,
     observation_probes: Vec<Option<f64>>,
