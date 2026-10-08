@@ -725,8 +725,17 @@ controls resume; separate assignments and loop iterations retain separate events
 The grouping survives hierarchy, inactive guards, rejected candidates and
 checkpoint restore. This is implementation coverage, not vendor qualification.
 
-Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, partial-array values and slices, replicated
-initializer patterns, cross-instance scheduling qualification,
+Variable array patterns now support nested replication in module/local
+initializers and analog/digital assignments (schema 118). Every unpacked axis is
+checked before expansion; counts use the declaring scope's integer constants and
+participate in specialization identity. Packed leaf concatenations keep their
+normal expression semantics, including wide X/Z values. Zero-count items follow
+the existing parameter-pattern extension; an entirely empty value cannot fill a
+nonempty array. Assignment-pattern side-effect evaluation counts are not a
+portable vendor contract (IEEE 1800-2017 section 10.9.1).
+
+Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, partial-array values and slices,
+parameter-array value copies, cross-instance scheduling qualification,
 full parameter-dependent shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
 are still open.
 

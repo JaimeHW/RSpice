@@ -64,10 +64,18 @@ impl SemanticAnalyzer {
         let target = self
             .analog_array_value_type(&name, module)
             .ok_or_else(|| self.array_coordinate_error(&name, "has no array-value type", *span))?;
-        let elements = crate::array_values::assignment_elements(&assign.value, &target, |name| {
-            self.analog_array_value_type(name, module)
-        })
+        let mut counts = Vec::new();
+        let elements = crate::array_values::assignment_elements(
+            &assign.value,
+            &target,
+            |name| self.analog_array_value_type(name, module),
+            |expression| {
+                counts.push(expression.clone());
+                self.array_pattern_count(expression)
+            },
+        )
         .map_err(|detail| self.array_coordinate_error(&name, &detail, assign.value.span()))?;
+        self.protect_array_pattern_counts(&counts, module, assign.span)?;
         let var_type = module.variables[array.base].var_type;
         let mut captured = Vec::with_capacity(elements.len());
         // Capture every RHS before modifying any destination, including self
@@ -161,6 +169,7 @@ impl SemanticAnalyzer {
     pub(super) fn array_initializer_values<'a>(
         &mut self,
         item: &'a VariableItem,
+        module: &mut AnalyzedModule,
     ) -> CompileResult<Vec<(usize, &'a Expression)>> {
         let mut bounds = Vec::with_capacity(item.dimensions.len());
         for dimension in &item.dimensions {
@@ -201,11 +210,16 @@ impl SemanticAnalyzer {
                 )
             })?;
         let initializer = item.init.as_ref().expect("array initializer");
+        let mut counts = Vec::new();
         let elements =
-            crate::canonical_ir::digital_lower::array_initializer_elements(initializer, &shape)
-                .map_err(|reason| {
-                    self.array_coordinate_error(&item.name, &reason, initializer.span())
-                })?;
+            crate::array_values::initializer_elements(initializer, &shape, |expression| {
+                counts.push(expression.clone());
+                self.array_pattern_count(expression)
+            })
+            .map_err(|reason| {
+                self.array_coordinate_error(&item.name, &reason, initializer.span())
+            })?;
+        self.protect_array_pattern_counts(&counts, module, initializer.span())?;
         Ok(elements
             .into_iter()
             .enumerate()
@@ -216,6 +230,37 @@ impl SemanticAnalyzer {
                 )
             })
             .collect())
+    }
+
+    fn array_pattern_count(&self, expression: &Expression) -> Option<i64> {
+        let expression = constant_dependencies::bound_expression(self, expression)?;
+        match crate::canonical_ir::digital_lower::elaboration_constant(
+            &expression,
+            &self.digital_selector_constants,
+            self.current_time_scale,
+        )? {
+            crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+            crate::numeric_literal::NumericLiteralValue::Real(_) => None,
+        }
+    }
+
+    fn protect_array_pattern_counts(
+        &self,
+        counts: &[Expression],
+        module: &mut AnalyzedModule,
+        span: Span,
+    ) -> CompileResult<()> {
+        if counts.is_empty() {
+            return Ok(());
+        }
+        let dependencies = crate::canonical_ir::digital_lower::expression_dependencies(
+            &self.digital_selector_constants,
+            self.current_time_scale,
+            counts,
+        )
+        .map_err(|detail| self.array_coordinate_error("assignment pattern", &detail, span))?;
+        constant_dependencies::protect(module, &dependencies, span)?;
+        Ok(())
     }
 
     pub(super) fn lower_array_coordinates(

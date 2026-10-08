@@ -930,13 +930,14 @@ impl<'a> Lexer<'a> {
         while let Some(ch) = self.peek_char() {
             if ch.is_ascii_digit() || ch == '_' {
                 self.advance();
-            } else if ch == '\'' && !has_dot && !has_exp {
+            } else if ch == '\'' && !has_dot && !has_exp && self.based_literal_apostrophe_follows()
+            {
                 self.advance();
                 return self.scan_based_number(start);
             } else if ch.is_whitespace()
                 && !has_dot
                 && !has_exp
-                && self.whitespace_precedes_apostrophe()
+                && self.based_literal_apostrophe_follows()
             {
                 while self.peek_char().is_some_and(char::is_whitespace) {
                     self.advance();
@@ -1072,7 +1073,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn whitespace_precedes_apostrophe(&self) -> bool {
+    fn based_literal_apostrophe_follows(&self) -> bool {
         let mut lookahead = self.chars.clone();
         while lookahead
             .peek()
@@ -1080,9 +1081,14 @@ impl<'a> Lexer<'a> {
         {
             lookahead.next();
         }
+        // A quote followed by `{` opens the next assignment-pattern token,
+        // including directly after an intra-assignment delay such as #50'{...}.
         lookahead
-            .peek()
-            .is_some_and(|(_, character)| *character == '\'')
+            .next()
+            .is_some_and(|(_, character)| character == '\'')
+            && !lookahead
+                .peek()
+                .is_some_and(|(_, character)| *character == '{')
     }
 
     fn scan_string(&mut self, start: usize) -> Result<Token, LexerError> {

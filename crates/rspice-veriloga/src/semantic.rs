@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet};
 const RSPICE_LIMITED_EXP_INTRINSIC: &str = "__rspice_limited_exp";
 pub(crate) const MAX_PARAMETER_ARRAY_RANK: usize = 16;
 pub(crate) const MAX_PARAMETER_ARRAY_ELEMENTS: u64 = 1_048_576;
-const MAX_REPLICATION_NESTING: usize = 128;
+use crate::array_values::MAX_REPLICATION_NESTING;
 const MAX_REPLICATION_MATERIALIZATION_WORK: usize = 4_194_304;
 const MAX_ANALOG_FILTER_VECTOR_ELEMENTS: usize =
     crate::zfilter::MAX_ZI_RUNTIME_OPERANDS - crate::zfilter::ZI_FIXED_RUNTIME_OPERANDS;
@@ -1973,7 +1973,7 @@ impl SemanticAnalyzer {
                 function_effects::validate_initializer_expression(init, &self.user_functions)?;
 
                 if let Some(layout) = self.arrays.get(&item.name).cloned() {
-                    for (offset, element) in self.array_initializer_values(item)? {
+                    for (offset, element) in self.array_initializer_values(item, &mut analyzed)? {
                         let var_index = layout.base + offset;
                         let expression = self.lower_expression_with_side_effects(
                             element,
@@ -3046,7 +3046,7 @@ impl SemanticAnalyzer {
                                 );
                                 if item.init.is_some() {
                                     for (offset, expression) in
-                                        self.array_initializer_values(item)?
+                                        self.array_initializer_values(item, module)?
                                     {
                                         let target =
                                             module.variables[layout.base + offset].name.clone();

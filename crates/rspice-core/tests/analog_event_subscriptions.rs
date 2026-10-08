@@ -2145,3 +2145,105 @@ endmodule
         }
     }
 }
+
+#[test]
+fn replicated_array_patterns_capture_typed_values_and_specialize_hierarchy() {
+    let text = r#"
+`timescale 1ps/1ps
+module patterns(a,p); input a; electrical a; inout p; electrical p;
+ parameter integer N=2;
+ real data[N-1:0][1:0]='{N{'{2{0.25}}}};
+ real copied[N-1:0][1:0]='{N{'{2{1.0}}}};
+ reg [69:0] bits[1:0]='{2{{35{2'bxz}}}};
+ integer seen=0,checks=0;
+ initial begin : locals
+   real localdata[3:2][4:3]='{2{'{2{0.125}}}};
+   #50;
+   if (localdata[3][4]==0.125 && localdata[2][3]==0.125 && bits[0]==={35{2'bxz}} && bits[1]==={35{2'bxz}}) checks=1;
+   copied <= #50 '{N{'{2{V(a)}}}};
+   bits <= #80'{2{{35{2'b10}}}};
+   #51;
+   if (copied[N-1][1]==0.5 && copied[0][0]==0.5) checks=checks+2;
+   localdata='{2{'{2{copied[N-1][1]}}}};
+   #50;
+   if (localdata[3][4]==0.5 && localdata[2][3]==0.5 && bits[0]==={35{2'b10}} && bits[1]==={35{2'b10}}) checks=checks+4;
+ end
+ analog @(timer(75p)) data='{N{'{2{V(a)}}}};
+ always @(data) seen=seen+1;
+ analog I(p)<+(V(p)-(checks+10*seen+data[N-1][1]+data[0][0]))/1000;
+endmodule
+module wrapper(a,p,q); input a; electrical a; inout p,q; electrical p,q;
+ patterns first(a,p); patterns #(.N(3)) second(a,q);
+endmodule
+"#;
+    let source = Source::new(text);
+    let deck=Netlist::parse(&format!(
+        "* replicated array values\nV1 a 0 pwl(0 0 50p 0.5 100p 1)\nX1 a p q wrapper\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" wrapper module=wrapper\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 200e-12, 20e-12).unwrap();
+    for node in ["p", "q"] {
+        for (time, expected) in [(20e-12, 0.25), (120e-12, 7.25), (180e-12, 9.25)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-8,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn replicated_array_patterns_validate_counts_shapes_and_lexical_scope() {
+    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for (count, reason) in [
+        ("-1", "non-negative"),
+        ("2.0", "integer constant"),
+        ("2'bx", "integer constant"),
+        ("4294967296", "extent"),
+        ("1", "requires 2 elements"),
+    ] {
+        for domain in ["analog", "initial"] {
+            let text =
+                format!("module bad; real data[0:1]; {domain} data='{{{count}{{1.0}}}}; endmodule");
+            let error = compiler
+                .compile_runtime_with_qualifications(
+                    &text,
+                    None,
+                    rspice_veriloga::RuntimeQualificationOptions::NONE,
+                )
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(reason), "{domain} {count}: {error}");
+        }
+    }
+    for domain in ["analog", "initial"] {
+        let text = format!(
+            "module shadow; parameter integer N=2; real data[0:1]; {domain} begin : scope integer N; N=2; data='{{N{{1.0}}}}; end endmodule"
+        );
+        let error = compiler
+            .compile_runtime_with_qualifications(
+                &text,
+                None,
+                rspice_veriloga::RuntimeQualificationOptions::NONE,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("integer constant"), "{domain}: {error}");
+    }
+    // A huge repetition of an empty body must not iterate or allocate by count.
+    // This extends the parameter-pattern zero-replication contract to variables.
+    for domain in ["analog", "initial"] {
+        let text = format!(
+            "module empty; real data[0:1]; {domain} data='{{64'd9223372036854775807{{0{{9.0}}}},1.0,2.0}}; endmodule"
+        );
+        compiler
+            .compile_runtime_with_qualifications(
+                &text,
+                None,
+                rspice_veriloga::RuntimeQualificationOptions::NONE,
+            )
+            .unwrap();
+    }
+}

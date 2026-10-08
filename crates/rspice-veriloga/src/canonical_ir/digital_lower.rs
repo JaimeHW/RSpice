@@ -91,7 +91,6 @@
 mod constants;
 mod expressions;
 mod local_arrays;
-pub(crate) use crate::array_values::initializer_elements as array_initializer_elements;
 mod local_storage;
 use constants::ResolvedConstants;
 

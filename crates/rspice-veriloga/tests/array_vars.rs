@@ -548,3 +548,35 @@ endmodule
         assert!(error.to_string().contains("index"), "{error}");
     }
 }
+
+#[test]
+fn replicated_array_patterns_preserve_jacobians_and_shape_dependencies() {
+    let model = compile(
+        r#"
+module patterns(p,n); inout p,n; electrical p,n;
+ parameter integer COPIES=2;
+ real data[0:1][1:0]='{2{'{2{0.125}}}};
+ analog begin
+   real localdata[3:2]='{COPIES{0.25}};
+   data='{2{'{2{V(p,n)*V(p,n)}}}};
+   I(p,n)<+localdata[3]*V(p,n)+data[0][0]+data[0][1]+data[1][0]+data[1][1];
+ end
+endmodule
+"#,
+    );
+    let mut device = model.device("X", &[1, 0]);
+    assert!(
+        device.try_set_parameter("COPIES", 3.0).is_err(),
+        "pattern shape is part of elaborated identity"
+    );
+    for voltage in [0.5, -0.25] {
+        let (matrix, rhs) = collect_stamps(&mut device, &[voltage]);
+        assert!(
+            (matrix[&(0, 0)] - (0.25 + 8.0 * voltage)).abs() < 1e-12,
+            "{matrix:?}"
+        );
+        assert!((rhs[&0] - 4.0 * voltage * voltage).abs() < 1e-12, "{rhs:?}");
+        model.observe(&mut device);
+        assert_eq!(device.variable("data[0][1]"), Some(voltage * voltage));
+    }
+}

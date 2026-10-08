@@ -1,6 +1,8 @@
 //! Shape-checked unpacked values, expanded in declaration order before writes.
 use crate::{array_index::UnpackedArrayLayout, ast::*, source::Span};
 
+pub(crate) const MAX_REPLICATION_NESTING: usize = 128;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ElementType {
     Real,
@@ -20,6 +22,7 @@ pub(crate) fn assignment_elements(
     expression: &Expression,
     target: &ArrayType,
     resolve: impl Fn(&str) -> Option<ArrayType>,
+    count: impl FnMut(&Expression) -> Option<i64>,
 ) -> Result<Vec<Expression>, String> {
     if let Expression::Identifier(id) = expression {
         let source = resolve(&id.name)
@@ -45,7 +48,7 @@ pub(crate) fn assignment_elements(
             .map(|ordinal| element_read(&id.name, &source.layout, ordinal, id.span))
             .collect());
     }
-    initializer_elements(expression, &target.layout)
+    initializer_elements(expression, &target.layout, count)
         .map(|elements| elements.into_iter().cloned().collect())
 }
 
@@ -120,8 +123,15 @@ pub(crate) fn digital_target(
 pub(crate) fn initializer_elements<'a>(
     expression: &'a Expression,
     layout: &crate::array_index::UnpackedArrayLayout,
+    mut count: impl FnMut(&Expression) -> Option<i64>,
 ) -> Result<Vec<&'a Expression>, String> {
     let mut elements = Vec::with_capacity(layout.len());
+    let mut counts = std::collections::HashMap::new();
+    let mut cached_count = |expression: &Expression| {
+        *counts
+            .entry(std::ptr::from_ref(expression))
+            .or_insert_with(|| count(expression))
+    };
     let mut pending = vec![(expression, 0)];
     while let Some((expression, depth)) = pending.pop() {
         if depth == layout.axes().len() {
@@ -140,24 +150,72 @@ pub(crate) fn initializer_elements<'a>(
             );
         }
         let expected = layout.axes()[depth].len();
-        if literal.first_replication().is_some() {
-            return Err(
-                "replicated array initialization requires element-pattern expansion".into(),
-            );
-        }
-        if literal.elements.len() != expected {
+        let values = dimension_elements(&literal.elements, expected, &mut cached_count, 0)?;
+        if values.len() != expected {
             return Err(format!(
                 "array initializer dimension {} requires {expected} elements, found {}",
                 depth + 1,
-                literal.elements.len()
+                values.len()
             ));
         }
-        for element in literal.elements.iter().rev() {
-            let ArrayLiteralElement::Value(value) = element else {
-                unreachable!("replication rejected")
-            };
+        for value in values.into_iter().rev() {
             pending.push((value, depth + 1));
         }
     }
     Ok(elements)
+}
+
+/// Replication expands only its current dimension. References retain the original
+/// scalar expression and assignment context; packed leaf concatenations are left
+/// to ordinary expression lowering. Never allocate proportional to an unchecked
+/// source count, including a huge count of an empty (zero-replicated) body.
+fn dimension_elements<'a>(
+    items: &'a [ArrayLiteralElement],
+    limit: usize,
+    count: &mut impl FnMut(&Expression) -> Option<i64>,
+    depth: usize,
+) -> Result<Vec<&'a Expression>, String> {
+    if depth >= MAX_REPLICATION_NESTING {
+        return Err(format!(
+            "array pattern replication nesting exceeds {MAX_REPLICATION_NESTING} levels"
+        ));
+    }
+    let mut result = Vec::new();
+    for item in items {
+        match item {
+            ArrayLiteralElement::Value(value) => {
+                if result.len() == limit {
+                    return Err(format!(
+                        "array pattern exceeds its dimension extent of {limit}"
+                    ));
+                }
+                result.push(value);
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                let copies = count(&replication.count).ok_or(
+                    "array pattern replication count must be an integer constant expression",
+                )?;
+                if copies < 0 {
+                    return Err("array pattern replication count must be non-negative".into());
+                }
+                let body = dimension_elements(&replication.elements, limit, count, depth + 1)?;
+                let expanded = (copies as u64)
+                    .checked_mul(body.len() as u64)
+                    .filter(|size| *size <= (limit - result.len()) as u64)
+                    .ok_or_else(|| {
+                        format!("array pattern replication exceeds its dimension extent of {limit}")
+                    })?;
+                if expanded == 0 {
+                    continue;
+                }
+                result
+                    .try_reserve(expanded as usize)
+                    .map_err(|_| "could not allocate array pattern elements")?;
+                for _ in 0..copies {
+                    result.extend_from_slice(&body);
+                }
+            }
+        }
+    }
+    Ok(result)
 }

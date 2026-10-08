@@ -50,13 +50,15 @@ impl ProcessLowerer<'_> {
         };
         self.array_declaration(name)?;
         let array = self.array_value_type(name).expect("validated target array");
-        let elements =
-            match crate::array_values::assignment_elements(&assign.value, &array, |name| {
-                self.array_value_type(name)
-            }) {
-                Ok(elements) => elements,
-                Err(error) => return Some(Err(error)),
-            };
+        let elements = match crate::array_values::assignment_elements(
+            &assign.value,
+            &array,
+            |name| self.array_value_type(name),
+            |count| self.array_pattern_count(count),
+        ) {
+            Ok(elements) => elements,
+            Err(error) => return Some(Err(error)),
+        };
         let mut targets = Vec::with_capacity(elements.len());
         let mut values = Vec::with_capacity(elements.len());
         for (ordinal, element) in elements.into_iter().enumerate() {
@@ -71,6 +73,13 @@ impl ProcessLowerer<'_> {
             values.push(value);
         }
         Some(Ok((targets, values)))
+    }
+
+    fn array_pattern_count(&self, expression: &Expression) -> Option<i64> {
+        if self.is_real_expression(expression) {
+            return None;
+        }
+        self.constant(expression)
     }
 
     pub(super) fn declare_local_array(
@@ -256,7 +265,9 @@ impl ProcessLowerer<'_> {
             .or_else(|| self.arrays.get(&array.base))
             .expect("local array metadata");
         let layout = declaration.layout().expect("validated local array");
-        let elements = match initializer_elements(expression, &layout) {
+        let elements = match initializer_elements(expression, &layout, |count| {
+            self.array_pattern_count(count)
+        }) {
             Ok(elements) => elements,
             Err(message) => {
                 self.error(message, expression.span());

@@ -602,8 +602,13 @@ pub(super) fn initializers(
         .collect();
     let layout =
         crate::array_index::UnpackedArrayLayout::new(&axes, 65536).expect("analyzed array layout");
-    let elements =
-        crate::array_values::initializer_elements(expression, &layout).map_err(refuse)?;
+    let elements = crate::array_values::initializer_elements(expression, &layout, |count| {
+        match scalar(count, constants, time_scale)? {
+            crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+            crate::numeric_literal::NumericLiteralValue::Real(_) => None,
+        }
+    })
+    .map_err(refuse)?;
     let mut element = signal.clone();
     element.unpacked = None;
     element.dimensions.clear();
