@@ -118,6 +118,7 @@ impl CircuitData {
         &self,
         net_current: &[Value],
         current_scale: &[Value],
+        unresolved_current: &[bool],
         abstol: Value,
         reltol: Value,
     ) -> Vec<String> {
@@ -125,11 +126,12 @@ impl CircuitData {
             .iter()
             .enumerate()
             .filter(|(component, _)| {
-                if !self
-                    .dc_floating_component_is_certain
-                    .get(*component)
-                    .copied()
-                    .unwrap_or(false)
+                if unresolved_current[*component]
+                    || !self
+                        .dc_floating_component_is_certain
+                        .get(*component)
+                        .copied()
+                        .unwrap_or(false)
                 {
                     return false;
                 }
@@ -141,11 +143,16 @@ impl CircuitData {
             .collect()
     }
 
-    /// Floating components with a nonzero net installed independent-source
-    /// current. This is safe before solving and follows the circuit-owned DC
-    /// values, including loaded PWL/PAT snapshots and live `.DC` sweep values.
+    /// Floating components with an unbalanced installed independent-source
+    /// current and no controlled current crossing their boundary. Feedback or
+    /// another prescribed current can balance the independent drive; those
+    /// components require the installed-equation audit after solving instead.
+    /// Uses loaded PWL/PAT snapshots and live `.DC` sweep values.
     pub(crate) fn independent_dc_drive_nodes(&self, abstol: Value, reltol: Value) -> Vec<String> {
         let component_count = self.dc_floating_component_nodes.len();
+        if component_count == 0 || self.current_sources.is_empty() {
+            return Vec::new();
+        }
         let mut net_current = vec![0.0; component_count];
         let mut current_scale = vec![0.0; component_count];
         for index in 0..self.current_sources.len() {
@@ -158,15 +165,57 @@ impl CircuitData {
                 self.current_sources.dc_values[index],
             );
         }
-        self.driven_floating_component_nodes(&net_current, &current_scale, abstol, reltol)
+        let mut unresolved_current = vec![false; component_count];
+        let controlled_outputs = self
+            .vccs
+            .node_pos
+            .iter()
+            .copied()
+            .zip(self.vccs.node_neg.iter().copied())
+            .chain(
+                self.cccs
+                    .node_pos
+                    .iter()
+                    .copied()
+                    .zip(self.cccs.node_neg.iter().copied()),
+            )
+            .chain(
+                self.behavioral_sources
+                    .current_sources
+                    .iter()
+                    .map(|source| (source.node_pos, source.node_neg)),
+            );
+        for (positive, negative) in controlled_outputs {
+            let component_of = |node: NodeId| {
+                self.dc_floating_component_by_node
+                    .get(node)
+                    .copied()
+                    .flatten()
+            };
+            let positive = component_of(positive);
+            let negative = component_of(negative);
+            if positive == negative {
+                // Internal source currents cancel in component common-mode KCL.
+                continue;
+            }
+            for component in [positive, negative].into_iter().flatten() {
+                unresolved_current[component] = true;
+            }
+        }
+        self.driven_floating_component_nodes(
+            &net_current,
+            &current_scale,
+            &unresolved_current,
+            abstol,
+            reltol,
+        )
     }
 
     /// Nodes that no chain of DC-conducting elements ties to ground.
     ///
-    /// Their DC voltage is set by the solver's conditioning shunt rather than
-    /// by the circuit, so an operating point reported for them would be an
-    /// artifact of the shunt's size. Empty when the circuit is sound or when
-    /// its topology could not be analyzed.
+    /// This is a passive-conduction diagnostic: controlled-source feedback
+    /// can still determine these voltages. The installed equations decide
+    /// whether an accepted bias depends on numerical conditioning.
     pub fn no_dc_path_nodes(&self) -> &[String] {
         &self.no_dc_path_nodes
     }
@@ -196,7 +245,8 @@ impl CircuitData {
             .collect()
     }
 
-    /// No-DC-path nodes in components driven by a current-source equation.
+    /// No-DC-path nodes with an unbalanced independent current and no possible
+    /// controlled-current contribution across their component boundary.
     ///
     /// Unlike an unforced capacitive island, these nodes cannot be assigned a
     /// finite operating point without making the result depend on the solver's

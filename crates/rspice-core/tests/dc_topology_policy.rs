@@ -17,6 +17,129 @@ fn voltage(result: &rspice_core::solver::SimulationResult, node: &str) -> f64 {
         .unwrap_or_else(|| panic!("missing voltage for node {node}"))
 }
 
+fn check_current_feedback_bias(feedback: &str) {
+    let netlist = parse(&format!(
+        "Current drive with a feedback conductance\nI1 0 out dc 1m ac 1m\n{feedback}\n.end\n"
+    ));
+    let engine = engine();
+    // Feedback supplies 1 mS even though a passive-conduction walk cannot
+    // reach ground from OUT. Physical KCL is .001 * V(out) = .001.
+    let result = engine
+        .run_dc_op(&netlist)
+        .expect("feedback determines DC bias");
+    assert!((voltage(&result, "out") - 1.0).abs() < 1e-8);
+    let circuit = engine.build_circuit(&netlist).unwrap();
+    assert!(circuit.fatal_no_dc_path_nodes().is_empty());
+    let topology = rspice_core::netlist::analyze_dc_ground_paths(&netlist.elements).unwrap();
+    assert!(topology.fatal_nodes().next().is_none());
+    // Keep the known conduction partition for the post-solve audit. An
+    // unresolved source current does not make its output topology unknown.
+    assert!(
+        topology
+            .floating_component_is_certain
+            .iter()
+            .all(|certain| *certain)
+    );
+    let ac = engine.run_ac(&netlist, &[0.0, 1e3]).unwrap();
+    for point in ac {
+        let out = point
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!((point.voltages[out].re - 1.0).abs() < 1e-8);
+        assert!(point.voltages[out].im.abs() < 1e-12);
+    }
+    let sweep = engine
+        .run_dc_sweep(&netlist, "I1", -1e-3, 1e-3, 5e-4)
+        .unwrap();
+    assert_eq!(sweep.len(), 5);
+    for (current, point) in sweep {
+        assert!((voltage(&point, "out") - 1000.0 * current).abs() < 1e-8);
+    }
+    let transient = engine.run_tran(&netlist, 2e-6, 1e-6).unwrap();
+    let output = transient.try_voltage_waveform_named("out").unwrap();
+    assert!(output.len() >= 2);
+    assert!(output.iter().all(|value| (value - 1.0).abs() < 1e-8));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn self_controlled_vccs_balances_independent_dc_drive() {
+    check_current_feedback_bias("G1 out 0 out 0 1m");
+    check_current_feedback_bias("E1 copy 0 out 0 1\nG1 out 0 copy 0 1m");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn behavioral_feedback_balances_independent_dc_drive() {
+    check_current_feedback_bias("B1 out 0 i={v(out)/1000}");
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn current_controlled_feedback_balances_independent_dc_drive() {
+    check_current_feedback_bias(
+        "E1 copy 0 out 0 1\nVsense copy sense 0\nRsense sense 0 1k\nF1 out 0 Vsense 1",
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn feedback_balances_current_injected_elsewhere_in_a_conductive_component() {
+    let netlist = parse(
+        "Feedback grounds a resistor island\nI1 0 drive 1m\nR1 drive out 1k\nG1 out 0 out 0 1m\n.end\n",
+    );
+    let result = engine().run_dc_op(&netlist).unwrap();
+    assert!((voltage(&result, "out") - 1.0).abs() < 1e-8);
+    assert!((voltage(&result, "drive") - 2.0).abs() < 1e-8);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn unresolved_controlled_currents_do_not_admit_a_shunt_dependent_bias() {
+    for source in ["G1 out 0 ref 0 1m", "F1 out 0 Vref 1", "B1 out 0 i=0"] {
+        let netlist = parse(&format!(
+            "Unbalanced DC drive\nVref ref 0 0\nI1 0 out 1m\n{source}\nC1 out 0 1u\n.end\n"
+        ));
+        let error = engine()
+            .run_dc_op(&netlist)
+            .expect_err("unknown current is not a ground path");
+        assert!(
+            error.to_string().contains("no DC path to ground"),
+            "{source}: {error}"
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn sensing_or_driving_inside_a_floating_component_does_not_balance_its_net_current() {
+    for source in [
+        "G1 other 0 out 0 1m\nR1 other 0 1k",
+        "G1 out other out 0 1m\nR1 out other 1k",
+    ] {
+        let netlist = parse(&format!(
+            "Unbalanced component\nI1 0 out 1m\n{source}\nC1 out 0 1u\n.end\n"
+        ));
+        let engine = engine();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+        assert!(
+            circuit
+                .fatal_no_dc_path_nodes()
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case("out"))
+        );
+        let error = engine
+            .run_dc_op(&netlist)
+            .expect_err("net component current remains nonzero");
+        assert!(
+            error.to_string().contains("no DC path to ground"),
+            "{source}: {error}"
+        );
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn homogeneous_dc_retains_a_unique_bias_when_floating_lu_loses_a_pivot() {

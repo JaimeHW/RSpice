@@ -171,9 +171,9 @@ fn all_element_terminal_nodes(element: &Element) -> Vec<&str> {
 /// Severity assigned to a node with no DC-conducting path to ground.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DcGroundPathSeverity {
-    /// The node is unconstrained but has no current-source constraint driving
-    /// its conductive component. Preserve historical SPICE behavior: warn and
-    /// let the numerical conditioning shunt choose the component common mode.
+    /// The conduction walk cannot prove an inconsistent common-mode KCL.
+    /// Controlled-source feedback may determine the voltage; passive floating
+    /// islands preserve the historical numerical common-mode choice.
     WarningOnly,
     /// A current source drives the node's otherwise ungrounded conductive
     /// component. Its operating point would depend on the conditioning shunt,
@@ -188,7 +188,7 @@ pub struct DcGroundPathNodeDiagnostic {
     pub severity: DcGroundPathSeverity,
 }
 
-/// Nodes whose DC voltage nothing in the circuit determines.
+/// Nodes without a passive DC conduction path; feedback can still fix their bias.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DcGroundPathDiagnostics {
     /// True when every flattened element had a modeled DC conduction contract.
@@ -246,8 +246,10 @@ impl DcGroundPathDiagnostics {
 ///
 /// The rule here is conduction, not lead grouping: an element ties all of its
 /// terminals together unless it is open at DC. Capacitors are open, and so is
-/// every current source -- independent, controlled, or behavioral -- because a
-/// prescribed current constrains no node voltage. A MOSFET's insulated gate
+/// every current source -- independent, controlled, or behavioral. Controlled
+/// currents can nevertheless constrain voltage through feedback, so components
+/// they drive require an installed-equation audit rather than a fatal precheck.
+/// A MOSFET's insulated gate
 /// remains separate from its drain/source/body conduction group. Every other
 /// supported native element conservatively ties the terminals its DC model can
 /// conduct through. The post-solve audit independently requires a singular
@@ -330,6 +332,7 @@ pub(crate) fn analyze_dc_ground_paths_with_capacitor_ic_mode(
     // it can determine voltage differences but cannot make the arbitrary
     // common mode depend on the conditioning shunt.
     let mut current_driven_roots = BTreeSet::new();
+    let mut controlled_current_roots = BTreeSet::new();
     for element in elements {
         let roots: BTreeSet<usize> = dc_current_constraint_nodes(element)
             .iter()
@@ -337,7 +340,11 @@ pub(crate) fn analyze_dc_ground_paths_with_capacitor_ic_mode(
             .map(|index| union.root_of(*index))
             .collect();
         if roots.len() > 1 {
-            current_driven_roots.extend(roots);
+            if matches!(element.kind, ElementKind::CurrentSource(_)) {
+                current_driven_roots.extend(roots);
+            } else {
+                controlled_current_roots.extend(roots);
+            }
         }
     }
 
@@ -377,7 +384,9 @@ pub(crate) fn analyze_dc_ground_paths_with_capacitor_ic_mode(
                 .get(&node_key(node))
                 .map(|index| union.root_of(*index))
                 .filter(|root| {
-                    current_driven_roots.contains(root) && !uncertain_roots.contains(root)
+                    current_driven_roots.contains(root)
+                        && !controlled_current_roots.contains(root)
+                        && !uncertain_roots.contains(root)
                 })
                 .map_or(DcGroundPathSeverity::WarningOnly, |_| {
                     DcGroundPathSeverity::FatalCurrentDriven
