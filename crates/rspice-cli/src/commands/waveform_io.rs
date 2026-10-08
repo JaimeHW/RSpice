@@ -1105,18 +1105,31 @@ pub(super) fn result_document_table(
         ),
         None => ("point".to_string(), vec![0.0]),
     };
-    enforce_resource_limit(
-        path,
-        rspice_core::ResourceKind::ExternalDataValues,
-        scale.len().saturating_mul(
-            document
-                .signals()
-                .len()
-                .saturating_add(document.scalars().len())
-                .saturating_add(document.axes().len().max(1)),
-        ),
-        resource_limits.max_external_data_values,
-    )?;
+    // Payload reference impedances become per-point columns. Admit the
+    // expanded table, including both components of complex quantities,
+    // before allocating those copies.
+    let ports = match document.payload() {
+        ResultPayload::Sp(payload) => payload.ports.as_slice(),
+        _ => &[],
+    };
+    let width = document.signals().iter().fold(
+        document.axes().len().max(1).saturating_add(ports.len()),
+        |width, signal| {
+            width.saturating_add(if matches!(signal.values(), SeriesValues::Complex { .. }) {
+                2
+            } else {
+                1
+            })
+        },
+    );
+    let width = document.scalars().iter().fold(width, |width, scalar| {
+        width.saturating_add(if matches!(scalar.value(), ScalarValue::Complex { .. }) {
+            2
+        } else {
+            1
+        })
+    });
+    enforce_table_value_limits(path, scale.len().saturating_mul(width), resource_limits)?;
 
     let mut columns = Vec::new();
     if document.frequency_table().is_some() {
@@ -1224,6 +1237,24 @@ pub(super) fn result_document_table(
                 })
                 .to_string(),
             data,
+        });
+    }
+    for port in ports {
+        let name = format!("Z0({})", port.number);
+        if columns
+            .iter()
+            .any(|column| column.name.eq_ignore_ascii_case(&name))
+        {
+            return Err(conversion_error(
+                path,
+                format!("port reference column '{name}' conflicts with another quantity"),
+            ));
+        }
+        columns.push(ExportColumn {
+            name,
+            var_type: "resistance".to_string(),
+            unit: Some("ohm".to_string()),
+            data: ColumnData::Real(vec![port.reference_impedance; scale.len()]),
         });
     }
     if columns.is_empty() {
