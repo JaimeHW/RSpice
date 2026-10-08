@@ -680,7 +680,8 @@ impl<T> std::ops::Deref for MixedCell<T> {
 /// [`AdcBridge::signal_name`] carries.
 #[derive(Clone)]
 struct AdcBridge {
-    signal: DigitalSignalId,
+    /// None for a root detector: the converter owns its external output.
+    signal: Option<DigitalSignalId>,
     bit: u32,
     /// The boundary net's own spelling, carried so a boundary diagnostic can
     /// name it: the module's name for a scalar, and `name[bit]` for one bit of
@@ -701,6 +702,11 @@ struct AdcBridge {
 }
 
 impl AdcBridge {
+    fn driven_signal(&self) -> DigitalSignalId {
+        self.signal
+            .expect("a root-only detector does not publish a digital drive")
+    }
+
     /// Apply the converter's own decision law, including hysteresis versus an
     /// unknown band and its rule at an exactly equal threshold.
     fn decision(
@@ -2266,7 +2272,7 @@ impl MixedSignalHost {
             .iter()
             .filter(|bridge| !bridge.root_only)
         {
-            if let Some(value) = self.state.digital.read(bridge.signal) {
+            if let Some(value) = self.state.digital.read(bridge.driven_signal()) {
                 sink(
                     bridge.positive,
                     value.bit(bridge.bit),
@@ -2337,7 +2343,7 @@ impl MixedSignalHost {
         let range = self.state.digital.declared_range(id);
         self.max_circuit_node = self.max_circuit_node.max(positive).max(negative);
         self.state.bridges.make_mut().adc.push(AdcBridge {
-            signal: id,
+            signal: Some(id),
             bit,
             signal_name: boundary_net_name(signal, bit, width, range),
             positive,
@@ -2355,29 +2361,39 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    /// Bind a root detector to the input actually sampled by a constructed
-    /// converter. The signal identifies its host; this observation never drives
-    /// an event port or occupies a circuit node.
+    /// Bind a root detector to the input actually sampled by a converter.
+    /// The host owns its trial history; no HDL bit or output driver is required.
     pub(crate) fn add_converter_input_root(
         &mut self,
-        signal: &str,
-        bit: u32,
         instance: usize,
         instance_name: &str,
         threshold: &crate::xspice::AnalogInputThreshold,
     ) -> Result<(), MixedSignalError> {
-        self.add_adc_bridge(signal, bit, (0, 0), threshold.low, threshold.high)?;
-        let bridge = self
-            .state
-            .bridges
-            .make_mut()
-            .adc
-            .last_mut()
-            .expect("added detector");
-        bridge.root_only = true;
-        bridge.threshold_behavior = threshold.behavior;
-        bridge.signal_name = format!("{instance_name}.{}[{}]", threshold.port, threshold.element);
-        bridge.converter_input = Some((instance, threshold.port.clone(), threshold.element));
+        self.require_idle("add a converter root")?;
+        if !threshold.low.is_finite()
+            || !threshold.high.is_finite()
+            || threshold.low > threshold.high
+        {
+            return Err(MixedSignalError::InvalidBridge {
+                detail: "A/D thresholds must be finite and low <= high".into(),
+            });
+        }
+        self.state.bridges.make_mut().adc.push(AdcBridge {
+            signal: None,
+            bit: 0,
+            signal_name: format!("{instance_name}.{}[{}]", threshold.port, threshold.element),
+            positive: 0,
+            negative: 0,
+            low: threshold.low,
+            high: threshold.high,
+            root_only: true,
+            threshold_behavior: threshold.behavior,
+            converter_input: Some((instance, threshold.port.clone(), threshold.element)),
+        });
+        self.state.accepted_adc_voltages.push(0.0);
+        self.state.accepted_adc_decisions.push(None);
+        self.state.accepted_adc_transition_times.push(None);
+        self.state.adc_history.push(BoundaryNetHistory::default());
         Ok(())
     }
 
@@ -3330,7 +3346,7 @@ impl MixedSignalHost {
             } else {
                 self.state
                     .digital
-                    .read(bridge.signal)
+                    .read(bridge.driven_signal())
                     .map(|value| value.bit(bridge.bit))
             };
             let Some((bit, threshold)) = bridge.decision(
@@ -3725,7 +3741,7 @@ impl MixedSignalHost {
             .bridges
             .adc
             .iter()
-            .position(|bridge| bridge.signal == id)
+            .position(|bridge| bridge.signal == Some(id))
             .map(|index| self.state.accepted_adc_transition_times[index])
             .ok_or_else(|| MixedSignalError::InvalidBridge {
                 detail: format!("`{signal}` is not an A/D bridge on this module"),
@@ -3853,7 +3869,9 @@ impl MixedSignalHost {
             }
         };
         for (bridge, entry) in bridges.adc.iter().zip(&mut history.adc) {
-            record(bridge.signal, bridge.bit, entry);
+            if let Some(signal) = bridge.signal {
+                record(signal, bridge.bit, entry);
+            }
         }
         for (bridge, entry) in bridges.dac.iter().zip(&mut history.dac) {
             record(bridge.signal, bridge.bit, entry);
@@ -4013,7 +4031,7 @@ impl MixedSignalHost {
                 if bridge.root_only {
                     trial.vectors.adc_decisions[index].unwrap_or(FourStateBit::Unknown)
                 } else {
-                    read_bit(bridge.signal, bridge.bit)
+                    read_bit(bridge.driven_signal(), bridge.bit)
                 },
                 classify(trial.vectors.adc_moved.get(index).copied().unwrap_or(false)),
             );
@@ -4124,12 +4142,19 @@ impl MixedSignalHost {
             .adc
             .iter()
             .zip(&trial.vectors.adc_moved)
-            .map(|(bridge, moved)| BoundaryNetActivity {
+            .zip(&trial.vectors.adc_decisions)
+            .map(|((bridge, moved), decision)| BoundaryNetActivity {
                 signal: bridge.signal_name.clone(),
                 node: bridge.positive,
                 read_by_module: true,
                 moves: u32::from(*moved),
-                recent: vec![spelling(read(bridge.signal, bridge.bit))],
+                recent: vec![spelling(
+                    bridge
+                        .signal
+                        .map_or(decision.unwrap_or(FourStateBit::Unknown), |signal| {
+                            read(signal, bridge.bit)
+                        }),
+                )],
             })
             .chain(
                 self.state
@@ -4310,15 +4335,16 @@ fn compose_bit_drives(
             .adc
             .get(index)
             .expect("a moved bit names the bridge it was sampled from");
-        let slot = match out.iter_mut().find(|(held, _)| *held == bridge.signal) {
+        let signal = bridge.driven_signal();
+        let slot = match out.iter_mut().find(|(held, _)| *held == signal) {
             Some(slot) => slot,
             None => {
-                let current = state.digital.read(bridge.signal).cloned().ok_or_else(|| {
+                let current = state.digital.read(signal).cloned().ok_or_else(|| {
                     MixedSignalError::InvalidBridge {
                         detail: format!("A/D signal `{}` disappeared", bridge.signal_name),
                     }
                 })?;
-                out.push((bridge.signal, current));
+                out.push((signal, current));
                 out.last_mut().expect("just pushed")
             }
         };

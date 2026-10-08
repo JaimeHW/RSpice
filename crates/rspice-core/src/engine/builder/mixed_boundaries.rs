@@ -107,21 +107,17 @@ pub(super) fn plan_conversions(
 /// Construction resolves template parameters and expands subcircuits. Bind
 /// their declared thresholds only now, using the model's connected input values
 /// at runtime so differential/current inputs and internal nodes share one law.
-pub(super) fn bind_converter_thresholds(
-    circuit: &mut CircuitData,
-    first_instance: usize,
-) -> Result<(), SimulationError> {
+pub(super) fn bind_converter_thresholds(circuit: &mut CircuitData) -> Result<(), SimulationError> {
+    if circuit.mixed_signal_hosts.is_empty() {
+        return Ok(());
+    }
     let mut owners = BTreeMap::new();
     for (host_index, host) in circuit.mixed_signal_hosts.iter().enumerate() {
-        for (port, signal) in host.direct_event_ports() {
-            if let Some(bit) = port.bit {
-                owners
-                    .entry(port.node)
-                    .or_insert((host_index, signal.to_string(), bit));
-            }
+        for (port, _) in host.direct_event_ports() {
+            owners.entry(port.node).or_insert(host_index);
         }
     }
-    for instance_index in first_instance..circuit.xspice_instances.len() {
+    for instance_index in 0..circuit.xspice_instances.len() {
         let instance = &circuit.xspice_instances[instance_index];
         let thresholds = instance
             .analog_input_thresholds()
@@ -137,21 +133,15 @@ pub(super) fn bind_converter_thresholds(
         });
         // An internal comparator may feed gates inside a template. Its root
         // still constrains the whole circuit; the host is only its ledger owner.
-        let fallback = output_owners
-            .values()
-            .next()
-            .or_else(|| owners.values().next())
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "converter '{}' declares analog thresholds without a mixed logic host",
-                    instance.name
-                ))
-            })?;
+        let fallback = output_owners.values().next().copied().unwrap_or(0);
         let name = instance.name.clone();
         for threshold in &thresholds {
-            let (host, signal, bit) = output_owners.get(&threshold.element).unwrap_or(fallback);
-            circuit.mixed_signal_hosts[*host]
-                .add_converter_input_root(signal, *bit, instance_index, &name, threshold)
+            let host = output_owners
+                .get(&threshold.element)
+                .copied()
+                .unwrap_or(fallback);
+            circuit.mixed_signal_hosts[host]
+                .add_converter_input_root(instance_index, &name, threshold)
                 .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         circuit.xspice_instances[instance_index]

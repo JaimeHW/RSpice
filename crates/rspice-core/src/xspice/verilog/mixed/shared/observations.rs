@@ -239,7 +239,7 @@ impl MixedDigitalCoordinator {
             {
                 let host = &hosts[entry.host];
                 let bridge = &host.state.bridges.adc[entry.bridge];
-                let global = self.port_signals[entry.host][usize::from(bridge.signal)];
+                let global = self.port_signals[entry.host][usize::from(bridge.driven_signal())];
                 let current = drives.iter().position(|(signal, _)| *signal == global);
                 if let Some(index) = current {
                     drives[index].1.set_bit(bridge.bit, entry.bit);

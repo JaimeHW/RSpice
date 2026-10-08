@@ -9525,7 +9525,6 @@ impl Engine {
                     reject_disabled_xspice_auto_bridge(&circuit, &bridges)?;
                 }
                 report_planned_xspice_auto_bridge_supplies(&circuit, &bridges, &boundary_supplies)?;
-                let first_converter = circuit.xspice_instances.len();
                 add_planned_xspice_auto_bridges(
                     &mut circuit,
                     &bridges,
@@ -9543,7 +9542,6 @@ impl Engine {
                     },
                     abort,
                 )?;
-                mixed_boundaries::bind_converter_thresholds(&mut circuit, first_converter)?;
             }
         }
 
@@ -9634,6 +9632,11 @@ impl Engine {
                         error
                     }
                 })?;
+            if circuit.has_coupled_event_nets() {
+                // Explicit and generated converters share the same physical
+                // root contract once the complete event domain is enrolled.
+                mixed_boundaries::bind_converter_thresholds(&mut circuit)?;
+            }
         }
 
         // Register each multi-winding Core as one shared constitutive device

@@ -943,3 +943,35 @@ endmodule
         );
     }
 }
+
+#[test]
+fn explicit_adc_roots_attach_to_real_only_mixed_domains() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module real_source(r);
+ output r; wreal r;
+ real level=0;
+ initial begin #125 level=1; #125 level=0; end
+ assign r=level;
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!(
+        "* real-only mixed domain with explicit converter\nXreal r real_source\nAconvert r converted rv\n.model rv real_to_v(transition_time=1p)\nRload converted 0 1k\nAadc [converted] [d] adc\n.model adc adc_bridge(in_low=0.5 in_high=0.5 rise_delay=1p fall_delay=1p)\n.va \"{}\" real_source\n.end\n",source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 300e-12, 70e-12).unwrap();
+    let trace = result.digital_trace_named("d").unwrap();
+    let rise = trace
+        .iter()
+        .find(|point| point.value.state == rspice_core::xspice::DigitalState::One)
+        .unwrap();
+    let fall = trace
+        .iter()
+        .find(|point| {
+            point.time > rise.time && point.value.state == rspice_core::xspice::DigitalState::Zero
+        })
+        .unwrap();
+    assert!((rise.time - 126.5e-12).abs() < 1e-15, "{trace:?}");
+    assert!((fall.time - 251.5e-12).abs() < 1e-15, "{trace:?}");
+}

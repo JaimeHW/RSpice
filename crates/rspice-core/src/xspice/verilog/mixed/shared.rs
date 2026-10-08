@@ -305,7 +305,7 @@ impl MixedDigitalCoordinator {
                 .filter(|bridge| !bridge.root_only)
                 .map(|bridge| {
                     (
-                        bridge.signal,
+                        bridge.driven_signal(),
                         bridge.positive,
                         bridge.negative,
                         DigitalLinkDirection::Input,
@@ -463,7 +463,7 @@ impl MixedDigitalCoordinator {
                 .adc
                 .iter()
                 .filter(|bridge| !bridge.root_only)
-                .map(|bridge| (bridge.signal, bridge.bit, bridge.positive))
+                .map(|bridge| (bridge.driven_signal(), bridge.bit, bridge.positive))
                 .chain(
                     host.state
                         .bridges
@@ -1174,7 +1174,7 @@ impl MixedDigitalCoordinator {
             for entry in &coordinator.publications[group..end] {
                 let host = &hosts[entry.host];
                 let bridge = &host.state.bridges.adc[entry.bridge];
-                let global = coordinator.port_signals[entry.host][usize::from(bridge.signal)];
+                let global = coordinator.port_signals[entry.host][usize::from(bridge.driven_signal())];
                 // Preserve event-connected bits of a partly electrical vector,
                 // and bits of it that crossed at another instant. Only
                 // physical A/D decisions at *this* instant are external forces.
