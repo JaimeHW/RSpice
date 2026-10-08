@@ -374,6 +374,14 @@ fn hdf5_section_kind(
                 "time" => crate::WaveformDomain::Transient,
                 "frequency" => crate::WaveformDomain::Ac,
                 "voltage" | "current" | "temperature" => crate::WaveformDomain::DcSweep,
+                // A sweep may use a parameter with no declared physical
+                // quantity. Its analysis still identifies the waveform domain.
+                "value"
+                    if attrs.contains_key("analysis")
+                        && hdf_string_attr(&attrs, "analysis", format)? == "dc_sweep" =>
+                {
+                    crate::WaveformDomain::DcSweep
+                }
                 // Report/index coordinates have no waveform-domain equivalent.
                 _ => {
                     return Ok(Some(Hdf5SectionKind::Unsupported(format!(

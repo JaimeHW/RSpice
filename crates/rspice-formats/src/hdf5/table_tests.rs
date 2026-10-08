@@ -3,6 +3,58 @@ use rustyhdf5::{AttrValue, FileBuilder};
 
 type Column<'a> = (&'a str, &'a str, Option<&'a str>, &'a [f64]);
 
+#[test]
+fn generic_sweep_coordinates_require_an_explicit_dc_analysis() {
+    for (analysis, coordinate_type, accepted) in [
+        (Some("dc_sweep"), "value", true),
+        (Some("dc_sweep"), "index", false),
+        (Some("transient"), "value", false),
+        (Some("report"), "value", false),
+        (None, "value", false),
+    ] {
+        let mut file = FileBuilder::new();
+        let mut group = file.create_group("selected");
+        for (key, value) in [
+            ("section_type", "table"),
+            ("coordinate_type", coordinate_type),
+            ("independent_name", "control"),
+            ("signal_0000_name", "out"),
+            ("signal_0000_type", "value"),
+        ] {
+            group.set_attr(key, AttrValue::String(value.into()));
+        }
+        if let Some(analysis) = analysis {
+            group.set_attr("analysis", AttrValue::String(analysis.into()));
+        }
+        group.set_attr("signal_count", AttrValue::I64(1));
+        group
+            .create_dataset("independent")
+            .with_f64_data(&[1.0, 2.0]);
+        group
+            .create_dataset("signal_0000")
+            .with_f64_data(&[3.0, 4.0]);
+        file.add_group(group.finish());
+        let result = decode_hdf5(
+            &file.finish().unwrap(),
+            Hdf5Limits {
+                max_columns: 4,
+                max_values: 16,
+                coordinate_names: &["time", "frequency"],
+            },
+            "hdf5",
+        );
+        if accepted {
+            let decoded = result.unwrap();
+            assert_eq!(decoded.domain, crate::WaveformDomain::DcSweep);
+            assert_eq!(decoded.coordinate_name, "control");
+            assert_eq!(decoded.coordinate_unit, None);
+            assert_eq!(decoded.coordinate, [1.0, 2.0]);
+        } else {
+            assert!(result.is_err(), "{analysis:?} {coordinate_type}");
+        }
+    }
+}
+
 fn section_container(sections: &[(&str, Option<AttrValue>)]) -> Vec<u8> {
     let mut file = FileBuilder::new();
     for (name, kind) in sections {

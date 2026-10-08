@@ -1097,6 +1097,7 @@ fn hdf5_table(path: &Path, data: crate::hdf5::Hdf5SimulationData) -> Result<Expo
         scale_type: match analysis {
             "transient" => "time".into(),
             "noise" => "frequency".into(),
+            "dc_sweep" => "value".into(),
             _ => scale_var_type(&section.independent_name),
         },
         scale_name: section.independent_name,

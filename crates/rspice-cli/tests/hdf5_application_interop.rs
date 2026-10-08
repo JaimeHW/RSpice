@@ -15,6 +15,8 @@ fn native_sections_preserve_coordinate_identity_through_cli_conversion() {
         ("dc_sweep", "bias", Some("A"), "value"),
         ("dc_sweep", "ambient", Some("K"), "value"),
         ("dc_sweep", "control", None, "value"),
+        ("dc_sweep", "time", None, "value"),
+        ("dc_sweep", "frequency", Some("A"), "value"),
         ("ac", "Test frequency", Some("MHz"), "frequency"),
         ("ac", "Tone", None, "frequency"),
     ] {
@@ -59,7 +61,7 @@ fn native_sections_preserve_coordinate_identity_through_cli_conversion() {
         let source = directory.join("source.h5");
         let mut bytes = Vec::new();
         rspice_core::io::write_hdf5(&mut bytes, &document).unwrap();
-        std::fs::write(&source, bytes).unwrap();
+        std::fs::write(&source, &bytes).unwrap();
         let json_path = directory.join("converted.json");
         let roundtrip = directory.join("converted.h5");
         let restored = directory.join("restored.json");
@@ -77,6 +79,18 @@ fn native_sections_preserve_coordinate_identity_through_cli_conversion() {
                 .unwrap();
             assert!(result.status.success(), "{family} {label}: {result:?}");
         }
+        let limits = Hdf5Limits {
+            max_columns: 10,
+            max_values: 100,
+            coordinate_names: &["time", "frequency", "x"],
+        };
+        let before = decode_hdf5(&bytes, limits, "hdf5").unwrap();
+        let after = decode_hdf5(&std::fs::read(&roundtrip).unwrap(), limits, "hdf5").unwrap();
+        assert_eq!(before.coordinate_name, label);
+        assert_eq!(after.coordinate_name, label);
+        assert_eq!(before.domain, after.domain);
+        assert_eq!(before.coordinate_unit, after.coordinate_unit);
+        assert_eq!(before.coordinate, after.coordinate);
         let original: serde_json::Value =
             serde_json::from_slice(&std::fs::read(json_path).unwrap()).unwrap();
         let decoded: serde_json::Value =
