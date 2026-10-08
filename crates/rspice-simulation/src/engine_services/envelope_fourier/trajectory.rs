@@ -8,6 +8,7 @@ pub(super) struct EnvelopeSignal {
     pub unit: &'static str,
     pub values: Vec<Value>,
     pub current: Option<CurrentImpulseTrace>,
+    pub voltage: Option<rspice_core::VoltageImpulseTrace>,
 }
 
 pub(super) struct EnvelopeTrajectory {
@@ -25,7 +26,7 @@ impl EnvelopeTrajectory {
     ) -> ServiceRunResult<Self> {
         ensure_not_aborted(abort)?;
         result
-            .validate_current_impulses()
+            .validate_impulses()
             .map_err(ServiceRunError::Failure)?;
         let branch_names = std::mem::take(&mut result.branch_names);
         let currents = std::mem::take(&mut result.branch_currents);
@@ -46,19 +47,45 @@ impl EnvelopeTrajectory {
             .into_iter()
             .map(|trace| (trace.owner.to_string().to_ascii_lowercase(), trace))
             .collect();
+        let observes_voltages = result.voltage_impulses.is_some();
+        let mut voltage_impulses: HashMap<_, _> = result
+            .voltage_impulses
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|trace| (trace.node_name.to_ascii_lowercase(), trace))
+            .collect();
         let names = result.node_names.clone();
         let voltage =
             TransientData::from_retained_voltage_history_with_abort(result, &names, abort)?;
         let mut signals: Vec<_> = voltage
             .voltages
             .into_iter()
-            .map(|(name, values)| EnvelopeSignal {
-                name,
-                unit: "V",
-                values,
-                current: None,
+            .map(|(name, values)| {
+                ensure_not_aborted(abort)?;
+                let trace = if observes_voltages {
+                    Some(
+                        voltage_impulses
+                            .remove(&name.to_ascii_lowercase())
+                            .filter(|trace| trace.complete)
+                            .ok_or_else(|| {
+                                ServiceRunError::Failure(format!(
+                                    "Envelope voltage '{name}' requires complete impulse history"
+                                ))
+                            })?,
+                    )
+                } else {
+                    None
+                };
+                Ok(EnvelopeSignal {
+                    name,
+                    unit: "V",
+                    values,
+                    current: None,
+                    voltage: trace,
+                })
             })
-            .collect();
+            .collect::<ServiceRunResult<_>>()?;
         let mut seen: HashSet<_> = signals
             .iter()
             .map(|signal| signal.name.to_ascii_lowercase())
@@ -103,6 +130,7 @@ impl EnvelopeTrajectory {
                 unit: "A",
                 values,
                 current,
+                voltage: None,
             });
             Ok(())
         };

@@ -54,7 +54,7 @@ pub use envelope_fourier::{
     run_envelope_analysis_with_source_path_and_abort,
 };
 pub(crate) use envelope_fourier::{
-    fourier_output_is_current, run_fourier_from_observation_with_abort, split_fourier_output,
+    fourier_output_is_current, run_fourier_from_impulses_with_abort, split_fourier_output,
 };
 pub(crate) use hb::HbData;
 pub(crate) use hb::HbSpectrum;

@@ -1184,23 +1184,42 @@ fn fourier_from_transient_artifact(
         signal.push(reference_values.map_or(value, |reference| value - reference[index]));
     }
 
-    let current = if config
+    let mut impulses = Vec::new();
+    if config
         .output_node
         .trim()
         .to_ascii_uppercase()
         .starts_with("I(")
     {
-        trajectory
+        if let Some(trace) = trajectory
             .current_impulse_trace(&config.output_node)
             .map_err(SimulationError::InvalidConfig)?
+        {
+            impulses.push((rspice_core::ImpulseTraceRef::Current(trace), 1.0));
+        }
     } else {
-        None
-    };
+        if let Some(trace) = trajectory
+            .voltage_impulse_trace(&config.output_node)
+            .map_err(SimulationError::InvalidConfig)?
+        {
+            impulses.push((rspice_core::ImpulseTraceRef::Voltage(trace), 1.0));
+        }
+        if let Some(reference) = config
+            .output_ref
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            && let Some(trace) = trajectory
+                .voltage_impulse_trace(reference)
+                .map_err(SimulationError::InvalidConfig)?
+        {
+            impulses.push((rspice_core::ImpulseTraceRef::Voltage(trace), -1.0));
+        }
+    }
     super::run_abort_aware_service(abort, || {
-        svc_runner::run_fourier_from_observation_with_abort(
+        svc_runner::run_fourier_from_impulses_with_abort(
             trajectory.time(),
             &signal,
-            current,
+            &impulses,
             config,
             abort,
         )

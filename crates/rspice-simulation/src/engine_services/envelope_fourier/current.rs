@@ -1,43 +1,43 @@
-//! Exact singular-current contributions to the carrier least-squares moments.
+//! Exact singular-signal contributions to the carrier least-squares moments.
 use super::*;
 
 pub(super) fn projection_prefixes(
-    trace: &rspice_core::CurrentImpulseTrace,
+    trace: rspice_core::ImpulseTraceRef<'_>,
     time: &[Value],
     frequencies: &[Value],
     basis: &[EnvelopeProjectionBasis],
     window: Value,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Vec<Value>>> {
-    if !trace.complete {
+    if !trace.complete() {
         return Err(ServiceRunError::Failure(format!(
-            "Envelope current '{}' has incomplete impulse history",
-            trace.owner
+            "Envelope signal '{}' has incomplete impulse history",
+            trace
         )));
     }
     trace
         .validate(time[0], time[time.len() - 1])
         .map_err(ServiceRunError::Failure)?;
-    if !trace.derivatives.is_empty() {
+    if !trace.derivatives().is_empty() {
         return Err(ServiceRunError::Failure(
-            "Envelope projection of current impulse derivatives is not yet implemented".into(),
+            "Envelope projection of impulse derivatives is not yet implemented".into(),
         ));
     }
     let mut prefixes = Vec::with_capacity(basis.len());
     for &component in basis {
         ensure_not_aborted(abort)?;
-        let mut prefix = Vec::with_capacity(trace.points.len() + 1);
+        let mut prefix = Vec::with_capacity(trace.points().len() + 1);
         prefix.push(0.0);
         let mut sum = 0.0;
         let mut correction = 0.0;
-        for (index, point) in trace.points.iter().enumerate() {
+        for (index, point) in trace.points().enumerate() {
             poll_periodically(abort, index)?;
-            // Charge/window has current units. Never convert an impulse into
+            // Action/window has signal units. Never convert an impulse into
             // a finite sample by dividing it by an integration timestep.
-            let normalized = point.charge_coulombs / window;
+            let normalized = point.coefficient / window;
             if !normalized.is_finite() || normalized == 0.0 {
                 return Err(ServiceRunError::Failure(
-                    "Envelope impulse charge per window is not representable".into(),
+                    "Envelope impulse action per window is not representable".into(),
                 ));
             }
             let value = normalized * projection_basis_value(component, frequencies, point.time);
@@ -47,7 +47,7 @@ pub(super) fn projection_prefixes(
             sum = next;
             if !sum.is_finite() {
                 return Err(ServiceRunError::Failure(
-                    "Envelope current impulse projection overflowed".into(),
+                    "Envelope signal impulse projection overflowed".into(),
                 ));
             }
             prefix.push(sum);
@@ -92,12 +92,36 @@ mod tests {
             &values,
             &[0.5],
             &[1.0],
-            Some(&trace),
+            Some(rspice_core::ImpulseTraceRef::Current(&trace)),
             &NoAbort,
         )
         .unwrap();
         let expected = 4.0 * Complex64::from_polar(1.0, -std::f64::consts::FRAC_PI_4) - 2.0;
         assert!((projected[0][0] - expected).norm() < 1e-12);
+        let voltage = rspice_core::VoltageImpulseTrace {
+            node_name: "out".into(),
+            complete: true,
+            derivatives: vec![],
+            points: trace
+                .points
+                .iter()
+                .map(|point| rspice_core::VoltageImpulsePoint {
+                    time: point.time,
+                    volt_seconds: point.charge_coulombs,
+                })
+                .collect(),
+        };
+        let voltage_projection = compute_carrier_envelopes_with_abort(
+            &time,
+            &values,
+            &[0.5],
+            &[1.0],
+            Some(rspice_core::ImpulseTraceRef::Voltage(&voltage)),
+            &NoAbort,
+        )
+        .unwrap();
+        assert!((voltage_projection[0][0] - expected).norm() < 1e-12);
+
         trace.complete = false;
         assert!(
             compute_carrier_envelopes_with_abort(
@@ -105,7 +129,7 @@ mod tests {
                 &values,
                 &[0.5],
                 &[1.0],
-                Some(&trace),
+                Some(rspice_core::ImpulseTraceRef::Current(&trace)),
                 &NoAbort
             )
             .unwrap_err()
@@ -126,7 +150,7 @@ mod tests {
                 &values,
                 &[0.5],
                 &[1.0],
-                Some(&trace),
+                Some(rspice_core::ImpulseTraceRef::Current(&trace)),
                 &NoAbort
             )
             .unwrap_err()
@@ -141,7 +165,7 @@ mod tests {
                 &values,
                 &[0.5],
                 &[1.0],
-                Some(&trace),
+                Some(rspice_core::ImpulseTraceRef::Current(&trace)),
                 &cancelled
             ),
             Err(ServiceRunError::Aborted)
