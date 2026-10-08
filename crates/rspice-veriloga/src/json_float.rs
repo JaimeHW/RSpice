@@ -1106,12 +1106,10 @@ mod tests {
             .map_err(|error| error.to_string())
         }
 
-        // 1. A `parameter real` whose default folds to an infinity never enters
-        //    the digital constant table: `digital_constants` admits only
-        //    finite defaults, so the module is refused rather than lowered.
-        //    The declaration itself is legal — the continuous domain keeps it
-        //    — so the refusal names the parameter and the value it folded to
-        //    rather than claiming the name was never declared.
+        // 1. A `parameter real` whose default folds to an infinity cannot
+        //    supply an exact finite elaboration value to a digital process.
+        //    Dependency validation rejects it before digital lowering, naming
+        //    the parameter rather than treating it as an undeclared signal.
         let refused = compile(
             r#"
 module rspice_digital_parameter_probe(p, n, clk, q);
@@ -1127,11 +1125,11 @@ endmodule
         )
         .expect_err("an infinite real parameter has no discrete-domain form");
         assert!(
-            refused.contains("`big` folds to inf"),
-            "the refusal must name the parameter and the value it folded to: {refused}"
+            refused.contains("parameter 'big'"),
+            "the refusal must name the parameter: {refused}"
         );
         assert!(
-            refused.contains("a non-finite real has no discrete-domain form"),
+            refused.contains("requires an exact finite numeric elaboration value"),
             "the refusal must say what is wrong with the value: {refused}"
         );
         assert!(

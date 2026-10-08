@@ -946,7 +946,27 @@ fn for_loop_unrolls_statically() {
             end
             "#,
     ));
-    assert_eq!(flat_assignments(&m).len(), 3);
+    let assignments = flat_assignments(&m);
+    assert_eq!(
+        assignments
+            .iter()
+            .map(|assignment| assignment.target.as_str())
+            .collect::<Vec<_>>(),
+        ["i", "x", "i", "x", "i", "x", "i"]
+    );
+    assert_eq!(
+        assignments
+            .iter()
+            .filter(|assignment| assignment.target == "i")
+            .map(|assignment| constant_value(&assignment.expression))
+            .collect::<Vec<_>>(),
+        [0.0, 1.0, 2.0, 3.0]
+    );
+    assert!(
+        m.statements
+            .iter()
+            .all(|statement| !matches!(statement, AnalyzedStatement::Loop(_)))
+    );
 }
 
 #[test]
