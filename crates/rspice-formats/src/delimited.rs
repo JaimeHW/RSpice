@@ -4,6 +4,7 @@ use crate::WaveformDomain;
 use std::collections::HashSet;
 use unit::{EngineeringUnit, UnitDimension};
 
+pub mod layout;
 mod unit;
 
 /// Limits supplied by the consumer of an already byte-bounded source.
@@ -144,10 +145,23 @@ pub fn decode_delimited_waveforms(
     let mut coordinate = Vec::new();
     let mut signal_values = vec![Vec::new(); headers.len() - 1];
     let mut direction = None;
+    let mut has_layout = false;
 
     for (row_index, record) in reader.records().enumerate() {
         let line = row_index + 2;
-        if row_index >= limits.max_rows {
+        if has_layout {
+            return Err("the table layout record must be unique and final"
+                .to_owned()
+                .into());
+        }
+        // A final layout declaration carries no samples, even at the row limit.
+        // Preserve the historical limit error for excess malformed data rows.
+        let is_layout = record
+            .as_ref()
+            .ok()
+            .and_then(|row| row.get(0))
+            .is_some_and(layout::is_layout_record);
+        if coordinate.len() >= limits.max_rows && !is_layout {
             return Err(format!(
                 "the dataset exceeds the {}-row import limit",
                 limits.max_rows
@@ -158,6 +172,16 @@ pub fn decode_delimited_waveforms(
             context: format!("row {line}"),
             source: error,
         })?;
+        if is_layout {
+            let names: Vec<_> = headers[1..]
+                .iter()
+                .map(|header| header.name.as_str())
+                .collect();
+            let fields: Vec<_> = record.iter().collect();
+            layout::parse_layout_record(&names, &fields)?;
+            has_layout = true;
+            continue;
+        }
         let x = parse_finite_cell(record.get(0), line, 1, &headers[0].name, headers[0].unit)?;
         if analysis_type == WaveformDomain::Ac && x <= 0.0 {
             return Err(format!(
@@ -381,6 +405,49 @@ fn parse_finite_cell(
 mod tests {
     use super::*;
     use std::error::Error as _;
+
+    #[test]
+    fn layout_is_validated_without_becoming_a_sample_or_changing_physical_columns() {
+        let limits = DelimitedReadLimits {
+            max_columns: 3,
+            max_rows: 1,
+            max_header_bytes: 32,
+            min_rows: 1,
+        };
+        for delimiter in [b',', b'\t'] {
+            for layout in ["real,real", "complex_real,complex_imag"] {
+                let source = format!("time,Re(x),Im(x)\n0,1,2\n# RSpiceTableLayoutV1,{layout}\n\n")
+                    .replace(',', &(delimiter as char).to_string());
+                let decoded = decode_delimited_waveforms(&source, delimiter, limits).unwrap();
+                assert_eq!(decoded.coordinate, [0.0]);
+                assert_eq!(decoded.signal_values, [vec![1.0], vec![2.0]]);
+                assert_eq!(decoded.columns[1].name, "Re(x)");
+                assert_eq!(decoded.columns[2].name, "Im(x)");
+            }
+        }
+        for footer in [
+            "# RSpiceTableLayoutV2,real,real\n",
+            "# RSpiceTableLayoutV1,real\n",
+            "# RSpiceTableLayoutV1,unknown,real\n",
+            "# RSpiceTableLayoutV1,complex_real,real\n",
+            "# RSpiceTableLayoutV1,real,real\n1,3,4\n",
+            "# RSpiceTableLayoutV1,real,real\n# RSpiceTableLayoutV1,real,real\n",
+        ] {
+            let source = format!("time,Re(x),Im(x)\n0,1,2\n{footer}");
+            assert!(
+                decode_delimited_waveforms(&source, b',', limits).is_err(),
+                "{footer}"
+            );
+        }
+        assert!(
+            decode_delimited_waveforms(
+                "time,Re(x),Im(x)\n# RSpiceTableLayoutV1,real,real\n",
+                b',',
+                limits
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn reader_limits_preserve_refusal_order_and_csv_error_sources() {
