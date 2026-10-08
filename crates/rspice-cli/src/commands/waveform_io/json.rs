@@ -14,6 +14,25 @@ pub(super) fn parse(
     kind: Kind,
     limits: ResourceLimits,
 ) -> Result<Value, crate::cli::CliError> {
+    read::<true>(path, content, kind, limits).map(|(value, _)| value)
+}
+
+/// Admit every numeric field without retaining an untyped payload tree.
+/// Used before allocating typed FFT spectra or embedded RAW metadata.
+pub(crate) fn admit_numbers(
+    path: &std::path::Path,
+    content: &str,
+    limits: ResourceLimits,
+) -> Result<usize, crate::cli::CliError> {
+    read::<false>(path, content, Kind::Fft, limits).map(|(_, count)| count)
+}
+
+fn read<const RETAIN: bool>(
+    path: &std::path::Path,
+    content: &str,
+    kind: Kind,
+    limits: ResourceLimits,
+) -> Result<(Value, usize), crate::cli::CliError> {
     let mut admission = Admission {
         numbers: numbers::Numbers::new(content),
         limits,
@@ -21,7 +40,7 @@ pub(super) fn parse(
         failure: None,
     };
     let mut deserializer = serde_json::Deserializer::from_str(content);
-    let decoded = Seed {
+    let decoded = Seed::<RETAIN> {
         admission: &mut admission,
         scope: if kind == Kind::Fft {
             Scope::AllNumbers
@@ -31,13 +50,14 @@ pub(super) fn parse(
     }
     .deserialize(&mut deserializer)
     .and_then(|value| deserializer.end().map(|()| value));
-    decoded.map_err(|error| match admission.failure {
+    let value = decoded.map_err(|error| match admission.failure {
         Some(source) => crate::cli::CliError::ResourceLimit {
             path: path.to_owned(),
             source,
         },
         None => super::conversion_error(path, error),
-    })
+    })?;
+    Ok((value, admission.count))
 }
 
 /// Missing or null legacy metadata is unstated; other non-text values are
@@ -159,12 +179,12 @@ impl Scope {
     }
 }
 
-struct Seed<'a, 'source> {
+struct Seed<'a, 'source, const RETAIN: bool> {
     admission: &'a mut Admission<'source>,
     scope: Scope,
 }
 
-impl<'de> DeserializeSeed<'de> for Seed<'_, '_> {
+impl<'de, const RETAIN: bool> DeserializeSeed<'de> for Seed<'_, '_, RETAIN> {
     type Value = Value;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
@@ -177,7 +197,7 @@ impl<'de> DeserializeSeed<'de> for Seed<'_, '_> {
     }
 }
 
-impl<'de> Visitor<'de> for Seed<'_, '_> {
+impl<'de, const RETAIN: bool> Visitor<'de> for Seed<'_, '_, RETAIN> {
     type Value = Value;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -208,12 +228,12 @@ impl<'de> Visitor<'de> for Seed<'_, '_> {
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<Value, E> {
         self.scope.non_numeric()?;
-        Ok(value.into())
+        Ok(if RETAIN { value.into() } else { Value::Null })
     }
 
     fn visit_string<E: de::Error>(self, value: String) -> Result<Value, E> {
         self.scope.non_numeric()?;
-        Ok(value.into())
+        Ok(if RETAIN { value.into() } else { Value::Null })
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
@@ -226,13 +246,19 @@ impl<'de> Visitor<'de> for Seed<'_, '_> {
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Value, A::Error> {
         self.scope.non_numeric()?;
         let mut values = Vec::new();
-        while let Some(value) = sequence.next_element_seed(Seed {
+        while let Some(value) = sequence.next_element_seed(Seed::<RETAIN> {
             admission: &mut *self.admission,
             scope: self.scope.element(),
         })? {
-            values.push(value);
+            if RETAIN {
+                values.push(value);
+            }
         }
-        Ok(Value::Array(values))
+        Ok(if RETAIN {
+            Value::Array(values)
+        } else {
+            Value::Null
+        })
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut object: A) -> Result<Value, A::Error> {
@@ -245,13 +271,18 @@ impl<'de> Visitor<'de> for Seed<'_, '_> {
             if values.contains_key(&key) {
                 return Err(de::Error::custom(format!("duplicate JSON field {key:?}")));
             }
-            let value = object.next_value_seed(Seed {
+            let value = object.next_value_seed(Seed::<RETAIN> {
                 admission: &mut *self.admission,
                 scope: self.scope.field(&key),
             })?;
-            values.insert(key, value);
+            // Discarded objects retain only their keys for duplicate checks.
+            values.insert(key, if RETAIN { value } else { Value::Null });
         }
-        Ok(Value::Object(values))
+        Ok(if RETAIN {
+            Value::Object(values)
+        } else {
+            Value::Null
+        })
     }
 }
 
@@ -259,6 +290,40 @@ impl<'de> Visitor<'de> for Seed<'_, '_> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn discarded_admission_keeps_counts_duplicates_and_early_budget_refusal() {
+        let path = std::path::Path::new("metadata.json");
+        let source = r#"{"array":[0,{"x":1.5,"text":"123"}],"native":18446744073709551615,"flag":true,"none":null}"#;
+        let (value, count) =
+            read::<false>(path, source, Kind::Fft, ResourceLimits::default()).unwrap();
+        assert!(value.is_null(), "no retained payload tree");
+        assert_eq!(count, 3);
+        for source in [r#"{"data":[{"x":0,"\u0078":1}]}"#, r#"{"data":[1e-999]}"#] {
+            assert!(admit_numbers(path, source, ResourceLimits::default()).is_err());
+        }
+        let source = format!(r#"{{"data":[0,1,{}0]}}"#, "0,".repeat(100_000));
+        let mut limits = ResourceLimits::default();
+        limits.max_external_data_values = 1;
+        let mut admission = Admission {
+            numbers: numbers::Numbers::new(&source),
+            limits,
+            count: 0,
+            failure: None,
+        };
+        let mut input = Cursor::new(source.as_bytes());
+        assert!(
+            Seed::<false> {
+                admission: &mut admission,
+                scope: Scope::AllNumbers
+            }
+            .deserialize(&mut serde_json::Deserializer::from_reader(&mut input))
+            .is_err()
+        );
+        let error = admission.failure.unwrap();
+        assert_eq!((error.requested, error.limit), (2, 1));
+        assert!(input.position() < 128);
+    }
 
     #[test]
     fn numeric_admission_stops_decoding_at_the_first_excess_value() {
@@ -300,7 +365,7 @@ mod tests {
                     failure: None,
                 };
                 let mut input = Cursor::new(content.as_bytes());
-                let result = Seed {
+                let result = Seed::<true> {
                     admission: &mut admission,
                     scope,
                 }
@@ -331,7 +396,7 @@ mod tests {
             failure: None,
         };
         let mut input = Cursor::new(content.as_bytes());
-        let error = Seed {
+        let error = Seed::<true> {
             admission: &mut admission,
             scope: Scope::Table,
         }

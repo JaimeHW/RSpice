@@ -882,7 +882,12 @@ its native integer range. FFT JSON spectra and FFT metadata embedded in RAW
 apply the same checks to every floating-point field, including transform
 settings, metrics, and incomplete-history bounds.
 For tables, `max_result_values` counts coordinate values and both components
-of complex samples. HDF5 readers admit the combined dataset and measurement
+of complex samples. RAW FFT imports also charge all numeric metadata fields
+against both value budgets, in addition to the file's sample storage, before
+decoding the typed metadata. The budgets cover every plot before selection,
+including empty spectra. FFT JSON uses the same admission scanner without
+retaining an extra untyped payload tree. HDF5 readers admit the combined dataset
+and measurement
 value count before decoding any section, including sections not selected.
 FFT JSON and delimited imports apply both value limits to numeric source
 fields, including metadata repeated in CSV/TSV records, before assembling spectra.

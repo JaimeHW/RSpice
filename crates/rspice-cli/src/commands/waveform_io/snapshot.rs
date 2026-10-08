@@ -73,7 +73,7 @@ impl ResultSnapshot {
                         bytes, limits,
                     )
                     .map_err(|error| raw_read_error(path, error))?;
-                    raw_result(path, file, section)?
+                    raw_result(path, file, section, limits)?
                 }
                 InputFormat::Csv => parse_delimited(path, text()?, ',', limits)?,
                 InputFormat::Tsv => parse_delimited(path, text()?, '\t', limits)?,

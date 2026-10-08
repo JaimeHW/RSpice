@@ -17,7 +17,7 @@ use std::path::Path;
 
 mod delimited;
 mod json;
-pub(crate) use json::{Kind as JsonKind, kind as json_kind};
+pub(crate) use json::{Kind as JsonKind, admit_numbers as admit_json_numbers, kind as json_kind};
 mod snapshot;
 pub(crate) use delimited::{parse_record as parse_delimited_record, records as delimited_records};
 mod touchstone;
@@ -393,7 +393,7 @@ fn load_rawfile(
     let file =
         rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
             .map_err(|error| raw_read_error(path, error))?;
-    raw_result(path, file, section)
+    raw_result(path, file, section, resource_limits)
 }
 
 /// Preserve parser admission and I/O errors for every RAW read path.
@@ -430,11 +430,12 @@ pub(super) fn raw_result(
     path: &Path,
     file: rspice_core::io::ltspice_raw::RawFile,
     section: Option<&str>,
+    resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
     validate_raw_coordinates(path, &file)?;
     rspice_core::execution::decode_event_plots(&file)
         .map_err(|error| conversion_error(path, error))?;
-    let mut fft_plots = decode_raw_fft_plots(path, &file)?;
+    let mut fft_plots = decode_raw_fft_plots(path, &file, resource_limits)?;
     let names: Vec<_> = file
         .plots
         .iter()
@@ -516,13 +517,51 @@ pub(super) fn raw_result(
 pub(crate) fn decode_raw_fft_plots(
     path: &Path,
     file: &rspice_core::io::ltspice_raw::RawFile,
+    limits: rspice_core::ResourceLimits,
 ) -> Result<std::collections::BTreeMap<usize, crate::commands::run::FftBundle>, CliError> {
+    // RAW admission already charged the wire samples and retained coordinate
+    // copies. Add embedded FFT metadata to those same whole-file budgets.
+    let (mut external, mut retained) =
+        file.plots
+            .iter()
+            .fold((0usize, 0usize), |(external, retained), plot| {
+                let (plot_external, plot_retained) = plot.numeric_value_counts();
+                (
+                    external.saturating_add(plot_external),
+                    retained.saturating_add(plot_retained),
+                )
+            });
     let mut fft_plots = std::collections::BTreeMap::new();
     for (index, plot) in file.plots.iter().enumerate() {
         if plot.header.plotname == "Transient FFT"
             && !rspice_core::io::ltspice_raw::raw_table_has_coordinate(&plot.header)
                 .map_err(|error| conversion_error(path, error))?
         {
+            let mut remaining = limits;
+            remaining.max_external_data_values =
+                limits.max_external_data_values.saturating_sub(external);
+            remaining.max_result_values = limits.max_result_values.saturating_sub(retained);
+            let count =
+                admit_json_numbers(path, &plot.header.command, remaining).map_err(|error| {
+                    if let CliError::ResourceLimit { path, mut source } = error {
+                        match source.resource {
+                            rspice_core::ResourceKind::ExternalDataValues => {
+                                source.requested = source.requested.saturating_add(external);
+                                source.limit = limits.max_external_data_values;
+                            }
+                            rspice_core::ResourceKind::ResultValues => {
+                                source.requested = source.requested.saturating_add(retained);
+                                source.limit = limits.max_result_values;
+                            }
+                            _ => {}
+                        }
+                        CliError::ResourceLimit { path, source }
+                    } else {
+                        error
+                    }
+                })?;
+            external = external.saturating_add(count);
+            retained = retained.saturating_add(count);
             let decoded = crate::commands::run::decode_fft_raw_plot(plot)
                 .and_then(crate::commands::run::FftBundle::from_raw)
                 .map_err(|error| conversion_error(path, error))?;
@@ -866,6 +905,10 @@ pub(super) fn parse_untyped_json(
     kind: JsonKind,
     resource_limits: rspice_core::ResourceLimits,
 ) -> Result<ImportedResult, CliError> {
+    if kind == JsonKind::Fft {
+        return crate::commands::run::FftBundle::from_json(path, content, resource_limits)
+            .map(ImportedResult::Fft);
+    }
     let value = json::parse(path, content, kind, resource_limits)?;
     let read_unit = |object: &serde_json::Value| -> Result<Option<String>, CliError> {
         match object.get("unit") {
@@ -880,10 +923,6 @@ pub(super) fn parse_untyped_json(
         }
     };
     let analysis = json::optional_text(path, value.get("analysis"), "analysis")?;
-    if analysis == Some("fft") {
-        return crate::commands::run::FftBundle::from_json(path, content, value, resource_limits)
-            .map(ImportedResult::Fft);
-    }
 
     let parsed_values = std::cell::Cell::new(0_usize);
     let to_f64_vec = |value: &serde_json::Value, what: &str| -> Result<Vec<f64>, CliError> {

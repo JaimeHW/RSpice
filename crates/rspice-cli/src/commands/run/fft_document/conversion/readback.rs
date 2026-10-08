@@ -1,6 +1,6 @@
 //! Decode the structured FFT projection, retaining its metadata contract.
 use super::*;
-use crate::commands::waveform_io::{conversion_error, enforce_resource_limit};
+use crate::commands::waveform_io::{admit_json_numbers, conversion_error};
 use rspice_core::io::json::NumericJsonDocument;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -54,45 +54,14 @@ struct Complex {
     imaginary: f64,
 }
 
-// The JSON reader admits numbers during decoding. Keep this independent check
-// at the typed projection boundary too, before allocating spectra and metadata.
-fn numeric_count(value: &serde_json::Value) -> usize {
-    match value {
-        serde_json::Value::Number(_) => 1,
-        serde_json::Value::Array(values) => values.iter().fold(0usize, |count, value| {
-            count.saturating_add(numeric_count(value))
-        }),
-        serde_json::Value::Object(values) => values.values().fold(0usize, |count, value| {
-            count.saturating_add(numeric_count(value))
-        }),
-        _ => 0,
-    }
-}
-
 impl FftBundle {
     pub(crate) fn from_json(
         path: &Path,
         content: &str,
-        value: serde_json::Value,
         limits: rspice_core::ResourceLimits,
     ) -> Result<Self, CliError> {
-        let numeric_values = numeric_count(&value);
-        enforce_resource_limit(
-            path,
-            rspice_core::ResourceKind::ExternalDataValues,
-            numeric_values,
-            limits.max_external_data_values,
-        )?;
-        enforce_resource_limit(
-            path,
-            rspice_core::ResourceKind::ResultValues,
-            numeric_values,
-            limits.max_result_values,
-        )?;
-        // Release the admitted untyped tree before allocating the typed one.
-        // Decode from source so integers beyond u64 still have their authored
-        // digits available to the shared precision check.
-        drop(value);
+        admit_json_numbers(path, content, limits)?;
+        // Original spellings remain available even for integers beyond u64.
         let document = Document::decode_numeric_json(content, &crate::abort::ProcessAbort)
             .map_err(|error| match error {
                 rspice_core::io::json::JsonDecodeError::Aborted => CliError::Interrupted,

@@ -781,6 +781,113 @@ fn all_fft_readers_enforce_numeric_admission_before_publication() {
 }
 
 #[test]
+fn raw_fft_metadata_counts_toward_the_whole_file_numeric_budget() {
+    fn count(value: &serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Number(_) => 1,
+            serde_json::Value::Array(values) => values.iter().map(count).sum(),
+            serde_json::Value::Object(values) => values.values().map(count).sum(),
+            _ => 0,
+        }
+    }
+    let directory = test_dir("raw_fft_metadata_budget");
+    let json = source(&directory);
+    let original = read_json(&json);
+    let input = directory.join("input.raw");
+    let output = directory.join("protected.json");
+    let config = directory.join("limit.toml");
+    for incomplete in [false, true] {
+        let mut document = original.clone();
+        if incomplete {
+            for result in document["results"].as_array_mut().unwrap() {
+                result["status"] = serde_json::json!({"kind":"incomplete-history","availableStart":0.0,"availableStop":0.0002});
+                result["metrics"] = serde_json::Value::Null;
+                result["spectrum"]["bins"] = serde_json::json!([]);
+            }
+        }
+        std::fs::write(&json, serde_json::to_vec(&document).unwrap()).unwrap();
+        for format in ["raw", "ascii"] {
+            let baseline = directory.join("baseline.raw");
+            assert!(
+                convert(&json, &baseline, "json", format, &[])
+                    .status
+                    .success()
+            );
+            let bytes = std::fs::read(&baseline).unwrap();
+            let raw = rspice_core::io::parse_raw_reader(&mut std::io::Cursor::new(&bytes)).unwrap();
+            let metadata = count(&serde_json::from_str(&raw.header.command).unwrap());
+            let samples = raw.header.no_variables * raw.header.no_points;
+            for copies in [1, 2] {
+                std::fs::write(&input, bytes.repeat(copies)).unwrap();
+                for (budget, total) in [
+                    ("max_external_data_values", (samples + metadata) * copies),
+                    ("max_result_values", (2 * samples + metadata) * copies),
+                ] {
+                    std::fs::write(&config, format!("[resources]\n{budget}={total}\n")).unwrap();
+                    let result = convert(
+                        &input,
+                        &output,
+                        "raw",
+                        "json",
+                        &["--section", "1", "--config", config.to_str().unwrap()],
+                    );
+                    assert!(
+                        result.status.success(),
+                        "{incomplete}/{format}/{copies}/{budget}: {result:?}"
+                    );
+                    std::fs::write(&config, format!("[resources]\n{budget}={}\n", total - 1))
+                        .unwrap();
+                    std::fs::write(&output, "predecessor").unwrap();
+                    for to in ["json", "vcd"] {
+                        let result = convert(
+                            &input,
+                            &output,
+                            "raw",
+                            to,
+                            &[
+                                "--section",
+                                "1",
+                                "--config",
+                                config.to_str().unwrap(),
+                                "--error-format",
+                                "json",
+                            ],
+                        );
+                        assert_eq!(
+                            result.status.code(),
+                            Some(75),
+                            "{incomplete}/{format}/{copies}/{budget}/{to}: {result:?}"
+                        );
+                        let error: serde_json::Value =
+                            serde_json::from_slice(&result.stderr).unwrap();
+                        assert_eq!(error["error"]["requested"], total);
+                        assert_eq!(error["error"]["limit"], total - 1);
+                    }
+                    assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+                    if copies == 1 {
+                        for bless in [false, true] {
+                            let mut args = vec![
+                                "--config",
+                                config.to_str().unwrap(),
+                                "compare",
+                                input.to_str().unwrap(),
+                                baseline.to_str().unwrap(),
+                            ];
+                            if bless {
+                                args.push("--bless");
+                            }
+                            let result = cli(&args);
+                            assert_eq!(result.status.code(), Some(75), "{result:?}");
+                            assert_eq!(std::fs::read(&baseline).unwrap(), bytes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn selecting_a_raw_plot_still_validates_other_fft_plot_metadata() {
     let directory = test_dir("raw_container");
     let source = source(&directory);

@@ -505,7 +505,7 @@ fn load_raw_document(
         rspice_core::io::ltspice_raw::parse_raw_plots_bytes_with_limits(&bytes, resource_limits)
             .map_err(|error| waveform_io::raw_read_error(path, error))?;
     waveform_io::validate_raw_coordinates(path, &file)?;
-    waveform_io::decode_raw_fft_plots(path, &file)?;
+    waveform_io::decode_raw_fft_plots(path, &file, resource_limits)?;
     let mut traces = rspice_core::execution::decode_event_plots(&file)
         .map_err(|error| conversion_error(path, error))?;
     if section.is_some() {
@@ -527,7 +527,7 @@ fn load_raw_document(
             .map_err(|error| conversion_error(path, error))?;
     }
     if traces.digital_traces.is_empty() && traces.real_traces.is_empty() {
-        let result = waveform_io::raw_result(path, file, None)?;
+        let result = waveform_io::raw_result(path, file, None, resource_limits)?;
         let table =
             waveform_io::validate_result(path, result, resource_limits)?.into_table(path)?;
         return LoadedVcdDocument::from_table(path, &table);

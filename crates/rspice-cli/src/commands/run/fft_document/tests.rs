@@ -147,15 +147,10 @@ fn every_fft_json_float_has_a_matching_precision_checked_wire_path() {
                             .unwrap_err()
                             .to_string()
                     } else {
-                        FftBundle::from_json(
-                            &path,
-                            &text,
-                            serde_json::from_str(&text).unwrap(),
-                            rspice_core::ResourceLimits::default(),
-                        )
-                        .err()
-                        .expect("precision refusal")
-                        .to_string()
+                        FftBundle::from_json(&path, &text, rspice_core::ResourceLimits::default())
+                            .err()
+                            .expect("precision refusal")
+                            .to_string()
                     };
                     assert!(error.contains(message), "{pointer}: {error}");
                     checked += 1;
