@@ -18,6 +18,7 @@ pub(crate) enum ConstraintError {
 
 mod descriptor;
 pub(crate) mod finite;
+pub(crate) mod hurwitz;
 pub(crate) mod transition;
 pub(crate) use descriptor::{ConstraintDisposition, close_descriptor};
 

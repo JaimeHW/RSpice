@@ -6,6 +6,23 @@ use rspice_core::analysis::stb::{
 use rspice_core::{Engine, Netlist, NoAbort, ResourceLimits};
 
 const LOOP: &str = "E1 eo 0 ctrl 0 -10\nVPROBE eo x 0\nR1 x ctrl 1k\nC1 ctrl 0 1u\n";
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn stable_loop_margins_do_not_hide_a_lossless_natural_mode() {
+    let extra = "Lhidden1 a 0 1\nLhidden2 b 0 3\nChidden1 a 0 3\nChidden2 b 0 5\nCcouple a b 4\n";
+    let result = Engine::default()
+        .run_stb(&netlist(extra), config())
+        .unwrap();
+    assert_eq!(
+        result.result.circuit_poles.spectrum().unwrap().poles.len(),
+        5
+    );
+    assert_eq!(
+        result.result.stability_verdict(),
+        StabilityVerdict::Unstable
+    );
+}
 fn config() -> StbConfig {
     StbConfig::new()
         .with_sweep(10.0, 10000.0, 3)

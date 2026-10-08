@@ -141,7 +141,7 @@ impl Engine {
                 .map_err(extraction_error)?;
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
-            spectrum.poles.len().saturating_mul(2).saturating_add(4),
+            spectrum.poles.len().saturating_mul(2).saturating_add(5),
             limits.max_result_values,
         )?;
         Ok(spectrum)

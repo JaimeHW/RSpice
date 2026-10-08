@@ -26,7 +26,7 @@ impl PoleZeroAnalyzer {
 
         // Qualify the underlying descriptor before interpreting an irregular
         // augmented pencil as an identically-zero transfer numerator.
-        self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort)?;
+        self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort, false)?;
 
         let n = self.num_nodes;
         let mut g_aug = Matrix::zeros(n + 1, n + 1);
@@ -41,7 +41,7 @@ impl PoleZeroAnalyzer {
             g_aug.set(n, i, output_vec[i]);
         }
 
-        let mut spectrum = match self.generalized_eigenvalues(&g_aug, &c_aug, abort) {
+        let mut spectrum = match self.generalized_eigenvalues(&g_aug, &c_aug, abort, false) {
             Err(PoleZeroAnalysisError::IrregularDescriptor { .. }) => {
                 return Err(PoleZeroAnalysisError::TransferExtraction(
                     "transfer numerator is identically zero",
@@ -172,28 +172,15 @@ impl PoleZeroAnalyzer {
         g_matrix: &Matrix,
         c_matrix: &Matrix,
         abort: &dyn AbortSignal,
+        certify_stability: bool,
     ) -> Result<ComputedSpectrum, PoleZeroAnalysisError> {
-        use crate::numerics::exact_constraints::{
-            ConstraintError,
-            finite::{FiniteDescriptorError, finite_dynamics},
-        };
-        let dynamics = finite_dynamics(&g_matrix.data, &c_matrix.data, self.limits, abort)
-            .map_err(|error| match error {
-                FiniteDescriptorError::Irregular => PoleZeroAnalysisError::IrregularDescriptor {
-                    index: 0,
-                    alpha_norm: 0.0,
-                    beta_norm: 0.0,
-                },
-                FiniteDescriptorError::Constraint(ConstraintError::Aborted) => {
-                    PoleZeroAnalysisError::Aborted
-                }
-                FiniteDescriptorError::Constraint(ConstraintError::ResourceLimit(error)) => {
-                    PoleZeroAnalysisError::ResourceLimit(error)
-                }
-                FiniteDescriptorError::Constraint(ConstraintError::Invalid(message)) => {
-                    PoleZeroAnalysisError::InvalidSystem(message)
-                }
-            })?;
+        let dynamics = crate::numerics::exact_constraints::finite::finite_dynamics(
+            &g_matrix.data,
+            &c_matrix.data,
+            self.limits,
+            abort,
+            certify_stability,
+        )?;
         let order = g_matrix.rows;
         let finite_count = dynamics.matrix.len();
         if finite_count == 0 {
@@ -227,7 +214,11 @@ impl PoleZeroAnalyzer {
                 "finite descriptor certificate is internally inconsistent".to_owned(),
             )
         })?;
-        ComputedSpectrum::from_certificate(spectrum.finite, certificate)
+        let mut spectrum = ComputedSpectrum::from_certificate(spectrum.finite, certificate)?;
+        if let Some(stable) = dynamics.asymptotically_stable {
+            spectrum.evidence.set_asymptotic_stability(stable);
+        }
+        Ok(spectrum)
     }
 
     pub(in crate::analysis::pole_zero) fn zeros_from_state_space(
@@ -268,7 +259,7 @@ impl PoleZeroAnalyzer {
         }
         g_zero.set(n, n, model.d);
 
-        let spectrum = match self.generalized_eigenvalues(&g_zero, &c_zero, abort) {
+        let spectrum = match self.generalized_eigenvalues(&g_zero, &c_zero, abort, false) {
             Err(PoleZeroAnalysisError::IrregularDescriptor { .. }) => {
                 return Err(PoleZeroAnalysisError::TransferExtraction(
                     "transfer numerator is identically zero",

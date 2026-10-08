@@ -18,6 +18,8 @@ pub(crate) struct FiniteDynamics {
     pub(crate) matrix: Vec<Vec<Value>>,
     /// Residual of G*T + C*T*A, where x=T*q spans the finite subspace.
     pub(crate) projection_error: Value,
+    /// Strict Hurwitz classification before the exact finite equations round.
+    pub(crate) asymptotically_stable: Option<bool>,
 }
 
 type Reducer = ExactElimination<usize>;
@@ -35,19 +37,22 @@ fn check_abort(abort: &dyn AbortSignal) -> Result<(), ConstraintError> {
     }
 }
 
-fn project(
+fn project_equation(
     mut row: Row,
     reducer: &Reducer,
-    count: usize,
     abort: &dyn AbortSignal,
-) -> Result<Vec<Value>, FiniteDescriptorError> {
+) -> Result<Row, FiniteDescriptorError> {
     reducer.reduce(&mut row, abort)?;
     if !row.nodes.is_empty() {
         return Err(FiniteDescriptorError::Irregular);
     }
+    Ok(row)
+}
+
+fn rounded_projection(row: &Row, count: usize) -> Result<Vec<Value>, FiniteDescriptorError> {
     let mut values = vec![0.0; count];
-    for (index, value) in row.values {
-        values[index] = -coefficient_ratio(&value, &row.query)
+    for (&index, value) in &row.values {
+        values[index] = -coefficient_ratio(value, &row.query)
             .ok_or_else(|| invalid("finite descriptor coefficient is not representable"))?;
     }
     Ok(values)
@@ -59,6 +64,7 @@ pub(crate) fn finite_dynamics(
     c: &[Vec<Value>],
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
+    certify_stability: bool,
 ) -> Result<FiniteDynamics, FiniteDescriptorError> {
     check_abort(abort)?;
     let n = g.len();
@@ -106,6 +112,7 @@ pub(crate) fn finite_dynamics(
         return Ok(FiniteDynamics {
             matrix: Vec::new(),
             projection_error: 0.0,
+            asymptotically_stable: certify_stability.then_some(true),
         });
     }
     let mut rate_limits = limits;
@@ -165,7 +172,19 @@ pub(crate) fn finite_dynamics(
         .max_result_values
         .saturating_sub(overhead.saturating_add(algebraic.retained_words));
     let mut matrix = Vec::with_capacity(free.len());
+    let mut certificate_rows = Vec::new();
+    let mut certificate_words = 0usize;
     for &node in &free {
+        rates.limits.max_result_values = limits.max_result_values.saturating_sub(
+            overhead
+                .saturating_add(algebraic.retained_words)
+                .saturating_add(certificate_words),
+        );
+        algebraic.limits.max_result_values = limits.max_result_values.saturating_sub(
+            overhead
+                .saturating_add(rates.retained_words)
+                .saturating_add(certificate_words),
+        );
         let mut query = Row {
             nodes: BTreeMap::from([(node, BigInt::from(-1))]),
             query: BigInt::from(1),
@@ -178,8 +197,48 @@ pub(crate) fn finite_dynamics(
         // The rate equation's symbolic forcing is the original x vector.
         // Substitute its exact finite-state expansion before rounding once.
         query.nodes = std::mem::take(&mut query.values);
-        matrix.push(project(query, &algebraic, free.len(), abort)?);
+        let projected = project_equation(query, &algebraic, abort)?;
+        matrix.push(rounded_projection(&projected, free.len())?);
+        if certify_stability {
+            certificate_words = certificate_words.saturating_add(projected.words());
+            Reducer::ensure_words(
+                overhead
+                    .saturating_add(algebraic.retained_words)
+                    .saturating_add(rates.retained_words)
+                    .saturating_add(certificate_words),
+                limits.max_result_values,
+            )?;
+            certificate_rows.push(projected);
+        }
     }
+    let asymptotically_stable = if certify_stability {
+        let mut certificate_limits = limits;
+        certificate_limits.max_result_values = limits.max_result_values.saturating_sub(
+            overhead
+                .saturating_add(algebraic.retained_words)
+                .saturating_add(rates.retained_words),
+        );
+        Some(
+            super::hurwitz::rational_rows_are_hurwitz(&certificate_rows, certificate_limits, abort)
+                .map_err(|mut error| {
+                    if let ConstraintError::ResourceLimit(resource) = &mut error
+                        && resource.resource == crate::resource::ResourceKind::ResultValues
+                    {
+                        resource.requested = resource.requested.saturating_add(
+                            limits.max_result_values - certificate_limits.max_result_values,
+                        );
+                        resource.limit = limits.max_result_values;
+                    }
+                    error
+                })?,
+        )
+    } else {
+        None
+    };
+    drop(certificate_rows);
+    algebraic.limits.max_result_values = limits
+        .max_result_values
+        .saturating_sub(overhead.saturating_add(rates.retained_words));
     let mut basis = Vec::with_capacity(n);
     for node in 1..=n {
         let query = Row {
@@ -187,7 +246,10 @@ pub(crate) fn finite_dynamics(
             query: BigInt::from(1),
             ..Row::default()
         };
-        basis.push(project(query, &algebraic, free.len(), abort)?);
+        basis.push(rounded_projection(
+            &project_equation(query, &algebraic, abort)?,
+            free.len(),
+        )?);
     }
     // Verify the projected finite invariant subspace against the original
     // binary64 pencil. Scale before products to avoid gratuitous overflow.
@@ -250,5 +312,6 @@ pub(crate) fn finite_dynamics(
     Ok(FiniteDynamics {
         matrix,
         projection_error,
+        asymptotically_stable,
     })
 }

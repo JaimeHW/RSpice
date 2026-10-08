@@ -3,6 +3,137 @@ use rspice_core::analysis::pole_zero::StabilityVerdict;
 use rspice_core::{AbortSignal, Engine, Netlist, SimulationError};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+const LOSSLESS_LC: &str = "L1 a 0 1\nL2 b 0 3\nC1 a 0 3\nC2 b 0 5\nCc a b 4\n";
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn exact_lossless_and_weakly_damped_circuits_have_physical_stability_verdicts() {
+    let engine = Engine::default();
+    for damping in [0.0, 2.0f64.powi(-60), -2.0f64.powi(-60), 2.0f64.powi(-10)] {
+        let deck = format!(
+            "LC damping\n{LOSSLESS_LC}G1 a 0 a 0 {:.17e}\nG2 b 0 b 0 {:.17e}\nGc a b a b {:.17e}\n.pz a 0 a 0 cur pol\n.end\n",
+            6.0 * damping,
+            10.0 * damping,
+            8.0 * damping
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let spectrum = engine.run_pole_spectrum(&netlist).unwrap();
+        let expected = if damping > 0.0 {
+            StabilityVerdict::Stable
+        } else {
+            StabilityVerdict::Unstable
+        };
+        assert_eq!(
+            spectrum.stability_verdict(),
+            expected,
+            "damping={damping}: {spectrum:?}"
+        );
+        assert_eq!(spectrum.poles.len(), 4);
+        // det(s^2*C + L^-1) is (141*s^4+34*s^2+1)/3. Adding
+        // G=2*damping*C gives -damping +/- j*sqrt(omega^2-damping^2).
+        for (pair, sign) in spectrum.poles.chunks_exact(2).zip([-1.0, 1.0]) {
+            let frequency =
+                ((17.0 + sign * 2.0 * 37.0f64.sqrt()) / 141.0 - damping * damping).sqrt();
+            for pole in pair {
+                assert!((pole.im.abs() - frequency).abs() < 1e-12);
+            }
+        }
+        let transfer = engine
+            .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &rspice_core::NoAbort)
+            .unwrap();
+        assert_eq!(transfer.stability_verdict(), expected);
+        assert_eq!(
+            transfer
+                .pole_evidence
+                .certificate()
+                .unwrap()
+                .asymptotically_stable,
+            Some(damping > 0.0)
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn lossless_lc_parameter_grid_never_acquires_asymptotic_stability_from_roundoff() {
+    let engine = Engine::default();
+    for l1 in 1..=5 {
+        for l2 in 1..=5 {
+            for coupling in 1..=5 {
+                let netlist = Netlist::parse(&format!("Conserved LC energy\nL1 a 0 {l1}\nL2 b 0 {l2}\nC1 a 0 3\nC2 b 0 5\nCc a b {coupling}\n.end\n")).unwrap();
+                let spectrum = engine.run_pole_spectrum(&netlist).unwrap();
+                assert_eq!(spectrum.poles.len(), 4);
+                assert_eq!(
+                    spectrum.stability_verdict(),
+                    StabilityVerdict::Unstable,
+                    "L1={l1} L2={l2} Cc={coupling}: {spectrum:?}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn backward_error_only_legacy_spectra_do_not_recreate_a_sign_certificate() {
+    use rspice_core::analysis::pole_zero::PoleSpectrum;
+    let netlist = Netlist::parse(&format!("Lossless\n{LOSSLESS_LC}.end\n")).unwrap();
+    let spectrum = Engine::default().run_pole_spectrum(&netlist).unwrap();
+    let mut stored = serde_json::to_value(&spectrum).unwrap();
+    let restored: PoleSpectrum = serde_json::from_value(stored.clone()).unwrap();
+    assert_eq!(restored.stability_verdict(), StabilityVerdict::Unstable);
+    stored["evidence"]["certificate"]
+        .as_object_mut()
+        .unwrap()
+        .remove("asymptoticallyStable");
+    let legacy: PoleSpectrum = serde_json::from_value(stored).unwrap();
+    assert!(legacy.evidence.is_qualified());
+    assert_eq!(legacy.stability_verdict(), StabilityVerdict::Indeterminate);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn stability_evidence_survives_physical_scaling_and_result_documents() {
+    use rspice_core::execution::{
+        AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, ResultPayload,
+    };
+    for exponent in [-20, 0, 20] {
+        let scale = 2.0f64.powi(exponent);
+        for damping in [0.0, 2.0f64.powi(-60), -2.0f64.powi(-60)] {
+            let netlist = Netlist::parse(&format!(
+                "Scaled LC\nL1 a 0 {:.17e}\nL2 b 0 {:.17e}\nC1 a 0 {:.17e}\nC2 b 0 {:.17e}\nCc a b {:.17e}\nG1 a 0 a 0 {:.17e}\nG2 b 0 b 0 {:.17e}\nGc a b a b {:.17e}\n.pz a 0 a 0 cur pol\n.end\n",
+                1.0/scale, 3.0/scale, 3.0*scale, 5.0*scale, 4.0*scale,
+                6.0*damping*scale, 10.0*damping*scale, 8.0*damping*scale,
+            )).unwrap();
+            let result = Engine::default()
+                .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &rspice_core::NoAbort)
+                .unwrap();
+            let expected = Some(damping > 0.0);
+            assert_eq!(
+                result
+                    .pole_evidence
+                    .certificate()
+                    .unwrap()
+                    .asymptotically_stable,
+                expected
+            );
+            let document = AnalysisResultDocument::from_pole_zero(
+                AnalysisInstanceId::new(AnalysisKind::PoleZero, 0),
+                &result,
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+            let json = serde_json::to_string(&document).unwrap();
+            let restored: AnalysisResultDocument = serde_json::from_str(&json).unwrap();
+            let ResultPayload::PoleZero(payload) = restored.payload() else {
+                panic!("PZ payload");
+            };
+            assert_eq!(payload.to_pole_evidence(), result.pole_evidence);
+        }
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn natural_circuit_spectrum_retains_an_unobserved_unstable_mode() {

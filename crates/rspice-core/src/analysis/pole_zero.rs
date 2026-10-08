@@ -102,6 +102,33 @@ pub enum PoleZeroAnalysisError {
     TransferExtraction(&'static str),
 }
 
+impl From<crate::numerics::exact_constraints::ConstraintError> for PoleZeroAnalysisError {
+    fn from(error: crate::numerics::exact_constraints::ConstraintError) -> Self {
+        use crate::numerics::exact_constraints::ConstraintError;
+        match error {
+            ConstraintError::Aborted => Self::Aborted,
+            ConstraintError::ResourceLimit(error) => Self::ResourceLimit(error),
+            ConstraintError::Invalid(message) => Self::InvalidSystem(message),
+        }
+    }
+}
+
+impl From<crate::numerics::exact_constraints::finite::FiniteDescriptorError>
+    for PoleZeroAnalysisError
+{
+    fn from(error: crate::numerics::exact_constraints::finite::FiniteDescriptorError) -> Self {
+        use crate::numerics::exact_constraints::finite::FiniteDescriptorError;
+        match error {
+            FiniteDescriptorError::Constraint(error) => error.into(),
+            FiniteDescriptorError::Irregular => Self::IrregularDescriptor {
+                index: 0,
+                alpha_norm: 0.0,
+                beta_norm: 0.0,
+            },
+        }
+    }
+}
+
 /// Numerical evidence attached to one complete finite/infinite eigenspectrum.
 ///
 /// `problem_order - infinite_count` is the number of finite roots represented
@@ -121,6 +148,11 @@ pub struct SpectrumCertificate {
     pub max_backward_error: Value,
     /// Strict threshold below which the spectrum is fully qualified.
     pub qualification_tolerance: Value,
+    /// Exact Hurwitz classification of the original finite descriptor.
+    /// Backward-error-qualified roots alone do not prove their real-part signs.
+    /// Older retained spectra carry no such evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asymptotically_stable: Option<bool>,
 }
 
 impl SpectrumCertificate {
@@ -136,6 +168,7 @@ impl SpectrumCertificate {
             infinite_count,
             max_backward_error,
             qualification_tolerance,
+            asymptotically_stable: None,
         };
         certificate.is_valid().then_some(certificate)
     }
@@ -158,6 +191,7 @@ impl SpectrumCertificate {
     /// Whether all certificate fields and counts are internally valid.
     pub fn is_valid(self) -> bool {
         self.infinite_count <= self.problem_order
+            && (self.finite_count() != 0 || self.asymptotically_stable != Some(false))
             && self.max_backward_error.is_finite()
             && self.max_backward_error >= 0.0
             && self.max_backward_error <= PoleZeroAnalyzer::APPROXIMATE_BACKWARD_ERROR_LIMIT
@@ -193,6 +227,15 @@ pub enum RootSetEvidence {
 }
 
 impl RootSetEvidence {
+    pub(crate) fn set_asymptotic_stability(&mut self, stable: bool) {
+        match self {
+            Self::QualifiedEmpty { certificate }
+            | Self::Qualified { certificate }
+            | Self::Approximate { certificate } => certificate.asymptotically_stable = Some(stable),
+            Self::NotRequested | Self::LegacyUnknown => {}
+        }
+    }
+
     /// Build evidence for a newly computed complete spectrum.
     pub fn from_certificate(root_count: usize, certificate: SpectrumCertificate) -> Option<Self> {
         if !certificate.is_valid() || certificate.finite_count() != root_count {
@@ -248,8 +291,8 @@ impl RootSetEvidence {
     }
 }
 
-/// Three-valued stability result. Only a qualified pole set can prove stable
-/// or unstable behavior; absent, approximate, and legacy roots are indeterminate.
+/// Three-valued asymptotic stability result. A complete spectrum needs separate
+/// Hurwitz evidence; backward residuals do not certify real-part signs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StabilityVerdict {
     Stable,
@@ -270,7 +313,7 @@ pub struct PoleSpectrum {
 }
 
 impl PoleSpectrum {
-    /// Classify asymptotic stability only from a complete, qualified pole set.
+    /// Classify asymptotic stability from complete modes and exact sign evidence.
     pub fn stability_verdict(&self) -> StabilityVerdict {
         pole_stability_verdict(&self.poles, &self.evidence)
     }
@@ -278,16 +321,23 @@ impl PoleSpectrum {
 
 fn pole_stability_verdict(poles: &[Complex64], evidence: &RootSetEvidence) -> StabilityVerdict {
     if !evidence.is_consistent_with(poles)
-        || !evidence.is_qualified()
         || poles
             .iter()
             .any(|pole| !pole.re.is_finite() || !pole.im.is_finite())
     {
         StabilityVerdict::Indeterminate
-    } else if poles.iter().all(|pole| pole.re < 0.0) {
-        StabilityVerdict::Stable
     } else {
-        StabilityVerdict::Unstable
+        match evidence
+            .certificate()
+            .and_then(|certificate| certificate.asymptotically_stable)
+        {
+            Some(true) => StabilityVerdict::Stable,
+            Some(false) => StabilityVerdict::Unstable,
+            None if matches!(evidence, RootSetEvidence::QualifiedEmpty { .. }) => {
+                StabilityVerdict::Stable
+            }
+            None => StabilityVerdict::Indeterminate,
+        }
     }
 }
 
@@ -360,12 +410,12 @@ impl PoleZeroResult {
             .min_by(|a, b| a.re.abs().total_cmp(&b.re.abs()))
     }
 
-    /// Return a three-valued stability verdict from qualified pole evidence.
+    /// Return a three-valued stability verdict from exact Hurwitz evidence.
     pub fn stability_verdict(&self) -> StabilityVerdict {
         pole_stability_verdict(&self.poles, &self.pole_evidence)
     }
 
-    /// Check whether qualified pole evidence proves asymptotic stability.
+    /// Check whether the retained evidence proves asymptotic stability.
     pub fn is_stable(&self) -> bool {
         self.stability_verdict() == StabilityVerdict::Stable
     }

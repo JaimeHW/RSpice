@@ -54,6 +54,7 @@ impl PoleZeroAnalyzer {
         output_label: &str,
         limits: crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
+        certify_stability: bool,
     ) -> Result<PoleZeroResult, PoleZeroAnalysisError> {
         ensure_pole_zero_not_aborted(abort)?;
         let n = a.dims().0;
@@ -79,6 +80,32 @@ impl PoleZeroAnalyzer {
         if config.compute_poles {
             ensure_pole_zero_not_aborted(abort)?;
             let mut spectrum = helper.eigenvalues_from_matrix(&model.a)?;
+            if certify_stability {
+                let retained = n.saturating_mul(n.saturating_mul(8).saturating_add(1));
+                crate::resource::ResourceLimitError::ensure(
+                    crate::resource::ResourceKind::ResultValues,
+                    retained,
+                    limits.max_result_values,
+                )?;
+                let mut proof_limits = limits;
+                proof_limits.max_result_values -= retained;
+                let stable = crate::numerics::exact_constraints::hurwitz::matrix_is_hurwitz(
+                    &model.a.data,
+                    proof_limits,
+                    abort,
+                )
+                .map_err(|error| {
+                    let mut error = PoleZeroAnalysisError::from(error);
+                    if let PoleZeroAnalysisError::ResourceLimit(resource) = &mut error
+                        && resource.resource == crate::resource::ResourceKind::ResultValues
+                    {
+                        resource.requested = resource.requested.saturating_add(retained);
+                        resource.limit = limits.max_result_values;
+                    }
+                    error
+                })?;
+                spectrum.evidence.set_asymptotic_stability(stable);
+            }
             ensure_pole_zero_not_aborted(abort)?;
             helper.ensure_roots_within_frequency_limit(&spectrum.finite, config, "pole")?;
             spectrum

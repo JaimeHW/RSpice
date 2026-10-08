@@ -123,7 +123,11 @@ impl PoleZeroAnalyzer {
                     });
                 }
                 let poles = vec![Complex64::new(pole, 0.0)];
-                return ComputedSpectrum::exact(poles, 1, 0);
+                let mut spectrum = ComputedSpectrum::exact(poles, 1, 0)?;
+                spectrum.evidence.set_asymptotic_stability(
+                    g != 0.0 && g.is_sign_positive() == c.is_sign_positive(),
+                );
+                return Ok(spectrum);
             }
             if g != 0.0 {
                 return ComputedSpectrum::exact(Vec::new(), 1, 1);
@@ -135,20 +139,10 @@ impl PoleZeroAnalyzer {
             });
         }
 
-        // A nonsingular C has no infinite modes, so the ordinary state-space
-        // solve is complete and avoids exact algebraic-closure work.
-        if let Some(state_space) = self.build_state_space(&vec![0.0; n], &vec![0.0; n])
-            && state_space.a.rows == n
-        {
-            let mut spectrum = self.eigenvalues_from_matrix(&state_space.a)?;
-            spectrum
-                .finite
-                .sort_by(|a, b| a.norm().total_cmp(&b.norm()));
-            return Ok(spectrum);
-        }
-
-        // Singular descriptors require generalized finite/infinite accounting.
-        let mut spectrum = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort)?;
+        // Retain the exact finite equations through stability classification;
+        // rounding C^-1*G before that decision can erase or invent damping.
+        let mut spectrum =
+            self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix, abort, true)?;
         spectrum
             .finite
             .sort_by(|a, b| a.norm().total_cmp(&b.norm()));

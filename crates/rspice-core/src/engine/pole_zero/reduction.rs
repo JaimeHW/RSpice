@@ -155,9 +155,63 @@ pub(super) fn retain_original_evidence(
             previous.infinite_count.checked_add(algebraic_count)?,
         )?;
         certificate.max_backward_error = error.max(previous.max_backward_error);
+        // The audit sums binary64 products exactly and rounds positive errors
+        // upward, so zero proves exact equivalence. Only then does the reduced
+        // model's sign proof transfer to the original circuit.
+        if error == 0.0 {
+            certificate.asymptotically_stable = previous.asymptotically_stable;
+        }
         *evidence = RootSetEvidence::from_certificate(roots.len(), certificate)?;
     }
     Some(())
+}
+
+/// Reclassify original equations when sparse floating reduction was inexact.
+pub(super) fn certify_original_stability(
+    result: &mut PoleZeroResult,
+    g: &crate::solver::ComplexMatrix,
+    c: &crate::solver::ComplexMatrix,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<bool, SimulationError> {
+    let Some(certificate) = result.pole_evidence.certificate() else {
+        return Ok(true);
+    };
+    if certificate.asymptotically_stable.is_some() {
+        return Ok(true);
+    }
+    let retained = workspace_floor(g.nrows);
+    ResourceLimitError::ensure(
+        ResourceKind::ResultValues,
+        retained.saturating_add(g.nrows.saturating_mul(g.nrows).saturating_mul(2)),
+        limits.max_result_values,
+    )?;
+    let mut remaining = limits;
+    remaining.max_result_values = limits.max_result_values.saturating_sub(retained);
+    let dynamics = crate::numerics::exact_constraints::finite::finite_dynamics(
+        &g.to_dense_real(),
+        &c.to_dense_imag(),
+        remaining,
+        abort,
+        true,
+    )
+    .map_err(|error| {
+        let mut error = descriptor::extraction_error(error.into());
+        if let SimulationError::ResourceLimit(resource) = &mut error
+            && resource.resource == ResourceKind::ResultValues
+        {
+            resource.requested = resource.requested.saturating_add(retained);
+            resource.limit = limits.max_result_values;
+        }
+        error
+    })?;
+    if dynamics.matrix.len() != result.poles.len() {
+        return Ok(false);
+    }
+    result
+        .pole_evidence
+        .set_asymptotic_stability(dynamics.asymptotically_stable.unwrap());
+    Ok(true)
 }
 
 #[cfg(test)]

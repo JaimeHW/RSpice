@@ -2033,18 +2033,22 @@ pub struct SpectrumCertificateDocument {
     pub infinite_count: usize,
     pub max_backward_error: f64,
     pub qualification_tolerance: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asymptotically_stable: Option<bool>,
 }
 
 impl SpectrumCertificateDocument {
     /// Rebuild the core certificate, or `None` when the retained numbers do
     /// not satisfy its validity contract.
     pub fn to_core(self) -> Option<SpectrumCertificate> {
-        SpectrumCertificate::new(
+        let mut certificate = SpectrumCertificate::new(
             self.problem_order,
             self.infinite_count,
             self.max_backward_error,
             self.qualification_tolerance,
-        )
+        )?;
+        certificate.asymptotically_stable = self.asymptotically_stable;
+        certificate.is_valid().then_some(certificate)
     }
 }
 
@@ -2055,6 +2059,7 @@ impl From<SpectrumCertificate> for SpectrumCertificateDocument {
             infinite_count: certificate.infinite_count,
             max_backward_error: certificate.max_backward_error,
             qualification_tolerance: certificate.qualification_tolerance,
+            asymptotically_stable: certificate.asymptotically_stable,
         }
     }
 }

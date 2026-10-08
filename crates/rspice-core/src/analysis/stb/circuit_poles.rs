@@ -55,10 +55,10 @@ impl CircuitPoleEvidence {
         )
     }
 
-    /// Four certificate/diagnostic scalar slots, including absent slots.
+    /// Five certificate slots, or four diagnostic slots without a spectrum.
     pub fn retained_value_count(&self) -> usize {
         self.spectrum()
-            .map_or(4, |s| s.poles.len().saturating_mul(2).saturating_add(4))
+            .map_or(4, |s| s.poles.len().saturating_mul(2).saturating_add(5))
     }
 
     pub fn diagnostic_bytes(&self) -> usize {

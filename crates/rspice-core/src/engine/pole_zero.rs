@@ -356,6 +356,7 @@ impl Engine {
             &format!("node{}", config.output_pos),
             limits,
             abort,
+            reduction_error == 0.0,
         ) {
             Ok(result) => result,
             // Sparse reduction is an optimization. Its numerical path may
@@ -384,6 +385,15 @@ impl Engine {
         if reduction::retain_original_evidence(&mut result, algebraic_count, reduction_error)
             .is_none()
         {
+            return Ok(None);
+        }
+        if !reduction::certify_original_stability(
+            &mut result,
+            g_descriptor,
+            c_descriptor,
+            limits,
+            abort,
+        )? {
             return Ok(None);
         }
         Ok(Some(result))
