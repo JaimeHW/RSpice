@@ -1229,9 +1229,14 @@ impl VerilogACompiler {
             )
         }) {
             artifact = artifact.with_connection_source(source);
-        } else if !artifact.digital.is_empty()
+        } else if (!artifact.digital.is_empty()
             && (!artifact.hir.parameters.is_empty()
-                || !artifact.digital.elaboration_parameters.is_empty())
+                || !artifact.digital.elaboration_parameters.is_empty()))
+            || artifact
+                .hir
+                .parameters
+                .iter()
+                .any(|parameter| parameter.elaboration_value.is_some())
         {
             artifact.parameter_source = Some(source.into());
         }

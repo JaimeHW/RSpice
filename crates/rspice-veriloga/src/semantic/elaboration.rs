@@ -23,8 +23,11 @@ use smol_str::SmolStr;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Return the selected module itself when it is structural-leaf, otherwise a
-/// faithfully flattened owned module.  Unsupported or ambiguous structure is
+#[path = "elaboration_parameters.rs"]
+mod parameters;
+
+/// Return the selected module itself when it has no hierarchy or retained
+/// generate structure, otherwise a faithfully flattened owned module.  Unsupported or ambiguous structure is
 /// rejected before code generation; it is never omitted.
 pub(crate) fn elaborate_executable_module<'a>(
     analyzed: &'a AnalyzedFile,
@@ -53,7 +56,7 @@ pub(crate) fn elaborate_executable_module<'a>(
             selected.name
         ))
     })?;
-    if root.instances.is_empty() {
+    if root.instances.is_empty() && root.generate_template.is_none() {
         return Ok(Cow::Borrowed(selected));
     }
 
@@ -67,6 +70,9 @@ pub(crate) fn elaborate_executable_module<'a>(
     let mut elaborator = HierarchyElaborator::new(analyzed, source_modules, selected.clone());
     elaborator.flattened.digital.instances = digital_instances;
     let root_scope = ScopeMap::for_root(selected);
+    elaborator
+        .parameter_hierarchy
+        .register(root, selected, &root_scope, None)?;
     let mut module_stack = vec![selected.name.clone()];
     elaborator.append_instances(
         root,
@@ -121,6 +127,7 @@ struct ScopeMap {
     nodes: HashMap<SmolStr, NodeBinding>,
     parameters: HashMap<SmolStr, SmolStr>,
     parameter_given: HashMap<SmolStr, bool>,
+    parameter_locals: std::sync::Arc<crate::semantic::parameter_defaults::LocalDefaults>,
     variables: HashMap<SmolStr, SmolStr>,
     arrays: HashMap<SmolStr, SmolStr>,
     branches: HashMap<SmolStr, SmolStr>,
@@ -144,7 +151,10 @@ impl ScopeMap {
     }
 
     fn for_root(module: &AnalyzedModule) -> Self {
-        let mut scope = Self::default();
+        let mut scope = Self {
+            parameter_locals: module.parameter_locals.clone(),
+            ..Self::default()
+        };
         for port in &module.ports {
             scope.nodes.insert(
                 port.name.clone(),
@@ -224,6 +234,10 @@ struct HierarchyElaborator<'a> {
     next_noise_process: u32,
     child_control_variables: [Vec<SmolStr>; 2],
     port_flows: BTreeMap<SmolStr, PortFlow>,
+    parameter_hierarchy: parameters::ParameterHierarchy,
+    specialization_modules: HashSet<SmolStr>,
+    specializations:
+        HashMap<parameters::SpecializationKey, std::sync::Arc<parameters::SpecializedModule>>,
 }
 
 impl<'a> HierarchyElaborator<'a> {
@@ -250,6 +264,7 @@ impl<'a> HierarchyElaborator<'a> {
         used_names.extend(flattened.branches.iter().map(|item| item.name.clone()));
         used_names.extend(flattened.arrays.keys().cloned());
         let next_noise_process = flattened.noise_process_count;
+        let specialization_modules = parameters::specialization_modules(&source_modules);
         Self {
             analyzed,
             source_modules,
@@ -259,10 +274,16 @@ impl<'a> HierarchyElaborator<'a> {
             next_noise_process,
             child_control_variables: Default::default(),
             port_flows: BTreeMap::new(),
+            parameter_hierarchy: Default::default(),
+            specialization_modules,
+            specializations: HashMap::new(),
         }
     }
 
     fn finish(mut self) -> CompileResult<AnalyzedModule> {
+        let span = self.source_modules[&self.flattened.name].span;
+        self.parameter_hierarchy
+            .protect(&mut self.flattened, span)?;
         self.flattened.noise_process_count = self.next_noise_process;
         // Child control variables remain independent, including their resets.
         // Publish one aggregate under the names executable backends consume.
@@ -420,6 +441,7 @@ impl<'a> HierarchyElaborator<'a> {
             let path = format!("{parent_path}.{}", instance.name);
             self.append_instance(
                 instance,
+                source_module,
                 parent_scope,
                 module_stack,
                 &path,
@@ -432,6 +454,7 @@ impl<'a> HierarchyElaborator<'a> {
     fn append_instance(
         &mut self,
         instance: &ModuleInstance,
+        parent_source: &Module,
         parent_scope: &ScopeMap,
         module_stack: &mut Vec<SmolStr>,
         path: &str,
@@ -475,27 +498,21 @@ impl<'a> HierarchyElaborator<'a> {
             ));
         }
 
+        let overrides = bind_parameter_overrides(instance, child, path)?;
+        self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
+        let specialized =
+            self.specialize_parameters(child_source, child, parent_source, &overrides, path)?;
+        let (child_source, child) = specialized
+            .as_deref()
+            .map(|value| (&value.source, &value.analyzed))
+            .unwrap_or((child_source, child));
+        // Generate specialization may change the child's domain. Never flatten
+        // newly discrete work into an analog body and silently omit it.
+        if super::digital_elaborate::is_digital_child(child) {
+            super::reject_digital_content(child)?;
+        }
         let branch_inventory = super::flow_probes::hierarchy_branches(child);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
-        let overrides = bind_parameter_overrides(instance, child, path)?;
-        for &index in overrides.keys() {
-            let parameter = &child.parameters[index];
-            if parameter.elaboration_value.is_some()
-                || matches!(
-                    parameter.default_expr,
-                    Some(Expression::Digital(crate::ast::DigitalExpr::FourState(_)))
-                )
-            {
-                return Err(semantic_error(
-                    SemanticErrorKind::UnsupportedFeature(format!(
-                        "parameter '{}' of analog child '{path}' affects packed elaboration and requires source specialization before hierarchy flattening",
-                        parameter.name
-                    )),
-                    instance.span,
-                ));
-            }
-        }
-        self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
         let noise_process_base = self.next_noise_process;
         self.next_noise_process = self
             .next_noise_process
@@ -506,6 +523,7 @@ impl<'a> HierarchyElaborator<'a> {
                 ))
             })?;
         let mut scope = ScopeMap {
+            parameter_locals: child.parameter_locals.clone(),
             ground_nodes: child.ground_nodes.clone(),
             instance_path: Some(path.into()),
             noise_process_range: Some((noise_process_base, child.noise_process_count)),
@@ -621,9 +639,16 @@ impl<'a> HierarchyElaborator<'a> {
             let mut parameter = parameter.clone();
             parameter.name = scope.parameters[&parameter.name].clone();
             parameter.is_public = false;
-            parameter.default_expr = if let Some(override_expr) = overrides.get(&index) {
+            parameter.default_expr = if parameters::is_packed(&parameter) {
+                parameter.default_expr.clone()
+            } else if parameter.elaboration_value.is_some() && overrides.contains_key(&index) {
+                // This input is fixed by source elaboration. Its parent inputs
+                // are protected through the original override's provenance.
+                parameter.default_expr.clone()
+            } else if let Some(override_expr) = overrides.get(&index) {
                 parameter.default = None;
-                Some(rewrite_expression(override_expr, parent_scope)?)
+                let expanded = parent_scope.parameter_locals.expand(override_expr)?;
+                Some(rewrite_expression(&expanded, parent_scope)?)
             } else {
                 parameter
                     .default_expr
@@ -674,6 +699,13 @@ impl<'a> HierarchyElaborator<'a> {
             self.flattened.parameters.len(),
             parameter_base + child.parameters.len()
         );
+
+        self.parameter_hierarchy.register(
+            child_source,
+            child,
+            &scope,
+            Some((parent_source, parent_scope, &overrides)),
+        )?;
 
         let variable_base = self.flattened.variables.len();
         for variable in &child.variables {

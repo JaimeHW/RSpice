@@ -433,18 +433,11 @@ impl DigitalElaborator<'_> {
         let mut values = Vec::new();
         let mut key = Vec::new();
         for (index, expression) in overrides {
-            let mut declaration = source.parameters[index].clone();
-            declaration.default = Some(expression);
-            if declaration.packed_range.is_some() || declaration.signedness.is_some() {
-                // Close the RHS in the parent's scope. The child's packed
-                // assignment, including overridden bounds, happens afterwards.
-                declaration.packed_range = None;
-                declaration.signedness = None;
-                declaration.type_is_explicit = false;
-                declaration.param_type = crate::ast::ParamType::Real;
-            }
-            let value = crate::canonical_ir::digital_lower::parameter_override_literal(
-                &declaration,
+            let declaration = &source.parameters[index];
+            let span = expression.span();
+            let value = super::instance_parameters::close_override(
+                declaration,
+                expression,
                 &parent.constants,
                 parent.time_scale,
             )
@@ -454,7 +447,7 @@ impl DigitalElaborator<'_> {
                         "parameter `{}` of instance `{path}`: {message}",
                         declaration.name
                     )),
-                    declaration.default.as_ref().expect("override").span(),
+                    span,
                 )
             })?;
             let identity = match &value {

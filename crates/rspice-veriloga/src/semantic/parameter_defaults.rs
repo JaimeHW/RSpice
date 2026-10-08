@@ -90,6 +90,7 @@ impl SemanticAnalyzer {
 const MAX_EXPANDED_DEFAULT_NODES: usize = 1_048_576;
 const MAX_LOCAL_DEPENDENCY_DEPTH: usize = 128;
 
+#[derive(Debug)]
 struct LocalDefault {
     expression: Expression,
     nodes: usize,
@@ -98,8 +99,8 @@ struct LocalDefault {
 
 /// Keep local expressions shared until a public default needs them. Analog
 /// localparams continue to use their existing prologue variables.
-#[derive(Default)]
-pub(super) struct LocalDefaults {
+#[derive(Debug, Default)]
+pub(crate) struct LocalDefaults {
     values: HashMap<SmolStr, LocalDefault>,
     strings: HashSet<SmolStr>,
 }

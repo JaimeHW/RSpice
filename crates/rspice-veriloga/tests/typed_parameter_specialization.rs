@@ -1175,16 +1175,10 @@ endmodule
     for (source, expected) in [
         (
             r#"module leaf(p); inout p; electrical p;
- parameter W=8; parameter [W-1:0] P=16'h1234; parameter real LEVEL=P+0.0;
- analog I(p)<+LEVEL; endmodule
-module parent(p); inout p; electrical p; leaf #(.W(4)) child(p); endmodule"#,
-            "requires source specialization before hierarchy flattening",
-        ),
-        (
-            r#"module leaf(p); inout p; electrical p;
- parameter [7:0] P=1; parameter real LEVEL=P+0.0; analog I(p)<+LEVEL; endmodule
+ parameter real A[1:0]='{1,2}; parameter [7:0] P=1;
+ parameter real LEVEL=P+0.0; analog I(p)<+LEVEL; endmodule
 module parent(p); inout p; electrical p; leaf #(.P(2)) child(p); endmodule"#,
-            "requires source specialization before hierarchy flattening",
+            "requires combined packed and array source specialization",
         ),
         (
             "module bad(q); parameter [1.5:0] P=0; output reg q=0; endmodule",
@@ -1205,4 +1199,222 @@ module parent(p); inout p; electrical p; leaf #(.P(2)) child(p); endmodule"#,
             .to_string();
         assert!(error.contains(expected), "{error}");
     }
+}
+
+#[test]
+fn analog_children_specialize_packed_parameters_and_preserve_live_numeric_inputs() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module packed_leaf(p);
+ inout p; electrical p;
+ parameter integer W=8 from [1:32];
+ parameter [W+15:16] CODE=16'h1234;
+ aliasparam PATTERN=CODE;
+ parameter real GAIN=1;
+ parameter real LEVEL=CODE+0.0;
+ analog I(p)<+GAIN*(LEVEL+($param_given(CODE)?1000:0));
+endmodule
+module middle(p);
+ inout p; electrical p;
+ parameter integer WIDTH=4;
+ parameter real GAIN=2;
+ packed_leaf #(.W(WIDTH),.PATTERN(16'h1234),.GAIN(GAIN)) stage(p);
+endmodule
+module top(p);
+ inout p; electrical p;
+ parameter integer N=4;
+ parameter real GAIN=2;
+ localparam WIDTH=N;
+ middle #(.WIDTH(WIDTH),.GAIN(GAIN)) nested(p);
+ packed_leaf #(.PATTERN(16'h12ff),.W(8)) direct(p);
+endmodule
+"#,
+            Some("top"),
+        )
+        .unwrap();
+    let current = |report: &rspice_veriloga::RuntimeCompileReport,
+                   device: &mut rspice_veriloga::device::VerilogADevice| {
+        report
+            .model
+            .stamp_programs
+            .iter()
+            .zip(device.try_evaluate().unwrap())
+            .map(|(program, value)| {
+                program
+                    .stamp_locations
+                    .iter()
+                    .filter(|stamp| {
+                        matches!(stamp.row, rspice_veriloga::codegen::StampIndex::Terminal(0))
+                    })
+                    .map(|stamp| -stamp.sign * value)
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+    };
+    let make_device = |report: &rspice_veriloga::RuntimeCompileReport| {
+        rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "hierarchy",
+            report.model.clone(),
+            &report.canonical_ir,
+            &[1],
+        )
+        .unwrap()
+    };
+    let mut device = make_device(&original);
+    assert_eq!(current(&original, &mut device), 3263.0);
+    assert!(
+        device
+            .try_set_parameter("N", 8.0)
+            .unwrap_err()
+            .to_string()
+            .contains("specialize the source")
+    );
+    assert_eq!(current(&original, &mut device), 3263.0);
+    assert!(device.try_set_parameter("GAIN", 3.0).unwrap());
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(current(&original, &mut device), 4267.0);
+    let specialized = compiler
+        .specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[("N", ScalarParameterValue::Integer(8))],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert_eq!(
+        current(&specialized, &mut make_device(&specialized)),
+        3359.0
+    );
+    let encoded = serde_json::to_vec(&specialized).unwrap();
+    let restored: rspice_veriloga::RuntimeCompileReport = serde_json::from_slice(&encoded).unwrap();
+    restored.validate_integrity().unwrap();
+    assert_eq!(current(&restored, &mut make_device(&restored)), 3359.0);
+    assert!(!restored.canonical_ir.digital.has_executable_content());
+}
+
+#[test]
+fn analog_generated_children_keep_wide_values_and_structural_dependencies() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module cell(p);
+ inout p; electrical p;
+ parameter signed [0:128] WORD=0;
+ parameter real GAIN=1;
+ parameter real LEVEL=WORD[113:120]+0.0;
+ analog I(p)<+GAIN*LEVEL;
+endmodule
+module bank(p);
+ inout p; electrical p;
+ parameter integer COUNT=1;
+ parameter [128:0] WORD=0;
+ parameter real GAIN=1;
+ genvar i;
+ generate for(i=0;i<COUNT;i=i+1) begin:cells
+   cell #(.WORD(WORD),.GAIN(GAIN)) item(p);
+ end endgenerate
+endmodule
+module top(p);
+ inout p; electrical p;
+ parameter integer COUNT=2;
+ parameter [128:0] WORD=129'h1_00000000_00000000_00000000_000001xz;
+ parameter real GAIN=2;
+ bank #(.COUNT(COUNT),.WORD(WORD),.GAIN(GAIN)) stage(p);
+endmodule
+"#,
+            Some("top"),
+        )
+        .unwrap();
+    let make_device = |report: &rspice_veriloga::RuntimeCompileReport| {
+        rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "wide",
+            report.model.clone(),
+            &report.canonical_ir,
+            &[1],
+        )
+        .unwrap()
+    };
+    let current = |report: &rspice_veriloga::RuntimeCompileReport,
+                   device: &mut rspice_veriloga::device::VerilogADevice| {
+        report
+            .model
+            .stamp_programs
+            .iter()
+            .zip(device.try_evaluate().unwrap())
+            .map(|(program, value)| {
+                program
+                    .stamp_locations
+                    .iter()
+                    .filter(|stamp| {
+                        matches!(stamp.row, rspice_veriloga::codegen::StampIndex::Terminal(0))
+                    })
+                    .map(|stamp| -stamp.sign * value)
+                    .sum::<f64>()
+            })
+            .sum::<f64>()
+    };
+    let mut device = make_device(&original);
+    assert_eq!(current(&original, &mut device), 4.0);
+    assert!(
+        device
+            .try_set_parameter("COUNT", 3.0)
+            .unwrap_err()
+            .to_string()
+            .contains("specialize the source")
+    );
+    assert!(device.try_set_parameter("GAIN", 3.0).unwrap());
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(current(&original, &mut device), 6.0);
+    let expanded = compiler
+        .specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[("COUNT", ScalarParameterValue::Integer(3))],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert_eq!(current(&expanded, &mut make_device(&expanded)), 6.0);
+    assert_eq!(
+        expanded.canonical_ir.digital.elaboration_parameters.len(),
+        5
+    );
+    for value in &expanded.canonical_ir.digital.elaboration_parameters {
+        assert_eq!(
+            value.value,
+            bits("129'h1_00000000_00000000_00000000_000001xz")
+        );
+    }
+    expanded.validate_integrity().unwrap();
+    let empty = compiler
+        .compile_runtime(
+            r#"
+module unit(p); inout p; electrical p; analog I(p)<+1; endmodule
+module empty(p);
+ inout p; electrical p; parameter integer COUNT=0;
+ generate if(COUNT) begin:g unit child(p); end endgenerate
+endmodule
+"#,
+            Some("empty"),
+        )
+        .unwrap();
+    let mut damaged = empty.canonical_ir.clone();
+    damaged.parameter_source = None;
+    assert!(damaged.validate().is_err());
+    let mut empty_device = make_device(&empty);
+    assert!(
+        empty_device
+            .try_set_parameter("COUNT", 1.0)
+            .unwrap_err()
+            .to_string()
+            .contains("specialize the source")
+    );
+    let populated = compiler
+        .specialize_mixed_runtime_typed(
+            &empty.canonical_ir,
+            &[("COUNT", ScalarParameterValue::Integer(1))],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert_eq!(current(&populated, &mut make_device(&populated)), 1.0);
 }

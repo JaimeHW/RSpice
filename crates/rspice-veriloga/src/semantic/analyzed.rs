@@ -66,6 +66,8 @@ pub struct AnalyzedModule {
     pub noise_process_count: u32,
     pub ports: Vec<AnalyzedPort>,
     pub parameters: Vec<AnalyzedParameter>,
+    /// Typed, bounded expansion of local constants in child override expressions.
+    pub(crate) parameter_locals: std::sync::Arc<super::parameter_defaults::LocalDefaults>,
     /// Parameter aliases (aliasparam): alternate instance-facing names
     /// resolving to entries of `parameters`
     pub param_aliases: Vec<AnalyzedParamAlias>,

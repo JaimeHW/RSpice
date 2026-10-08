@@ -387,6 +387,7 @@ mod elaboration;
 mod flow_probes;
 mod function_effects;
 mod implicit_integrator;
+mod instance_parameters;
 mod packed_parameters;
 mod parameter_assignments;
 mod parameter_constants;
@@ -957,6 +958,7 @@ impl SemanticAnalyzer {
             noise_process_count: 0,
             ports: Vec::new(),
             parameters: Vec::new(),
+            parameter_locals: Default::default(),
             param_aliases: Vec::new(),
             variables: Vec::new(),
             event_state_variables: Vec::new(),
@@ -2113,6 +2115,7 @@ impl SemanticAnalyzer {
         analyzed.symbol_table = self.symbols.clone();
         analyzed.noise_process_count = self.next_noise_process;
         retained_inputs::record(&mut analyzed);
+        analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
         Ok(analyzed)
     }
 

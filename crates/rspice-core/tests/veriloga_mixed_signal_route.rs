@@ -3028,3 +3028,60 @@ endmodule
         assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
     }
 }
+
+#[test]
+fn analog_child_packed_parameters_specialize_in_loaded_mixed_instances() {
+    let model = ModelFile::new(
+        "analog_child_packed",
+        r#"
+`timescale 1ns/1ps
+module packed_child(p);
+ inout p; electrical p;
+ parameter integer W=8;
+ parameter [W-1:0] CODE=16'h1234;
+ parameter real LEVEL=CODE+0.0;
+ analog I(p)<+(V(p)-LEVEL)/1000;
+endmodule
+module mixed_parent(p,q);
+ inout p; electrical p; output reg q=0;
+ parameter integer WIDTH=4;
+ packed_child #(.W(WIDTH)) child(p);
+ initial #1 q=1;
+ analog I(p)<+(-1.0*q)/1000.0;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* analog child packed specialization\n.param vcc=1\n\
+         Xa pa qa mixed_parent\n\
+         Xb pb qb mixed_parent WIDTH=8\n\
+         Rpa pa 0 1k\nRqa qa 0 1k\nRpb pb 0 1k\nRqb qb 0 1k\n\
+         .va \"{}\" mixed_parent module=mixed_parent\n.end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2e-9, 0.1e-9);
+    for (node, before, after) in [("pa", 2.0, 2.5), ("pb", 26.0, 26.5)] {
+        let values = waveform(&result, node);
+        for (&time, &value) in result.time.iter().zip(&values) {
+            if time < 0.9e-9 {
+                assert!((value - before).abs() < 1e-8, "{node} at {time}: {value}");
+            } else if time > 1.1e-9 {
+                assert!((value - after).abs() < 1e-8, "{node} at {time}: {value}");
+            }
+        }
+        assert!((values.last().unwrap() - after).abs() < 1e-8);
+    }
+    for node in ["qa", "qb"] {
+        let events = result.digital_trace_named(node).unwrap();
+        assert_eq!(events.len(), 2, "{node}: {events:?}");
+        assert_eq!(
+            events[0].value.state,
+            rspice_core::xspice::DigitalState::Zero
+        );
+        assert_eq!(
+            events[1].value.state,
+            rspice_core::xspice::DigitalState::One
+        );
+        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+    }
+}

@@ -24,8 +24,8 @@ use super::{
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CanonicalIrArtifact {
-    /// Preprocessed source retained only for parameterized mixed modules, so
-    /// instance elaboration can specialize both domains on every platform.
+    /// Preprocessed source for parameterized mixed modules and elaboration-bound
+    /// analog parameters, so source specialization is available on every platform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameter_source: Option<SmolStr>,
     /// Active source closure for design-level connection elaboration. This is
@@ -148,6 +148,18 @@ impl CanonicalIrArtifact {
                     "{kind} source does not match its source identity"
                 )));
             }
+        }
+        if self
+            .hir
+            .parameters
+            .iter()
+            .any(|parameter| parameter.elaboration_value.is_some())
+            && self.parameter_source.is_none()
+            && self.connections.source().is_none()
+        {
+            diagnostics.push(artifact_error(
+                "elaboration-bound parameters require retained parameter source",
+            ));
         }
         let connection_identity = self
             .connections

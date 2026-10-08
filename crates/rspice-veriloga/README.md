@@ -649,10 +649,21 @@ compiled device to a different dependency value reports that source
 specialization is required; specialization recomputes the dependent packed
 values and widths. Ordinary numeric defaults remain symbolic and writable.
 The generated Rust parameter-update path emits the same dependency guard.
-Unimplemented packed analog-child overrides report an explicit diagnostic.
-General packed analog arithmetic, typed range constraints, and complete analog
-child source specialization remain open; retaining a declared packed constant
-does not provide those capabilities.
+Schema 100 specializes scalar analog-child overrides before semantic analysis
+and flattening when the subtree needs effective values for types or structure.
+It shares override assignment with digital children and caches repeated child
+specializations. Widths, dependent values, private packed metadata, local
+assignment boundaries, and generated instance counts now follow the effective
+child source. Original override presence still drives `$param_given`.
+
+A dependency graph retains parent/child provenance through numeric parameters
+and locals. Packed and generate dependencies require source specialization to
+change, including an initially empty generated hierarchy. Unrelated numeric
+inputs retain symbolic defaults and live updates; explicitly typed numeric-only
+trees keep their existing path. Mixed packed/array source specialization, general
+packed analog arithmetic, typed ranges, and full mixed-domain hierarchy remain
+open. Array-valued hierarchy retains its existing shape validation and explicitly
+refuses overrides that also require unavailable packed/array specialization.
 
 General packed operations over mutable numeric parameters, non-scalar
 overrides, and typed range constraints remain open.
