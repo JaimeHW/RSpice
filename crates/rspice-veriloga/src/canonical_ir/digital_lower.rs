@@ -54,10 +54,10 @@
 //! missing rather than compiled into a device that is quietly short of what
 //! its author wrote. What still refuses here:
 //!
-//! Scalar analog-owned real/integer reads now carry an explicit typed probe.
-//! The runtime must bind it to values retained by normal analog evaluation;
-//! the interpreter refuses an unavailable binding. Analog event subscriptions
-//! and arrays still require additional lowering and runtime support.
+//! Analog-owned scalar and array-element reads carry explicit typed probes.
+//! The runtime binds them to values retained by normal analog evaluation.
+//! Analog event subscriptions lowered by semantic analysis carry an occurrence
+//! signal and a retained counter probe through the same hierarchy mappings.
 //!
 //! - A process-local `string`: a process computes in four-state and real
 //!   values, and a string is neither.
@@ -626,6 +626,49 @@ fn lower_with_analog_variables(
         }
     }
 
+    let mut add_events = |bindings: &[crate::semantic::AnalogEventBinding],
+                          scope: &HashMap<&str, DigitalSignalId>,
+                          variables: &HashMap<SmolStr, AnalogVariable>| {
+        for binding in bindings {
+            let Some(variable) = variables.get(&binding.variable) else {
+                diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                    "analog event counter has no relocated storage",
+                    binding.span.into(),
+                ));
+                continue;
+            };
+            let Some(signal) = scope.get(binding.signal.as_str()).copied() else {
+                diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                    "analog event counter has no signal",
+                    binding.span.into(),
+                ));
+                continue;
+            };
+            probes.push(DigitalAnalogProbe {
+                event_signal: Some(signal),
+                id: DigitalAnalogProbeId::from(probes.len()),
+                access: "$analog_event".into(),
+                quantity: super::digital::DigitalAnalogQuantity::IntegerVariable,
+                target: super::digital::DigitalAnalogProbeTarget::Variable {
+                    name: variable.target.clone(),
+                },
+                span: binding.span.into(),
+            });
+        }
+    };
+    add_events(&digital.analog_events, &module_scope, analog_variables);
+    for (instance, scope) in digital.instances.iter().zip(&frame_scopes) {
+        let variables = instance
+            .analog_variables
+            .iter()
+            .filter_map(|(local, global)| {
+                analog_variables
+                    .get(global)
+                    .map(|v| (local.clone(), v.clone()))
+            })
+            .collect();
+        add_events(&instance.analog_events, scope, &variables);
+    }
     diagnostics.extend(reject_overdriven_real_nets(&signals, &drivers));
 
     if !diagnostics.is_empty() {
@@ -3283,6 +3326,7 @@ impl ProcessLowerer<'_> {
             None => {
                 let id = DigitalAnalogProbeId::from(self.probes.len());
                 self.probes.push(DigitalAnalogProbe {
+                    event_signal: None,
                     id,
                     access: function,
                     quantity: quantity.into(),
@@ -3321,6 +3365,7 @@ impl ProcessLowerer<'_> {
             None => {
                 let id = DigitalAnalogProbeId::from(self.probes.len());
                 self.probes.push(DigitalAnalogProbe {
+                    event_signal: None,
                     id,
                     access: name.into(),
                     quantity,
@@ -3384,6 +3429,7 @@ impl ProcessLowerer<'_> {
                 let name: SmolStr =
                     format!("{}[{}]", target_name, lower + i64::from(offset)).into();
                 self.probes.push(DigitalAnalogProbe {
+                    event_signal: None,
                     id: DigitalAnalogProbeId::from(self.probes.len()),
                     access: name.clone(),
                     quantity,
@@ -4287,10 +4333,10 @@ impl ProcessLowerer<'_> {
 /// A based literal is never one: `4'd2` carries a base marker, and section
 /// 2.5.2 gives real constants no bases.
 fn is_real_literal(raw: &str) -> bool {
-    if raw.contains('\'') {
-        return false;
-    }
-    raw.contains('.') || raw.contains(['e', 'E'])
+    matches!(
+        crate::numeric_literal::parse_numeric_literal(raw),
+        Ok(crate::numeric_literal::NumericLiteralValue::Real(_))
+    )
 }
 
 /// The real comparison an operator spells, if it spells one.

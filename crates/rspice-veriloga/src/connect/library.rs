@@ -25,8 +25,9 @@
 //!
 //! Other declarations execute through the ordinary mixed runtime with their own
 //! parameters, hierarchy and transactional instance state. Discrete processes can
-//! sample analog nodes and variables; analog-event subscriptions in discrete
-//! sensitivity lists remain a separate language requirement.
+//! sample analog nodes and variables and subscribe to cross, above, timer and
+//! event-assigned scalar variables. Other analog event forms require further
+//! language support.
 //!
 //! The shipped signatures expose `vsup` and derive levels from that parameter.
 //! An authored body can declare its own threshold and loading parameters. Clause

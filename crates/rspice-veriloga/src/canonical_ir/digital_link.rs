@@ -371,6 +371,9 @@ pub fn link_digital_plans(
             let id = DigitalAnalogProbeId::new(index(plan.analog_probes.len(), "analog probe")?);
             let mut probe = probe.clone();
             probe.id = id;
+            probe.event_signal = probe
+                .event_signal
+                .map(|signal| layout.map.signals[usize::from(signal)]);
             match &mut probe.target {
                 super::digital::DigitalAnalogProbeTarget::Nodes { positive, negative } => {
                     *positive = qualify_probe_node(layout.instance.name, positive).into();

@@ -137,6 +137,7 @@
 //! its Thevenin conductance onto whichever node happened to occupy row zero.
 
 mod analog_samples;
+mod analog_events;
 mod shared;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 use shared::MixedDigital;
@@ -3479,11 +3480,12 @@ impl MixedSignalHost {
             }
             group = end;
         }
+        let events_published = self.publish_local_analog_events(circuit_voltages)?;
         read_dac_bits(&self.state, &mut scratch.dac_after)?;
         // Circuit-owned processes see the complete A/D bank before any analog
         // equation reads their outputs. The group samples these inputs at stamp.
-        let changed = (!self.state.digital.is_view() && self.sample_discrete_inputs()?)
-            || scratch.dac_before != scratch.dac_after;
+        let inputs_changed = !self.state.digital.is_view() && self.sample_discrete_inputs()?;
+        let changed = events_published || inputs_changed || scratch.dac_before != scratch.dac_after;
         if let Some(trial) = self.trial.as_mut() {
             // Which D/A nets moved, not merely that one did. The boundary
             // diagnostic names participants, and a `!=` on the whole vector

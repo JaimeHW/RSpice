@@ -34,6 +34,7 @@ use std::collections::HashMap;
 /// to report the unsupported construct.
 #[derive(Debug, Clone, Default)]
 pub struct AnalyzedDigital {
+    pub analog_events: Vec<super::AnalogEventBinding>,
     pub time_scale: crate::time_scale::ModuleTimeScale,
     /// Exact scalar constants that cannot occupy a numeric runtime slot.
     pub elaboration_parameters: Vec<AnalyzedPackedParameter>,
@@ -479,6 +480,7 @@ pub struct AnalyzedContinuousAssign {
 /// their processes and drivers separately addressable.
 #[derive(Debug, Clone)]
 pub struct ElaboratedDigitalInstance {
+    pub analog_events: Vec<super::AnalogEventBinding>,
     /// Local analog variable/array names mapped to their relocated storage.
     pub analog_variables: HashMap<SmolStr, SmolStr>,
     pub time_scale: crate::time_scale::ModuleTimeScale,
@@ -696,6 +698,7 @@ impl SemanticAnalyzer {
             }
         }
         analyzed.digital = AnalyzedDigital {
+            analog_events: Vec::new(),
             time_scale: module.time_scale,
             elaboration_parameters: std::mem::take(&mut analyzed.digital.elaboration_parameters),
             signals,

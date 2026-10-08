@@ -1193,6 +1193,61 @@ impl MixedDigitalCoordinator {
             result.map_err(|error| coordinator.execution_error(error))?;
             published_any = true;
         }
+        // Prepare occurrences at the candidate solution before publishing them.
+        // Publish one assignment occurrence per wave; repeat-event controls must
+        // retain multiple writes even when the associated data did not change.
+        let mut targets = Vec::new();
+        for (host, map) in hosts.iter_mut().zip(&self.maps) {
+            targets.extend(
+                host.analog_event_targets(solution)?
+                    .into_iter()
+                    .map(|(signal, value)| (map.signals[usize::from(signal)], value)),
+            );
+        }
+        if !targets.is_empty() {
+            let tick = hdl_tick(cursor.time, |at| at.nearest_tick(self.resolution))?;
+            cursor.published_tick = cursor.published_tick.max(tick);
+            let limit = hosts
+                .iter()
+                .map(|host| host.max_bridge_iterations)
+                .min()
+                .unwrap_or(1);
+            for wave in 0..=limit {
+                let drives = super::analog_events::event_bank(&targets, |signal| {
+                    self.digital.read(signal).and_then(FourStateValue::to_u64)
+                })?;
+                if drives.is_empty() {
+                    break;
+                }
+                if wave == limit {
+                    return Err(MixedSignalError::BridgeIterationLimit {
+                        tick: cursor.published_tick,
+                        limit,
+                    });
+                }
+                let external = match &mut participant {
+                    Some(external) => Some(&mut **external as &mut dyn DigitalActiveParticipant),
+                    None => None,
+                };
+                let mut active = CircuitAnalogParticipant {
+                    hosts: &mut *hosts,
+                    maps: &self.maps,
+                    solution,
+                    external,
+                };
+                let digital = self.digital.make_mut();
+                digital.sample_analog_probes(&self.probes);
+                let result = digital.force_many_from_analog_at(
+                    &drives,
+                    cursor.published_tick,
+                    cursor.time,
+                    cursor.time,
+                    &mut active,
+                );
+                result.map_err(|error| self.execution_error(error))?;
+                published_any = true;
+            }
+        }
         Ok(published_any)
     }
 

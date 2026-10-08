@@ -378,6 +378,8 @@ const EDGE_EVENT_AS_CROSS_CODE: &str = "VA-SEM-EDGE-EVENT-AS-CROSS";
 pub(crate) const MAX_DIGITAL_VECTOR_WIDTH: u32 = 65_536;
 
 mod analyzed;
+mod analog_events;
+pub use analog_events::AnalogEventBinding;
 mod bounded_loop;
 mod constant_dependencies;
 mod digital;
@@ -955,6 +957,12 @@ impl SemanticAnalyzer {
         module: &Module,
         default_transition: f64,
     ) -> CompileResult<AnalyzedModule> {
+        let event_lowering = (!module.digital_processes.is_empty())
+            .then(|| analog_events::lower(module))
+            .transpose()?;
+        let module = event_lowering
+            .as_ref()
+            .map_or(module, |(lowered, _)| lowered);
         self.current_time_scale = module.time_scale;
         self.digital_selector_constants = DigitalConstants::from_module(module);
         let mut analyzed = AnalyzedModule {
@@ -1919,6 +1927,9 @@ impl SemanticAnalyzer {
         // Establish ownership before routing declaration initialization. Numeric
         // declarations do not choose a domain; their procedural writers do.
         self.analyze_digital(module, &mut analyzed);
+        if let Some((_, bindings)) = &event_lowering {
+            analyzed.digital.analog_events = bindings.clone();
+        }
 
         // Phase 10: Module-level variable initializers run before the
         // analog initialization, in declaration order.

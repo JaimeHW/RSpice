@@ -398,8 +398,30 @@ impl CanonicalDigitalPlan {
                 ));
             }
         }
+        let mut event_signals = HashSet::new();
         for probe in &self.analog_probes {
             use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
+            if let Some(signal) = probe.event_signal {
+                let valid_signal = self.signal(signal).is_some_and(|signal| {
+                    !signal.kind.is_real()
+                        && signal.width == 32
+                        && signal.local.is_none()
+                        && matches!(
+                            &signal.initial_value,
+                            Some(super::digital::DigitalInitialValue::FourState(value))
+                                if value.to_u64() == Some(0)
+                        )
+                });
+                if probe.quantity != DigitalAnalogQuantity::IntegerVariable
+                    || !event_signals.insert(signal)
+                    || !valid_signal
+                    || self.drivers_of(signal).next().is_some()
+                {
+                    return Err(error(
+                        "analog event subscription requires an independent initialized 32-bit occurrence signal",
+                    ));
+                }
+            }
             let variable = matches!(
                 probe.quantity,
                 DigitalAnalogQuantity::RealVariable | DigitalAnalogQuantity::IntegerVariable
@@ -520,6 +542,31 @@ impl CanonicalDigitalPlan {
                 }
                 for value in &function.values {
                     let kind = &value.kind;
+                    let writes_event = match kind {
+                        CfgValueKind::DigitalBlockingWrite { target, .. }
+                        | CfgValueKind::DigitalNonblockingWrite { target, .. }
+                        | CfgValueKind::DigitalDriverWrite { target, .. } => {
+                            event_signals.contains(&target.signal)
+                        }
+                        CfgValueKind::DigitalBitBlockingWrite { signal, .. }
+                        | CfgValueKind::DigitalBitNonblockingWrite { signal, .. } => {
+                            event_signals.contains(signal)
+                        }
+                        CfgValueKind::DigitalArrayBlockingWrite { array, .. }
+                        | CfgValueKind::DigitalArrayNonblockingWrite { array, .. } => {
+                            array.cell_range().is_some_and(|range| {
+                                range
+                                    .map(super::ids::DigitalSignalId::new)
+                                    .any(|signal| event_signals.contains(&signal))
+                            })
+                        }
+                        _ => false,
+                    };
+                    if writes_event {
+                        return Err(error(
+                            "digital process cannot write an analog occurrence signal",
+                        ));
+                    }
                     if !kind.is_digital()
                         && !matches!(
                             kind,

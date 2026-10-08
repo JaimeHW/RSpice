@@ -504,6 +504,9 @@ impl From<crate::ast::AccessKind> for DigitalAnalogQuantity {
 /// A typed solver sample requested by a discrete-domain expression.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalAnalogProbe {
+    /// Private occurrence counter signal for an analog event subscription.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_signal: Option<DigitalSignalId>,
     pub id: DigitalAnalogProbeId,
     /// Authored nature access function, resolved to its physical role.
     pub access: SmolStr,

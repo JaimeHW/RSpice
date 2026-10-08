@@ -1,9 +1,7 @@
 //! The library's sources are compiled through this crate's own front end.
 //!
-//! That is the whole point of keeping them as Verilog-AMS rather than as
-//! prose. It is also why they carry no behavioural body: the last two tests
-//! here pin the two refusals that would meet one, so the decision is checked
-//! rather than remembered.
+//! Shipped signatures delegate to native bridges. The cases below also cover
+//! the language features used by authored connection bodies.
 
 use super::*;
 use crate::connect::{
@@ -304,21 +302,11 @@ endmodule
     );
 }
 
-/// Every published `a2d` senses the analog side from a discrete process. Half
-/// of what that needs now works, and the other half is what still holds the
-/// behavioural body back.
-///
-/// Reading `V(a)` from the process is Verilog-AMS LRM 2.4 section 7.3.3's
-/// probe and is accepted — see the mixed-signal tests in
-/// `digital_process_execution`. Waking on `above(V(a) - vhi)` is section
-/// 7.3.5's *event*, a different construct in a different position: the
-/// `event_expression` production admits `analog_event_functions`, and nothing
-/// here subscribes a process to one yet. So the refusal that remains is
-/// exactly one, and it names the event rather than the probe inside it.
+/// An authored A/D body can subscribe to an analog threshold event.
 #[test]
-fn an_analog_sensing_discrete_process_is_refused_by_name() {
-    let error = analysis_error(
-        "\
+fn an_analog_sensing_discrete_process_retains_its_subscription() {
+    let file = parse(
+        r#"
 module a2d_with_body(a, d);
     input a;
     output d;
@@ -329,24 +317,17 @@ module a2d_with_body(a, d);
     always @(above(V(a) - vhi))
         d <= 1'b1;
 endmodule
-",
+"#,
     );
-    assert!(
-        error.contains("call to `above` inside a discrete-domain expression is not supported yet"),
-        "unexpected error: {error}"
-    );
-    assert!(
-        !error.contains("has no meaning in a discrete-domain expression"),
-        "the probe inside the event argument is section 7.3.3's and is no longer refused: {error}"
-    );
+    let analyzed = crate::SemanticAnalyzer::new().analyze(&file).unwrap();
+    assert_eq!(analyzed.modules["a2d_with_body"].digital.analog_events.len(), 1);
 }
 
 /// The probe on its own — section 7.3.3's read, without section 7.3.5's
 /// event — compiles inside a connect module's discrete half.
 ///
-/// This is the half of an `a2d` body that now exists, pinned here rather than
-/// only in the front end's own tests because the library's decision to ship
-/// signatures rather than bodies rests on which half is missing.
+/// An independently clocked sampler and a threshold subscription both retain
+/// the continuous port's probe binding.
 #[test]
 fn a_connect_module_process_may_probe_its_continuous_port() {
     // Spelled `module`, for the reason [`as_plain_module`] gives: the analyzer
