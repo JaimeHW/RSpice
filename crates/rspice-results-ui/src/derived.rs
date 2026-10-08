@@ -135,7 +135,13 @@ impl DerivedSeries {
             std::sync::Arc::new(
                 psd_v2_per_hz
                     .iter()
-                    .map(|&value| 1.0e9 * value.max(0.0).sqrt())
+                    .map(|&value| {
+                        if value.is_finite() {
+                            1.0e9 * value.max(0.0).sqrt()
+                        } else {
+                            f64::NAN
+                        }
+                    })
                     .collect::<Vec<_>>(),
             )
         })
@@ -149,5 +155,24 @@ impl DerivedSeries {
                 phase_deg,
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_transforms_preserve_gaps_and_restart_phase_after_them() {
+        let mut derived = DerivedSeries::default();
+        let values = [1.0, f64::NAN, 4.0];
+        assert!(derived.db(1, &values)[1].is_nan());
+        let noise = derived.noise_density_nv(1, &values);
+        assert!(noise[1].is_nan());
+        assert_eq!(noise[2], 2.0e9);
+        let phase = derived.unwrapped(1, &[170.0, -170.0, f64::NAN, -170.0, 170.0]);
+        assert_eq!(&phase[..2], &[170.0, 190.0]);
+        assert!(phase[2].is_nan());
+        assert_eq!(&phase[3..], &[-170.0, -190.0]);
     }
 }

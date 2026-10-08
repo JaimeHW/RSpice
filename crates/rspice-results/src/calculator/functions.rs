@@ -320,8 +320,8 @@ fn xval(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
 /// - Consecutive finite output samples differ by at most 180°, provided the
 ///   true signal moves less than 180° between samples (the usual sampling
 ///   assumption for unwrapping).
-/// - Non-finite samples (NaN/±inf) pass through unchanged and are skipped
-///   when measuring jumps, so a gap does not poison the running offset.
+/// - Non-finite samples pass through unchanged. Unwrapping restarts after
+///   a gap because the missing interval's number of phase turns is unknown.
 pub fn unwrap_phase_deg(phase: &[f64]) -> Vec<f64> {
     let mut out = Vec::with_capacity(phase.len());
     let mut offset = 0.0_f64;
@@ -329,6 +329,8 @@ pub fn unwrap_phase_deg(phase: &[f64]) -> Vec<f64> {
     for &sample in phase {
         if !sample.is_finite() {
             out.push(sample);
+            prev = None;
+            offset = 0.0;
             continue;
         }
         if let Some(prev) = prev {

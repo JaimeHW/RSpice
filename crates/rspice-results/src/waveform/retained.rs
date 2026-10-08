@@ -85,7 +85,7 @@ impl AsMut<RetainedWaveform> for RetainedWaveform {
 }
 
 impl RetainedWaveform {
-    /// Read a measured value, distinguishing unavailable and out-of-range rows.
+    /// Read an available measured value; unavailable and out-of-range rows return None.
     pub fn sample(&self, index: usize) -> Option<f64> {
         self.y.get(index).copied().filter(|value| value.is_finite())
     }
@@ -145,7 +145,9 @@ impl RetainedWaveform {
             return Vec::new();
         }
         let limit = maximum_samples.max(2).min(count);
-        extrema_cache_indices(&self.y[..count], limit)
+        let mut indices = extrema_cache_indices(&self.y[..count], limit);
+        preserve_gap_separators(&self.y[..count], &mut indices);
+        indices
     }
 
     /// A bounded live preview consists of exact source knots. Display-cache
@@ -163,7 +165,7 @@ impl RetainedWaveform {
         }
         let limit = maximum_samples.max(2).min(count);
         if count > limit {
-            let indices = if let Some(complex) = &self.complex {
+            let mut indices = if let Some(complex) = &self.complex {
                 // Include extrema of both rectangular components even where
                 // their magnitude is constant. Each list shares endpoints.
                 let part = (limit / 3).max(2);
@@ -176,6 +178,7 @@ impl RetainedWaveform {
             } else {
                 extrema_cache_indices(&self.y, limit)
             };
+            preserve_gap_separators(&self.y, &mut indices);
             let selected = |values: &SharedWaveformValues| -> SharedWaveformValues {
                 indices
                     .iter()
@@ -205,6 +208,69 @@ impl RetainedWaveform {
         let min = self.y.iter().copied().fold(f64::INFINITY, f64::min);
         let max = self.y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
         (min, max)
+    }
+}
+
+/// A bounded preview may omit source knots, but must never invent a segment
+/// across unavailable samples. Replace a selected endpoint with an exact gap
+/// knot when there is no budget to add a separator. Keep the final endpoint
+/// whenever possible; an extremely small budget may omit the first endpoint.
+fn preserve_gap_separators(values: &[f64], indices: &mut [usize]) {
+    for index in 1..indices.len() {
+        let left = indices[index - 1];
+        let right = indices[index];
+        if values[left].is_finite()
+            && values[right].is_finite()
+            && let Some(gap) = values[left + 1..right]
+                .iter()
+                .position(|value| !value.is_finite())
+        {
+            let replaced = if index + 1 == indices.len() {
+                index - 1
+            } else {
+                index
+            };
+            indices[replaced] = left + 1 + gap;
+        }
+    }
+}
+
+#[cfg(test)]
+mod gap_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_caches_and_previews_do_not_join_segments_across_gaps() {
+        let mut values = (0..120).map(|value| (value % 9) as f64).collect::<Vec<_>>();
+        for index in [1, 10, 12, 19, 53, 54, 55, 77, 96, 118] {
+            values[index] = f64::NAN;
+        }
+        let waveform =
+            RetainedWaveform::new("gaps", (0..120).map(f64::from).collect::<Vec<_>>(), values);
+        for budget in 2..=120 {
+            let indices = waveform.display_sample_indices(budget);
+            assert!(indices.len() <= budget);
+            for pair in indices.windows(2) {
+                assert!(pair[0] < pair[1]);
+                if waveform.y[pair[0]].is_finite() && waveform.y[pair[1]].is_finite() {
+                    assert!(
+                        waveform.y[pair[0]..=pair[1]]
+                            .iter()
+                            .all(|value| value.is_finite())
+                    );
+                }
+            }
+            let preview = waveform.clone().into_bounded_preview(budget).unwrap();
+            for index in 1..preview.x.len() {
+                if preview.y[index - 1].is_finite() && preview.y[index].is_finite() {
+                    assert!(
+                        waveform.y[preview.x[index - 1] as usize..=preview.x[index] as usize]
+                            .iter()
+                            .all(|value| value.is_finite())
+                    );
+                }
+            }
+        }
     }
 }
 
