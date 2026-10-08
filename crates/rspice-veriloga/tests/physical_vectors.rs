@@ -431,3 +431,138 @@ connectrules selected; connect drive; endconnectrules
         .compile_runtime(&out_of_range, Some("top"))
         .unwrap();
 }
+
+#[test]
+fn mixed_concatenated_wire_aliases_specialize_and_replay() {
+    let source = r#"
+module leaf(d);
+ inout [-2:-1] d; logic [-2:-1] d;
+ assign d=2'bzz;
+endmodule
+module top(a);
+ parameter integer PICK=5;
+ inout a; electrical a;
+ wire [5:4] bus;
+ leaf child({a,bus[PICK]});
+ analog I(a)<+V(a)/1000;
+endmodule
+connectmodule bidirectional(d,a);
+ inout d; logic d;
+ inout a; electrical a;
+ analog I(a)<+V(a)/1000;
+endmodule
+connectrules selected; connect bidirectional; endconnectrules
+"#;
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    let check = |ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact, selected| {
+        ir.validate().unwrap();
+        assert_eq!(ir.digital.bit_aliases.len(), 2);
+        let alias = ir
+            .digital
+            .bit_aliases
+            .iter()
+            .find(|alias| ir.digital.signal(alias.right.signal).unwrap().name == "bus")
+            .unwrap();
+        assert_eq!((alias.left.bit, alias.right.bit), (0, selected));
+        assert_eq!(
+            ir.digital.drivers.len(),
+            1,
+            "wire aliases must not create feedback drivers"
+        );
+    };
+    check(&compiled.canonical_ir, 1);
+    assert_eq!(
+        compiled
+            .canonical_ir
+            .hir
+            .parameters
+            .iter()
+            .find(|p| p.name == "PICK")
+            .unwrap()
+            .elaboration_value,
+        Some(5.0)
+    );
+    let assigned = compiler
+        .specialize_mixed_runtime(&compiled.canonical_ir, &[("PICK", 4.0)], &NoPipelineControl)
+        .unwrap();
+    check(&assigned.canonical_ir, 0);
+    let replayed = compiler
+        .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    check(&replayed.canonical_ir, 0);
+    assert_eq!(
+        assigned.canonical_ir.digital.content_identity,
+        replayed.canonical_ir.digital.content_identity
+    );
+}
+
+#[test]
+fn mixed_concatenations_refuse_invalid_drive_targets() {
+    let cases = [
+        (
+            "output",
+            "reg d;",
+            "{a,d}",
+            "requires a net, not a variable",
+        ),
+        ("inout", "reg d;", "{a,d}", "requires a net, not a variable"),
+        (
+            "output",
+            "input d; logic d;",
+            "{a,d}",
+            "cannot drive a parent input port",
+        ),
+        (
+            "inout",
+            "wire [5:4] d;",
+            "{a,d[3]}",
+            "requires an in-range wire bit",
+        ),
+        (
+            "input",
+            "wreal d;",
+            "{a,d}",
+            "requires scalar physical or four-state digital lanes",
+        ),
+        (
+            "output",
+            "wire d;",
+            "{a,{1{d}}}",
+            "replicated concatenations cannot connect",
+        ),
+        (
+            "inout",
+            "wire d;",
+            "{a,{1{d}}}",
+            "replicated concatenations cannot connect",
+        ),
+    ];
+    for (direction, declaration, connection, expected) in cases {
+        let ports = if declaration.starts_with("input") {
+            "a,d"
+        } else {
+            "a"
+        };
+        let source = format!(
+            r#"
+module leaf(d); {direction} [1:0] d; logic [1:0] d; endmodule
+module top({ports}); inout a; electrical a; {declaration} leaf child({connection}); endmodule
+connectmodule bidirectional(d,a);
+ inout d; logic d;
+ inout a; electrical a;
+ analog I(a)<+V(a)/1000;
+endmodule
+connectrules selected; connect bidirectional; endconnectrules
+"#
+        );
+        let result = compiler().compile_runtime(&source, Some("top"));
+        let error = match result {
+            Ok(_) => panic!("accepted {source}"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains(expected), "expected {expected}: {error}");
+    }
+}

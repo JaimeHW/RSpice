@@ -326,6 +326,14 @@ pub(in crate::semantic) fn bind(
             }
         }
         let Some(actual) = actual else { continue };
+        if child.ports[positions[&lanes[0]]].direction != PortDirection::Input
+            && matches!(actual, Expression::ArrayLiteral(concat) if concat.first_replication().is_some())
+        {
+            return Err(error(
+                "replicated concatenations cannot connect to output or inout ports",
+                actual.span(),
+            ));
+        }
         if lanes.len() == 1 && discrete.contains(&lanes[0]) {
             bound[positions[&lanes[0]]] = Some(match parent.physical_selection(actual)? {
                 Some(mut selected) if selected.len() == 1 => selected.remove(0),

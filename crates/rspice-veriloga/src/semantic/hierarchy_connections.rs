@@ -220,6 +220,7 @@ pub(super) fn prepare(
                     prepared: &mut prepared,
                     used: &mut used,
                     signals: &mut signals,
+                    aliases: &mut aliases,
                 }
                 .connect(
                     child,

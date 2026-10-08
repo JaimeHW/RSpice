@@ -1336,3 +1336,155 @@ connectrules selected; connect drive {mode}; endconnectrules
         }
     }
 }
+
+#[test]
+fn mixed_concatenated_inputs_preserve_array_lanes_and_converter_loading() {
+    for (mode, loaded) in [("merged", 1.5), ("split", 1.0)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module receiver(d,p);
+ input [-2:1] d; logic [-2:1] d;
+ output p; electrical p;
+ analog V(p)<+(d[-2] ? 8.0 : 0.0)+(d[-1] ? 4.0 : 0.0)+(d[0] ? 2.0 : 0.0)+(d[1] ? 1.0 : 0.0);
+endmodule
+module bank(a,p,q);
+ input a; electrical a;
+ output p,q; electrical p,q;
+ reg [5:6] words[3:2];
+ reg flag;
+ wire bit_value;
+ assign bit_value=flag;
+ initial begin words[3]=2'b01; flag=1; #1 words[3]=2'b10; flag=0; end
+ receiver first({{a,words[3],bit_value}},p);
+ receiver second({{a,{{1{{words[3][5:6]}}}},bit_value}},q);
+endmodule
+module top(p,q,r);
+ output p,q,r; electrical p,q,r;
+ electrical a;
+ analog begin I(a)<+(V(a)-3.0)/1000; V(r)<+V(a); end
+ bank child(a,p,q);
+endmodule
+connectmodule sample(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+ always #0.1 d=V(a)>0.5;
+ analog I(a)<+V(a)/1000;
+endmodule
+connectrules selected; connect sample {mode}; endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!("* mixed physical/digital input concatenation\nX1 p q r top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\n.va \"{}\" top module=top\n.end\n", source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+        for (time, code) in [(0.5e-9, 11.0), (1.5e-9, 12.0)] {
+            for (node, expected) in [("p", code), ("q", code), ("r", loaded)] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{mode} {node} at {time}: {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn packed_outputs_drive_mixed_physical_and_digital_concatenations() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module driver(d);
+ output [4:1] d; logic [4:1] d; reg [4:1] d;
+ initial begin d=4'b1010; #1 d=4'b0101; end
+endmodule
+module top(p,q);
+ output p,q; electrical p,q;
+ wire [6:7] bus;
+ wire flag;
+ driver child({q,bus[6:7],flag});
+ analog V(p)<+(bus[6] ? 4.0 : 0.0)+(bus[7] ? 2.0 : 0.0)+(flag ? 1.0 : 0.0);
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectrules selected; connect drive; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!("* mixed physical/digital output concatenation\nX1 p q top\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" top module=top\n.end\n", source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+    for (time, code, loaded) in [(0.5e-9, 2.0, 1.5), (1.5e-9, 5.0, 0.0)] {
+        for (node, expected) in [("p", code), ("q", loaded)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node} at {time}: {actual}, expected {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mixed_concatenated_inouts_keep_independent_drivers_and_release() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module driver(d);
+ inout [-1:0] d; logic [-1:0] d;
+ reg [1:0] drive;
+ initial begin drive=2'b10; #1 drive=2'bzz; #1 drive=2'b01; #1 drive=2'bzz; end
+ assign d=drive;
+endmodule
+module bank(p,m);
+ inout p; electrical p;
+ output m; electrical m;
+ wire [5:6] bus;
+ reg [1:0] external;
+ integer code;
+ initial begin external=2'bzz; #1 external=2'b1z; #1 external=2'b0z; #1 external=2'bzz; end
+ assign bus=external;
+ driver child({p,bus[5]});
+ always @(bus) begin
+  if(bus===2'b0z) code=1;
+  else if(bus===2'b1z) code=2;
+  else if(bus===2'bxz) code=3;
+  else if(bus===2'bzz) code=4;
+  else code=9;
+ end
+ analog V(m)<+code;
+endmodule
+module top(p,m);
+ inout p; electrical p;
+ output m; electrical m;
+ bank child(p,m);
+endmodule
+connectmodule bidirectional(d,a);
+ inout d; logic d;
+ inout a; electrical a;
+ wire high, low;
+ assign d=1'bz;
+ assign high=(d===1'b1); assign low=(d===1'b0);
+ analog I(a)<+(high*(V(a)-3.0)+low*V(a))/1000;
+endmodule
+connectrules selected; connect bidirectional; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!("* mixed physical/digital inout concatenation\nX1 p m top\nRp p 0 1k\nRm m 0 1k\n.va \"{}\" top module=top\n.end\n", source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 3.8e-9, 50e-12).unwrap();
+    for (time, code, loaded) in [
+        (0.5e-9, 1.0, 1.5),
+        (1.5e-9, 2.0, 0.0),
+        (2.5e-9, 3.0, 0.0),
+        (3.5e-9, 4.0, 0.0),
+    ] {
+        for (node, expected) in [("m", code), ("p", loaded)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node} at {time}: {actual}, expected {expected}"
+            );
+        }
+    }
+}

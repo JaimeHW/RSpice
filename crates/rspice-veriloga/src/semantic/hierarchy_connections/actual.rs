@@ -211,6 +211,10 @@ pub(super) fn endpoint(
 pub(super) fn lvalue(actual: &Expression) -> crate::ast::DigitalLValue {
     use crate::ast::DigitalLValue;
     match actual {
+        Expression::Identifier(identifier) => DigitalLValue::Identifier {
+            name: identifier.name.clone(),
+            span: identifier.span,
+        },
         Expression::ArrayAccess(access) => DigitalLValue::BitSelect {
             name: access.array.clone(),
             index: access.index.clone(),

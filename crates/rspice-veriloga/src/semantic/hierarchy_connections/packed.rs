@@ -1,4 +1,4 @@
-//! Physical vector actuals feeding packed discrete formals.
+//! Physical and discrete lanes sharing one packed port connection.
 use super::*;
 
 pub(super) struct Connections<'a> {
@@ -8,6 +8,7 @@ pub(super) struct Connections<'a> {
     pub prepared: &'a mut Module,
     pub used: &'a mut HashSet<SmolStr>,
     pub signals: &'a mut BTreeMap<SignalIdentity, BoundarySignal>,
+    pub aliases: &'a mut Vec<super::super::digital::ElaboratedDigitalBitAlias>,
 }
 
 impl Connections<'_> {
@@ -24,7 +25,7 @@ impl Connections<'_> {
         if lanes.len() != lower.width as usize {
             return Err(error(
                 format!(
-                    "packed port '{}.{}' requires {} physical lanes, but its connection supplies {}",
+                    "packed port '{}.{}' requires {} lanes, but its connection supplies {}",
                     instance.name,
                     port.name,
                     lower.width,
@@ -38,11 +39,11 @@ impl Connections<'_> {
             .map(|lane| {
                 actual::endpoint(self.source, self.module, lane, self.constants)?
                     .filter(|(endpoint, _)| {
-                        endpoint.net_kind.is_none() && endpoint.width == 1 && !endpoint.unpacked
+                        endpoint.width == 1 && !endpoint.unpacked
                     })
                     .ok_or_else(|| {
                         error(
-                            "a physical bus connection requires scalar physical lanes",
+                            "a mixed bus connection requires scalar physical or four-state digital lanes",
                             lane.span(),
                         )
                     })
@@ -93,11 +94,25 @@ impl Connections<'_> {
                 }));
             }
         }
+        let mut digital_targets = Vec::new();
+        let mut digital_values = Vec::new();
         for (ordinal, ((upper, actual), coordinate)) in endpoints
             .into_iter()
             .zip(bounds.indices_msb_first())
             .enumerate()
         {
+            if upper.net_kind.is_some() {
+                if let Some((target, value)) = self.connect_digital(
+                    &upper,
+                    actual,
+                    (&proxy, coordinate, lower.width - 1 - ordinal as u32),
+                    port.direction,
+                )? {
+                    digital_targets.push(target);
+                    digital_values.push(crate::ast::ArrayLiteralElement::Value(value));
+                }
+                continue;
+            }
             let boundary = self.signals.entry(upper.identity).or_insert_with(|| {
                 let mut signal = Signal::default();
                 signal.push(upper.segment);
@@ -129,6 +144,101 @@ impl Connections<'_> {
                 },
             );
         }
+        if !digital_targets.is_empty() {
+            // One assignment captures the concatenated value and publishes its
+            // affected vector lanes through the existing grouped-write path.
+            self.prepared.continuous_assigns.push(ContinuousAssign {
+                target: DigitalLValue::Concat {
+                    elements: digital_targets,
+                    span,
+                },
+                value: Expression::ArrayLiteral(crate::ast::ArrayLiteralExpr {
+                    elements: digital_values,
+                    assignment_pattern: false,
+                    span,
+                }),
+                delay: None,
+                span,
+            });
+        }
         Ok(())
+    }
+
+    fn connect_digital(
+        &mut self,
+        upper: &Endpoint,
+        actual: Expression,
+        proxy: (&SmolStr, i64, u32),
+        direction: PortDirection,
+    ) -> CompileResult<Option<(DigitalLValue, Expression)>> {
+        let (proxy, coordinate, position) = proxy;
+        let span = actual.span();
+        let declaration = self
+            .module
+            .digital
+            .signals
+            .iter()
+            .find(|signal| signal.name == upper.identity.name)
+            .expect("a digital endpoint has a declaration");
+        if direction != PortDirection::Input {
+            if declaration.class.is_variable() {
+                return Err(error(
+                    "an output or inout mixed bus lane requires a net, not a variable",
+                    span,
+                ));
+            }
+            if self
+                .module
+                .ports
+                .iter()
+                .any(|port| port.name == declaration.name && port.direction == PortDirection::Input)
+            {
+                return Err(error(
+                    "an output or inout mixed bus lane cannot drive a parent input port",
+                    span,
+                ));
+            }
+        }
+        let proxy_bit = Expression::ArrayAccess(crate::ast::ArrayAccessExpr {
+            normalized: false,
+            packed: None,
+            discrete_validity: None,
+            array: proxy.clone(),
+            index: Box::new(super::super::exact_integer_expression(coordinate, span)),
+            span,
+        });
+        match direction {
+            PortDirection::Input | PortDirection::Output => {
+                let (target, value) = if direction == PortDirection::Input {
+                    (actual::lvalue(&proxy_bit), actual)
+                } else {
+                    (actual::lvalue(&actual), proxy_bit)
+                };
+                return Ok(Some((target, value)));
+            }
+            PortDirection::Inout => {
+                let bounds = declaration
+                    .range
+                    .unwrap_or(super::super::VectorBounds::SCALAR);
+                let selected = upper.identity.bits.map_or(bounds.lsb, |(msb, _)| msb);
+                if !upper.identity.elements.is_empty() || !bounds.contains(selected) {
+                    return Err(error(
+                        "an inout mixed bus lane requires an in-range wire bit",
+                        span,
+                    ));
+                }
+                // Aliases use normalized positions, independent of each
+                // side's authored ascending or descending bit coordinates.
+                self.aliases
+                    .push(super::super::digital::ElaboratedDigitalBitAlias {
+                        left: proxy.clone(),
+                        left_bit: position,
+                        right: declaration.name.clone(),
+                        right_bit: bounds.position_of(selected) as u32,
+                        span,
+                    });
+            }
+        }
+        Ok(None)
     }
 }
