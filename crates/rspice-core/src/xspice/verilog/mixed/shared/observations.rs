@@ -273,10 +273,9 @@ impl MixedDigitalCoordinator {
                     publication_tick.max(hdl_tick(time, |at| at.ceil_tick(self.resolution))?);
             }
             cursor.published_tick = publication_tick;
-            let external = match &mut participant {
-                Some(external) => Some(&mut **external as &mut dyn DigitalActiveParticipant),
-                None => None,
-            };
+            let external = participant
+                .as_mut()
+                .map(|external| &mut **external as &mut dyn DigitalActiveParticipant);
             let mut active = InterpolatedParticipant {
                 samples: &bank,
                 external,

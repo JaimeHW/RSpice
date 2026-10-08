@@ -128,7 +128,7 @@ pub(super) fn bind_converter_thresholds(circuit: &mut CircuitData) -> Result<(),
         let mut output_owners = BTreeMap::new();
         instance.for_each_digital_output_driver(|output| {
             if let Some(owner) = owners.get(&output.node_id) {
-                output_owners.insert(output.driver_index, owner.clone());
+                output_owners.insert(output.driver_index, *owner);
             }
         });
         // An internal comparator may feed gates inside a template. Its root
