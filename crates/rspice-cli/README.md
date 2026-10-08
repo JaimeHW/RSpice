@@ -767,6 +767,12 @@ or compared: PAC columns use `<signal>:sb<index>`, distortion phasors use
 `<signal>:sb<input>->sb<output>`. Each response remains separately selectable
 with `--variables`. Ambiguous names that would collide after projection are
 rejected before an output file is replaced.
+PAC conversion also retains `fundamental_frequency`, `frequency(sb<index>)`,
+and each normalized `conversion(sb<input>->sb<output>)` matrix response.
+Sparse matrix entries keep explicit missing samples. Distortion conversion
+retains each `frequency(<product>)` column and the fixed F2 frequency and
+authored F2/F1 ratio for two-tone runs. Expanded payload columns count toward
+both external-data and result-value limits.
 
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
