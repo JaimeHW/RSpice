@@ -9486,6 +9486,7 @@ impl Engine {
                     reject_disabled_xspice_auto_bridge(&circuit, &bridges)?;
                 }
                 report_planned_xspice_auto_bridge_supplies(&circuit, &bridges, &boundary_supplies)?;
+                let first_converter = circuit.xspice_instances.len();
                 add_planned_xspice_auto_bridges(
                     &mut circuit,
                     &bridges,
@@ -9503,6 +9504,7 @@ impl Engine {
                     },
                     abort,
                 )?;
+                mixed_boundaries::bind_converter_thresholds(&mut circuit, first_converter)?;
             }
         }
 

@@ -383,6 +383,13 @@ impl<'a> XspiceDigitalParticipant<'a> {
 }
 
 impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
+    fn analog_threshold_sample(&self, instance: usize, port: &str, element: usize) -> Option<f64> {
+        self.circuit
+            .xspice_instances
+            .get(instance)?
+            .analog_threshold_sample(port, element)
+    }
+
     fn analog_boundaries_ready(&mut self) -> bool {
         if self.analog_boundaries_ready {
             return false;
@@ -390,7 +397,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
         self.analog_boundaries_ready = true;
         let mut released = false;
         for (index, instance) in self.circuit.xspice_instances.iter().enumerate() {
-            if instance.model_name() == "__rspice_mixed_adc" {
+            if instance.has_mixed_input_thresholds() {
                 self.circuit.xspice_dispatch_pending[index] = true;
                 released = true;
             }

@@ -916,6 +916,8 @@ pub struct XspiceInstance {
     event_inputs_dirty: bool,
     /// Has been initialized
     initialized: bool,
+    /// A coupled trial has bound this instance's declared input thresholds.
+    mixed_input_thresholds_bound: bool,
 }
 
 /// A circuit's handle on one instance, shared with rollback snapshots until
@@ -1367,12 +1369,77 @@ impl XspiceInstance {
             // happen. Nothing else establishes that base case.
             event_inputs_dirty: true,
             initialized: false,
+            mixed_input_thresholds_bound: false,
         })
     }
 
     /// Get the model name
     pub fn model_name(&self) -> &str {
         self.model.name()
+    }
+
+    pub(crate) fn analog_input_thresholds(&self) -> CmResult<Vec<super::AnalogInputThreshold>> {
+        let thresholds = self.model.analog_input_thresholds(&self.context)?;
+        for threshold in &thresholds {
+            let port_index = self.port_indices.get(&threshold.port).copied();
+            let port = port_index.and_then(|index| self.ports.get(index));
+            let analog = port_index
+                .and_then(|index| self.connections.get(index))
+                .is_some_and(|connection| {
+                    matches!(
+                        connection,
+                        PortConnection::Analog(_)
+                            | PortConnection::Differential(_, _)
+                            | PortConnection::AnalogVector(_)
+                            | PortConnection::TypedAnalogVector(_)
+                            | PortConnection::CurrentProbe { .. }
+                            | PortConnection::BranchCurrent { .. }
+                            | PortConnection::NamedBranchCurrent { .. }
+                            | PortConnection::NamedCurrentSource { .. }
+                    )
+                });
+            if !analog
+                || !threshold.low.is_finite()
+                || !threshold.high.is_finite()
+                || threshold.low > threshold.high
+                || port.is_none_or(|port| {
+                    port.direction != super::PortDirection::In
+                        || (!port.is_vector && threshold.element != 0)
+                })
+                || threshold.element >= self.context.port_width(&threshold.port)
+            {
+                return Err(CmError::InvalidPortConnection(format!(
+                    "{} declares an invalid input threshold for {}[{}]",
+                    self.name, threshold.port, threshold.element
+                )));
+            }
+        }
+        Ok(thresholds)
+    }
+
+    pub(crate) fn bind_mixed_input_thresholds(&mut self) {
+        self.mixed_input_thresholds_bound = true;
+    }
+
+    pub(crate) fn has_mixed_input_thresholds(&self) -> bool {
+        self.mixed_input_thresholds_bound
+    }
+
+    pub(crate) fn analog_threshold_sample(&self, port: &str, element: usize) -> Option<Value> {
+        let spec = self
+            .port_indices
+            .get(port)
+            .and_then(|index| self.ports.get(*index))?;
+        if spec.is_vector {
+            self.context
+                .input_analog_vector_values(port)?
+                .get(element)
+                .map(|input| input.value)
+        } else {
+            (element == 0)
+                .then(|| self.context.input_analog(port))
+                .flatten()
+        }
     }
 
     /// Whether this instance can be resumed from a transient checkpoint.

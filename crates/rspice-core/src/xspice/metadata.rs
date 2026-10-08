@@ -68,6 +68,10 @@ impl CodeModel for MetadataOverlayModel {
         self.inner.checkpoint_support(ctx)
     }
 
+    fn analog_input_thresholds(&self, ctx: &CmContext) -> CmResult<Vec<super::AnalogInputThreshold>> {
+        self.inner.analog_input_thresholds(ctx)
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         self.inner.init(ctx)
     }

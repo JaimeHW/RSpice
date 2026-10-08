@@ -759,6 +759,17 @@ pub trait CodeModel: Send + Sync {
         )
     }
 
+    /// Effective static input thresholds after instance parameter resolution.
+    /// A mixed circuit uses these observations to localize analog crossings
+    /// before publishing this model's event outputs. An empty list declares
+    /// no static threshold surfaces; it does not infer them from model names.
+    fn analog_input_thresholds(
+        &self,
+        _ctx: &super::CmContext,
+    ) -> CmResult<Vec<super::AnalogInputThreshold>> {
+        Ok(Vec::new())
+    }
+
     /// Initialize instance state
     ///
     /// Called once when the instance is created.

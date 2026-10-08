@@ -175,7 +175,7 @@ pub use analog::{
 
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
 #[cfg(feature = "veriloga")]
-pub(crate) use bridges::{MixedAdcBridge, MixedDacBridge, mixed_adc_decision};
+pub(crate) use bridges::{MixedAdcBridge, MixedDacBridge};
 
 pub use digital_output::{
     XyceDAdd, XyceDGate, XyceDLegacyDff, XyceDLegacyGate, XyceDSequential, XyceDTff,

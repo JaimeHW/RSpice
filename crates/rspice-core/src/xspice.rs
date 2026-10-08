@@ -121,6 +121,9 @@ pub use registry::CodeModelRegistry;
 pub(crate) use resource_transaction::{
     ResourceEntry, ResourceTransaction, ResourceTransactionScope, TransactionalContextResource,
 };
+mod threshold;
+pub use threshold::{AnalogInputThreshold, AnalogThresholdBehavior};
+
 pub use traits::{
     CmError, CmResult, CodeModel, InputDataFileParameter, ParamSpec, ParamType, PortDirection,
     PortSpec, PortType, XspiceCheckpointSupport, XspiceRationalTransfer,

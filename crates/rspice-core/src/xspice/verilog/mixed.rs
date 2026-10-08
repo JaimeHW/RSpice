@@ -695,35 +695,42 @@ struct AdcBridge {
     high: f64,
     /// Detect analog roots only; a shared converter owns the output driver.
     root_only: bool,
+    threshold_behavior: crate::xspice::AnalogThresholdBehavior,
+    converter_input: Option<(usize, String, usize)>,
 }
 
 impl AdcBridge {
-    /// A zero-width threshold belongs to the side the signal is entering. At
-    /// a stationary threshold retain the resolved level (zero at startup).
-    /// This prevents a rising root from being postponed by the low-first test.
+    /// Apply the converter's own decision law, including hysteresis versus an
+    /// unknown band and its rule at an exactly equal threshold.
     fn decision(
         &self,
         voltage: f64,
         previous: Option<f64>,
         held: Option<FourStateBit>,
     ) -> Option<(FourStateBit, f64)> {
-        crate::xspice::models::mixed_adc_decision(
-            voltage,
-            previous,
-            held == Some(FourStateBit::One),
-            self.low,
-            self.high,
-        )
-        .map(|(high, threshold)| {
-            (
-                if high {
-                    FourStateBit::One
-                } else {
-                    FourStateBit::Zero
-                },
-                threshold,
+        use crate::xspice::DigitalState;
+        self.threshold_behavior
+            .decision(
+                voltage,
+                previous,
+                held.map(|bit| match bit {
+                    FourStateBit::Zero => DigitalState::Zero,
+                    FourStateBit::One => DigitalState::One,
+                    _ => DigitalState::Unknown,
+                }),
+                self.low,
+                self.high,
             )
-        })
+            .map(|(state, threshold)| {
+                (
+                    match state {
+                        DigitalState::Zero => FourStateBit::Zero,
+                        DigitalState::One => FourStateBit::One,
+                        _ => FourStateBit::Unknown,
+                    },
+                    threshold,
+                )
+            })
     }
 }
 
@@ -968,6 +975,7 @@ struct TrialVectors {
     transition_times: Vec<Option<f64>>,
     sampled_adc_voltages: Vec<f64>,
     adc_decisions: Vec<Option<FourStateBit>>,
+    converter_samples: Vec<Option<f64>>,
     probe_values: Vec<Option<f64>>,
     adc_moved: Vec<bool>,
     dac_moved: Vec<bool>,
@@ -1956,7 +1964,7 @@ impl MixedSignalHost {
             bridges
                 .adc
                 .iter()
-                .filter(|bridge| nodes.contains(&bridge.positive))
+                .filter(|bridge| !bridge.root_only && nodes.contains(&bridge.positive))
                 .map(|bridge| bridge.positive),
         );
         self.event_nodes.extend(
@@ -1970,7 +1978,7 @@ impl MixedSignalHost {
         self.event_nodes.dedup();
         bridges
             .adc
-            .retain(|bridge| !nodes.contains(&bridge.positive));
+            .retain(|bridge| bridge.root_only || !nodes.contains(&bridge.positive));
         bridges
             .dac
             .retain(|bridge| !nodes.contains(&bridge.positive));
@@ -2326,6 +2334,8 @@ impl MixedSignalHost {
             low: low_threshold,
             high: high_threshold,
             root_only: false,
+            threshold_behavior: crate::xspice::AnalogThresholdBehavior::Hysteresis,
+            converter_input: None,
         });
         self.state.accepted_adc_voltages.push(0.0);
         self.state.accepted_adc_decisions.push(None);
@@ -2334,23 +2344,54 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    /// Register the analog root detector for a shared input converter.
-    pub(crate) fn add_adc_root(
+    /// Bind a root detector to the input actually sampled by a constructed
+    /// converter. The signal identifies its host; this observation never drives
+    /// an event port or occupies a circuit node.
+    pub(crate) fn add_converter_input_root(
         &mut self,
         signal: &str,
         bit: u32,
-        nodes: (usize, usize),
-        low: f64,
-        high: f64,
+        instance: usize,
+        instance_name: &str,
+        threshold: &crate::xspice::AnalogInputThreshold,
     ) -> Result<(), MixedSignalError> {
-        self.add_adc_bridge(signal, bit, nodes, low, high)?;
-        self.state
+        self.add_adc_bridge(signal, bit, (0, 0), threshold.low, threshold.high)?;
+        let bridge = self
+            .state
             .bridges
             .make_mut()
             .adc
             .last_mut()
-            .expect("added detector")
-            .root_only = true;
+            .expect("added detector");
+        bridge.root_only = true;
+        bridge.threshold_behavior = threshold.behavior;
+        bridge.signal_name = format!("{instance_name}.{}[{}]", threshold.port, threshold.element);
+        bridge.converter_input = Some((instance, threshold.port.clone(), threshold.element));
+        Ok(())
+    }
+
+    /// Copy current converter inputs after Active input refresh, before any
+    /// converter publishes. Samples belong to this trial and disappear on rollback.
+    pub(crate) fn sample_converter_inputs(
+        &mut self,
+        mut sample: impl FnMut(usize, &str, usize) -> Option<f64>,
+    ) -> Result<(), MixedSignalError> {
+        let Some(trial) = self.trial.as_mut() else {
+            return Ok(());
+        };
+        for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
+            if let Some((instance, port, element)) = &bridge.converter_input {
+                let value = sample(*instance, port, *element)
+                    .filter(|value| value.is_finite())
+                    .ok_or_else(|| MixedSignalError::InvalidBridge {
+                        detail: format!(
+                            "converter input '{}' has no finite analog sample",
+                            bridge.signal_name
+                        ),
+                    })?;
+                trial.vectors.converter_samples[index] = Some(value);
+            }
+        }
         Ok(())
     }
 
@@ -2689,6 +2730,10 @@ impl MixedSignalHost {
         vectors
             .adc_decisions
             .clone_from(&self.state.accepted_adc_decisions);
+        vectors.converter_samples.clear();
+        vectors
+            .converter_samples
+            .resize(self.state.bridges.adc.len(), None);
         vectors
             .probe_values
             .clone_from(&self.state.accepted_probe_values);
@@ -3248,8 +3293,20 @@ impl MixedSignalHost {
         scratch.endpoint_dated.clear();
         scratch.sampled.clear();
         for (index, bridge) in self.state.bridges.adc.iter().enumerate() {
-            let voltage = node_voltage(circuit_voltages, bridge.positive)
-                - node_voltage(circuit_voltages, bridge.negative);
+            let voltage = if bridge.converter_input.is_some() {
+                self.trial
+                    .as_ref()
+                    .and_then(|trial| trial.vectors.converter_samples[index])
+                    .ok_or_else(|| MixedSignalError::InvalidBridge {
+                        detail: format!(
+                            "converter input '{}' was not sampled in this trial",
+                            bridge.signal_name
+                        ),
+                    })?
+            } else {
+                node_voltage(circuit_voltages, bridge.positive)
+                    - node_voltage(circuit_voltages, bridge.negative)
+            };
             scratch.sampled.push(voltage);
             let held = if bridge.root_only {
                 self.trial

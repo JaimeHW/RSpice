@@ -21,6 +21,16 @@ pub(crate) trait DigitalActiveParticipant {
         false
     }
 
+    /// Read the connected quantity refreshed for a deferred converter.
+    fn analog_threshold_sample(
+        &self,
+        _instance: usize,
+        _port: &str,
+        _element: usize,
+    ) -> Option<f64> {
+        None
+    }
+
     /// All Active prefixes have drained. Evaluate the requested analog
     /// producers at this physical time and publish their common sample bank.
     fn sample_analog(

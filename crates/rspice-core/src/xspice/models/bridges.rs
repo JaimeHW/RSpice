@@ -54,13 +54,37 @@ fn bridge_control_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResu
 }
 
 fn adc_bridge_state(input: Value, _previous: i64, in_low: Value, in_high: Value) -> i64 {
-    if input <= in_low {
-        0
-    } else if input >= in_high {
-        1
-    } else {
-        -1
+    match crate::xspice::AnalogThresholdBehavior::UnknownBand
+        .decision(input, None, None, in_low, in_high)
+        .unwrap()
+        .0
+    {
+        DigitalState::Zero => 0,
+        DigitalState::One => 1,
+        _ => -1,
     }
+}
+
+fn adc_input_thresholds(
+    ctx: &CmContext,
+    behavior: crate::xspice::AnalogThresholdBehavior,
+) -> CmResult<Vec<crate::xspice::AnalogInputThreshold>> {
+    let width = bridge_vector_width(ctx, "ADC threshold declaration")?;
+    let low = finite_bridge_param(ctx, "ADC threshold declaration", "in_low")?;
+    let high = finite_bridge_param(ctx, "ADC threshold declaration", "in_high")?;
+    let high = match behavior {
+        crate::xspice::AnalogThresholdBehavior::UnknownBand => high.max(low),
+        crate::xspice::AnalogThresholdBehavior::Hysteresis => high,
+    };
+    Ok((0..width)
+        .map(|element| crate::xspice::AnalogInputThreshold {
+            port: "in".into(),
+            element,
+            low,
+            high,
+            behavior,
+        })
+        .collect())
 }
 
 fn adc_bridge_delay_for_transition(
@@ -137,6 +161,13 @@ impl CodeModel for AdcBridge {
         })
     }
 
+    fn analog_input_thresholds(
+        &self,
+        ctx: &CmContext,
+    ) -> CmResult<Vec<crate::xspice::AnalogInputThreshold>> {
+        adc_input_thresholds(ctx, crate::xspice::AnalogThresholdBehavior::UnknownBand)
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let width = bridge_vector_width(ctx, "adc_bridge")?;
         ctx.allocate_int_states(width);
@@ -180,33 +211,6 @@ impl CodeModel for AdcBridge {
     }
 }
 
-/// Shared threshold law for mixed-port publication and analog root detection.
-#[cfg(feature = "veriloga")]
-pub(crate) fn mixed_adc_decision(
-    voltage: Value,
-    previous: Option<Value>,
-    held_high: bool,
-    low: Value,
-    high: Value,
-) -> Option<(bool, Value)> {
-    if low == high && voltage == low {
-        let high = if previous.is_some_and(|previous| previous < voltage) {
-            true
-        } else if previous.is_some_and(|previous| previous > voltage) {
-            false
-        } else {
-            held_high
-        };
-        Some((high, low))
-    } else if voltage <= low {
-        Some((false, low))
-    } else if voltage >= high {
-        Some((true, high))
-    } else {
-        None
-    }
-}
-
 /// Mixed logic input publication. Physical root detection belongs to the
 /// coupled analog trial; delays and cancellation use the common event queue.
 #[cfg(feature = "veriloga")]
@@ -233,6 +237,13 @@ impl CodeModel for MixedAdcBridge {
             params
         })
     }
+    fn analog_input_thresholds(
+        &self,
+        ctx: &CmContext,
+    ) -> CmResult<Vec<crate::xspice::AnalogInputThreshold>> {
+        adc_input_thresholds(ctx, crate::xspice::AnalogThresholdBehavior::Hysteresis)
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         AdcBridge.init(ctx)
     }
@@ -246,10 +257,15 @@ impl CodeModel for MixedAdcBridge {
         for index in 0..width {
             let voltage = analog_vector_input_value(ctx, "in", index);
             let previous = ctx.int_state(index);
-            let decision = mixed_adc_decision(
+            let held = match previous {
+                0 => Some(DigitalState::Zero),
+                1 => Some(DigitalState::One),
+                _ => None,
+            };
+            let decision = crate::xspice::AnalogThresholdBehavior::Hysteresis.decision(
                 voltage,
                 (ctx.time > 0.0).then(|| ctx.state_prev(index)),
-                previous == 1,
+                held,
                 low,
                 high,
             );
@@ -259,7 +275,7 @@ impl CodeModel for MixedAdcBridge {
                 } else {
                     previous
                 },
-                |(high, _)| i64::from(high),
+                |(state, _)| i64::from(state == DigitalState::One),
             );
             if commit && state != previous {
                 let value = match state {

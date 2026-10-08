@@ -4207,3 +4207,131 @@ endmodule
     );
     assert_eq!(bad[0].value.state, rspice_core::xspice::DigitalState::Zero);
 }
+
+
+#[test]
+fn template_adc_thresholds_preserve_unknown_bands_and_atomic_vectors() {
+    use rspice_core::xspice::DigitalState::{One, Unknown, Zero};
+    let model = ModelFile::new(
+        "template_thresholds",
+        r#"
+`timescale 1ps/1ps
+module sample_template(d,q,bad);
+ input [1:0] d; wire [1:0] d;
+ output q; wire q;
+ output bad; reg bad;
+ initial bad=0;
+ always @(d) if (d === 2'b01) bad=1;
+ assign q=d[0];
+endmodule
+"#,
+    );
+    let mut deck = Netlist::parse(&format!(
+        "* custom ADC thresholds and simultaneous inputs\n.param vcc=1\nV1 vin 0 pwl(0 0 1n 1 2n 0)\nX1 vin vin q bad sample_template\nRload q 0 1k\nRbad bad 0 1k\n.va \"{}\" sample_template\n.end\n", model.deck_path()
+    )).unwrap();
+    deck.options
+        .auto_bridge_templates
+        .push(rspice_core::netlist::XspiceAutoBridgeTemplate {
+            key: "auto_bridge_d_in".into(),
+            setup_card:
+                ".model custom_adc adc_bridge(in_low=0.2 in_high=0.8 rise_delay=37p fall_delay=61p)"
+                    .into(),
+            device_card: "Aadc%d [ %s ] [ %s ] custom_adc".into(),
+            max_nodes: Some(2),
+        });
+    let result = Engine::default().run_tran(&deck, 2e-9, 370e-12).unwrap();
+    let trace = result.digital_trace_named("q").unwrap();
+    assert_eq!(trace.len(), 5, "{trace:?}");
+    for (point, (state, time)) in trace.iter().zip([
+        (Zero, 0.0),
+        (Unknown, 237e-12),
+        (One, 837e-12),
+        (Unknown, 1261e-12),
+        (Zero, 1861e-12),
+    ]) {
+        assert_eq!(point.value.state, state, "{trace:?}");
+        assert!(
+            (point.time - time).abs() < 2e-20,
+            "expected {time:e}, got {point:?}"
+        );
+    }
+    let bad = result.digital_trace_named("bad").unwrap();
+    assert_eq!(
+        bad.len(),
+        1,
+        "a converter bank must not publish an intermediate word: {bad:?}"
+    );
+    assert_eq!(bad[0].value.state, Zero);
+    let voltage = waveform(&result, "q");
+    for (time, expected) in [
+        (0.5e-9, 0.5 / 1.02),
+        (1.0e-9, 1.0 / 1.02),
+        (1.5e-9, 0.5 / 1.02),
+    ] {
+        let index = result
+            .time
+            .iter()
+            .position(|sample| *sample >= time)
+            .unwrap();
+        assert!(
+            (voltage[index] - expected).abs() < 1e-6,
+            "t={}, V(q)={}",
+            result.time[index],
+            voltage[index]
+        );
+    }
+}
+
+#[test]
+fn template_adc_localizes_internal_differential_controls() {
+    let model = ModelFile::new(
+        "internal_threshold",
+        r#"
+`timescale 1ps/1ps
+module sample_internal(d,q);
+ input d; wire d;
+ output q; wire q;
+ assign q=d;
+endmodule
+"#,
+    );
+    // The divider makes V(sensed)=V(pin)/2. The comparator sees the
+    // reversed differential quantity, so its -0.2 threshold is at V(pin)=0.4.
+    let template = ModelFile::new(
+        "sensing_subckt",
+        r#"
+.subckt sensing a d
+R1 a sensed 1k
+R2 sensed 0 1k
+A1 [%vd[0 sensed]] [d] detector
+.model detector adc_bridge(in_low=-0.2 in_high=-0.2 rise_delay=37p fall_delay=61p)
+.ends sensing
+"#,
+    );
+    let mut deck = Netlist::parse(&format!(
+        "* template internal differential control\n.param vcc=1\nV1 pin 0 pwl(0 0 1n 1 2n 0)\nX1 pin q sample_internal\nRload q 0 1k\n.va \"{}\" sample_internal\n.end\n", model.deck_path()
+    )).unwrap();
+    deck.options
+        .auto_bridge_templates
+        .push(rspice_core::netlist::XspiceAutoBridgeTemplate {
+            key: "auto_bridge_d_in".into(),
+            setup_card: format!(".include \"{}\"", template.deck_path()),
+            device_card: "Xsense%d %s %s sensing".into(),
+            max_nodes: Some(1),
+        });
+    let result = Engine::default().run_tran(&deck, 2e-9, 170e-12).unwrap();
+    let trace = result.digital_trace_named("q").unwrap();
+    assert_eq!(trace.len(), 3, "{trace:?}");
+    assert_eq!(trace[0].value.state, rspice_core::xspice::DigitalState::One);
+    assert_eq!(
+        trace[1].value.state,
+        rspice_core::xspice::DigitalState::Zero
+    );
+    assert_eq!(trace[2].value.state, rspice_core::xspice::DigitalState::One);
+    for (point, expected) in trace.iter().skip(1).zip([461e-12, 1637e-12]) {
+        assert!(
+            (point.time - expected).abs() < 2e-20,
+            "expected {expected:e}, got {point:?}"
+        );
+    }
+}

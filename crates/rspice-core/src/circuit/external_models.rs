@@ -1499,9 +1499,6 @@ impl CircuitData {
             // snapshot, or the copy this whole arrangement defers happens
             // anyway.
             let instance = &instances[index];
-            if wave.defer_mixed_adc && instance.model_name() == "__rspice_mixed_adc" {
-                continue;
-            }
             if dirty_dispatch_applies
                 && dispatch.is_dirty_dispatched(index)
                 && !instance.event_inputs_dirty()
@@ -1557,6 +1554,11 @@ impl CircuitData {
                 return Err(crate::xspice::CmError::EvaluationError(message));
             }
 
+            // Refresh even deferred inputs: root detection samples this exact
+            // connected quantity before the model changes state or emits edges.
+            if wave.defer_mixed_adc && instance.has_mixed_input_thresholds() {
+                continue;
+            }
             if let Err(e) = instance.evaluate_with_resource_transaction(
                 time, timestep, analysis, phase, resources, index,
             ) {
@@ -1572,7 +1574,7 @@ impl CircuitData {
 
             // Sample all mixed input converters before publishing any bit.
             // A vector comparison must never see an intermediate bus word.
-            if instance.model_name() == "__rspice_mixed_adc" {
+            if instance.has_mixed_input_thresholds() {
                 if instance.has_pending_events() {
                     converter_outputs.push(index);
                 }
