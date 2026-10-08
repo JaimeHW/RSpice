@@ -1,11 +1,21 @@
 //! Bind authored port groups to physical lanes in declaration order.
 use super::*;
 
+mod digital_words;
+
+#[derive(Debug, Clone)]
+struct DigitalShape {
+    range: Option<VectorBounds>,
+    dimensions: Vec<VectorBounds>,
+    width: u32,
+    real: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConnectionScope {
     nodes: HashMap<SmolStr, NodeVector>,
     physical: HashSet<SmolStr>,
-    digital: HashMap<SmolStr, (Option<VectorBounds>, bool)>,
+    digital: HashMap<SmolStr, DigitalShape>,
     constants: DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
 }
@@ -19,7 +29,12 @@ impl ConnectionScope {
             .map(|signal| {
                 (
                     signal.name.clone(),
-                    (signal.range, !signal.dimensions.is_empty()),
+                    DigitalShape {
+                        range: signal.range,
+                        dimensions: signal.dimensions.clone(),
+                        width: signal.width,
+                        real: signal.class.is_real(),
+                    },
                 )
             })
             .collect();
@@ -110,67 +125,60 @@ impl ConnectionScope {
             ));
         }
         let span = actual.span();
-        match actual {
-            Expression::Identifier(id) => {
-                if let Some(vector) = self.nodes.get(&id.name) {
-                    output.extend(vector.lanes.iter().map(|name| {
-                        Expression::Identifier(Identifier {
-                            name: name.clone(),
-                            span,
-                        })
-                    }));
-                } else if let Some((Some(range), false)) = self.digital.get(&id.name) {
-                    for index in range.indices_msb_first() {
-                        output.push(self.selected(&id.name, index, span)?);
+        if !self.append_digital(actual, output)? {
+            match actual {
+                Expression::Identifier(id) => {
+                    if let Some(vector) = self.nodes.get(&id.name) {
+                        output.extend(vector.lanes.iter().map(|name| {
+                            Expression::Identifier(Identifier {
+                                name: name.clone(),
+                                span,
+                            })
+                        }));
+                    } else {
+                        output.push(actual.clone());
                     }
-                } else if self
-                    .digital
-                    .get(&id.name)
-                    .is_some_and(|(_, unpacked)| *unpacked)
-                {
-                    return Err(error(
-                        "an unpacked array connection requires explicit element coordinates",
-                        span,
-                    ));
-                } else {
-                    output.push(actual.clone());
                 }
-            }
-            Expression::ArrayAccess(access) if self.nodes.contains_key(&access.array) => {
-                output.push(self.selected(&access.array, self.coordinate(&access.index)?, span)?);
-            }
-            Expression::Digital(DigitalExpr::PartSelect(select)) => {
-                let msb = self.coordinate(&select.msb)?;
-                let lsb = self.coordinate(&select.lsb)?;
-                let range = VectorBounds { msb, lsb };
-                if range.width() > MAX_DIGITAL_VECTOR_WIDTH {
-                    return Err(error(
-                        "physical port connection exceeds the lane limit",
+                Expression::ArrayAccess(access) if self.nodes.contains_key(&access.array) => {
+                    output.push(self.selected(
+                        &access.array,
+                        self.coordinate(&access.index)?,
                         span,
-                    ));
+                    )?);
                 }
-                if let Some(vector) = self.nodes.get(&select.name) {
-                    if msb != lsb && (msb > lsb) != (vector.bounds.msb > vector.bounds.lsb) {
+                Expression::Digital(DigitalExpr::PartSelect(select)) => {
+                    let msb = self.coordinate(&select.msb)?;
+                    let lsb = self.coordinate(&select.lsb)?;
+                    let range = VectorBounds { msb, lsb };
+                    if range.width() > MAX_DIGITAL_VECTOR_WIDTH {
                         return Err(error(
-                            "physical vector part-select direction disagrees with its declaration",
+                            "physical port connection exceeds the lane limit",
                             span,
                         ));
                     }
+                    if let Some(vector) = self.nodes.get(&select.name) {
+                        if msb != lsb && (msb > lsb) != (vector.bounds.msb > vector.bounds.lsb) {
+                            return Err(error(
+                                "physical vector part-select direction disagrees with its declaration",
+                                span,
+                            ));
+                        }
+                    }
+                    for index in range.indices_msb_first() {
+                        output.push(self.selected(&select.name, index, span)?);
+                    }
                 }
-                for index in range.indices_msb_first() {
-                    output.push(self.selected(&select.name, index, span)?);
+                Expression::ArrayLiteral(concat) => {
+                    if concat.assignment_pattern {
+                        return Err(error(
+                            "a physical port connection requires a concatenation, not an assignment pattern",
+                            span,
+                        ));
+                    }
+                    self.elements(&concat.elements, output, depth + 1)?;
                 }
+                _ => output.push(actual.clone()),
             }
-            Expression::ArrayLiteral(concat) => {
-                if concat.assignment_pattern {
-                    return Err(error(
-                        "a physical port connection requires a concatenation, not an assignment pattern",
-                        span,
-                    ));
-                }
-                self.elements(&concat.elements, output, depth + 1)?;
-            }
-            _ => output.push(actual.clone()),
         }
         if output.len() > MAX_DIGITAL_VECTOR_WIDTH as usize {
             return Err(error(

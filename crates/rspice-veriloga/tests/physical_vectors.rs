@@ -77,6 +77,26 @@ endmodule
 fn physical_vector_errors_do_not_silently_collapse_topology() {
     let cases = [
         (
+            "module leaf(a); input [1:0] a; electrical [1:0] a; endmodule module top; reg [1:0] words[3:2][-1:0]; leaf l(words[3]); endmodule",
+            "requires 2 unpacked coordinates",
+        ),
+        (
+            "module leaf(a); input [1:0] a; electrical [1:0] a; endmodule module top; reg [1:0] words[3:2][-1:0]; leaf l(words); endmodule",
+            "requires 2 unpacked coordinates",
+        ),
+        (
+            "module leaf(a); input [1:0] a; electrical [1:0] a; endmodule module top; reg [-2:-1] words[3:2]; leaf l(words[3][-1:-2]); endmodule",
+            "packed part-select direction disagrees",
+        ),
+        (
+            "module leaf(a); input [1:0] a; electrical [1:0] a; endmodule module top; reg [-2:-1] word; leaf l(word[-1:-2]); endmodule",
+            "packed part-select direction disagrees",
+        ),
+        (
+            "module leaf(a); input [1:0] a; electrical [1:0] a; endmodule module top; reg [1:0] words[3:2]; integer pick; leaf l(words[pick]); endmodule",
+            "integer at elaboration",
+        ),
+        (
             "module leaf(a); inout a; wire a; endmodule module top; wire [3:2] bus; leaf l(bus[1]); endmodule",
             "requires an in-range wire selection",
         ),
@@ -332,4 +352,82 @@ connectrules selected; connect sample {mode}; endconnectrules
             replayed.canonical_ir.digital.content_identity
         );
     }
+}
+
+#[test]
+fn packed_array_words_specialize_and_replay_physical_connections() {
+    let source = r#"
+module load(a,p);
+ input [4:3] a; electrical [4:3] a;
+ output p; electrical p;
+ analog V(p)<+V(a[4])+2.0*V(a[3]);
+endmodule
+module top(p,q);
+ parameter integer ROW=3, COLUMN=0;
+ parameter real R=1000;
+ output p,q; electrical p,q;
+ reg [-2:-1] words[3:2][-1:0];
+ initial begin words[3][0]=2'b10; words[2][-1]=2'b01; end
+ load first(words[$param_given(ROW) ? ROW : 3][COLUMN],p);
+ load second(words[ROW][COLUMN][-2:-1],q);
+ analog I(p)<+V(p)/R;
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectrules selected; connect drive; endconnectrules
+"#;
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    for (name, expected) in [("ROW", Some(3.0)), ("COLUMN", Some(0.0)), ("R", None)] {
+        assert_eq!(
+            compiled
+                .canonical_ir
+                .hir
+                .parameters
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .elaboration_value,
+            expected,
+            "{name}",
+        );
+    }
+    assert_eq!(
+        compiled
+            .canonical_ir
+            .hir
+            .parameters
+            .iter()
+            .find(|p| p.name == "ROW")
+            .unwrap()
+            .elaboration_given,
+        Some(false)
+    );
+    let assigned = compiler
+        .specialize_mixed_runtime(
+            &compiled.canonical_ir,
+            &[("ROW", 2.0), ("COLUMN", -1.0)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert_ne!(
+        compiled.canonical_ir.digital.content_identity,
+        assigned.canonical_ir.digital.content_identity
+    );
+    let prepared = compiler
+        .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+        .unwrap();
+    let replayed = prepared.compile_runtime(None).unwrap();
+    assert_eq!(
+        assigned.canonical_ir.digital.content_identity,
+        replayed.canonical_ir.digital.content_identity
+    );
+    // An absent digital element remains an X-valued read, not a nonexistent physical node.
+    let out_of_range = source.replace("ROW=3", "ROW=7");
+    compiler
+        .compile_runtime(&out_of_range, Some("top"))
+        .unwrap();
 }

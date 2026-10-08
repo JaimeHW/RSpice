@@ -1269,3 +1269,70 @@ connectrules selected; connect bidirectional {mode}; endconnectrules
         }
     }
 }
+
+#[test]
+fn packed_array_words_drive_physical_vectors_with_shared_lane_loading() {
+    for (mode, high) in [("merged", 0.5), ("split", 0.75)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module amplifier(a,p);
+ input [4:3] a; electrical [4:3] a;
+ output [7:8] p; electrical [7:8] p;
+ analog begin
+  I(a[4])<+V(a[4])/1000; I(a[3])<+V(a[3])/1000;
+  I(p[7])<+(V(p[7])-V(a[4]))/1000;
+  I(p[8])<+(V(p[8])-V(a[3]))/1000;
+ end
+endmodule
+module bank(p,q,r,s,t,u,v,w);
+ parameter integer ROW=2, COLUMN=-1;
+ output p,q,r,s,t,u,v,w; electrical p,q,r,s,t,u,v,w;
+ reg [-2:-1] words[3:2][-1:0];
+ reg [5:6] singles[-3:-2];
+ initial begin
+  words[3][0]=2'b10; words[2][-1]=2'b01; singles[-3]=2'b01;
+  #1 words[3][0]=2'b01; words[2][-1]=2'b10; singles[-3]=2'b10;
+ end
+ amplifier first(words[ROW][COLUMN],{{p,q}});
+ amplifier second(words[ROW][COLUMN][-2:-1],{{r,s}});
+ amplifier third(words[2][-1],{{t,u}});
+ amplifier fourth(singles[-3],{{v,w}});
+endmodule
+module top(p,q,r,s,t,u,v,w);
+ output p,q,r,s,t,u,v,w; electrical p,q,r,s,t,u,v,w;
+ bank #(.ROW(3),.COLUMN(0)) child(p,q,r,s,t,u,v,w);
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectrules selected; connect drive {mode}; endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!("* packed array words into physical buses\nX1 p q r s t u v w top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\nRt t 0 1k\nRu u 0 1k\nRv v 0 1k\nRw w 0 1k\n.va \"{}\" top module=top\n.end\n", source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+        for (time, first, second, other_first, other_second) in [
+            (0.5e-9, high, 0.0, 0.0, 0.75),
+            (1.5e-9, 0.0, high, 0.75, 0.0),
+        ] {
+            for (node, expected) in [
+                ("p", first),
+                ("q", second),
+                ("r", first),
+                ("s", second),
+                ("t", other_first),
+                ("u", other_second),
+                ("v", other_first),
+                ("w", other_second),
+            ] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{mode} {node} at {time}: {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+}

@@ -495,6 +495,22 @@ pub(super) fn prepare(
         module.default_transition,
         module.default_discipline.clone(),
     )?;
+    // Converter insertion replaces authored selectors with concrete lanes. Keep
+    // the dependencies already recorded before that rewrite, or a scalar
+    // parameter update could leave the selected topology unchanged.
+    let original_parameters: HashMap<_, _> = module
+        .parameters
+        .iter()
+        .map(|parameter| (&parameter.name, parameter))
+        .collect();
+    for parameter in &mut analyzed.parameters {
+        if let Some(original) = original_parameters.get(&parameter.name) {
+            parameter.elaboration_value =
+                parameter.elaboration_value.or(original.elaboration_value);
+            parameter.elaboration_given =
+                parameter.elaboration_given.or(original.elaboration_given);
+        }
+    }
     analyzed.hierarchical_connections = true;
     analyzed.digital.bit_aliases = aliases;
     Ok(Some(Arc::new(SpecializedModule {

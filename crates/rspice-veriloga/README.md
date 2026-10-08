@@ -159,8 +159,8 @@ can drive whole physical input vectors through per-lane authored converters;
 selected physical lanes can connect to scalar digital formals. Scalar potential
 and flow accesses resolve constant coordinates, including analog `genvar` loops
 and custom nature accesses. Shape and selector dependencies require source
-specialization when their parameters change. Artifact schema 127 and core cache
-record 109 invalidate models compiled before these checks.
+specialization when their parameters change. Artifact schema 128 and core cache
+record 110 invalidate models compiled before these checks.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.
@@ -168,8 +168,12 @@ External event-net identities survive aliases that join multiple circuit nets.
 Whole physical vectors, physical part-selects and physical concatenations can also
 connect to packed digital input, output and inout ports. Packed proxy nets preserve
 port order and use per-lane aliases to share merged converter drivers across child
-ports, including nested instances and variable outputs. Variable-array word
-connections, vector-valued/named branch forms, unpacked net/port arrays, complete
+ports, including nested instances and variable outputs. Packed words and word
+part-selects from variable arrays can drive physical input vectors; each unpacked
+coordinate is resolved in the parent parameter scope before packed lanes expand.
+Declared bit order and per-element identities retain merged/split loading, while
+real-valued elements keep their scalar connection semantics. Vector-valued/named
+branch forms, unpacked net/port arrays, complete
 inherited discipline resolution, and library/view selection remain open.
 Escaped node names retain distinct lane identities; escaped ground and comma-bearing
 names still require structured branch labels, and the full escaped-identifier
