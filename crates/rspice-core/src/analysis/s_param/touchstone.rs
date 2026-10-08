@@ -174,13 +174,53 @@ pub fn touchstone_with_version(
                 .to_string(),
         );
     }
-    for row in input.parameters {
-        for series in row {
+    if input.frequencies.is_empty() {
+        return Err("Touchstone export requires at least one frequency point".to_string());
+    }
+    let divisor = unit.divisor();
+    let mut previous = None;
+    for (index, frequency) in input.frequencies.iter().enumerate() {
+        if !frequency.is_finite() || *frequency < 0.0 {
+            return Err(format!(
+                "Touchstone frequency point {index} must be finite and non-negative"
+            ));
+        }
+        let scaled = frequency / divisor;
+        if (*frequency > 0.0 && scaled == 0.0)
+            || previous.is_some_and(|previous| previous >= scaled)
+        {
+            return Err(format!(
+                "Touchstone frequencies must remain distinct and increasing in {}; point {index} cannot be represented without losing its coordinate",
+                unit.keyword()
+            ));
+        }
+        previous = Some(scaled);
+    }
+    for (index, reference) in input.reference_impedances.iter().enumerate() {
+        if !reference.is_finite() || *reference <= 0.0 {
+            return Err(format!(
+                "Touchstone port {} reference impedance must be finite and positive",
+                index + 1
+            ));
+        }
+    }
+    for (row_index, row) in input.parameters.iter().enumerate() {
+        for (column_index, series) in row.iter().enumerate() {
             if series.len() != input.frequencies.len() {
                 return Err(format!(
                     "malformed S-parameter result: a series has {} points for {} frequencies",
                     series.len(),
                     input.frequencies.len()
+                ));
+            }
+            if let Some(index) = series
+                .iter()
+                .position(|value| !value.re.is_finite() || !value.im.is_finite())
+            {
+                return Err(format!(
+                    "Touchstone S({},{}) sample {index} must be finite",
+                    row_index + 1,
+                    column_index + 1
                 ));
             }
         }
@@ -236,17 +276,25 @@ pub fn touchstone_with_version(
         let _ = writeln!(output, "\n[Matrix Format] Full\n[Network Data]");
     }
 
-    let divisor = unit.divisor();
     for (frequency_index, frequency) in input.frequencies.iter().enumerate() {
         let pair = |row: usize, column: usize| {
-            format.encode(input.parameters[row][column][frequency_index])
+            let encoded = format.encode(input.parameters[row][column][frequency_index]);
+            if !encoded.0.is_finite() || !encoded.1.is_finite() {
+                return Err(format!(
+                    "Touchstone S({},{}) sample {frequency_index} cannot be represented in {} format",
+                    row + 1,
+                    column + 1,
+                    format.keyword()
+                ));
+            }
+            Ok(encoded)
         };
         let frequency_field = format_float(frequency / divisor);
 
         match ports {
             // 1-port: freq S11
             1 => {
-                let (first, second) = pair(0, 0);
+                let (first, second) = pair(0, 0)?;
                 let _ = writeln!(
                     output,
                     "{frequency_field}\t{}\t{}",
@@ -258,7 +306,7 @@ pub fn touchstone_with_version(
             2 => {
                 let mut line = frequency_field;
                 for (row, column) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                    let (first, second) = pair(row, column);
+                    let (first, second) = pair(row, column)?;
                     let _ = write!(line, "\t{}\t{}", format_float(first), format_float(second));
                 }
                 let _ = writeln!(output, "{line}");
@@ -279,7 +327,7 @@ pub fn touchstone_with_version(
                             line = String::new();
                             pairs_on_line = 0;
                         }
-                        let (first, second) = pair(row, column);
+                        let (first, second) = pair(row, column)?;
                         let _ = write!(
                             line,
                             "{}{}\t{}",

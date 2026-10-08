@@ -1134,9 +1134,6 @@ fn write_touchstone_nport(
     s: &[Vec<Vec<rspice_core::Complex64>>],
     version: s_param::TouchstoneVersion,
 ) -> Result<(), CliError> {
-    if ports.is_empty() {
-        return Ok(());
-    }
     let reference_impedances: Vec<f64> = ports.iter().map(|port| port.z0).collect();
     let comments = vec![format!("{}-port S-parameters", ports.len())];
     let document = s_param::touchstone_with_version(
