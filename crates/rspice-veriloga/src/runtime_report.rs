@@ -228,6 +228,7 @@ impl RuntimeCompileReport {
                 .any(|(model, hir)| {
                     model.elaboration_value.map(f64::to_bits)
                         != hir.elaboration_value.map(f64::to_bits)
+                        || model.elaboration_given != hir.elaboration_given
                         || model
                             .elaboration_value
                             .is_some_and(|value| !value.is_finite())
@@ -366,6 +367,7 @@ impl RuntimeAbiSummary {
                     value_type: parameter.value_type,
                     default: parameter.default,
                     elaboration_value: parameter.elaboration_value,
+                    elaboration_given: parameter.elaboration_given,
                     aliases: parameter.aliases.clone(),
                 })
                 .collect(),
@@ -421,6 +423,8 @@ pub struct RuntimeAbiParameter {
     pub default: Option<f64>,
     #[serde(default)]
     pub elaboration_value: Option<f64>,
+    #[serde(default)]
+    pub elaboration_given: Option<bool>,
     pub aliases: Vec<SmolStr>,
 }
 

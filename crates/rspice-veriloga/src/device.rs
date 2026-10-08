@@ -997,6 +997,10 @@ struct NativeEntryDependencies<'a> {
 /// Invalid instance parameter value reported before it can enter a model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParameterValueError {
+    RequiresGivenElaboration {
+        parameter: SmolStr,
+        given: bool,
+    },
     RequiresElaboration {
         parameter: SmolStr,
         value: f64,
@@ -1027,6 +1031,10 @@ pub enum ParameterValueError {
 impl std::fmt::Display for ParameterValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::RequiresGivenElaboration { parameter, given } => write!(
+                f,
+                "parameter '{parameter}' supplied state {given} changes an elaboration dependency; specialize the source before updating the compiled device"
+            ),
             Self::RequiresElaboration { parameter, value } => write!(
                 f,
                 "parameter '{parameter}' value {value} changes a packed elaboration dependency; specialize the source before updating the compiled device"
@@ -3139,7 +3147,11 @@ impl VerilogADevice {
         for (i, param) in model.parameters.iter().enumerate() {
             context.set_param(i, param.default);
         }
-        context.param_given = vec![0; model.parameters.len()];
+        context.param_given = model
+            .parameters
+            .iter()
+            .map(|parameter| u8::from(parameter.elaboration_given.unwrap_or(false)))
+            .collect();
         context.variables.resize(model.num_variables, 0.0);
         context.configure_event_state_variables(&model.event_state_variables)?;
         context.configure_evaluation_inputs(
@@ -3966,7 +3978,7 @@ impl VerilogADevice {
         } else {
             value
         };
-        self.validate_parameter_value(i, value, false)?;
+        self.validate_parameter_value(i, value, true, false)?;
         self.context.set_param(i, value);
         self.context.mark_param_given(i);
         for filter in &mut self.context.zi_filters {
@@ -3979,6 +3991,7 @@ impl VerilogADevice {
         &mut self,
         parameter_index: usize,
         value: f64,
+        given: bool,
         resolve_dynamic_constraints: bool,
     ) -> Result<(), ParameterValueError> {
         let parameter = self
@@ -3994,6 +4007,15 @@ impl VerilogADevice {
             return Err(ParameterValueError::NonFinite {
                 parameter: parameter.name.clone(),
                 value,
+            });
+        }
+        if parameter
+            .elaboration_given
+            .is_some_and(|expected| expected != given)
+        {
+            return Err(ParameterValueError::RequiresGivenElaboration {
+                parameter: parameter.name.clone(),
+                given,
             });
         }
         if parameter
@@ -4266,7 +4288,7 @@ impl VerilogADevice {
                 vm.execute(&default_program)?
             };
 
-            self.validate_parameter_value(i, value, false)
+            self.validate_parameter_value(i, value, false, false)
                 .map_err(|error| VmError::ParameterValue(error.to_string()))?;
             self.context.set_param(i, value);
         }
@@ -4277,7 +4299,7 @@ impl VerilogADevice {
         // a cross-parameter violation.
         for i in 0..self.model.parameters.len() {
             let value = self.context.parameters[i];
-            self.validate_parameter_value(i, value, true)
+            self.validate_parameter_value(i, value, self.context.is_param_given(i), true)
                 .map_err(|error| VmError::ParameterValue(error.to_string()))?;
         }
 
@@ -11123,7 +11145,11 @@ endmodule
         for (i, param) in model.parameters.iter().enumerate() {
             context.set_param(i, param.default);
         }
-        context.param_given = vec![0; model.parameters.len()];
+        context.param_given = model
+            .parameters
+            .iter()
+            .map(|parameter| u8::from(parameter.elaboration_given.unwrap_or(false)))
+            .collect();
         context.variables.resize(model.num_variables, 0.0);
         context
             .configure_event_state_variables(&model.event_state_variables)

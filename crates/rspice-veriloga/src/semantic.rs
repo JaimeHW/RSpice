@@ -392,6 +392,7 @@ mod packed_parameters;
 mod parameter_assignments;
 mod parameter_constants;
 mod parameter_defaults;
+pub(crate) mod parameter_given;
 mod retained_inputs;
 mod switch_branches;
 mod symbols;
@@ -1611,6 +1612,7 @@ impl SemanticAnalyzer {
                 } else {
                     parameter_assignments.fixed_value(param)?
                 },
+                elaboration_given: parameter_assignments.fixed_given(param),
                 packed_bounds: parameter_assignments.bounds(&param.name),
                 dimensions: param
                     .dimensions

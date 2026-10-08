@@ -149,12 +149,9 @@ impl CanonicalIrArtifact {
                 )));
             }
         }
-        if self
-            .hir
-            .parameters
-            .iter()
-            .any(|parameter| parameter.elaboration_value.is_some())
-            && self.parameter_source.is_none()
+        if self.hir.parameters.iter().any(|parameter| {
+            parameter.elaboration_value.is_some() || parameter.elaboration_given.is_some()
+        }) && self.parameter_source.is_none()
             && self.connections.source().is_none()
         {
             diagnostics.push(artifact_error(
@@ -567,6 +564,7 @@ fn validate_hir_mir_parameters(
             || hir_parameter.default != mir_parameter.default
             || hir_parameter.elaboration_value.map(f64::to_bits)
                 != mir_parameter.elaboration_value.map(f64::to_bits)
+            || hir_parameter.elaboration_given != mir_parameter.elaboration_given
             || hir_parameter
                 .elaboration_value
                 .is_some_and(|value| !value.is_finite())
@@ -923,6 +921,9 @@ fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
     if let Some(value) = parameter.elaboration_value {
         writeln!(out, "elaboration_value={}", f64_label(value)).expect("write to string");
     }
+    if let Some(given) = parameter.elaboration_given {
+        writeln!(out, "elaboration_given={given}").expect("write to string");
+    }
 }
 
 fn write_hir_variable(out: &mut String, variable: &HirVariable) {
@@ -1101,6 +1102,9 @@ fn write_mir_parameter(out: &mut String, parameter: &MirParameterSlot) {
     .expect("write to string");
     if let Some(value) = parameter.elaboration_value {
         writeln!(out, "elaboration_value={}", f64_label(value)).expect("write to string");
+    }
+    if let Some(given) = parameter.elaboration_given {
+        writeln!(out, "elaboration_given={given}").expect("write to string");
     }
 }
 

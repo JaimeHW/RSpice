@@ -2,15 +2,7 @@
 use super::*;
 
 pub(super) fn constants(source: &Module) -> DigitalConstants {
-    DigitalConstants {
-        definitions: source
-            .parameters
-            .iter()
-            .chain(&source.localparams)
-            .cloned()
-            .collect(),
-        ..Default::default()
-    }
+    DigitalConstants::from_module(source)
 }
 
 pub(super) fn close_override(

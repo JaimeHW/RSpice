@@ -5,6 +5,7 @@ use crate::canonical_ir::digital_lower::ParameterAssignment;
 pub(super) struct ParameterAssignments {
     values: HashMap<SmolStr, ParameterAssignment>,
     fixed_inputs: HashSet<SmolStr>,
+    fixed_given: HashSet<SmolStr>,
 }
 
 impl ParameterAssignments {
@@ -28,10 +29,12 @@ impl ParameterAssignments {
             return Ok(Self {
                 values: HashMap::new(),
                 fixed_inputs: HashSet::new(),
+                fixed_given: HashSet::new(),
             });
         }
         let assignments = crate::canonical_ir::digital_lower::parameter_assignments(
             &declarations,
+            &parameter_given::GivenParameters::new(module),
             module.time_scale,
         )
         .map_err(|errors| {
@@ -69,6 +72,8 @@ impl ParameterAssignments {
             .map(|value| value.name.clone())
             .collect();
         let mut fixed_inputs = HashSet::new();
+        let mut fixed_given = HashSet::new();
+        let given = parameter_given::GivenParameters::new(module);
         while let Some(name) = pending.pop() {
             if !fixed_inputs.insert(name.clone()) {
                 continue;
@@ -76,8 +81,15 @@ impl ParameterAssignments {
             let Some(parameter) = by_name.get(&name) else {
                 continue;
             };
-            let mut read = |expression: &Expression| {
-                flow_probes::visit_expression(expression, &mut |expression| {
+            let mut read = |expression: &Expression| -> CompileResult<()> {
+                let (folded, dependencies) = given.fold(expression).map_err(|message| {
+                    SemanticError::new(
+                        SemanticErrorKind::InvalidExpression(message),
+                        expression.span(),
+                    )
+                })?;
+                fixed_given.extend(dependencies);
+                flow_probes::visit_expression(&folded, &mut |expression| {
                     let name = match expression {
                         Expression::Identifier(value) => Some(&value.name),
                         Expression::ArrayAccess(value) => Some(&value.array),
@@ -88,19 +100,27 @@ impl ParameterAssignments {
                         pending.push(name.clone());
                     }
                 });
+                Ok(())
             };
             if let Some(default) = &parameter.default {
-                read(default);
+                read(default)?;
             }
             if let Some(range) = &parameter.packed_range {
-                read(&range.msb);
-                read(&range.lsb);
+                read(&range.msb)?;
+                read(&range.lsb)?;
             }
         }
         Ok(Self {
             values,
             fixed_inputs,
+            fixed_given,
         })
+    }
+
+    pub(super) fn fixed_given(&self, parameter: &ParameterDecl) -> Option<bool> {
+        self.fixed_given
+            .contains(&parameter.name)
+            .then_some(parameter.is_given)
     }
 
     pub(super) fn prepare(&self, parameter: &mut ParameterDecl) {

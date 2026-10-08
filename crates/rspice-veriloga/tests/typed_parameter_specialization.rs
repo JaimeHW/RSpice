@@ -86,6 +86,111 @@ endmodule
     }
 }
 
+#[test]
+fn constant_given_dependencies_require_source_even_for_same_value_assignments() {
+    let compiler = compiler();
+    for declaration in ["parameter [7:0]", "parameter integer"] {
+        let source = format!(
+            r#"
+module constant_given(p,q);
+ inout p; electrical p;
+ parameter real INPUT=5.0;
+ aliasparam USER=INPUT;
+ {declaration} CODE=$param_given(USER)?9:3;
+ parameter real LEVEL=CODE+0.0;
+ output reg [7:0] q=CODE;
+ analog I(p)<+LEVEL;
+endmodule
+"#
+        );
+        let original = compiler.compile_runtime(&source, None).unwrap();
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "omitted",
+            original.model.clone(),
+            &original.canonical_ir,
+            &[1, 2],
+        )
+        .unwrap();
+        assert_eq!(device.try_evaluate().unwrap()[0], 3.0);
+        let error = device
+            .try_set_parameter("USER", 5.0)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("specialize the source"), "{error}");
+        assert_eq!(device.try_evaluate().unwrap()[0], 3.0);
+        let supplied = compiler
+            .specialize_mixed_runtime_typed(
+                &original.canonical_ir,
+                &[("USER", ScalarParameterValue::Real(5.0))],
+                &NoPipelineControl,
+            )
+            .unwrap();
+        let encoded = serde_json::to_vec(&supplied).unwrap();
+        let supplied: rspice_veriloga::RuntimeCompileReport =
+            serde_json::from_slice(&encoded).unwrap();
+        supplied.validate_integrity().unwrap();
+        assert_eq!(supplied.abi.parameters[0].elaboration_given, Some(true));
+        assert_eq!(original.abi.parameters[0].elaboration_given, Some(false));
+        let mut damaged = supplied.clone();
+        damaged.canonical_ir.hir.parameters[0].elaboration_given = Some(false);
+        assert!(damaged.validate_integrity().is_err());
+        assert_eq!(
+            initial(&supplied, "q"),
+            DigitalInitialValue::FourState(bits("8'h09"))
+        );
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "supplied",
+            supplied.model.clone(),
+            &supplied.canonical_ir,
+            &[1, 2],
+        )
+        .unwrap();
+        assert_eq!(device.try_evaluate().unwrap()[0], 9.0);
+        // Only presence controls CODE: numeric changes remain legal after INPUT
+        // is supplied, without inventing a value dependency.
+        assert!(device.try_set_parameter("INPUT", 8.0).unwrap());
+        device.try_resolve_parameter_defaults().unwrap();
+        assert_eq!(device.try_evaluate().unwrap()[0], 9.0);
+    }
+}
+
+#[test]
+fn constant_given_generate_changes_execution_without_freezing_numeric_values() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module generated_given(p);
+ inout p; electrical p;
+ parameter real INPUT=5.0;
+ aliasparam USER=INPUT;
+ integer q=0;
+ generate if($param_given(USER)) begin:enabled
+  initial q=1;
+ end endgenerate
+ analog I(p)<+INPUT+q;
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    assert!(!original.canonical_ir.digital.has_executable_content());
+    assert_eq!(original.model.parameters[0].elaboration_given, Some(false));
+    let supplied = compiler
+        .specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[("USER", ScalarParameterValue::Real(5.0))],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert!(supplied.canonical_ir.digital.has_executable_content());
+    assert_eq!(supplied.model.parameters[0].elaboration_given, Some(true));
+    assert_eq!(supplied.model.parameters[0].elaboration_value, None);
+    assert!(compiler.compile_runtime(
+        "module illegal(q); parameter integer P=1; output reg q; initial q=$param_given(P); endmodule", None,
+    ).is_err(), "procedural digital queries remain outside the supported contexts");
+}
+
 fn bits(raw: &str) -> FourStateValue {
     FourStateValue::from_literal(&rspice_veriloga::four_state::decode(raw).unwrap())
 }
@@ -1505,4 +1610,77 @@ endmodule
         )
         .unwrap();
     assert_eq!(current(&populated, &mut make_device(&populated)), 1.0);
+}
+
+#[test]
+fn constant_given_hierarchy_protects_parent_presence_used_by_child_width() {
+    let compiler = compiler();
+    let current = |report: &rspice_veriloga::RuntimeCompileReport,
+                   device: &mut rspice_veriloga::device::VerilogADevice| {
+        report
+            .model
+            .stamp_programs
+            .iter()
+            .zip(device.try_evaluate().unwrap())
+            .flat_map(|(program, value)| {
+                program
+                    .stamp_locations
+                    .iter()
+                    .filter(|stamp| {
+                        matches!(stamp.row, rspice_veriloga::codegen::StampIndex::Terminal(0))
+                    })
+                    .map(move |stamp| -stamp.sign * value)
+            })
+            .sum::<f64>()
+    };
+    let original = compiler
+        .compile_runtime(
+            r#"
+module given_width_child(p);
+ inout p; electrical p;
+ parameter integer W=4;
+ parameter [W-1:0] CODE=16'h1234;
+ parameter real LEVEL=CODE+0.0;
+ analog I(p)<+LEVEL;
+endmodule
+module given_width_parent(p);
+ inout p; electrical p;
+ parameter real INPUT=5;
+ aliasparam USER=INPUT;
+ given_width_child #(.W($param_given(USER)?8:4)) child(p);
+endmodule
+"#,
+            Some("given_width_parent"),
+        )
+        .unwrap();
+    assert_eq!(original.model.parameters[0].elaboration_given, Some(false));
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "omitted",
+        original.model.clone(),
+        &original.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(current(&original, &mut device), 4.0);
+    assert!(device.try_set_parameter("USER", 5.0).is_err());
+    let supplied = compiler
+        .specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[("USER", ScalarParameterValue::Real(5.0))],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assert_eq!(supplied.model.parameters[0].elaboration_given, Some(true));
+    assert_eq!(supplied.model.parameters[0].elaboration_value, None);
+    let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+        "supplied",
+        supplied.model.clone(),
+        &supplied.canonical_ir,
+        &[1],
+    )
+    .unwrap();
+    assert_eq!(current(&supplied, &mut device), 52.0);
+    assert!(device.try_set_parameter("INPUT", 8.0).unwrap());
+    device.try_resolve_parameter_defaults().unwrap();
+    assert_eq!(current(&supplied, &mut device), 52.0);
 }

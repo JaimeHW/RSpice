@@ -337,15 +337,7 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
 }
 
 fn module_constants(module: &Module) -> crate::semantic::DigitalConstants {
-    crate::semantic::DigitalConstants {
-        definitions: module
-            .parameters
-            .iter()
-            .chain(&module.localparams)
-            .cloned()
-            .collect(),
-        ..Default::default()
-    }
+    crate::semantic::DigitalConstants::from_module(module)
 }
 
 /// Move every item of `expanded` onto `module`.
@@ -630,7 +622,7 @@ impl Unroller<'_> {
     /// The constant value of an elaboration-time expression.
     fn value(&self, expression: &Expression, context: &str) -> Result<i64, ParseError> {
         let environment = self.constant_environment(expression.span());
-        crate::canonical_ir::digital_lower::selector_constant(
+        crate::canonical_ir::digital_lower::elaboration_constant(
             expression,
             &environment,
             self.time_scale,

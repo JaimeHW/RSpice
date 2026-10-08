@@ -177,15 +177,7 @@ struct Scope {
 impl Scope {
     fn for_root(root: &AnalyzedModule, source: &Module) -> Self {
         let mut scope = Self {
-            constants: super::DigitalConstants {
-                definitions: source
-                    .parameters
-                    .iter()
-                    .chain(&source.localparams)
-                    .cloned()
-                    .collect(),
-                ..Default::default()
-            },
+            constants: super::DigitalConstants::from_module(source),
             time_scale: source.time_scale,
             ..Self::default()
         };
@@ -1122,15 +1114,7 @@ fn internal_error(message: String) -> CompileError {
 /// Instance constraints see the final typed values, including dependent defaults.
 fn validate_parameter_ranges(source: &Module, path: &str) -> CompileResult<()> {
     use crate::ast::{BinaryExpr, BinaryOp};
-    let constants = super::DigitalConstants {
-        definitions: source
-            .parameters
-            .iter()
-            .chain(&source.localparams)
-            .cloned()
-            .collect(),
-        ..Default::default()
-    };
+    let constants = super::DigitalConstants::from_module(source);
     for parameter in &source.parameters {
         let Some(range) = &parameter.range else {
             continue;

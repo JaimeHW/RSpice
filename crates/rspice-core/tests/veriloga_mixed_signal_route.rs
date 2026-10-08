@@ -3369,3 +3369,54 @@ endmodule
         }
     }
 }
+
+#[test]
+fn constant_given_specializes_packed_values_before_selecting_instance_routes() {
+    let model = ModelFile::new(
+        "constant_given",
+        r#"
+`timescale 1ns/1ps
+module constant_given(p);
+ inout p; electrical p;
+ parameter real INPUT=5.0;
+ aliasparam USER=INPUT;
+ parameter [($param_given(USER)?7:3):0] CODE=$param_given(USER)?9:3;
+ parameter real LEVEL=CODE+0.0;
+ integer q=0;
+ generate if($param_given(USER)) begin:enabled
+  initial #1 q=1;
+ end endgenerate
+ analog I(p)<+(V(p)-LEVEL-q)/1000;
+endmodule
+"#,
+    );
+    for assignment in ["", " INPUT=5", " user=5"] {
+        let deck = format!(
+            "* supplied-state instance specialization\nX1 p constant_given{assignment}\nR1 p 0 1k\n.va \"{}\" constant_given module=constant_given\n.end\n",
+            model.deck_path(),
+        );
+        let supplied = !assignment.is_empty();
+        let result = run(&deck, 2e-9, 0.1e-9);
+        for (&time, &value) in result.time.iter().zip(waveform(&result, "p").iter()) {
+            let expected = if !supplied {
+                1.5
+            } else if time < 0.9e-9 {
+                4.5
+            } else if time > 1.1e-9 {
+                5.0
+            } else {
+                continue;
+            };
+            assert!(
+                (value - expected).abs() < 1e-8,
+                "{assignment:?} at {time}: {value}"
+            );
+        }
+        if !supplied {
+            assert!(result.digital_traces.is_empty());
+            Engine::default()
+                .run_ac(&Netlist::parse(&deck).unwrap(), &[1e3])
+                .expect("the omitted parameter leaves an analog-only instance");
+        }
+    }
+}

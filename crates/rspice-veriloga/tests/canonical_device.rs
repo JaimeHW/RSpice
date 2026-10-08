@@ -7573,6 +7573,15 @@ endmodule
 const RUNTIME_STUB: &str = concat!(
     r#"
 #![allow(dead_code, non_snake_case, unused_parens, unused_variables, unused_mut, unused_imports)]
+fn checked_discrete_value(validity:f64, value:f64) -> Result<f64, &'static str> {
+    if validity == 0.0 {
+        Err("analog read of discrete input has an X, Z, or non-finite value")
+    } else if validity != 1.0 || !value.is_finite() {
+        Err("analog discrete input has an invalid value/validity encoding")
+    } else {
+        Ok(value)
+    }
+}
 
 pub type Value = f64;
 pub const DEFAULT_GMIN: f64 = 1e-12;
@@ -8701,4 +8710,78 @@ instance.visit_equation_abstols(7, 1e-12, |_,tol|assert_eq!(tol,2e-9));
 "#,
     )
     .unwrap_or_else(|report| panic!("{report}"));
+}
+
+#[test]
+fn generated_constant_given_guards_assignments_transactionally() {
+    let compiler = VerilogACompiler::default();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module constant_given(p);
+ inout p; electrical p;
+ parameter real INPUT=5.0;
+ aliasparam USER=INPUT;
+ parameter [7:0] CODE=$param_given(USER)?9:3;
+ parameter real LEVEL=CODE+0.0;
+ analog I(p)<+LEVEL;
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    for supplied in [false, true] {
+        let report = if supplied {
+            compiler
+                .specialize_mixed_runtime_typed(
+                    &original.canonical_ir,
+                    &[("USER", rspice_veriloga::ScalarParameterValue::Real(5.0))],
+                    &rspice_veriloga::NoPipelineControl,
+                )
+                .unwrap()
+        } else {
+            original.clone()
+        };
+        let generated = canonical::generate_device(&report.canonical_ir, &options()).unwrap();
+        let file = |name| {
+            generated
+                .files
+                .iter()
+                .find(|file| file.relative_path == name)
+                .unwrap()
+                .contents
+                .as_str()
+        };
+        let body = format!(
+            r#"
+let mut instance=device::state::Instance::new(&[0]);
+instance.finalize_parameters().unwrap();
+instance.validate_parameters().unwrap();
+assert_eq!(instance.param_given[0],{supplied});
+assert_eq!(instance.params.values[1],{level}.0);
+let before=instance.params.clone();
+let given=instance.param_given.clone();
+let changed=instance.set_parameter("USER",5.0);
+if {supplied} {{
+    changed.unwrap();
+    instance.set_parameter("INPUT",8.0).unwrap();
+    instance.finalize_parameters().unwrap();
+    assert_eq!(instance.params.values[1],9.0);
+}} else {{
+    assert!(changed.unwrap_err().contains("specialize the source"));
+    assert_eq!(instance.params.values,before.values);
+    assert_eq!(instance.param_given,given);
+}}
+"#,
+            level = if supplied { 9 } else { 3 }
+        );
+        run_generated_main(
+            &format!("constant given {supplied}"),
+            file("state.rs"),
+            file("stamp.rs"),
+            file("noise.rs"),
+            &body,
+        )
+        .unwrap();
+    }
 }

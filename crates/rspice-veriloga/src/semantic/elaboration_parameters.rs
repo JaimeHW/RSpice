@@ -1,6 +1,7 @@
 //! Parameter provenance across flattened analog instance scopes.
 use super::*;
 use crate::ast::{DigitalExpr, GenerateConstruct};
+use crate::semantic::parameter_given;
 
 pub(super) type SpecializationKey = (SmolStr, Vec<(usize, String)>);
 
@@ -138,6 +139,8 @@ pub(super) struct ParameterHierarchy {
     edges: HashMap<SmolStr, HashSet<SmolStr>>,
     values: HashMap<SmolStr, f64>,
     roots: HashSet<SmolStr>,
+    given_edges: HashMap<SmolStr, HashSet<SmolStr>>,
+    given_roots: HashSet<SmolStr>,
 }
 
 pub(super) fn is_packed(parameter: &AnalyzedParameter) -> bool {
@@ -168,6 +171,7 @@ impl ParameterHierarchy {
             .collect();
         let assignments = crate::canonical_ir::digital_lower::parameter_assignments(
             &declarations,
+            &parameter_given::GivenParameters::new(source),
             source.time_scale,
         )
         .map_err(|errors| {
@@ -211,7 +215,7 @@ impl ParameterHierarchy {
                     parent_dependencies
                         .as_ref()
                         .expect("parent scope")
-                        .dependencies([expression]),
+                        .dependencies([expression])?,
                     parent_scope,
                 )
             } else {
@@ -219,11 +223,20 @@ impl ParameterHierarchy {
                 if let Some(range) = &declaration.packed_range {
                     expressions.extend([&range.msb, &range.lsb]);
                 }
-                (local_dependencies.dependencies(expressions), scope)
+                (local_dependencies.dependencies(expressions)?, scope)
             };
             self.edges.insert(
                 name.clone(),
                 dependencies
+                    .values
+                    .into_iter()
+                    .filter_map(|name| dependency_scope.parameters.get(&name).cloned())
+                    .collect(),
+            );
+            self.given_edges.insert(
+                name.clone(),
+                dependencies
+                    .given
                     .into_iter()
                     .filter_map(|name| dependency_scope.parameters.get(&name).cloned())
                     .collect(),
@@ -238,18 +251,33 @@ impl ParameterHierarchy {
                 name: local.name.clone(),
                 span: source.span,
             });
+            let dependencies = local_dependencies.dependencies([&expression])?;
             self.roots.extend(
-                local_dependencies
-                    .dependencies([&expression])
+                dependencies
+                    .values
+                    .into_iter()
+                    .filter_map(|name| scope.parameters.get(&name).cloned()),
+            );
+            self.given_roots.extend(
+                dependencies
+                    .given
                     .into_iter()
                     .filter_map(|name| scope.parameters.get(&name).cloned()),
             );
         }
         // Re-expanded generate structure is also immutable in a compiled device.
         if let Some(template) = &source.generate_template {
+            let dependencies =
+                local_dependencies.dependencies(generate_controls(&template.module.generates))?;
             self.roots.extend(
-                local_dependencies
-                    .dependencies(generate_controls(&template.module.generates))
+                dependencies
+                    .values
+                    .into_iter()
+                    .filter_map(|name| scope.parameters.get(&name).cloned()),
+            );
+            self.given_roots.extend(
+                dependencies
+                    .given
                     .into_iter()
                     .filter_map(|name| scope.parameters.get(&name).cloned()),
             );
@@ -260,14 +288,22 @@ impl ParameterHierarchy {
     pub(super) fn protect(&self, module: &mut AnalyzedModule, span: Span) -> CompileResult<()> {
         let mut pending: Vec<_> = self.roots.iter().cloned().collect();
         let mut required = HashSet::new();
+        let mut given_required = self.given_roots.clone();
         while let Some(name) = pending.pop() {
-            if required.insert(name.clone())
-                && let Some(reads) = self.edges.get(&name)
-            {
+            if !required.insert(name.clone()) {
+                continue;
+            }
+            if let Some(reads) = self.edges.get(&name) {
                 pending.extend(reads.iter().cloned());
+            }
+            if let Some(reads) = self.given_edges.get(&name) {
+                given_required.extend(reads.iter().cloned());
             }
         }
         for parameter in &mut module.parameters {
+            if parameter.is_public && given_required.contains(&parameter.name) {
+                parameter.elaboration_given = Some(parameter.is_given);
+            }
             if !required.contains(&parameter.name) || is_packed(parameter) {
                 continue;
             }
@@ -284,7 +320,14 @@ impl ParameterHierarchy {
 
 /// Public inputs read by an expression, expanding local dependencies only.
 /// Public-to-public edges remain separate so instance overrides replace them.
+#[derive(Default)]
+struct ParameterDependencies {
+    values: HashSet<SmolStr>,
+    given: HashSet<SmolStr>,
+}
+
 struct SourceParameters<'a> {
+    given: parameter_given::GivenParameters,
     public: HashSet<&'a SmolStr>,
     locals: HashMap<&'a SmolStr, &'a crate::ast::ParameterDecl>,
 }
@@ -292,6 +335,7 @@ struct SourceParameters<'a> {
 impl<'a> SourceParameters<'a> {
     fn new(source: &'a Module) -> Self {
         Self {
+            given: parameter_given::GivenParameters::new(source),
             public: source.parameters.iter().map(|value| &value.name).collect(),
             locals: source
                 .localparams
@@ -304,12 +348,19 @@ impl<'a> SourceParameters<'a> {
     fn dependencies<'b>(
         &'b self,
         expressions: impl IntoIterator<Item = &'b Expression>,
-    ) -> HashSet<SmolStr> {
+    ) -> CompileResult<ParameterDependencies> {
         let mut pending: Vec<_> = expressions.into_iter().collect();
         let mut visited = HashSet::new();
-        let mut result = HashSet::new();
+        let mut result = ParameterDependencies::default();
         while let Some(expression) = pending.pop() {
-            crate::semantic::flow_probes::visit_expression(expression, &mut |expression| {
+            let (folded, given) = self.given.fold(expression).map_err(|message| {
+                SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(message),
+                    expression.span(),
+                )
+            })?;
+            result.given.extend(given);
+            crate::semantic::flow_probes::visit_expression(&folded, &mut |expression| {
                 let name = match expression {
                     Expression::Identifier(value) => Some(&value.name),
                     Expression::ArrayAccess(value) => Some(&value.array),
@@ -318,7 +369,7 @@ impl<'a> SourceParameters<'a> {
                 };
                 let Some(name) = name else { return };
                 if self.public.contains(name) {
-                    result.insert(name.clone());
+                    result.values.insert(name.clone());
                 } else if visited.insert(name.clone())
                     && let Some(local) = self.locals.get(name)
                 {
@@ -329,7 +380,7 @@ impl<'a> SourceParameters<'a> {
                 }
             });
         }
-        result
+        Ok(result)
     }
 }
 

@@ -264,6 +264,8 @@ pub struct HirParameter {
     pub default: Option<f64>,
     #[serde(default, with = "crate::json_float::option")]
     pub elaboration_value: Option<f64>,
+    #[serde(default)]
+    pub elaboration_given: Option<bool>,
     pub default_expr: Option<HirExprRef>,
     pub range: Option<HirParamRange>,
     pub aliases: Vec<SmolStr>,
@@ -891,6 +893,7 @@ impl HirModel {
                     dimensions,
                     default: parameter.default,
                     elaboration_value: parameter.elaboration_value,
+                    elaboration_given: parameter.elaboration_given,
                     default_expr,
                     range,
                     aliases: Vec::new(),

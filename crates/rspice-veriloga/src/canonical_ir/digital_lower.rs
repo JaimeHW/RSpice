@@ -134,6 +134,16 @@ pub(crate) fn selector_constant(
     constants::scalar(expression, &resolved, time_scale)
 }
 
+/// Constant evaluation for source elaboration, not procedural digital code.
+pub(crate) fn elaboration_constant(
+    expression: &Expression,
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+) -> Option<crate::numeric_literal::NumericLiteralValue> {
+    let (expression, _) = source.given.fold(expression).ok()?;
+    selector_constant(&expression, source, time_scale)
+}
+
 pub(crate) fn parameter_override_literal(
     declaration: &crate::ast::ParameterDecl,
     source: &DigitalConstants,
@@ -142,13 +152,21 @@ pub(crate) fn parameter_override_literal(
     constants::override_literal(declaration, source, time_scale)
 }
 
+pub(crate) fn given_dependencies<'a>(
+    digital: &AnalyzedDigital,
+    shape_expressions: impl IntoIterator<Item = &'a Expression>,
+) -> Result<std::collections::HashSet<SmolStr>, String> {
+    constants::given_dependencies(digital, shape_expressions)
+}
+
 pub(crate) use constants::ParameterAssignment;
 
 pub(crate) fn parameter_assignments(
     declarations: &[&crate::ast::ParameterDecl],
+    given: &crate::semantic::parameter_given::GivenParameters,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<Vec<ParameterAssignment>, Vec<DigitalLoweringDiagnostic>> {
-    constants::parameter_assignments(declarations, time_scale)
+    constants::parameter_assignments(declarations, given, time_scale)
 }
 
 /// Whether a diagnostic is the author's to fix or the compiler's.

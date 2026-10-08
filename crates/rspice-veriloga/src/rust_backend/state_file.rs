@@ -511,6 +511,16 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.new_initializers);
     out.push_str("        };\n");
     out.push_str(&extensions.after_new);
+    for (index, parameter) in artifact.mir.parameters.iter().enumerate() {
+        if parameter.elaboration_given == Some(true) {
+            writeln!(out, "        instance.param_given[{index}] = true;")
+                .expect("write initial supplied state");
+            if parameter.scope == crate::semantic::ParameterScope::Model {
+                writeln!(out, "        instance.model_param_given[{index}] = true;")
+                    .expect("write initial model supplied state");
+            }
+        }
+    }
     out.push_str("        instance.apply_parameters(assignments)?;\n");
     out.push_str("        Ok(instance)\n");
     out.push_str("    }\n\n");
@@ -965,6 +975,11 @@ pub(super) fn generate_state_file_with_extensions(
         "        Self::finalize_parameter_vector(params.as_mut(), param_given.as_ref(), false)?;\n",
     );
     out.push_str("        Self::validate_parameter_vector(params.as_ref())?;\n");
+    for (index, parameter) in artifact.mir.parameters.iter().enumerate() {
+        if let Some(given) = parameter.elaboration_given {
+            writeln!(out, "        if param_given[{index}] != {given} {{ return Err(format!(\"parameter '{{}}' supplied state changes an elaboration dependency; specialize the source before updating the compiled device\", PARAMETER_DISPLAY_NAMES[{index}])); }}").expect("write staged supplied guard");
+        }
+    }
     if has_equation_abstols {
         out.push_str(
             "        let equation_abstols = Self::resolve_equation_abstols(params.as_ref())?;\n",
@@ -1016,6 +1031,11 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    pub fn validate_parameters(&self) -> Result<(), String> {\n");
     if has_equation_abstols {
         out.push_str("        Self::resolve_equation_abstols(self.params.as_ref())?;\n");
+    }
+    for (index, parameter) in artifact.mir.parameters.iter().enumerate() {
+        if let Some(given) = parameter.elaboration_given {
+            writeln!(out, "        if self.param_given[{index}] != {given} {{ return Err(format!(\"parameter '{{}}' supplied state changes an elaboration dependency; specialize the source before updating the compiled device\", PARAMETER_DISPLAY_NAMES[{index}])); }}").expect("write supplied guard");
+        }
     }
     out.push_str("        Self::validate_parameter_vector(self.params.as_ref())\n");
     out.push_str("    }\n\n");

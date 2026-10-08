@@ -91,6 +91,7 @@ pub struct AnalyzedPackedParameter {
 /// each question in the domain that asked it.
 #[derive(Debug, Clone, Default)]
 pub struct DigitalConstants {
+    pub(crate) given: super::parameter_given::GivenParameters,
     /// Scalar declarations retained for typed digital constant evaluation.
     pub(crate) definitions: Vec<ParameterDecl>,
     /// Parameters whose default is a whole finite number, as that number.
@@ -115,6 +116,19 @@ pub struct DigitalConstants {
 }
 
 impl DigitalConstants {
+    pub(crate) fn from_module(module: &Module) -> Self {
+        Self {
+            definitions: module
+                .parameters
+                .iter()
+                .chain(&module.localparams)
+                .cloned()
+                .collect(),
+            given: super::parameter_given::GivenParameters::new(module),
+            ..Default::default()
+        }
+    }
+
     /// The integer a name denotes, if it denotes one.
     pub fn integer(&self, name: &str) -> Option<i64> {
         self.integers.get(name).copied()
@@ -675,6 +689,48 @@ impl SemanticAnalyzer {
             instances: Vec::new(),
             constants: self.digital_selector_constants.clone(),
         };
+        let ranges = module
+            .digital_nets
+            .iter()
+            .filter_map(|value| value.range.as_ref())
+            .chain(
+                module
+                    .digital_variables
+                    .iter()
+                    .filter_map(|value| value.range.as_ref()),
+            )
+            .chain(
+                module
+                    .port_declarations
+                    .iter()
+                    .filter_map(|value| value.range.as_ref()),
+            );
+        let dimensions = module
+            .digital_nets
+            .iter()
+            .flat_map(|value| &value.items)
+            .chain(
+                module
+                    .digital_variables
+                    .iter()
+                    .flat_map(|value| &value.items),
+            )
+            .flat_map(|item| &item.dimensions);
+        let shapes = ranges
+            .flat_map(|range| [&range.msb, &range.lsb])
+            .chain(dimensions.flat_map(|range| [&range.start, &range.end]));
+        match crate::canonical_ir::digital_lower::given_dependencies(&analyzed.digital, shapes) {
+            Ok(given) => {
+                for parameter in &mut analyzed.parameters {
+                    if parameter.is_public && given.contains(&parameter.name) {
+                        parameter.elaboration_given = Some(parameter.is_given);
+                    }
+                }
+            }
+            Err(message) => {
+                self.record_error_at(SemanticErrorKind::InvalidExpression(message), module.span)
+            }
+        }
         self.discrete_projection
             .register_signals(&analyzed.digital.signals);
         self.bind_discrete_analog_reads(module, analyzed);
@@ -1240,7 +1296,10 @@ impl SemanticAnalyzer {
     /// environments accumulate, and a table that inherited a neighbour's
     /// parameter would fold a name this module never wrote.
     fn digital_constants(&self, module: &Module) -> DigitalConstants {
-        let mut constants = DigitalConstants::default();
+        let mut constants = DigitalConstants {
+            given: super::parameter_given::GivenParameters::new(module),
+            ..Default::default()
+        };
         let declarations = module.parameters.iter().chain(&module.localparams);
         for parameter in declarations {
             // Retain the authored expression even when the analog scalar

@@ -639,6 +639,10 @@ impl<'a> HierarchyElaborator<'a> {
             let mut parameter = parameter.clone();
             parameter.name = scope.parameters[&parameter.name].clone();
             parameter.is_public = false;
+            // Child supplied state is immutable in the hierarchy. Its query
+            // has already been resolved in that scope; this hidden numeric slot
+            // may still have a symbolic default driven by parent values.
+            parameter.elaboration_given = None;
             parameter.default_expr = if parameters::is_packed(&parameter) {
                 parameter.default_expr.clone()
             } else if parameter.elaboration_value.is_some() && overrides.contains_key(&index) {

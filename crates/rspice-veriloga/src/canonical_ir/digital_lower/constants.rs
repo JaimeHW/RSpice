@@ -141,13 +141,11 @@ pub(super) fn math_call(name: &str) -> Option<MathCall> {
     })
 }
 
-pub(super) fn resolve<'a>(
-    source: &DigitalConstants,
-    time_scale: crate::time_scale::ModuleTimeScale,
+fn required_parameters<'a>(
     processes: &[AnalyzedDigitalProcess],
     assignments: &[crate::semantic::AnalyzedContinuousAssign],
     initializers: impl IntoIterator<Item = &'a Expression>,
-) -> Result<ResolvedConstants, Vec<DigitalLoweringDiagnostic>> {
+) -> BTreeSet<String> {
     let mut required = BTreeSet::new();
     for initializer in initializers {
         collect_expression_reads(initializer, &mut required);
@@ -162,6 +160,66 @@ pub(super) fn resolve<'a>(
             collect_expression_reads(delay, &mut required);
         }
     }
+    required
+}
+
+/// Presence reads in parameter constants actually consumed by a digital body.
+/// Use the same lexical read collector as constant lowering; a process-local
+/// shadow must not freeze an unrelated public analog parameter.
+pub(super) fn given_dependencies<'a>(
+    digital: &AnalyzedDigital,
+    shape_expressions: impl IntoIterator<Item = &'a Expression>,
+) -> Result<HashSet<SmolStr>, String> {
+    let mut required = required_parameters(
+        &digital.processes,
+        &digital.continuous_assigns,
+        digital
+            .signals
+            .iter()
+            .filter_map(|signal| signal.initializer.as_ref()),
+    );
+    for expression in shape_expressions {
+        collect_expression_reads(expression, &mut required);
+    }
+    let definitions: HashMap<_, _> = digital
+        .constants
+        .definitions
+        .iter()
+        .map(|value| (value.name.as_str(), value))
+        .collect();
+    let mut pending: Vec<_> = required.into_iter().collect();
+    let mut visited = HashSet::new();
+    let mut given = HashSet::new();
+    while let Some(name) = pending.pop() {
+        if !visited.insert(name.clone()) {
+            continue;
+        }
+        let Some(declaration) = definitions.get(name.as_str()) else {
+            continue;
+        };
+        let mut expressions: Vec<_> = declaration.default.iter().collect();
+        if let Some(range) = &declaration.packed_range {
+            expressions.extend([&range.msb, &range.lsb]);
+        }
+        for expression in expressions {
+            let (folded, dependencies) = digital.constants.given.fold(expression)?;
+            given.extend(dependencies);
+            let mut reads = BTreeSet::new();
+            collect_expression_reads(&folded, &mut reads);
+            pending.extend(reads);
+        }
+    }
+    Ok(given)
+}
+
+pub(super) fn resolve<'a>(
+    source: &DigitalConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    processes: &[AnalyzedDigitalProcess],
+    assignments: &[crate::semantic::AnalyzedContinuousAssign],
+    initializers: impl IntoIterator<Item = &'a Expression>,
+) -> Result<ResolvedConstants, Vec<DigitalLoweringDiagnostic>> {
+    let required = required_parameters(processes, assignments, initializers);
     let definitions: HashMap<_, _> = source
         .definitions
         .iter()
@@ -188,8 +246,14 @@ pub(super) fn resolve<'a>(
         if finished.contains(&name) {
             continue;
         }
+        let declaration = source.given.declaration(declaration).map_err(|message| {
+            vec![DigitalLoweringDiagnostic::refusal(
+                message,
+                declaration.span.into(),
+            )]
+        })?;
         if ready {
-            resolve_one(&name, declaration, &mut resolved, time_scale)?;
+            resolve_one(&name, &declaration, &mut resolved, time_scale)?;
             active.remove(&name);
             finished.insert(name);
             continue;
@@ -223,12 +287,26 @@ pub(crate) struct ParameterAssignment {
 
 pub(super) fn parameter_assignments(
     declarations: &[&ParameterDecl],
+    given: &crate::semantic::parameter_given::GivenParameters,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<Vec<ParameterAssignment>, Vec<DigitalLoweringDiagnostic>> {
+    let prepared = declarations
+        .iter()
+        .map(|declaration| {
+            given.declaration(declaration).map_err(|message| {
+                vec![DigitalLoweringDiagnostic::refusal(
+                    message,
+                    declaration.span.into(),
+                )]
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let declarations: Vec<_> = prepared.iter().map(|value| value.as_ref()).collect();
     let mut resolved = ResolvedConstants::default();
     let mut unavailable = HashSet::new();
     let source = DigitalConstants {
         definitions: declarations.iter().map(|value| (*value).clone()).collect(),
+        given: given.clone(),
         ..Default::default()
     };
     let mut result = Vec::with_capacity(declarations.len());
@@ -706,6 +784,8 @@ pub(super) fn override_literal(
     source: &DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<Expression, String> {
+    let declaration = source.given.declaration(declaration)?;
+    let declaration = declaration.as_ref();
     let expression = declaration
         .default
         .as_ref()

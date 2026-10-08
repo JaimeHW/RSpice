@@ -43,7 +43,8 @@ fn public_parameter<'a>(entry: &'a CachedVerilogAModel, name: &str) -> Option<Pu
         let parameter = &entry.model.parameters[index];
         return Some(PublicParameter {
             name: parameter.name.as_str(),
-            needs_source: parameter.elaboration_value.is_some(),
+            needs_source: parameter.elaboration_value.is_some()
+                || parameter.elaboration_given.is_some(),
         });
     }
     let parameters = &entry
