@@ -2673,8 +2673,8 @@ pub struct PxfPayload {
     /// because a `ResultSignal` must have exactly `point_count` samples and a
     /// difference-derived delay has one fewer, on a grid of its own.
     pub group_delay: Vec<PxfGroupDelaySample>,
-    /// Transfer at the lowest swept offset, when that offset is low enough for
-    /// the curve to have a DC end. Absent means the sweep never went there.
+    /// Transfer at zero offset, only when actually evaluated there. Positive
+    /// offset samples do not establish DC gain, however small their frequency.
     pub dc_gain: Option<ComplexSample>,
 }
 

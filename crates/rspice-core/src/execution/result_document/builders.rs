@@ -3362,13 +3362,9 @@ impl AnalysisResultDocument {
         } else {
             ScalarUnavailability::EmptyDomain
         };
-        // A 0 dB crossing is looked for between adjacent points, so a
-        // single-point sweep holds no interval to cross in.
-        let unity_absent = if point_count >= 2 {
-            ScalarUnavailability::NoCrossover
-        } else {
-            ScalarUnavailability::EmptyDomain
-        };
+        // An exact unity sample is an observation even on a singleton sweep.
+        // Absence means neither a unity sample nor a finite bracket was found.
+        let unity_absent = ScalarUnavailability::NoCrossover;
         let scalars = vec![
             derived_metric_scalar(
                 LOCATION,

@@ -328,12 +328,7 @@ impl StabilityMargins {
 }
 
 fn loop_gain_db(gain: Complex64) -> Value {
-    let scale = gain.re.abs().max(gain.im.abs());
-    if scale == 0.0 {
-        f64::NEG_INFINITY
-    } else {
-        20.0 * (scale.log10() + (gain.re / scale).hypot(gain.im / scale).log10())
-    }
+    20.0 * crate::numerics::complex_log10_magnitude(gain)
 }
 
 //=============================================================================

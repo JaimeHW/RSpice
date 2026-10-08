@@ -23,6 +23,20 @@ pub mod rustfft_qualification;
 
 use crate::Value;
 
+/// Logarithmic complex magnitude without overflowing or rounding a subnormal
+/// norm before taking its logarithm. Zero has negative-infinite log magnitude.
+pub(crate) fn complex_log10_magnitude(value: crate::Complex64) -> Value {
+    if !value.re.is_finite() || !value.im.is_finite() {
+        return Value::NAN;
+    }
+    let scale = value.re.abs().max(value.im.abs());
+    if scale == 0.0 {
+        Value::NEG_INFINITY
+    } else {
+        scale.log10() + (value.re / scale).hypot(value.im / scale).log10()
+    }
+}
+
 /// Scalar operations for the small, stack-allocated device reductions.
 pub(crate) trait DenseScalar:
     Copy + Default + std::ops::SubAssign + std::ops::Mul<Output = Self>

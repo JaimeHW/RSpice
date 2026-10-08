@@ -408,10 +408,5 @@ impl GainAnalysis {
 }
 
 fn log_magnitude(value: Complex64) -> Value {
-    let scale = value.re.abs().max(value.im.abs());
-    if scale == 0.0 {
-        Value::NEG_INFINITY
-    } else {
-        scale.log10() + (value.re / scale).hypot(value.im / scale).log10()
-    }
+    crate::numerics::complex_log10_magnitude(value)
 }

@@ -1010,9 +1010,9 @@ fn pxf_measurement() -> (crate::netlist::PxfCard, crate::analysis::pxf::PxfResul
         source: crate::netlist::PeriodicSourceSelector::Preceding,
     };
     let mut result = PxfResult::new(1.0e6, card.input_sideband, card.output_sideband);
-    // A magnitude that falls past unity and past -3 dB, so all four curve
+    // A passband with both edges below unity and -3 dB, so all four curve
     // metrics resolve to a number rather than to a determination.
-    for (index, magnitude) in [4.0, 1.0, 0.25].into_iter().enumerate() {
+    for (index, magnitude) in [0.25, 4.0, 0.25].into_iter().enumerate() {
         let freq_in = 1.0e3 + 1.0e3 * index as f64;
         result.add_point(TransferPoint {
             freq_in,

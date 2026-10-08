@@ -296,7 +296,7 @@ impl TransferPoint {
 
     /// Get magnitude in dB
     pub fn magnitude_db(&self) -> Value {
-        20.0 * self.transfer.norm().log10()
+        20.0 * crate::numerics::complex_log10_magnitude(self.transfer)
     }
 
     /// Get phase in radians
@@ -356,7 +356,7 @@ pub struct PxfResult {
     /// Node names
     pub node_names: Vec<String>,
 
-    /// DC gain (transfer at f = 0)
+    /// Transfer at zero offset, when actually evaluated there.
     pub dc_gain: Option<Complex64>,
 
     /// Peak gain and frequency
@@ -426,82 +426,123 @@ impl PxfResult {
             .collect()
     }
 
-    /// Find peak gain
+    /// Find the highest finite decibel gain on a valid offset sweep.
     pub fn find_peak_gain(&self) -> Option<(Value, Value)> {
+        if !self.valid_metric_sweep() {
+            return None;
+        }
+        self.peak_index()
+            .map(|(index, gain)| (self.points[index].freq_in, gain))
+    }
+
+    fn peak_index(&self) -> Option<(usize, Value)> {
         self.points
             .iter()
-            .map(|p| (p.freq_in, p.magnitude_db()))
+            .enumerate()
+            .map(|(index, point)| (index, point.magnitude_db()))
             .filter(|(_, db)| db.is_finite())
             .max_by(|a, b| a.1.total_cmp(&b.1))
     }
 
-    /// Find 3dB bandwidth below peak
-    pub fn find_bandwidth_3db(&self) -> Option<Value> {
-        let (peak_freq, peak_db) = self.find_peak_gain()?;
-        let threshold = peak_db - 3.0;
-
-        // Find lower -3dB point
-        let lower = self
+    fn valid_metric_sweep(&self) -> bool {
+        self.points.iter().all(|point| {
+            point.freq_in.is_finite()
+                && point.freq_in >= 0.0
+                && point.transfer.re.is_finite()
+                && point.transfer.im.is_finite()
+        }) && self
             .points
-            .iter()
-            .filter(|p| p.freq_in < peak_freq)
-            .filter(|p| p.magnitude_db() <= threshold)
-            .map(|p| p.freq_in)
-            .next_back();
-
-        // Find upper -3dB point
-        let upper = self
-            .points
-            .iter()
-            .filter(|p| p.freq_in > peak_freq)
-            .filter(|p| p.magnitude_db() <= threshold)
-            .map(|p| p.freq_in)
-            .next();
-
-        match (lower, upper) {
-            (Some(l), Some(u)) => Some(u - l),
-            (None, Some(u)) => Some(u - self.points.first()?.freq_in),
-            (Some(l), None) => Some(self.points.last()?.freq_in - l),
-            _ => None,
-        }
+            .windows(2)
+            .all(|pair| pair[0].freq_in < pair[1].freq_in)
     }
 
-    /// Find unity gain frequency (0 dB crossing)
-    pub fn find_unity_gain_freq(&self) -> Option<Value> {
-        if self.points.len() < 2 {
+    /// Width of the peak's contiguous passband, three decibels below its peak.
+    ///
+    /// Cutoffs are interpolated linearly in decibels versus offset frequency,
+    /// as for unity gain. Both edges must be observed; a sweep starting at DC
+    /// above the threshold has a known lower edge of zero. A positive sweep
+    /// endpoint or an interval touching a zero transfer cannot supply a missing
+    /// cutoff. Such an unresolved bandwidth is `None`.
+    pub fn find_bandwidth_3db(&self) -> Option<Value> {
+        if !self.valid_metric_sweep() {
             return None;
         }
+        let (peak_index, peak_db) = self.peak_index()?;
+        let threshold = peak_db - 3.0;
+        let lower = if let Some(pair) = self
+            .points
+            .windows(2)
+            .take(peak_index)
+            .rev()
+            .find(|pair| pair[0].magnitude_db() <= threshold)
+        {
+            crossing(&pair[0], &pair[1], threshold)?
+        } else if self.points.first()?.freq_in == 0.0 {
+            0.0
+        } else {
+            return None;
+        };
+        let pair = self
+            .points
+            .windows(2)
+            .skip(peak_index)
+            .find(|pair| pair[1].magnitude_db() <= threshold)?;
+        let upper = crossing(&pair[0], &pair[1], threshold)?;
+        Some(upper - lower)
+    }
 
-        for window in self.points.windows(2) {
-            let db0 = window[0].magnitude_db();
-            let db1 = window[1].magnitude_db();
-
-            // Look for 0dB crossing
-            if (db0 >= 0.0 && db1 < 0.0) || (db0 < 0.0 && db1 >= 0.0) {
-                // Linear interpolation
-                let f0 = window[0].freq_in;
-                let f1 = window[1].freq_in;
-                let alpha = (0.0 - db0) / (db1 - db0);
-                return Some(f0 + alpha * (f1 - f0));
+    /// First observed unity-gain sample or finite, interpolated 0 dB crossing.
+    ///
+    /// Interpolation is linear in decibels versus offset frequency. Intervals
+    /// touching a zero transfer have no finite logarithmic interpolation and
+    /// are skipped; subsequent finite intervals are still examined.
+    pub fn find_unity_gain_freq(&self) -> Option<Value> {
+        if !self.valid_metric_sweep() {
+            return None;
+        }
+        for (index, point) in self.points.iter().enumerate() {
+            if point.magnitude_db() == 0.0 {
+                return Some(point.freq_in);
+            }
+            if let Some(next) = self.points.get(index + 1)
+                && let Some(frequency) = crossing(point, next, 0.0)
+            {
+                return Some(frequency);
             }
         }
-
         None
     }
 
-    /// Compute derived metrics
+    /// Recompute every derived metric, clearing determinations no longer held.
     pub fn compute_metrics(&mut self) {
         self.peak_gain = self.find_peak_gain();
         self.bandwidth_3db = self.find_bandwidth_3db();
         self.unity_gain_freq = self.find_unity_gain_freq();
-
-        // DC gain from lowest frequency point
-        if let Some(first) = self.points.first()
-            && first.freq_in < 100.0
-        {
-            self.dc_gain = Some(first.transfer);
-        }
+        // A positive offset, however small, is not a measurement at DC.
+        self.dc_gain = self
+            .points
+            .first()
+            .filter(|point| self.valid_metric_sweep() && point.freq_in == 0.0)
+            .map(|point| point.transfer);
     }
+}
+
+/// Interpolate a finite decibel bracket, including exact endpoint samples.
+fn crossing(first: &TransferPoint, next: &TransferPoint, threshold: Value) -> Option<Value> {
+    let left = first.magnitude_db();
+    let right = next.magnitude_db();
+    if left == threshold {
+        return Some(first.freq_in);
+    }
+    if right == threshold {
+        return Some(next.freq_in);
+    }
+    if !left.is_finite() || !right.is_finite() || (left < threshold) == (right < threshold) {
+        return None;
+    }
+    let alpha = (threshold - left) / (right - left);
+    let frequency = alpha.mul_add(next.freq_in - first.freq_in, first.freq_in);
+    frequency.is_finite().then_some(frequency)
 }
 
 //=============================================================================
@@ -511,6 +552,117 @@ impl PxfResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn response(samples: &[(f64, Complex64)]) -> PxfResult {
+        let mut result = PxfResult::new(1000.0, 0, 0);
+        result.points = samples
+            .iter()
+            .map(|&(frequency, transfer)| TransferPoint {
+                freq_in: frequency,
+                freq_out: frequency,
+                transfer,
+                sideband_in: 0,
+                sideband_out: 0,
+            })
+            .collect();
+        result
+    }
+
+    #[test]
+    fn bandwidth_interpolates_both_edges_of_the_peak_passband() {
+        let result = response(&[
+            (10.0, Complex64::new(1.0, 0.0)),
+            (20.0, Complex64::new(10f64.powf(6.0 / 20.0), 0.0)),
+            (30.0, Complex64::new(1.0, 0.0)),
+        ]);
+        assert!((result.find_bandwidth_3db().unwrap() - 10.0).abs() < 1e-12);
+        for points in [&result.points[..2], &result.points[1..]] {
+            let mut truncated = result.clone();
+            truncated.points = points.to_vec();
+            assert_eq!(
+                truncated.find_bandwidth_3db(),
+                None,
+                "an unresolved edge is not a cutoff"
+            );
+        }
+        let lowpass = response(&[
+            (0.0, Complex64::new(10f64.powf(6.0 / 20.0), 0.0)),
+            (20.0, Complex64::new(1.0, 0.0)),
+        ]);
+        assert!((lowpass.find_bandwidth_3db().unwrap() - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn unity_gain_detects_exact_samples_including_singletons_and_endpoints() {
+        for gains in [vec![1.0], vec![2.0, 1.0], vec![1.0, 2.0], vec![1.0, 1.0]] {
+            let samples = gains
+                .iter()
+                .enumerate()
+                .map(|(i, &gain)| ((i + 1) as f64, Complex64::new(gain, 0.0)))
+                .collect::<Vec<_>>();
+            let expected = gains.iter().position(|&gain| gain == 1.0).unwrap() as f64 + 1.0;
+            assert_eq!(response(&samples).find_unity_gain_freq(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn unity_gain_does_not_interpolate_through_undefined_log_magnitudes() {
+        for gains in [[0.0, 2.0], [2.0, 0.0]] {
+            let samples = [
+                (1.0, Complex64::new(gains[0], 0.0)),
+                (2.0, Complex64::new(gains[1], 0.0)),
+            ];
+            assert_eq!(response(&samples).find_unity_gain_freq(), None);
+        }
+        let result = response(&[
+            (1.0, Complex64::new(0.0, 0.0)),
+            (2.0, Complex64::new(2.0, 0.0)),
+            (4.0, Complex64::new(0.5, 0.0)),
+        ]);
+        assert_eq!(result.find_unity_gain_freq(), Some(3.0));
+    }
+
+    #[test]
+    fn finite_complex_transfers_keep_representable_decibel_magnitudes() {
+        for value in [f64::MAX, f64::from_bits(1)] {
+            let result = response(&[(1.0, Complex64::new(value, value))]);
+            let expected = 20.0 * value.log10() + 10.0 * 2.0_f64.log10();
+            assert!((result.points[0].magnitude_db() - expected).abs() < 1e-10);
+            assert!((result.find_peak_gain().unwrap().1 - expected).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn recomputed_dc_gain_requires_an_actual_dc_sample() {
+        let mut result = response(&[(0.0, Complex64::new(2.0, 0.0))]);
+        result.compute_metrics();
+        assert_eq!(result.dc_gain, Some(Complex64::new(2.0, 0.0)));
+        result.points[0].freq_in = 10.0;
+        result.compute_metrics();
+        assert_eq!(result.dc_gain, None, "10 Hz does not establish DC gain");
+        result.points.clear();
+        result.dc_gain = Some(Complex64::new(2.0, 0.0));
+        result.compute_metrics();
+        assert_eq!(
+            result.dc_gain, None,
+            "removed samples cannot leave stale metrics"
+        );
+    }
+
+    #[test]
+    fn invalid_sweeps_cannot_produce_finite_curve_metrics() {
+        for frequency in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
+            let mut result = response(&[
+                (0.0, Complex64::new(2.0, 0.0)),
+                (frequency, Complex64::new(0.5, 0.0)),
+            ]);
+            result.compute_metrics();
+            assert_eq!(result.peak_gain, None);
+            assert_eq!(result.bandwidth_3db, None);
+            assert_eq!(result.unity_gain_freq, None);
+            assert_eq!(result.dc_gain, None);
+        }
+    }
 
     #[test]
     fn group_delay_preserves_resolvable_small_and_large_intervals() {
