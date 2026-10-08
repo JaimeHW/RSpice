@@ -82,6 +82,9 @@
 mod bindings;
 use bindings::ConnectedBits;
 pub(crate) use bindings::{DigitalBitChange, DigitalBitConnection, ExternalBitDriverId};
+mod real_bindings;
+pub(crate) use real_bindings::{ExternalNetChange, ExternalRealDriverId};
+use real_bindings::ExternalReals;
 
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
@@ -325,6 +328,9 @@ struct ExpressionSubscription {
 pub(crate) struct DigitalSignalStore {
     plan: Arc<CanonicalDigitalPlan>,
     connected: Option<ConnectedBits>,
+    external_reals: Option<ExternalReals>,
+    external_changes: Vec<ExternalNetChange>,
+    external_batch: Option<Vec<(DigitalSignalId, TransitionValues)>>,
     expression_waits: BTreeMap<u64, ExpressionSubscription>,
     expression_inputs: Vec<BTreeSet<u64>>,
     expression_scratch: DigitalEvalScratch,
@@ -591,6 +597,9 @@ impl DigitalSignalStore {
             activation_clock: None,
             plan,
             connected: None,
+            external_reals: None,
+            external_changes: Vec::new(),
+            external_batch: None,
             expression_waits: BTreeMap::new(),
             expression_inputs: vec![BTreeSet::new(); count],
             expression_scratch: DigitalEvalScratch::new(),
@@ -866,6 +875,20 @@ impl DigitalSignalStore {
         previous: FourStateValue,
         value: FourStateValue,
     ) {
+        self.record_transition(
+            signal,
+            TransitionValues::FourState {
+                previous,
+                next: value,
+            },
+        );
+    }
+
+    fn record_transition(&mut self, signal: DigitalSignalId, values: TransitionValues) {
+        if let Some(pending) = &mut self.external_batch {
+            pending.push((signal, values));
+            return;
+        }
         self.invalidate_analog_variables(signal);
         let sequence = self.next_sequence();
         let expressions = self.observe_expressions(signal);
@@ -873,10 +896,7 @@ impl DigitalSignalStore {
             sequence,
             expressions,
             signal,
-            values: TransitionValues::FourState {
-                previous,
-                next: value,
-            },
+            values,
         });
     }
 
@@ -887,22 +907,29 @@ impl DigitalSignalStore {
     /// `@($realtobits(r))`; dispatch still rejects it for a direct `@(r)`.
     fn publish_real(&mut self, signal: DigitalSignalId, value: f64) {
         let index = usize::from(signal);
-        if self.reals[index] == value && self.reals[index].to_bits() == value.to_bits() {
+        if self.reals[index].to_bits() == value.to_bits() {
             return;
         }
         let previous = std::mem::replace(&mut self.reals[index], value);
-        self.invalidate_analog_variables(signal);
-        let sequence = self.next_sequence();
-        let expressions = self.observe_expressions(signal);
-        self.transitions.push(SignalTransition {
-            sequence,
-            expressions,
+        if self
+            .external_reals
+            .as_ref()
+            .is_some_and(|real| real.topology.observed.contains(&signal))
+        {
+            self.external_changes.push(ExternalNetChange::Real {
+                signal,
+                previous,
+                value,
+                starts_publication: true,
+            });
+        }
+        self.record_transition(
             signal,
-            values: TransitionValues::Real {
+            TransitionValues::Real {
                 previous,
                 next: value,
             },
-        });
+        );
     }
 
     /// Fold every contribution of one net into its resolved value.
@@ -962,6 +989,7 @@ impl DigitalSignalStore {
                 ContributionValue::Real(value) => value.unwrap_or(0.0),
                 ContributionValue::FourState(_) => 0.0,
             })
+            .chain(self.external_real_values(signal))
             .peekable();
 
         // Section 3.7: "If no driver is connected to a wreal net, its value

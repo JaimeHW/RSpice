@@ -155,17 +155,23 @@ impl CircuitData {
                     .instance(host.instance_name())
                 })?;
             for node in host.direct_real_nodes() {
-                if self.net_kinds.kind(node).is_discrete() {
+                if matches!(
+                    self.net_kinds.kind(node),
+                    super::NetKind::Digital | super::NetKind::DigitalAndReal
+                ) {
                     return Err(crate::ElaborationError::new(
                         crate::ElaborationErrorKind::PortDiscipline,
-                        "a real-valued HDL port and an XSPICE event port require shared typed driver resolution; this boundary is not implemented yet",
+                        "a real-valued HDL port and a four-state XSPICE event port require explicit domain conversion",
                     ).instance(host.instance_name()).into());
                 }
             }
             for (signal, node) in host.boundary_connections() {
                 let kind = self.net_kinds.kind(node);
                 if !kind.is_discrete()
-                    || (kind == super::NetKind::Digital && event_nodes.contains(&node))
+                    || (event_nodes.contains(&node)
+                        && (kind == super::NetKind::Digital
+                            || (kind == super::NetKind::Real
+                                && host.direct_real_nodes().any(|real| real == node))))
                 {
                     continue;
                 }

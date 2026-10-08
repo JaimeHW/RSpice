@@ -3639,3 +3639,72 @@ endmodule
     assert!(waveform(&result, "low").last().unwrap().abs() < 1e-8);
     assert!((waveform(&result, "both").last().unwrap() - 1.0).abs() < 1e-8);
 }
+
+#[test]
+fn typed_event_boundaries_share_xspice_real_drivers_delays_and_voltage_conversion() {
+    let model = ModelFile::new(
+        "xspice_real_ports",
+        r#"
+`timescale 1ns/1ps
+module real_source(q);
+ output q; wrealsum q;
+ real value=1;
+ initial begin #1 value=3; end
+ assign q=value;
+endmodule
+module real_sink(r,p);
+ input r; wreal r;
+ inout p; electrical p;
+ analog I(p)<+(V(p)-r)/1000;
+endmodule
+"#,
+    );
+    for reverse in [false, true] {
+        let mut cards = vec![
+            "Xs q real_source",
+            "Xr delayed out real_sink",
+            "Aobs input q obs",
+            "Again q delayed rg",
+            "Adrv q converted drv",
+        ];
+        if reverse {
+            cards.reverse();
+        }
+        let deck = format!(
+            "* coupled real drivers and conversions\n{}\nV1 input 0 2\nRout out 0 1k\nRc converted 0 1k\n.model obs v_to_real\n.model rg real_gain (gain=2 out_offset=1 delay=250p)\n.model drv real_to_v (transition_time=1p)\n.va \"{}\" real_source module=real_source\n.va \"{}\" real_sink module=real_sink\n.end\n",
+            cards.join("\n"),
+            model.deck_path(),
+            model.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.05e-9);
+        let q = result.real_trace_named("q").expect("shared real trace");
+        assert_eq!(q.first().unwrap().value, 3.0);
+        assert_eq!(q.last().unwrap().value, 5.0);
+        assert!((q.last().unwrap().time - 1e-9).abs() < 1e-15);
+        assert!(
+            q.windows(2).all(|pair| pair[0].time < pair[1].time),
+            "one accepted value per instant: {q:?}"
+        );
+        let delayed = result.real_trace_named("delayed").unwrap();
+        assert!(
+            delayed
+                .iter()
+                .any(|point| (point.time - 1.25e-9).abs() < 1e-15 && point.value == 11.0),
+            "{delayed:?}"
+        );
+        for (&time, value) in result.time.iter().zip(waveform(&result, "out")) {
+            let expected = if time > 0.35e-9 && time < 1.2e-9 {
+                3.5
+            } else if time > 1.35e-9 {
+                5.5
+            } else {
+                continue;
+            };
+            assert!(
+                (value - expected).abs() < 1e-8,
+                "reverse={reverse}, t={time}, out={value}, expected={expected}"
+            );
+        }
+        assert!((waveform(&result, "converted").last().unwrap() - 5.0).abs() < 1e-7);
+    }
+}

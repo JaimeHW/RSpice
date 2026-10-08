@@ -441,6 +441,7 @@ pub(crate) struct DigitalHost {
     /// No process slot or driver identity is allocated per delayed assignment.
     nba_target: TargetId,
     external_targets: Vec<TargetId>,
+    external_real_targets: Vec<TargetId>,
     elaboration_closed: bool,
     delayed_updates: BTreeMap<u64, Vec<DigitalDeferredUpdate>>,
     event_updates: BTreeMap<u64, EventCapture>,
@@ -558,6 +559,7 @@ impl DigitalHost {
         Self {
             nba_target,
             external_targets: Vec::new(),
+            external_real_targets: Vec::new(),
             elaboration_closed: false,
             delayed_updates: BTreeMap::new(),
             event_updates: BTreeMap::new(),
@@ -649,6 +651,11 @@ impl DigitalHost {
         for (_, target) in fresh.store.external_sources() {
             fresh
                 .external_targets
+                .push(fresh.scheduler.intern_target(target.clone()));
+        }
+        for (_, target) in fresh.store.external_real_sources() {
+            fresh
+                .external_real_targets
                 .push(fresh.scheduler.intern_target(target.clone()));
         }
         fresh

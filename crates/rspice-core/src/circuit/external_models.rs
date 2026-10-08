@@ -372,13 +372,16 @@ fn apply_xspice_events_at_or_before(
 /// observations only; the circuit never feeds them back as output contributions.
 pub(super) trait XspiceDigitalResolver {
     fn owns(&self, node: NodeId) -> bool;
+    fn owns_real(&self, node: NodeId) -> bool;
     fn publish(
         &mut self,
         drivers: &[(
             crate::xspice::event_scheduler::EventTarget,
             crate::xspice::DigitalValue,
         )],
+        real_drivers: &[(crate::xspice::event_scheduler::EventTarget, Value)],
         resolved: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
+        resolved_real: &mut Vec<(NodeId, Value)>,
     ) -> crate::xspice::CmResult<()>;
 }
 
@@ -387,15 +390,21 @@ impl XspiceDigitalResolver for LocalDigitalResolver {
     fn owns(&self, _node: NodeId) -> bool {
         false
     }
+    fn owns_real(&self, _node: NodeId) -> bool {
+        false
+    }
     fn publish(
         &mut self,
         drivers: &[(
             crate::xspice::event_scheduler::EventTarget,
             crate::xspice::DigitalValue,
         )],
+        real_drivers: &[(crate::xspice::event_scheduler::EventTarget, Value)],
         _resolved: &mut Vec<(NodeId, crate::xspice::DigitalValue)>,
+        _resolved_real: &mut Vec<(NodeId, Value)>,
     ) -> crate::xspice::CmResult<()> {
         debug_assert!(drivers.is_empty());
+        debug_assert!(real_drivers.is_empty());
         Ok(())
     }
 }
@@ -426,6 +435,7 @@ fn apply_xspice_events_with_resolver(
         real_event_times,
     } = event_values.make_mut();
     let mut shared_drivers = Vec::new();
+    let mut shared_real_drivers = Vec::new();
     event_queue
         .run_due_events(time, |event| {
             let node_id = event.node_id;
@@ -453,6 +463,17 @@ fn apply_xspice_events_with_resolver(
                     touched_digital_nodes.push(node_id);
                 }
                 crate::xspice::EventValue::Real(value) => {
+                    if resolver.owns_real(node_id) {
+                        shared_real_drivers.push((
+                            crate::xspice::event_scheduler::EventTarget {
+                                node_id,
+                                instance: driver_key.0.clone(),
+                                port_name: driver_key.1.clone(),
+                                driver_index: driver_key.2,
+                            },
+                            value,
+                        ));
+                    }
                     real_drivers
                         .entry(node_id)
                         .or_default()
@@ -489,14 +510,26 @@ fn apply_xspice_events_with_resolver(
         let previous_value = digital_values.insert(node_id, resolved);
         changed |= previous_value != Some(resolved);
     }
-    if !shared_drivers.is_empty() {
+    if !shared_drivers.is_empty() || !shared_real_drivers.is_empty() {
         let mut resolved = Vec::new();
-        resolver.publish(&shared_drivers, &mut resolved)?;
+        let mut resolved_real = Vec::new();
+        resolver.publish(
+            &shared_drivers,
+            &shared_real_drivers,
+            &mut resolved,
+            &mut resolved_real,
+        )?;
         for (node, value) in resolved {
             changed |= digital_values.insert(node, value) != Some(value);
         }
+        for (node, value) in resolved_real {
+            changed |= real_values.insert(node, value).map(f64::to_bits) != Some(value.to_bits());
+        }
     }
     for &node_id in touched_real_nodes.iter() {
+        if resolver.owns_real(node_id) {
+            continue;
+        }
         let resolved = real_drivers
             .get(&node_id)
             .map(|drivers| drivers.values().copied().sum())
@@ -1295,6 +1328,45 @@ impl CircuitData {
         );
     }
 
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn observe_xspice_shared_real_inputs(
+        &mut self,
+        wave: &XspiceActiveWave,
+        values: &[(NodeId, Value)],
+    ) {
+        self.xspice_touched_real_nodes.clear();
+        for &(node, value) in values {
+            if node == 0 {
+                continue;
+            }
+            let state = &self.scheduler.xspice_event_values;
+            if state.real_values.get(&node).map(|v| v.to_bits()) == Some(value.to_bits())
+                && state.real_event_times.get(&node) == Some(&wave.time)
+            {
+                continue;
+            }
+            let state = self.scheduler.xspice_event_values.make_mut();
+            state.real_values.insert(node, value);
+            state.real_event_times.insert(node, wave.time);
+            self.xspice_touched_real_nodes.push(node);
+        }
+        let dispatch = self
+            .scheduler
+            .xspice_event_dispatch
+            .as_ref()
+            .expect("prepared event wave");
+        dispatch.mark_fanout_dirty(
+            &mut self.xspice_instances,
+            EventInputKind::Real,
+            &self.xspice_touched_real_nodes,
+        );
+        dispatch.record_fanout_pending(
+            &mut self.xspice_dispatch_pending,
+            EventInputKind::Real,
+            &self.xspice_touched_real_nodes,
+        );
+    }
+
     /// Execute one due-event/dirty-fanout wave, then yield to the circuit.
     /// True requests another Active wave; only false permits later HDL regions.
     pub(crate) fn step_xspice_active_wave(
@@ -1617,7 +1689,7 @@ impl CircuitData {
         snapshot.dedup_by_key(|(node_id, _)| *node_id);
     }
 
-    /// Fill a reusable snapshot of committed XSPICE real event-node values.
+    /// Fill a reusable snapshot of committed XSPICE and shared HDL real values.
     pub(crate) fn fill_xspice_real_snapshot(&self, snapshot: &mut Vec<(NodeId, Value)>) {
         snapshot.clear();
         snapshot.extend(
@@ -1625,7 +1697,18 @@ impl CircuitData {
                 .xspice_event_values
                 .real_values
                 .iter()
-                .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
+                .filter_map(|(&node_id, &value)| {
+                    #[cfg(feature = "veriloga")]
+                    if self
+                        .scheduler
+                        .mixed_xspice_bindings
+                        .as_ref()
+                        .is_some_and(|bindings| bindings.contains_real_node(node_id))
+                    {
+                        return None;
+                    }
+                    (node_id > 0).then_some((node_id, value))
+                }),
         );
         #[cfg(feature = "veriloga")]
         if let Some(digital) = &self.scheduler.mixed_digital_coordinator {

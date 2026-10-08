@@ -46,9 +46,10 @@
 //!
 //! # Where a `wreal` meets an analog node
 //!
-//! Direct HDL real-valued connections use the linked runtime's authored driver
-//! resolution and publish accepted real event traces. Electrical and XSPICE
-//! real-valued conversion remain unimplemented. The boundary's rulings below
+//! HDL and XSPICE real-valued connections use the linked runtime's authored driver
+//! resolution and publish accepted real event traces. Explicit `real_to_v` and
+//! `v_to_real` instances provide electrical conversion. Automatic insertion for
+//! mixed real ports remains unimplemented. The boundary's rulings below
 //! describe the timing and resolution requirements for that integration. The
 //! mixed host above now implements the time half of them —
 //! [`Instant::floor_tick`](super::event_scheduler::Instant::floor_tick)
@@ -83,12 +84,11 @@
 //! at the tick's seconds is what keeps D5 clause 2 — the step controller stops
 //! bit-exactly at an event time — untouched by the grid.
 //!
-//! **One hazard to check when that boundary is wired.** The two sides resolve
-//! multiple drivers differently. A circuit real event node *sums* its drivers
-//! (`circuit::external_models`), while Verilog-AMS LRM 2.4 section 6.5.3 permits
-//! exactly one driver of a `wreal` and the front end refuses a second. A
-//! published `wreal` must therefore be the only driver of the node it lands on,
-//! or the analog side sees a sum neither standard asked for, silently.
+//! Shared real nets use the HDL net's declared resolution, including the
+//! single-driver restriction of `wreal`. Enrollment counts HDL and XSPICE output
+//! identities together. Every original XSPICE output contributes once; resolved
+//! observations are input views and never become additional drivers. XSPICE-only
+//! real nets retain their existing resolver.
 //!
 //! The bridge halves already exist as code models — `real_to_v` and
 //! `v_to_real` (sample on accepted step, no threshold, no breakpoint), both

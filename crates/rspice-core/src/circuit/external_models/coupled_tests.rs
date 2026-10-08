@@ -383,6 +383,102 @@ module bank; wire a,b; reg [31:0] glitches; initial glitches=0;
     );
 }
 
+#[test]
+fn coupled_active_real_bank_resolves_atomically_and_replays() {
+    use crate::xspice::verilog::store::{ExternalNetChange, ExternalRealDriverId};
+    #[derive(Default)]
+    struct TypedBank {
+        bits: Vec<(ExternalBitDriverId, DigitalValue)>,
+        reals: Vec<(ExternalRealDriverId, f64)>,
+        changes: Vec<ExternalNetChange>,
+    }
+    impl DigitalActiveParticipant for TypedBank {
+        fn settle_active(
+            &mut self,
+            exchange: &mut DigitalActiveExchange<'_>,
+        ) -> Result<bool, DigitalRunError> {
+            self.changes.extend(exchange.take_event_changes());
+            let bits = std::mem::take(&mut self.bits);
+            let reals = std::mem::take(&mut self.reals);
+            exchange.drive_bank(&bits, &reals)?;
+            Ok(!bits.is_empty() || !reals.is_empty())
+        }
+    }
+    let mut digital = host(
+        r#"
+module typed_bank;
+ wire b; wrealsum r; assign r=1.0;
+ reg glitch=0;
+ always @(posedge(b ^ (r>1.0))) glitch=1;
+endmodule
+"#,
+        &["b"],
+    );
+    let real = digital.signal("r").unwrap();
+    let bits = digital
+        .attach_external_bits(&[0], &[(0, target(1, "Abits"))])
+        .unwrap();
+    let reals = digital
+        .attach_external_reals(&[real], &[(real, target(2, "Areals"))])
+        .unwrap();
+    let mut bank = TypedBank {
+        bits: vec![(bits[0], DigitalValue::zero())],
+        reals: vec![(reals[0], 0.0)],
+        ..Default::default()
+    };
+    digital.prepare_start().unwrap();
+    digital.advance_to_with(0, &mut bank).unwrap();
+    let accepted = digital.clone();
+    for _ in 0..2 {
+        digital = accepted.clone();
+        bank.changes.clear();
+        bank.bits = vec![(bits[0], DigitalValue::one())];
+        bank.reals = vec![(reals[0], 1.0)];
+        digital.settle_with(0, &mut bank).unwrap();
+        assert_eq!(digital.read_real(real), Some(2.0));
+        assert_eq!(
+            bit(&digital, "glitch"),
+            "0",
+            "no partially installed bit/real bank is observable"
+        );
+        assert_eq!(bank.changes.len(), 2);
+        assert!(bank.changes[0].starts_publication());
+        assert!(!bank.changes[1].starts_publication());
+    }
+    let mut fresh = digital.fresh();
+    let mut initial = TypedBank {
+        bits: vec![(bits[0], DigitalValue::zero())],
+        reals: vec![(reals[0], 0.0)],
+        ..Default::default()
+    };
+    fresh.prepare_start().unwrap();
+    fresh.advance_to_with(0, &mut initial).unwrap();
+    assert_eq!(
+        fresh.read_real(real),
+        Some(1.0),
+        "fresh run clears external contributions"
+    );
+    bank.reals = vec![(reals[0], f64::NAN)];
+    digital.settle_with(0, &mut bank).unwrap();
+    bank.changes.clear();
+    bank.reals = vec![(reals[0], f64::NAN)];
+    digital.settle_with(0, &mut bank).unwrap();
+    assert!(
+        bank.changes.is_empty(),
+        "an unchanged undefined real does not reschedule itself"
+    );
+
+    let mut single = host("module single; wreal r; assign r=1.0; endmodule", &[]);
+    let r = single.signal("r").unwrap();
+    assert!(
+        single
+            .attach_external_reals(&[r], &[(r, target(2, "Aextra"))])
+            .unwrap_err()
+            .to_string()
+            .contains("one driver")
+    );
+}
+
 fn routed_inverters() -> crate::CircuitData {
     let mut circuit = crate::CircuitData::new();
     for name in ["command", "bus", "response"] {

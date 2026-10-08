@@ -7,19 +7,21 @@ use crate::xspice::DigitalValue;
 use crate::xspice::event_scheduler::EventTarget;
 #[cfg(test)]
 use crate::xspice::verilog::host::DigitalHost;
-use crate::xspice::verilog::host::{
-    DigitalActiveExchange, DigitalActiveParticipant, DigitalRunError,
-};
-use crate::xspice::verilog::store::{DigitalBitChange, ExternalBitDriverId};
+use crate::xspice::verilog::host::{DigitalActiveExchange, DigitalActiveParticipant, DigitalRunError};
+use crate::xspice::verilog::store::{ExternalNetChange, ExternalBitDriverId, ExternalRealDriverId};
+use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 use std::collections::{BTreeSet, VecDeque};
 
 /// Immutable connections between physical circuit node identities and resolved
-/// HDL bit groups. Driver indices match XspiceInstance::schedule_events.
+/// HDL bit groups and real signals. Driver indices match XspiceInstance::schedule_events.
 #[derive(Clone, Debug)]
 pub(crate) struct XspiceDigitalBindings {
     by_node: BTreeMap<NodeId, usize>,
     by_net: BTreeMap<usize, NodeId>,
     drivers: BTreeMap<EventTarget, ExternalBitDriverId>,
+    real_by_node: BTreeMap<NodeId, DigitalSignalId>,
+    real_by_signal: BTreeMap<DigitalSignalId, NodeId>,
+    real_drivers: BTreeMap<EventTarget, ExternalRealDriverId>,
 }
 
 impl XspiceDigitalBindings {
@@ -28,9 +30,60 @@ impl XspiceDigitalBindings {
         coordinator: &mut crate::xspice::verilog::MixedDigitalCoordinator,
     ) -> Result<Option<Self>, DigitalRunError> {
         let nets: Vec<_> = coordinator.event_bindings().collect();
-        Self::enroll_with(circuit, &nets, |observed, drivers| {
+        let bits = Self::enroll_with(circuit, &nets, |observed, drivers| {
             coordinator.attach_external_bits(observed, drivers)
-        })
+        })?;
+        let offered: BTreeMap<_, _> = coordinator.real_event_bindings().iter().copied().collect();
+        let mut connected = BTreeSet::new();
+        let mut targets = Vec::new();
+        for instance in &circuit.xspice_instances {
+            instance.for_each_event_input_net(|kind, node| {
+                if kind == EventInputKind::Real && offered.contains_key(&node) {
+                    connected.insert(node);
+                }
+            });
+            instance.for_each_real_output_driver(|target| {
+                if offered.contains_key(&target.node_id) {
+                    connected.insert(target.node_id);
+                    targets.push(target);
+                }
+            });
+        }
+        if connected.is_empty() {
+            return Ok(bits);
+        }
+        let mut result = bits.unwrap_or_else(|| Self {
+            by_node: BTreeMap::new(),
+            by_net: BTreeMap::new(),
+            drivers: BTreeMap::new(),
+            real_by_node: BTreeMap::new(),
+            real_by_signal: BTreeMap::new(),
+            real_drivers: BTreeMap::new(),
+        });
+        result.real_by_node = connected
+            .into_iter()
+            .map(|node| (node, offered[&node]))
+            .collect();
+        result.real_by_signal = result
+            .real_by_node
+            .iter()
+            .map(|(&node, &signal)| (signal, node))
+            .collect();
+        targets.sort();
+        let targets: Vec<_> = targets
+            .into_iter()
+            .map(|target| (offered[&target.node_id], target))
+            .collect();
+        let ids = coordinator.attach_external_reals(
+            &result.real_by_node.values().copied().collect::<Vec<_>>(),
+            &targets,
+        )?;
+        result.real_drivers = targets
+            .into_iter()
+            .map(|(_, target)| target)
+            .zip(ids)
+            .collect();
+        Ok(Some(result))
     }
 
     #[cfg(test)]
@@ -98,10 +151,16 @@ impl XspiceDigitalBindings {
                 .map(|(_, target)| target)
                 .zip(ids)
                 .collect(),
+            real_by_node: BTreeMap::new(),
+            real_by_signal: BTreeMap::new(),
+            real_drivers: BTreeMap::new(),
         }))
     }
     pub(crate) fn contains_node(&self, node: NodeId) -> bool {
         self.by_node.contains_key(&node)
+    }
+    pub(crate) fn contains_real_node(&self, node: NodeId) -> bool {
+        self.real_by_node.contains_key(&node)
     }
 
     pub(crate) fn remap_nodes(&mut self, remap: impl Fn(usize) -> usize) {
@@ -113,6 +172,20 @@ impl XspiceDigitalBindings {
             *node = remap(*node);
         }
         self.drivers = std::mem::take(&mut self.drivers)
+            .into_iter()
+            .map(|(mut target, id)| {
+                target.node_id = remap(target.node_id);
+                (target, id)
+            })
+            .collect();
+        self.real_by_node = std::mem::take(&mut self.real_by_node)
+            .into_iter()
+            .map(|(node, signal)| (remap(node), signal))
+            .collect();
+        for node in self.real_by_signal.values_mut() {
+            *node = remap(*node);
+        }
+        self.real_drivers = std::mem::take(&mut self.real_drivers)
             .into_iter()
             .map(|(mut target, id)| {
                 target.node_id = remap(target.node_id);
@@ -146,7 +219,7 @@ pub(crate) struct XspiceDigitalParticipant<'a> {
     coefficients: crate::numerics::integration::CompanionCoefficients,
     xyce_one_step_order2: bool,
     wave: Option<XspiceActiveWave>,
-    pending: VecDeque<DigitalBitChange>,
+    pending: VecDeque<ExternalNetChange>,
     initialized: bool,
     /// Node rows an earlier pass of this same candidate moved, and with them
     /// the fact that there *was* an earlier pass. Empty and `None` for the
@@ -327,7 +400,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
             }
             self.wave = Some(wave);
         }
-        self.pending.extend(exchange.take_changes());
+        self.pending.extend(exchange.take_event_changes());
         let wave = self.wave.as_mut().expect("prepared physical Active wave");
         if !self.initialized {
             // An undriven shared bit starts at Z. Seed missing observation
@@ -342,8 +415,13 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                     .digital_values
                     .contains_key(&node)
                 {
-                    let value = match self.pending.iter().find(|change| change.net == net) {
-                        Some(change) => change.previous,
+                    let value = match self.pending.iter().find_map(|change| match change {
+                        ExternalNetChange::Bits(change) if change.net == net => {
+                            Some(change.previous)
+                        }
+                        _ => None,
+                    }) {
+                        Some(value) => value,
                         None => exchange.read_net(net)?,
                     };
                     initial.push((node, value));
@@ -351,27 +429,79 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
             }
             self.circuit
                 .observe_xspice_shared_digital_inputs(wave, &initial);
+            let mut initial_real = Vec::new();
+            for (&node, &signal) in &self.bindings.real_by_node {
+                if !self
+                    .circuit
+                    .scheduler
+                    .xspice_event_values
+                    .real_values
+                    .contains_key(&node)
+                {
+                    let value = self
+                        .pending
+                        .iter()
+                        .find_map(|change| match change {
+                            ExternalNetChange::Real {
+                                signal: changed,
+                                previous,
+                                ..
+                            } if *changed == signal => Some(*previous),
+                            _ => None,
+                        })
+                        .or_else(|| exchange.read_real_signal(signal))
+                        .ok_or_else(|| external_error("missing linked real signal"))?;
+                    initial_real.push((node, value));
+                }
+            }
+            self.circuit
+                .observe_xspice_shared_real_inputs(wave, &initial_real);
             self.initialized = true;
         }
         let mut observed = Vec::new();
+        let mut observed_real = Vec::new();
         while let Some(change) = self.pending.pop_front() {
-            let Some(&node) = self.bindings.by_net.get(&change.net) else {
-                return Err(external_error(format!(
-                    "unbound XSPICE observation for bit group {}",
-                    change.net
-                )));
-            };
-            observed.push((node, change.value));
+            match change {
+                ExternalNetChange::Bits(change) => {
+                    let node = self
+                        .bindings
+                        .by_net
+                        .get(&change.net)
+                        .copied()
+                        .ok_or_else(|| {
+                            external_error(format!(
+                                "unbound XSPICE observation for bit group {}",
+                                change.net
+                            ))
+                        })?;
+                    observed.push((node, change.value));
+                }
+                ExternalNetChange::Real { signal, value, .. } => {
+                    let node = self
+                        .bindings
+                        .real_by_signal
+                        .get(&signal)
+                        .copied()
+                        .ok_or_else(|| {
+                            external_error(format!(
+                                "unbound XSPICE real observation for signal {signal}"
+                            ))
+                        })?;
+                    observed_real.push((node, value));
+                }
+            }
             if self
                 .pending
                 .front()
-                .is_none_or(|next| next.starts_publication)
+                .is_none_or(|next| next.starts_publication())
             {
                 break;
             }
         }
         self.circuit
             .observe_xspice_shared_digital_inputs(wave, &observed);
+        self.circuit
+            .observe_xspice_shared_real_inputs(wave, &observed_real);
         let mut resolver = SharedResolver {
             bindings: self.bindings,
             exchange,
@@ -397,10 +527,15 @@ impl XspiceDigitalResolver for SharedResolver<'_, '_> {
     fn owns(&self, node: NodeId) -> bool {
         self.bindings.by_node.contains_key(&node)
     }
+    fn owns_real(&self, node: NodeId) -> bool {
+        self.bindings.real_by_node.contains_key(&node)
+    }
     fn publish(
         &mut self,
         drivers: &[(EventTarget, DigitalValue)],
+        real_drivers: &[(EventTarget, Value)],
         resolved: &mut Vec<(NodeId, DigitalValue)>,
+        resolved_real: &mut Vec<(NodeId, Value)>,
     ) -> crate::xspice::CmResult<()> {
         let mut bank = Vec::with_capacity(drivers.len());
         let mut nodes = BTreeSet::new();
@@ -415,7 +550,26 @@ impl XspiceDigitalResolver for SharedResolver<'_, '_> {
             nodes.insert(target.node_id);
         }
         // Validate every original driver before publishing any vector element.
-        self.exchange.drive_many(&bank).map_err(model_error)?;
+        let mut real_bank = Vec::with_capacity(real_drivers.len());
+        let mut real_nodes = BTreeSet::new();
+        for (target, value) in real_drivers {
+            let id = self
+                .bindings
+                .real_drivers
+                .get(target)
+                .copied()
+                .ok_or_else(|| {
+                    model_error(format!(
+                        "undeclared XSPICE real output driver {}.{}[{}]",
+                        target.instance, target.port_name, target.driver_index
+                    ))
+                })?;
+            real_bank.push((id, *value));
+            real_nodes.insert(target.node_id);
+        }
+        self.exchange
+            .drive_bank(&bank, &real_bank)
+            .map_err(model_error)?;
         for node in nodes {
             resolved.push((
                 node,
@@ -423,6 +577,13 @@ impl XspiceDigitalResolver for SharedResolver<'_, '_> {
                     .read_net(self.bindings.by_node[&node])
                     .map_err(model_error)?,
             ));
+        }
+        for node in real_nodes {
+            let value = self
+                .exchange
+                .read_real_signal(self.bindings.real_by_node[&node])
+                .ok_or_else(|| model_error("missing shared real net"))?;
+            resolved_real.push((node, value));
         }
         Ok(())
     }

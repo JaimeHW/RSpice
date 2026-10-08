@@ -29,8 +29,9 @@
 //!   An electrical bidirectional boundary still requires an explicit converter.
 //!
 //! Real-valued ports also join the shared event resolver, retaining the authored
-//! real net's driver policy. They require explicit conversion to electrical or
-//! XSPICE event domains; the completed topology validates this after loading.
+//! real net's driver policy for HDL and XSPICE real contributions. Electrical
+//! conversion uses explicit code-model boundaries; unlike event types require
+//! a converter. The completed topology validates these connections after loading.
 //!
 //! # A vector boundary port
 //!

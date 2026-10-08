@@ -628,6 +628,20 @@ impl MixedDigitalCoordinator {
             .map(|(net, &node)| (node, net))
     }
 
+    pub(crate) fn real_event_bindings(&self) -> &[(usize, DigitalSignalId)] {
+        &self.real_event_nodes
+    }
+
+    pub(crate) fn attach_external_reals(
+        &mut self,
+        observed: &[DigitalSignalId],
+        drivers: &[(DigitalSignalId, EventTarget)],
+    ) -> Result<Vec<super::super::store::ExternalRealDriverId>, DigitalRunError> {
+        self.digital
+            .make_mut()
+            .attach_external_reals(observed, drivers)
+    }
+
     pub(crate) fn attach_external_bits(
         &mut self,
         observed: &[usize],

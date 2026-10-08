@@ -1,7 +1,9 @@
 //! Cooperative Active-region execution over the existing HDL scheduler.
 //! The owning circuit must retain the participant and roll it back with the host;
 //! this interface neither launches a second simulator nor promotes an HDL region.
-use super::super::store::{DigitalBitChange, ExternalBitDriverId};
+#[cfg(test)]
+use super::super::store::DigitalBitChange;
+use super::super::store::{ExternalBitDriverId, ExternalRealDriverId, ExternalNetChange};
 use super::*;
 
 /// One external Active wave. Return true while external work remains, even if
@@ -103,16 +105,32 @@ impl DigitalActiveExchange<'_> {
                 detail: format!("unknown shared digital net {net}"),
             })
     }
+    #[cfg(test)]
     pub(crate) fn take_changes(&mut self) -> Vec<DigitalBitChange> {
         self.host.store.take_external_bit_changes()
     }
+    pub(crate) fn take_event_changes(&mut self) -> Vec<ExternalNetChange> {
+        self.host.store.take_external_changes()
+    }
+    #[cfg(test)]
     pub(crate) fn drive_many(
         &mut self,
         drives: &[(ExternalBitDriverId, DigitalValue)],
     ) -> Result<(), DigitalRunError> {
+        self.drive_bank(drives, &[])
+    }
+    pub(crate) fn drive_bank(
+        &mut self,
+        drives: &[(ExternalBitDriverId, DigitalValue)],
+        reals: &[(ExternalRealDriverId, f64)],
+    ) -> Result<(), DigitalRunError> {
         self.host
             .store
             .check_external_drives(drives)
+            .map_err(|detail| DigitalRunError::ExternalExecution { detail })?;
+        self.host
+            .store
+            .check_external_real_drives(reals)
             .map_err(|detail| DigitalRunError::ExternalExecution { detail })?;
         let at = self.host.instant_of(self.tick)?;
         let resolution = self.host.resolution;
@@ -122,7 +140,13 @@ impl DigitalActiveExchange<'_> {
                 .note_external_activation(at, self.host.external_targets[driver.index()])
                 .map_err(|error| super::name_oscillating_tick(resolution, error))?;
         }
-        self.host.store.publish_external_drives(drives);
+        for (driver, _) in reals {
+            self.host
+                .scheduler
+                .note_external_activation(at, self.host.external_real_targets[driver.index()])
+                .map_err(|error| super::name_oscillating_tick(resolution, error))?;
+        }
+        self.host.store.publish_external_bank(drives, reals);
         Ok(())
     }
 }
@@ -225,6 +249,11 @@ impl DigitalHost {
             .external_sources()
             .iter()
             .any(|(_, external)| external == target)
+            || self
+                .store
+                .external_real_sources()
+                .iter()
+                .any(|(_, external)| external == target)
     }
 
     pub(crate) fn remap_external_nodes(&mut self, remap: impl Fn(usize) -> usize) {
@@ -236,6 +265,12 @@ impl DigitalHost {
         self.external_targets = self
             .store
             .external_sources()
+            .iter()
+            .map(|(_, target)| self.scheduler.intern_target(target.clone()))
+            .collect();
+        self.external_real_targets = self
+            .store
+            .external_real_sources()
             .iter()
             .map(|(_, target)| self.scheduler.intern_target(target.clone()))
             .collect();
@@ -262,5 +297,26 @@ impl DigitalHost {
             .map(|(_, target)| self.scheduler.intern_target(target.clone()))
             .collect();
         Ok(identities)
+    }
+
+    pub(crate) fn attach_external_reals(
+        &mut self,
+        observed: &[DigitalSignalId],
+        drivers: &[(DigitalSignalId, EventTarget)],
+    ) -> Result<Vec<ExternalRealDriverId>, DigitalRunError> {
+        if self.elaboration_closed {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "event topology cannot change after digital execution starts".into(),
+            });
+        }
+        let ids = self
+            .store
+            .attach_external_reals(observed, drivers)
+            .map_err(|detail| DigitalRunError::ExternalExecution { detail })?;
+        self.external_real_targets = drivers
+            .iter()
+            .map(|(_, target)| self.scheduler.intern_target(target.clone()))
+            .collect();
+        Ok(ids)
     }
 }

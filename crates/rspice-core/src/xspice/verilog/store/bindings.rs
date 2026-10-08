@@ -51,7 +51,6 @@ pub(super) struct ConnectedBits {
     topology: Arc<BitTopology>,
     resolved: Vec<DigitalValue>,
     external_values: Vec<DigitalValue>,
-    changes: Vec<DigitalBitChange>,
     pending: Vec<Option<FourStateValue>>,
     touched: Vec<DigitalSignalId>,
 }
@@ -61,7 +60,6 @@ impl ConnectedBits {
         Self {
             resolved: vec![DigitalValue::high_z(); topology.nets.len()],
             external_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
-            changes: Vec::new(),
             pending: vec![None; topology.by_signal.len()],
             touched: Vec::new(),
             topology,
@@ -153,6 +151,7 @@ impl DigitalSignalStore {
             .connected
             .as_ref()
             .map(|connected| ConnectedBits::fresh(Arc::clone(&connected.topology)));
+        self.external_reals = source.external_reals.as_ref().map(ExternalReals::fresh);
     }
 
     pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
@@ -213,6 +212,7 @@ impl DigitalSignalStore {
         self.connected
             .as_ref()
             .is_some_and(|bits| bits.topology.external_attached)
+            || self.external_reals.is_some()
     }
 
     pub(crate) fn external_sources(&self) -> &[(usize, EventTarget)] {
@@ -227,12 +227,22 @@ impl DigitalSignalStore {
                 target.node_id = remap(target.node_id);
             }
         }
+        if let Some(reals) = &mut self.external_reals {
+            for (_, target) in &mut Arc::make_mut(&mut reals.topology).sources {
+                target.node_id = remap(target.node_id);
+            }
+        }
     }
 
+    #[cfg(test)]
     pub(crate) fn take_external_bit_changes(&mut self) -> Vec<DigitalBitChange> {
-        self.connected
-            .as_mut()
-            .map_or_else(Vec::new, |bits| std::mem::take(&mut bits.changes))
+        self.take_external_changes()
+            .into_iter()
+            .filter_map(|change| match change {
+                ExternalNetChange::Bits(change) => Some(change),
+                ExternalNetChange::Real { .. } => None,
+            })
+            .collect()
     }
 
     pub(crate) fn check_external_drives(
@@ -266,7 +276,7 @@ impl DigitalSignalStore {
             connected.external_values[driver.0] = *value;
             nets.insert(connected.topology.external_sources[driver.0].0);
         }
-        let publication_start = connected.changes.len();
+        let publication_start = self.external_changes.len();
         for net in nets {
             self.resolve_connected_net(&mut connected, net, publication_start);
         }
@@ -290,7 +300,7 @@ impl DigitalSignalStore {
             .edit(signal, &self.values[usize::from(signal)])
             .clone_from(&value);
         let topology = Arc::clone(&connected.topology);
-        let publication_start = connected.changes.len();
+        let publication_start = self.external_changes.len();
         for &net_index in &topology.by_signal[usize::from(signal)] {
             self.resolve_connected_net(&mut connected, net_index, publication_start);
         }
@@ -334,12 +344,13 @@ impl DigitalSignalStore {
         let resolved = resolved.unwrap_or_else(DigitalValue::high_z);
         let previous = std::mem::replace(&mut connected.resolved[net_index], resolved);
         if previous != resolved && topology.observed[net_index] {
-            connected.changes.push(DigitalBitChange {
-                net: net_index,
-                previous,
-                value: resolved,
-                starts_publication: connected.changes.len() == publication_start,
-            });
+            self.external_changes
+                .push(ExternalNetChange::Bits(DigitalBitChange {
+                    net: net_index,
+                    previous,
+                    value: resolved,
+                    starts_publication: self.external_changes.len() == publication_start,
+                }));
         }
         for member in &net.members {
             connected

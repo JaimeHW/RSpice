@@ -2099,19 +2099,43 @@ impl XspiceInstance {
     #[cfg(feature = "veriloga")]
     pub(crate) fn for_each_digital_output_driver(
         &self,
+        visit: impl FnMut(super::event_scheduler::EventTarget),
+    ) {
+        self.for_each_typed_event_output_driver(false, visit);
+    }
+
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn for_each_real_output_driver(
+        &self,
+        visit: impl FnMut(super::event_scheduler::EventTarget),
+    ) {
+        self.for_each_typed_event_output_driver(true, visit);
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn for_each_typed_event_output_driver(
+        &self,
+        real: bool,
         mut visit: impl FnMut(super::event_scheduler::EventTarget),
     ) {
         for (port, connection) in self.ports.iter().zip(&self.connections) {
             if !matches!(
                 port.direction,
                 super::PortDirection::Out | super::PortDirection::InOut
-            ) || !matches!(
-                connection,
-                PortConnection::Digital(_)
-                    | PortConnection::DigitalInverted(_)
-                    | PortConnection::DigitalVector(_)
-                    | PortConnection::DigitalVectorMapped(_)
-            ) {
+            ) || !(if real {
+                matches!(
+                    connection,
+                    PortConnection::Real(_) | PortConnection::RealVector(_)
+                )
+            } else {
+                matches!(
+                    connection,
+                    PortConnection::Digital(_)
+                        | PortConnection::DigitalInverted(_)
+                        | PortConnection::DigitalVector(_)
+                        | PortConnection::DigitalVectorMapped(_)
+                )
+            }) {
                 continue;
             }
             for_each_event_connection_node(connection, |driver_index, node_id| {
