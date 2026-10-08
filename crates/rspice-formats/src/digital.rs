@@ -546,8 +546,33 @@ fn digital_events_to_dataset(
             max: max_rows,
         });
     }
+    // Sparse events can expand to every signal at every distinct tick. Admit
+    // that dense storage before allocating columns or walking their samples.
+    let columns = signals
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| adapter_error(format, "digital column count overflow"))?;
+    if columns > limits.max_columns {
+        return Err(adapter_error(format, "digital signal-count limit exceeded"));
+    }
+    let retained_values = ticks
+        .len()
+        .checked_mul(columns)
+        .ok_or_else(|| adapter_error(format, "digital retained-value count overflow"))?;
+    if retained_values > limits.max_values {
+        return Err(adapter_error(
+            format,
+            format_args!(
+                "the source expands to {retained_values} numeric values; the limit is {}",
+                limits.max_values
+            ),
+        ));
+    }
     let mut states = vec![None; signals.len()];
-    let mut values = vec![Vec::with_capacity(ticks.len()); signals.len()];
+    // Cloning an empty Vec does not preserve its reserved capacity.
+    let mut values = (0..signals.len())
+        .map(|_| Vec::with_capacity(ticks.len()))
+        .collect::<Vec<_>>();
     let mut coordinate = Vec::with_capacity(ticks.len());
     let mut events = events.into_iter().peekable();
     for tick in ticks {
@@ -667,6 +692,84 @@ mod tests {
                 max_signal_name_bytes: 1_024,
             },
         }
+    }
+
+    #[test]
+    fn sparse_vcd_checks_the_expanded_grid_budget() {
+        let mut source = String::from(
+            "$timescale 1 ns $end\n$scope module top $end\n$var wire 1 ! a $end\n$var wire 1 \" b $end\n$var wire 1 # c $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n0\"\n0#\n",
+        );
+        for tick in 1..20 {
+            source.push_str(&format!("#{tick}\n{}!\n", tick % 2));
+        }
+        let mut policy = limits();
+        policy.samples.max_values = 79;
+        let error = decode_vcd(source.as_bytes(), ResultImportFormat::Vcd, policy).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("expands to 80 numeric values; the limit is 79"),
+            "{error}"
+        );
+        policy.samples.max_values = 80;
+        let decoded = decode_vcd(source.as_bytes(), ResultImportFormat::Vcd, policy).unwrap();
+        assert_eq!(decoded.data.sample_count, 20);
+        assert_eq!(decoded.data.waveforms.len(), 3);
+        assert!(
+            decoded.data.waveforms[1]
+                .y
+                .iter()
+                .all(|value| *value == 0.0)
+        );
+        assert!(decoded.event_payload.is_some());
+    }
+
+    #[test]
+    fn dense_digital_expansion_is_admitted_before_allocating_or_projecting_samples() {
+        let mut policy = limits().samples;
+        policy.max_values = 3;
+        let signals = || {
+            vec![DigitalSignal {
+                name: "clock".into(),
+                width: Some(1),
+            }]
+        };
+        let events = |signal| {
+            vec![
+                DigitalEvent {
+                    tick: 0,
+                    signal,
+                    value: 0.0,
+                },
+                DigitalEvent {
+                    tick: 1,
+                    signal,
+                    value: 1.0,
+                },
+            ]
+        };
+        // Two sparse events retain two coordinates and two signal values. A bad
+        // signal reference must not be visited before the dense budget refusal.
+        let error = digital_events_to_dataset(
+            ResultImportFormat::Vcd,
+            1e-9,
+            signals(),
+            events(usize::MAX),
+            policy,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("expands to 4 numeric values; the limit is 3"),
+            "{error}"
+        );
+        policy.max_values = 4;
+        let decoded =
+            digital_events_to_dataset(ResultImportFormat::Vcd, 1e-9, signals(), events(0), policy)
+                .unwrap();
+        assert_eq!(decoded.data.waveforms[0].x.as_slice(), [0.0, 1e-9]);
+        assert_eq!(decoded.data.waveforms[0].y.as_slice(), [0.0, 1.0]);
     }
 
     #[test]
