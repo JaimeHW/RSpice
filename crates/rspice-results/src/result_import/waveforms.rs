@@ -21,6 +21,8 @@ pub struct WaveformImportLimits {
     pub min_rows: usize,
     pub max_rows: usize,
     pub max_columns: usize,
+    /// Retained f64 values: the shared coordinate plus each real trace, or
+    /// both rectangular components and the magnitude of each complex trace.
     pub max_values: usize,
     pub max_signal_name_bytes: usize,
 }
@@ -96,9 +98,13 @@ pub fn assemble_imported_waveforms(
     validate_finite(format, &coordinate_name, &coordinate)?;
     validate_coordinate(format, analysis_type, &coordinate)?;
 
-    let retained_values = coordinate
-        .len()
-        .checked_mul(1 + signals.len().saturating_mul(2))
+    // The coordinate is shared. Each real trace owns one array; each complex
+    // trace retains both components and a derived magnitude array.
+    let retained_columns = signals.iter().try_fold(1usize, |count, signal| {
+        count.checked_add(if signal.imag.is_some() { 3 } else { 1 })
+    });
+    let retained_values = retained_columns
+        .and_then(|columns| coordinate.len().checked_mul(columns))
         .ok_or_else(|| adapter_error(format, "retained-value count overflow"))?;
     if retained_values > max_values {
         return Err(adapter_error(
@@ -290,6 +296,66 @@ fn validate_coordinate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_value_limits_count_shared_coordinates_and_each_owned_sample_array() {
+        for (complex, expected) in [
+            (vec![false], 4),
+            (vec![true], 8),
+            (vec![false, false], 6),
+            (vec![true, false], 10),
+            (vec![true, true], 14),
+        ] {
+            for maximum in [expected - 1, expected] {
+                let signals = complex
+                    .iter()
+                    .enumerate()
+                    .map(|(index, complex)| ImportedSignal {
+                        name: format!("signal{index}"),
+                        real: vec![3.0, 4.0],
+                        imag: complex.then(|| vec![4.0, 3.0]),
+                        unit: None,
+                    })
+                    .collect();
+                let result = assemble_imported_waveforms(
+                    ResultImportFormat::Hdf5,
+                    AnalysisType::Ac,
+                    "frequency",
+                    vec![1.0, 2.0],
+                    signals,
+                    WaveformImportLimits {
+                        min_rows: 1,
+                        max_rows: 2,
+                        max_columns: 3,
+                        max_values: maximum,
+                        max_signal_name_bytes: 32,
+                    },
+                );
+                if maximum == expected {
+                    let decoded = result.unwrap();
+                    let actual = decoded.waveforms[0].x.len()
+                        + decoded
+                            .waveforms
+                            .iter()
+                            .map(|waveform| {
+                                waveform.y.len()
+                                    + waveform
+                                        .complex
+                                        .as_ref()
+                                        .map_or(0, |parts| parts.real.len() + parts.imag.len())
+                            })
+                            .sum::<usize>();
+                    assert_eq!(actual, expected);
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error.contains(&format!("expands to {expected} numeric values")),
+                        "{error}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn unavailable_samples_survive_assembly_and_calculation_without_becoming_zeroes() {
