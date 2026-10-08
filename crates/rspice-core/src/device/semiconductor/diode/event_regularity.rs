@@ -74,7 +74,7 @@ impl Diode {
                 }
             }
         }
-        let components = self.current_components_before_knees(vd);
+        let components = self.current_components_before_knees(vd, self.junction_gmin);
         if components
             .into_iter()
             .any(|(i, g)| !i.is_finite() || !g.is_finite())
@@ -82,15 +82,22 @@ impl Diode {
             return false;
         }
         // The authored knees act on a summed current, not on voltage alone.
-        // Their sqrt rational branches are analytic at every positive ratio;
-        // the evaluator's +/-1e-18 A switches must remain uncertified.
+        // Retain ngspice's +/-1e-18 A switches and Xyce's distinct domain.
         let forward = vd >= -3.0 * self.n * self.vt;
         let knee = if forward {
             self.forward_knee_current
         } else {
             self.reverse_knee_current
         };
-        if !knee_locally_c2(components[0].0, knee, forward)
+        let bottom_smooth = if self.xyce_forward_injection(vd) {
+            // Xyce has no +/-1e-18 current switch. Its analytic square-root
+            // chart requires finite IKF and Inorm with Inorm/IKF > -1.
+            // A positive overflowing ratio is still on the smooth chart.
+            knee.is_finite() && components[0].0 / knee > -1.0
+        } else {
+            knee_locally_c2(components[0].0, knee, forward)
+        };
+        if !bottom_smooth
             || !knee_locally_c2(
                 components[1].0,
                 self.sidewall_knee_current * self.sidewall_perimeter,

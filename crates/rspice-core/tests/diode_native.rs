@@ -346,3 +346,103 @@ fn diode_startup_bias_selects_the_bistable_operating_point_branch() {
     let off = op_node_voltage(&standard_bistable_deck(true), "n");
     assert_close("OFF diode bistable v(n)", off, -1.5, 1.0e-6, 1.0e-9);
 }
+
+#[test]
+fn diode_xyce_high_injection_matches_current_and_ac_charge_oracles() {
+    // Xyce 7.10 N_DEV_Diode.C: Inorm*Khi, Khi=sqrt(IKF/(IKF+Inorm)).
+    // Its GMIN contribution is inside Inorm, before the injection factor.
+    let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
+    for gmin in [0.0, 1e-3] {
+        for ratio in [1.0_f64, 0.01, 100.0] {
+            let voltage = vt * (1.0 + ratio * 1e-3 / 1e-14).ln();
+            let normal = 1e-14 * (voltage / vt).exp_m1() + gmin * voltage;
+            let normal_g = 1e-14 * (voltage / vt).exp() / vt + gmin;
+            let r = normal / 1e-3;
+            let expected_i = normal / (1.0 + r).sqrt();
+            let expected_g = normal_g * (1.0 + 0.5 * r) / (1.0 + r).powf(1.5);
+            let deck = Netlist::parse(&format!("Xyce high injection\nV1 n 0 DC {voltage:.17e} AC 1\nD1 n 0 dm\n.model dm D(IS=1e-14 N=1 IKF=1m CJO=0 TT=2n)\n.options GMIN={gmin:.17e} RELTOL=1e-8 ABSTOL=1e-15 VNTOL=1e-12\n.end\n")).unwrap();
+            let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+            config.convergence_config.gmin_target = 0.0;
+            let engine = Engine::new(config);
+            let point = engine.run_dc_op(&deck).unwrap();
+            let source_i = -branch_current(&point, "v1");
+            let observed_i = point.try_dc_observable_named("I(D1)").unwrap();
+            assert!(
+                (source_i - expected_i).abs() < 1e-14 + 1e-9 * expected_i.abs(),
+                "GMIN={gmin:e} ratio={ratio}: source {source_i:e}, expected {expected_i:e}"
+            );
+            assert!(
+                (observed_i - expected_i).abs() < 1e-14 + 1e-9 * expected_i.abs(),
+                "GMIN={gmin:e} ratio={ratio}: I(D1)={observed_i:e}, expected {expected_i:e}"
+            );
+            for frequency in [1e6, 1e9] {
+                let result = engine.run_ac(&deck, &[frequency]).unwrap();
+                let index = result[0]
+                    .branch_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case("v1"))
+                    .unwrap();
+                let current = -result[0].currents[index];
+                let susceptance = std::f64::consts::TAU * frequency * 2e-9 * expected_g;
+                assert!(
+                    (current.re - expected_g).abs() < 1e-13 + 1e-9 * expected_g.abs(),
+                    "AC GMIN={gmin:e} ratio={ratio}: {current:?}, expected G={expected_g:e}"
+                );
+                assert!((current.im - susceptance).abs() < 1e-13 + 1e-9 * susceptance.abs());
+            }
+        }
+    }
+}
+
+#[test]
+fn diode_xyce_injection_keeps_recombination_and_sidewall_outside_the_knee() {
+    let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
+    for separate in [false, true] {
+        for gmin in [0.0, 1e-3] {
+            let v: f64 = 0.67;
+            let isat = if separate { 1e-14 } else { 1e-14 + 2.0 * 3e-14 };
+            let nvt = 1.1 * vt;
+            let normal = isat * (v / nvt).exp_m1() + gmin * v;
+            let normal_g = isat * (v / nvt).exp() / nvt + gmin;
+            let ratio = normal / 1e-3;
+            let mut expected_i = normal / (1.0 + ratio).sqrt();
+            let mut expected_g = normal_g * (1.0 + 0.5 * ratio) / (1.0 + ratio).powf(1.5);
+            let rec = 1e-10 * (v / (2.0 * vt)).exp_m1();
+            let rec_g = 1e-10 * (v / (2.0 * vt)).exp() / (2.0 * vt);
+            let base = (1.0 - v).powi(2) + 0.005;
+            let generation = base.powf(0.25);
+            let generation_g = -0.5 * (1.0 - v) * base.powf(-0.75);
+            expected_i += rec * generation;
+            expected_g += rec_g * generation + rec * generation_g;
+            if separate {
+                expected_i += 6e-14 * (v / (1.3 * vt)).exp_m1();
+                expected_g += 6e-14 * (v / (1.3 * vt)).exp() / (1.3 * vt);
+            }
+            let sidewall = if separate { "NS=1.3" } else { "" };
+            let deck = Netlist::parse(&format!("Xyce composite diode\nV1 n 0 DC {v} AC 1\nD1 n 0 dm PJ=2\n.model dm D(IS=1e-14 N=1.1 IKF=1m ISR=1e-10 NR=2 JSW=3e-14 {sidewall} VJ=1 M=.5 CJO=0 TT=2n)\n.options GMIN={gmin:e} RELTOL=1e-8 ABSTOL=1e-15 VNTOL=1e-12\n.end\n")).unwrap();
+            let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+            config.convergence_config.gmin_target = 0.0;
+            let engine = Engine::new(config);
+            let point = engine.run_dc_op(&deck).unwrap();
+            for current in [
+                -branch_current(&point, "v1"),
+                point.try_dc_observable_named("I(D1)").unwrap(),
+            ] {
+                assert!(
+                    (current - expected_i).abs() < 1e-14 + 1e-9 * expected_i.abs(),
+                    "NS={separate} GMIN={gmin}: {current:e} vs {expected_i:e}"
+                );
+            }
+            let result = engine.run_ac(&deck, &[1e6]).unwrap();
+            let index = result[0]
+                .branch_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case("v1"))
+                .unwrap();
+            let actual = -result[0].currents[index];
+            assert!((actual.re - expected_g).abs() < 1e-13 + 1e-9 * expected_g.abs());
+            let expected_c = std::f64::consts::TAU * 1e6 * 2e-9 * expected_g;
+            assert!((actual.im - expected_c).abs() < 1e-13 + 1e-9 * expected_c.abs());
+        }
+    }
+}

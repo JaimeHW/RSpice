@@ -502,9 +502,9 @@ impl Diode {
         self.last_limited_vd.set(voltage);
         self.limited.set(false);
         self.last_stamp_vd.set(voltage);
-        self.last_stamp_id
-            .set(current + self.junction_gmin * voltage);
-        self.last_stamp_gd.set(conductance + self.junction_gmin);
+        let (stamped_current, stamped_conductance) = self.stamped_current_and_conductance(voltage);
+        self.last_stamp_id.set(stamped_current);
+        self.last_stamp_gd.set(stamped_conductance);
     }
 
     pub(crate) fn nonlinear_state_snapshot(&self) -> DiodeNonlinearState {
@@ -711,8 +711,9 @@ impl Diode {
     }
 
     /// Limit the junction voltage against the previous iterate and
-    /// linearize there, folding the engine junction gmin in (dioload.c:
-    /// `gd += CKTgmin; cd += CKTgmin·vd`). Returns `(vd, id, gd)`.
+    /// linearize the stamped current there, including junction GMIN under
+    /// the selected dialect's law. Xyce applies its forward injection knee
+    /// after GMIN; other branches add GMIN linearly. Returns `(vd, id, gd)`.
     ///
     /// Breakdown diodes keep the raw voltage: ngspice limits those through
     /// a dedicated branch around `-BV`, and clamping them with the plain
@@ -755,9 +756,7 @@ impl Diode {
             self.limited.set(false);
             let vd = if tied || self.initial_off { 0.0 } else { vcrit };
             self.last_limited_vd.set(vd);
-            let (id, gd) = self.candidate_current_and_conductance(vd);
-            let stamped_id = id + self.junction_gmin * vd;
-            let stamped_gd = gd + self.junction_gmin;
+            let (stamped_id, stamped_gd) = self.candidate_stamped_current_and_conductance(vd);
             self.last_stamp_vd.set(vd);
             self.last_stamp_id.set(stamped_id);
             self.last_stamp_gd.set(stamped_gd);
@@ -795,9 +794,7 @@ impl Diode {
         self.last_limited_vd.set(vd);
         self.junction_history_valid.set(true);
 
-        let (id, gd) = self.candidate_current_and_conductance(vd);
-        let stamped_id = id + self.junction_gmin * vd;
-        let stamped_gd = gd + self.junction_gmin;
+        let (stamped_id, stamped_gd) = self.candidate_stamped_current_and_conductance(vd);
         self.last_stamp_vd.set(vd);
         self.last_stamp_id.set(stamped_id);
         self.last_stamp_gd.set(stamped_gd);
@@ -1584,10 +1581,11 @@ impl Diode {
             .filter(|value| *value >= 0.0)
     }
 
-    /// Cached operating-point values from the last accepted Newton solution:
-    /// `(vd, id, gd)` — junction voltage, current, and conductance.
+    /// Operating-point values at the last accepted Newton solution:
+    /// `(vd, id, gd, cd)` — junction voltage, stamped current, conductance,
+    /// and differential charge capacitance, including junction GMIN.
     pub fn op_values(&self) -> (Value, Value, Value, Value) {
-        let (id, gd) = self.current_and_conductance(self.prev_vd);
+        let (id, gd) = self.stamped_current_and_conductance(self.prev_vd);
         let (_, cd) = self.junction_charge_and_capacitance(self.prev_vd);
         (self.prev_vd, id, gd, cd)
     }
@@ -1673,9 +1671,7 @@ impl Diode {
             // continuation conductance. Excluding gmin here would stamp its
             // static current but omit d/dt(TT*gmin*vd) from the same physical
             // lead current.
-            let (model_current, model_conductance) = self.current_and_conductance(vd);
-            let id = model_current + self.junction_gmin * vd;
-            let gd = model_conductance + self.junction_gmin;
+            let (id, gd) = self.stamped_current_and_conductance(vd);
             qd += self.tt * id;
             capd += self.tt * gd;
         }
@@ -1836,9 +1832,7 @@ impl Diode {
         voltages: &[Value],
     ) {
         let vd = self.terminal_voltage(voltages);
-        let (id, gd) = self.candidate_current_and_conductance(vd);
-        let stamped_id = id + self.junction_gmin * vd;
-        let stamped_gd = gd + self.junction_gmin;
+        let (stamped_id, stamped_gd) = self.candidate_stamped_current_and_conductance(vd);
         self.stamp_linearized_direct(matrix, rhs, vd, stamped_id, stamped_gd);
     }
 
@@ -1893,8 +1887,9 @@ impl Diode {
         }
     }
 
-    /// Shockley diode equation: I = Is * (exp(Vd / (N * Vt)) - 1)
-    /// Public for noise analysis (shot noise = 2qI)
+    /// Model conduction current, including the selected dialect's junction
+    /// terms and injection knees, without the artificial GMIN contribution.
+    /// Public for noise analysis (shot noise = 2qI).
     pub fn current(&self, vd: Value) -> Value {
         self.current_and_conductance(vd).0
     }
@@ -1907,16 +1902,12 @@ impl Diode {
     /// current before the integration-owned dQ/dt term is added.
     #[inline]
     pub(crate) fn stamped_conduction_current(&self, vd: Value) -> Value {
-        self.current(vd) + self.junction_gmin * vd
+        self.stamped_current_and_conductance(vd).0
     }
 
     /// Physical F and dF/dV at an arbitrary bias, without Newton limiting.
     pub(crate) fn stamped_current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        let (current, conductance) = self.current_and_conductance(vd);
-        (
-            current + self.junction_gmin * vd,
-            conductance + self.junction_gmin,
-        )
+        self.current_and_conductance_with_gmin(vd, self.junction_gmin)
     }
 
     /// Sufficient, bias-independent certificate for the C1 monotone law used
@@ -1959,11 +1950,15 @@ impl Diode {
     /// junction voltage. That distinction matters for high-injection limiting
     /// and for the sidewall current shape.
     fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        self.current_and_conductance_with_gmin(vd, 0.0)
+    }
+
+    fn current_and_conductance_with_gmin(&self, vd: Value, gmin: Value) -> (Value, Value) {
         let [
             (bottom_i, bottom_g),
             (sidewall_i, sidewall_g),
             (recombination_i, recombination_g),
-        ] = self.current_components_before_knees(vd);
+        ] = self.current_components_before_knees(vd, gmin);
         let (mut bottom_i, mut bottom_g) = self.apply_high_injection_knee(vd, bottom_i, bottom_g);
         if !self.ngspice_dialect {
             bottom_i += recombination_i;
@@ -1974,13 +1969,19 @@ impl Diode {
             sidewall_g,
             self.sidewall_knee_current * self.sidewall_perimeter,
         );
-        (bottom_i + sidewall_i, bottom_g + sidewall_g)
+        let (current, conductance) = (bottom_i + sidewall_i, bottom_g + sidewall_g);
+        if gmin == 0.0 || self.xyce_forward_injection(vd) {
+            (current, conductance)
+        } else {
+            (current + gmin * vd, conductance + gmin)
+        }
     }
 
     /// Bottom, sidewall and recombination terms before their injection knees.
     /// Event regularity checks use these same currents to locate the actual
-    /// switching thresholds, including the dialect's recombination ordering.
-    fn current_components_before_knees(&self, vd: Value) -> [(Value, Value); 3] {
+    /// switching thresholds, including the dialect's recombination ordering
+    /// and the GMIN contribution inside Xyce's forward injection knee.
+    fn current_components_before_knees(&self, vd: Value, gmin: Value) -> [(Value, Value); 3] {
         let (mut bottom_i, mut bottom_g) =
             self.exponential_current_and_conductance(vd, self.bottom_saturation_current(), self.n);
         let recombination = self.recombination_current_and_conductance(vd);
@@ -1995,6 +1996,12 @@ impl Diode {
         if self.ngspice_dialect {
             bottom_i += recombination.0;
             bottom_g += recombination.1;
+        }
+        // Xyce's normal junction includes GMIN before Khi is applied. Its
+        // recombination and independent sidewall terms remain outside Khi.
+        if gmin != 0.0 && self.xyce_forward_injection(vd) {
+            bottom_i += gmin * vd;
+            bottom_g += gmin;
         }
         let (mut sidewall_i, mut sidewall_g) = self.sidewall_current_and_conductance(vd);
         if self.tunneling.sidewall_given {
@@ -2021,6 +2028,25 @@ impl Diode {
         } else {
             self.current_and_conductance(vd)
         }
+    }
+
+    /// The candidate cache owns the model current at zero continuation
+    /// conductance. A changed GMIN therefore cannot stale it. Xyce's active
+    /// forward knee is the one non-affine GMIN path and must reevaluate F/G.
+    fn candidate_stamped_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        if self.junction_gmin != 0.0 && self.xyce_forward_injection(vd) {
+            self.stamped_current_and_conductance(vd)
+        } else {
+            let (current, conductance) = self.candidate_current_and_conductance(vd);
+            (
+                current + self.junction_gmin * vd,
+                conductance + self.junction_gmin,
+            )
+        }
+    }
+
+    fn xyce_forward_injection(&self, vd: Value) -> bool {
+        self.xyce_dialect && self.forward_knee_current > 0.0 && vd >= -3.0 * self.n * self.vt
     }
 
     /// Sidewall junction current, whether or not the card gave it its own
@@ -2444,9 +2470,46 @@ impl Diode {
     ) -> (Value, Value) {
         let n_vt = self.n * self.vt;
         if vd >= -3.0 * n_vt {
-            return Self::apply_forward_knee(current, conductance, self.forward_knee_current);
+            return if self.xyce_dialect {
+                Self::apply_xyce_forward_knee(current, conductance, self.forward_knee_current)
+            } else {
+                Self::apply_forward_knee(current, conductance, self.forward_knee_current)
+            };
         }
         Self::apply_reverse_knee(current, conductance, self.reverse_knee_current)
+    }
+
+    /// Xyce 7.10: I = Inorm / sqrt(1 + Inorm/IKF). Unlike the ngspice
+    /// knee, this law is smooth through zero and also applies to negative
+    /// Inorm in the forward exponential region, provided IKF+Inorm > 0.
+    fn apply_xyce_forward_knee(current: Value, conductance: Value, knee: Value) -> (Value, Value) {
+        if knee <= 0.0 {
+            return (current, conductance);
+        }
+        if current > knee {
+            // Factor the dominant current before forming a ratio or sum.
+            // This retains finite I/G when Inorm/IKF would overflow.
+            let ratio = knee / current;
+            let denominator = (1.0 + ratio).sqrt();
+            let root_current = current.sqrt();
+            let root_knee = knee.sqrt();
+            let limited_current = root_current * root_knee / denominator;
+            let limited_conductance = rspice_veriloga_runtime::arithmetic::product_div(
+                conductance,
+                root_knee,
+                root_current,
+            ) / denominator
+                * (0.5 + 0.5 * ratio / (1.0 + ratio));
+            (limited_current, limited_conductance)
+        } else {
+            let ratio = current / knee;
+            let denominator = 1.0 + ratio;
+            let factor = denominator.sqrt().recip();
+            (
+                current * factor,
+                conductance * factor * (1.0 - 0.5 * ratio / denominator),
+            )
+        }
     }
 
     fn apply_forward_knee(
@@ -2482,11 +2545,9 @@ impl Diode {
     }
 
     fn linearized_current_matches_candidate(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        let candidate_current = if self.candidate_eval_valid {
-            self.prev_id
-        } else {
-            self.current(self.prev_vd)
-        } + self.junction_gmin * self.prev_vd;
+        let candidate_current = self
+            .candidate_stamped_current_and_conductance(self.prev_vd)
+            .0;
         let predicted_current = self.last_stamp_id.get()
             + self.last_stamp_gd.get() * (self.prev_vd - self.last_stamp_vd.get());
         let tolerance = criteria.current_tolerance()

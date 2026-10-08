@@ -152,7 +152,7 @@ fn diode_event_injection_switches_use_the_actual_summed_current() {
     // owner at a real composite bias, not a proxy Shockley-only current.
     for dialect in 0..3 {
         let diode = model(dialect);
-        let components = diode.current_components_before_knees(0.25);
+        let components = diode.current_components_before_knees(0.25, 0.0);
         let ordinary = diode
             .exponential_current_and_conductance(0.25, diode.bottom_saturation_current(), diode.n)
             .0
@@ -180,5 +180,67 @@ fn diode_event_regularity_refuses_invalid_or_clamped_charge_charts() {
             _ => invalid.cj0 = Value::INFINITY,
         }
         assert!(!invalid.physical_event_locally_c2(0.25), "case {case}");
+    }
+}
+
+#[test]
+fn xyce_injection_keeps_the_zero_current_chart_and_checks_its_domain() {
+    let mut diode = Diode::spice_defaults("d".into(), 1, 0);
+    diode.set_xyce_compatibility(true);
+    diode.vt = 0.125;
+    diode.is = 2.0;
+    diode.forward_knee_current = 1.0;
+    for v in [-0.01, 0.0, 0.01] {
+        assert!(diode.physical_event_locally_c2(v));
+        let h = 1e-7;
+        let g = diode.current_and_conductance(v).1;
+        let finite = (diode.current(v + h) - diode.current(v - h)) / (2.0 * h);
+        assert!((g - finite).abs() < 1e-8 * g.abs());
+    }
+    let boundary = diode.vt * 0.5_f64.ln();
+    assert!(!diode.physical_event_locally_c2(boundary));
+    assert!(!diode.physical_event_locally_c2(boundary - 1e-6));
+    assert!(diode.physical_event_locally_c2(boundary + 1e-6));
+    // An overflowing intermediate current ratio must not erase a finite
+    // current or tangent in the high-injection asymptote.
+    let (i, g) = Diode::apply_xyce_forward_knee(1e200, 1e200, 1e-200);
+    assert!((i - 1.0).abs() < 1e-14);
+    assert!((g - 0.5).abs() < 1e-14);
+}
+
+#[test]
+fn xyce_injection_gmin_changes_do_not_reuse_an_incorrect_candidate_or_charge() {
+    let mut diode = Diode::spice_defaults("d".into(), 1, 0);
+    diode.set_xyce_compatibility(true);
+    diode.is = 1e-14;
+    diode.forward_knee_current = 1e-3;
+    diode.tt = 2e-9;
+    let v: f64 = 0.65;
+    diode.update(&[v]);
+    let model_current = diode.candidate_current_and_conductance(v);
+    for gmin in [0.0, 1e-3, 2e-3, 0.0] {
+        diode.set_junction_gmin(gmin);
+        let raw = diode.is * (v / diode.vt).exp_m1() + gmin * v;
+        let raw_g = diode.is * (v / diode.vt).exp() / diode.vt + gmin;
+        let r = raw / diode.forward_knee_current;
+        let expected_i = raw / (1.0 + r).sqrt();
+        let expected_g = raw_g * (1.0 + 0.5 * r) / (1.0 + r).powf(1.5);
+        let before = diode.nonlinear_state_snapshot();
+        let actual = diode.candidate_stamped_current_and_conductance(v);
+        assert!((actual.0 - expected_i).abs() < 1e-14 * expected_i.abs());
+        assert!((actual.1 - expected_g).abs() < 1e-14 * expected_g.abs());
+        let charge = diode.junction_charge_and_capacitance(v);
+        assert!((charge.0 - 2e-9 * expected_i).abs() < 1e-23);
+        assert!((charge.1 - 2e-9 * expected_g).abs() < 1e-22);
+        assert_eq!(diode.candidate_current_and_conductance(v), model_current);
+        assert_eq!(before, diode.nonlinear_state_snapshot());
+        diode.seed_accepted_periodic_bias(v);
+        let (_, i, g) = diode.limited_linearization(v);
+        assert_eq!((i, g), actual);
+        assert!(
+            diode.linearized_current_matches_candidate(NonlinearConvergenceCriteria::default())
+        );
+        let (_, id, gd, cd) = diode.op_values();
+        assert_eq!((id, gd, cd), (actual.0, actual.1, charge.1));
     }
 }

@@ -323,3 +323,57 @@ fn gp_diode_smooth_model_terms_do_not_create_endless_delay_events() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_xyce_diode_injection_preserves_charge_impulses_and_finite_currents() {
+    let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
+    for gmin in [0.0, 1e-3] {
+        let current = |v: f64| {
+            let normal = 1e-14 * (v / vt).exp_m1() + gmin * v;
+            normal / (1.0 + normal / 1e-3).sqrt()
+        };
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            let engine = engine(SpiceDialect::Xyce, method);
+            let deck = Netlist::parse(&format!("Xyce injection event\nVD d 0 DC .65 PWL(0 .65 1n .65 1n .75 3n .75)\nD1 d 0 dm\n.model dm D(IS=1e-14 N=1 IKF=1m CJO=0 TT=2n)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN={gmin:e} RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(d) i(d1) i(vd)\n.end\n")).unwrap();
+            let (result, checkpoints) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode(
+                    &deck,
+                    3e-9,
+                    5e-12,
+                    TransientStartupMode::OperatingPoint,
+                    &[1e-9, 1.7e-9],
+                )
+                .unwrap();
+            let diode = result.try_branch_current_waveform_named("d1").unwrap();
+            let source = result.try_branch_current_waveform_named("vd").unwrap();
+            for (index, &time) in result.time.iter().enumerate() {
+                let expected = current(if time >= 1e-9 { 0.75 } else { 0.65 });
+                assert!(
+                    (diode[index] - expected).abs() < 1e-13 + expected.abs() * 1e-9,
+                    "{method:?}/{gmin}: I(D1) at {time:e}: {} vs {expected:e}",
+                    diode[index]
+                );
+                if time == 0.0 || time == 1e-9 {
+                    assert!((diode[index] + source[index]).abs() < 1e-13 + expected.abs() * 1e-9);
+                }
+            }
+            let expected = 2e-9 * (current(0.75) - current(0.65));
+            for (name, sign) in [("d1", 1.0), ("vd", -1.0)] {
+                let trace = branch_impulses(&result, name);
+                assert!(trace.complete);
+                let jump = trace.points.iter().find(|p| p.time == 1e-9).unwrap();
+                assert!(
+                    (jump.charge_coulombs - sign * expected).abs() < 1e-25 + expected.abs() * 1e-10
+                );
+            }
+            for checkpoint in checkpoints {
+                exact_restart(&engine, &deck, &result, &checkpoint.checkpoint, 3e-9, 5e-12);
+            }
+        }
+    }
+}

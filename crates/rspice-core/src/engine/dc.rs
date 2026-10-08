@@ -632,7 +632,7 @@ impl Engine {
         // with voltage-source and resistor I(...) observables.
         for diode in &circuit.diodes.devices {
             let voltage = node_voltage(diode.node_anode) - node_voltage(diode.node_cathode);
-            let current = diode.current(voltage);
+            let current = diode.stamped_conduction_current(voltage);
             result.push_dc_observable(format!("I({})", diode.name), current);
         }
 
