@@ -847,8 +847,21 @@ impl Engine {
         }
     }
 
-    fn is_nonzero_finite_complex(value: Complex64) -> bool {
-        value != Complex64::new(0.0, 0.0) && value.re.is_finite() && value.im.is_finite()
+    fn xspice_ac_coefficient_is_nonzero(
+        instance: &crate::xspice::XspiceInstance,
+        output_port: &str,
+        output_index: Option<usize>,
+        frequency_hz: Value,
+        value: Complex64,
+    ) -> Result<bool, SimulationError> {
+        if !complex_is_finite(value) {
+            let element = output_index.map_or_else(String::new, |index| format!("[{index}]"));
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE instance '{}' output '{output_port}{element}' has a non-finite small-signal coefficient ({value}) at {frequency_hz:.16e} Hz",
+                instance.name
+            )));
+        }
+        Ok(value != Complex64::new(0.0, 0.0))
     }
 
     fn stamp_xspice_ac_current_probe(
@@ -905,7 +918,7 @@ impl Engine {
         neg: usize,
         conductance: Value,
     ) {
-        if !conductance.is_finite() || conductance == 0.0 {
+        if conductance == 0.0 {
             return;
         }
         if pos > 0 {
@@ -930,11 +943,17 @@ impl Engine {
         branch_row: usize,
         frequency_hz: Value,
         num_nodes: usize,
-    ) {
+    ) -> Result<(), SimulationError> {
         for (control_port, partial) in
             instance.output_vector_input_ac_partials(output_port, output_index, frequency_hz)
         {
-            if !Self::is_nonzero_finite_complex(partial) {
+            if !Self::xspice_ac_coefficient_is_nonzero(
+                instance,
+                output_port,
+                Some(output_index),
+                frequency_hz,
+                partial,
+            )? {
                 continue;
             }
             if let Some(control_connection) = instance.connection(&control_port) {
@@ -951,7 +970,13 @@ impl Engine {
         for (control_port, index, partial) in
             instance.output_vector_input_vector_ac_partials(output_port, output_index, frequency_hz)
         {
-            if !Self::is_nonzero_finite_complex(partial) {
+            if !Self::xspice_ac_coefficient_is_nonzero(
+                instance,
+                output_port,
+                Some(output_index),
+                frequency_hz,
+                partial,
+            )? {
                 continue;
             }
             if let Some(control_connection) = instance.connection(&control_port) {
@@ -966,6 +991,7 @@ impl Engine {
                 );
             }
         }
+        Ok(())
     }
 
     fn stamp_xspice_ac_vector_current_controls(
@@ -974,7 +1000,7 @@ impl Engine {
         port: XspiceAcOutputPort<'_>,
         frequency_hz: Value,
         num_nodes: usize,
-    ) {
+    ) -> Result<(), SimulationError> {
         let XspiceAcOutputPort {
             output_port,
             output_index,
@@ -984,7 +1010,13 @@ impl Engine {
         for (control_port, partial) in
             instance.output_vector_input_ac_partials(output_port, output_index, frequency_hz)
         {
-            if !Self::is_nonzero_finite_complex(partial) {
+            if !Self::xspice_ac_coefficient_is_nonzero(
+                instance,
+                output_port,
+                Some(output_index),
+                frequency_hz,
+                partial,
+            )? {
                 continue;
             }
             let Some(control_connection) = instance.connection(&control_port) else {
@@ -1014,7 +1046,13 @@ impl Engine {
         for (control_port, index, partial) in
             instance.output_vector_input_vector_ac_partials(output_port, output_index, frequency_hz)
         {
-            if !Self::is_nonzero_finite_complex(partial) {
+            if !Self::xspice_ac_coefficient_is_nonzero(
+                instance,
+                output_port,
+                Some(output_index),
+                frequency_hz,
+                partial,
+            )? {
                 continue;
             }
             let Some(control_connection) = instance.connection(&control_port) else {
@@ -1043,6 +1081,7 @@ impl Engine {
                 );
             }
         }
+        Ok(())
     }
 
     fn stamp_xspice_ac_vector_output_element(
@@ -1052,7 +1091,7 @@ impl Engine {
         element: XspiceAcOutputElement<'_>,
         frequency_hz: Value,
         num_nodes: usize,
-    ) {
+    ) -> Result<(), SimulationError> {
         let XspiceAcOutputElement {
             port,
             port_idx,
@@ -1073,6 +1112,13 @@ impl Engine {
         if stamp_as_current_output {
             let self_conductance =
                 Self::xspice_ac_current_output_self_conductance(port, conductance);
+            Self::xspice_ac_coefficient_is_nonzero(
+                instance,
+                &port.name,
+                Some(output_index),
+                frequency_hz,
+                Complex64::new(self_conductance, 0.0),
+            )?;
             Self::stamp_xspice_ac_current_self_conductance(ac_matrix, pos, neg, self_conductance);
             Self::stamp_xspice_ac_vector_current_controls(
                 ac_matrix,
@@ -1085,8 +1131,8 @@ impl Engine {
                 },
                 frequency_hz,
                 num_nodes,
-            );
-            return;
+            )?;
+            return Ok(());
         }
         match output_type {
             crate::xspice::PortType::Voltage
@@ -1096,7 +1142,7 @@ impl Engine {
                 let Some(branch_ordinal) =
                     instance.branch_vector_output_ordinal(port_idx, output_index)
                 else {
-                    return;
+                    return Ok(());
                 };
                 Self::stamp_xspice_ac_voltage_branch_topology(
                     circuit,
@@ -1114,10 +1160,11 @@ impl Engine {
                     branch - 1,
                     frequency_hz,
                     num_nodes,
-                );
+                )?;
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn stamp_xspice_small_signal_ac(
@@ -1173,7 +1220,7 @@ impl Engine {
                                     },
                                     frequency_hz,
                                     num_nodes,
-                                );
+                                )?;
                             }
                         }
                         crate::xspice::PortConnection::TypedAnalogVector(elements) => {
@@ -1194,7 +1241,7 @@ impl Engine {
                                             },
                                             frequency_hz,
                                             num_nodes,
-                                        );
+                                        )?;
                                     }
                                     crate::xspice::AnalogInputConnection::Differential(
                                         pos,
@@ -1223,7 +1270,7 @@ impl Engine {
                                             },
                                             frequency_hz,
                                             num_nodes,
-                                        );
+                                        )?;
                                     }
                                     crate::xspice::AnalogInputConnection::CurrentOutput {
                                         pos,
@@ -1243,7 +1290,7 @@ impl Engine {
                                             },
                                             frequency_hz,
                                             num_nodes,
-                                        );
+                                        )?;
                                     }
                                     _ => {}
                                 }
@@ -1258,6 +1305,13 @@ impl Engine {
                     if let Some((conductance, _)) = instance.get_analog_contribution(port_idx) {
                         let self_conductance =
                             Self::xspice_ac_current_output_self_conductance(port, conductance);
+                        Self::xspice_ac_coefficient_is_nonzero(
+                            instance,
+                            &port.name,
+                            None,
+                            frequency_hz,
+                            Complex64::new(self_conductance, 0.0),
+                        )?;
                         Self::stamp_xspice_ac_current_self_conductance(
                             ac_matrix,
                             *pos,
@@ -1268,7 +1322,13 @@ impl Engine {
                     for (control_port, partial) in
                         instance.output_input_ac_partials(&port.name, frequency_hz)
                     {
-                        if !Self::is_nonzero_finite_complex(partial) {
+                        if !Self::xspice_ac_coefficient_is_nonzero(
+                            instance,
+                            &port.name,
+                            None,
+                            frequency_hz,
+                            partial,
+                        )? {
                             continue;
                         }
                         let Some(control_connection) = instance.connection(&control_port) else {
@@ -1298,7 +1358,13 @@ impl Engine {
                     for (control_port, index, partial) in
                         instance.output_input_vector_ac_partials(&port.name, frequency_hz)
                     {
-                        if !Self::is_nonzero_finite_complex(partial) {
+                        if !Self::xspice_ac_coefficient_is_nonzero(
+                            instance,
+                            &port.name,
+                            None,
+                            frequency_hz,
+                            partial,
+                        )? {
                             continue;
                         }
                         let Some(control_connection) = instance.connection(&control_port) else {
@@ -1374,7 +1440,13 @@ impl Engine {
                         for (control_port, partial) in
                             instance.output_input_ac_partials(&port.name, frequency_hz)
                         {
-                            if !Self::is_nonzero_finite_complex(partial) {
+                            if !Self::xspice_ac_coefficient_is_nonzero(
+                                instance,
+                                &port.name,
+                                None,
+                                frequency_hz,
+                                partial,
+                            )? {
                                 continue;
                             }
                             if let Some(control_connection) = instance.connection(&control_port) {
@@ -1391,7 +1463,13 @@ impl Engine {
                         for (control_port, index, partial) in
                             instance.output_input_vector_ac_partials(&port.name, frequency_hz)
                         {
-                            if !Self::is_nonzero_finite_complex(partial) {
+                            if !Self::xspice_ac_coefficient_is_nonzero(
+                                instance,
+                                &port.name,
+                                None,
+                                frequency_hz,
+                                partial,
+                            )? {
                                 continue;
                             }
                             if let Some(control_connection) = instance.connection(&control_port) {
@@ -1414,6 +1492,13 @@ impl Engine {
                         if let Some((conductance, _)) = instance.get_analog_contribution(port_idx) {
                             let self_conductance =
                                 Self::xspice_ac_current_output_self_conductance(port, conductance);
+                            Self::xspice_ac_coefficient_is_nonzero(
+                                instance,
+                                &port.name,
+                                None,
+                                frequency_hz,
+                                Complex64::new(self_conductance, 0.0),
+                            )?;
                             match connection {
                                 crate::xspice::PortConnection::Analog(node) => {
                                     Self::stamp_xspice_ac_current_self_conductance(
@@ -1439,7 +1524,13 @@ impl Engine {
                         for (control_port, partial) in
                             instance.output_input_ac_partials(&port.name, frequency_hz)
                         {
-                            if !Self::is_nonzero_finite_complex(partial) {
+                            if !Self::xspice_ac_coefficient_is_nonzero(
+                                instance,
+                                &port.name,
+                                None,
+                                frequency_hz,
+                                partial,
+                            )? {
                                 continue;
                             }
                             let Some(control_connection) = instance.connection(&control_port)
@@ -1510,7 +1601,13 @@ impl Engine {
                         for (control_port, index, partial) in
                             instance.output_input_vector_ac_partials(&port.name, frequency_hz)
                         {
-                            if !Self::is_nonzero_finite_complex(partial) {
+                            if !Self::xspice_ac_coefficient_is_nonzero(
+                                instance,
+                                &port.name,
+                                None,
+                                frequency_hz,
+                                partial,
+                            )? {
                                 continue;
                             }
                             let Some(control_connection) = instance.connection(&control_port)
@@ -3214,6 +3311,250 @@ pub(super) fn validate_ac_frequencies(frequencies: &[Value]) -> Result<(), Simul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xspice_ac_checks_scalar_vector_and_selected_output_coefficients() {
+        use crate::xspice::{
+            AnalogInputConnection, CmContext, CmResult, CodeModel, ParamSpec, PortConnection,
+            PortSpec, PortType, XspiceInstance,
+        };
+        use std::sync::Arc;
+
+        struct AcCoefficients {
+            ports: Vec<PortSpec>,
+            coefficient: Complex64,
+            // Scalar control, vector control, or direct self-conductance.
+            source: usize,
+        }
+        impl CodeModel for AcCoefficients {
+            fn name(&self) -> &str {
+                "ac_coefficients"
+            }
+            fn ports(&self) -> &[PortSpec] {
+                &self.ports
+            }
+            fn parameters(&self) -> &[ParamSpec] {
+                &[]
+            }
+            fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+                let conductance = if self.source == 2 {
+                    self.coefficient.re
+                } else {
+                    0.0
+                };
+                if self.ports[2].is_vector {
+                    ctx.set_output_vector_with_partials(
+                        "out",
+                        vec![0.0; 2],
+                        vec![0.0, conductance],
+                    )?;
+                } else {
+                    ctx.set_output_with_partial("out", 0.0, conductance);
+                }
+                Ok(())
+            }
+            fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+                Ok(())
+            }
+            fn output_input_ac_partials(
+                &self,
+                _ctx: &CmContext,
+                _port: &str,
+                _frequency: Value,
+            ) -> Vec<(String, Complex64)> {
+                if self.source == 0 {
+                    vec![("in".into(), self.coefficient)]
+                } else {
+                    Vec::new()
+                }
+            }
+            fn output_input_vector_ac_partials(
+                &self,
+                _ctx: &CmContext,
+                _port: &str,
+                _frequency: Value,
+            ) -> Vec<(String, usize, Complex64)> {
+                if self.source == 1 {
+                    vec![("iv".into(), 0, self.coefficient)]
+                } else {
+                    Vec::new()
+                }
+            }
+            fn output_vector_input_ac_partials(
+                &self,
+                ctx: &CmContext,
+                port: &str,
+                index: usize,
+                frequency: Value,
+            ) -> Vec<(String, Complex64)> {
+                if index == 1 {
+                    self.output_input_ac_partials(ctx, port, frequency)
+                } else {
+                    Vec::new()
+                }
+            }
+            fn output_vector_input_vector_ac_partials(
+                &self,
+                ctx: &CmContext,
+                port: &str,
+                index: usize,
+                frequency: Value,
+            ) -> Vec<(String, usize, Complex64)> {
+                if index == 1 {
+                    self.output_input_vector_ac_partials(ctx, port, frequency)
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+
+        for vector in [false, true] {
+            for default in [PortType::Voltage, PortType::Current] {
+                for explicit in [false, true] {
+                    let voltage_output = (default == PortType::Voltage) != explicit;
+                    for source in 0..3 {
+                        for coefficient in [
+                            Complex64::new(0.0, 0.0),
+                            Complex64::new(2.0, -3.0),
+                            Complex64::new(f64::INFINITY, 0.0),
+                            Complex64::new(f64::NEG_INFINITY, 0.0),
+                            Complex64::new(0.0, f64::NAN),
+                            Complex64::new(f64::NAN, 0.0),
+                        ] {
+                            let mut circuit = CircuitData::new();
+                            let input = circuit.get_or_create_node("in");
+                            let first = circuit.get_or_create_node("first");
+                            let last = circuit.get_or_create_node("last");
+                            let output_connection = if vector {
+                                if explicit {
+                                    PortConnection::TypedAnalogVector(
+                                        [first, last]
+                                            .map(|pos| {
+                                                if voltage_output {
+                                                    AnalogInputConnection::VoltageOutput {
+                                                        pos,
+                                                        neg: 0,
+                                                    }
+                                                } else {
+                                                    AnalogInputConnection::CurrentOutput {
+                                                        pos,
+                                                        neg: 0,
+                                                    }
+                                                }
+                                            })
+                                            .to_vec(),
+                                    )
+                                } else {
+                                    PortConnection::AnalogVector(vec![first, last])
+                                }
+                            } else if explicit {
+                                if voltage_output {
+                                    PortConnection::VoltageOutput { pos: last, neg: 0 }
+                                } else {
+                                    PortConnection::CurrentOutput { pos: last, neg: 0 }
+                                }
+                            } else {
+                                PortConnection::Analog(last)
+                            };
+                            let mut output = if vector {
+                                PortSpec::vector_output("out", default)
+                            } else {
+                                PortSpec::output("out", default)
+                            };
+                            output.allowed_types = vec![PortType::Voltage, PortType::Current];
+                            let model = Arc::new(AcCoefficients {
+                                ports: vec![
+                                    PortSpec::input("in", PortType::Voltage),
+                                    PortSpec::vector_input("iv", PortType::Voltage),
+                                    output,
+                                ],
+                                coefficient,
+                                source,
+                            });
+                            let mut instance = XspiceInstance::new(
+                                "A_CHECK",
+                                model,
+                                vec![
+                                    PortConnection::Analog(input),
+                                    PortConnection::AnalogVector(vec![input]),
+                                    output_connection,
+                                ],
+                                &[],
+                                &[],
+                                &[],
+                                &[],
+                            )
+                            .unwrap();
+                            let row = if voltage_output {
+                                if vector {
+                                    instance
+                                        .set_output_vector_branch(2, 0, circuit.allocate_branch())
+                                        .unwrap();
+                                    let branch = circuit.allocate_branch();
+                                    instance.set_output_vector_branch(2, 1, branch).unwrap();
+                                    circuit.get_branch_matrix_index(branch) - 1
+                                } else {
+                                    let branch = circuit.allocate_branch();
+                                    instance.set_output_branch(2, branch).unwrap();
+                                    circuit.get_branch_matrix_index(branch) - 1
+                                }
+                            } else {
+                                last - 1
+                            };
+                            instance.init().unwrap();
+                            circuit.add_xspice_instance(instance);
+                            let structure = Engine::default().build_matrix(&circuit).unwrap();
+                            let mut matrix = ComplexMatrix::from_real_structure(&structure);
+                            let result = Engine::stamp_xspice_small_signal_ac(
+                                &circuit,
+                                &mut matrix,
+                                17.0,
+                                true,
+                            );
+                            let uses_conductance = !voltage_output && default == PortType::Current;
+                            let invalid = if source == 2 {
+                                uses_conductance && !coefficient.re.is_finite()
+                            } else {
+                                !complex_is_finite(coefficient)
+                            };
+                            if invalid {
+                                let message = result
+                                    .expect_err("invalid coefficient must refuse assembly")
+                                    .to_string();
+                                for expected in [
+                                    "XSPICE",
+                                    "A_CHECK",
+                                    if vector { "out[1]" } else { "out" },
+                                    "non-finite",
+                                    "1.7000000000000000e1 Hz",
+                                ] {
+                                    assert!(message.contains(expected), "{message}");
+                                }
+                            } else {
+                                result.unwrap();
+                                if source == 2 {
+                                    let expected = if uses_conductance {
+                                        coefficient.re
+                                    } else {
+                                        0.0
+                                    };
+                                    assert_eq!(
+                                        matrix.to_dense_real()[last - 1][last - 1],
+                                        expected
+                                    );
+                                } else {
+                                    let expected =
+                                        coefficient * if voltage_output { -1.0 } else { 1.0 };
+                                    assert_eq!(matrix.to_dense_real()[row][input - 1], expected.re);
+                                    assert_eq!(matrix.to_dense_imag()[row][input - 1], expected.im);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fn voltage_at(point: &AcResult, node_name: &str) -> Complex64 {
         let index = point

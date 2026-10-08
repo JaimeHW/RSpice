@@ -189,3 +189,40 @@ fn polynomial_keeps_cancellation_between_out_of_range_terms() {
         (0.0, vec![huge, -huge])
     );
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn small_signal_analyses_reject_unrepresentable_transfer_gain_instead_of_zero() {
+    for output in ["out", "%id[out 0]"] {
+        let netlist = rspice_core::Netlist::parse(&format!(
+            "Unrepresentable AC gain\nV1 in 0 dc 0 ac 1\nA1 in {output} filt\n.model filt s_xfer(gain=10 num_coeff=[1e308 0] den_coeff=[1 1])\nR1 out 0 1\nP1 rf 0 portnum=1 z0=50\nRport rf 0 50\n.end\n"
+        )).unwrap();
+        // The zero operating point is finite; only the AC derivative overflows.
+        let engine = rspice_core::Engine::default();
+        engine.run_dc_op(&netlist).unwrap();
+        for (analysis, result) in [
+            ("AC", engine.run_ac(&netlist, &[1.0]).map(|_| ())),
+            (
+                "noise",
+                engine
+                    .run_noise_named_with_input_source(&netlist, "out", None, "V1", &[1.0], 300.15)
+                    .map(|_| ()),
+            ),
+            (
+                "SP",
+                engine
+                    .run_sp_over_grid_with_abort(&netlist, &[1.0], true, &rspice_core::NoAbort)
+                    .map(|_| ()),
+            ),
+        ] {
+            let error = result.expect_err("an invalid code-model gain must not become zero");
+            let message = error.to_string();
+            for expected in ["XSPICE", "A1", "out", "non-finite", "Hz"] {
+                assert!(
+                    message.contains(expected),
+                    "{analysis}, {output}: {message}"
+                );
+            }
+        }
+    }
+}
