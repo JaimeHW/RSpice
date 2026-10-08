@@ -3,6 +3,119 @@ use rustyhdf5::{AttrValue, FileBuilder};
 
 type Column<'a> = (&'a str, &'a str, Option<&'a str>, &'a [f64]);
 
+fn section_container(sections: &[(&str, Option<AttrValue>)]) -> Vec<u8> {
+    let mut file = FileBuilder::new();
+    for (name, kind) in sections {
+        let mut group = file.create_group(name);
+        if let Some(kind) = kind {
+            group.set_attr("section_type", kind.clone());
+        }
+        group.set_attr("independent_name", AttrValue::String("time".into()));
+        group.set_attr("signal_count", AttrValue::I64(1));
+        group.set_attr("signal_0000_name", AttrValue::String("V(out)".into()));
+        group
+            .create_dataset("independent")
+            .with_f64_data(&[0.0, 1.0]);
+        group
+            .create_dataset("signal_0000")
+            .with_f64_data(&[2.0, 3.0]);
+        file.add_group(group.finish());
+    }
+    file.finish().unwrap()
+}
+
+#[test]
+fn unsupported_sections_are_never_silently_skipped_beside_supported_waveforms() {
+    let limits = Hdf5Limits {
+        max_columns: 4,
+        max_values: 16,
+        coordinate_names: &["time"],
+    };
+    for kind in [
+        "noise",
+        "operating_point",
+        "distortion",
+        "fft",
+        "future_result",
+    ] {
+        let bytes = section_container(&[
+            ("tran1", Some(AttrValue::String("transient".into()))),
+            ("another_result", Some(AttrValue::String(kind.into()))),
+        ]);
+        let error = decode_hdf5(&bytes, limits, "hdf5").unwrap_err();
+        assert!(
+            matches!(&error.reason, Hdf5ReadFailure::MultipleSections(names)
+            if names.len() == 2 && names.iter().any(|name| name == "another_result")),
+            "{error}"
+        );
+    }
+    let legacy = section_container(&[("transient", None), ("noise", None)]);
+    assert!(matches!(
+        decode_hdf5(&legacy, limits, "hdf5").unwrap_err().reason,
+        Hdf5ReadFailure::MultipleSections(_)
+    ));
+}
+
+#[test]
+fn invalid_and_unsupported_section_declarations_cannot_fall_back_to_a_waveform() {
+    let limits = Hdf5Limits {
+        max_columns: 4,
+        max_values: 16,
+        coordinate_names: &["time"],
+    };
+    for kind in [
+        "noise",
+        "operating_point",
+        "distortion",
+        "fft",
+        "future_result",
+    ] {
+        let bytes = section_container(&[("transient", Some(AttrValue::String(kind.into())))]);
+        let error = decode_hdf5(&bytes, limits, "hdf5").unwrap_err();
+        assert!(
+            matches!(&error.reason, Hdf5ReadFailure::UnsupportedSection { section, kind: actual }
+            if section == "transient" && actual == kind),
+            "{error}"
+        );
+    }
+    for kind in [AttrValue::I64(1), AttrValue::String("".into())] {
+        let bytes = section_container(&[("transient", Some(kind))]);
+        assert!(
+            matches!(decode_hdf5(&bytes, limits, "hdf5").unwrap_err().reason,
+            Hdf5ReadFailure::StringAttribute { name, .. } if name == "section_type")
+        );
+    }
+    let missing_coordinate =
+        section_container(&[("converted", Some(AttrValue::String("table".into())))]);
+    assert!(
+        matches!(decode_hdf5(&missing_coordinate, limits, "hdf5").unwrap_err().reason,
+        Hdf5ReadFailure::MissingAttribute { name } if name == "coordinate_type")
+    );
+}
+
+#[test]
+fn ordinary_metadata_groups_do_not_count_as_result_sections() {
+    let limits = Hdf5Limits {
+        max_columns: 4,
+        max_values: 16,
+        coordinate_names: &["time"],
+    };
+    let legacy = section_container(&[("transient", None), ("metadata", None)]);
+    let decoded = decode_hdf5(&legacy, limits, "hdf5").unwrap();
+    assert_eq!(decoded.coordinate, [0.0, 1.0]);
+    assert_eq!(decoded.signals[0].real, [2.0, 3.0]);
+
+    let mut file = FileBuilder::new();
+    file.create_dataset("time").with_f64_data(&[0.0, 1.0]);
+    file.create_dataset("V(out)").with_f64_data(&[2.0, 3.0]);
+    let mut metadata = file.create_group("metadata");
+    metadata.set_attr("title", AttrValue::String("Generic root table".into()));
+    file.add_group(metadata.finish());
+    let decoded = decode_hdf5(&file.finish().unwrap(), limits, "hdf5").unwrap();
+    assert_eq!(decoded.coordinate, [0.0, 1.0]);
+    assert_eq!(decoded.signals[0].real, [2.0, 3.0]);
+}
+
 fn read_table(
     columns: &[Column<'_>],
     coordinate_unit: Option<AttrValue>,

@@ -25,6 +25,10 @@ pub enum Hdf5ReadFailure {
         source: Box<rustyhdf5::Error>,
     },
     MultipleSections(Vec<String>),
+    UnsupportedSection {
+        section: String,
+        kind: String,
+    },
     UnrepresentableSignalCount {
         section: String,
         count: i64,
@@ -83,8 +87,12 @@ impl std::fmt::Display for Hdf5ReadFailure {
             Self::Decode { context, source } => write!(f, "{context}: {source}"),
             Self::MultipleSections(names) => write!(
                 f,
-                "the file contains multiple waveform sections ({}); import one analysis per file",
+                "the file contains multiple result sections ({}); use rspice convert --section NAME_OR_INDEX to export one waveform analysis before importing",
                 names.join(", ")
+            ),
+            Self::UnsupportedSection { section, kind } => write!(
+                f,
+                "section /{section} declares {kind:?}, which cannot be represented as a waveform"
             ),
             Self::UnrepresentableSignalCount { section, .. } => {
                 write!(f, "/{section} signal_count is negative or too large")
@@ -170,6 +178,11 @@ enum Hdf5SectionFamily {
     Transient,
     DcSweep,
     Ac,
+}
+
+enum Hdf5SectionKind {
+    Waveform(Hdf5SectionFamily),
+    Unsupported(String),
 }
 
 #[derive(Debug)]
@@ -281,26 +294,36 @@ fn decode_hdf5_container(
     let groups = root
         .groups()
         .map_err(|error| decode_error(format, "could not enumerate groups", error))?;
-    let supported = groups
-        .iter()
-        .filter_map(|name| hdf5_section_family(&file, name).map(|family| (name.clone(), family)))
-        .collect::<Vec<_>>();
-    if supported.len() > 1 {
+    let mut sections = Vec::new();
+    for name in groups {
+        if let Some(kind) = hdf5_section_kind(&file, &name, format)? {
+            sections.push((name, kind));
+        }
+    }
+    if sections.len() > 1 {
         return Err(adapter_error(
             format,
             Hdf5ReadFailure::MultipleSections(
-                supported.iter().map(|(name, _)| name.clone()).collect(),
+                sections.iter().map(|(name, _)| name.clone()).collect(),
             ),
         ));
     }
-    if let Some((section, family)) = supported.first() {
-        return parse_rspice_hdf5_section(&file, section, *family, format, limits);
+    if let Some((section, kind)) = sections.pop() {
+        return match kind {
+            Hdf5SectionKind::Waveform(family) => {
+                parse_rspice_hdf5_section(&file, &section, family, format, limits)
+            }
+            Hdf5SectionKind::Unsupported(kind) => Err(adapter_error(
+                format,
+                Hdf5ReadFailure::UnsupportedSection { section, kind },
+            )),
+        };
     }
     parse_generic_hdf5_root(&file, format, limits)
 }
 
-/// The analysis family one root group holds, or `None` when this reader has no
-/// section shape for it.
+/// Classify every declared result, including families the waveform viewer
+/// cannot represent. Only unmarked, non-legacy groups are ordinary metadata.
 ///
 /// The layout contract in `rspice_core::io::hdf5` is explicit that a section
 /// group's *name* is the producer's choice and its `section_type` attribute is
@@ -311,34 +334,58 @@ fn decode_hdf5_container(
 /// file this product had just written. The name is still consulted, because a
 /// file written before the attribute existed carries nothing else.
 ///
-/// `operating_point`, `noise`, `distortion` and `fft` are families the layout
-/// defines and this reader has no domain for; they return `None` and are
-/// refused by name at the root, rather than imported under a heading that
-/// would make the result something it is not.
-fn hdf5_section_family(file: &rustyhdf5::File, group: &str) -> Option<Hdf5SectionFamily> {
-    let declared = file
+/// Malformed declarations cannot fall back to a legacy group name, and an
+/// unsupported result cannot disappear beside a supported waveform section.
+fn hdf5_section_kind(
+    file: &rustyhdf5::File,
+    group: &str,
+    format: &str,
+) -> Result<Option<Hdf5SectionKind>, Hdf5ReadError> {
+    let opened = file
         .group(group)
-        .ok()
-        .and_then(|opened| opened.attrs().ok())
-        .and_then(|attrs| hdf_optional_string_attr(&attrs, "section_type"));
-    match declared.as_deref().unwrap_or(group) {
-        "transient" => Some(Hdf5SectionFamily::Transient),
-        "dc_sweep" => Some(Hdf5SectionFamily::DcSweep),
-        "ac" => Some(Hdf5SectionFamily::Ac),
+        .map_err(|error| decode_error(format, format!("could not open /{group}"), error))?;
+    let attrs = opened.attrs().map_err(|error| {
+        decode_error(format, format!("could not read /{group} attributes"), error)
+    })?;
+    let declared = if attrs.contains_key("section_type") {
+        hdf_string_attr(&attrs, "section_type", format)?
+    } else if matches!(
+        group,
+        "transient"
+            | "dc_sweep"
+            | "ac"
+            | "table"
+            | "operating_point"
+            | "noise"
+            | "distortion"
+            | "fft"
+    ) {
+        group.to_owned()
+    } else {
+        return Ok(None);
+    };
+    let family = match declared.as_str() {
+        "transient" => Hdf5SectionFamily::Transient,
+        "dc_sweep" => Hdf5SectionFamily::DcSweep,
+        "ac" => Hdf5SectionFamily::Ac,
         "table" => {
-            let attrs = file.group(group).ok()?.attrs().ok()?;
-            let coordinate_type = hdf_optional_string_attr(&attrs, "coordinate_type")?;
+            let coordinate_type = hdf_string_attr(&attrs, "coordinate_type", format)?;
             let domain = match coordinate_type.as_str() {
                 "time" => crate::WaveformDomain::Transient,
                 "frequency" => crate::WaveformDomain::Ac,
                 "voltage" | "current" | "temperature" => crate::WaveformDomain::DcSweep,
                 // Report/index coordinates have no waveform-domain equivalent.
-                _ => return None,
+                _ => {
+                    return Ok(Some(Hdf5SectionKind::Unsupported(format!(
+                        "table with coordinate type {coordinate_type:?}"
+                    ))));
+                }
             };
-            Some(Hdf5SectionFamily::Table(domain))
+            Hdf5SectionFamily::Table(domain)
         }
-        _ => None,
-    }
+        _ => return Ok(Some(Hdf5SectionKind::Unsupported(declared))),
+    };
+    Ok(Some(Hdf5SectionKind::Waveform(family)))
 }
 
 fn decode_matlab_v73_container(
