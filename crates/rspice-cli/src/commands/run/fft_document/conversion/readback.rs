@@ -1,8 +1,9 @@
 //! Decode the structured FFT projection, retaining its metadata contract.
 use super::*;
 use crate::commands::waveform_io::{conversion_error, enforce_resource_limit};
+use rspice_core::io::json::NumericJsonDocument;
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Document {
     schema_version: u32,
     analysis: String,
@@ -13,21 +14,23 @@ struct Document {
     format_policy: Policy,
 }
 
-#[derive(serde::Deserialize)]
+impl NumericJsonDocument for Document {}
+
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Policy {
     selected: String,
     representation: String,
     supported: Vec<String>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct ResultRecord {
     #[serde(flatten)]
     metadata: FftRawMetadataResult,
     spectrum: Spectrum,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Spectrum {
     frequency_unit: String,
     value_unit: Option<String>,
@@ -36,7 +39,7 @@ struct Spectrum {
     bins: Vec<Bin>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Bin {
     index: usize,
     frequency_hz: f64,
@@ -45,7 +48,7 @@ struct Bin {
     phase_degrees: f64,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Complex {
     real: f64,
     imaginary: f64,
@@ -69,6 +72,7 @@ fn numeric_count(value: &serde_json::Value) -> usize {
 impl FftBundle {
     pub(crate) fn from_json(
         path: &Path,
+        content: &str,
         value: serde_json::Value,
         limits: rspice_core::ResourceLimits,
     ) -> Result<Self, CliError> {
@@ -85,8 +89,15 @@ impl FftBundle {
             numeric_values,
             limits.max_result_values,
         )?;
-        let document: Document =
-            serde_json::from_value(value).map_err(|error| conversion_error(path, error))?;
+        // Release the admitted untyped tree before allocating the typed one.
+        // Decode from source so integers beyond u64 still have their authored
+        // digits available to the shared precision check.
+        drop(value);
+        let document = Document::decode_numeric_json(content, &crate::abort::ProcessAbort)
+            .map_err(|error| match error {
+                rspice_core::io::json::JsonDecodeError::Aborted => CliError::Interrupted,
+                error => conversion_error(path, error),
+            })?;
         if document.schema_version != FFT_ARTIFACT_SCHEMA_VERSION
             || document.analysis != "fft"
             || document.result_count != document.results.len()

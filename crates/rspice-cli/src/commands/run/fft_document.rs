@@ -1177,6 +1177,8 @@ pub(crate) struct FftRawMetadata {
     selected_format: String,
 }
 
+impl rspice_core::io::json::NumericJsonDocument for FftRawMetadata {}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FftRawCoordinate {
     coordinate_id: String,
@@ -1800,8 +1802,9 @@ pub(crate) fn decode_fft_raw_plot(
     {
         return Err("invalid FFT RAW variable schema".to_string());
     }
-    let metadata: FftRawMetadata =
-        serde_json::from_str(&raw.header.command).map_err(|error| error.to_string())?;
+    use rspice_core::io::json::NumericJsonDocument;
+    let metadata = FftRawMetadata::decode_numeric_json(&raw.header.command, &rspice_core::NoAbort)
+        .map_err(|error| error.to_string())?;
     validate_fft_raw_metadata(&metadata)?;
     let expected_format = if raw.header.is_binary { "raw" } else { "ascii" };
     if metadata.selected_format != expected_format {

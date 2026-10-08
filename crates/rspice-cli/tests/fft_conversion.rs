@@ -241,10 +241,20 @@ fn rewrite_raw_metadata(
     legacy: bool,
     change: impl FnOnce(&mut serde_json::Value),
 ) -> Vec<u8> {
+    rewrite_raw_metadata_text(bytes, legacy, |text| {
+        let mut metadata = serde_json::from_str(text).unwrap();
+        change(&mut metadata);
+        serde_json::to_string(&metadata).unwrap()
+    })
+}
+
+fn rewrite_raw_metadata_text(
+    bytes: &[u8],
+    legacy: bool,
+    change: impl FnOnce(&str) -> String,
+) -> Vec<u8> {
     let parsed = rspice_core::io::parse_raw_reader(&mut std::io::Cursor::new(bytes)).unwrap();
-    let mut metadata: serde_json::Value = serde_json::from_str(&parsed.header.command).unwrap();
-    change(&mut metadata);
-    let metadata = serde_json::to_string(&metadata).unwrap();
+    let metadata = change(&parsed.header.command);
     let marker = if parsed.header.is_binary {
         b"\nBinary:\n".as_slice()
     } else {
@@ -280,6 +290,144 @@ fn rewrite_raw_metadata(
     assert!(replaced);
     output.extend_from_slice(&bytes[offset..]);
     output
+}
+
+fn numeric_literal(source: &str, path: &str, literal: &str) -> String {
+    let mut value: serde_json::Value = serde_json::from_str(source).unwrap();
+    *value.pointer_mut(path).unwrap() = serde_json::json!("numeric-test-marker");
+    serde_json::to_string(&value)
+        .unwrap()
+        .replace("\"numeric-test-marker\"", literal)
+}
+
+fn precision_refusal(input: &Path, golden: &Path, output: &Path, from: &str, expected: &str) {
+    let original = std::fs::read(golden).unwrap();
+    let input_bytes = std::fs::read(input).unwrap();
+    std::fs::write(output, "predecessor").unwrap();
+    let check = |result: Output| {
+        assert_eq!(result.status.code(), Some(1), "{result:?}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains(expected),
+            "{result:?}"
+        );
+    };
+    check(convert(input, output, from, "json", &[]));
+    check(convert(input, input, from, from, &[]));
+    for bless in [false, true] {
+        let mut args = vec!["compare", input.to_str().unwrap(), golden.to_str().unwrap()];
+        if bless {
+            args.push("--bless");
+        }
+        check(cli(&args));
+    }
+    let missing = golden.with_file_name(format!(
+        "missing.{}",
+        golden.extension().unwrap().to_str().unwrap()
+    ));
+    check(cli(&[
+        "compare",
+        input.to_str().unwrap(),
+        missing.to_str().unwrap(),
+        "--bless",
+    ]));
+    assert!(!missing.exists());
+    assert_eq!(std::fs::read(input).unwrap(), input_bytes);
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "predecessor");
+    assert_eq!(std::fs::read(golden).unwrap(), original);
+}
+
+#[test]
+fn fft_json_integer_precision_is_checked_before_conversion_comparison_and_blessing() {
+    let directory = test_dir("fft_json_integer_precision");
+    let golden = source(&directory);
+    let text = std::fs::read_to_string(&golden).unwrap();
+    let input = directory.join("input.json");
+    let output = directory.join("protected.json");
+    for path in [
+        "/results/0/transform/alpha",
+        "/results/0/spectrum/bins/0/value/real",
+        "/results/0/metrics/enob_bits",
+    ] {
+        for literal in ["9007199254740993", "18446744073709551617"] {
+            std::fs::write(&input, numeric_literal(&text, path, literal)).unwrap();
+            precision_refusal(
+                &input,
+                &golden,
+                &output,
+                "json",
+                "cannot be represented exactly",
+            );
+        }
+    }
+}
+
+#[test]
+fn fft_raw_metadata_cannot_round_integers_or_underflow_decimals() {
+    let directory = test_dir("fft_raw_numeric_precision");
+    let json = source(&directory);
+    let input = directory.join("input.raw");
+    let output = directory.join("protected.json");
+    for format in ["raw", "ascii"] {
+        let golden = directory.join(format!("golden.{format}.raw"));
+        let result = convert(&json, &golden, "json", format, &[]);
+        assert!(result.status.success(), "{result:?}");
+        let bytes = std::fs::read(&golden).unwrap();
+        for legacy in [false, true] {
+            for (path, literal, message) in [
+                ("/results/0/sampling/start_time_s", "1e-999", "underflow"),
+                (
+                    "/results/0/transform/alpha",
+                    "9007199254740993",
+                    "cannot be represented exactly",
+                ),
+            ] {
+                std::fs::write(
+                    &input,
+                    rewrite_raw_metadata_text(&bytes, legacy, |text| {
+                        numeric_literal(text, path, literal)
+                    }),
+                )
+                .unwrap();
+                precision_refusal(&input, &golden, &output, "raw", message);
+            }
+        }
+    }
+}
+
+#[test]
+fn fft_json_keeps_exact_float_boundaries_and_native_integer_metadata() {
+    let directory = test_dir("fft_exact_numeric_boundaries");
+    let source = source(&directory);
+    let mut data = read_json(&source);
+    data["coordinate"]["ordinal"] = serde_json::json!(usize::MAX);
+    let text = serde_json::to_string(&data).unwrap();
+    let input = directory.join("input.json");
+    let output = directory.join("output.json");
+    for (literal, expected) in [
+        ("18446744073709551616", 18446744073709551616.0_f64),
+        ("5e-324", 5e-324_f64),
+        ("-0e-999", -0.0_f64),
+    ] {
+        std::fs::write(
+            &input,
+            numeric_literal(&text, "/results/0/transform/alpha", literal),
+        )
+        .unwrap();
+        let result = convert(&input, &output, "json", "json", &[]);
+        assert!(result.status.success(), "{literal}: {result:?}");
+        let data = read_json(&output);
+        assert_eq!(
+            data["coordinate"]["ordinal"].as_u64().unwrap(),
+            usize::MAX as u64
+        );
+        assert_eq!(
+            data["results"][0]["transform"]["alpha"]
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            expected.to_bits()
+        );
+    }
 }
 
 fn roundtrip_all_formats(directory: &Path, source: &Path, expected: &serde_json::Value, tag: &str) {

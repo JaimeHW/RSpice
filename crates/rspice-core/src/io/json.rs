@@ -18,11 +18,32 @@ mod tests;
 
 /// Failure to decode numerical JSON without losing source information.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum JsonDecodeError {
+pub enum JsonDecodeError {
     #[error("JSON decoding aborted")]
     Aborted,
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+}
+
+/// Opt a wire schema into precision-checked JSON decoding.
+///
+/// Implementors must serialize every decoded numeric field at the same JSON
+/// path and with the same numeric type used by deserialization. Ordinary serde
+/// floating-point fields must use `f64` throughout this wire schema. Serde
+/// derives, including flattening and tagged enums, preserve the paths. Aliases
+/// and adapters that move or transform numbers must be normalized first.
+/// Do not implement this trait for such an unnormalized input schema.
+///
+/// This checks binary64 precision, not schema semantics or resource limits;
+/// callers must apply their admission policy before decoding and validate the
+/// result afterwards. Native integer fields retain their full range.
+pub trait NumericJsonDocument: DeserializeOwned + Serialize {
+    fn decode_numeric_json(
+        content: &str,
+        abort: &dyn crate::AbortSignal,
+    ) -> Result<Self, JsonDecodeError> {
+        from_str(content, abort)
+    }
 }
 
 /// Decode binary64 result JSON, rejecting nonzero decimals rounded to zero and

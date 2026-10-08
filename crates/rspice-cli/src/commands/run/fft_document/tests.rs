@@ -70,6 +70,106 @@ fn fft_publication_fixture() -> (
 }
 
 #[test]
+fn every_fft_json_float_has_a_matching_precision_checked_wire_path() {
+    use rspice_core::io::json::NumericJsonDocument;
+
+    fn floats(value: &serde_json::Value, path: &str, output: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Number(number) if number.is_f64() => output.push(path.to_owned()),
+            serde_json::Value::Array(values) => {
+                for (index, value) in values.iter().enumerate() {
+                    floats(value, &format!("{path}/{index}"), output);
+                }
+            }
+            serde_json::Value::Object(values) => {
+                for (key, value) in values {
+                    let key = key.replace('~', "~0").replace('/', "~1");
+                    floats(value, &format!("{path}/{key}"), output);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let (netlist, original) = fft_publication_fixture();
+    let directory = FftTestDirectory::new();
+    let path = directory.0.join("fft.json");
+    let mut checked = 0;
+    for incomplete in [false, true] {
+        let mut results = original.clone();
+        if incomplete {
+            results[0].status = rspice_core::engine::TransientFftStatus::IncompleteHistory {
+                available_start: 0.0,
+                available_stop: 0.1e-3,
+            };
+            results[0].bins.clear();
+            results[0].metrics = None;
+        }
+        write_fft_output(
+            &path,
+            OutputFormat::Json,
+            "tran-001",
+            &fft_test_identities(2),
+            None,
+            &results,
+            &netlist,
+            None,
+        )
+        .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let raw = fft_raw_metadata(
+            OutputFormat::Raw,
+            "tran-001",
+            &fft_test_identities(2),
+            None,
+            &results,
+            &netlist.fft_analyses,
+        )
+        .unwrap();
+        for (is_raw, value) in [(false, json), (true, serde_json::to_value(raw).unwrap())] {
+            let mut paths = Vec::new();
+            floats(&value, "", &mut paths);
+            assert!(!paths.is_empty());
+            for pointer in paths {
+                for (literal, message) in [
+                    ("9007199254740993", "cannot be represented exactly"),
+                    ("1e-999", "underflow"),
+                ] {
+                    let mut corrupted = value.clone();
+                    *corrupted.pointer_mut(&pointer).unwrap() =
+                        serde_json::json!("numeric-test-marker");
+                    let text = serde_json::to_string(&corrupted)
+                        .unwrap()
+                        .replace("\"numeric-test-marker\"", literal);
+                    let error = if is_raw {
+                        FftRawMetadata::decode_numeric_json(&text, &rspice_core::NoAbort)
+                            .unwrap_err()
+                            .to_string()
+                    } else {
+                        FftBundle::from_json(
+                            &path,
+                            &text,
+                            serde_json::from_str(&text).unwrap(),
+                            rspice_core::ResourceLimits::default(),
+                        )
+                        .err()
+                        .expect("precision refusal")
+                        .to_string()
+                    };
+                    assert!(error.contains(message), "{pointer}: {error}");
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 400,
+        "checked {checked} field/literal combinations"
+    );
+}
+
+#[test]
 fn fft_decimal_underflow_is_refused_in_metadata_bins_and_harmonics() {
     use crate::commands::waveform_io::parse_delimited_record;
     let (netlist, original) = fft_publication_fixture();

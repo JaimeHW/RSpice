@@ -881,7 +881,7 @@ pub(super) fn parse_untyped_json(
     };
     let analysis = json::optional_text(path, value.get("analysis"), "analysis")?;
     if analysis == Some("fft") {
-        return crate::commands::run::FftBundle::from_json(path, value, resource_limits)
+        return crate::commands::run::FftBundle::from_json(path, content, value, resource_limits)
             .map(ImportedResult::Fft);
     }
 
