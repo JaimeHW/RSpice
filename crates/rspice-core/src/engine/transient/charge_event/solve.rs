@@ -171,16 +171,47 @@ impl ChargeEventTopology {
             ));
         }
         let mut trial = self.physical_probe(incoming);
+        let mut initial_sample = None;
         if matches!(policy, CoordinatePolicy::Project) {
-            self.project_current_controlled_voltage_seed(incoming, &mut trial, abort)?;
+            self.project_voltage_seed(incoming, &mut trial, options, abort)?;
+            // Satisfying ideal voltage constraints first avoids spending the
+            // Newton budget moving clamped exponential charge laws from zero.
+            // The seed can leave a nonlinear constitutive domain, however;
+            // retain the original coupled Newton path in that case. Structural
+            // errors and resource/cancellation failures are never suppressed.
+            let seeded = sample(&trial, abort)?;
+            if seeded.nonfinite(self.size)? {
+                trial = self.physical_probe(incoming);
+            } else {
+                initial_sample = Some(seeded);
+            }
         }
         for iteration in 0..options.iterations {
             check_abort(abort)?;
-            let physical = sample(&self.physical_probe(&trial), abort)?;
-            let equations = self.jump_equations(&trial, incoming_q, &physical, options, abort)?;
+            let seeded = initial_sample.is_some();
+            let mut physical = match initial_sample.take() {
+                Some(physical) => physical,
+                None => sample(&self.physical_probe(&trial), abort)?,
+            };
+            let mut equations =
+                self.jump_equations(&trial, incoming_q, &physical, options, abort)?;
             // Factor even an exactly zero residual: a singular system must
             // not certify an arbitrary unconstrained initial guess.
-            let correction = equations.solve(options, abort)?;
+            let correction = match equations.solve(options, abort) {
+                Err(SimulationError::Solver(crate::solver::SolverError::SingularMatrix))
+                    if seeded =>
+                {
+                    // A finite seed may still land on a zero constitutive
+                    // slope. Retry the incoming chart once, within this same
+                    // Newton iteration, without hiding structural failures.
+                    trial = self.physical_probe(incoming);
+                    physical = sample(&trial, abort)?;
+                    equations =
+                        self.jump_equations(&trial, incoming_q, &physical, options, abort)?;
+                    equations.solve(options, abort)?
+                }
+                result => result?,
+            };
             let residual = equations.norm(options)?;
             let mut update: Value = 0.0;
             for (column, (&value, &change)) in trial.iter().zip(&correction).enumerate() {

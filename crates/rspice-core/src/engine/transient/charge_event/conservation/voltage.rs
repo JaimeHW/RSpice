@@ -45,9 +45,7 @@ impl VoltageSeed {
             row.values
                 .insert(Input::Source(index), integer_coefficient(1.0).unwrap());
             if reducer.admit(row, 1, abort)?.is_some() {
-                return Err(error(
-                    "dependent voltage constraints in current-controlled event",
-                ));
+                return Err(error("dependent voltage constraints in physical event"));
             }
         }
         let constrained: Vec<_> = (1..=nodes)

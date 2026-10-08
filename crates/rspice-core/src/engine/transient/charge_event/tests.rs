@@ -213,6 +213,65 @@ fn charge_event_bounds_assembly_and_rejects_unowned_branch_dependencies() {
 }
 
 #[test]
+fn charge_event_voltage_seed_preserves_nonlinear_domain_fallback() {
+    let options = options();
+    let topology = ChargeEventTopology::new(
+        2,
+        3,
+        &[(2, 1)],
+        vec![source(1, 0, 2.0, 0.0)],
+        vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
+        &options,
+        &NoAbort,
+    )
+    .unwrap();
+    // Projecting V1 alone either leaves sqrt(V2-V1)'s domain or places
+    // (V2-V1)^3 at its zero slope. Coupled Newton instead translates both
+    // nodes and conserves the incoming charge in a nonsingular chart.
+    for (initial, exponent) in [(1.0_f64, 0.5), (2.0, 3.0)] {
+        let incoming_charge = initial.powf(exponent);
+        let mut invalid_seeds = 0;
+        let state = topology
+            .solve(
+                &[0.0, initial, 0.0],
+                &[-incoming_charge, incoming_charge, 0.0],
+                &options,
+                &NoAbort,
+                |state, _| {
+                    let mut sample = EventSample::new(3, &options)?;
+                    let difference = state[1] - state[0];
+                    let charge = difference.powf(exponent);
+                    let derivative = exponent * difference.powf(exponent - 1.0);
+                    if !charge.is_finite() || derivative == 0.0 {
+                        invalid_seeds += 1;
+                    }
+                    for (row, sign) in [(2, 1.0), (1, -1.0)] {
+                        sample.q.stamp_rhs(row, -sign * charge);
+                        sample.q.stamp(row, 2, sign * derivative);
+                        sample.q.stamp(row, 1, -sign * derivative);
+                    }
+                    branch(&mut sample.f, state, 2, 0, 1.0);
+                    Ok(sample)
+                },
+            )
+            .unwrap();
+        assert!(invalid_seeds > 0, "must exercise an invalid projected seed");
+        let outgoing = initial + 2.0;
+        close(state.solution[0], 2.0, 1e-12);
+        close(state.solution[1], outgoing, 1e-12);
+        close(state.solution[2], -outgoing, 1e-12);
+        close(state.source_impulses[0], 0.0, 1e-25);
+        close(state.coordinate_rates[0].unwrap(), 0.0, 1e-12);
+        let derivative = exponent * initial.powf(exponent - 1.0);
+        close(
+            state.coordinate_rates[1].unwrap(),
+            -outgoing / derivative,
+            1e-12,
+        );
+    }
+}
+
+#[test]
 fn charge_event_backtracks_nonlinear_charge_domain_failures() {
     let options = options();
     let topology =

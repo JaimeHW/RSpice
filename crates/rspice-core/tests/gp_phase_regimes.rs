@@ -112,6 +112,53 @@ fn diode(voltage: f64, vt: f64, dialect: SpiceDialect) -> (f64, f64) {
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_clamped_uic_preserves_tight_charge_tolerance() {
+    use rspice_core::engine::TransientStartupMode;
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        for polarity in [1.0, -1.0] {
+            let kind = if polarity > 0.0 { "NPN" } else { "PNP" };
+            let deck = Netlist::parse(&format!(
+                "clamped GP UIC\nVC c 0 {}\nVB b 0 DC {} SIN({} {} 1G)\nQ1 c b 0 qm\n.model qm {kind}(IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) i(vc) i(vb)\n.end\n",
+                2.0 * polarity, 0.7 * polarity, 0.7 * polarity, 1e-6 * polarity,
+            )).unwrap();
+            let mut config = SimulationConfig {
+                gp_transient_phase_model: GpTransientPhaseModel::ExactDelay,
+                ..SimulationConfig::default().with_spice_dialect(dialect)
+            };
+            config.convergence_config.gmin_target = 0.0;
+            let engine = Engine::new(config);
+            let result = engine
+                .run_tran_with_startup_mode(&deck, 2.5e-9, 4e-12, TransientStartupMode::Uic)
+                .unwrap_or_else(|error| panic!("{dialect:?}/{polarity}: {error}"));
+            behavioral::check(&result, dialect, polarity, None, "vb", true);
+            let impulse = result
+                .current_impulses
+                .as_ref()
+                .unwrap()
+                .iter()
+                .find(|trace| {
+                    matches!(&trace.owner, rspice_core::CurrentImpulseOwner::Branch { branch_name }
+                    if branch_name.eq_ignore_ascii_case("vb"))
+                })
+                .unwrap();
+            let startup = impulse
+                .points
+                .iter()
+                .find(|point| point.time == 0.0)
+                .unwrap();
+            let expected = -polarity * TF * diode(0.7, thermal_voltage(dialect), dialect).0;
+            assert!((startup.charge_coulombs - expected).abs() < 1e-26 + 1e-10 * expected.abs());
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}
+
 impl Regime {
     fn waveform(bias: f64, amplitude: f64, frequency: f64, time: f64) -> (f64, f64) {
         let omega = std::f64::consts::TAU * frequency;

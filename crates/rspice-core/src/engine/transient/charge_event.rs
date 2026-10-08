@@ -633,11 +633,9 @@ impl Equations {
             &entries,
             options.solver,
         )
-        .map_err(|failure| error(failure.to_string()))?;
+        .map_err(SimulationError::Solver)?;
         let rhs: Vec<_> = self.values.iter().map(|value| -value).collect();
-        let result = matrix
-            .solve(&rhs)
-            .map_err(|failure| error(failure.to_string()))?;
+        let result = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
         check_abort(abort)?;
         Ok(result)
     }

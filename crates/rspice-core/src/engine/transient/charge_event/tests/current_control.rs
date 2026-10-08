@@ -57,7 +57,7 @@ fn current_controlled_startup_seed_satisfies_authored_voltage_constraints() {
             let incoming = [17.0, 0.25, -2.0, 0.0, 0.0];
             let mut trial = incoming;
             topology
-                .project_current_controlled_voltage_seed(&incoming, &mut trial, &NoAbort)
+                .project_voltage_seed(&incoming, &mut trial, &options, &NoAbort)
                 .unwrap();
             close(trial[0], value, 1e-14);
             close(trial[1] - trial[2], 0.5 + gain * trial[0], 1e-14);

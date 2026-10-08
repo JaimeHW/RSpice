@@ -272,16 +272,26 @@ pub(super) fn with_retained_values<T>(
 }
 
 impl ChargeEventTopology {
-    pub(super) fn project_current_controlled_voltage_seed(
+    pub(super) fn project_voltage_seed(
         &self,
         incoming: &[Value],
         trial: &mut [Value],
+        options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<()> {
         if let Some(basis) = &self.weighted {
             basis
                 .voltage_seed
                 .project(incoming, &self.sources, trial, abort)?;
+        } else if !self.sources.is_empty() {
+            with_retained_values(options, self.size.saturating_mul(64), |bounded| {
+                VoltageSeed::new(self.nodes, &self.sources, bounded, abort)?.project(
+                    incoming,
+                    &self.sources,
+                    trial,
+                    abort,
+                )
+            })?;
         }
         Ok(())
     }
