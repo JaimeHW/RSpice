@@ -9,6 +9,21 @@ impl ControlCircuit {
         CommandKind::parse(command).map(|_| ())
     }
 
+    /// Whether this command names an explicit electrical analysis. This does
+    /// not parse its arguments or classify the orchestration command `run`.
+    pub fn is_analysis_command(command: &ControlCommand) -> bool {
+        matches!(CommandKind::parse(command), Ok(CommandKind::Analysis))
+    }
+
+    /// Check that this analysis has a control execution handler, without
+    /// validating its parameters, circuit capabilities or resource needs.
+    pub fn validate_analysis_support(
+        analysis: &AnalysisCommand,
+        line: usize,
+    ) -> Result<(), ControlError> {
+        identity(analysis, line).map(|_| ())
+    }
+
     /// Parse one OP, DC, AC, NOISE, TF, PZ or TRAN request using the execution grammar and limits.
     /// Arguments must already be literal or substituted. No analysis is run.
     pub fn parse_analysis_command(
@@ -64,6 +79,32 @@ impl ControlCircuit {
         }
         Ok(analysis)
     }
+}
+
+pub(super) fn identity(
+    analysis: &AnalysisCommand,
+    line: usize,
+) -> Result<(&'static str, crate::identity::AnalysisKind), ControlError> {
+    Ok(match analysis {
+        AnalysisCommand::Op => ("op", crate::identity::AnalysisKind::Op),
+        AnalysisCommand::Dc { .. } => ("dc", crate::identity::AnalysisKind::Dc),
+        AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => {
+            ("ac", crate::identity::AnalysisKind::Ac)
+        }
+        AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => {
+            ("noise", crate::identity::AnalysisKind::Noise)
+        }
+        AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
+        AnalysisCommand::Tf { .. } => ("tf", crate::identity::AnalysisKind::TransferFunction),
+        AnalysisCommand::PoleZero { .. } => ("pz", crate::identity::AnalysisKind::PoleZero),
+        AnalysisCommand::Sensitivity { .. } => ("sens", crate::identity::AnalysisKind::Sensitivity),
+        _ => {
+            return Err(command_error(
+                line,
+                "this analysis has no control-host execution handler",
+            ));
+        }
+    })
 }
 
 // Preserve resource failures and cooperative cancellation during grid construction.

@@ -194,6 +194,11 @@ fn analysis_inventory_parses_and_matches_control_execution() {
             panic!("{name}: inventory card must name exactly one command");
         };
         assert_eq!(variant(command), name);
+        assert_eq!(
+            ControlCircuit::validate_analysis_support(command, 1).is_ok(),
+            row["control_host"] == "implemented",
+            "{name}: static admission must match execution"
+        );
         // `run` selects standalone producers. Result-dependent Fourier and
         // sweep/temperature cards need a producer; their presence alone does
         // not constitute an executable analysis. Their missing control-host

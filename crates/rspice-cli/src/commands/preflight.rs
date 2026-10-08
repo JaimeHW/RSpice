@@ -292,23 +292,8 @@ pub(crate) fn check_requests(
                 ) {
                     continue;
                 }
-                if !matches!(
-                    analysis,
-                    AnalysisCommand::Op
-                        | AnalysisCommand::Dc { .. }
-                        | AnalysisCommand::Noise { .. }
-                        | AnalysisCommand::NoiseData { .. }
-                        | AnalysisCommand::Ac { .. }
-                        | AnalysisCommand::AcData { .. }
-                        | AnalysisCommand::Tf { .. }
-                        | AnalysisCommand::PoleZero { .. }
-                        | AnalysisCommand::Sensitivity { .. }
-                        | AnalysisCommand::Tran { .. }
-                ) {
-                    return Err(located(invalid(
-                        "this analysis has no control-host execution handler",
-                    )));
-                }
+                ControlCircuit::validate_analysis_support(analysis, command.line)
+                    .map_err(|error| control_error(error, script, input))?;
                 analysis_request(netlist, analysis, limits, None).map_err(located)?;
                 count += 1;
             }
@@ -317,10 +302,7 @@ pub(crate) fn check_requests(
                     "run has no declarative analysis to execute",
                 )));
             }
-        } else if matches!(
-            command.name.as_str(),
-            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens"
-        ) {
+        } else if ControlCircuit::is_analysis_command(&command) {
             if command.arguments.contains('$') {
                 deferred.push(command.line);
                 continue;

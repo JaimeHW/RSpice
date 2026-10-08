@@ -294,29 +294,7 @@ impl ControlCircuit {
             engine.try_resolved_with_config(configured)
         }
         .map_err(|source| ControlExecutionError::Configuration { line, source })?;
-        let (kind, identity_kind) = match &analysis {
-            AnalysisCommand::Op => ("op", crate::identity::AnalysisKind::Op),
-            AnalysisCommand::Dc { .. } => ("dc", crate::identity::AnalysisKind::Dc),
-            AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => {
-                ("ac", crate::identity::AnalysisKind::Ac)
-            }
-            AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => {
-                ("noise", crate::identity::AnalysisKind::Noise)
-            }
-            AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
-            AnalysisCommand::Tf { .. } => ("tf", crate::identity::AnalysisKind::TransferFunction),
-            AnalysisCommand::PoleZero { .. } => ("pz", crate::identity::AnalysisKind::PoleZero),
-            AnalysisCommand::Sensitivity { .. } => {
-                ("sens", crate::identity::AnalysisKind::Sensitivity)
-            }
-            _ => {
-                return Err(command_error(
-                    line,
-                    "this analysis has no control-host execution handler",
-                )
-                .into());
-            }
-        };
+        let (kind, identity_kind) = analysis::identity(&analysis, line)?;
         let ordinal = self
             .ordinals
             .get(kind)
