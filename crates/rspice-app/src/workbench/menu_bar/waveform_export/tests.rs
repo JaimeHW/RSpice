@@ -1797,6 +1797,128 @@ fn a_hidden_trace_stays_out_of_the_export_for_one_analysis_and_for_many() {
     assert!(!contents.contains(",V(mid),"), "{contents}");
 }
 
+fn stacked_export_state(preference: usize) -> AppState {
+    let mut run = SimulationRun::new(7);
+    for id in 1..=2 {
+        let mut analysis =
+            AnalysisResult::new(id, AnalysisType::Transient, format!("Transient {id}"))
+                .with_waveforms(vec![waveform("out", vec![0.0, 1e-8], vec![0.0, id as f64])]);
+        // Native waveform bundles do not support event evidence. Other routes
+        // must handle a waveform analysis that also retains an event schedule.
+        if !matches!(preference, 3 | 4) {
+            analysis.result_payload = Some(AnalysisResultPayload::TransientEvents {
+                voltage_impulses: None,
+                current_impulses: None,
+                digital_traces: vec![crate::state::DigitalEventTraceEvidence {
+                    node_name: format!("d{id}"),
+                    points: vec![crate::state::DigitalEventPointEvidence {
+                        time_s: 0.0,
+                        value_code: 1,
+                    }],
+                }],
+                real_traces: Vec::new(),
+                digital_buses: Vec::new(),
+            });
+        }
+        run.add_analysis(analysis);
+    }
+    let mut state = AppState::default();
+    state.simulation.retained.runs = vec![run].into();
+    state.simulation.view.active_run_idx = Some(0);
+    state.simulation.view.active_analysis_idx = Some(0);
+    activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
+    state
+        .ui
+        .preferences
+        .set_choice(
+            crate::workbench::ChoicePreference::EngineeringExport,
+            preference,
+        )
+        .unwrap();
+    state
+}
+
+fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize]) {
+    for &preference in preferences {
+        let mut state = stacked_export_state(preference);
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+        assert!(
+            io.dialog_titles.borrow().is_empty(),
+            "preference {preference}: a partial export opened a picker"
+        );
+        assert!(io.byte_files.borrow().is_empty());
+        let message = last_log_message(&state);
+        assert!(
+            message.contains("one") && message.contains("CSV/TSV"),
+            "{message}"
+        );
+        let run = state.simulation.active_run().unwrap();
+        state.ui.results.session.maximized_strip = Some(
+            crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+                run.dataset_id,
+                &run.analyses[1],
+            ),
+        );
+        action_export_csv_with_io(&mut state, &io);
+        let files = io.byte_files.borrow();
+        assert_eq!(files.len(), 1, "{}", last_log_message(&state));
+        if preference == 5 {
+            let dump = String::from_utf8(files[0].1.clone()).unwrap();
+            assert!(dump.contains(" d2 $end"), "{dump}");
+            assert!(!dump.contains(" d1 $end"), "{dump}");
+        } else {
+            let reopened =
+                crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+                    files[0].0.to_str().unwrap(),
+                    &files[0].1,
+                )
+                .unwrap();
+            assert_eq!(reopened.waveforms.len(), 1);
+            assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 2.0]);
+        }
+    }
+}
+
+#[test]
+fn numpy_stacked_binary_export_does_not_omit_other_analyses() {
+    assert_stacked_binary_export_is_not_silently_truncated(&[6, 7]);
+}
+
+#[test]
+fn vcd_stacked_binary_export_does_not_omit_other_event_schedules() {
+    assert_stacked_binary_export_is_not_silently_truncated(&[5]);
+}
+
+#[test]
+fn hdf5_and_matlab_stacked_binary_export_give_a_supported_alternative() {
+    assert_stacked_binary_export_is_not_silently_truncated(&[8, 9]);
+}
+
+#[test]
+fn native_stacked_binary_export_gives_a_supported_alternative() {
+    assert_stacked_binary_export_is_not_silently_truncated(&[3, 4]);
+}
+
+#[test]
+fn delimited_stacked_export_with_events_keeps_both_displayed_waveforms() {
+    for preference in [0, 2] {
+        let mut state = stacked_export_state(preference);
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+        let files = io.text_files.borrow();
+        assert_eq!(files.len(), 1, "{}", last_log_message(&state));
+        let contents = &files[0].1;
+        assert!(contents.contains("Transient 1"), "{contents}");
+        assert!(contents.contains("Transient 2"), "{contents}");
+        let delimiter = if preference == 0 { ',' } else { '\t' };
+        assert!(
+            contents.contains(&format!("{delimiter}out{delimiter}display{delimiter}")),
+            "{contents}"
+        );
+    }
+}
+
 /// Hiding every trace refuses the export and says so.
 #[test]
 fn an_export_with_every_trace_hidden_names_the_hidden_traces() {

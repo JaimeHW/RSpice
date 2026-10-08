@@ -81,17 +81,6 @@ pub(super) fn export_matlab(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
 ) {
-    // A `.mat` file holds one analysis's variables in one flat namespace, so
-    // a stack of displayed strips has nowhere to go and is refused before a
-    // picker opens.
-    if displayed.analysis_indices.len() > 1 {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-            "A {LABEL} file names its variables in one flat namespace, and this view shows \
-             several analyses. Maximize one displayed strip, or export an RSpice bundle, which \
-             carries them all."
-        )));
-        return;
-    }
     let prepared = match displayed.primary_analysis(state) {
         Some(analysis) => {
             let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);

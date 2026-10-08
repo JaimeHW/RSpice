@@ -57,16 +57,6 @@ pub(super) fn export_hdf5(
     io: &(impl ExportWorkflowIo + ?Sized),
     displayed: &ResolvedResultView,
 ) {
-    // A dataset holds one analysis, so a stack of displayed strips has no
-    // section to go in and is refused before a picker opens.
-    if displayed.analysis_indices.len() > 1 {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
-            "An HDF5 dataset carries one analysis, and this view shows several. Maximize one \
-             displayed strip, or export an RSpice bundle, which carries them all."
-                .to_owned(),
-        ));
-        return;
-    }
     let prepared = match displayed.primary_analysis(state) {
         Some(analysis) => {
             let waveforms = exported_waveforms(state, displayed.dataset_id, analysis);

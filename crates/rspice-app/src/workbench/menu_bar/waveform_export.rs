@@ -254,6 +254,27 @@ pub(crate) fn action_export_csv_with_io(
         state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
         return;
     }
+    // These encoders currently publish one retained analysis. Enforce that
+    // before any route selects the primary analysis and discards other strips.
+    let single_analysis_export = match export_format {
+        EngineeringExportFormat::Csv
+        | EngineeringExportFormat::Tsv
+        | EngineeringExportFormat::TouchstoneWhereCompatible => false,
+        EngineeringExportFormat::RSpiceResultBundle
+        | EngineeringExportFormat::RSpiceDatasetBundle
+        | EngineeringExportFormat::ValueChangeDump
+        | EngineeringExportFormat::NumpyArray
+        | EngineeringExportFormat::NumpyArchive
+        | EngineeringExportFormat::Hdf5EngineeringDataset
+        | EngineeringExportFormat::MatlabV5File => true,
+    };
+    if single_analysis_export && displayed.analysis_indices.len() > 1 {
+        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
+            "This export supports one analysis, and this view shows several. Maximize one displayed strip to export it, or choose CSV/TSV to export the displayed stack."
+                .to_owned(),
+        ));
+        return;
+    }
     if let Some(kind) = match export_format {
         EngineeringExportFormat::RSpiceResultBundle => {
             Some(rspice_formats::native_bundle::NativeBundleKind::Result)
@@ -266,8 +287,7 @@ pub(crate) fn action_export_csv_with_io(
         // A native bundle carries the exact retained waveform analysis. It
         // must not quietly substitute that source for a derived or tabular
         // sheet that the reader is currently looking at.
-        let owns_non_waveform_view = displayed.analysis_indices.len() != 1
-            || prepare_displayed_table(state, &displayed).is_some();
+        let owns_non_waveform_view = prepare_displayed_table(state, &displayed).is_some();
         if owns_non_waveform_view {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(
                 "Native RSpice bundles export one retained shared-axis waveform analysis. Select a waveform sheet, or choose CSV/TSV for this derived or tabular view."
@@ -391,17 +411,17 @@ fn prepare_displayed_table(
     if let Some(sheet) = prepare_active_sheet_csv(state, displayed) {
         return Some(sheet.map(|sheet| (sheet, RESULTS_SHEET_TOUCHSTONE_REFUSAL)));
     }
-    if let Some(typed) = displayed
-        .primary_analysis(state)
-        .and_then(prepare_typed_result_csv)
-    {
-        return Some(Ok((typed, TYPED_RESULT_TOUCHSTONE_REFUSAL)));
-    }
     if displayed.analysis_indices.len() > 1 {
         return Some(
             prepare_displayed_analysis_stack_csv(state, displayed)
                 .map(|prepared| (prepared, ANALYSIS_STACK_TOUCHSTONE_REFUSAL)),
         );
+    }
+    if let Some(typed) = displayed
+        .primary_analysis(state)
+        .and_then(prepare_typed_result_csv)
+    {
+        return Some(Ok((typed, TYPED_RESULT_TOUCHSTONE_REFUSAL)));
     }
     None
 }
