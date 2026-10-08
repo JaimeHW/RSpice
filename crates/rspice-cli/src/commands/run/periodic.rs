@@ -307,51 +307,50 @@ fn export_pac(
     result: &rspice_core::analysis::PacResult,
 ) -> Result<(), CliError> {
     let analysis_id = artifact.analysis;
-    let frequencies = result.frequencies.clone();
     let sidebands = pac_projected_sidebands(ctx, result)?;
-    let table = pac_export_table(&frequencies, &sidebands);
-    let schema = super::document::distinct_schema(table.columns.iter().map(|column| {
-        rspice_core::execution::signal_descriptor(
-            &column.name,
-            &column.name,
-            rspice_core::execution::SignalKind::Scalar,
-            rspice_core::execution::SignalValueType::Complex,
-        )
-    }))?;
+    let table = pac_export_table(
+        &result.frequencies,
+        result.fundamental_frequency,
+        &sidebands,
+    );
+    let responses = sidebands.iter().flat_map(|entry| {
+        entry.signals.iter().map(|signal| {
+            let descriptor = crate::commands::run_signals::complex_descriptor(signal)?;
+            rspice_core::execution::SignalDescriptor::new(
+                format!("{}:sb{}", descriptor.canonical_name(), entry.sideband),
+                format!("{}:sb{}", descriptor.display_name(), entry.sideband),
+                descriptor.kind(),
+                descriptor.unit().clone(),
+                descriptor.value_type(),
+                descriptor.shape(),
+                descriptor.owner().clone(),
+            )
+        })
+    });
+    let frequencies = table
+        .columns
+        .iter()
+        .filter(|column| column.var_type == "frequency")
+        .map(|column| {
+            use rspice_core::execution::{
+                SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
+            };
+            SignalDescriptor::new(
+                &column.name,
+                &column.name,
+                SignalKind::Scalar,
+                SignalUnit::Hertz,
+                SignalValueType::Real,
+                SignalShape::Scalar,
+                SignalOwner::Analysis,
+            )
+        });
+    let schema = super::document::distinct_schema(responses.chain(frequencies))?;
 
-    super::document::publish_analysis_result(
-        ctx,
-        path,
-        analysis_id,
-        schema,
-        || {
-            AnalysisResultDocument::from_pac(analysis_id, result)
-                .map(|builder| builder.parent_analysis(upstream))
-        },
-        |path, format| {
-            if matches!(format, OutputFormat::Hdf5) {
-                let mut data = crate::hdf5::Hdf5SimulationData::new();
-                data.title = "Periodic AC".to_string();
-                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-                let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
-                for column in &table.columns {
-                    let ColumnData::Complex { real, imag } = &column.data else {
-                        return Err(CliError::InternalError {
-                            message: "a PAC sideband published a real response column".to_string(),
-                        });
-                    };
-                    // A sideband response is assembled as a table column, so
-                    // no descriptor unit reaches here to state.
-                    section.add_signal(column.name.clone(), None, real.clone(), imag.clone());
-                }
-                data.ac = Some(section);
-                crate::hdf5::write_hdf5(path, &data)
-                    .map_err(|error| super::shared::map_hdf5_output_error(path, error))
-            } else {
-                table.write(path, format)
-            }
-        },
-    )?;
+    super::document::publish_table_result(ctx, path, analysis_id, schema, &table, || {
+        AnalysisResultDocument::from_pac(analysis_id, result)
+            .map(|builder| builder.parent_analysis(upstream))
+    })?;
     if !ctx.quiet {
         crate::console::line(format_args!(
             "  PAC sidebands exported to: {}",
@@ -364,6 +363,7 @@ fn export_pac(
 /// One sideband's projected response columns.
 struct PacSideband {
     sideband: i32,
+    absolute_frequencies: Vec<f64>,
     signals: Vec<ComplexSignal>,
 }
 
@@ -383,6 +383,10 @@ fn pac_projected_sidebands(
     let point_count = result.frequencies.len();
     let mut sidebands = Vec::with_capacity(result.sideband_indices().len());
     for sideband in result.sideband_indices() {
+        if sideband == 0 && !result.include_dc {
+            continue;
+        }
+        let mut absolute_frequencies = Vec::with_capacity(point_count);
         let mut node_columns = vec![(Vec::new(), Vec::new()); result.node_names.len()];
         let mut branch_columns = vec![(Vec::new(), Vec::new()); result.branch_names.len()];
         for index in 0..point_count {
@@ -400,11 +404,16 @@ fn pac_projected_sidebands(
                     "PAC",
                 ));
             }
+            absolute_frequencies.push(data.absolute_frequency);
+            // The coupled solve retains unit-drive spectra. Scale before
+            // authored output expressions see physical voltages and currents.
             for (column, value) in node_columns.iter_mut().zip(&data.node_voltages) {
+                let value = value * result.pac_magnitude;
                 column.0.push(value.re);
                 column.1.push(value.im);
             }
             for (column, value) in branch_columns.iter_mut().zip(&data.branch_currents) {
+                let value = value * result.pac_magnitude;
                 column.0.push(value.re);
                 column.1.push(value.im);
             }
@@ -441,35 +450,57 @@ fn pac_projected_sidebands(
             source,
             analysis: Some(format!("PAC sideband {sideband} output projection")),
         })?;
-        sidebands.push(PacSideband { sideband, signals });
+        sidebands.push(PacSideband {
+            sideband,
+            absolute_frequencies,
+            signals,
+        });
     }
     Ok(sidebands)
 }
 
 /// The flat PAC table: the offset-frequency scale and one complex column per
 /// projected signal per sideband, named `<signal>:sb<index>`.
-fn pac_export_table(frequencies: &[f64], sidebands: &[PacSideband]) -> ExportTable {
+fn pac_export_table(
+    frequencies: &[f64],
+    fundamental: f64,
+    sidebands: &[PacSideband],
+) -> ExportTable {
+    let mut columns = sidebands
+        .iter()
+        .flat_map(|entry| {
+            entry.signals.iter().map(|signal| ExportColumn {
+                unit: signal.unit_symbol(),
+                name: format!("{}:sb{}", signal.display_name, entry.sideband),
+                var_type: signal.raw_variable_type().to_string(),
+                data: ColumnData::Complex {
+                    real: signal.real.clone(),
+                    imag: signal.imag.clone(),
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    // The offset alone cannot locate a nonzero sideband in physical frequency.
+    columns.push(ExportColumn {
+        unit: Some("Hz".into()),
+        name: "fundamental_frequency".into(),
+        var_type: "frequency".into(),
+        data: ColumnData::Real(vec![fundamental; frequencies.len()]),
+    });
+    columns.extend(sidebands.iter().map(|entry| ExportColumn {
+        unit: Some("Hz".into()),
+        name: format!("frequency(sb{})", entry.sideband),
+        var_type: "frequency".into(),
+        data: ColumnData::Real(entry.absolute_frequencies.clone()),
+    }));
     ExportTable {
-        scale_unit: None,
+        scale_unit: Some("Hz".into()),
         analysis: "pac".to_string(),
         plot_name: "Periodic AC".to_string(),
         scale_name: "offset_frequency".to_string(),
         scale_type: "frequency".to_string(),
         scale: frequencies.to_vec(),
-        columns: sidebands
-            .iter()
-            .flat_map(|entry| {
-                entry.signals.iter().map(|signal| ExportColumn {
-                    unit: None,
-                    name: format!("{}:sb{}", signal.display_name, entry.sideband),
-                    var_type: signal.raw_variable_type().to_string(),
-                    data: ColumnData::Complex {
-                        real: signal.real.clone(),
-                        imag: signal.imag.clone(),
-                    },
-                })
-            })
-            .collect(),
+        columns,
     }
 }
 
