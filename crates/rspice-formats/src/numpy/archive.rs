@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::io::Read;
-use std::path::Path;
 
 use super::reader::{NumpyReadError, NumpyReadFailure, read_error};
 use super::{MAX_COLUMNS, NamedArray, NumpyWriteError, encode_complex_array, encode_real_array};
@@ -13,7 +12,7 @@ use num_complex::Complex64;
 /// A member name RSpice's own archive reader will accept.
 ///
 /// The reader refuses a member whose name is absolute, contains `..`, or
-/// contains a backslash, and it identifies an array by the file stem, so two
+/// contains a backslash, and it identifies an array by its relative name, so two
 /// signals whose names differ only in case collide. Every one of those is
 /// refused here, by name, rather than published as an archive this product
 /// would not reopen.
@@ -25,6 +24,14 @@ fn archive_member_name(name: &str) -> Result<String, NumpyWriteError> {
         return Err(NumpyWriteError::InvalidMemberName(name.to_owned()));
     }
     Ok(format!("{name}.npy"))
+}
+
+/// NPZ keys are the entire relative member name without its NPY suffix.
+/// Treating this as a host filesystem path drops hierarchy prefixes, changes
+/// signal identity, and makes distinct probes collide after a round trip.
+fn array_name(member: &str) -> Option<&str> {
+    let (name, extension) = member.rsplit_once('.')?;
+    (!name.is_empty() && extension.eq_ignore_ascii_case("npy")).then_some(name)
 }
 
 /// One `.npy` member per signal, plus the coordinate, in a stored ZIP.
@@ -127,11 +134,7 @@ fn decode_npz_arrays(
                         NumpyReadFailure::MemberCount { members, limit }
                     }
                     ArchiveReadError::DuplicateMember(name) => NumpyReadFailure::DuplicateArray(
-                        Path::new(&name)
-                            .file_stem()
-                            .and_then(|stem| stem.to_str())
-                            .unwrap_or(&name)
-                            .to_owned(),
+                        array_name(&name).unwrap_or(&name).to_owned(),
                     ),
                 },
             )
@@ -180,9 +183,7 @@ fn decode_npz_arrays(
                 },
             ));
         }
-        let stem = Path::new(&member_name)
-            .file_stem()
-            .and_then(|name| name.to_str())
+        let stem = array_name(&member_name)
             .ok_or_else(|| {
                 read_error(
                     format,
@@ -284,6 +285,49 @@ mod tests {
         NamedArray, NpzReadLimits, NumpyReadFailure, decode_npz, decode_npz_arrays, encode_npz,
     };
     use crate::zip::deterministic_stored_zip;
+
+    #[test]
+    fn npz_round_trip_preserves_hierarchical_signal_and_coordinate_names() {
+        for names in [vec!["V(top/out)"], vec!["V(top/out)", "V(other/out)"]] {
+            let signals = names
+                .iter()
+                .map(|name| NamedArray {
+                    name,
+                    real: &[2.0, 3.0],
+                    imag: None,
+                })
+                .collect::<Vec<_>>();
+            for coordinate_name in ["time", "analysis/time"] {
+                let bytes = encode_npz(coordinate_name, &[0.0, 1.0], &signals).unwrap();
+                let decoded = decode_npz(
+                    &bytes,
+                    NpzReadLimits {
+                        max_members: 3,
+                        max_expanded_bytes: 4096,
+                        max_numeric_values: 6,
+                    },
+                    &[coordinate_name],
+                    "numpy_npz",
+                )
+                .unwrap();
+                assert_eq!(decoded.coordinate_name, coordinate_name);
+                assert_eq!(
+                    decoded
+                        .signals
+                        .iter()
+                        .map(|signal| signal.name.as_str())
+                        .collect::<Vec<_>>(),
+                    names
+                );
+                assert!(
+                    decoded
+                        .signals
+                        .iter()
+                        .all(|signal| signal.real == [2.0, 3.0])
+                );
+            }
+        }
+    }
 
     #[test]
     fn npz_refuses_repeated_exact_member_names_instead_of_selecting_the_last_array() {
