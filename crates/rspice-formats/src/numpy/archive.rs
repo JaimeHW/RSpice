@@ -103,6 +103,7 @@ pub fn encode_npz(
 pub struct NpzReadLimits {
     pub max_members: usize,
     pub max_expanded_bytes: u64,
+    /// Total decoded f64 components across all members, including coordinates.
     pub max_numeric_values: usize,
 }
 
@@ -114,7 +115,7 @@ fn decode_npz_arrays(
 ) -> Result<Vec<(String, super::reader::NpyArray)>, NumpyReadError> {
     let max_members = limits.max_members;
     let max_expanded_bytes = limits.max_expanded_bytes;
-    let max_numeric_values = limits.max_numeric_values;
+    let mut remaining_values = limits.max_numeric_values;
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
         .map_err(|error| read_error(format, NumpyReadFailure::Archive(error)))?;
     if archive.len() > max_members {
@@ -209,10 +210,9 @@ fn decode_npz_arrays(
                 },
             ));
         }
-        arrays.push((
-            stem,
-            super::reader::decode_npy(&member_bytes, max_numeric_values, format)?,
-        ));
+        let array = super::reader::decode_npy(&member_bytes, remaining_values, format)?;
+        remaining_values -= array.numeric_values();
+        arrays.push((stem, array));
     }
     Ok(arrays)
 }
@@ -249,10 +249,10 @@ pub fn decode_npz(
             },
         ));
     }
-    let coordinate = super::reader::npy_vector(&coordinate_array, format, &coordinate_name)?.0;
+    let coordinate = super::reader::npy_vector(coordinate_array, format, &coordinate_name)?.0;
     let mut signals = Vec::with_capacity(arrays.len());
     for (name, array) in arrays {
-        let (real, imag) = super::reader::npy_vector(&array, format, &name)?;
+        let (real, imag) = super::reader::npy_vector(array, format, &name)?;
         signals.push(DecodedNumericSignal {
             name,
             real,
@@ -275,6 +275,40 @@ mod tests {
         NamedArray, NpzReadLimits, NumpyReadFailure, decode_npz, decode_npz_arrays, encode_npz,
     };
     use crate::zip::deterministic_stored_zip;
+
+    #[test]
+    fn numeric_decode_budget_is_shared_by_every_archive_member() {
+        let bytes = encode_npz(
+            "time",
+            &[0.0, 1.0],
+            &[NamedArray {
+                name: "out",
+                real: &[2.0, 3.0],
+                imag: None,
+            }],
+        )
+        .unwrap();
+        for max_numeric_values in [3, 4] {
+            let result = decode_npz(
+                &bytes,
+                NpzReadLimits {
+                    max_members: 2,
+                    max_expanded_bytes: 4096,
+                    max_numeric_values,
+                },
+                &["time"],
+                "numpy_npz",
+            );
+            if max_numeric_values == 4 {
+                assert_eq!(result.unwrap().signals[0].real, [2.0, 3.0]);
+            } else {
+                assert!(matches!(
+                    result.unwrap_err().reason,
+                    NumpyReadFailure::NumericValueLimit { .. }
+                ));
+            }
+        }
+    }
 
     #[test]
     fn rejects_unbalanced_columns_before_writing_archive_members() {
@@ -355,7 +389,7 @@ mod tests {
         let limits = NpzReadLimits {
             max_members: 3,
             max_expanded_bytes: 4096,
-            max_numeric_values: 6,
+            max_numeric_values: 8,
         };
         let decoded = decode_npz(&bytes, limits, &["time", "t"], "numpy_npz").unwrap();
         assert_eq!(decoded.coordinate_name, "T");

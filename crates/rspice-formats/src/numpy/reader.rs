@@ -1,8 +1,6 @@
 //! Bounded NPY decoding and projection into numeric waveform columns.
 
 use crate::numeric::{DecodedNumericDataset, DecodedNumericSignal};
-use std::io::Cursor;
-
 mod header;
 
 /// A NumPy array/container failure or a bounded decoding refusal.
@@ -22,6 +20,7 @@ pub enum NumpyReadFailure {
         values: usize,
         limit: usize,
     },
+    NumericValueCountOverflow,
     StructuredDtype(Box<npyz::DType>),
     Values(std::io::Error),
     InexactInteger(crate::numeric::ExactIntegerError),
@@ -88,7 +87,11 @@ impl std::fmt::Display for NumpyReadFailure {
                 "NPY shape {shape:?} is not a one- or two-dimensional waveform table"
             ),
             Self::ShapeProductOverflow(_) => f.write_str("NPY shape product overflow"),
-            Self::NumericValueLimit { .. } => f.write_str("NPY numeric-value limit exceeded"),
+            Self::NumericValueLimit { values, limit } => write!(
+                f,
+                "NPY decoding requires {values} numeric values; the remaining limit is {limit}"
+            ),
+            Self::NumericValueCountOverflow => f.write_str("NPY numeric-value count overflow"),
             Self::StructuredDtype(_) => f.write_str(
                 "structured and nested NPY dtypes require an explicit mapping and are not accepted",
             ),
@@ -162,6 +165,7 @@ impl std::error::Error for NumpyReadError {
 
 #[derive(Debug)]
 pub struct NpyArray {
+    max_values: usize,
     shape: Vec<usize>,
     fortran: bool,
     real: Vec<f64>,
@@ -172,6 +176,11 @@ impl NpyArray {
     pub(super) fn is_complex(&self) -> bool {
         self.imag.is_some()
     }
+
+    pub(super) fn numeric_values(&self) -> usize {
+        // Both arrays are admitted together before decoding; their sum fits.
+        self.real.len() + self.imag.as_ref().map_or(0, Vec::len)
+    }
 }
 
 pub(super) fn read_error(format: &str, reason: NumpyReadFailure) -> NumpyReadError {
@@ -181,6 +190,24 @@ pub(super) fn read_error(format: &str, reason: NumpyReadFailure) -> NumpyReadErr
     }
 }
 
+fn check_numeric_values(
+    values: Option<usize>,
+    limit: usize,
+    format: &str,
+) -> Result<(), NumpyReadError> {
+    let values =
+        values.ok_or_else(|| read_error(format, NumpyReadFailure::NumericValueCountOverflow))?;
+    if values > limit {
+        return Err(read_error(
+            format,
+            NumpyReadFailure::NumericValueLimit { values, limit },
+        ));
+    }
+    Ok(())
+}
+
+/// Decode at most `max_values` f64 components (two per complex element).
+/// The same budget also applies when constructing an implicit coordinate.
 pub fn decode_npy(
     bytes: &[u8],
     max_values: usize,
@@ -190,48 +217,82 @@ pub fn decode_npy(
     // npyz multiplies dimensions and allocates the declared header before it
     // returns control. Validate those operations before entering the reader.
     let (shape, count) = header::preflight(bytes, format)?;
-    let file = npyz::NpyFile::new(Cursor::new(bytes))
+    let mut payload = bytes;
+    let header = npyz::NpyHeader::from_reader(&mut payload)
         .map_err(|error| read_error(format, NumpyReadFailure::Header(error)))?;
-    if count > max_values {
-        return Err(read_error(
-            format,
-            NumpyReadFailure::NumericValueLimit {
-                values: count,
-                limit: max_values,
-            },
-        ));
-    }
-    let fortran = file.order() == Order::Fortran;
-    let dtype = file.dtype();
+    let fortran = header.order() == Order::Fortran;
+    let dtype = header.dtype();
     let DType::Plain(type_string) = dtype else {
         return Err(read_error(
             format,
             NumpyReadFailure::StructuredDtype(Box::new(dtype)),
         ));
     };
+    let components = if type_string.type_char() == TypeChar::Complex {
+        2
+    } else {
+        1
+    };
+    check_numeric_values(count.checked_mul(components), max_values, format)?;
+    // Check payload availability before reserving output arrays. Header-only
+    // files cannot make a decoder reserve memory for nonexistent samples.
+    if let Some(size) = type_string.num_bytes()
+        && size > 0
+        && count > payload.len() / size
+    {
+        return Err(read_error(
+            format,
+            NumpyReadFailure::Values(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "NPY payload is shorter than its declared shape and dtype",
+            )),
+        ));
+    }
+    let file = npyz::NpyFile::with_header(header, payload);
+    macro_rules! values {
+        ($ty:ty) => {
+            file.data::<$ty>().map_err(|error| {
+                read_error(
+                    format,
+                    NumpyReadFailure::Values(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        error,
+                    )),
+                )
+            })?
+        };
+    }
     macro_rules! real {
         ($ty:ty) => {{
-            let values = file
-                .into_vec::<$ty>()
+            let real = values!($ty)
+                .map(|value| value.map(|value| value as f64))
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
             NpyArray {
+                max_values,
                 shape,
                 fortran,
-                real: values.into_iter().map(|value| value as f64).collect(),
+                real,
                 imag: None,
             }
         }};
     }
     macro_rules! complex {
         ($ty:ty) => {{
-            let values = file
-                .into_vec::<$ty>()
-                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
+            let mut real = Vec::with_capacity(count);
+            let mut imag = Vec::with_capacity(count);
+            for value in values!($ty) {
+                let value =
+                    value.map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
+                real.push(value.re as f64);
+                imag.push(value.im as f64);
+            }
             NpyArray {
+                max_values,
                 shape,
                 fortran,
-                real: values.iter().map(|value| value.re as f64).collect(),
-                imag: Some(values.iter().map(|value| value.im as f64).collect()),
+                real,
+                imag: Some(imag),
             }
         }};
     }
@@ -241,56 +302,49 @@ pub fn decode_npy(
         (TypeChar::Int, 1) => real!(i8),
         (TypeChar::Int, 2) => real!(i16),
         (TypeChar::Int, 4) => real!(i32),
-        (TypeChar::Int, 8) => {
-            let values = file
-                .into_vec::<i64>()
-                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
-            NpyArray {
-                shape,
-                fortran,
-                real: values
-                    .into_iter()
-                    .map(|value| {
-                        crate::numeric::exact_signed_integer("NPY array", value).map_err(|detail| {
-                            read_error(format, NumpyReadFailure::InexactInteger(detail))
-                        })
+        (TypeChar::Int, 8) => NpyArray {
+            max_values,
+            shape,
+            fortran,
+            real: values!(i64)
+                .map(|value| {
+                    let value = value
+                        .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
+                    crate::numeric::exact_signed_integer("NPY array", value).map_err(|detail| {
+                        read_error(format, NumpyReadFailure::InexactInteger(detail))
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
-                imag: None,
-            }
-        }
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            imag: None,
+        },
         (TypeChar::Uint, 1) => real!(u8),
         (TypeChar::Uint, 2) => real!(u16),
         (TypeChar::Uint, 4) => real!(u32),
-        (TypeChar::Uint, 8) => {
-            let values = file
-                .into_vec::<u64>()
-                .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
-            NpyArray {
-                shape,
-                fortran,
-                real: values
-                    .into_iter()
-                    .map(|value| {
-                        crate::numeric::exact_unsigned_integer("NPY array", value).map_err(
-                            |detail| read_error(format, NumpyReadFailure::InexactInteger(detail)),
-                        )
+        (TypeChar::Uint, 8) => NpyArray {
+            max_values,
+            shape,
+            fortran,
+            real: values!(u64)
+                .map(|value| {
+                    let value = value
+                        .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
+                    crate::numeric::exact_unsigned_integer("NPY array", value).map_err(|detail| {
+                        read_error(format, NumpyReadFailure::InexactInteger(detail))
                     })
-                    .collect::<Result<Vec<_>, _>>()?,
-                imag: None,
-            }
-        }
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            imag: None,
+        },
         (TypeChar::Bool, 1) => {
-            let values = file
-                .into_vec::<bool>()
+            let real = values!(bool)
+                .map(|value| value.map(|value| if value { 1.0 } else { 0.0 }))
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| read_error(format, NumpyReadFailure::Values(error)))?;
             NpyArray {
+                max_values,
                 shape,
                 fortran,
-                real: values
-                    .into_iter()
-                    .map(|value| if value { 1.0 } else { 0.0 })
-                    .collect(),
+                real,
                 imag: None,
             }
         }
@@ -307,7 +361,7 @@ pub fn decode_npy(
 }
 
 pub(super) fn npy_vector(
-    array: &NpyArray,
+    array: NpyArray,
     format: &str,
     name: &str,
 ) -> Result<(Vec<f64>, Option<Vec<f64>>), NumpyReadError> {
@@ -336,7 +390,7 @@ pub(super) fn npy_vector(
             },
         ));
     }
-    Ok((array.real.clone(), array.imag.clone()))
+    Ok((array.real, array.imag))
 }
 
 /// Interpret column zero as the coordinate in every multi-column table,
@@ -363,6 +417,13 @@ pub fn npy_matrix_to_dataset(
             },
         ));
     }
+    let signal_columns = if columns >= 2 { columns - 1 } else { 1 };
+    let components = if array.is_complex() { 2 } else { 1 };
+    let projected_values = signal_columns
+        .checked_mul(components)
+        .and_then(|count| count.checked_add(1))
+        .and_then(|count| rows.checked_mul(count));
+    check_numeric_values(projected_values, array.max_values, format)?;
     let index = |row: usize, column: usize| {
         if array.fortran {
             column * rows + row
@@ -402,23 +463,12 @@ pub fn npy_matrix_to_dataset(
         });
     }
     let coordinate = (0..rows).map(|row| row as f64).collect();
-    let signals = (0..columns)
-        .map(|column| DecodedNumericSignal {
-            name: if columns == 1 {
-                "value".to_owned()
-            } else {
-                format!("signal_{}", column + 1)
-            },
-            real: (0..rows)
-                .map(|row| array.real[index(row, column)])
-                .collect(),
-            imag: array
-                .imag
-                .as_ref()
-                .map(|imag| (0..rows).map(|row| imag[index(row, column)]).collect()),
-            unit: None,
-        })
-        .collect();
+    let signals = vec![DecodedNumericSignal {
+        name: "value".to_owned(),
+        real: array.real,
+        imag: array.imag,
+        unit: None,
+    }];
     Ok(DecodedNumericDataset {
         coordinate_unit: None,
         domain: crate::WaveformDomain::DcSweep,
@@ -432,6 +482,105 @@ pub fn npy_matrix_to_dataset(
 mod tests {
     use super::*;
     use npyz::WriterBuilder as _;
+
+    #[test]
+    fn compact_dtypes_expand_to_exact_f64_components_within_the_budget() {
+        macro_rules! encoded {
+            ($ty:ty, $values:expr) => {{
+                let mut bytes = Vec::new();
+                let mut writer = npyz::WriteOptions::<$ty>::new()
+                    .default_dtype()
+                    .shape(&[2])
+                    .writer(&mut bytes)
+                    .begin_nd()
+                    .unwrap();
+                writer.extend($values).unwrap();
+                writer.finish().unwrap();
+                bytes
+            }};
+        }
+        for (bytes, expected) in [
+            (encoded!(i8, [-128, 127]), [-128.0, 127.0]),
+            (encoded!(i16, [-32768, 32767]), [-32768.0, 32767.0]),
+            (
+                encoded!(i32, [i32::MIN, i32::MAX]),
+                [i32::MIN as f64, i32::MAX as f64],
+            ),
+            (encoded!(i64, [-1, 2]), [-1.0, 2.0]),
+            (encoded!(u8, [0, 255]), [0.0, 255.0]),
+            (encoded!(u16, [0, 65535]), [0.0, 65535.0]),
+            (encoded!(u32, [0, u32::MAX]), [0.0, u32::MAX as f64]),
+            (encoded!(u64, [0, 1u64 << 53]), [0.0, (1u64 << 53) as f64]),
+            (encoded!(f32, [-0.0, 1.25]), [-0.0, 1.25]),
+            (encoded!(bool, [false, true]), [0.0, 1.0]),
+        ] {
+            let decoded = decode_npy(&bytes, 2, "numpy_npy").unwrap();
+            assert_eq!(
+                decoded.real.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                expected.map(f64::to_bits)
+            );
+            assert!(decoded.imag.is_none());
+            assert!(matches!(
+                decode_npy(&bytes, 1, "numpy_npy").unwrap_err().reason,
+                NumpyReadFailure::NumericValueLimit {
+                    values: 2,
+                    limit: 1
+                }
+            ));
+        }
+        let bytes = encoded!(
+            num_complex::Complex32,
+            [num_complex::Complex32::new(1.25, -0.0); 2]
+        );
+        let decoded = decode_npy(&bytes, 4, "numpy_npy").unwrap();
+        assert_eq!(decoded.real, [1.25, 1.25]);
+        assert_eq!(decoded.imag.unwrap()[0].to_bits(), (-0.0_f64).to_bits());
+        assert!(matches!(
+            decode_npy(&bytes, 3, "numpy_npy").unwrap_err().reason,
+            NumpyReadFailure::NumericValueLimit {
+                values: 4,
+                limit: 3
+            }
+        ));
+    }
+
+    #[test]
+    fn complex_components_count_toward_the_decode_budget_before_reading_samples() {
+        let bytes =
+            crate::numpy::encode_complex_array(&[2], &[num_complex::Complex64::new(1.0, -0.0); 2])
+                .unwrap();
+        for source in [&bytes[..], &bytes[..bytes.len() - 1]] {
+            let error = decode_npy(source, 3, "numpy_npy").unwrap_err();
+            assert!(matches!(
+                error.reason,
+                NumpyReadFailure::NumericValueLimit {
+                    values: 4,
+                    limit: 3
+                }
+            ));
+        }
+        let array = decode_npy(&bytes, 4, "numpy_npy").unwrap();
+        assert_eq!(array.real, [1.0, 1.0]);
+        assert_eq!(array.imag.unwrap()[0].to_bits(), (-0.0_f64).to_bits());
+    }
+
+    #[test]
+    fn implicit_coordinates_count_toward_the_projected_decode_budget() {
+        let bytes = crate::numpy::encode_real_array(&[2], &[5.0, 6.0]).unwrap();
+        let array = decode_npy(&bytes, 3, "numpy_npy").unwrap();
+        let error = npy_matrix_to_dataset(array, 2, 2, "numpy_npy").unwrap_err();
+        assert!(matches!(
+            error.reason,
+            NumpyReadFailure::NumericValueLimit {
+                values: 4,
+                limit: 3
+            }
+        ));
+        let array = decode_npy(&bytes, 4, "numpy_npy").unwrap();
+        let dataset = npy_matrix_to_dataset(array, 2, 2, "numpy_npy").unwrap();
+        assert_eq!(dataset.coordinate, [0.0, 1.0]);
+        assert_eq!(dataset.signals[0].real, [5.0, 6.0]);
+    }
 
     #[test]
     fn overflowing_header_dimensions_are_refused_without_panicking() {
@@ -571,7 +720,7 @@ mod tests {
             num_complex::Complex64::new(3.0, 4.0),
         ];
         let bytes = crate::numpy::encode_complex_array(&[2], &values).expect("NPY fixture");
-        let array = decode_npy(&bytes, 2, "numpy_npy").expect("decode");
+        let array = decode_npy(&bytes, 6, "numpy_npy").expect("decode");
         let DecodedNumericDataset {
             coordinate,
             signals,
