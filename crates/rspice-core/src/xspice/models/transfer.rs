@@ -2,6 +2,7 @@
 
 use crate::{
     Complex64, Value,
+    numerics::scaled_product::ScaledProduct,
     xspice::{
         AnalysisType, CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec,
         PortDirection, PortSpec, PortType, XspiceRationalTransfer, XspiceSmallSignalDescriptor,
@@ -922,34 +923,80 @@ fn s_xfer_coefficients_for_context(ctx: &CmContext) -> CmResult<Option<Arc<SXfer
     }
 }
 
-fn evaluate_ascending_polynomial(coefficients: &[Value], s: Complex64) -> Complex64 {
-    let mut acc = Complex64::new(0.0, 0.0);
+fn evaluate_ascending_polynomial(
+    coefficients: &[Value],
+    omega: ScaledProduct,
+) -> (ScaledProduct, ScaledProduct) {
+    let (mut real, mut imaginary) = (ScaledProduct::ZERO, ScaledProduct::ZERO);
     for coefficient in coefficients.iter().rev() {
-        acc = acc * s + *coefficient;
+        // Horner evaluation at s=j*omega. Separate exponents also retain a
+        // small component when the other component is much larger than f64.
+        (real, imaginary) = (
+            imaginary
+                .multiply_scaled(omega)
+                .multiply(-1.0)
+                .add(ScaledProduct::ONE.multiply(*coefficient)),
+            real.multiply_scaled(omega),
+        );
     }
-    acc
+    (real, imaginary)
+}
+
+fn s_xfer_origin_factored_coefficients(coefficients: &SXferCoefficients) -> (&[Value], &[Value]) {
+    // Exact common powers of s are removable in the port response. Keep the
+    // cached realization intact so natural poles still include those states.
+    let common = coefficients
+        .numerator
+        .iter()
+        .zip(&coefficients.denominator)
+        .take_while(|(n, d)| **n == 0.0 && **d == 0.0)
+        .count();
+    (
+        &coefficients.numerator[common..],
+        &coefficients.denominator[common..],
+    )
 }
 
 fn s_xfer_gain_at(coefficients: &SXferCoefficients, frequency: Value) -> Complex64 {
-    let s = Complex64::new(0.0, 2.0 * PI * frequency);
-    let numerator = evaluate_ascending_polynomial(&coefficients.numerator, s) * coefficients.gain;
-    let denominator = evaluate_ascending_polynomial(&coefficients.denominator, s);
-    if denominator.norm_sqr() <= 1.0e-60 {
-        Complex64::new(0.0, 0.0)
-    } else {
-        numerator / denominator
+    if coefficients.gain == 0.0 || coefficients.numerator.iter().all(|value| *value == 0.0) {
+        return Complex64::new(0.0, 0.0);
     }
+    let (numerator, denominator) = s_xfer_origin_factored_coefficients(coefficients);
+    let omega = ScaledProduct::ONE.multiply(2.0 * PI).multiply(frequency);
+    let (nr, ni) = evaluate_ascending_polynomial(numerator, omega);
+    let (dr, di) = evaluate_ascending_polynomial(denominator, omega);
+    let norm_squared = dr.multiply_scaled(dr).add(di.multiply_scaled(di));
+    // Apply f64's exponent range only after the complete quotient. Neither a
+    // polynomial value, the numerator gain, nor |D|^2 has to fit on its own.
+    // An unresolved zero denominator remains non-finite so AC can refuse it.
+    Complex64::new(
+        nr.multiply_scaled(dr)
+            .add(ni.multiply_scaled(di))
+            .multiply(coefficients.gain)
+            .divide(norm_squared)
+            .value(),
+        ni.multiply_scaled(dr)
+            .add(nr.multiply_scaled(di).multiply(-1.0))
+            .multiply(coefficients.gain)
+            .divide(norm_squared)
+            .value(),
+    )
 }
 
 fn s_xfer_dc_gain(ctx: &CmContext) -> Value {
     let Ok(Some(coefficients)) = s_xfer_coefficients_for_context(ctx) else {
         return 0.0;
     };
-    let den0 = coefficients.denominator.first().copied().unwrap_or(0.0);
-    if den0.abs() <= 1.0e-30 {
+    let (numerator, denominator) = s_xfer_origin_factored_coefficients(&coefficients);
+    let den0 = denominator.first().copied().unwrap_or(0.0);
+    if den0 == 0.0 {
         0.0
     } else {
-        coefficients.gain * coefficients.numerator.first().copied().unwrap_or(0.0) / den0
+        ScaledProduct::ONE
+            .multiply(coefficients.gain)
+            .multiply(numerator.first().copied().unwrap_or(0.0))
+            .without_factor(den0)
+            .value()
     }
 }
 

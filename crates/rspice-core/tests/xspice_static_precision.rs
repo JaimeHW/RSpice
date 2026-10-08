@@ -1,8 +1,274 @@
-//! Memoryless code-model arithmetic must retain representable derivatives.
+//! Code-model arithmetic must retain representable responses and derivatives.
 use rspice_core::xspice::{
     CmContext, CodeModel,
-    models::{Divider, Multiplier, Spice2Poly},
+    models::{Divider, Multiplier, SXfer, Spice2Poly},
 };
+
+fn rational_context(gain: f64, numerator: &[f64], denominator: &[f64]) -> CmContext {
+    let mut context = CmContext::new();
+    context.set_param("gain", gain);
+    context.set_real_vector_param("num_coeff", numerator.to_vec());
+    context.set_real_vector_param("den_coeff", denominator.to_vec());
+    SXfer.init(&mut context).unwrap();
+    context
+}
+
+fn coefficient_list(values: &[f64]) -> String {
+    values
+        .iter()
+        .map(|value| format!("{value:e}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn relative_component(actual: f64, expected: f64) {
+    // A complex norm would itself underflow for some of these finite gains.
+    assert!(
+        actual.is_finite() && (actual - expected).abs() <= 5e-14 * expected.abs(),
+        "{actual:e} != {expected:e}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_ac_retains_finite_quotients_beyond_intermediate_float_range() {
+    use rspice_core::{Complex64, Engine, Netlist};
+    let large_frequency = 1e200;
+    let inverse_omega = 1.0 / (std::f64::consts::TAU * large_frequency);
+    let corner_ratio = std::f64::consts::TAU * 0.1;
+    let lowpass = Complex64::new(1.0, -corner_ratio) / (1.0 + corner_ratio * corner_ratio);
+    let highpass = Complex64::new(corner_ratio * corner_ratio, corner_ratio)
+        / (1.0 + corner_ratio * corner_ratio);
+    for (gain, numerator, denominator, frequency, expected) in [
+        (
+            1.0,
+            vec![1.0],
+            vec![1.0, 1.0],
+            large_frequency,
+            Complex64::new(0.0, -inverse_omega),
+        ),
+        (
+            1.0,
+            vec![1.0, 0.0, 0.0],
+            vec![1.0, 0.0, 1.0],
+            large_frequency,
+            Complex64::new(1.0, 0.0),
+        ),
+        (
+            1.0,
+            vec![1e-300],
+            vec![1.0, 1e-300],
+            0.0,
+            Complex64::new(1.0, 0.0),
+        ),
+        (1.0, vec![1e-300], vec![1.0, 1e-300], 1e-301, lowpass),
+        (
+            1e-308,
+            vec![1e308, 0.0],
+            vec![1.0, 1.0],
+            large_frequency,
+            Complex64::new(1.0, inverse_omega),
+        ),
+        (
+            1e308,
+            vec![1e-308, 0.0],
+            vec![1.0, 1e-300],
+            1e-301,
+            highpass,
+        ),
+        (
+            1e-300,
+            vec![1e-300],
+            vec![1.0, 1e-300],
+            0.0,
+            Complex64::new(1e-300, 0.0),
+        ),
+        (
+            1e300,
+            vec![1e300],
+            vec![1.0, 1e300],
+            0.0,
+            Complex64::new(1e300, 0.0),
+        ),
+        (
+            1.0,
+            vec![f64::from_bits(2)],
+            vec![1.0, f64::from_bits(1)],
+            0.0,
+            Complex64::new(2.0, 0.0),
+        ),
+        (
+            1.0,
+            vec![f64::MAX],
+            vec![1.0, f64::MAX],
+            0.0,
+            Complex64::new(1.0, 0.0),
+        ),
+        (
+            f64::MAX,
+            vec![1e300],
+            vec![1.0, 1e300],
+            0.0,
+            Complex64::new(f64::MAX, 0.0),
+        ),
+    ] {
+        for sign in [-1.0, 1.0] {
+            let context = rational_context(sign * gain, &numerator, &denominator);
+            let actual = SXfer.output_input_ac_partials(&context, "out", frequency)[0].1;
+            relative_component(actual.re, sign * expected.re);
+            relative_component(actual.im, sign * expected.im);
+
+            let netlist = Netlist::parse(&format!(
+                "Scaled rational AC\nV1 in 0 dc 0 ac 1\nA1 in out filt\n.model filt s_xfer(gain={:e} num_coeff=[{}] den_coeff=[{}])\nRload out 0 1\n.end\n",
+                sign * gain, coefficient_list(&numerator), coefficient_list(&denominator)
+            )).unwrap();
+            let point = Engine::default()
+                .run_ac(&netlist, &[frequency])
+                .unwrap()
+                .remove(0);
+            let output = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            relative_component(point.voltages[output].re, sign * expected.re);
+            relative_component(point.voltages[output].im, sign * expected.im);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_dc_gain_preserves_tiny_denominators_and_compensating_factors() {
+    for (gain, numerator, denominator, expected) in [
+        (1.0, 1e-300, 1e-300, 1.0),
+        (1e-300, 1e-300, 1e-300, 1e-300),
+        (1e300, 1e300, 1e300, 1e300),
+        (1.0, f64::from_bits(2), f64::from_bits(1), 2.0),
+        (f64::MAX, 1e300, 1e300, f64::MAX),
+    ] {
+        let context = rational_context(gain, &[numerator], &[1.0, denominator]);
+        relative_component(SXfer.ac_gain(&context)[0], expected);
+    }
+    // The legacy real-gain callback keeps the exact-integrator DC convention.
+    let context = rational_context(1.0, &[1.0], &[1.0, 0.0]);
+    assert_eq!(SXfer.ac_gain(&context), [0.0]);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_singular_ac_refuses_true_poles_instead_of_reporting_zero() {
+    for (numerator, denominator, frequency, pole_count, imaginary_magnitude) in [
+        ("1", "1 0", 0.0, 1, 0.0),
+        ("1", "1 0 1", 1.0 / std::f64::consts::TAU, 2, 1.0),
+    ] {
+        let netlist = rspice_core::Netlist::parse(&format!(
+            "Rational singular frequency\nV1 in 0 dc 0 ac 1\nA1 in out filt\n.model filt s_xfer(num_coeff=[{numerator}] den_coeff=[{denominator}])\nRload out 0 1\n.end\n"
+        )).unwrap();
+        let engine = rspice_core::Engine::default();
+        let error = engine
+            .run_ac(&netlist, &[frequency])
+            .expect_err("a singular transfer is not zero")
+            .to_string();
+        for expected in ["XSPICE", "A1", "out", "non-finite"] {
+            assert!(error.contains(expected), "{error}");
+        }
+        let spectrum = engine.run_pole_spectrum(&netlist).unwrap();
+        assert_eq!(spectrum.poles.len(), pole_count);
+        for pole in &spectrum.poles {
+            assert!(pole.re.abs() < 1e-12);
+            assert!((pole.im.abs() - imaginary_magnitude).abs() < 1e-12);
+        }
+        assert!(spectrum.evidence.is_qualified());
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_origin_cancellation_and_zero_gain_keep_their_internal_modes() {
+    use rspice_core::{Complex64, Engine, Netlist};
+    for (gain, numerator, denominator, dc, poles) in [
+        (
+            1.0,
+            vec![1.0, 0.0],
+            vec![1.0, 0.0],
+            1.0,
+            vec![Complex64::new(0.0, 0.0)],
+        ),
+        (
+            2.0,
+            vec![3.0, 0.0, 0.0],
+            vec![1.0, 2.0, 0.0, 0.0],
+            3.0,
+            vec![
+                Complex64::new(0.0, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(-2.0, 0.0),
+            ],
+        ),
+        (
+            0.0,
+            vec![1.0],
+            vec![1.0, 0.0],
+            0.0,
+            vec![Complex64::new(0.0, 0.0)],
+        ),
+        (
+            1.0,
+            vec![0.0],
+            vec![1.0, 0.0, 1.0],
+            0.0,
+            vec![Complex64::new(0.0, 1.0), Complex64::new(0.0, -1.0)],
+        ),
+    ] {
+        let context = rational_context(gain, &numerator, &denominator);
+        relative_component(SXfer.ac_gain(&context)[0], dc);
+        let netlist = Netlist::parse(&format!(
+            "Removable transfer origins\nV1 in 0 dc 0 ac 1\nA1 in out filt\n.model filt s_xfer(gain={gain} num_coeff=[{}] den_coeff=[{}])\nRload out 0 1\n.end\n",
+            coefficient_list(&numerator), coefficient_list(&denominator)
+        )).unwrap();
+        let engine = Engine::default();
+        let point = engine.run_ac(&netlist, &[0.0]).unwrap().remove(0);
+        let output = point
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        relative_component(point.voltages[output].re, dc);
+        relative_component(point.voltages[output].im, 0.0);
+        if dc == 0.0 {
+            let point = engine
+                .run_ac(&netlist, &[1.0 / std::f64::consts::TAU])
+                .unwrap()
+                .remove(0);
+            assert_eq!(point.voltages[output], Complex64::new(0.0, 0.0));
+        }
+        let spectrum = engine.run_pole_spectrum(&netlist).unwrap();
+        assert!(spectrum.evidence.is_qualified());
+        let mut remaining = spectrum.poles;
+        assert_eq!(remaining.len(), poles.len());
+        let repeated_origin = poles
+            .iter()
+            .filter(|pole| pole.re == 0.0 && pole.im == 0.0)
+            .count()
+            > 1;
+        for expected in poles {
+            // The double integrator is a defective zero eigenvalue: a
+            // perturbation of size epsilon can split it by sqrt(epsilon).
+            // Check both retained modes; AC response checks stay much tighter.
+            let tolerance = if repeated_origin && expected == Complex64::new(0.0, 0.0) {
+                2.0 * f64::EPSILON.sqrt()
+            } else {
+                1e-10
+            };
+            let index = remaining
+                .iter()
+                .position(|pole| (*pole - expected).norm() < tolerance)
+                .unwrap_or_else(|| panic!("gain={gain}, numerator={numerator:?}, denominator={denominator:?}: missing {expected}, actual {remaining:?}"));
+            remaining.remove(index);
+        }
+    }
+}
 
 fn multiplier(inputs: &[f64], gains: &[f64], offset: f64) -> (f64, Vec<f64>) {
     let mut context = CmContext::new();

@@ -19,10 +19,18 @@ impl ScaledProduct {
 
     pub(crate) fn multiply(self, factor: Value) -> Self {
         let (factor, exponent) = libm::frexp(factor);
-        let (mantissa, normalization) = libm::frexp(self.mantissa * factor);
+        self.multiply_scaled(Self {
+            mantissa: factor,
+            exponent: i64::from(exponent),
+        })
+    }
+
+    /// Multiply two retained products without materializing their full values.
+    pub(crate) fn multiply_scaled(self, factor: Self) -> Self {
+        let (mantissa, normalization) = libm::frexp(self.mantissa * factor.mantissa);
         Self {
             mantissa,
-            exponent: self.exponent + i64::from(exponent) + i64::from(normalization),
+            exponent: self.exponent + factor.exponent + i64::from(normalization),
         }
     }
 
