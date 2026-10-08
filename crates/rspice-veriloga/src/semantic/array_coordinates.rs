@@ -41,7 +41,7 @@ impl SemanticAnalyzer {
         Some(ArrayType {
             layout: crate::array_index::UnpackedArrayLayout::new(
                 &dimensions,
-                Self::MAX_ARRAY_ELEMENTS,
+                MAX_PARAMETER_ARRAY_ELEMENTS as usize,
             )
             .ok()?,
             element,
@@ -61,6 +61,13 @@ impl SemanticAnalyzer {
         let Some(array) = self.arrays.get(&name).cloned() else {
             return Ok(false);
         };
+        if self
+            .symbols
+            .lookup(&name)
+            .is_some_and(|symbol| symbol.kind == SymbolKind::Parameter)
+        {
+            return Err(self.array_coordinate_error(&name, "is a read-only parameter", *span));
+        }
         let target = self
             .analog_array_value_type(&name, module)
             .ok_or_else(|| self.array_coordinate_error(&name, "has no array-value type", *span))?;
@@ -160,7 +167,7 @@ impl SemanticAnalyzer {
         }
         let shape = crate::array_index::UnpackedArrayLayout::new(
             &array.dimensions,
-            Self::MAX_ARRAY_ELEMENTS,
+            MAX_PARAMETER_ARRAY_ELEMENTS as usize,
         )
         .expect("validated array shape");
         crate::array_index::element_name(name, &shape, index as usize).into()
@@ -201,14 +208,13 @@ impl SemanticAnalyzer {
             }
             bounds.push((axis[0], axis[1]));
         }
-        let shape = crate::array_index::UnpackedArrayLayout::new(&bounds, Self::MAX_ARRAY_ELEMENTS)
-            .map_err(|_| {
-                self.array_coordinate_error(
-                    &item.name,
-                    "has an invalid initializer shape",
-                    item.span,
-                )
-            })?;
+        let shape = crate::array_index::UnpackedArrayLayout::new(
+            &bounds,
+            MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+        )
+        .map_err(|_| {
+            self.array_coordinate_error(&item.name, "has an invalid initializer shape", item.span)
+        })?;
         let initializer = item.init.as_ref().expect("array initializer");
         let mut counts = Vec::new();
         let elements =
@@ -270,11 +276,11 @@ impl SemanticAnalyzer {
         indices: &[&Expression],
         span: Span,
     ) -> CompileResult<Expression> {
-        let shape =
-            crate::array_index::UnpackedArrayLayout::new(dimensions, Self::MAX_ARRAY_ELEMENTS)
-                .map_err(|_| {
-                    self.array_coordinate_error(name, "has an invalid coordinate layout", span)
-                })?;
+        let shape = crate::array_index::UnpackedArrayLayout::new(
+            dimensions,
+            MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+        )
+        .map_err(|_| self.array_coordinate_error(name, "has an invalid coordinate layout", span))?;
         if indices.len() != dimensions.len() {
             return Err(self.array_coordinate_error(
                 name,

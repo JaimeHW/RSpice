@@ -381,6 +381,7 @@ mod analyzed;
 mod analog_events;
 pub use analog_events::AnalogEventBinding;
 mod array_coordinates;
+mod parameter_arrays;
 mod bounded_loop;
 mod constant_dependencies;
 mod digital;
@@ -1753,10 +1754,25 @@ impl SemanticAnalyzer {
                 attrs: Default::default(),
             })?;
 
+            if !analyzed.parameters[target].dimensions.is_empty() {
+                self.parameter_arrays.insert(decl.alias.clone());
+            }
             analyzed.param_aliases.push(AnalyzedParamAlias {
                 alias: decl.alias.clone(),
                 target,
             });
+        }
+
+        // Parameter arrays share checked numeric storage with variables, but
+        // retain parameter symbols so source code can never write their cells.
+        let parameter_arrays = Self::parameter_array_items(&analyzed);
+        for (item, var_type) in &parameter_arrays {
+            if let Some(layout) =
+                self.register_array_variable(item, *var_type, &item.name, &mut analyzed)
+            {
+                analyzed.arrays.insert(item.name.clone(), layout.clone());
+                self.arrays.insert(item.name.clone(), layout);
+            }
         }
 
         // Phase 8: Analyze variables
@@ -1957,6 +1973,9 @@ impl SemanticAnalyzer {
         let declaration_site = self.next_analog_site();
         let mut declaration_statements = Vec::new();
         self.open_region();
+        for (item, _) in &parameter_arrays {
+            self.initialize_array_storage(item, &mut analyzed, &mut declaration_statements)?;
+        }
         for var_decl in &module.variables {
             for item in &var_decl.items {
                 let Some(init) = &item.init else { continue };
@@ -1972,34 +1991,12 @@ impl SemanticAnalyzer {
                 }
                 function_effects::validate_initializer_expression(init, &self.user_functions)?;
 
-                if let Some(layout) = self.arrays.get(&item.name).cloned() {
-                    for (offset, element) in self.array_initializer_values(item, &mut analyzed)? {
-                        let var_index = layout.base + offset;
-                        let expression = self.lower_expression_with_side_effects(
-                            element,
-                            &mut analyzed,
-                            &mut declaration_statements,
-                        )?;
-                        let (expression, expr_type) = self.coerce_assignment_expression(
-                            expression,
-                            analyzed.variables[var_index].value_type,
-                        )?;
-                        let site = self.next_analog_site();
-                        let assignment = AnalyzedAssignment {
-                            occurrence_source: None,
-                            target: analyzed.variables[var_index].name.clone(),
-                            var_index,
-                            index: None,
-                            expression,
-                            site,
-                            expression_guard: AnalogSiteGuard::None,
-                            expr_type,
-                            span: item.span,
-                            unfiltered_initial_step_guard: None,
-                        };
-                        self.record_region(AnalyzedRegion::Assignment(assignment.clone()));
-                        declaration_statements.push(AnalyzedStatement::Assignment(assignment));
-                    }
+                if self.arrays.contains_key(&item.name) {
+                    self.initialize_array_storage(
+                        item,
+                        &mut analyzed,
+                        &mut declaration_statements,
+                    )?;
                     continue;
                 }
 
@@ -2138,6 +2135,19 @@ impl SemanticAnalyzer {
         analyzed.noise_process_count = self.next_noise_process;
         retained_inputs::record(&mut analyzed);
         self.assignment_events.finish(&mut analyzed)?;
+        for (item, _) in &parameter_arrays {
+            analyzed
+                .digital
+                .immutable_analog_variables
+                .push(item.name.clone());
+            if let Some(array) = analyzed.arrays.get(&item.name) {
+                analyzed.digital.immutable_analog_variables.extend(
+                    analyzed.variables[array.base..array.base + array.len]
+                        .iter()
+                        .map(|variable| variable.name.clone()),
+                );
+            }
+        }
         analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
         Ok(analyzed)
     }
@@ -2387,9 +2397,12 @@ impl SemanticAnalyzer {
             }
             axes.push((start, end));
         }
-        let Ok(shape) =
-            crate::array_index::UnpackedArrayLayout::new(&axes, Self::MAX_ARRAY_ELEMENTS)
-        else {
+        let limit = if self.parameter_arrays.contains(&item.name) {
+            MAX_PARAMETER_ARRAY_ELEMENTS as usize
+        } else {
+            Self::MAX_ARRAY_ELEMENTS
+        };
+        let Ok(shape) = crate::array_index::UnpackedArrayLayout::new(&axes, limit) else {
             let detail = if let [(left, right)] = axes.as_slice() {
                 format!("has {} elements", u128::from(left.abs_diff(*right)) + 1)
             } else {
@@ -2398,8 +2411,7 @@ impl SemanticAnalyzer {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "array '{}' {detail} (limit {})",
-                    item.name,
-                    Self::MAX_ARRAY_ELEMENTS
+                    item.name, limit
                 )),
                 item.span,
             );
@@ -6998,15 +7010,6 @@ impl SemanticAnalyzer {
                 }
                 let index = self.lower_expression(&a.index)?;
                 let array_name = self.resolve_substituted_name(&a.array);
-                if self.parameter_arrays.contains(&array_name) {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "indexed access to parameter array '{}' is represented by its declaration metadata, but parameter-array element lowering is not implemented",
-                            a.array
-                        )),
-                        a.span,
-                    )));
-                }
                 let Some(layout) = self.arrays.get(&array_name).cloned() else {
                     return Err(CompileError::Semantic(SemanticError::new(
                         SemanticErrorKind::UnsupportedFeature(format!(

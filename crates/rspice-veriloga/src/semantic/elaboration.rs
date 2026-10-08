@@ -747,10 +747,13 @@ impl<'a> HierarchyElaborator<'a> {
                 } else {
                     array.dimensions.clone()
                 };
-                let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65536)
-                    .map_err(|_| {
-                        internal_error("hierarchy array shape exceeds supported storage".into())
-                    })?;
+                let layout = crate::array_index::UnpackedArrayLayout::new(
+                    &dimensions,
+                    MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+                )
+                .map_err(|_| {
+                    internal_error("hierarchy array shape exceeds supported storage".into())
+                })?;
                 for offset in 0..array.len {
                     let mut name = mapped_name.to_string();
                     for index in layout.indices(offset).expect("array element") {

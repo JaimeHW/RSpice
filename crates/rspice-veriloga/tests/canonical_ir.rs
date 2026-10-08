@@ -1602,18 +1602,21 @@ fn canonical_ir_preserves_multidimensional_parameter_bounds_and_direction() {
 }
 
 #[test]
-fn executable_and_generated_rust_backends_reject_parameter_arrays_until_abi_support() {
+fn parameter_array_values_keep_generated_rust_qualification_explicit() {
     let compiler = VerilogACompiler::default();
     let artifact = compiler
         .compile_canonical_ir(parameter_array_source())
         .expect("parameter-array canonical IR");
 
-    let compile_error = compiler
+    let model = compiler
         .compile(parameter_array_source())
-        .expect_err("bytecode execution must fail closed");
-    assert!(compile_error.to_string().contains(
-        "represented in canonical HIR/MIR, but executable array storage and atomic instance overrides are not implemented"
-    ));
+        .expect("numeric parameter arrays have executable declaration storage");
+    assert!(
+        model
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name == "coefficients" && parameter.is_array)
+    );
 
     let rust_error = rspice_veriloga::rust_backend::RustTranspiler::default()
         .transpile(&artifact)

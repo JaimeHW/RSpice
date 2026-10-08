@@ -53,6 +53,81 @@ fn terminal_current(device: &mut VerilogADevice, voltages: &[f64]) -> f64 {
 }
 
 #[test]
+fn parameter_array_values_initialize_copy_and_preserve_jacobians() {
+    let model = compile(
+        r#"
+module parameter_arrays(p,n); inout p,n; electrical p,n;
+ parameter real gain=2.0;
+ parameter real coefficients[2:1][0:1]='{'{gain,gain+1.0},'{gain+2.0,gain+3.0}};
+ parameter integer weights[3:2]='{1.5,-1.5};
+ real copied[4:5][-1:0];
+ integer index;
+ analog begin
+   copied=coefficients;
+   index=1;
+   I(p,n)<+coefficients[index][0]*V(p,n)*V(p,n)+copied[4][-1]*V(p,n)+weights[3];
+ end
+endmodule
+"#,
+    );
+    let mut malformed = model.clone();
+    malformed
+        .parameters
+        .iter_mut()
+        .find(|parameter| parameter.name == "coefficients")
+        .unwrap()
+        .is_array = false;
+    assert!(
+        malformed
+            .try_device("bad", &[1, 0])
+            .unwrap_err()
+            .to_string()
+            .contains("array storage metadata")
+    );
+    let mut device = model.device("X", &[1, 0]);
+    assert!(
+        device
+            .try_set_parameter("coefficients", 0.0)
+            .unwrap_err()
+            .to_string()
+            .contains("is an array")
+    );
+    for gain in [2.0, 4.0] {
+        device.try_set_parameter("gain", gain).unwrap();
+        device.try_resolve_parameter_defaults().unwrap();
+        device.try_begin_analysis(0).unwrap();
+        for voltage in [0.5, -0.25] {
+            let (matrix, rhs) = collect_stamps(&mut device, &[voltage]);
+            assert!((matrix[&(0, 0)] - (2.0 * (gain + 2.0) * voltage + gain)).abs() < 1e-12);
+            assert!((rhs[&0] - ((gain + 2.0) * voltage * voltage - 2.0)).abs() < 1e-12);
+            model.observe(&mut device);
+            assert_eq!(device.variable("coefficients[2][0]"), Some(gain));
+            assert_eq!(device.variable("copied[4][-1]"), Some(gain));
+            assert_eq!(device.variable("weights[2]"), Some(-2.0));
+        }
+    }
+}
+
+#[test]
+fn parameter_array_values_reject_writes_and_scalar_uses() {
+    for body in [
+        "analog values='{3.0,4.0};",
+        "analog values[0]=3.0;",
+        "initial values='{3.0,4.0};",
+        "initial values[0]=3.0;",
+        "real value; analog value=values;",
+    ] {
+        let source =
+            format!("module readonly; parameter real values[0:1]='{{1.0,2.0}}; {body} endmodule");
+        let error = compile_err(&source);
+        assert!(
+            error.contains("parameter") || error.contains("Parameter"),
+            "{body}: {error}"
+        );
+    }
+}
+
+#[test]
 fn whole_array_values_capture_self_permutations_and_exact_jacobians() {
     let model = compile(
         r#"

@@ -997,6 +997,9 @@ struct NativeEntryDependencies<'a> {
 /// Invalid instance parameter value reported before it can enter a model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParameterValueError {
+    ArrayRequiresSpecialization {
+        parameter: SmolStr,
+    },
     RequiresGivenElaboration {
         parameter: SmolStr,
         given: bool,
@@ -1031,6 +1034,10 @@ pub enum ParameterValueError {
 impl std::fmt::Display for ParameterValueError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ArrayRequiresSpecialization { parameter } => write!(
+                f,
+                "parameter '{parameter}' is an array; assign a complete array through source specialization"
+            ),
             Self::RequiresGivenElaboration { parameter, given } => write!(
                 f,
                 "parameter '{parameter}' supplied state {given} changes an elaboration dependency; specialize the source before updating the compiled device"
@@ -3973,6 +3980,11 @@ impl VerilogADevice {
         let index = self.model.parameter_index(name);
         let params = &self.model.parameters;
         let Some(i) = index else { return Ok(false) };
+        if params[i].is_array {
+            return Err(ParameterValueError::ArrayRequiresSpecialization {
+                parameter: params[i].name.clone(),
+            });
+        }
         // Cross-parameter constraints are checked after all instance
         // assignments have been applied. Checking them here would make a
         // valid instance depend on the textual order of its assignments.

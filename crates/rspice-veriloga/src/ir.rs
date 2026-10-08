@@ -320,6 +320,7 @@ pub struct ParamDef {
     /// reference previously declared parameters)
     pub default_expr: Option<NodeId>,
     pub is_integer: bool,
+    pub is_array: bool,
     pub elaboration_value: Option<f64>,
     pub elaboration_given: Option<bool>,
     pub min: Option<f64>,
@@ -629,22 +630,6 @@ impl DeviceIR {
             ));
         }
 
-        if let Some(parameter) = module
-            .parameters
-            .iter()
-            .find(|parameter| !parameter.dimensions.is_empty())
-        {
-            return Err(crate::error::CompileError::Semantic(
-                crate::error::SemanticError::new(
-                    crate::error::SemanticErrorKind::UnsupportedFeature(format!(
-                        "parameter array '{}' is represented in canonical HIR/MIR, but executable array storage and atomic instance overrides are not implemented",
-                        parameter.name
-                    )),
-                    parameter.dimensions[0].span,
-                ),
-            ));
-        }
-
         let mut ir = DeviceIR {
             name: module.name.clone(),
             exprs: ExprArena::new(),
@@ -708,6 +693,7 @@ impl DeviceIR {
                 default: param.default.unwrap_or(0.0),
                 default_expr: None,
                 is_integer: param.param_type == crate::ast::ParamType::Integer,
+                is_array: !param.dimensions.is_empty(),
                 elaboration_value: param.elaboration_value,
                 elaboration_given: param.elaboration_given,
                 min: range.min,
@@ -768,7 +754,8 @@ impl DeviceIR {
         // previously declared parameters and are evaluated per instance,
         // in declaration order, for parameters not explicitly given.
         for (idx, param) in module.parameters.iter().enumerate() {
-            if param.default.is_none()
+            if param.dimensions.is_empty()
+                && param.default.is_none()
                 && let Some(default_expr) = &param.default_expr
             {
                 let converted = converter.convert(&mut ir.exprs, default_expr)?;

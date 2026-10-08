@@ -133,10 +133,21 @@ fn validate_parameters(model: &CompiledModel, mir: &MirModel) -> Result<(), Stri
                 canonical.name, compiled.name
             ));
         }
+        if compiled.is_array != !canonical.dimensions.is_empty()
+            || (compiled.is_array
+                && (compiled.default_program.is_some()
+                    || compiled.default.to_bits() != 0.0f64.to_bits()))
+        {
+            return Err(format!(
+                "canonical parameter '{}' array storage metadata does not match compiled parameter metadata",
+                canonical.name
+            ));
+        }
         // A constant compiled default has to have a canonical default that is
         // bit-equal to it. Both halves of the negation are reportable: the
         // canonical side may carry no default at all, or carry a different one.
-        if compiled.default_program.is_none()
+        if !compiled.is_array
+            && compiled.default_program.is_none()
             && canonical
                 .default
                 .is_none_or(|default| default.to_bits() != compiled.default.to_bits())

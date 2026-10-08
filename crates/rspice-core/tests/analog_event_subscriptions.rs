@@ -2247,3 +2247,45 @@ fn replicated_array_patterns_validate_counts_shapes_and_lexical_scope() {
             .unwrap();
     }
 }
+
+#[test]
+fn parameter_array_values_feed_analog_and_digital_hierarchy() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module coefficients(p); inout p; electrical p;
+ parameter integer N=2;
+ parameter real gain=1.0;
+ parameter real taps[N-1:0][1:0]='{N{'{gain,gain+1.0}}};
+ parameter integer weights[N-1:0]='{N{2}};
+ real copied[0:N-1][3:4];
+ integer observed=0;
+ initial begin
+   copied=taps;
+   observed=weights[0];
+   #50 copied <= #25 taps;
+   #26 if (copied[0][4] == taps[N-1][0]) observed=observed+10;
+ end
+ analog I(p)<+(V(p)-(taps[N-1][1]+copied[0][3]+observed))/1000;
+endmodule
+module wrapper(p,q); inout p,q; electrical p,q;
+ coefficients first(p);
+ coefficients #(.N(3), .gain(2.0), .taps('{3{'{4.0,5.0}}}), .weights('{3{3}})) second(q);
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* shared parameter arrays\nX1 p q wrapper\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" wrapper module=wrapper\n.end\n", source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 120e-12, 10e-12).unwrap();
+    for (node, initial, settled) in [("p", 2.0, 7.0), ("q", 5.5, 10.5)] {
+        assert!(
+            (voltage(&result, node, 20e-12) - initial).abs() < 1e-8,
+            "{node} initialization"
+        );
+        assert!(
+            (voltage(&result, node, 100e-12) - settled).abs() < 1e-8,
+            "{node} delayed copy"
+        );
+    }
+}

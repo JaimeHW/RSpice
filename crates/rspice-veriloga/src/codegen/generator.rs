@@ -455,6 +455,7 @@ impl CodeGenerator {
                     default: p.default,
                     default_program,
                     is_integer: p.is_integer,
+                    is_array: p.is_array,
                     elaboration_value: p.elaboration_value,
                     elaboration_given: p.elaboration_given,
                     min: p.min,

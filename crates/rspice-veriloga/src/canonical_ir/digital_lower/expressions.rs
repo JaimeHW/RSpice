@@ -1056,10 +1056,9 @@ fn apply(
         }
         Operation::Unary(op, context, real) => match op {
             UnaryOp::ArrayIndex { lower, len } => {
-                let Some(upper) = lower
-                    .checked_add(i64::from(len) - 1)
-                    .filter(|_| len > 0 && len <= 65_536)
-                else {
+                let Some(upper) = lower.checked_add(i64::from(len) - 1).filter(|_| {
+                    len > 0 && u64::from(len) <= crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS
+                }) else {
                     lowerer.error(
                         "invalid internal array coordinate bounds",
                         crate::source::Span::dummy(),

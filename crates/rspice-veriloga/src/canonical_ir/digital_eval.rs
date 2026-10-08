@@ -2164,8 +2164,11 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     return Err(DigitalEvalError::InvalidArrayShape(id));
                 }
                 if !self.scratch.array_layouts.contains_key(dimensions) {
-                    let layout = crate::array_index::UnpackedArrayLayout::new(dimensions, 65_536)
-                        .map_err(|_| DigitalEvalError::InvalidArrayShape(id))?;
+                    let layout = crate::array_index::UnpackedArrayLayout::new(
+                        dimensions,
+                        crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+                    )
+                    .map_err(|_| DigitalEvalError::InvalidArrayShape(id))?;
                     self.scratch
                         .array_layouts
                         .insert(dimensions.clone(), layout);

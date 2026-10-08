@@ -2171,7 +2171,7 @@ impl SemanticAnalyzer {
         match self.resolve_digital_name(name, index) {
             Resolution::ProcessLocal(local) => local.dimensions.len(),
             Resolution::Digital(position) => signals[position].dimensions.len(),
-            Resolution::Analog(SymbolKind::Variable) => self
+            Resolution::Analog(SymbolKind::Variable | SymbolKind::Parameter) => self
                 .arrays
                 .get(name)
                 .map_or(0, |array| array.dimensions.len().max(1)),
@@ -2228,7 +2228,7 @@ impl SemanticAnalyzer {
                 };
                 range
             }
-            Resolution::Analog(SymbolKind::Variable)
+            Resolution::Analog(SymbolKind::Variable | SymbolKind::Parameter)
                 if self.arrays.contains_key(&select.name)
                     && self.symbols.lookup(&select.name).is_some_and(|symbol| {
                         symbol.value_type == crate::types::ValueType::Integer
@@ -2390,7 +2390,9 @@ impl SemanticAnalyzer {
         let unpacked = match self.resolve_digital_name(name, index) {
             Resolution::ProcessLocal(local) => local.unpacked.is_some(),
             Resolution::Digital(position) => signals[position].unpacked.is_some(),
-            Resolution::Analog(SymbolKind::Variable) => self.arrays.contains_key(name),
+            Resolution::Analog(SymbolKind::Variable | SymbolKind::Parameter) => {
+                self.arrays.contains_key(name)
+            }
             _ => false,
         };
         if unpacked {

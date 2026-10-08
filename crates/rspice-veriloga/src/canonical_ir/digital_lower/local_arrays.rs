@@ -34,8 +34,11 @@ impl ProcessLowerer<'_> {
         let layout = if variable.declared_dimensions.is_empty() {
             variable.array_layout()?
         } else {
-            crate::array_index::UnpackedArrayLayout::new(&variable.declared_dimensions, 65_536)
-                .ok()?
+            crate::array_index::UnpackedArrayLayout::new(
+                &variable.declared_dimensions,
+                crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+            )
+            .ok()?
         };
         Some(ArrayType { layout, element })
     }

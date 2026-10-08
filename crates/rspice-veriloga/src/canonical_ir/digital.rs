@@ -360,7 +360,7 @@ pub struct DigitalArrayRef {
 impl DigitalArrayRef {
     /// The bounded storage range; malformed artifacts must not create huge walks.
     pub fn cell_range(self) -> Option<std::ops::Range<u32>> {
-        if self.len == 0 || self.len > 65_536 {
+        if self.len == 0 || u64::from(self.len) > crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS {
             return None;
         }
         self.lower.checked_add(i64::from(self.len) - 1)?;
@@ -404,7 +404,10 @@ impl DigitalArray {
         } else {
             &self.dimensions
         };
-        crate::array_index::UnpackedArrayLayout::new(bounds, 65_536)
+        crate::array_index::UnpackedArrayLayout::new(
+            bounds,
+            crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+        )
     }
 
     pub fn element_name(&self, offset: usize) -> Option<SmolStr> {

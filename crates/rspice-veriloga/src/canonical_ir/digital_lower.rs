@@ -301,7 +301,11 @@ impl AnalogVariable {
         } else {
             self.dimensions.clone()
         };
-        let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65_536).ok()?;
+        let layout = crate::array_index::UnpackedArrayLayout::new(
+            &dimensions,
+            crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+        )
+        .ok()?;
         (layout.len() == len as usize).then_some(layout)
     }
 }

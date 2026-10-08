@@ -777,8 +777,11 @@ impl CanonicalDigitalPlan {
                             indices,
                         } => {
                             if dimensions.len() != indices.len()
-                                || crate::array_index::UnpackedArrayLayout::new(dimensions, 65_536)
-                                    .is_err()
+                                || crate::array_index::UnpackedArrayLayout::new(
+                                    dimensions,
+                                    crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+                                )
+                                .is_err()
                                 || value.value_type != (CfgValueType::FourState { width: 64 })
                                 || indices.iter().any(|(index, _)| {
                                     !matches!(
@@ -912,7 +915,8 @@ impl CanonicalDigitalPlan {
                             }
                             if let Some(selection) = array_index {
                                 if selection.len == 0
-                                    || selection.len > 65_536
+                                    || u64::from(selection.len)
+                                        > crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS
                                     || selection
                                         .lower
                                         .checked_add(i64::from(selection.len) - 1)
@@ -951,7 +955,7 @@ impl CanonicalDigitalPlan {
                                     }
                                     selection.dimensions.clone()
                                 };
-                                let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65_536)
+                                let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize)
                                     .map_err(|_| error("digital analog array read has an invalid coordinate layout"))?;
                                 if layout.len() != selection.len as usize {
                                     return Err(error(

@@ -534,6 +534,10 @@ pub struct CompiledParameter {
     /// Whether the declared parameter type is `integer`.
     #[serde(default)]
     pub is_integer: bool,
+    /// Read-only array cells are initialized by declaration programs. This
+    /// parameter slot carries identity/given metadata, never a scalar value.
+    #[serde(default)]
+    pub is_array: bool,
     /// Numeric value captured by an elaboration dependency.
     #[serde(default, with = "crate::json_float::option")]
     pub elaboration_value: Option<f64>,

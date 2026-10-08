@@ -321,12 +321,9 @@ impl HirArray {
             }
             self.dimensions.clone()
         };
-        // Packed projection banks contain multiple chunks per source element.
-        let limit = if self.dimensions.is_empty() {
-            crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize
-        } else {
-            65_536
-        };
+        // Numeric parameter arrays and packed projection banks can exceed
+        // the smaller source-variable admission limit.
+        let limit = crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize;
         let layout = crate::array_index::UnpackedArrayLayout::new(&bounds, limit).ok()?;
         (layout.len() == self.len as usize).then_some(layout)
     }
@@ -1399,7 +1396,10 @@ impl HirModel {
                 len,
             } => {
                 self.validate_expression_child(diagnostics, expression, "operand", *operand);
-                if *len == 0 || *len > 65536 || lower.checked_add(i64::from(*len) - 1).is_none() {
+                if *len == 0
+                    || u64::from(*len) > crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS
+                    || lower.checked_add(i64::from(*len) - 1).is_none()
+                {
                     diagnostics.push(IrDiagnostic::error(
                         CompilerPhase::HirValidation,
                         "invalid checked array coordinate bounds",
@@ -1573,7 +1573,7 @@ impl HirModel {
             .find(|parameter| parameter.name == *name);
         let parameter_rank = parameter.map_or(0, |parameter| parameter.dimensions.len());
 
-        if local_array_count > 1 || (local_array_count != 0 && parameter_rank != 0) {
+        if local_array_count > 1 {
             diagnostics.push(IrDiagnostic::error(
                 CompilerPhase::HirValidation,
                 format!("HIR array access target '{}' is ambiguous", name),

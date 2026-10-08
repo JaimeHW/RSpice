@@ -2201,22 +2201,6 @@ fn validate_canonical_artifact_for_model(
 ) -> JitResult<()> {
     validate_canonical_artifact_identity_for_model(model, artifact)?;
 
-    // Native executable ABI coverage, deliberately not part of the shared
-    // artifact/model identity validator used by the portable CFG evaluator.
-    if let Some(parameter) = artifact
-        .mir
-        .parameters
-        .iter()
-        .find(|parameter| !parameter.dimensions.is_empty())
-    {
-        return Err(JitError::unsupported_native_coverage(
-            model.name.clone(),
-            format!(
-                "parameter array '{}' before the array-valued executable ABI is available",
-                parameter.name
-            ),
-        ));
-    }
     Ok(())
 }
 
@@ -2257,7 +2241,16 @@ fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel
             });
         }
 
-        if compiled.default_program.is_none() {
+        if compiled.is_array != !canonical.dimensions.is_empty()
+            || (compiled.is_array
+                && (compiled.default_program.is_some()
+                    || compiled.default.to_bits() != 0.0f64.to_bits()))
+        {
+            return Err(JitError::InvalidCanonicalIr { model: model.name.clone(), detail: format!(
+                "canonical parameter '{}' array storage metadata does not match compiled parameter metadata", canonical.name
+            ).into() });
+        }
+        if !compiled.is_array && compiled.default_program.is_none() {
             let matches_default = canonical
                 .default
                 .is_some_and(|default| default.to_bits() == compiled.default.to_bits());

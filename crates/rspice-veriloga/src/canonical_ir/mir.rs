@@ -1077,7 +1077,10 @@ fn validate_expressions(
                     "operand",
                     *operand,
                 );
-                if *len == 0 || *len > 65_536 || lower.checked_add(i64::from(*len) - 1).is_none() {
+                if *len == 0
+                    || u64::from(*len) > crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS
+                    || lower.checked_add(i64::from(*len) - 1).is_none()
+                {
                     diagnostics.push(IrDiagnostic::error(
                         CompilerPhase::MirValidation,
                         "MIR invalid array coordinate bounds",
