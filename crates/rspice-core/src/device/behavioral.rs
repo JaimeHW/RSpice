@@ -24,7 +24,7 @@ pub(crate) mod integrals;
 mod physical;
 pub(crate) use history::BehavioralAcceptedState;
 pub(crate) use integrals::BehavioralFqPoint;
-pub(crate) use physical::PhysicalCurrentSample;
+pub(crate) use physical::PhysicalSample;
 pub(crate) mod periodicity;
 mod quasi_periodic;
 pub(crate) use quasi_periodic::QuasiPeriodicClockBasis;

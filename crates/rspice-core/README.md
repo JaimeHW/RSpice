@@ -1442,6 +1442,17 @@ The hybrid integrator also refreshes retained OneStep static residuals during
 Gear2 intervals, so returning to trapezoidal integration uses the latest
 accepted currents.
 
+The exact-delay physical-event path supports smooth nodal behavioral voltage
+and current equations with analytic nodal Jacobians and fixed-coordinate time
+partials. Voltage constraints preserve their full nonlinear equations during
+charge projection and rate reconstruction. Independent public tests cover
+nonlinear feedback, finite source currents, source charge impulses and CCCS
+fanout, OP/UIC startup, and packed continuation across three dialects. Local
+voltage seeding backtracks invalid trial values; the coupled physical solve
+still verifies charge, flux, rank and current balance. Branch-current-controlled,
+switched and stateful behavioral equations, CCVS voltage impulses, and remaining
+device providers require further implementation.
+
 Native GP physical events retain outgoing charge/flux rates and delay memory,
 then start a new integration epoch. Gear2 uses one BE interval before returning
 to second order. Capacitor/inductor error control and checkpoint restoration

@@ -120,7 +120,7 @@ pub(super) fn classify(
     let mut has_cause = false;
     let mut has_unknown = false;
     // Smooth B-equations have identical sides at fixed coordinates. Nodal
-    // current dependence belongs to F and its Jacobian; switched/stateful
+    // voltage/current dependence belongs to F and its Jacobian; switched/stateful
     // providers still need their own event causes and certificates.
     let mut invariant = circuit.behavioral_sources.has_smooth_physical_equations();
     // A C1 constitutive chart has continuous rate-system coefficients at

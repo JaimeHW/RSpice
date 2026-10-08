@@ -261,9 +261,18 @@ impl<'a> PreparedEventCircuit<'a> {
         }
         for source in &circuit.behavioral_sources.voltage_sources {
             check_abort(abort)?;
-            source
-                .physical_time_program()
-                .ok_or_else(|| behavioral::unsupported(&source.name))?;
+            if !source.has_smooth_physical_equation() {
+                return Err(behavioral::unsupported(&source.name));
+            }
+            if source
+                .bound_solution_indices()
+                .any(|column| column >= nodes)
+            {
+                return Err(error(format!(
+                    "behavioral voltage '{}' has an invalid nodal binding",
+                    source.name
+                )));
+            }
             terminals(source.node_pos, source.node_neg)?;
             claim(
                 &mut equations,
@@ -273,7 +282,7 @@ impl<'a> PreparedEventCircuit<'a> {
         }
         for source in &circuit.behavioral_sources.current_sources {
             check_abort(abort)?;
-            if !source.has_smooth_physical_current_equation() {
+            if !source.has_smooth_physical_equation() {
                 return Err(behavioral::unsupported(&source.name));
             }
             if source
@@ -342,13 +351,15 @@ impl<'a> PreparedEventCircuit<'a> {
                 positive: source.node_pos[index],
                 negative: source.node_neg[index],
                 branch: nodes + source.branch_indices[index] - 1,
-                value: 0.0,
-                slope: 0.0,
-                control: Some(EventVoltageControl {
-                    positive: source.ctrl_pos[index],
-                    negative: source.ctrl_neg[index],
-                    gain: source.gains[index],
-                }),
+                equation: EventVoltageEquation::Affine {
+                    value: 0.0,
+                    slope: 0.0,
+                    control: Some(EventVoltageControl {
+                        positive: source.ctrl_pos[index],
+                        negative: source.ctrl_neg[index],
+                        gain: source.gains[index],
+                    }),
+                },
             });
         }
         for index in 0..controlled_current.len() {
@@ -422,12 +433,14 @@ impl<'a> PreparedEventCircuit<'a> {
                 claim(&mut equations, ordinal, row)?;
                 if value == 0.0 {
                     constant_sources.push(EventVoltageSource {
-                        control: None,
                         positive: p,
                         negative: n,
                         branch: nodes + ordinal - 1,
-                        value: 0.0,
-                        slope: 0.0,
+                        equation: EventVoltageEquation::Affine {
+                            value: 0.0,
+                            slope: 0.0,
+                            control: None,
+                        },
                     });
                 }
             }

@@ -126,12 +126,14 @@ fn charge_event_solves_native_coupled_bjt_charge_and_held_transport_history() {
                     polarity * value,
                 );
                 EventVoltageSource {
-                    control: None,
                     positive,
                     negative: 0,
                     branch: nodes + branch - 1,
-                    value: polarity * value,
-                    slope: 0.0,
+                    equation: EventVoltageEquation::Affine {
+                        value: polarity * value,
+                        slope: 0.0,
+                        control: None,
+                    },
                 }
             })
             .collect();
@@ -190,7 +192,10 @@ fn charge_event_solves_native_coupled_bjt_charge_and_held_transport_history() {
             incoming_arrival: false,
         };
         let mut outgoing_sources = sources.clone();
-        outgoing_sources[1].value = 0.64 * polarity;
+        let EventVoltageEquation::Affine { value, .. } = &mut outgoing_sources[1].equation else {
+            panic!("expected an affine base source");
+        };
+        *value = 0.64 * polarity;
         let topology = ChargeEventTopology::new(
             nodes,
             size,
@@ -296,28 +301,34 @@ fn flux_event_retains_active_gp_transport_memory_in_finite_terminal_currents() {
         }
         let sources = vec![
             EventVoltageSource {
-                control: None,
                 positive: 1,
                 negative: 0,
                 branch: 5,
-                value: 2.0 * polarity,
-                slope: 0.0,
+                equation: EventVoltageEquation::Affine {
+                    value: 2.0 * polarity,
+                    slope: 0.0,
+                    control: None,
+                },
             },
             EventVoltageSource {
-                control: None,
                 positive: 2,
                 negative: 0,
                 branch: 6,
-                value: 0.64 * polarity,
-                slope: 0.0,
+                equation: EventVoltageEquation::Affine {
+                    value: 0.64 * polarity,
+                    slope: 0.0,
+                    control: None,
+                },
             },
             EventVoltageSource {
-                control: None,
                 positive: 3,
                 negative: 0,
                 branch: 7,
-                value: 0.0,
-                slope: 0.0,
+                equation: EventVoltageEquation::Affine {
+                    value: 0.0,
+                    slope: 0.0,
+                    control: None,
+                },
             },
         ];
         let ports: Vec<_> = bjt.charge_storage_nodes().into_iter().flatten().collect();

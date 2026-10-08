@@ -145,3 +145,155 @@ fn nodal_behavioral_current_supplies_algebraic_coordinate_rates_and_domain_backt
         Err(SimulationError::ResourceLimit(e)) if e.limit == 32_000 && e.requested > e.limit)
     );
 }
+
+#[test]
+fn nodal_voltage_constraints_retain_nonlinear_feedback_rates_and_charge_fanout() {
+    for fanout in [false, true] {
+        let extra = if fanout {
+            "F1 w 0 B1 2\nCW w 0 3u\nRW w 0 1k\n"
+        } else {
+            ""
+        };
+        let circuit = build(&format!(
+            "nonlinear voltage constraint\nB0 x 0 V={{1+time^2}}\nB1 y 0 V={{(v(x)+time)^2-.05*v(y)^2}}\nCY y 0 2u\nRY y 0 1k\n{extra}.end\n"
+        ));
+        let options = options();
+        let x = circuit.get_node_by_name("x").unwrap() - 1;
+        let y = circuit.get_node_by_name("y").unwrap() - 1;
+        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        let topology = sampler
+            .topology(0.5, SourceTimeSide::RightLimit, &options, &NoAbort)
+            .unwrap();
+        let zero = vec![0.0; circuit.matrix_size()];
+        let result = topology
+            .solve(&zero, &zero, &options, &NoAbort, |state, abort| {
+                sampler.sample(0.5, SourceTimeSide::RightLimit, state, &[], &options, abort)
+            })
+            .unwrap();
+        // y + .05*y^2 = (x+t)^2; these roots and derivatives are independent
+        // of the expression evaluator and the event Newton implementation.
+        let expected = ((1.0_f64 + 0.2 * 1.75_f64.powi(2)).sqrt() - 1.0) / 0.1;
+        let rate = 7.0 / (1.0 + 0.1 * expected);
+        close(result.solution[x], 1.25, 1e-12);
+        close(result.solution[y], expected, 1e-12);
+        close(result.coordinate_rates[x].unwrap(), 1.0, 1e-12);
+        close(result.coordinate_rates[y].unwrap(), rate, 1e-12);
+        let source = circuit
+            .behavioral_sources
+            .voltage_sources
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case("b1"))
+            .unwrap();
+        let branch = circuit.num_nodes() + source.branch_ordinal - 1;
+        let current = -expected / 1000.0 - 2e-6 * rate;
+        close(result.solution[branch], current, 1e-14);
+        let index = topology
+            .source_branches()
+            .position(|b| b == branch)
+            .unwrap();
+        close(result.source_impulses[index], -2e-6 * expected, 1e-17);
+        if fanout {
+            let w = circuit.get_node_by_name("w").unwrap() - 1;
+            let voltage = 4.0 / 3.0 * expected;
+            close(result.solution[w], voltage, 1e-12);
+            close(
+                result.coordinate_rates[w].unwrap(),
+                (-2.0 * current - voltage / 1000.0) / 3e-6,
+                1e-9,
+            );
+        }
+    }
+}
+
+#[test]
+fn nodal_voltage_physical_samples_preserve_domain_and_resource_failures() {
+    let circuit = build("voltage trial domain\nB1 y 0 V={exp(v(x))}\nVX x 0 0\n.end\n");
+    let options = options();
+    let x = circuit.get_node_by_name("x").unwrap() - 1;
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut state = vec![0.0; circuit.matrix_size()];
+    state[x] = 1000.0;
+    assert!(
+        sampler
+            .sample(
+                0.0,
+                SourceTimeSide::RightLimit,
+                &state,
+                &[],
+                &options,
+                &NoAbort
+            )
+            .unwrap()
+            .nonfinite(state.len())
+            .unwrap()
+    );
+    state[x] = 0.0;
+    assert!(
+        !sampler
+            .sample(
+                0.0,
+                SourceTimeSide::RightLimit,
+                &state,
+                &[],
+                &options,
+                &NoAbort
+            )
+            .unwrap()
+            .nonfinite(state.len())
+            .unwrap()
+    );
+    let mut bounded = options.clone();
+    bounded.limits.max_result_values = 32_000;
+    assert!(
+        matches!(sampler.sample(0.0, SourceTimeSide::RightLimit, &state, &[], &bounded, &NoAbort),
+        Err(SimulationError::ResourceLimit(e)) if e.limit==32_000 && e.requested>e.limit)
+    );
+}
+
+#[test]
+fn nodal_voltage_seed_backtracks_overflow_and_conserves_incoming_charge() {
+    let circuit = build(
+        "voltage seed domain\nVX x 0 2\nB1 y 0 V={v(y)-exp(v(y))+v(x)}\nCY y 0 2u\nRY y 0 1k\n.end\n",
+    );
+    let options = options();
+    let x = circuit.get_node_by_name("x").unwrap() - 1;
+    let y = circuit.get_node_by_name("y").unwrap() - 1;
+    let mut incoming = vec![0.0; circuit.matrix_size()];
+    incoming[x] = (-10.0_f64).exp();
+    incoming[y] = -10.0;
+    let mut charge = vec![0.0; incoming.len()];
+    charge[y] = -20e-6;
+    let original = incoming.clone();
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let topology = sampler
+        .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+        .unwrap();
+    let mut invalid_probes = 0;
+    let result = topology
+        .solve(&incoming, &charge, &options, &NoAbort, |state, abort| {
+            let sample =
+                sampler.sample(0.0, SourceTimeSide::RightLimit, state, &[], &options, abort)?;
+            invalid_probes += usize::from(sample.nonfinite(state.len())?);
+            Ok(sample)
+        })
+        .unwrap();
+    // exp(y)=x changes from exp(-10) to 2. The first local Newton guess
+    // overflows exp; the accepted root and displaced charge remain physical.
+    assert!(invalid_probes > 0);
+    assert_eq!(incoming, original);
+    close(result.solution[x], 2.0, 1e-12);
+    close(result.solution[y], 2.0_f64.ln(), 1e-12);
+    close(result.coordinate_rates[y].unwrap(), 0.0, 1e-12);
+    let source = &circuit.behavioral_sources.voltage_sources[0];
+    let branch = circuit.num_nodes() + source.branch_ordinal - 1;
+    close(result.solution[branch], -2.0_f64.ln() / 1000.0, 1e-14);
+    let index = topology
+        .source_branches()
+        .position(|b| b == branch)
+        .unwrap();
+    close(
+        result.source_impulses[index],
+        -2e-6 * (2.0_f64.ln() + 10.0),
+        1e-17,
+    );
+}

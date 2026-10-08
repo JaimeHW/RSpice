@@ -142,29 +142,33 @@ impl PreparedEventCircuit<'_> {
                     ))
                 })?;
             sources.push(EventVoltageSource {
-                control: None,
                 positive: table.node_pos[index],
                 negative: table.node_neg[index],
                 branch: self.circuit.num_nodes() + table.branch_indices[index] - 1,
-                value,
-                slope,
+                equation: EventVoltageEquation::Affine {
+                    value,
+                    slope,
+                    control: None,
+                },
             });
         }
         for source in &self.circuit.behavioral_sources.voltage_sources {
-            let [value, slope] = self.behavioral_time_values(
-                &source.name,
-                source.physical_time_program(),
-                time,
-                options,
-                abort,
-            )?;
+            let equation = if let Some(program) = source.physical_time_program() {
+                let [value, slope] =
+                    self.behavioral_time_values(&source.name, Some(program), time, options, abort)?;
+                EventVoltageEquation::Affine {
+                    value,
+                    slope,
+                    control: None,
+                }
+            } else {
+                EventVoltageEquation::Sampled
+            };
             sources.push(EventVoltageSource {
-                control: None,
                 positive: source.node_pos,
                 negative: source.node_neg,
                 branch: self.circuit.num_nodes() + source.branch_ordinal - 1,
-                value,
-                slope,
+                equation,
             });
         }
         let mut topology = ChargeEventTopology::new(

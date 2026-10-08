@@ -18,6 +18,28 @@ pub(super) struct EventCurrentControl {
     pub gain: Value,
 }
 
+/// Identity of the authored constraint, excluding its time-varying forcing.
+#[derive(Clone, Copy, PartialEq)]
+struct VoltageBinding {
+    positive: usize,
+    negative: usize,
+    branch: usize,
+    control: Option<EventVoltageControl>,
+    sampled: bool,
+}
+
+impl From<&EventVoltageSource> for VoltageBinding {
+    fn from(source: &EventVoltageSource) -> Self {
+        Self {
+            positive: source.positive,
+            negative: source.negative,
+            branch: source.branch,
+            control: source.affine().and_then(|(_, _, control)| control),
+            sampled: source.affine().is_none(),
+        }
+    }
+}
+
 pub(super) struct CurrentConservation {
     pub rows: Vec<Vec<(usize, Value)>>,
     pub incidence: Arc<Vec<Vec<(usize, Value)>>>,
@@ -25,7 +47,7 @@ pub(super) struct CurrentConservation {
     pub retained_values: usize,
     voltage_seed: VoltageSeed,
     pub(super) charge_roots: Vec<usize>,
-    bindings: Vec<(usize, usize, usize, Option<EventVoltageControl>)>,
+    bindings: Vec<VoltageBinding>,
     size: usize,
 }
 
@@ -109,24 +131,13 @@ impl CurrentConservation {
                 || source_columns[source.branch]
                 || source.positive > nodes
                 || source.negative > nodes
-                || !source.value.is_finite()
-                || !source.slope.is_finite()
-                || source.control.is_some_and(|control| {
-                    control.positive > nodes
-                        || control.negative > nodes
-                        || !control.gain.is_finite()
-                })
+                || !source.valid(nodes)
             {
                 return Err(error("invalid source in current descriptor"));
             }
             source_columns[source.branch] = true;
             positions[source.branch] = Some(index);
-            bindings.push((
-                source.positive,
-                source.negative,
-                source.branch,
-                source.control,
-            ));
+            bindings.push(VoltageBinding::from(source));
             columns[index].extend([(source.positive, 1.0), (source.negative, -1.0)]);
         }
         for control in controls {
@@ -210,10 +221,9 @@ impl CurrentConservation {
             .saturating_mul(8)
             .saturating_add(size)
             .saturating_add(
-                bindings.capacity().saturating_mul(
-                    std::mem::size_of::<(usize, usize, usize, Option<EventVoltageControl>)>()
-                        .div_ceil(8),
-                ),
+                bindings
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<VoltageBinding>().div_ceil(8)),
             )
             .saturating_add(8)
             .saturating_add(rows.iter().chain(&incidence).fold(0usize, |sum, row| {
@@ -306,14 +316,7 @@ impl ChargeEventTopology {
                 .bindings
                 .iter()
                 .copied()
-                .eq(self.sources.iter().map(|source| {
-                    (
-                        source.positive,
-                        source.negative,
-                        source.branch,
-                        source.control,
-                    )
-                }))
+                .eq(self.sources.iter().map(VoltageBinding::from))
         {
             return Err(error(
                 "current conservation bindings do not match event topology",

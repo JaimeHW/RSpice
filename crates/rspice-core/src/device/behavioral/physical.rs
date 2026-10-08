@@ -1,6 +1,6 @@
 //! Smooth physical-event equations and their analytic derivatives.
-//! Voltage sources currently prescribe time; current sources can also depend
-//! on nodal coordinates. Memory and branch-current impulses require their
+//! Voltage and current equations can depend on time and nodal coordinates.
+//! Memory and branch-current impulses require their
 //! own state/descriptor owner, independently of a finite sample at one bias.
 
 use super::*;
@@ -64,137 +64,141 @@ fn prepared<'a>(
         .then_some((program, context))
 }
 
-impl BehavioralVoltageSource {
-    pub(crate) fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
-        prepared(&self.ast, self.prescribed_time_program())
-    }
-
-    pub(crate) fn physical_time_is_stationary(&self) -> bool {
-        self.physical_time_program().is_some() && constant_over_time(&self.ast)
-    }
-}
-
-/// Current and physical derivatives at fixed event coordinates. These are
+/// Source value and physical derivatives at fixed event coordinates. These are
 /// constitutive values, not a Newton affine RHS or accepted device history.
-pub(crate) struct PhysicalCurrentSample {
+pub(crate) struct PhysicalSample {
     pub value: Value,
     pub time_partial: Value,
     pub partials: Vec<(usize, Value)>,
 }
 
-impl BehavioralCurrentSource {
-    pub(crate) fn has_smooth_physical_current_equation(&self) -> bool {
-        if self.program.node_map.is_empty() {
-            return self.physical_time_program().is_some();
-        }
-        self.program.sdt_count == 0
-            && self.program.branch_map.is_empty()
-            && smooth(
-                &self.ast,
-                &self
-                    .periodicity_context()
+macro_rules! physical_source {
+    ($source:ty) => {
+        impl $source {
+            pub(crate) fn has_smooth_physical_equation(&self) -> bool {
+                if self.program.node_map.is_empty() {
+                    return self.physical_time_program().is_some();
+                }
+                self.program.sdt_count == 0
+                    && self.program.branch_map.is_empty()
+                    && smooth(
+                        &self.ast,
+                        &self
+                            .periodicity_context()
+                            .with_frequency(0.0)
+                            .with_ieee_logarithm(),
+                        true,
+                    )
+            }
+
+            /// Read-only physical sampling. Numerical-domain failures remain NaNs so
+            /// the event Newton owner can backtrack; binding, quota and cancellation
+            /// failures are returned before any trial can be accepted.
+            pub(crate) fn physical_sample(
+                &self,
+                solution: &[Value],
+                time: Value,
+                max_values: usize,
+                abort: &dyn AbortSignal,
+            ) -> Result<PhysicalSample, TimeDerivativeError> {
+                if abort.is_aborted() {
+                    return Err(TimeDerivativeError::Aborted);
+                }
+                if !self.has_smooth_physical_equation()
+                    || self.node_bindings.len() != self.program.node_map.len()
+                    || self
+                        .node_bindings
+                        .iter()
+                        .flatten()
+                        .any(|&index| index >= solution.len())
+                {
+                    return Err(TimeDerivativeError::Unsupported);
+                }
+                // Inputs, output partials, VM stack and recursive analytic workspace.
+                // Include scaled derivative arithmetic before any scratch allocation.
+                let words = self
+                    .program
+                    .instructions
+                    .len()
+                    .saturating_mul(32)
+                    .saturating_add(self.node_bindings.len().saturating_mul(8))
+                    .saturating_add(32 * 1024);
+                ResourceLimitError::ensure(ResourceKind::ResultValues, words, max_values)?;
+                let mut nodes = Vec::with_capacity(self.node_bindings.len());
+                for binding in &self.node_bindings {
+                    if abort.is_aborted() {
+                        return Err(TimeDerivativeError::Aborted);
+                    }
+                    nodes.push(binding.map_or(0.0, |index| solution[index]));
+                }
+                let context = Context::transient(&nodes, &[], time)
+                    .with_temperature(self.temperature)
                     .with_frequency(0.0)
-                    .with_ieee_logarithm(),
-                true,
-            )
-    }
+                    .with_gmin(self.gmin)
+                    .with_expression_dialect(self.expression_dialect)
+                    .with_ieee_logarithm();
+                let value = Vm::new().execute(&self.program, &context);
+                let environment = BehavioralEnvironment {
+                    time,
+                    frequency: 0.0,
+                    temperature: self.temperature,
+                    gmin: self.gmin,
+                    expression_dialect: self.expression_dialect,
+                    logarithm_domain: LogarithmDomain::Ieee,
+                };
+                let derivative = |target| {
+                    analytic_expression_partial(
+                        &self.ast,
+                        &self.program,
+                        &nodes,
+                        &[],
+                        environment,
+                        target,
+                    )
+                    .unwrap_or(Value::NAN)
+                };
+                let mut partials = Vec::with_capacity(nodes.len());
+                for (local, binding) in self.node_bindings.iter().enumerate() {
+                    if abort.is_aborted() {
+                        return Err(TimeDerivativeError::Aborted);
+                    }
+                    if let Some(column) = binding {
+                        partials.push((*column, derivative(DerivativeTarget::PhysicalNode(local))));
+                    }
+                }
+                let time_partial = derivative(DerivativeTarget::Time);
+                if abort.is_aborted() {
+                    return Err(TimeDerivativeError::Aborted);
+                }
+                Ok(PhysicalSample {
+                    value,
+                    time_partial,
+                    partials,
+                })
+            }
+            pub(crate) fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+                prepared(&self.ast, self.prescribed_time_program())
+            }
 
-    /// Read-only physical sampling. Numerical-domain failures remain NaNs so
-    /// the event Newton owner can backtrack; binding, quota and cancellation
-    /// failures are returned before any trial can be accepted.
-    pub(crate) fn physical_current_sample(
-        &self,
-        solution: &[Value],
-        time: Value,
-        max_values: usize,
-        abort: &dyn AbortSignal,
-    ) -> Result<PhysicalCurrentSample, TimeDerivativeError> {
-        if abort.is_aborted() {
-            return Err(TimeDerivativeError::Aborted);
-        }
-        if !self.has_smooth_physical_current_equation()
-            || self.node_bindings.len() != self.program.node_map.len()
-            || self
-                .node_bindings
-                .iter()
-                .flatten()
-                .any(|&index| index >= solution.len())
-        {
-            return Err(TimeDerivativeError::Unsupported);
-        }
-        // Inputs, output partials, VM stack and recursive analytic workspace.
-        // Include scaled derivative arithmetic before any scratch allocation.
-        let words = self
-            .program
-            .instructions
-            .len()
-            .saturating_mul(32)
-            .saturating_add(self.node_bindings.len().saturating_mul(8))
-            .saturating_add(32 * 1024);
-        ResourceLimitError::ensure(ResourceKind::ResultValues, words, max_values)?;
-        let mut nodes = Vec::with_capacity(self.node_bindings.len());
-        for binding in &self.node_bindings {
-            if abort.is_aborted() {
-                return Err(TimeDerivativeError::Aborted);
-            }
-            nodes.push(binding.map_or(0.0, |index| solution[index]));
-        }
-        let context = Context::transient(&nodes, &[], time)
-            .with_temperature(self.temperature)
-            .with_frequency(0.0)
-            .with_gmin(self.gmin)
-            .with_expression_dialect(self.expression_dialect)
-            .with_ieee_logarithm();
-        let value = Vm::new().execute(&self.program, &context);
-        let environment = BehavioralEnvironment {
-            time,
-            frequency: 0.0,
-            temperature: self.temperature,
-            gmin: self.gmin,
-            expression_dialect: self.expression_dialect,
-            logarithm_domain: LogarithmDomain::Ieee,
-        };
-        let derivative = |target| {
-            analytic_expression_partial(&self.ast, &self.program, &nodes, &[], environment, target)
-                .unwrap_or(Value::NAN)
-        };
-        let mut partials = Vec::with_capacity(nodes.len());
-        for (local, binding) in self.node_bindings.iter().enumerate() {
-            if abort.is_aborted() {
-                return Err(TimeDerivativeError::Aborted);
-            }
-            if let Some(column) = binding {
-                partials.push((*column, derivative(DerivativeTarget::PhysicalNode(local))));
+            pub(crate) fn physical_time_is_stationary(&self) -> bool {
+                self.physical_time_program().is_some() && constant_over_time(&self.ast)
             }
         }
-        let time_partial = derivative(DerivativeTarget::Time);
-        if abort.is_aborted() {
-            return Err(TimeDerivativeError::Aborted);
-        }
-        Ok(PhysicalCurrentSample {
-            value,
-            time_partial,
-            partials,
-        })
-    }
-    pub(crate) fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
-        prepared(&self.ast, self.prescribed_time_program())
-    }
-
-    pub(crate) fn physical_time_is_stationary(&self) -> bool {
-        self.physical_time_program().is_some() && constant_over_time(&self.ast)
-    }
+    };
 }
+
+physical_source!(BehavioralVoltageSource);
+physical_source!(BehavioralCurrentSource);
 
 impl BehavioralSources {
     pub(crate) fn has_smooth_physical_equations(&self) -> bool {
         self.voltage_sources
             .iter()
-            .all(|source| source.physical_time_program().is_some())
+            .all(BehavioralVoltageSource::has_smooth_physical_equation)
             && self
                 .current_sources
                 .iter()
-                .all(BehavioralCurrentSource::has_smooth_physical_current_equation)
+                .all(BehavioralCurrentSource::has_smooth_physical_equation)
     }
 }
 
@@ -263,9 +267,9 @@ mod tests {
             // Xyce's Newton slope for x^1 at zero is regularized to zero;
             // the physical event Jacobian must retain the actual unit slope.
             let source = nodal_source("v(a)^1 + 2^-1*v(b)^3*(1+time^2)", dialect);
-            assert!(source.has_smooth_physical_current_equation());
+            assert!(source.has_smooth_physical_equation());
             let sample = source
-                .physical_current_sample(&[0.0, -2.0], 0.5, 100_000, &NoAbort)
+                .physical_sample(&[0.0, -2.0], 0.5, 100_000, &NoAbort)
                 .unwrap();
             assert_eq!(sample.value, -5.0);
             assert_eq!(sample.time_partial, -4.0);
@@ -288,7 +292,7 @@ mod tests {
                 "v(a)^.5",
             ] {
                 assert!(
-                    !nodal_source(expression, dialect).has_smooth_physical_current_equation(),
+                    !nodal_source(expression, dialect).has_smooth_physical_equation(),
                     "{expression}"
                 );
             }
@@ -309,11 +313,11 @@ mod tests {
         }
         let source = nodal_source("v(a)*v(b)+time", ExpressionDialect::Ngspice);
         assert!(
-            matches!(source.physical_current_sample(&[2.0, 3.0], 0.5, 100, &NoAbort),
+            matches!(source.physical_sample(&[2.0, 3.0], 0.5, 100, &NoAbort),
             Err(TimeDerivativeError::Resource(e)) if e.limit == 100 && e.requested > e.limit)
         );
         assert!(matches!(
-            source.physical_current_sample(&[2.0], 0.5, 100_000, &NoAbort),
+            source.physical_sample(&[2.0], 0.5, 100_000, &NoAbort),
             Err(TimeDerivativeError::Unsupported)
         ));
         for stop in [1, 3, 5] {
@@ -322,13 +326,13 @@ mod tests {
                 stop,
             };
             assert!(matches!(
-                source.physical_current_sample(&[2.0, 3.0], 0.5, 100_000, &abort),
+                source.physical_sample(&[2.0, 3.0], 0.5, 100_000, &abort),
                 Err(TimeDerivativeError::Aborted)
             ));
             assert_eq!(abort.count.load(Ordering::SeqCst), stop);
         }
         let sample = source
-            .physical_current_sample(&[2.0, 3.0], 0.5, 100_000, &NoAbort)
+            .physical_sample(&[2.0, 3.0], 0.5, 100_000, &NoAbort)
             .unwrap();
         assert_eq!(sample.value, 6.5);
         assert_eq!(sample.time_partial, 1.0);

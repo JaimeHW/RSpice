@@ -59,28 +59,64 @@ pub(super) struct EventVoltageControl {
 const SOURCE_STORAGE_VALUES: usize = 16;
 
 #[derive(Clone, Copy)]
+pub(super) enum EventVoltageEquation {
+    /// V(out) - gain * V(control) = value. Slope differentiates only the
+    /// prescribed right-hand side; control-coordinate rates remain unknowns.
+    Affine {
+        value: Value,
+        slope: Value,
+        control: Option<EventVoltageControl>,
+    },
+    /// The physical sampler owns the complete nonlinear voltage residual,
+    /// nodal Jacobian and explicit time partial in this source's branch row.
+    Sampled,
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct EventVoltageSource {
     pub positive: usize,
     pub negative: usize,
     /// Zero-based coordinate in the original MNA solution.
     pub branch: usize,
-    pub value: Value,
-    pub slope: Value,
-    /// V(out) - gain * V(control) = value. Slope differentiates only the
-    /// prescribed right-hand side; control-coordinate rates remain unknowns.
-    pub control: Option<EventVoltageControl>,
+    pub equation: EventVoltageEquation,
 }
 
 impl EventVoltageSource {
-    fn voltage_terms(&self) -> impl Iterator<Item = (usize, Value)> + Clone {
-        [(self.positive, 1.0), (self.negative, -1.0)]
-            .into_iter()
-            .chain(self.control.into_iter().flat_map(|control| {
-                [
-                    (control.positive, -control.gain),
-                    (control.negative, control.gain),
-                ]
-            }))
+    fn affine(&self) -> Option<(Value, Value, Option<EventVoltageControl>)> {
+        match self.equation {
+            EventVoltageEquation::Affine {
+                value,
+                slope,
+                control,
+            } => Some((value, slope, control)),
+            EventVoltageEquation::Sampled => None,
+        }
+    }
+
+    fn valid(&self, nodes: usize) -> bool {
+        self.affine().is_none_or(|(value, slope, control)| {
+            value.is_finite()
+                && slope.is_finite()
+                && control.is_none_or(|control| {
+                    control.positive <= nodes
+                        && control.negative <= nodes
+                        && control.gain.is_finite()
+                })
+        })
+    }
+
+    fn voltage_terms(&self) -> Option<impl Iterator<Item = (usize, Value)> + Clone> {
+        let (_, _, control) = self.affine()?;
+        Some(
+            [(self.positive, 1.0), (self.negative, -1.0)]
+                .into_iter()
+                .chain(control.into_iter().flat_map(|control| {
+                    [
+                        (control.positive, -control.gain),
+                        (control.negative, control.gain),
+                    ]
+                })),
+        )
     }
 }
 
@@ -243,13 +279,7 @@ impl ChargeEventTopology {
                 || branch_equations[source.branch - nodes]
                     .flux_tolerance()
                     .is_some()
-                || !source.value.is_finite()
-                || !source.slope.is_finite()
-                || source.control.is_some_and(|control| {
-                    control.positive > nodes
-                        || control.negative > nodes
-                        || !control.gain.is_finite()
-                })
+                || !source.valid(nodes)
             {
                 return Err(error("invalid or duplicate voltage-source descriptor"));
             }
@@ -449,12 +479,20 @@ impl ChargeEventTopology {
             }
         }
         for source in &self.sources {
-            equations.source_row(source, source.value, options.voltage_tolerance)?;
+            let Some((value, _, control)) = source.affine() else {
+                // The sampler's nonlinear constraint and Jacobian already
+                // occupy this row; never replace them with an affine proxy.
+                equations.absolute[source.branch] = options.voltage_tolerance;
+                continue;
+            };
+            equations.source_row(source, value, options.voltage_tolerance)?;
             equations.values[source.branch] = sum(source
                 .voltage_terms()
+                .into_iter()
+                .flatten()
                 .map(|(node, coefficient)| (voltage(trial, node), coefficient))
-                .chain([(source.value, -1.0)]))?;
-            if let Some(control) = source.control {
+                .chain([(value, -1.0)]))?;
+            if let Some(control) = control {
                 let controlled = sum([
                     (voltage(trial, control.positive), control.gain),
                     (voltage(trial, control.negative), -control.gain),
@@ -521,8 +559,12 @@ impl ChargeEventTopology {
         for source in &self.sources {
             // A differentiated constraint has units per second; its audit
             // uses componentwise relative backward error, not volt/amp floors.
-            equations.source_row(source, source.slope, 0.0)?;
-            equations.values[source.branch] = -source.slope;
+            if let Some((_, slope, _)) = source.affine() {
+                equations.source_row(source, slope, 0.0)?;
+                equations.values[source.branch] = -slope;
+            } else {
+                equations.absolute[source.branch] = 0.0;
+            }
         }
         Ok(equations)
     }
@@ -606,7 +648,10 @@ impl Equations {
         let row = source.branch;
         self.terms -= self.rows[row].len();
         self.rows[row].clear();
-        for (node, coefficient) in source.voltage_terms() {
+        let terms = source
+            .voltage_terms()
+            .ok_or_else(|| error("nonlinear voltage equation has no affine source row"))?;
+        for (node, coefficient) in terms {
             if node != 0 {
                 self.add(row, node - 1, coefficient)?;
             }

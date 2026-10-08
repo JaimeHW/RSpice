@@ -36,12 +36,14 @@ fn branch(stamp: &mut EventStamp, state: &[Value], pos: usize, neg: usize, coeff
 
 fn source(positive: usize, negative: usize, value: Value, slope: Value) -> EventVoltageSource {
     EventVoltageSource {
-        control: None,
         positive,
         negative,
         branch: 2,
-        value,
-        slope,
+        equation: EventVoltageEquation::Affine {
+            value,
+            slope,
+            control: None,
+        },
     }
 }
 
@@ -331,6 +333,63 @@ fn charge_event_cancels_at_every_observed_boundary_without_modifying_input() {
         assert_eq!(abort.polls_after_abort(), 0);
         assert_eq!(incoming, [0.0]);
     }
+}
+
+#[test]
+fn charge_event_nonlinear_voltage_seed_preserves_cancellation_and_singular_refusal() {
+    use crate::abort_signal::CountingAbort;
+    let options = options();
+    let topology = ChargeEventTopology::new(
+        1,
+        2,
+        &[(1, 0)],
+        vec![EventVoltageSource {
+            positive: 1,
+            negative: 0,
+            branch: 1,
+            equation: EventVoltageEquation::Sampled,
+        }],
+        vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
+        &options,
+        &NoAbort,
+    )
+    .unwrap();
+    let incoming = [0.0; 2];
+    let solve = |abort: &dyn AbortSignal, regular: bool| {
+        topology.solve(&incoming, &incoming, &options, abort, |state, _| {
+            let mut sample = EventSample::new(2, &options)?;
+            branch(&mut sample.q, state, 1, 0, 1e-12);
+            branch(&mut sample.f, state, 1, 0, 1e-3);
+            let v = state[0];
+            let linear = if regular { 1.0 } else { 0.0 };
+            sample.f.stamp_rhs(2, 2.0 * linear - linear * v - v.powi(3));
+            sample.f.stamp(2, 1, linear + 3.0 * v * v);
+            Ok(sample)
+        })
+    };
+    let baseline = CountingAbort::new(usize::MAX);
+    let result = solve(&baseline, true).unwrap();
+    close(result.solution[0], 1.0, 1e-12);
+    close(result.solution[1], -1e-3, 1e-14);
+    close(result.source_impulses[0], -1e-12, 1e-25);
+    for threshold in 0..baseline.count() {
+        let abort = CountingAbort::new(threshold);
+        assert!(
+            matches!(solve(&abort, true), Err(SimulationError::Aborted)),
+            "threshold {threshold}"
+        );
+        assert_eq!(abort.observed_at(), Some(threshold + 1));
+        assert_eq!(abort.polls_after_abort(), 0);
+        assert_eq!(incoming, [0.0; 2]);
+    }
+    // A zero residual with a zero voltage Jacobian is not an accepted state.
+    // Local seeding must defer to the coupled solver's rank check.
+    assert!(matches!(
+        solve(&NoAbort, false),
+        Err(SimulationError::Solver(
+            crate::solver::SolverError::SingularMatrix
+        ))
+    ));
 }
 
 #[test]

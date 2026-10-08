@@ -12,21 +12,25 @@ fn voltage_control_transfers_jumps_and_rates_without_drawing_input_impulses() {
                 positive: 1,
                 negative: 0,
                 branch: nodes,
-                value: 1.0,
-                slope: 2e6,
-                control: None,
+                equation: EventVoltageEquation::Affine {
+                    value: 1.0,
+                    slope: 2e6,
+                    control: None,
+                },
             },
             EventVoltageSource {
                 positive: 2,
                 negative,
                 branch: nodes + 1,
-                value: 0.0,
-                slope: 0.0,
-                control: Some(EventVoltageControl {
-                    positive: 1,
-                    negative: 0,
-                    gain: -3.0,
-                }),
+                equation: EventVoltageEquation::Affine {
+                    value: 0.0,
+                    slope: 0.0,
+                    control: Some(EventVoltageControl {
+                        positive: 1,
+                        negative: 0,
+                        gain: -3.0,
+                    }),
+                },
             },
         ];
         let topology = ChargeEventTopology::new(
@@ -90,25 +94,29 @@ fn voltage_control_feedback_is_solved_jointly_and_a_singular_loop_is_refused() {
                 positive: 1,
                 negative: 0,
                 branch: 2,
-                value: if gain == 1.0 { 0.0 } else { 1.0 },
-                slope: 3e6,
-                control: Some(EventVoltageControl {
-                    positive: 2,
-                    negative: 0,
-                    gain,
-                }),
+                equation: EventVoltageEquation::Affine {
+                    value: if gain == 1.0 { 0.0 } else { 1.0 },
+                    slope: 3e6,
+                    control: Some(EventVoltageControl {
+                        positive: 2,
+                        negative: 0,
+                        gain,
+                    }),
+                },
             },
             EventVoltageSource {
                 positive: 2,
                 negative: 0,
                 branch: 3,
-                value: 0.0,
-                slope: 0.0,
-                control: Some(EventVoltageControl {
-                    positive: 1,
-                    negative: 0,
-                    gain,
-                }),
+                equation: EventVoltageEquation::Affine {
+                    value: 0.0,
+                    slope: 0.0,
+                    control: Some(EventVoltageControl {
+                        positive: 1,
+                        negative: 0,
+                        gain,
+                    }),
+                },
             },
         ];
         let topology = ChargeEventTopology::new(
@@ -156,11 +164,15 @@ fn voltage_control_descriptor_checks_control_terminals_and_coefficients() {
         (1, 0, Value::INFINITY),
     ] {
         let mut source = source(2, 0, 0.0, 0.0);
-        source.control = Some(EventVoltageControl {
-            positive,
-            negative,
-            gain,
-        });
+        source.equation = EventVoltageEquation::Affine {
+            value: 0.0,
+            slope: 0.0,
+            control: Some(EventVoltageControl {
+                positive,
+                negative,
+                gain,
+            }),
+        };
         assert!(matches!(ChargeEventTopology::new(2,3,&[],vec![source],
             vec![EventBranchEquation::Algebraic(options.voltage_tolerance)], &options,&NoAbort), Err(SimulationError::Circuit(message)) if message.contains("voltage-source descriptor")));
     }

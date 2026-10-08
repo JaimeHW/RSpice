@@ -78,12 +78,14 @@ fn integrated_reference_retains_the_outgoing_prescribed_voltage_slope() {
         2,
         &[(1, 0)],
         vec![EventVoltageSource {
-            control: None,
             positive: 1,
             negative: 0,
             branch: 1,
-            value: 1.0,
-            slope: 5.0,
+            equation: EventVoltageEquation::Affine {
+                value: 1.0,
+                slope: 5.0,
+                control: None,
+            },
         }],
         vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
         &options,

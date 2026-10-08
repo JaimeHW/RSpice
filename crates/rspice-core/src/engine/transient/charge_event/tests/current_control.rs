@@ -36,21 +36,25 @@ fn current_controlled_startup_seed_satisfies_authored_voltage_constraints() {
                     positive: 1,
                     negative: 0,
                     branch: 3,
-                    value,
-                    slope: 0.0,
-                    control: None,
+                    equation: EventVoltageEquation::Affine {
+                        value,
+                        slope: 0.0,
+                        control: None,
+                    },
                 },
                 EventVoltageSource {
                     positive: 2,
                     negative: 3,
                     branch: 4,
-                    value: 0.5,
-                    slope: 0.0,
-                    control: Some(EventVoltageControl {
-                        positive: 1,
-                        negative: 0,
-                        gain,
-                    }),
+                    equation: EventVoltageEquation::Affine {
+                        value: 0.5,
+                        slope: 0.0,
+                        control: Some(EventVoltageControl {
+                            positive: 1,
+                            negative: 0,
+                            gain,
+                        }),
+                    },
                 },
             ];
             let topology = controlled(3, 5, &[(1, 0), (2, 0), (3, 0)], sources, &[], &options);
@@ -77,9 +81,11 @@ fn controlled_current_transfers_source_charge_and_finite_current_to_another_capa
             positive: 1,
             negative: 0,
             branch: 2,
-            value: 1.0,
-            slope: 2e6,
-            control: None,
+            equation: EventVoltageEquation::Affine {
+                value: 1.0,
+                slope: 2e6,
+                control: None,
+            },
         }];
         let topology = controlled(
             2,
@@ -123,9 +129,11 @@ fn controlled_current_preserves_weighted_kcl_between_floating_charge_components(
             positive: a,
             negative: 0,
             branch: 4,
-            value: 1.0,
-            slope: 2e6,
-            control: None,
+            equation: EventVoltageEquation::Affine {
+                value: 1.0,
+                slope: 2e6,
+                control: None,
+            },
         }];
         let topology = controlled(
             4,
@@ -181,17 +189,21 @@ fn controlled_current_feedback_solves_both_source_impulses_and_finite_currents()
             positive: 1,
             negative: 0,
             branch: 2,
-            value: 1.0,
-            slope: 1e6,
-            control: None,
+            equation: EventVoltageEquation::Affine {
+                value: 1.0,
+                slope: 1e6,
+                control: None,
+            },
         },
         EventVoltageSource {
             positive: 2,
             negative: 0,
             branch: 3,
-            value: 2.0,
-            slope: -2e6,
-            control: None,
+            equation: EventVoltageEquation::Affine {
+                value: 2.0,
+                slope: -2e6,
+                control: None,
+            },
         },
     ];
     let topology = controlled(
@@ -237,17 +249,21 @@ fn controlled_current_rank_retains_a_loop_below_binary64_product_precision() {
             positive: 1,
             negative: 0,
             branch: 2,
-            value: 0.0,
-            slope: 0.0,
-            control: None,
+            equation: EventVoltageEquation::Affine {
+                value: 0.0,
+                slope: 0.0,
+                control: None,
+            },
         },
         EventVoltageSource {
             positive: 2,
             negative: 0,
             branch: 3,
-            value: 0.0,
-            slope: 0.0,
-            control: None,
+            equation: EventVoltageEquation::Affine {
+                value: 0.0,
+                slope: 0.0,
+                control: None,
+            },
         },
     ];
     let epsilon = 2.0_f64.powi(-30);
@@ -282,9 +298,11 @@ fn controlled_current_preparation_rejects_invalid_controls_and_honors_resource_l
         positive: 1,
         negative: 0,
         branch: 2,
-        value: 0.0,
-        slope: 0.0,
-        control: None,
+        equation: EventVoltageEquation::Affine {
+            value: 0.0,
+            slope: 0.0,
+            control: None,
+        },
     }];
     for (node, branch, gain) in [(3, 2, 1.0), (2, 1, 1.0), (2, 2, Value::NAN)] {
         let controls = [EventCurrentControl {

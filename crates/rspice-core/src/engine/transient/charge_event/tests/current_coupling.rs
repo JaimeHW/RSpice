@@ -157,12 +157,14 @@ fn current_event_coupling_does_not_certify_continuous_source_current_or_regular_
         2,
         &[],
         vec![EventVoltageSource {
-            control: None,
             positive: 1,
             negative: 0,
             branch: 1,
-            value: 0.0,
-            slope: 0.0,
+            equation: EventVoltageEquation::Affine {
+                value: 0.0,
+                slope: 0.0,
+                control: None,
+            },
         }],
         vec![EventBranchEquation::Algebraic(options.voltage_tolerance)],
         &options,

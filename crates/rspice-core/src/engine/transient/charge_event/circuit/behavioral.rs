@@ -4,7 +4,7 @@ use crate::expr::{CompiledExpr, Context, TimeDerivativeError, TimeDerivatives};
 
 pub(super) fn unsupported(name: &str) -> SimulationError {
     error(format!(
-        "behavioral source '{name}' requires a smooth prescribed physical time equation or a smooth nodal current equation; voltage equations with circuit dependence, branch-current control, switched and stateful event providers remain unavailable"
+        "behavioral source '{name}' requires a smooth prescribed physical time equation or a smooth nodal equation; branch-current control, switched and stateful event providers remain unavailable"
     ))
 }
 
@@ -28,23 +28,21 @@ impl PreparedEventCircuit<'_> {
             )
     }
 
-    pub(super) fn behavioral_current_sample(
+    pub(super) fn behavioral_sample(
         &self,
-        source: &crate::device::BehavioralCurrentSource,
-        state: &[Value],
+        name: &str,
         time: Value,
         options: &EventOptions,
-        abort: &dyn AbortSignal,
-    ) -> Result<crate::device::behavioral::PhysicalCurrentSample> {
+        sample: impl FnOnce(
+            usize,
+        ) -> std::result::Result<
+            crate::device::behavioral::PhysicalSample,
+            TimeDerivativeError,
+        >,
+    ) -> Result<crate::device::behavioral::PhysicalSample> {
         let retained = self.behavioral_retained_values();
-        source
-            .physical_current_sample(
-                state,
-                time,
-                options.limits.max_result_values.saturating_sub(retained),
-                abort,
-            )
-            .map_err(|failure| match failure {
+        sample(options.limits.max_result_values.saturating_sub(retained)).map_err(|failure| {
+            match failure {
                 TimeDerivativeError::Aborted => SimulationError::Aborted,
                 TimeDerivativeError::Resource(mut failure) => {
                     failure.requested = failure.requested.saturating_add(retained);
@@ -52,10 +50,10 @@ impl PreparedEventCircuit<'_> {
                     SimulationError::ResourceLimit(failure)
                 }
                 failure => error(format!(
-                    "behavioral current '{}' at t={time:e}: {failure}",
-                    source.name
+                    "behavioral source '{name}' at t={time:e}: {failure}"
                 )),
-            })
+            }
+        })
     }
 
     pub(super) fn behavioral_time_values(

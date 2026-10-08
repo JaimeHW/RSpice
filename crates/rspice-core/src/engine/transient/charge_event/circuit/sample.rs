@@ -260,7 +260,9 @@ impl PreparedEventCircuit<'_> {
                 )?;
                 (value, slope, Vec::new())
             } else {
-                let sample = self.behavioral_current_sample(source, state, time, options, abort)?;
+                let sample = self.behavioral_sample(&source.name, time, options, |available| {
+                    source.physical_sample(state, time, available, abort)
+                })?;
                 (sample.value, sample.time_partial, sample.partials)
             };
             for (row, sign) in [(source.node_pos, 1.0), (source.node_neg, -1.0)] {
@@ -276,6 +278,25 @@ impl PreparedEventCircuit<'_> {
                             .unwrap_or(Value::NAN);
                 }
             }
+        }
+        for source in &self.circuit.behavioral_sources.voltage_sources {
+            if source.physical_time_program().is_some() {
+                continue; // Prescribed voltage equations belong to the topology.
+            }
+            let physical = self.behavioral_sample(&source.name, time, options, |available| {
+                source.physical_sample(state, time, available, abort)
+            })?;
+            let row = nodes + source.branch_ordinal;
+            // Keep each term's scale for the nonlinear voltage residual audit.
+            sample.f.stamp_rhs(row, -voltage(state, source.node_pos));
+            sample.f.stamp_rhs(row, voltage(state, source.node_neg));
+            sample.f.stamp_rhs(row, physical.value);
+            sample.f.stamp(row, source.node_pos, 1.0);
+            sample.f.stamp(row, source.node_neg, -1.0);
+            for (column, partial) in physical.partials {
+                sample.f.stamp(row, column + 1, -partial);
+            }
+            sample.f_time[row - 1] = -physical.time_partial;
         }
         for (index, (model, history)) in self.models.iter_mut().zip(phase).enumerate() {
             check_abort(abort)?;

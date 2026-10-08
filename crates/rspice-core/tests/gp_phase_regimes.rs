@@ -26,6 +26,8 @@ mod coverage_gaps;
 mod current_controlled;
 #[path = "gp_phase_regimes/magnetic.rs"]
 mod magnetic;
+#[path = "gp_phase_regimes/nodal_voltage.rs"]
+mod nodal_voltage;
 #[path = "gp_phase_regimes/private_nodes.rs"]
 mod private_nodes;
 #[path = "gp_phase_regimes/static_private.rs"]

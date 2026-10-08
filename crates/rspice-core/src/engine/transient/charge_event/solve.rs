@@ -174,6 +174,7 @@ impl ChargeEventTopology {
         let mut initial_sample = None;
         if matches!(policy, CoordinatePolicy::Project) {
             self.project_voltage_seed(incoming, &mut trial, options, abort)?;
+            self.project_nonlinear_voltage_seed(incoming, &mut trial, options, abort, sample)?;
             // Satisfying ideal voltage constraints first avoids spending the
             // Newton budget moving clamped exponential charge laws from zero.
             // The seed can leave a nonlinear constitutive domain, however;
