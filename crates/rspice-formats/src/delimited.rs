@@ -493,6 +493,11 @@ fn parse_finite_cell(
             "row {row}, column {column} ({header:?}) overflows after unit conversion"
         ));
     }
+    if unit.is_some_and(|unit| unit.lost_nonzero_sample(parsed, scaled)) {
+        return Err(format!(
+            "row {row}, column {column} ({header:?}) underflows after unit conversion"
+        ));
+    }
     Ok(scaled)
 }
 
@@ -500,6 +505,38 @@ fn parse_finite_cell(
 mod tests {
     use super::*;
     use std::error::Error as _;
+
+    #[test]
+    fn unit_conversion_cannot_replace_nonzero_samples_with_zero() {
+        let limits = DelimitedReadLimits {
+            max_columns: 2,
+            max_rows: 1,
+            max_header_bytes: 32,
+            min_rows: 1,
+        };
+        for source in [
+            "time [ns],v\n5e-324,1\n",
+            "time,v [mV]\n0,5e-324\n",
+            "time,i [pA]\n0,-5e-324\n",
+        ] {
+            let error = decode_delimited_waveforms(source, b',', limits).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("underflows after unit conversion"),
+                "{error}"
+            );
+            assert!(error.to_string().contains("row 2"), "{error}");
+        }
+        for (source, expected) in [
+            ("time,v [mV]\n0,-0\n", -0.0_f64),
+            ("time,v [mV]\n0,1e-320\n", 1e-323_f64),
+            ("time,temperature [degC]\n0,-273.15\n", 0.0_f64),
+        ] {
+            let decoded = decode_delimited_waveforms(source, b',', limits).unwrap();
+            assert_eq!(decoded.signal_values[0][0].to_bits(), expected.to_bits());
+        }
+    }
 
     #[test]
     fn layout_is_validated_without_becoming_a_sample_or_changing_physical_columns() {
