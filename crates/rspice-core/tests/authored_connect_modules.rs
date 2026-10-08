@@ -1558,3 +1558,79 @@ endmodule
         }
     }
 }
+
+
+#[test]
+fn computed_mixed_inputs_preserve_expression_widths_replication_and_loading() {
+    for (mode, first_load, repeated_load) in [("merged", 1.5, 1.5), ("split", 1.0, 0.6)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module receiver(d,p);
+ input [13:0] d; logic [13:0] d;
+ output p; electrical p;
+ wire [11:0] clean;
+ wire valid;
+ assign clean={{d[13:9],d[6:0]}};
+ assign valid=(d[8:7]===2'bxz);
+ analog V(p)<+(valid ? clean : -1.0);
+endmodule
+module bank(a,p,q);
+ parameter integer BASE=7;
+ input [BASE:BASE+1] a; electrical [BASE:BASE+1] a;
+ output p,q; electrical p,q;
+ reg [3:0] words[3:2][-1:0];
+ reg [5:4] flags;
+ integer row,column,index;
+ initial begin
+  words[3][0]=4'd15; words[2][-1]=4'd2; flags=2'b10;
+  row=3; column=0; index=5;
+  #1 row=2; column=-1; index=4;
+ end
+ receiver first({{a[BASE],words[row][column]+4'd1,2'bxz,
+                  {{2{{a[BASE+1],flags[index]^1'b1}}}},
+                  flags[index] ? 3'b101 : 3'b010}},p);
+ receiver second(.p(q),.d({{a[BASE],words[row][column]+4'd1,2'bxz,
+                           {{2{{a[BASE+1],~flags[index]}}}},
+                           flags[index] ? 3'b101 : 3'b010}}));
+endmodule
+module top(p,q,r,s);
+ output p,q,r,s; electrical p,q,r,s;
+ electrical [9:8] a;
+ bank #(.BASE(2)) child(a,p,q);
+ analog begin
+  I(a[9])<+(V(a[9])-3.0)/1000; I(a[8])<+(V(a[8])-3.0)/1000;
+  V(r)<+V(a[9]); V(s)<+V(a[8]);
+ end
+endmodule
+connectmodule sample(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+ always #0.1 d=V(a)>0.5;
+ analog I(a)<+V(a)/1000;
+endmodule
+connectrules selected; connect sample {mode}; endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!(
+            "* computed mixed input connections\nX1 p q r s top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\n.va \"{}\" top module=top\n.end\n",
+            source.path()
+        )).unwrap();
+        let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+        for (time, code) in [(0.5e-9, 2133.0), (1.5e-9, 2554.0)] {
+            for (node, expected) in [
+                ("p", code),
+                ("q", code),
+                ("r", first_load),
+                ("s", repeated_load),
+            ] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{mode} {node} at {time}: {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+}

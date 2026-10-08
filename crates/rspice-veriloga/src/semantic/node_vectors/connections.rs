@@ -2,6 +2,7 @@
 use super::*;
 
 mod digital_words;
+mod mixed_inputs;
 
 #[derive(Debug, Clone)]
 struct DigitalShape {
@@ -339,10 +340,20 @@ pub(in crate::semantic) fn bind(
             ));
         }
         if lanes.len() == 1 && discrete.contains(&lanes[0]) {
-            bound[positions[&lanes[0]]] = Some(match parent.physical_selection(actual)? {
-                Some(mut selected) if selected.len() == 1 => selected.remove(0),
-                _ => actual.clone(),
-            });
+            // Mixed input expressions retain their digital operands until the
+            // connection planner has the parent's complete type environment.
+            bound[positions[&lanes[0]]] = Some(
+                if child.ports[positions[&lanes[0]]].direction == PortDirection::Input
+                    && matches!(actual, Expression::ArrayLiteral(_))
+                {
+                    actual.clone()
+                } else {
+                    match parent.physical_selection(actual)? {
+                        Some(mut selected) if selected.len() == 1 => selected.remove(0),
+                        _ => actual.clone(),
+                    }
+                },
+            );
             continue;
         }
         let mut actuals = Vec::new();

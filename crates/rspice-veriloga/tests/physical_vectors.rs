@@ -634,3 +634,81 @@ endmodule
     );
     replayed.canonical_ir.validate().unwrap();
 }
+
+
+#[test]
+fn computed_mixed_connections_replay_shapes_and_preserve_selector_guards() {
+    let source = r#"
+module leaf(d);
+ parameter integer W=12;
+ input [W-1:0] d; logic [W-1:0] d;
+endmodule
+module top(a);
+ parameter integer BASE=2, ROW=3, COUNT=2;
+ inout [2:5] a; electrical [2:5] a;
+ reg [3:0] words[3:2];
+ leaf #(.W(2+5*COUNT)) child({a[BASE],{COUNT{a[BASE+1],words[ROW]+4'd1}},1'b1});
+ analog I(a[2])<+V(a[2])/1000;
+endmodule
+connectmodule sample(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+endmodule
+connectrules selected; connect sample split; endconnectrules
+"#;
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    for (name, expected) in [("BASE", 2.0), ("ROW", 3.0), ("COUNT", 2.0)] {
+        assert_eq!(
+            compiled
+                .canonical_ir
+                .hir
+                .parameters
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .elaboration_value,
+            Some(expected),
+            "{name}"
+        );
+    }
+    assert_eq!(compiled.canonical_ir.digital.bit_aliases.len(), 3);
+    for count in [1.0, 0.0] {
+        let assigned = compiler
+            .specialize_mixed_runtime(
+                &compiled.canonical_ir,
+                &[("BASE", 4.0), ("ROW", 2.0), ("COUNT", count)],
+                &NoPipelineControl,
+            )
+            .unwrap();
+        assigned.canonical_ir.validate().unwrap();
+        assert_eq!(
+            assigned.canonical_ir.digital.bit_aliases.len(),
+            1 + count as usize
+        );
+        assert_ne!(
+            compiled.canonical_ir.digital.content_identity,
+            assigned.canonical_ir.digital.content_identity
+        );
+        let replayed = compiler
+            .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            assigned.canonical_ir.digital.content_identity,
+            replayed.canonical_ir.digital.content_identity
+        );
+    }
+    let mismatched = source.replace("W(2+5*COUNT)", "W(3+5*COUNT)");
+    let error = compiler
+        .compile_runtime(&mismatched, Some("top"))
+        .err()
+        .expect("mismatched mixed width")
+        .to_string();
+    assert!(
+        error.contains("requires 13 lanes") && error.contains("supplies 12"),
+        "{error}"
+    );
+}

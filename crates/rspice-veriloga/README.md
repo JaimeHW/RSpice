@@ -159,8 +159,8 @@ can drive whole physical input vectors through per-lane authored converters;
 selected physical lanes can connect to scalar digital formals. Scalar potential
 and flow accesses resolve constant coordinates, including analog `genvar` loops
 and custom nature accesses. Shape and selector dependencies require source
-specialization when their parameters change. Artifact schema 131 and core cache
-record 113 invalidate models compiled before these checks.
+specialization when their parameters change. Artifact schema 132 and core cache
+record 114 invalidate models compiled before these checks.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.
@@ -187,9 +187,14 @@ assignment conversion to retain the child's declared interpretation.
 Equal-width output/inout nets retain local packed bounds and signedness through
 positional wire aliases when their declarations differ. Body selections and signed
 operations use the local declaration; original drivers still share resolution.
-General expressions interleaved with physical net lanes in one concatenation,
-vector-valued/named branch forms, unpacked net/port arrays, complete inherited
-discipline resolution, and library/view selection remain open.
+Mixed input concatenations can interleave physical nets with constants, computed
+digital expressions and dynamic bit/array reads. One parent-side assignment retains
+the digital expression, including replication evaluation and X/Z values; it releases
+physical positions to the selected converters. Physical sites retain per-bit
+merged/split grouping and loading. The shared digital type rules determine operand
+widths, and the mixed connection must match its formal width. Vector-valued/named
+branch forms, unpacked net/port arrays, complete inherited discipline resolution,
+and library/view selection remain open.
 Escaped node names retain distinct lane identities; escaped ground and comma-bearing
 names still require structured branch labels, and the full escaped-identifier
 language surface remains part of language qualification.

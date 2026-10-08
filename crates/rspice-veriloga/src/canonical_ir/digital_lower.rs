@@ -88,10 +88,12 @@
 //! two sets of drivers a resolver can tell apart, rather than one body lowered
 //! twice.
 
+mod connection_shapes;
 mod constants;
 mod expressions;
 mod local_arrays;
 mod local_storage;
+pub(crate) use connection_shapes::ConnectionShapes;
 use constants::ResolvedConstants;
 
 use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
@@ -313,6 +315,10 @@ impl AnalogVariable {
 pub(crate) fn lower_module(
     module: &crate::semantic::AnalyzedModule,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
+    lower_with_analog_variables(&module.digital, &analog_variables(module))
+}
+
+fn analog_variables(module: &crate::semantic::AnalyzedModule) -> HashMap<SmolStr, AnalogVariable> {
     use super::digital::DigitalAnalogQuantity;
     let mut variables: HashMap<_, _> = module
         .variables
@@ -377,7 +383,7 @@ pub(crate) fn lower_module(
         &module.digital.event_assigned_variables,
         &module.digital.immutable_analog_variables,
     );
-    lower_with_analog_variables(&module.digital, &variables)
+    variables
 }
 
 fn bind_variable_events(

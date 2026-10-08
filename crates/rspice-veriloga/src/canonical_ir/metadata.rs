@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 132 retains computed mixed-input operands and physical converter bit ownership.
 /// Version 131 preserves local packed bounds and signedness across whole-net ports.
 /// Version 125 preserves physical vector lanes and their elaboration dependencies.
 /// Version 124 retains source assignments and hierarchy for configuration replay.
@@ -124,7 +125,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 131;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 132;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

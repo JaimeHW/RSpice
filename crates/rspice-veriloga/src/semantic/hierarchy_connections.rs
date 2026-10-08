@@ -167,6 +167,7 @@ pub(super) fn prepare(
     }
     let has_rules = !analyzed.connect_rules.insertions().is_empty();
     let mut prepared_inputs = false;
+    let mut input_types = None;
     let mut signals: BTreeMap<SignalIdentity, BoundarySignal> = BTreeMap::new();
     let scope = super::node_vectors::ConnectionScope::new(source, module);
     let mut prepared = source.clone();
@@ -237,6 +238,49 @@ pub(super) fn prepare(
                 continue;
             }
             if !has_rules {
+                continue;
+            }
+            if port.direction == PortDirection::Input
+                && lower.net_kind.is_some()
+                && lower.width != 0
+                && (lower.width > 1 || matches!(actual, Expression::ArrayLiteral(_)))
+                && scope.contains_physical(actual)
+            {
+                if input_types.is_none() {
+                    input_types = Some(
+                        crate::canonical_ir::digital_lower::ConnectionShapes::new(module, source)
+                            .map_err(|diagnostics| {
+                            error(
+                                diagnostics
+                                    .iter()
+                                    .map(|entry| entry.diagnostic.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("; "),
+                                actual.span(),
+                            )
+                        })?,
+                    );
+                }
+                packed::Connections {
+                    source,
+                    module,
+                    constants: &constants,
+                    prepared: &mut prepared,
+                    used: &mut used,
+                    signals: &mut signals,
+                    aliases: &mut aliases,
+                }
+                .connect_input(
+                    child,
+                    instance,
+                    (instance_index, port_index),
+                    &lower,
+                    actual,
+                    &scope,
+                    input_types
+                        .as_mut()
+                        .expect("prepared input expression types"),
+                )?;
                 continue;
             }
             if lower.net_kind.is_some()
