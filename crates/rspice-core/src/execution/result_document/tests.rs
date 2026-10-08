@@ -6,6 +6,7 @@ mod distortion;
 mod json_admission;
 mod json_precision;
 mod pac;
+mod pxf;
 mod resource_counts;
 
 use super::payload::{DigitalBusSourceTag, DigitalEventBus};

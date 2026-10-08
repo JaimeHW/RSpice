@@ -677,10 +677,10 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                 output_node: "out".to_owned(),
                 reference_node: Some("ref".to_owned()),
                 group_delay: shape
-                    .finite_reals()
-                    .into_iter()
-                    .map(|frequency| PxfGroupDelaySample {
-                        frequency,
+                    .axis_values()
+                    .windows(2)
+                    .map(|pair| PxfGroupDelaySample {
+                        frequency: pair[0].midpoint(pair[1]),
                         delay: 1e-9,
                     })
                     .collect(),
@@ -803,7 +803,10 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             .unwrap(),
         );
     }
-    let axis_unit = if matches!(analysis, AnalysisKind::Distortion | AnalysisKind::Pac) {
+    let axis_unit = if matches!(
+        analysis,
+        AnalysisKind::Distortion | AnalysisKind::Pac | AnalysisKind::Pxf
+    ) {
         SignalUnit::Hertz
     } else {
         SignalUnit::Dimensionless

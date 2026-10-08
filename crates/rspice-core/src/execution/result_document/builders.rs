@@ -3271,6 +3271,17 @@ impl AnalysisResultDocument {
             ));
         }
 
+        for (index, point) in result.points.iter().enumerate() {
+            if point.sideband_in != result.input_sideband
+                || point.sideband_out != result.output_sideband
+            {
+                return Err(source_error(
+                    LOCATION,
+                    format!("transfer point {index} names a different sideband conversion path"),
+                ));
+            }
+        }
+
         let offsets = result
             .points
             .iter()

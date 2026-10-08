@@ -179,6 +179,7 @@ mod json_admission;
 mod numeric_count;
 mod pac;
 mod payload;
+mod pxf;
 mod quasi_periodic;
 mod stability;
 #[cfg(test)]
@@ -750,6 +751,7 @@ impl AnalysisResultDocument {
         self.payload.validate(limits, abort)?;
         distortion::validate(self, abort)?;
         pac::validate(self, abort)?;
+        pxf::validate(self, abort)?;
         quasi_periodic::validate_primary(self, limits, abort)?;
         self.validate_impulses()?;
         frequency_table::validate(self, abort)?;

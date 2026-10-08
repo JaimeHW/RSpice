@@ -248,7 +248,8 @@ impl ResultPayload {
             Self::Pss(payload) => payload.validate(),
             // PAC metadata is validated with the primary coordinates and qualifiers.
             Self::Pac(_) => Ok(()),
-            Self::Pxf(payload) => payload.validate(),
+            // PXF metadata is validated with the retained conversion coordinates.
+            Self::Pxf(_) => Ok(()),
             Self::Pstb(payload) => payload.validate(),
             Self::PNoise(payload) => payload.validate(),
             Self::Hb(payload) => payload.validate(),
@@ -2690,47 +2691,6 @@ pub struct PxfGroupDelaySample {
 impl PxfPayload {
     fn value_count(&self) -> usize {
         self.group_delay.len().saturating_mul(2)
-    }
-
-    fn validate(&self) -> Result<(), ResultDocumentError> {
-        finite("PXF fundamental frequency", self.fundamental_frequency)?;
-        super::require_name("PXF input source", &self.input_source)?;
-        super::require_name("PXF output node", &self.output_node)?;
-        if let Some(reference) = &self.reference_node {
-            super::require_name("PXF reference node", reference)?;
-        }
-        if self.max_sideband < 0 {
-            return Err(ResultDocumentError::Malformed {
-                location: "PXF conversion depth",
-                detail: "a sideband span cannot be negative".to_owned(),
-            });
-        }
-        // The transfer is an element of a matrix spanning `-n..=n`. A payload
-        // that names a sideband outside that span describes a number the
-        // conversion matrix never held.
-        for (role, sideband) in [
-            ("input", self.input_sideband),
-            ("output", self.output_sideband),
-        ] {
-            if sideband.saturating_abs() > self.max_sideband {
-                return Err(ResultDocumentError::Malformed {
-                    location: "PXF sideband pair",
-                    detail: format!(
-                        "the {role} sideband {sideband} is outside the analyzed span +/-{}",
-                        self.max_sideband
-                    ),
-                });
-            }
-        }
-        for sample in &self.group_delay {
-            finite("PXF group-delay frequency", sample.frequency)?;
-            finite("PXF group delay", sample.delay)?;
-        }
-        if let Some(gain) = self.dc_gain {
-            finite("PXF DC gain real part", gain.real)?;
-            finite("PXF DC gain imaginary part", gain.imaginary)?;
-        }
-        Ok(())
     }
 }
 
