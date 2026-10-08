@@ -33,6 +33,7 @@ mod tests {
             return analysis;
         };
         analysis.with_result_payload(AnalysisResultPayload::TransientEvents {
+            voltage_impulses: None,
             digital_traces: vec![],
             real_traces: vec![],
             digital_buses: vec![],

@@ -260,6 +260,7 @@ fn scalar_state(source: EventSelectionSource) -> (AppState, &'static str) {
         }
         EventSelectionSource::ExactReal => {
             analysis.result_payload = Some(AnalysisResultPayload::TransientEvents {
+                voltage_impulses: None,
                 current_impulses: None,
                 digital_traces: vec![],
                 digital_buses: vec![],

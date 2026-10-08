@@ -1239,6 +1239,7 @@ fn live_current_impulses_reach_a_charge_only_preview_and_survive_bad_analog_colu
 #[test]
 fn live_transient_accumulator_rejects_partial_or_schema_changing_points() {
     let sample = |time, waveforms: &[(&str, f64)]| TransientSampleDelta {
+        voltage_impulses: None,
         current_impulses: None,
         time,
         waveforms: waveforms
@@ -1279,6 +1280,7 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
 
     let delta =
         |time: f64, events: &[(&str, u8)], real_events: &[(&str, f64)]| TransientSampleDelta {
+            voltage_impulses: None,
             current_impulses: None,
             time,
             waveforms: vec![rspice_simulation::live_transient::TransientWaveformSample {
@@ -1378,6 +1380,7 @@ fn live_transient_accumulator_bounds_the_provisional_event_history() {
 
     let deltas = (0..LiveTransientAccumulator::MAX_LIVE_EVENT_POINTS + 64)
         .map(|index| TransientSampleDelta {
+            voltage_impulses: None,
             current_impulses: None,
             time: index as f64,
             waveforms: Vec::new(),
@@ -1419,6 +1422,7 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
     let mut accumulator = LiveTransientAccumulator::default();
     let deltas = (0..LiveTransientAccumulator::MAX_SOURCE_SAMPLES + 1)
         .map(|index| TransientSampleDelta {
+            voltage_impulses: None,
             current_impulses: None,
             time: index as f64,
             waveforms: vec![

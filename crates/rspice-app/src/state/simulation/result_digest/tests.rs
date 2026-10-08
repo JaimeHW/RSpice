@@ -1083,6 +1083,7 @@ fn events_with_and_without_a_bus() -> (AnalysisResult, AnalysisResult) {
         ],
     };
     let payload = |digital_buses| AnalysisResultPayload::TransientEvents {
+        voltage_impulses: None,
         current_impulses: None,
         digital_traces: vec![trace("count#1"), trace("count#0")],
         real_traces: Vec::new(),

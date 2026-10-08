@@ -821,6 +821,7 @@ fn bussed_event_payload(digital_buses: Vec<DigitalBusEvidence>) -> AnalysisResul
         ],
     };
     AnalysisResultPayload::TransientEvents {
+        voltage_impulses: None,
         current_impulses: None,
         digital_traces: vec![trace("count#1"), trace("count#0")],
         real_traces: Vec::new(),

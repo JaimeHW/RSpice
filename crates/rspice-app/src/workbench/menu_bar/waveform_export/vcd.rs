@@ -113,6 +113,7 @@ mod tests {
             .collect::<Vec<_>>();
         let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
         analysis.result_payload = Some(AnalysisResultPayload::TransientEvents {
+            voltage_impulses: None,
             current_impulses: None,
             digital_traces: vec![DigitalEventTraceEvidence {
                 node_name: "d".to_owned(),

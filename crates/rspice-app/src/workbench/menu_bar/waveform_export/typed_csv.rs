@@ -106,14 +106,15 @@ pub(super) fn prepare_typed_result_csv(
             "event-history.csv",
             format!("{} event nodes, {event_count} committed events", node_count),
         ),
-        TypedCsvSummary::CurrentEvents {
+        TypedCsvSummary::ImpulseEvents {
             node_count,
             current_history_count,
+            voltage_history_count,
             impulse_count,
         } => (
             "event-history.csv",
             format!(
-                "{} event nodes, {} current histories, {impulse_count} current impulses",
+                "{} event nodes, {} current histories, {voltage_history_count} voltage histories, {impulse_count} impulses",
                 node_count, current_history_count
             ),
         ),

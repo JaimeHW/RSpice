@@ -3585,6 +3585,7 @@ fn retained_result_artifacts(
                 real_traces,
                 digital_buses,
                 current_impulses,
+                ..
             } => {
                 // One child row per declaration, under the artifact that
                 // carries them: a bus is a node of the browser in its own

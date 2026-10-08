@@ -635,6 +635,7 @@ fn current_impulse_csv_retains_exact_charge_owner_and_zero_event_coverage() {
     let analysis =
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
             .with_result_payload(crate::state::AnalysisResultPayload::TransientEvents {
+                voltage_impulses: None,
                 digital_traces: vec![],
                 real_traces: vec![],
                 digital_buses: vec![],
@@ -647,7 +648,7 @@ fn current_impulse_csv_retains_exact_charge_owner_and_zero_event_coverage() {
         .map(|line| line.split(',').collect())
         .collect();
     assert_eq!(rows.len(), 5);
-    assert!(rows.iter().all(|row| row.len() == 13));
+    assert!(rows.iter().all(|row| row.len() == 16));
     assert_eq!(rows[0][8], "charge_coulombs");
     assert_eq!(rows[1][5], "section");
     assert_eq!(rows[2][5], "coverage");
@@ -1875,6 +1876,7 @@ fn engineering_export_preference_dispatches_the_three_new_encoders() {
             vec![0.0, 1.0, 0.0],
         )])
         .with_result_payload(AnalysisResultPayload::TransientEvents {
+            voltage_impulses: None,
             current_impulses: None,
             digital_traces: vec![crate::state::DigitalEventTraceEvidence {
                 node_name: "d".to_owned(),

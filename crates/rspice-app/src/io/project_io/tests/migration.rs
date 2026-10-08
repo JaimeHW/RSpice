@@ -26,7 +26,7 @@ fn schema_v5_migrates_to_explicit_legacy_execution_state() {
         .expect("schema v5 migrates without inventing execution evidence");
     persisted.validate().expect("migrated schema validates");
 
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     let migrated = &persisted.runs[0];
     assert_eq!(
         migrated.lifecycle,
@@ -74,7 +74,7 @@ fn schema_v17_is_authenticated_then_restores_measurement_verification_defaults()
         .migrate_to_current(ProjectId::new())
         .expect("authentic schema-v17 measurement history migrates");
 
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     let measurement = &persisted.runs[0].analyses[0].measurements[0];
     assert_eq!(measurement.raw_value, measurement.value);
     assert_eq!(measurement.failure_limit, None);
@@ -348,7 +348,7 @@ fn schema_v12_is_authenticated_with_its_unit_free_encoding_then_resealed() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v12 result history migrates");
 
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     let migrated = persisted.runs[0]
         .clone()
         .into_run()
@@ -415,7 +415,7 @@ fn a_retained_waveform_unit_survives_the_current_schema_round_trip() {
     simulation.retained.next_run_id = 34;
 
     let persisted = crate::io::capture_simulation_results(&simulation);
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     let restored = crate::io::simulation_state_from_results(persisted)
         .expect("current result history restores");
 
@@ -552,7 +552,7 @@ fn schema_v16_periodic_results_migrate_to_explicit_unknown_without_inference() {
         persisted
             .migrate_to_current(ProjectId::new())
             .expect("authentic zero-waveform schema-v16 periodic result migrates");
-        assert_eq!(persisted.schema_version, 40);
+        assert_eq!(persisted.schema_version, 41);
         let payload = persisted.runs[0].analyses[0]
             .result_payload
             .as_ref()
@@ -606,7 +606,7 @@ fn schema_v16_cannot_inject_periodic_evidence_or_overwrite_an_existing_payload()
 fn current_schema_rejects_successful_periodic_results_without_the_typed_payload() {
     for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
         let mut current = persisted_periodic_at_schema_v16(analysis_type);
-        current.schema_version = 40;
+        current.schema_version = 41;
         let error = current
             .validate()
             .expect_err("current periodic success cannot omit its typed evidence");
@@ -657,7 +657,7 @@ fn schema_v13_migrates_prepared_receipts_to_an_explicit_default_specification_po
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v13 prepared receipt migrates");
 
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     let PersistedField::Value(receipt) = &persisted.runs[0].prepared_receipt else {
         panic!("migrated prepared receipt remains present");
     };
@@ -1491,7 +1491,7 @@ fn v2_same_kind_results_migrate_without_guessing_source_identity() {
         .migrate_to_current(ProjectId::new())
         .expect("v2 migrates");
 
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     assert!(
         persisted.runs[0]
             .analyses
@@ -1615,6 +1615,7 @@ fn persisted_events_at_schema_v18() -> ProjectSimulationResults {
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
             AnalysisResultPayload::TransientEvents {
+                voltage_impulses: None,
                 current_impulses: None,
                 digital_traces: vec![trace("count#1"), trace("count#0")],
                 real_traces: Vec::new(),
@@ -1664,7 +1665,7 @@ fn schema_v18_is_authenticated_then_resealed_with_an_empty_bus_table() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v18 event history migrates");
 
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
         persisted.runs[0].analyses[0].result_payload.as_ref()
     else {
@@ -1727,7 +1728,7 @@ fn schema_v18_rejects_tampering_and_a_smuggled_bus_table() {
 #[test]
 fn a_results_schema_from_the_future_is_refused_by_number() {
     let mut ahead = persisted_events_at_schema_v18();
-    ahead.schema_version = 40 + 1;
+    ahead.schema_version = 41 + 1;
     let error = ahead
         .migrate_to_current(ProjectId::new())
         .expect_err("a forward schema version is not migrated");
@@ -1801,7 +1802,7 @@ fn convergence_schema_v20_authenticates_before_migrating_unknown_quality() {
     let old_digest = stored.runs[0].dataset_content_digest.clone();
     stored.migrate_to_current(ProjectId::new()).unwrap();
     stored.validate().unwrap();
-    assert_eq!(stored.schema_version, 40);
+    assert_eq!(stored.schema_version, 41);
     assert_ne!(stored.runs[0].dataset_content_digest, old_digest);
     assert!(stored.runs[0].analyses[0].convergence.is_missing());
     assert!(
@@ -1900,7 +1901,7 @@ fn event_source_schema_v19_migrates_without_inventing_import_attribution() {
     let evidence = persisted.runs[0].analyses[0].result_payload.clone();
     persisted.migrate_to_current(ProjectId::new()).unwrap();
     persisted.validate().unwrap();
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     assert!(persisted.runs[0].analyses[0].import_source.is_missing());
     assert_eq!(persisted.runs[0].analyses[0].result_payload, evidence);
     let restored = crate::io::simulation_state_from_results(persisted).unwrap();

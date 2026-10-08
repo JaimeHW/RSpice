@@ -322,7 +322,7 @@ fn project_file_round_trips_exact_result_family_metadata_and_migrates_v6_absence
         .expect("analysis object")
         .remove("result_data_digest");
     let migrated = load_project_text(&v6.to_string(), None).expect("v6 project migrates");
-    assert_eq!(migrated.file.simulation_results.schema_version, 40);
+    assert_eq!(migrated.file.simulation_results.schema_version, 41);
     let migrated = crate::io::simulation_state_from_results(migrated.file.simulation_results)
         .expect("migrated v6 results restore");
     assert!(

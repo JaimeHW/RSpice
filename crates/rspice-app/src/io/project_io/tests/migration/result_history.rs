@@ -84,7 +84,7 @@ fn sensitivity_v25_migration_authenticates_numeric_evidence_before_resealing() {
         serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
     migrated.migrate_to_current(ProjectId::new()).unwrap();
     migrated.validate().unwrap();
-    assert_eq!(migrated.schema_version, 40);
+    assert_eq!(migrated.schema_version, 41);
     assert_eq!(
         migrated.runs[0].analyses[0].result_payload,
         legacy.runs[0].analyses[0].result_payload
@@ -120,6 +120,7 @@ fn current_impulse_project_history_round_trips_and_authenticates_charge() {
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
             AnalysisResultPayload::TransientEvents {
+                voltage_impulses: None,
                 digital_traces: vec![],
                 real_traces: vec![],
                 digital_buses: vec![],
@@ -175,7 +176,7 @@ fn current_impulse_schema_migration_authenticates_v26_before_resealing() {
         serde_json::from_str(&serde_json::to_string(&legacy).unwrap()).unwrap();
     migrated.migrate_to_current(ProjectId::new()).unwrap();
     migrated.validate().unwrap();
-    assert_eq!(migrated.schema_version, 40);
+    assert_eq!(migrated.schema_version, 41);
     assert_ne!(
         migrated.runs[0].dataset_content_digest,
         legacy.runs[0].dataset_content_digest
@@ -411,7 +412,7 @@ fn project_load_authenticates_v11_noise_and_preserves_eligible_regression_baseli
     let loaded = load_project_text(&v11.to_string(), None)
         .expect("authentic schema-v11 project remains loadable");
 
-    assert_eq!(loaded.file.simulation_results.schema_version, 40);
+    assert_eq!(loaded.file.simulation_results.schema_version, 41);
     assert_eq!(loaded.file.simulation_results.runs.len(), 1);
     assert!(loaded.file.simulation_results_warning.is_none());
     assert_eq!(
@@ -554,7 +555,7 @@ fn project_results_restore_rejects_invalid_overlay_references() {
     seal_legacy_unattributed(&mut run_two);
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 40,
+        schema_version: 41,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
             ProjectSimulationRun::from(&run_two),
@@ -587,7 +588,7 @@ fn project_results_validation_rejects_duplicate_run_ids() {
     seal_legacy_unattributed(&mut run_duplicate);
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 40,
+        schema_version: 41,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
             ProjectSimulationRun::from(&run_duplicate),
@@ -829,7 +830,7 @@ fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
     let migrated = &migrated_matrix[0];
 
     assert!(migrated.file.simulation_results_warning.is_none());
-    assert_eq!(migrated.file.simulation_results.schema_version, 40);
+    assert_eq!(migrated.file.simulation_results.schema_version, 41);
     assert!(
         migrated
             .file
@@ -899,7 +900,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
     let dataset_id = DatasetId::new();
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 40,
+        schema_version: 41,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -983,7 +984,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
     let dataset_id = DatasetId::new();
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 40,
+        schema_version: 41,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -1066,7 +1067,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
     let dataset_id = DatasetId::new();
     let mut results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 40,
+        schema_version: 41,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -1838,7 +1839,7 @@ fn a_results_history_saved_at_schema_27_restores_with_its_digests_unchanged() {
     at_v27
         .migrate_to_current(ProjectId::new())
         .expect("a v27 history migrates");
-    assert_eq!(at_v27.schema_version, 40);
+    assert_eq!(at_v27.schema_version, 41);
     let after = at_v27.runs[0]
         .analyses
         .iter()
@@ -1950,7 +1951,7 @@ fn a_results_history_saved_before_the_study_restores_with_its_digests_unchanged(
     at_v28
         .migrate_to_current(ProjectId::new())
         .expect("a v28 history migrates");
-    assert_eq!(at_v28.schema_version, 40);
+    assert_eq!(at_v28.schema_version, 41);
     let after = at_v28.runs[0]
         .analyses
         .iter()

@@ -679,6 +679,7 @@ pub mod test_support {
     pub fn committed_events(digital: &[(f64, u8)]) -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
             current_impulses: None,
+            voltage_impulses: None,
             digital_traces: vec![rspice_results::events::DigitalEventTraceEvidence {
                 node_name: "clk".to_owned(),
                 points: digital
@@ -714,6 +715,7 @@ pub mod test_support {
                 digital_traces,
                 real_traces: Vec::new(),
                 current_impulses: None,
+                voltage_impulses: None,
                 digital_buses: vec![DigitalBusEvidence {
                     name: "count".to_owned(),
                     msb,
@@ -839,6 +841,7 @@ mod tests {
     fn exact_event_rows_preserve_between_sample_and_same_time_transitions() {
         let payload = AnalysisResultPayload::TransientEvents {
             current_impulses: None,
+            voltage_impulses: None,
             digital_traces: vec![rspice_results::events::DigitalEventTraceEvidence {
                 node_name: "clk".to_owned(),
                 points: vec![
@@ -879,6 +882,7 @@ mod tests {
     fn exact_event_order_is_deterministic_without_claiming_cross_node_delta_order() {
         let payload = AnalysisResultPayload::TransientEvents {
             current_impulses: None,
+            voltage_impulses: None,
             digital_traces: vec![
                 rspice_results::events::DigitalEventTraceEvidence {
                     node_name: "a".to_owned(),
@@ -1046,6 +1050,7 @@ mod tests {
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
             .with_result_payload(AnalysisResultPayload::TransientEvents {
                 current_impulses: None,
+                voltage_impulses: None,
                 digital_traces: vec![DigitalEventTraceEvidence {
                     node_name: "clk".to_owned(),
                     points: vec![

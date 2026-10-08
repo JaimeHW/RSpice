@@ -157,6 +157,7 @@ mod tests {
         real_traces: Vec<RealEventTraceEvidence>,
     ) -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
+            voltage_impulses: None,
             current_impulses: None,
             digital_traces,
             real_traces,
@@ -290,6 +291,7 @@ mod tests {
     /// as the retained evidence a completed run would leave.
     fn bus_declaring_events() -> AnalysisResultPayload {
         AnalysisResultPayload::TransientEvents {
+            voltage_impulses: None,
             current_impulses: None,
             digital_traces: vec![
                 digital("count#1", &[(0.0, 0), (10.0e-9, 1)]),

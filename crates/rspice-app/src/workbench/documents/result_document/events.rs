@@ -312,6 +312,7 @@ mod tests {
         history.traces.push(second);
         let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
             AnalysisResultPayload::TransientEvents {
+                voltage_impulses: None,
                 digital_traces: vec![],
                 real_traces: vec![],
                 digital_buses: vec![],
@@ -435,6 +436,7 @@ mod availability_tests {
     #[test]
     fn never_validated_evidence_is_not_offered_as_an_events_sheet() {
         let payload = AnalysisResultPayload::TransientEvents {
+            voltage_impulses: None,
             current_impulses: None,
             digital_traces: vec![crate::state::DigitalEventTraceEvidence {
                 node_name: "clk".to_owned(),

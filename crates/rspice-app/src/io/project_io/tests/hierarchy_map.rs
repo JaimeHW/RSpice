@@ -158,7 +158,7 @@ fn results_written_before_the_hierarchy_map_load_and_reserialize_without_one() {
         .migrate_to_current(ProjectId::new())
         .expect("an authentic schema-v14 document migrates");
 
-    assert_eq!(persisted.schema_version, 40);
+    assert_eq!(persisted.schema_version, 41);
     assert!(
         restored_receipt(&persisted).hierarchy_map().is_empty(),
         "migration never invents an occurrence the run did not emit"
