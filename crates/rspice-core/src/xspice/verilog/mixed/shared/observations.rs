@@ -19,17 +19,23 @@ struct PendingObservation {
 
 /// A sampling activation observes one common interpolation bank. Invalidation
 /// after an HDL write must not cause a second analog operator evaluation.
-struct InterpolatedParticipant<'a> {
+struct InterpolatedParticipant<'a, 'p> {
     samples: &'a [Option<f64>],
+    external: Option<&'p mut dyn DigitalActiveParticipant>,
 }
 
-impl DigitalActiveParticipant for InterpolatedParticipant<'_> {
+impl DigitalActiveParticipant for InterpolatedParticipant<'_, '_> {
     fn settle_active(
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,
     ) -> Result<bool, DigitalRunError> {
-        exchange.require_standalone_execution()?;
-        Ok(false)
+        match &mut self.external {
+            Some(external) => external.settle_active(exchange),
+            None => {
+                exchange.require_standalone_execution()?;
+                Ok(false)
+            }
+        }
     }
 
     fn sample_analog(
@@ -134,13 +140,8 @@ impl MixedDigitalCoordinator {
         cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
-        participant: Option<&mut dyn DigitalActiveParticipant>,
+        mut participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<bool, MixedSignalError> {
-        if participant.is_some() {
-            return Err(MixedSignalError::Compile {
-                detail: "absdelta external-event scheduling is not yet connected".into(),
-            });
-        }
         if cursor.observation_refinement.is_some() {
             return Ok(false);
         }
@@ -184,6 +185,8 @@ impl MixedDigitalCoordinator {
         self.collect_adc_publications(cursor, hosts)?;
         let mut adc = 0;
         let mut published = false;
+        let mut external_endpoint =
+            participant.is_some() && cursor.observation_time != Some(cursor.time);
         let mut work = 0;
         let limit = self.digital.scheduler_limits().max_events_per_tick;
         loop {
@@ -192,16 +195,21 @@ impl MixedDigitalCoordinator {
                 .filter_map(|entry| entry.next.map(|event| event.sample.time))
                 .min_by(f64::total_cmp);
             let adc_time = self.publications.get(adc).map(|entry| entry.crossing);
-            let scheduled = self
-                .digital
-                .next_tick()
+            let scheduled_tick = self.digital.next_tick();
+            let scheduled = scheduled_tick
                 .map(|tick| self.resolution.ticks_to_seconds(tick))
                 .transpose()
                 .map_err(DigitalRunError::from)?;
+            let external_time = participant
+                .as_deref()
+                .and_then(DigitalActiveParticipant::next_event_time)
+                .filter(|time| *time <= cursor.time);
             let next = [
                 observation_time,
                 adc_time,
                 scheduled.filter(|time| *time <= cursor.time),
+                external_time,
+                external_endpoint.then_some(cursor.time),
             ]
             .into_iter()
             .flatten()
@@ -219,10 +227,13 @@ impl MixedDigitalCoordinator {
             }
             let bank = self.interpolate_observation_probes(cursor, &endpoint, time);
             let mut drives = Vec::new();
+            let mut publication_tick = cursor.published_tick;
             for (index, observer) in observers.iter_mut().enumerate() {
                 if let Some(event) = observer.next
                     && event.sample.time == time
                 {
+                    publication_tick = publication_tick
+                        .max(hdl_tick(time, |at| at.nearest_tick(self.resolution))?);
                     let held = self
                         .digital
                         .read(observer.signal)
@@ -237,6 +248,7 @@ impl MixedDigitalCoordinator {
             while let Some(entry) = self.publications.get(adc).copied()
                 && entry.crossing == time
             {
+                publication_tick = publication_tick.max(entry.tick);
                 let host = &hosts[entry.host];
                 let bridge = &host.state.bridges.adc[entry.bridge];
                 let global = self.port_signals[entry.host][usize::from(bridge.driven_signal())];
@@ -254,12 +266,24 @@ impl MixedDigitalCoordinator {
                 }
                 adc += 1;
             }
-            let tick = hdl_tick(time, |at| at.nearest_tick(self.resolution))?;
-            cursor.published_tick = cursor.published_tick.max(tick);
-            let mut active = InterpolatedParticipant { samples: &bank };
+            let external_due =
+                external_time == Some(time) || (external_endpoint && time == cursor.time);
+            if external_due {
+                publication_tick =
+                    publication_tick.max(hdl_tick(time, |at| at.ceil_tick(self.resolution))?);
+            }
+            cursor.published_tick = publication_tick;
+            let external = match &mut participant {
+                Some(external) => Some(&mut **external as &mut dyn DigitalActiveParticipant),
+                None => None,
+            };
+            let mut active = InterpolatedParticipant {
+                samples: &bank,
+                external,
+            };
             let digital = self.digital.make_mut();
             digital.sample_analog_probes(&bank);
-            if !drives.is_empty() {
+            if !drives.is_empty() || external_due {
                 digital.force_many_from_analog_at(
                     &drives,
                     cursor.published_tick,
@@ -270,16 +294,27 @@ impl MixedDigitalCoordinator {
                 published = true;
             }
             if scheduled == Some(time) {
-                let tick = hdl_tick(time, |at| at.nearest_tick(self.resolution))?;
-                digital.advance_to_with(tick, &mut active)?;
+                digital
+                    .advance_to_with(scheduled_tick.expect("scheduled event tick"), &mut active)?;
                 published = true;
             }
+            if time == cursor.time {
+                external_endpoint = false;
+            }
             self.synchronize(hosts)?;
-            let feedback = hosts.iter().try_fold(false, |changed, host| {
+            let external_feedback = participant
+                .as_deref()
+                .is_some_and(DigitalActiveParticipant::analog_feedback_pending);
+            let feedback = hosts.iter().try_fold(external_feedback, |changed, host| {
                 host.digital_feedback_since_trial_start()
                     .map(|value| changed || value)
             })?;
-            if feedback && time < cursor.time {
+            let endpoint_window = endpoint_root_window(
+                cursor.time,
+                self.accepted_time.unwrap_or(0.0),
+                self.analog_step_floor(),
+            );
+            if feedback && cursor.time - time > endpoint_window {
                 cursor.observation_refinement = Some(time);
                 for host in hosts.iter_mut() {
                     if let Some(trial) = &mut host.trial {
@@ -298,6 +333,6 @@ impl MixedDigitalCoordinator {
         cursor.observation_time = Some(cursor.time);
         cursor.observation_probes = endpoint;
         self.probes.clone_from(&cursor.observation_probes);
-        Ok(self.publish_counter_events_with(cursor, hosts, solution, None)? || published)
+        Ok(self.publish_counter_events_with(cursor, hosts, solution, participant)? || published)
     }
 }

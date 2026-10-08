@@ -3589,6 +3589,11 @@ impl MixedSignalHost {
                     .into(),
             });
         }
+        if trial.observation_refinement.is_some() {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "an interpolated event changed analog inputs inside this trial; solve at its refinement boundary before accepting".into(),
+            });
+        }
         if !trial.bridges_quiet {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "settle_analog_bridges must report the boundary quiet before a trial is \

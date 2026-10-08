@@ -134,6 +134,10 @@ pub(crate) struct XspiceActiveWave {
     pass: usize,
     /// Mixed input converters wait until the trial records physical roots.
     defer_mixed_adc: bool,
+    /// Interior observation waves execute event-only models. Physical fanout
+    /// is returned to the circuit solver before any analog model evaluates.
+    interpolated: bool,
+    analog_feedback: bool,
 }
 
 impl XspiceActiveWave {
@@ -1255,6 +1259,8 @@ impl CircuitData {
             analog_transitions: HashMap::new(),
             pass: 0,
             defer_mixed_adc: false,
+            interpolated: false,
+            analog_feedback: false,
         })
     }
 
@@ -1514,6 +1520,10 @@ impl CircuitData {
             // snapshot, or the copy this whole arrangement defers happens
             // anyway.
             let instance = &instances[index];
+            if wave.interpolated && !instance.has_only_event_connections() {
+                wave.analog_feedback = true;
+                continue;
+            }
             if dirty_dispatch_applies
                 && dispatch.is_dirty_dispatched(index)
                 && !instance.event_inputs_dirty()

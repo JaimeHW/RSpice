@@ -15,6 +15,25 @@ pub(crate) trait DigitalActiveParticipant {
         exchange: &mut DigitalActiveExchange<'_>,
     ) -> Result<bool, DigitalRunError>;
 
+    /// Prepare input-only endpoint sampling before an interpolated event interval.
+    /// Model evaluation remains ordered by the shared physical timeline.
+    fn prepare_interpolated_execution(
+        &mut self,
+        _endpoint_window: f64,
+    ) -> Result<(), DigitalRunError> {
+        Ok(())
+    }
+
+    /// The next external event, including work scheduled during this interval.
+    fn next_event_time(&self) -> Option<f64> {
+        None
+    }
+
+    /// An interior event reached an analog participant and needs a solver boundary.
+    fn analog_feedback_pending(&self) -> bool {
+        false
+    }
+
     /// The analog trial has recorded converter roots and their causes. Release
     /// deferred input publication, returning whether another Active wave is due.
     fn analog_boundaries_ready(&mut self) -> bool {

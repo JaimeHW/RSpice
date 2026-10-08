@@ -976,14 +976,32 @@ impl MixedDigitalCoordinator {
         solution: &[f64],
         participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<(), MixedSignalError> {
-        if !self.accepted_observers.is_empty() {
-            if participant.is_some() {
-                return Err(MixedSignalError::Compile { detail: "absdelta with XSPICE participants requires interpolated external-event scheduling, which is not yet connected".into() });
+        if !self.accepted_observers.is_empty() && cursor.time > 0.0 {
+            if let Some(external) = participant {
+                external.prepare_interpolated_execution(endpoint_root_window(
+                    cursor.time,
+                    self.accepted_time.unwrap_or(0.0),
+                    self.analog_step_floor(),
+                ))?;
+                if cursor.observation_time != Some(cursor.time) {
+                    return Ok(());
+                }
+                return self.advance_endpoint_with(cursor, hosts, solution, Some(external));
             }
-            if cursor.time > 0.0 && cursor.observation_time != Some(cursor.time) {
+            if cursor.observation_time != Some(cursor.time) {
                 return Ok(());
             }
         }
+        self.advance_endpoint_with(cursor, hosts, solution, participant)
+    }
+
+    fn advance_endpoint_with(
+        &mut self,
+        cursor: &mut SharedTrialCursor,
+        hosts: &mut [MixedSignalHost],
+        solution: &[f64],
+        participant: Option<&mut dyn DigitalActiveParticipant>,
+    ) -> Result<(), MixedSignalError> {
         let coordinator = self;
         for (host, map) in hosts.iter().zip(&coordinator.maps) {
             host.validate_solution(solution)?;
@@ -1040,6 +1058,14 @@ impl MixedDigitalCoordinator {
         solution: &[f64],
         external: &mut dyn DigitalActiveParticipant,
     ) -> Result<(), MixedSignalError> {
+        if !self.accepted_observers.is_empty()
+            && cursor.time > 0.0
+            && cursor.observation_time != Some(cursor.time)
+        {
+            // The observer timeline will release endpoint conversion after
+            // all earlier physical events have executed or requested refinement.
+            return Ok(());
+        }
         let tick = hdl_tick(cursor.time, |at| at.nearest_tick(self.resolution))?;
         cursor.published_tick = cursor.published_tick.max(tick);
         let mut participant = CircuitAnalogParticipant {
@@ -1174,7 +1200,8 @@ impl MixedDigitalCoordinator {
             for entry in &coordinator.publications[group..end] {
                 let host = &hosts[entry.host];
                 let bridge = &host.state.bridges.adc[entry.bridge];
-                let global = coordinator.port_signals[entry.host][usize::from(bridge.driven_signal())];
+                let global =
+                    coordinator.port_signals[entry.host][usize::from(bridge.driven_signal())];
                 // Preserve event-connected bits of a partly electrical vector,
                 // and bits of it that crossed at another instant. Only
                 // physical A/D decisions at *this* instant are external forces.

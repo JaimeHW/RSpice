@@ -261,6 +261,8 @@ pub(crate) struct XspiceDigitalParticipant<'a> {
     pending: VecDeque<ExternalNetChange>,
     initialized: bool,
     analog_boundaries_ready: bool,
+    interpolating: bool,
+    interpolation_endpoint_window: f64,
     /// Node rows an earlier pass of this same candidate moved, and with them
     /// the fact that there *was* an earlier pass. Empty and `None` for the
     /// opening pass, which is the ordinary case.
@@ -296,6 +298,8 @@ impl<'a> XspiceDigitalParticipant<'a> {
             pending: VecDeque::new(),
             initialized: false,
             analog_boundaries_ready: false,
+            interpolating: false,
+            interpolation_endpoint_window: 0.0,
             projected: &[],
             resettling: false,
         }
@@ -383,6 +387,51 @@ impl<'a> XspiceDigitalParticipant<'a> {
 }
 
 impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
+    fn prepare_interpolated_execution(
+        &mut self,
+        endpoint_window: f64,
+    ) -> Result<(), DigitalRunError> {
+        self.interpolating = true;
+        self.interpolation_endpoint_window = endpoint_window;
+        let sources = self.circuit.current_sources.values_at_time(self.time);
+        let transitions = self
+            .circuit
+            .xspice_instances
+            .iter()
+            .flat_map(|instance| instance.analog_output_transitions())
+            .collect();
+        let values = &self.circuit.scheduler.xspice_event_values;
+        for instance in &mut self.circuit.xspice_instances {
+            if instance.has_mixed_input_thresholds() {
+                instance
+                    .make_mut()
+                    .update_inputs_with_analog_transitions(
+                        self.solution,
+                        self.circuit.num_nodes,
+                        XspiceEventInputs {
+                            digital_values: &values.digital_values,
+                            digital_event_times: &values.digital_event_times,
+                            event_total_loads: &self.circuit.xspice_event_loads,
+                            real_values: &values.real_values,
+                            real_event_times: &values.real_event_times,
+                        },
+                        &sources,
+                        &transitions,
+                    )
+                    .map_err(|error| external_error(error.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn next_event_time(&self) -> Option<f64> {
+        self.circuit.scheduler.xspice_event_queue.next_event_time()
+    }
+
+    fn analog_feedback_pending(&self) -> bool {
+        self.wave.as_ref().is_some_and(|wave| wave.analog_feedback)
+    }
+
     fn analog_threshold_sample(&self, instance: usize, port: &str, element: usize) -> Option<f64> {
         self.circuit
             .xspice_instances
@@ -410,6 +459,15 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
         exchange: &mut DigitalActiveExchange<'_>,
     ) -> Result<bool, DigitalRunError> {
         let physical = exchange.physical_seconds();
+        let physical = if self.interpolating
+            && physical.is_finite()
+            && physical <= self.time
+            && self.time - physical <= self.interpolation_endpoint_window
+        {
+            self.time
+        } else {
+            physical
+        };
         if !physical.is_finite() || physical > self.time || physical < self.time - self.timestep {
             return Err(external_error(format!(
                 "XSPICE Active work at {physical:.16e}s is outside candidate interval [{:.16e}, {:.16e}]s",
@@ -430,6 +488,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
             if let Some(due) = self.circuit.scheduler.xspice_event_queue.next_event_time()
                 && due < physical
                 && self.event_was_reachable(due)
+                && !(self.interpolating && physical - due <= self.interpolation_endpoint_window)
             {
                 return Err(external_error(format!(
                     "missed XSPICE breakpoint at {due:.16e}s before shared Active work at {physical:.16e}s"
@@ -448,6 +507,10 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                     },
                 )
                 .map_err(|error| external_error(error.to_string()))?;
+            if self.interpolating && physical < self.time {
+                wave.interpolated = true;
+                wave.skip_opening_dispatch();
+            }
             if self.resettling {
                 // Opening a wave resets the pending flags, so the projection's
                 // marks are laid down again behind it.
@@ -465,7 +528,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
         }
         self.pending.extend(exchange.take_event_changes());
         let wave = self.wave.as_mut().expect("prepared physical Active wave");
-        wave.defer_mixed_adc = !self.analog_boundaries_ready;
+        wave.defer_mixed_adc = !self.analog_boundaries_ready || wave.interpolated;
         if !self.initialized {
             // An undriven shared bit starts at Z. Seed missing observation
             // entries from the state preceding the first journaled publication,

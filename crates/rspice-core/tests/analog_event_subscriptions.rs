@@ -945,6 +945,97 @@ endmodule
 }
 
 #[test]
+fn absdelta_xspice_delays_interleave_and_physical_fanout_refines() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module sampler(a,q,valid);
+ input a; electrical a;
+ input valid; integer seen_valid=0;
+ always @(valid) seen_valid=valid;
+ output q; reg q=0;
+ always @(absdelta(V(a),0.125,1p,1u)) q=~q;
+endmodule
+module receiver(a,b,c,valid);
+ input a; electrical a;
+ input b,c; output valid; reg valid=0;
+ parameter real ADC_DELAY=0;
+ integer count=0,adc_count=0,bad=0; real last=0,last_adc=0,sampled=0;
+ always @(c) if ($abstime>20p) begin adc_count=adc_count+1; last_adc=$abstime; end
+ analog I(a)<+0;
+ always @(b) if ($abstime>20p) begin
+   count=count+1; last=$abstime; sampled=V(a);
+   if ($abstime<1n && (sampled-$abstime*1e9>1u || $abstime*1e9-sampled>1u)) bad=1;
+ end
+ initial begin
+   #1080;
+   valid=(count==8 && adc_count==8 && bad==0 && last-1017p<=1f && 1017p-last<=1f
+      && last_adc-(1017p+ADC_DELAY)<=1f && (1017p+ADC_DELAY)-last_adc<=1f);
+ end
+endmodule
+"#,
+    );
+    for physical in [false, true] {
+        let dac = if physical {
+            "Adac [b] [out] dac\n.model dac dac_bridge(out_low=0 out_high=1 t_rise=1p t_fall=1p)\nRload out 0 1k\nAadc [out] [returned] adc\n.model adc adc_bridge(in_low=0.5 in_high=0.5 rise_delay=1p fall_delay=1p)\n"
+        } else {
+            ""
+        };
+        let (returned, adc_delay) = if physical {
+            ("returned", "1.5p")
+        } else {
+            ("b", "0")
+        };
+        let deck = Netlist::parse(&format!(
+            "* interpolated HDL/XSPICE timeline\nV1 a 0 PWL(0 0 1n 1)\nXsample a q valid sampler\nAbuf q b buffer\nXreceive a b {returned} valid receiver ADC_DELAY={adc_delay}\n.model buffer d_buffer(rise_delay=17p fall_delay=17p)\n{dac}.va \"{}\" sampler module=sampler\n.va \"{}\" receiver module=receiver\n.end\n",
+            source.path(),source.path()
+        )).unwrap();
+        let result = Engine::default()
+            .run_tran(&deck, 1.1e-9, 400e-12)
+            .unwrap_or_else(|error| panic!("physical={physical}: {error}"));
+        let valid = result
+            .digital_traces
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case("valid"))
+            .unwrap();
+        assert_eq!(
+            valid.points.last().unwrap().value.state,
+            rspice_core::xspice::DigitalState::One,
+            "physical={physical}: {:?}",
+            result.digital_traces
+        );
+        if physical {
+            for (time, expected) in [(0.2e-9, 0.0), (0.3e-9, 1.0), (0.45e-9, 0.0), (0.57e-9, 1.0)] {
+                let node = result
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                let point = result
+                    .time
+                    .iter()
+                    .rposition(|value| *value <= time)
+                    .unwrap();
+                let actual = result.voltage_waveform(node + 1)[point];
+                assert!(
+                    (actual - expected).abs() < 1e-4,
+                    "out@{time}: {actual} != {expected}"
+                );
+            }
+        } else {
+            assert!(
+                result
+                    .time
+                    .windows(2)
+                    .any(|pair| pair[1] - pair[0] > 150e-12),
+                "digital propagation must not force a sample grid: {:?}",
+                result.time
+            );
+        }
+    }
+}
+
+#[test]
 fn explicit_adc_roots_attach_to_real_only_mixed_domains() {
     let source = Source::new(
         r#"

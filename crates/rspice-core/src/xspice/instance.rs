@@ -2156,19 +2156,24 @@ impl XspiceInstance {
     /// today — none of them declare an analog port — and it is kept so that a
     /// future opt-in cannot silently make the skip unsound.
     pub(crate) fn supports_event_dirty_dispatch(&self) -> bool {
-        self.model.can_skip_unchanged_event_inputs()
-            && self.connections.iter().all(|connection| {
-                matches!(
-                    connection,
-                    PortConnection::Digital(_)
-                        | PortConnection::DigitalInverted(_)
-                        | PortConnection::DigitalVector(_)
-                        | PortConnection::DigitalVectorMapped(_)
-                        | PortConnection::Real(_)
-                        | PortConnection::RealVector(_)
-                        | PortConnection::Null
-                )
-            })
+        self.model.can_skip_unchanged_event_inputs() && self.has_only_event_connections()
+    }
+
+    /// Event-only models can execute inside an interpolated analog interval.
+    /// Models with a physical connection require a solved analog boundary.
+    pub(crate) fn has_only_event_connections(&self) -> bool {
+        self.connections.iter().all(|connection| {
+            matches!(
+                connection,
+                PortConnection::Digital(_)
+                    | PortConnection::DigitalInverted(_)
+                    | PortConnection::DigitalVector(_)
+                    | PortConnection::DigitalVectorMapped(_)
+                    | PortConnection::Real(_)
+                    | PortConnection::RealVector(_)
+                    | PortConnection::Null
+            )
+        })
     }
 
     /// Visit every circuit net this instance reads event values from, with the
