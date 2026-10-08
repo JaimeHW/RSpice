@@ -1,11 +1,11 @@
 //! Lower cross-domain event subscriptions to retained analog occurrence counters.
 //! Analog operators keep their ordinary state, root detection and rollback. A
 //! private digital signal carries occurrence counts, independently of data values.
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::ast::*;
 use crate::error::{CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
 use smol_str::SmolStr;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct AnalogEventBinding {
@@ -432,9 +432,9 @@ impl Lower {
             {
                 let rank = self.arrays.get(&access.name).map_or(0, Vec::len);
                 if term.edge.is_some()
-                    || !access
+                    || access
                         .split(rank)
-                        .is_some_and(|(_, packed)| packed.is_none())
+                        .is_none_or(|(_, packed)| packed.is_some())
                 {
                     return invalid(
                         "analog array assignment events require a complete unpacked element without a packed selection or edge qualifier",
