@@ -136,14 +136,14 @@
 //! circuit's first node on the other; a bridge referred to ground then stamped
 //! its Thevenin conductance onto whichever node happened to occupy row zero.
 
-mod analog_samples;
 mod analog_events;
+mod analog_samples;
 mod shared;
 mod standalone;
-use standalone::StandaloneExecution;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 use shared::MixedDigital;
 pub(crate) use shared::{MixedDigitalCoordinator, SharedTrialCursor};
+use standalone::StandaloneExecution;
 
 use std::fmt;
 use std::sync::Arc;
@@ -5469,12 +5469,26 @@ endmodule
         );
         let mut malformed = artifact.clone();
         malformed.hir.discrete_selections[0].signal = "missing".into();
+        let diagnostics = malformed.validate().unwrap_err();
         assert!(
-            malformed
-                .validate()
-                .unwrap_err()
+            diagnostics
                 .iter()
-                .any(|error| error.message.contains("must bind four-state"))
+                .any(|error| error.message.contains("packed discrete selections")),
+            "{diagnostics:?}"
+        );
+        // Matching the binding restores HIR consistency, but the referenced
+        // digital signal still must exist in the complete artifact.
+        malformed
+            .hir
+            .discrete_bindings
+            .insert(malformed.hir.discrete_selections[0].value, "missing".into());
+        malformed.hir.validate().unwrap();
+        let diagnostics = malformed.validate().unwrap_err();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|error| error.message == "analog input 'missing' has no digital signal"),
+            "{diagnostics:?}"
         );
         let mut host = MixedSignalHost::from_compiled(
             "x",
