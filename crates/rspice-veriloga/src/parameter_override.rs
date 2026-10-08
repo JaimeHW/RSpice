@@ -11,7 +11,7 @@ use crate::source::Span;
 /// Integral values retain their width, signedness and X/Z bits until the
 /// declaration's assignment conversion. A real is supplied as binary64.
 /// Arrays and strings are not represented by this scalar API.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScalarParameterValue {
     /// A signed decimal integer with at least 32 bits.
     Integer(i64),
@@ -98,4 +98,35 @@ impl ScalarParameterValue {
             ))
         })
     }
+}
+
+/// Stable typed source assignments; independent of JSON floating-point spelling.
+pub(crate) fn specialization_identity(
+    values: &[(smol_str::SmolStr, ScalarParameterValue)],
+) -> [u8; 32] {
+    if values.is_empty() {
+        return [0; 32];
+    }
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"rspice.source-specialization\0");
+    for (name, value) in values {
+        hash.update(&(name.len() as u64).to_le_bytes());
+        hash.update(name.as_bytes());
+        match value {
+            ScalarParameterValue::Real(value) => {
+                hash.update(&[0]);
+                hash.update(&value.to_bits().to_le_bytes());
+            }
+            ScalarParameterValue::Integer(value) => {
+                hash.update(&[1]);
+                hash.update(&value.to_le_bytes());
+            }
+            ScalarParameterValue::Bits { value, signed } => {
+                hash.update(&[2, u8::from(*signed)]);
+                hash.update(&value.width().to_le_bytes());
+                hash.update(value.spelling().as_bytes());
+            }
+        }
+    }
+    *hash.finalize().as_bytes()
 }

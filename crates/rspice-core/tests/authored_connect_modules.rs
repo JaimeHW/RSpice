@@ -115,24 +115,32 @@ endconnectrules
         if mode == "merged" {
             let foreign = Source::new(
                 r#"
+`timescale 1ns/1ps
 connectmodule replacement_driver(a,d);
  output a; electrical a;
  input d; logic d;
  analog V(a)<+7.0;
 endmodule
+connectmodule replacement_sense(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+ always #0.1 d=V(a)>6;
+endmodule
 connectrules replacement;
  connect replacement_driver;
+ connect replacement_sense;
 endconnectrules
 "#,
             );
             let override_deck=Netlist::parse(&format!(
-                "* configuration must match compiled internal connections\nX1 p m top\nRp p 0 1k\nRm m 0 1k\n.va \"{}\" top module=top\n.va \"{}\" replacement\n.options connectrules=replacement\n.end\n", source.path(),foreign.path(),
+                "* external configuration re-elaborates internal connections\nX1 p m top\nRp p 0 1k\nRm m 0 1k\n.va \"{}\" top module=top\n.va \"{}\" replacement\n.options connectrules=replacement\n.end\n", source.path(),foreign.path(),
             )).unwrap();
-            let error = Engine::default()
-                .run_tran(&override_deck, 2.5e-9, 50e-12)
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("hierarchical connect instances"), "{error}");
+            let overridden = Engine::default().run_tran(&override_deck, 2.5e-9, 50e-12).unwrap();
+            assert!((voltage(&overridden, "p", 1.5e-9)-7.0).abs()<1e-7);
+            assert!((voltage(&overridden, "m", 1.5e-9)-1.0/1.1).abs()<1e-7);
+            let restored = Engine::default().run_tran(&deck, 2.5e-9, 50e-12).unwrap();
+            assert!((voltage(&restored, "p", 1.5e-9)-high).abs()<1e-7);
         }
     }
 }
@@ -622,6 +630,182 @@ connectrules chosen; connect drive; endconnectrules
         assert!(
             prepared.diagnostics_for_error(&error)[0].path.is_none(),
             "external bytes must never be mapped to the device file"
+        );
+    }
+}
+
+
+const CONFIGURED_DEVICE: &str = r#"
+module source(q);
+ output q; logic q; reg q;
+ initial q=1;
+endmodule
+module top(p);
+ parameter integer N=1;
+ inout p; electrical p;
+ source first(p);
+ generate if (N==2) begin : extra
+  source second(p);
+ end endgenerate
+endmodule
+"#;
+const CONFIGURED_LIBRARY: &str = r#"
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ parameter real level=1;
+ analog I(a)<+(V(a)-(d ? level : 0.0))/1000;
+endmodule
+connectrules low; connect drive split #(.level(1.0)); endconnectrules
+connectrules high; connect drive split #(.level(3.0)); endconnectrules
+"#;
+
+#[test]
+fn deck_selects_external_rules_before_cold_hierarchy_and_keeps_cached_variants() {
+    let device = Source::new(CONFIGURED_DEVICE);
+    let library = Source::new(CONFIGURED_LIBRARY);
+    for (block, expected, reverse) in [
+        ("low", 2.0 / 3.0, false),
+        ("high", 2.0, true),
+        ("low", 2.0 / 3.0, true),
+    ] {
+        let imports = [
+            format!(".va \"{}\" top module=top\n", device.path()),
+            format!(".va \"{}\" library\n", library.path()),
+        ];
+        let imports = if reverse {
+            format!("{}{}", imports[1], imports[0])
+        } else {
+            imports.concat()
+        };
+        let deck=Netlist::parse(&format!("* external selected rules\n.options connectrules={block} connectrules_source=library\nX1 p top N=2\nRp p 0 1k\n{imports}.end\n")).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.2e-9, 50e-12).unwrap();
+        assert!(
+            (voltage(&result, "p", 0.1e-9) - expected).abs() < 1e-7,
+            "{block}, reverse={reverse}"
+        );
+    }
+}
+
+#[test]
+fn deck_reconfigures_registered_specializations_without_resetting_root_assignments() {
+    use rspice_veriloga::{CompilerOptions, NoPipelineControl, VerilogACompiler};
+    let source = Source::new(&format!("{CONFIGURED_DEVICE}\n{CONFIGURED_LIBRARY}"));
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let prepared = compiler.prepare_file_runtime_source(&source.0).unwrap();
+    let low = prepared.connection_configuration("low").unwrap();
+    let original = prepared
+        .compile_runtime_with_connections(Some("top"), &low, &NoPipelineControl)
+        .unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&original.canonical_ir, &[("N", 2.0)], &NoPipelineControl)
+        .unwrap();
+    let serialized = serde_json::to_vec(&specialized.canonical_ir).unwrap();
+    let specialized_artifact = serde_json::from_slice(&serialized).unwrap();
+    rspice_core::register_precompiled_veriloga_runtime_with_dependencies(
+        &source.0,
+        &[],
+        specialized.model,
+        specialized_artifact,
+    )
+    .unwrap();
+    for (block, overrides, expected) in [
+        ("high", "", 2.0),
+        ("low", "", 2.0 / 3.0),
+        ("high", "N=1", 1.5),
+    ] {
+        let deck=Netlist::parse(&format!("* retain source assignments\n.options connectrules={block}\n.va \"{}\" top\nX1 p top {overrides}\nRp p 0 1k\n.end\n",source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.2e-9, 50e-12).unwrap();
+        assert!(
+            (voltage(&result, "p", 0.1e-9) - expected).abs() < 1e-7,
+            "{block}, {overrides}"
+        );
+    }
+    // Replacing a base registration at the same path cannot reuse the derived
+    // runtime belonging to its previous root assignments.
+    rspice_core::register_precompiled_veriloga_runtime_with_dependencies(
+        &source.0,
+        &[],
+        original.model,
+        original.canonical_ir,
+    )
+    .unwrap();
+    let deck=Netlist::parse(&format!("* replaced source assignment\n.options connectrules=high\n.va \"{}\" top\nX1 p top\nRp p 0 1k\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 0.2e-9, 50e-12).unwrap();
+    assert!((voltage(&result, "p", 0.1e-9) - 1.5).abs() < 1e-7);
+    let mut tampered: serde_json::Value = serde_json::from_slice(&serialized).unwrap();
+    tampered["source_specialization"] = serde_json::json!([]);
+    let tampered: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+        serde_json::from_value(tampered).unwrap();
+    assert!(tampered.validate().is_err());
+}
+
+#[test]
+fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
+    use rspice_core::{
+        ProjectVerilogAConnectionLibraryRegistration, ProjectVerilogARuntimeRegistration,
+        ProjectVerilogASourceRegistration, register_project_veriloga_sources_for_session,
+    };
+    use rspice_veriloga::{
+        CompilerOptions, NoPipelineControl, VerilogACompiler, VirtualCompileLimits,
+        VirtualSourceBundle, VirtualSourceFile,
+    };
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let own_library = CONFIGURED_LIBRARY
+        .split("connectrules high")
+        .next()
+        .unwrap();
+    let original = compiler
+        .compile_runtime(&format!("{CONFIGURED_DEVICE}\n{own_library}"), Some("top"))
+        .unwrap();
+    let runtime = compiler
+        .specialize_mixed_runtime(&original.canonical_ir, &[("N", 2.0)], &NoPipelineControl)
+        .unwrap();
+    let bundle = VirtualSourceBundle::new(
+        "rules.vams",
+        [VirtualSourceFile::new("rules.vams", CONFIGURED_LIBRARY)],
+    )
+    .unwrap();
+    let library = compiler
+        .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+        .unwrap()
+        .connection_artifact()
+        .unwrap();
+    let prefix = format!(
+        "__rspice_project__/configured-hierarchy-{}",
+        std::process::id()
+    );
+    let device_key = std::path::PathBuf::from(format!("{prefix}/top.vams"));
+    let library_key = std::path::PathBuf::from(format!("{prefix}/rules.vams"));
+    assert!(!device_key.exists() && !library_key.exists());
+    register_project_veriloga_sources_for_session(vec![
+        ProjectVerilogASourceRegistration::Runtime(ProjectVerilogARuntimeRegistration {
+            source_key: device_key.clone(),
+            aliases: vec!["top".into()],
+            model: runtime.model,
+            canonical_ir: runtime.canonical_ir,
+        }),
+        ProjectVerilogASourceRegistration::Connections(
+            ProjectVerilogAConnectionLibraryRegistration {
+                source_key: library_key.clone(),
+                aliases: vec!["rules".into()],
+                artifact: library,
+            },
+        ),
+    ])
+    .unwrap();
+    for (block, expected) in [("high", 2.0), ("low", 2.0 / 3.0), ("high", 2.0)] {
+        let deck=Netlist::parse(&format!("* sealed hierarchy\n.options connectrules={block} connectrules_source=rules\n.va \"{}\" top\n.va \"{}\" rules\nX1 p top\nRp p 0 1k\n.end\n",device_key.display(),library_key.display())).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.2e-9, 50e-12).unwrap();
+        assert!(
+            (voltage(&result, "p", 0.1e-9) - expected).abs() < 1e-7,
+            "{block}"
         );
     }
 }

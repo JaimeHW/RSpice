@@ -28,6 +28,9 @@ pub struct CanonicalIrArtifact {
     /// analog parameters, so source specialization is available on every platform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameter_source: Option<SmolStr>,
+    /// Canonical root assignments replayed before changing connection rules.
+    pub source_specialization: Vec<(SmolStr, crate::ScalarParameterValue)>,
+    pub source_specialization_identity: [u8; 32],
     /// Active source closure for design-level connection elaboration. This is
     /// required in the serialized schema, even when the source has no rules;
     /// losing it must not silently select default electrical conversions.
@@ -126,6 +129,14 @@ impl CanonicalConnectionContext {
 }
 
 impl CanonicalIrArtifact {
+    pub fn runtime_source_identity(&self) -> [u8; 32] {
+        crate::prepared_source::runtime_source_identity(
+            &self.metadata.source_identity,
+            &self.hir.module_name,
+            &self.source_specialization_identity,
+        )
+    }
+
     pub fn from_parts(
         metadata: CanonicalMetadata,
         hir: HirModel,
@@ -153,6 +164,8 @@ impl CanonicalIrArtifact {
 
         Ok(Self {
             parameter_source: None,
+            source_specialization: Vec::new(),
+            source_specialization_identity: [0; 32],
             connections: CanonicalConnectionContext::None,
             connection_identity: [0; 32],
             metadata,
@@ -236,6 +249,31 @@ impl CanonicalIrArtifact {
             && let Err(error) = configuration.validate_integrity()
         {
             diagnostics.push(artifact_error(error));
+        }
+        if crate::parameter_override::specialization_identity(&self.source_specialization)
+            != self.source_specialization_identity
+        {
+            diagnostics.push(artifact_error(
+                "source specialization identity does not match its assignments",
+            ));
+        }
+        if !self.source_specialization.is_empty()
+            && self.parameter_source.is_none()
+            && self.connections.source().is_none()
+        {
+            diagnostics.push(artifact_error(
+                "source specialization requires retained source",
+            ));
+        }
+        let mut assigned = std::collections::HashSet::new();
+        for (name, value) in &self.source_specialization {
+            if !assigned.insert(name)
+                || matches!(value, crate::ScalarParameterValue::Real(value) if !value.is_finite())
+            {
+                diagnostics.push(artifact_error(
+                    "source specialization has duplicate or invalid assignments",
+                ));
+            }
         }
         let connection_identity = self.connections.identity();
         if self.connection_identity != connection_identity {

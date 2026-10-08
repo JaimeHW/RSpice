@@ -1,14 +1,14 @@
 //! Resolve a deck's Verilog sources before allocating mixed instances.
 //!
 //! Group module selections by source so one active closure supplies their
-//! compilation and connection rules. Only one analyzed tree is retained at a
-//! time; completed models keep using the existing bounded runtime cache.
+//! compilation and connection rules. Freeze discovery before executable
+//! elaboration, bound retained source closures, and key runtime variants by
+//! selected rules and the original model specialization.
 
 use super::connect_modules::DesignConnectRules;
 use super::veriloga_cache::{
-    CachedVerilogAModel, canonicalize_for_cache, compile_and_cache_prepared_veriloga,
-    lookup_cached_veriloga_with_limits_and_abort, lookup_registered_connection_library,
-    prepare_veriloga_source,
+    CachedVerilogAModel, canonicalize_for_cache, lookup_cached_veriloga_with_limits_and_abort,
+    lookup_registered_connection_library, prepare_veriloga_source,
 };
 use crate::abort_signal::AbortSignal;
 use crate::netlist::VerilogAInclude;
@@ -62,6 +62,13 @@ impl DependencyVersions {
     }
 }
 
+/// A frozen preparation or authenticated cache registration. Discover every
+/// group's rules before compiling any hierarchy which could need those rules.
+struct SourceGroup {
+    indices: Vec<usize>,
+    prepared: Option<rspice_veriloga::PreparedRuntimeSource>,
+}
+
 pub(super) fn resolve_includes(
     includes: &[VerilogAInclude],
     rules: &mut DesignConnectRules,
@@ -83,7 +90,19 @@ pub(super) fn resolve_includes(
     }
     let mut models = vec![None; includes.len()];
     let mut dependency_versions = DependencyVersions::default();
+    let mut frozen = Vec::new();
+    let mut retained_source_bytes = 0usize;
+    let mut admit_source = |bytes: usize| -> Result<(), SimulationError> {
+        retained_source_bytes = retained_source_bytes.saturating_add(bytes);
+        crate::ResourceLimitError::ensure(
+            crate::ResourceKind::ExpandedSourceBytes,
+            retained_source_bytes,
+            limits.max_expanded_source_bytes,
+        )?;
+        Ok(())
+    };
     for group in groups {
+        super::check_build_abort(abort)?;
         let path = &includes[group[0]].file_path;
         if let Some(library) = lookup_registered_connection_library(path, limits, abort)? {
             for &index in &group {
@@ -97,10 +116,10 @@ pub(super) fn resolve_includes(
                     ));
                 }
             }
+            admit_source(library.preprocessed_source().len())?;
             let specification = library
                 .connect_specification()
                 .map_err(|error| source_refusal(path, ElaborationErrorKind::ConnectRule, error))?;
-            super::check_build_abort(abort)?;
             rules.register(path, specification)?;
             continue;
         }
@@ -109,7 +128,7 @@ pub(super) fn resolve_includes(
         for &index in &group {
             let include = &includes[index];
             models[index] = lookup_cached_veriloga_with_limits_and_abort(
-                &include.file_path,
+                path,
                 include.selected_module.as_deref(),
                 limits,
                 abort,
@@ -119,31 +138,25 @@ pub(super) fn resolve_includes(
                 .and_then(|entry| entry.canonical_ir.as_deref())
             {
                 Some(artifact) => {
-                    if cached_identity
+                    needs_preparation |= cached_identity
                         .as_ref()
-                        .is_some_and(|identity| identity != &artifact.metadata.source_identity)
-                    {
-                        needs_preparation = true;
-                    }
+                        .is_some_and(|identity| identity != &artifact.metadata.source_identity);
                     cached_identity = Some(artifact.metadata.source_identity.clone());
                 }
                 None => {
-                    // The legacy browser registration API can supply only a
-                    // bytecode model. Its empty dependency set is fileless;
-                    // there is no source to reopen for connection discovery.
                     needs_preparation |= !models[index]
                         .as_ref()
                         .is_some_and(|entry| entry.dependencies.is_empty());
                 }
             }
         }
-        if needs_preparation {
+        let prepared = if needs_preparation {
             let prepared = prepare_veriloga_source(path, limits, abort)?;
+            admit_source(prepared.preprocessed_source().len())?;
             for dependency in prepared.dependencies() {
                 dependency_versions.record(path, &dependency.path, dependency.content_identity)?;
             }
             let specification = prepared.connect_specification();
-            let source_identity = specification.source_identity.clone();
             let has_modules = specification.declares_module;
             if !has_modules && !prepared.is_connect_library() {
                 return Err(source_refusal(
@@ -153,13 +166,9 @@ pub(super) fn resolve_includes(
                 ));
             }
             rules.register(path, specification)?;
-            // Reuse the complete analyzed tree for every selected module, and
-            // release it before preparing the next source group.
-            let mut compiled_selections = HashMap::new();
-            for &index in &group {
-                let include = &includes[index];
-                if !has_modules {
-                    if let Some(module) = &include.selected_module {
+            if !has_modules {
+                for &index in &group {
+                    if let Some(module) = &includes[index].selected_module {
                         return Err(source_refusal(
                             path,
                             ElaborationErrorKind::UnknownModule,
@@ -169,52 +178,162 @@ pub(super) fn resolve_includes(
                         ));
                     }
                     models[index] = None;
+                }
+                continue;
+            }
+            // A partial cache hit must not mix source snapshots. Compile all
+            // selected modules from this frozen preparation in the second pass.
+            for &index in &group {
+                models[index] = None;
+            }
+            Some(prepared)
+        } else {
+            let mut admitted = false;
+            for &index in &group {
+                if let Some(entry) = &models[index] {
+                    if let Some(artifact) = entry.canonical_ir.as_deref() {
+                        if !admitted {
+                            admit_source(
+                                artifact
+                                    .connections
+                                    .source()
+                                    .or(artifact.parameter_source.as_deref())
+                                    .map_or(0, str::len),
+                            )?;
+                            admitted = true;
+                        }
+                        rules.register_artifact(path, artifact)?;
+                    }
+                    for dependency in &entry.dependencies {
+                        dependency_versions.record(
+                            path,
+                            &dependency.canonical_path,
+                            dependency.content_hash,
+                        )?;
+                    }
+                }
+            }
+            None
+        };
+        frozen.push(SourceGroup {
+            indices: group,
+            prepared,
+        });
+    }
+    super::check_build_abort(abort)?;
+    let configuration = rules.configuration()?;
+    let compiler = rspice_veriloga::VerilogACompiler::new(
+        super::veriloga_cache::deck_include_compiler_options(),
+    );
+    let control = super::veriloga_cache::VerilogACompileControl { abort };
+    for group in frozen {
+        let path = &includes[group.indices[0]].file_path;
+        let mut compiled_selections = HashMap::new();
+        for index in group.indices {
+            super::check_build_abort(abort)?;
+            let selected = includes[index].selected_module.as_deref();
+            if let Some(cached) = compiled_selections.get(&includes[index].selected_module) {
+                models[index] = Some(CachedVerilogAModel::clone(cached));
+                continue;
+            }
+            let original = models[index].as_ref();
+            let artifact = original.and_then(|entry| entry.canonical_ir.as_deref());
+            let needs_configuration = configuration.as_deref().is_some_and(|configuration| {
+                artifact.is_none_or(|artifact| {
+                    artifact.connections.source().is_some()
+                        && artifact.connections.configuration() != Some(configuration)
+                })
+            });
+            if original.is_some() && !needs_configuration {
+                compiled_selections.insert(
+                    includes[index].selected_module.clone(),
+                    original.unwrap().clone(),
+                );
+                continue;
+            }
+            // Contextual hits use the authenticated source and root assignments,
+            // never only the path of a potentially replaced registration.
+            if let Some(configuration) = configuration.as_deref() {
+                let identity = match (&group.prepared, artifact) {
+                    (Some(prepared), _) => {
+                        prepared
+                            .runtime_source_identity(selected)
+                            .map_err(|error| {
+                                source_refusal(
+                                    path,
+                                    ElaborationErrorKind::ModuleNotSelected,
+                                    error.to_string(),
+                                )
+                            })?
+                    }
+                    (None, Some(artifact)) => artifact.runtime_source_identity(),
+                    _ => {
+                        return Err(source_refusal(
+                            path,
+                            ElaborationErrorKind::MissingSource,
+                            "configured runtime requires retained source",
+                        ));
+                    }
+                };
+                if let Some(cached) = super::veriloga_cache::lookup_configured_veriloga(
+                    path,
+                    selected,
+                    super::veriloga_cache::configuration_identity(identity, configuration),
+                    limits,
+                    abort,
+                )? {
+                    // A cold preparation and a disk entry must agree on every
+                    // dependency version already frozen in the first pass.
+                    for dependency in &cached.dependencies {
+                        dependency_versions.record(
+                            path,
+                            &dependency.canonical_path,
+                            dependency.content_hash,
+                        )?;
+                    }
+                    compiled_selections
+                        .insert(includes[index].selected_module.clone(), cached.clone());
+                    models[index] = Some(cached);
                     continue;
                 }
-                // A file changed between cache lookups and preparation must
-                // not mix artifacts from different snapshots of one source.
-                let reuse = models[index].as_ref().is_some_and(|entry| {
-                    entry.canonical_ir.as_deref().is_none_or(|artifact| {
-                        artifact.metadata.source_identity.as_str() == source_identity
-                    })
-                });
-                if !reuse {
-                    let selected = include.selected_module.clone();
-                    let model = match compiled_selections.entry(selected) {
-                        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            entry.insert(compile_and_cache_prepared_veriloga(
-                                &include.file_path,
-                                include.selected_module.as_deref(),
-                                &prepared,
-                                limits,
-                                abort,
-                            )?)
-                        }
-                    };
-                    models[index] = Some(model.clone());
-                }
             }
-        } else {
-            for &index in &group {
-                if let Some(artifact) = models[index]
-                    .as_ref()
-                    .and_then(|entry| entry.canonical_ir.as_deref())
-                {
-                    rules.register_artifact(&includes[index].file_path, artifact)?;
-                }
-            }
-        }
-        for index in group {
-            if let Some(entry) = &models[index] {
-                for dependency in &entry.dependencies {
-                    dependency_versions.record(
+            let replay;
+            let prepared = if let Some(prepared) = &group.prepared {
+                prepared
+            } else {
+                let artifact = artifact.ok_or_else(|| {
+                    source_refusal(
                         path,
-                        &dependency.canonical_path,
-                        dependency.content_hash,
-                    )?;
-                }
-            }
+                        ElaborationErrorKind::MissingSource,
+                        "configured runtime requires retained source",
+                    )
+                })?;
+                replay = compiler
+                    .prepare_artifact_runtime_source(artifact, &control)
+                    .map_err(|error| {
+                        if abort.is_aborted() {
+                            SimulationError::Aborted
+                        } else {
+                            source_refusal(
+                                path,
+                                ElaborationErrorKind::CompileRefusal,
+                                error.to_string(),
+                            )
+                        }
+                    })?;
+                &replay
+            };
+            let entry = super::veriloga_cache::compile_and_cache_prepared_with_connections(
+                path,
+                selected,
+                prepared,
+                configuration.as_deref(),
+                original.map_or(&[], |entry| entry.dependencies.as_slice()),
+                limits,
+                abort,
+            )?;
+            compiled_selections.insert(includes[index].selected_module.clone(), entry.clone());
+            models[index] = Some(entry);
         }
     }
     Ok(models)

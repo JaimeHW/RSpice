@@ -809,6 +809,8 @@ pub(crate) fn runtime_contract_identity(
     hasher.field(compiler_identity.as_bytes());
     hasher.field(runtime.model.source_digest.as_bytes());
     hasher.field(runtime.canonical_ir.metadata.source_digest.as_bytes());
+    hasher.field(&runtime.canonical_ir.connection_identity);
+    hasher.field(&runtime.canonical_ir.source_specialization_identity);
     hasher.field(runtime.abi.module_name.as_bytes());
     hasher.usize(runtime.abi.analog_ports.len());
     for port in &runtime.abi.analog_ports {

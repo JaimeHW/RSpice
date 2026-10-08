@@ -755,6 +755,44 @@ impl VerilogACompiler {
         parameters: &[(&str, f64)],
         control: &dyn PipelineControl,
     ) -> CompileResult<RuntimeCompileReport> {
+        self.compile_connect_runtime_selected(
+            source_package,
+            preprocessed,
+            module,
+            parameters,
+            None,
+            control,
+        )
+    }
+
+    pub fn compile_connect_runtime_with_configuration(
+        &self,
+        source_package: &str,
+        preprocessed: &str,
+        module: &str,
+        parameters: &[(&str, f64)],
+        configuration: &ConnectionConfiguration,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<RuntimeCompileReport> {
+        self.compile_connect_runtime_selected(
+            source_package,
+            preprocessed,
+            module,
+            parameters,
+            Some(configuration),
+            control,
+        )
+    }
+
+    fn compile_connect_runtime_selected(
+        &self,
+        source_package: &str,
+        preprocessed: &str,
+        module: &str,
+        parameters: &[(&str, f64)],
+        configuration: Option<&ConnectionConfiguration>,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<RuntimeCompileReport> {
         let parameters: Vec<_> = parameters
             .iter()
             .map(|&(name, value)| (name, ScalarParameterValue::Real(value)))
@@ -764,13 +802,16 @@ impl VerilogACompiler {
             self.options.performance_budget.clone(),
             control,
         );
-        let analyzed = self.analyze_preprocessed_with_parameters(
+        let mut analyzed = self.analyze_preprocessed_with_parameters(
             source_package,
             preprocessed,
             Some(module),
             &parameters,
             &mut measurements,
         )?;
+        if let Some(configuration) = configuration {
+            analyzed = configuration.apply(preprocessed, &analyzed, &mut measurements)?;
+        }
         if !analyzed
             .source
             .items
@@ -831,11 +872,46 @@ impl VerilogACompiler {
             self.options.performance_budget.clone(),
             control,
         );
+        let mut effective = artifact.source_specialization.clone();
+        let mut assigned = std::collections::HashSet::new();
+        for (name, value) in parameters {
+            let canonical = artifact
+                .hir
+                .parameters
+                .iter()
+                .find(|parameter| {
+                    parameter.name == *name || parameter.aliases.iter().any(|alias| alias == *name)
+                })
+                .map(|parameter| parameter.name.as_str())
+                .or_else(|| {
+                    artifact
+                        .digital
+                        .elaboration_parameters
+                        .iter()
+                        .find(|parameter| {
+                            parameter.name == *name
+                                || parameter.aliases.iter().any(|alias| alias == *name)
+                        })
+                        .map(|parameter| parameter.name.as_str())
+                })
+                .unwrap_or(name);
+            if !assigned.insert(canonical) {
+                return Err(CompileError::ModuleSelection(format!(
+                    "parameter override `{name}` must be unique, including aliases"
+                )));
+            }
+            effective.retain(|(previous, _)| previous != canonical);
+            effective.push((canonical.into(), value.clone()));
+        }
+        let parameters: Vec<_> = effective
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.clone()))
+            .collect();
         let mut analyzed = self.analyze_preprocessed_with_parameters(
             &artifact.metadata.source_package,
             source,
             Some(&artifact.hir.module_name),
-            parameters,
+            &parameters,
             &mut measurements,
         )?;
         if let Some(configuration) = artifact.connections.configuration() {
@@ -1128,6 +1204,7 @@ impl VerilogACompiler {
         trace_compiler_phase(trace, &target, "parse", None, None);
         let phase_started = web_time::Instant::now();
         let mut source_file = Parser::new(&tokens).parse()?;
+        let mut source_specialization = Vec::new();
         if !parameters.is_empty() {
             let selected = source_file
                 .items
@@ -1169,6 +1246,7 @@ impl VerilogACompiler {
                 parameter.default =
                     Some(value.assigned_expression(parameter, selected.time_scale)?);
                 parameter.is_given = true;
+                source_specialization.push((parameter.name.clone(), value.clone()));
             }
             parser::expand_specialized_generates(selected)?;
         }
@@ -1187,7 +1265,8 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Semantic)?;
         trace_compiler_phase(trace, &target, "semantic", None, None);
         let phase_started = web_time::Instant::now();
-        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+        let mut analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+        analyzed.source_specialization = source_specialization;
         measurements.record(PipelinePhase::Semantic, phase_started.elapsed())?;
         measurements.metrics_mut().module_count = metrics::usize_to_u64(analyzed.modules.len());
         trace_compiler_phase(
@@ -1302,6 +1381,9 @@ impl VerilogACompiler {
         )
         .map_err(Self::canonical_ir_error)?
         .with_digital(digital);
+        artifact.source_specialization = analyzed.source_specialization.clone();
+        artifact.source_specialization_identity =
+            parameter_override::specialization_identity(&artifact.source_specialization);
         if let Some(configuration) = analyzed.connection_configuration.as_deref() {
             artifact = artifact.with_connection_configuration(
                 source,
@@ -1312,14 +1394,14 @@ impl VerilogACompiler {
             matches!(
                 item,
                 ast::Item::ConnectModule(_) | ast::Item::ConnectRules(_)
-            )
+            ) || matches!(item, ast::Item::Module(module) if !module.instances.is_empty() || module.generate_template.is_some())
         }) {
             artifact = if module.hierarchical_connections {
                 artifact.with_elaborated_connection_source(source)
             } else {
                 artifact.with_connection_source(source)
             };
-        } else if (!artifact.digital.is_empty()
+        } else if !artifact.source_specialization.is_empty() || (!artifact.digital.is_empty()
             && (!artifact.hir.parameters.is_empty()
                 || !artifact.digital.elaboration_parameters.is_empty()))
             || artifact.hir.parameters.iter().any(|parameter| {
@@ -1417,6 +1499,7 @@ impl VerilogACompiler {
                 .insert(index + 1, ast::Item::Module(module.clone()));
             let mut promoted = SemanticAnalyzer::new().analyze(&source)?;
             promoted.connection_configuration = analyzed.connection_configuration.clone();
+            promoted.source_specialization = analyzed.source_specialization.clone();
             let selected = self.select_analyzed_module(&promoted, Some(name))?;
             return semantic::retain_packed_parameters(semantic::lower_flow_probes(
                 semantic::elaborate_executable_module(&promoted, selected)?,
@@ -1962,6 +2045,7 @@ impl VerilogACompiler {
             }),
             diagnostics,
             source_package,
+            replay_module: None,
             source: preprocessed.source,
             analyzed,
             dependencies,
@@ -1984,6 +2068,16 @@ impl VerilogACompiler {
         );
         *measurements.metrics_mut() = prepared.metrics.clone();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
+        // External libraries may add helper modules. Resolve an implicit root
+        // against the device closure before those helpers enter its namespace.
+        let module_name = match module_name {
+            Some(name) => Some(name),
+            None => Some(
+                self.select_analyzed_module(&prepared.analyzed, None)?
+                    .name
+                    .as_str(),
+            ),
+        };
         let analyzed = match configuration {
             Some(configuration) => std::borrow::Cow::Owned(configuration.apply(
                 &prepared.source,

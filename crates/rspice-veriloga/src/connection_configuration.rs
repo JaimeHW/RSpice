@@ -24,6 +24,17 @@ pub struct ConnectionConfiguration {
 }
 
 impl ConnectionConfiguration {
+    pub fn from_preprocessed(
+        source_package: &str,
+        source: &str,
+        block: &str,
+    ) -> Result<Self, String> {
+        Self::new(
+            ConnectionLibraryArtifact::from_prepared(source_package, source),
+            block,
+        )
+    }
+
     pub fn new(library: ConnectionLibraryArtifact, block: &str) -> Result<Self, String> {
         library
             .connect_specification()?
@@ -158,6 +169,7 @@ impl ConnectionConfiguration {
             }
             SemanticAnalyzer::new().analyze(&combined)?
         };
+        configured.source_specialization = analyzed.source_specialization.clone();
         configured.connection_configuration = Some(Box::new(self.clone()));
         measurements.record(PipelinePhase::Semantic, started.elapsed())?;
         Ok(configured)

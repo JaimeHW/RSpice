@@ -75,13 +75,14 @@ resolved for the import and survives remapping to a sealed virtual source key.
 An explicitly selected empty block supplies no insertion rules; a mixed boundary
 requiring one is an error. Selected authored bodies execute at deck boundaries
 and typed scalar HDL hierarchy boundaries, including merged/split loading and
-resolved real-net drivers. Registered runtimes may retain an explicit compiler
-connection configuration, including an external library and selected block;
-instance parameter specialization preserves it. A differing deck selection is
-rejected until source re-elaboration has occurred. Automatic deck-wide discovery
-before compilation and cache rebinding still require integration. Vector/array
-insertion, complete hierarchical discipline resolution, library/view configuration,
-and product workflows for standalone virtual libraries remain implementation work.
+resolved real-net drivers. The engine discovers the deck's selected library and
+rule block before compiling internal boundaries. A changed selection re-elaborates
+retained hierarchy source, including registered sealed runtimes, preserving their
+root parameter assignments. Configured variants occupy distinct bounded cache
+entries and leave the base registration intact; authored deck converters use the
+same selected rules inside their own helper hierarchy. Vector/array insertion,
+complete hierarchical discipline resolution, library/view configuration, and
+product workflows for standalone virtual libraries remain implementation work.
 
 The public `register_project_veriloga_sources_for_session` API accepts a single
 transaction of `ProjectVerilogASourceRegistration::Runtime` and `::Connections`

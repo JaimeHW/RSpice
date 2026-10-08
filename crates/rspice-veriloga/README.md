@@ -134,11 +134,14 @@ library/block; parameter specialization replays that exact configuration. Librar
 compiler directives retain their own scope, conflicting physical definitions are
 rejected, and external diagnostics name the retained preprocessed library.
 
-Automatic deck-wide discovery must still be moved ahead of compilation to use
-this API for cold sources and rebind cached devices. A deck selection differing
-from already compiled internal connections is rejected until re-elaboration has
-occurred. Vector/array connection insertion, inherited discipline resolution
-across the complete hierarchy, and library/view selection remain open.
+The engine discovers the complete deck selection before compiling internal
+boundaries and re-elaborates cached/registered hierarchies when it changes.
+Canonical artifacts retain typed root assignments separately from source text;
+reconfiguration and later partial overrides preserve prior assignments and their
+`$param_given` meaning. `prepare_artifact_runtime_source` reconstructs this input
+without filesystem access, with diagnostics labeled as preprocessed coordinates.
+Vector/array connection insertion, inherited discipline resolution across the
+complete hierarchy, and library/view selection remain open.
 
 `prepare_file_runtime_source` freezes one analyzed file/include closure before
 module selection. It can describe a standalone connection library or compile
@@ -148,11 +151,13 @@ if a file changes afterward. The preparation and compiler options are shared;
 module compilation does not reopen sources. Keep prepared trees scoped to
 elaboration. The limits/control variant bounds source expansion and preserves
 cancellation; returned module metrics include the shared preparation prefix.
-The engine groups `.VERILOGA` selections by source and uses this preparation
-for cold model compilation and standalone connection libraries. Warm runtime
-cache entries carry their own connection closure. Cache dependency hashes come
-from captured preprocessing bytes, so a later source edit cannot relabel old
-compiled behavior as current.
+The engine groups `.VERILOGA` selections by source and freezes discovery before
+emitting devices. Retained expanded source across the design obeys the active
+source byte budget. Configured memory/disk cache entries include the selected
+library, rule block, module and root assignments; they do not replace the base
+registration. Warm runtimes carry their connection closure. Cache dependency
+hashes come from captured preprocessing bytes, so a later source edit cannot
+relabel old compiled behavior as current.
 
 Connection tables retain case-sensitive named `connectrules` blocks, including
 empty blocks. `blocks()` lists their declaration spans; `select_block(name)`

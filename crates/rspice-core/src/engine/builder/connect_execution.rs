@@ -24,6 +24,7 @@ struct CompiledConnectBody {
 /// normal mixed host. The selected rule's parameter values key this cache.
 #[derive(Debug)]
 pub(super) struct AuthoredConnectBody {
+    configuration: Arc<rspice_veriloga::ConnectionConfiguration>,
     source: Arc<str>,
     source_package: String,
     continuous: String,
@@ -33,12 +34,14 @@ pub(super) struct AuthoredConnectBody {
 
 impl AuthoredConnectBody {
     pub(super) fn new(
+        configuration: Arc<rspice_veriloga::ConnectionConfiguration>,
         source: Arc<str>,
         source_package: String,
         continuous: String,
         discrete: String,
     ) -> Self {
         Self {
+            configuration,
             source,
             source_package,
             continuous,
@@ -75,11 +78,12 @@ pub(super) fn materialize(
             enable_ams: true,
             ..Default::default()
         })
-        .compile_connect_runtime(
+        .compile_connect_runtime_with_configuration(
             &body.source_package,
             &body.source,
             &selected.name,
             &parameters,
+            &body.configuration,
             &super::veriloga_cache::VerilogACompileControl { abort },
         )
         .map_err(|error| {

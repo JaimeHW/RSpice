@@ -38,6 +38,7 @@ impl Drop for SourceTree {
 
 struct EditDuringCompilation {
     header: PathBuf,
+    phase_threshold: f64,
     edited: AtomicBool,
 }
 impl rspice_core::abort_signal::AbortSignal for EditDuringCompilation {
@@ -45,9 +46,9 @@ impl rspice_core::abort_signal::AbortSignal for EditDuringCompilation {
         false
     }
     fn observe_progress(&self, fraction: f64) {
-        // Preparation has completed; mutate the include while the first
-        // selected module is being emitted, before the second is compiled.
-        if fraction >= 0.8 && !self.edited.swap(true, Ordering::SeqCst) {
+        // Edit either between root preparations or during module emission,
+        // according to the snapshot boundary exercised by the caller.
+        if fraction >= self.phase_threshold && !self.edited.swap(true, Ordering::SeqCst) {
             std::fs::write(&self.header, "`define GAIN 2e-3\n").unwrap();
         }
     }
@@ -78,6 +79,7 @@ fn connection_library_and_selected_modules_use_one_snapshot_then_refresh_changed
     )).unwrap();
     let edit = EditDuringCompilation {
         header,
+        phase_threshold: 0.8,
         edited: AtomicBool::new(false),
     };
     let first = Engine::default()
@@ -198,6 +200,7 @@ fn different_roots_cannot_mix_versions_of_a_shared_source_snapshot() {
     )).unwrap();
     let edit = EditDuringCompilation {
         header,
+        phase_threshold: 0.3,
         edited: AtomicBool::new(false),
     };
     let error = Engine::default()

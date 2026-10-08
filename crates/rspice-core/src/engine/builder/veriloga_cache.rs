@@ -328,7 +328,8 @@ use super::*;
 // Version 104 retains table derivative payload actions (Wasm ABI 19).
 // Version 105 retains compiler diagnostics. Older records cannot distinguish
 // a warning-free source from one whose warnings were discarded.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 105;
+// Version 106 separates connection-configuration and source-specialization variants.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 106;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -548,6 +549,7 @@ pub(super) struct VerilogADiskCacheRecord {
     pub(super) version: u32,
     pub(super) source_path: PathBuf,
     pub(super) selected_module: Option<String>,
+    pub(super) configuration: Option<[u8; 32]>,
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
     pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -626,6 +628,7 @@ impl CachedVerilogASource {
 pub(super) struct VerilogASourceKey {
     source_path: PathBuf,
     selected_module: Option<String>,
+    configuration: Option<[u8; 32]>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -634,6 +637,7 @@ impl VerilogASourceKey {
         Self {
             source_path: canonicalize_for_cache(path),
             selected_module: selected_module.map(str::to_owned),
+            configuration: None,
         }
     }
 
@@ -655,6 +659,7 @@ struct BorrowedVerilogACacheRecord<'a> {
     version: u32,
     source_path: &'a Path,
     selected_module: Option<&'a str>,
+    configuration: Option<[u8; 32]>,
     dependencies: &'a [VerilogADependencyFingerprint],
     model: &'a rspice_veriloga::CompiledModel,
     canonical_ir: Option<&'a rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -668,6 +673,7 @@ impl<'a> BorrowedVerilogACacheRecord<'a> {
             version: VERILOGA_CACHE_RECORD_VERSION,
             source_path: &source.source_path,
             selected_module: source.selected_module.as_deref(),
+            configuration: source.configuration,
             dependencies: &entry.dependencies,
             model: entry.model.as_ref(),
             canonical_ir: entry.canonical_ir.as_deref(),
@@ -1092,6 +1098,10 @@ pub(super) fn cache_record_path_with_root(
         // retain Verilog's case sensitivity, independently of SPICE aliases.
         hasher.update(b"\0module\0");
         hasher.update(module.as_bytes());
+    }
+    if let Some(configuration) = source.configuration {
+        hasher.update(b"\0configuration\0");
+        hasher.update(&configuration);
     }
     let key = hasher.finalize().to_hex().to_string();
     cache_root.join(format!("{key}.json"))
@@ -1641,6 +1651,14 @@ fn load_model_from_disk_locked_with_limits(
     let record_source = canonicalize_for_cache(&record.source_path);
     if *requested_source != record_source
         || source_path.selected_module != record.selected_module
+        || source_path.configuration != record.configuration
+        || record.configuration.is_some_and(|identity| {
+            record.canonical_ir.as_ref().and_then(|artifact| {
+                artifact.connections.configuration().map(|configuration| {
+                    configuration_identity(artifact.runtime_source_identity(), configuration)
+                })
+            }) != Some(identity)
+        })
         || source_path
             .selected_module
             .as_ref()
@@ -1909,8 +1927,22 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
-    use std::sync::atomic::Ordering::Relaxed;
+    lookup_veriloga_key_with_limits_and_abort(
+        &VerilogASourceKey::new(path, selected_module),
+        limits,
+        abort,
+    )
+}
 
+#[cfg(feature = "veriloga")]
+fn lookup_veriloga_key_with_limits_and_abort(
+    canonical: &VerilogASourceKey,
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Option<CachedVerilogAModel>, SimulationError> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let path = canonical.source_path.as_path();
+    let selected_module = canonical.selected_module.as_deref();
     VERILOGA_CACHE_TELEMETRY.lookups.fetch_add(1, Relaxed);
     check_build_abort(abort)?;
     if selected_module.is_some() && is_sealed_veriloga_virtual_path(path) {
@@ -1920,7 +1952,6 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
             "this sealed Verilog-A runtime already fixes its module; a module override is not permitted",
         ));
     }
-    let canonical = VerilogASourceKey::new(path, selected_module);
     let memory_entry = if let Ok(mut cache) = veriloga_source_cache().write() {
         cache.enforce_limit(limits.max_shared_cache_bytes);
         cache.get_cloned(&canonical)
@@ -1959,6 +1990,9 @@ pub(super) fn lookup_cached_veriloga_with_limits_and_abort(
     // disk cache and ambient files are not eligible fallbacks.
     if is_sealed_veriloga_virtual_path(path) {
         VERILOGA_CACHE_TELEMETRY.misses.fetch_add(1, Relaxed);
+        if canonical.configuration.is_some() {
+            return Ok(None);
+        }
         return Err(cache_refusal(
             path,
             crate::ElaborationErrorKind::MissingSource,
@@ -2152,7 +2186,7 @@ fn record_veriloga_compilation_time(elapsed: std::time::Duration) {
         .fetch_update(Relaxed, Relaxed, |total| Some(total.saturating_add(nanos)));
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(test, feature = "veriloga"))]
 pub(super) fn compile_and_cache_prepared_veriloga(
     path: &Path,
     selected_module: Option<&str>,
@@ -2160,17 +2194,79 @@ pub(super) fn compile_and_cache_prepared_veriloga(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<CachedVerilogAModel, SimulationError> {
-    use std::sync::atomic::Ordering::Relaxed;
+    compile_and_cache_prepared_with_connections(
+        path,
+        selected_module,
+        prepared,
+        None,
+        &[],
+        limits,
+        abort,
+    )
+}
 
+#[cfg(feature = "veriloga")]
+pub(super) fn configuration_identity(
+    source: [u8; 32],
+    configuration: &rspice_veriloga::ConnectionConfiguration,
+) -> [u8; 32] {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"rspice.configured-runtime-cache\0");
+    hash.update(&source);
+    hash.update(&configuration.identity());
+    *hash.finalize().as_bytes()
+}
+
+#[cfg(feature = "veriloga")]
+pub(super) fn lookup_configured_veriloga(
+    path: &Path,
+    selected_module: Option<&str>,
+    identity: [u8; 32],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Option<CachedVerilogAModel>, SimulationError> {
+    let mut key = VerilogASourceKey::new(path, selected_module);
+    key.configuration = Some(identity);
+    lookup_veriloga_key_with_limits_and_abort(&key, limits, abort)
+}
+
+#[cfg(feature = "veriloga")]
+pub(super) fn compile_and_cache_prepared_with_connections(
+    path: &Path,
+    selected_module: Option<&str>,
+    prepared: &rspice_veriloga::PreparedRuntimeSource,
+    configuration: Option<&rspice_veriloga::ConnectionConfiguration>,
+    retained_dependencies: &[VerilogADependencyFingerprint],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<CachedVerilogAModel, SimulationError> {
+    use std::sync::atomic::Ordering::Relaxed;
     check_build_abort(abort)?;
-    let canonical = VerilogASourceKey::new(path, selected_module);
+    let mut canonical = VerilogASourceKey::new(path, selected_module);
+    if let Some(configuration) = configuration {
+        let source = prepared
+            .runtime_source_identity(selected_module)
+            .map_err(|error| {
+                cache_refusal(
+                    path,
+                    crate::ElaborationErrorKind::ModuleNotSelected,
+                    error.to_string(),
+                )
+            })?;
+        canonical.configuration = Some(configuration_identity(source, configuration));
+    }
     let control = VerilogACompileControl { abort };
     log::info!("Verilog-A cache miss, compiling '{}'", canonical.display());
     VERILOGA_CACHE_TELEMETRY
         .compilations_started
         .fetch_add(1, Relaxed);
     let compile_started = crate::time_compat::Instant::now();
-    let compiled = prepared.compile_runtime_with_control(selected_module, &control);
+    let compiled = match configuration {
+        Some(configuration) => {
+            prepared.compile_runtime_with_connections(selected_module, configuration, &control)
+        }
+        None => prepared.compile_runtime_with_control(selected_module, &control),
+    };
     record_veriloga_compilation_time(compile_started.elapsed());
     let compiled = match compiled {
         Ok(compiled) => {
@@ -2189,7 +2285,12 @@ pub(super) fn compile_and_cache_prepared_veriloga(
             VERILOGA_CACHE_TELEMETRY
                 .compilations_failed
                 .fetch_add(1, Relaxed);
-            let diagnostics = prepared.diagnostics_for_error(&error);
+            let diagnostics = match configuration {
+                Some(configuration) => {
+                    prepared.diagnostics_for_error_with_connections(configuration, &error)
+                }
+                None => prepared.diagnostics_for_error(&error),
+            };
             let detail = if diagnostics.is_empty() {
                 format!("compilation failed: {error}")
             } else {
@@ -2216,7 +2317,16 @@ pub(super) fn compile_and_cache_prepared_veriloga(
         },
     )?;
     let mut dependency_bytes = 0_usize;
-    let mut dependencies = Vec::with_capacity(compiled.source_dependencies.len());
+    let mut dependencies = retained_dependencies.to_vec();
+    for dependency in retained_dependencies {
+        dependency_bytes = dependency_bytes
+            .saturating_add(usize::try_from(dependency.file_len).unwrap_or(usize::MAX));
+    }
+    ResourceLimitError::ensure(
+        ResourceKind::DependencySourceBytes,
+        dependency_bytes,
+        limits.max_dependency_source_bytes,
+    )?;
     for dependency in &compiled.source_dependencies {
         check_build_abort(abort)?;
         dependency_bytes = dependency_bytes.saturating_add(dependency.byte_len);
@@ -2253,7 +2363,9 @@ pub(super) fn compile_and_cache_prepared_veriloga(
         );
     }
 
-    if let Err(err) = persist_model_to_disk_with_limits(&canonical, &entry, limits) {
+    if !is_sealed_veriloga_virtual_path(path)
+        && let Err(err) = persist_model_to_disk_with_limits(&canonical, &entry, limits)
+    {
         VERILOGA_CACHE_TELEMETRY
             .persistence_failures
             .fetch_add(1, Relaxed);

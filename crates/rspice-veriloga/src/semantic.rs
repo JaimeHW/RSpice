@@ -687,6 +687,7 @@ impl SemanticAnalyzer {
         self.warnings.sort_by_key(|warning| warning.span.start);
         Ok(AnalyzedFile {
             source: source.clone(),
+            source_specialization: Vec::new(),
             disciplines: self.disciplines.clone(),
             modules,
             warnings: std::mem::take(&mut self.warnings),

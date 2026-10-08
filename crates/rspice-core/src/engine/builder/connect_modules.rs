@@ -359,6 +359,7 @@ pub(super) struct DesignConnectRules {
     disciplines: DisciplineDb,
     source: Option<std::sync::Arc<str>>,
     builtin_delegations: std::collections::BTreeSet<String>,
+    configuration: std::sync::OnceLock<std::sync::Arc<rspice_veriloga::ConnectionConfiguration>>,
     executions: std::cell::RefCell<
         std::collections::HashMap<
             String,
@@ -490,6 +491,31 @@ impl DesignConnectRules {
         Ok(())
     }
 
+    pub(super) fn configuration(
+        &self,
+    ) -> Result<Option<std::sync::Arc<rspice_veriloga::ConnectionConfiguration>>, SimulationError>
+    {
+        self.finish_selection()?;
+        let Some(block) = self.table.blocks().first() else {
+            return Ok(None);
+        };
+        if let Some(configuration) = self.configuration.get() {
+            return Ok(Some(configuration.clone()));
+        }
+        let configuration = rspice_veriloga::ConnectionConfiguration::from_preprocessed(
+            &self
+                .declared_in
+                .as_ref()
+                .expect("selected library")
+                .to_string_lossy(),
+            self.source.as_deref().expect("selected source"),
+            &block.name,
+        )
+        .map_err(|error| SimulationError::from(connect_refusal(error)))?;
+        let _ = self.configuration.set(std::sync::Arc::new(configuration));
+        Ok(self.configuration.get().cloned())
+    }
+
     pub(super) fn finish_selection(&self) -> Result<(), SimulationError> {
         if self.matches == 1
             || (self.matches == 0 && self.requested.is_none() && self.requested_source.is_none())
@@ -615,6 +641,7 @@ impl DesignConnectRules {
                 .map(|(name, value)| (name, value.to_bits()))
                 .collect::<Vec<_>>()
         );
+        let configuration = self.configuration()?.expect("selected configuration");
         let mut executions = self.executions.borrow_mut();
         let execution = executions.entry(key).or_insert_with(|| {
             std::sync::Arc::new(
@@ -625,6 +652,7 @@ impl DesignConnectRules {
                 } else {
                     super::connect_execution::ConnectExecution::Authored(
                         super::connect_execution::AuthoredConnectBody::new(
+                            configuration.clone(),
                             self.source.clone().expect("selected source retained"),
                             self.declared_in
                                 .as_ref()

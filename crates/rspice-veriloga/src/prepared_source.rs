@@ -25,6 +25,7 @@ pub struct PreparedSourceDependency {
 #[derive(Debug)]
 pub struct PreparedRuntimeSource {
     pub(crate) source_package: String,
+    pub(crate) replay_module: Option<smol_str::SmolStr>,
     pub(crate) source: String,
     pub(crate) analyzed: crate::semantic::AnalyzedFile,
     pub(crate) dependencies: Vec<PreparedSourceDependency>,
@@ -35,6 +36,24 @@ pub struct PreparedRuntimeSource {
 }
 
 impl PreparedRuntimeSource {
+    pub fn preprocessed_source(&self) -> &str {
+        &self.source
+    }
+
+    /// Input identity for a selected runtime, including preserved assignments.
+    pub fn runtime_source_identity(&self, module: Option<&str>) -> CompileResult<[u8; 32]> {
+        let compiler = VerilogACompiler::new(self.compiler_options.clone());
+        let module = compiler
+            .select_analyzed_module(&self.analyzed, module.or(self.replay_module.as_deref()))?;
+        Ok(runtime_source_identity(
+            &crate::canonical_ir::source_identity(&self.source),
+            &module.name,
+            &crate::parameter_override::specialization_identity(
+                &self.analyzed.source_specialization,
+            ),
+        ))
+    }
+
     pub fn is_connect_library(&self) -> bool {
         self.analyzed.modules.is_empty()
             && self.analyzed.source.items.iter().any(|item| {
@@ -121,7 +140,7 @@ impl PreparedRuntimeSource {
     ) -> CompileResult<CompiledRuntimeFile> {
         VerilogACompiler::new(self.compiler_options.clone()).compile_prepared_runtime_with_control(
             self,
-            module,
+            module.or(self.replay_module.as_deref()),
             Some(configuration),
             control,
         )
@@ -178,7 +197,80 @@ impl PreparedRuntimeSource {
         module: Option<&str>,
         control: &dyn PipelineControl,
     ) -> CompileResult<CompiledRuntimeFile> {
-        VerilogACompiler::new(self.compiler_options.clone())
-            .compile_prepared_runtime_with_control(self, module, None, control)
+        VerilogACompiler::new(self.compiler_options.clone()).compile_prepared_runtime_with_control(
+            self,
+            module.or(self.replay_module.as_deref()),
+            None,
+            control,
+        )
+    }
+}
+
+pub(crate) fn runtime_source_identity(
+    source: &str,
+    module: &str,
+    assignments: &[u8; 32],
+) -> [u8; 32] {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"rspice.runtime-source\0");
+    hash.update(&(source.len() as u64).to_le_bytes());
+    hash.update(source.as_bytes());
+    hash.update(&(module.len() as u64).to_le_bytes());
+    hash.update(module.as_bytes());
+    hash.update(assignments);
+    *hash.finalize().as_bytes()
+}
+
+impl VerilogACompiler {
+    /// Recover the exact retained input of an already validated runtime. This
+    /// never opens a source path; its containing registration owns provenance.
+    pub fn prepare_artifact_runtime_source(
+        &self,
+        artifact: &crate::canonical_ir::CanonicalIrArtifact,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<PreparedRuntimeSource> {
+        artifact.validate().map_err(Self::canonical_ir_error)?;
+        let source = artifact
+            .connections
+            .source()
+            .or(artifact.parameter_source.as_deref())
+            .ok_or_else(|| {
+                crate::CompileError::ModuleSelection(
+                    "runtime has no retained hierarchy source; recompile it".into(),
+                )
+            })?;
+        let mut measurements = crate::metrics::MetricsRecorder::with_control(
+            source.len(),
+            self.options.performance_budget.clone(),
+            control,
+        );
+        let parameters: Vec<_> = artifact
+            .source_specialization
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.clone()))
+            .collect();
+        let analyzed = self.analyze_preprocessed_with_parameters(
+            &artifact.metadata.source_package,
+            source,
+            Some(&artifact.hir.module_name),
+            &parameters,
+            &mut measurements,
+        )?;
+        let source_map = crate::prepared_diagnostics::PreparedSourceMap::from_preprocessed(
+            &artifact.metadata.source_package,
+            source,
+        );
+        let diagnostics = source_map.warnings(source, &analyzed.warnings);
+        Ok(PreparedRuntimeSource {
+            source_package: artifact.metadata.source_package.to_string(),
+            replay_module: Some(artifact.hir.module_name.clone()),
+            source: source.to_owned(),
+            analyzed,
+            dependencies: Vec::new(),
+            compiler_options: self.options.clone(),
+            metrics: measurements.finish(),
+            diagnostics,
+            source_map,
+        })
     }
 }

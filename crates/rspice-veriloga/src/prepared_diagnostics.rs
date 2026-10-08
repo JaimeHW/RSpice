@@ -27,6 +27,42 @@ struct SourceSegment {
 }
 
 impl PreparedSourceMap {
+    /// A replay artifact retains expanded text, not the original include map.
+    pub(crate) fn from_preprocessed(path: &str, source: &str) -> Self {
+        let mut offset = 0;
+        let segments = source
+            .split_inclusive('\n')
+            .enumerate()
+            .map(|(line, text)| {
+                let range = offset..offset + text.len();
+                offset = range.end;
+                SourceSegment {
+                    expanded: range.clone(),
+                    original: range,
+                    path: 0,
+                    line: line + 1,
+                    content_bytes: text.trim_end_matches(['\r', '\n']).len(),
+                    exact: true,
+                }
+            })
+            .collect();
+        Self {
+            paths: vec![format!("{path} (preprocessed)").into()],
+            segments,
+        }
+    }
+
+    pub(crate) fn warnings(
+        &self,
+        source: &str,
+        warnings: &[crate::semantic::SemanticWarning],
+    ) -> Vec<SourceCompileDiagnostic> {
+        self.map_diagnostics(
+            source,
+            crate::runtime_report::semantic_warning_diagnostics(source, warnings),
+        )
+    }
+
     pub(crate) fn new<'a>(
         preprocessed: &PreprocessedSource,
         source_for_path: impl Fn(&Path) -> Option<&'a str>,
@@ -84,7 +120,15 @@ impl PreparedSourceMap {
         source: &str,
         error: &CompileError,
     ) -> Vec<SourceCompileDiagnostic> {
-        crate::compile_diagnostics(source, error)
+        self.map_diagnostics(source, crate::compile_diagnostics(source, error))
+    }
+
+    fn map_diagnostics(
+        &self,
+        source: &str,
+        diagnostics: Vec<crate::CompileDiagnostic>,
+    ) -> Vec<SourceCompileDiagnostic> {
+        diagnostics
             .into_iter()
             .map(|diagnostic| {
                 let mapped = diagnostic

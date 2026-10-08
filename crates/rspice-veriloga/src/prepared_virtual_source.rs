@@ -248,6 +248,7 @@ impl VerilogACompiler {
         );
         Ok(PreparedVirtualSource {
             prepared: PreparedRuntimeSource {
+                replay_module: None,
                 source_map: crate::prepared_diagnostics::PreparedSourceMap::new(
                     &preprocessed,
                     |path| {

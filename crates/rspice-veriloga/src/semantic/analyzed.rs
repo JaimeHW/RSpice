@@ -13,6 +13,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct AnalyzedFile {
     pub source: SourceFile,
+    pub source_specialization: Vec<(SmolStr, crate::ScalarParameterValue)>,
     /// Physical definitions resolved while analyzing this exact source closure.
     pub disciplines: crate::disciplines::DisciplineDb,
     pub modules: HashMap<SmolStr, AnalyzedModule>,
