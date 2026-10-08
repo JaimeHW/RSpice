@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 119 specializes array, packed, and structural hierarchy overrides together.
 /// Version 118 expands bounded, parameter-specialized variable array patterns.
 /// Version 117 retains atomic aggregate analog assignment occurrence groups.
 /// Version 116 lowers whole-array values with complete RHS capture and declared direction.
@@ -116,7 +117,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 118;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 119;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

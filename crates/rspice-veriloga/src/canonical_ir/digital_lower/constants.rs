@@ -846,10 +846,9 @@ pub(super) fn override_literal(
         .default
         .as_ref()
         .ok_or("missing override expression")?;
-    if !declaration.dimensions.is_empty() || declaration.param_type == ParamType::String {
+    if declaration.param_type == ParamType::String {
         return Err(
-            "array and string digital parameter overrides require additional constant lowering"
-                .into(),
+            "string digital parameter overrides require additional constant lowering".into(),
         );
     }
     let diagnostic = |errors: Vec<DigitalLoweringDiagnostic>| {
@@ -864,11 +863,123 @@ pub(super) fn override_literal(
         required.extend([&range.msb, &range.lsb]);
     }
     let mut resolved = resolve(source, time_scale, &[], &[], required).map_err(diagnostic)?;
+    if !declaration.dimensions.is_empty() {
+        let Expression::ArrayLiteral(pattern) = expression else {
+            return Err("array parameter overrides require an assignment pattern".into());
+        };
+        if !pattern.assignment_pattern {
+            return Err("array parameter overrides require an assignment pattern".into());
+        }
+        let mut element = declaration.clone();
+        element.dimensions.clear();
+        element.default = None;
+        return close_override_pattern(expression, &element, &mut resolved, time_scale, 0);
+    }
     // This name cannot shadow an operand: the expression is evaluated before
     // resolve_one publishes its result in the constant environment.
     let name = "$rspice_override";
     resolve_one(name, declaration, &mut resolved, time_scale).map_err(diagnostic)?;
     resolved_literal(name, &resolved, declaration.span)
+}
+
+/// Resolve every leaf in the parent's constant environment. Keep pattern
+/// topology and replication until the child's effective bounds are available;
+/// this avoids assigning elements using the child's unspecialized shape.
+fn close_override_pattern(
+    expression: &Expression,
+    element: &ParameterDecl,
+    resolved: &mut ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    depth: usize,
+) -> Result<Expression, String> {
+    if depth >= crate::array_values::MAX_REPLICATION_NESTING {
+        return Err("array override pattern exceeds the supported nesting depth".into());
+    }
+    if let Expression::ArrayLiteral(pattern) = expression
+        && pattern.assignment_pattern
+    {
+        let mut pattern = pattern.clone();
+        close_override_elements(
+            &mut pattern.elements,
+            element,
+            resolved,
+            time_scale,
+            depth + 1,
+        )?;
+        return Ok(Expression::ArrayLiteral(pattern));
+    }
+    let mut leaf = element.clone();
+    leaf.default = Some(expression.clone());
+    // This key cannot collide with an authored or escaped source identifier.
+    let name = "\0rspice_override_element";
+    resolved.bits.remove(name);
+    resolve_one(name, &leaf, resolved, time_scale).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| error.diagnostic.message)
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    // Numeric integer arrays use the analog numeric declaration contract.
+    // The assignment has already rounded/truncated in the typed evaluator;
+    // retain its exact integer spelling for subsequent numeric analysis.
+    if element.param_type == ParamType::Integer
+        && element.type_is_explicit
+        && let Some(value) = resolved.integer(name)
+    {
+        return Ok(Expression::Number(crate::ast::NumberLit {
+            value: value as f64,
+            raw: value.to_string().into(),
+            span: expression.span(),
+        }));
+    }
+    resolved_literal(name, resolved, expression.span())
+}
+
+fn close_override_elements(
+    elements: &mut [crate::ast::ArrayLiteralElement],
+    element: &ParameterDecl,
+    resolved: &mut ResolvedConstants,
+    time_scale: crate::time_scale::ModuleTimeScale,
+    depth: usize,
+) -> Result<(), String> {
+    use crate::ast::ArrayLiteralElement;
+    if depth >= crate::array_values::MAX_REPLICATION_NESTING {
+        return Err("array override pattern exceeds the supported nesting depth".into());
+    }
+    for item in elements {
+        match item {
+            ArrayLiteralElement::Value(value) => {
+                *value = close_override_pattern(value, element, resolved, time_scale, depth)?;
+            }
+            ArrayLiteralElement::Replication(replication) => {
+                let Some(crate::numeric_literal::NumericLiteralValue::Integer(count)) =
+                    scalar(&replication.count, resolved, time_scale)
+                else {
+                    return Err(
+                        "array override replication count must be an integer constant expression"
+                            .into(),
+                    );
+                };
+                if count < 0 {
+                    return Err("array override replication count must be non-negative".into());
+                }
+                replication.count = Box::new(Expression::Number(crate::ast::NumberLit {
+                    value: count as f64,
+                    raw: count.to_string().into(),
+                    span: replication.count.span(),
+                }));
+                close_override_elements(
+                    &mut replication.elements,
+                    element,
+                    resolved,
+                    time_scale,
+                    depth + 1,
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn resolved_literal(

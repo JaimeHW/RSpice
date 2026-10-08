@@ -513,17 +513,8 @@ impl DigitalElaborator<'_> {
                     span,
                 )
             })?;
-            let identity = match &value {
-                Expression::Digital(DigitalExpr::FourState(literal)) => {
-                    literal.value.raw.to_string()
-                }
-                Expression::Number(number) => format!("real:{:016x}", number.value.to_bits()),
-                _ => {
-                    return Err(internal_error(
-                        "closed parameter has no constant identity".into(),
-                    ));
-                }
-            };
+            let identity =
+                super::instance_parameters::override_identity(&value).map_err(internal_error)?;
             key.push((index, identity));
             values.push((index, value));
         }

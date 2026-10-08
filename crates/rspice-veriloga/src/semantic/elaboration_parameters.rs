@@ -21,7 +21,9 @@ pub(super) fn specialization_modules(
     for source in sources.values() {
         if analyzed.modules.get(&source.name).is_some_and(|module| {
             module.parameters.iter().any(|parameter| {
-                parameter.elaboration_value.is_some() || parameter.elaboration_given.is_some()
+                parameter.elaboration_value.is_some()
+                    || parameter.elaboration_given.is_some()
+                    || !parameter.dimensions.is_empty()
             })
         }) || source.generate_template.is_some()
             || source
@@ -62,27 +64,6 @@ impl HierarchyElaborator<'_> {
         if overrides.is_empty() || !self.specialization_modules.contains(&source.name) {
             return Ok(None);
         }
-        if source
-            .parameters
-            .iter()
-            .any(|value| !value.dimensions.is_empty())
-        {
-            for &index in overrides.keys() {
-                let parameter = &child.parameters[index];
-                if is_packed(parameter) || parameter.elaboration_value.is_some() {
-                    return Err(semantic_error(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "parameter '{}' of instance '{path}' requires combined packed and array source specialization",
-                            parameter.name
-                        )),
-                        source.span,
-                    ));
-                }
-            }
-            // Array-valued hierarchy keeps its existing shape-aware path until
-            // source specialization supports the complete array assignment ABI.
-            return Ok(None);
-        }
         let constants = crate::semantic::instance_parameters::constants(parent);
         let mut indices: Vec<_> = overrides.keys().copied().collect();
         indices.sort_unstable();
@@ -106,17 +87,8 @@ impl HierarchyElaborator<'_> {
                     expression.span(),
                 )
             })?;
-            let identity = match &value {
-                Expression::Digital(DigitalExpr::FourState(literal)) => {
-                    literal.value.raw.to_string()
-                }
-                Expression::Number(number) => format!("real:{:016x}", number.value.to_bits()),
-                _ => {
-                    return Err(internal_error(
-                        "closed hierarchy parameter has no constant identity".into(),
-                    ));
-                }
-            };
+            let identity = super::super::instance_parameters::override_identity(&value)
+                .map_err(internal_error)?;
             key.push((index, identity));
             values.push((index, value));
         }
@@ -248,7 +220,11 @@ impl ParameterHierarchy {
                     .filter_map(|name| dependency_scope.parameters.get(&name).cloned())
                     .collect(),
             );
-            if is_packed(parameter) || parameter.elaboration_value.is_some() {
+            if is_packed(parameter)
+                || parameter.elaboration_value.is_some()
+                || (!parameter.dimensions.is_empty()
+                    && parent.is_some_and(|(_, _, overrides)| overrides.contains_key(&index)))
+            {
                 self.roots.insert(name.clone());
             }
         }
@@ -311,7 +287,10 @@ impl ParameterHierarchy {
             if parameter.is_public && given_required.contains(&parameter.name) {
                 parameter.elaboration_given = Some(parameter.is_given);
             }
-            if !required.contains(&parameter.name) || is_packed(parameter) {
+            if !required.contains(&parameter.name)
+                || is_packed(parameter)
+                || !parameter.dimensions.is_empty()
+            {
                 continue;
             }
             let value = self.values.get(&parameter.name).copied()

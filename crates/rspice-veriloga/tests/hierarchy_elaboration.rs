@@ -608,3 +608,89 @@ fn hierarchy_parameter_array_matching_replacement_is_accepted_and_keeps_directio
         HirExprKind::Number { value, .. } if *value == 0.0
     ));
 }
+
+#[test]
+fn hierarchy_parameter_array_specialization_shares_typed_parent_values_across_domains() {
+    let source = r#"
+module shaped(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer width = 2;
+    parameter real gain = 99.0;
+    parameter [65:0] flags = 66'b0;
+    parameter real taps[1:0][0:width-1] = '{'{1.0, 2.0}, '{3.0, 4.0}};
+    parameter integer weights[0:1] = '{0, 0};
+    reg [width-1:0] sampled;
+    initial sampled = width;
+    analog I(p, n) <+ gain * V(p, n);
+endmodule
+module parent(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer copies = 3;
+    parameter real gain = 0.25;
+    shaped #(.width(copies), .flags(66'h20000000000000001),
+        .taps('{'{copies{gain + 1.0}}, '{copies{gain + 2.0}}}), .weights('{1.5, -1.5})) first(p, n);
+    shaped #(.width(copies), .flags(66'h20000000000000001),
+        .taps('{'{copies{gain + 11.0}}, '{copies{gain + 12.0}}}), .weights('{2.5, -2.5})) second(p, n);
+endmodule
+"#;
+    for digital in [false, true] {
+        let source = if digital {
+            source.to_owned()
+        } else {
+            source.replace(
+                "    reg [width-1:0] sampled;\n    initial sampled = width;",
+                "",
+            )
+        };
+        let artifact = VerilogACompiler::default()
+            .compile_canonical_ir_module(&source, Some("parent"))
+            .expect("array, packed, and structural overrides specialize together");
+        let mut arrays = Vec::new();
+        let mut weights = Vec::new();
+        for parameter in &artifact.hir.parameters {
+            if !parameter.name.ends_with("_taps") && !parameter.name.ends_with("_weights") {
+                continue;
+            }
+            let mut pending = vec![parameter.default_expr.as_ref().unwrap().id];
+            let mut values = Vec::new();
+            while let Some(id) = pending.pop() {
+                match &artifact.hir.expressions[usize::from(id)].kind {
+                    HirExprKind::ArrayLiteral {
+                        elements,
+                        assignment_pattern: true,
+                    } => {
+                        pending.extend(elements.iter().rev().copied());
+                    }
+                    HirExprKind::Number { value, .. } => values.push(*value),
+                    kind => panic!("override was not closed in the parent scope: {kind:?}"),
+                }
+            }
+            if parameter.name.ends_with("_taps") {
+                arrays.push(values);
+            } else {
+                weights.push(values);
+            }
+        }
+        assert_eq!(
+            arrays,
+            vec![
+                vec![1.25, 1.25, 1.25, 2.25, 2.25, 2.25],
+                vec![11.25, 11.25, 11.25, 12.25, 12.25, 12.25]
+            ]
+        );
+        assert_eq!(weights, vec![vec![2.0, -2.0], vec![3.0, -3.0]]);
+        let gain = artifact
+            .hir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name == "gain")
+            .unwrap();
+        assert_eq!(
+            gain.elaboration_value,
+            Some(0.25),
+            "closed array overrides retain parent dependency protection"
+        );
+    }
+}

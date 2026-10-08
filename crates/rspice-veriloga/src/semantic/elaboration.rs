@@ -487,7 +487,13 @@ impl<'a> HierarchyElaborator<'a> {
         }
 
         let overrides = bind_parameter_overrides(instance, child, path)?;
-        self.validate_parameter_array_overrides(child, parent_scope, &overrides, path)?;
+        self.validate_parameter_array_overrides(
+            child_source,
+            child,
+            parent_source,
+            &overrides,
+            path,
+        )?;
         let specialized = if shared.is_none() {
             self.specialize_parameters(child_source, child, parent_source, &overrides, path)?
         } else {
@@ -647,7 +653,9 @@ impl<'a> HierarchyElaborator<'a> {
             // has already been resolved in that scope; this hidden numeric slot
             // may still have a symbolic default driven by parent values.
             parameter.elaboration_given = None;
-            parameter.default_expr = if parameters::is_packed(&parameter) {
+            parameter.default_expr = if parameters::is_packed(&parameter)
+                || (!parameter.dimensions.is_empty() && overrides.contains_key(&index))
+            {
                 parameter.default_expr.clone()
             } else if parameter.elaboration_value.is_some() && overrides.contains_key(&index) {
                 // This input is fixed by source elaboration. Its parent inputs
@@ -995,8 +1003,9 @@ impl<'a> HierarchyElaborator<'a> {
     /// remain preserved independently in the flattened parameter metadata.
     fn validate_parameter_array_overrides(
         &self,
+        child_source: &Module,
         child: &AnalyzedModule,
-        parent_scope: &ScopeMap,
+        parent_source: &Module,
         overrides: &HashMap<usize, Expression>,
         path: &str,
     ) -> CompileResult<()> {
@@ -1008,28 +1017,7 @@ impl<'a> HierarchyElaborator<'a> {
             return Ok(());
         }
 
-        // Parent-side override expressions are resolved in their declaring
-        // scope. Previously flattened child parameters already carry rewritten
-        // names and expressions, so this also handles nested hierarchies.
-        let mut parent_values = HashMap::new();
-        for parameter in &self.flattened.parameters {
-            if !parameter.dimensions.is_empty() {
-                continue;
-            }
-            let value = parameter
-                .default_expr
-                .as_ref()
-                .and_then(|expression| {
-                    SemanticAnalyzer::eval_const_value_with(expression, &parent_values)
-                })
-                .or_else(|| parameter.default.map(ConstantValue::Real))
-                .and_then(|value| {
-                    SemanticAnalyzer::constant_for_declared_type(value, parameter.param_type)
-                });
-            if let Some(value) = value {
-                parent_values.insert(parameter.name.clone(), value);
-            }
-        }
+        let parent_constants = super::instance_parameters::constants(parent_source);
 
         let mut declared_values = HashMap::new();
         let mut effective_values = HashMap::new();
@@ -1053,12 +1041,37 @@ impl<'a> HierarchyElaborator<'a> {
             }
 
             let effective = if let Some(override_expression) = overrides.get(&index) {
-                let expression = rewrite_expression(override_expression, parent_scope)?;
-                SemanticAnalyzer::eval_const_value_with(&expression, &parent_values).and_then(
-                    |value| {
-                        SemanticAnalyzer::constant_for_declared_type(value, parameter.param_type)
-                    },
+                let expression = super::instance_parameters::close_override(
+                    &child_source.parameters[index],
+                    override_expression.clone(),
+                    &parent_constants,
+                    parent_source.time_scale,
                 )
+                .map_err(|message| {
+                    semantic_error(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "parameter '{}' of instance '{path}': {message}",
+                            parameter.name
+                        )),
+                        override_expression.span(),
+                    )
+                })?;
+                crate::canonical_ir::digital_lower::elaboration_constant(
+                    &expression,
+                    &parent_constants,
+                    parent_source.time_scale,
+                )
+                .map(|value| match value {
+                    crate::numeric_literal::NumericLiteralValue::Integer(value) => {
+                        ConstantValue::Integer(value)
+                    }
+                    crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                        ConstantValue::Real(value)
+                    }
+                })
+                .and_then(|value| {
+                    SemanticAnalyzer::constant_for_declared_type(value, parameter.param_type)
+                })
             } else {
                 parameter
                     .default_expr
@@ -1127,6 +1140,37 @@ impl<'a> HierarchyElaborator<'a> {
                     initializer.span,
                 ));
             }
+            // Resolve parent names before materializing counts. The child's
+            // effective shape is checked only after all scalar overrides are
+            // known, and the retained source will be specialized atomically.
+            let closed = super::instance_parameters::close_override(
+                &child_source.parameters[index],
+                replacement.clone(),
+                &parent_constants,
+                parent_source.time_scale,
+            )
+            .map_err(|message| {
+                semantic_error(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "override of parameter array '{}' at instance '{path}': {message}",
+                        parameter.name
+                    )),
+                    replacement.span(),
+                )
+            })?;
+            let materialized = SemanticAnalyzer::new().materialize_replication_expression(
+                &closed,
+                MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+                super::MAX_REPLICATION_MATERIALIZATION_WORK,
+                &format!(
+                    "override of parameter array '{}' at instance '{path}'",
+                    parameter.name
+                ),
+                false,
+            )?;
+            let Expression::ArrayLiteral(initializer) = &materialized else {
+                unreachable!("closed array pattern")
+            };
             if let Err(detail) = SemanticAnalyzer::validate_parameter_array_initializer_shape(
                 initializer,
                 &effective.extents,
