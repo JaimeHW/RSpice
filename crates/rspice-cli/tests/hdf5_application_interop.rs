@@ -183,3 +183,36 @@ fn hdf5_coordinate_units_are_normalized_before_application_use() {
         assert_eq!(decoded.signals[0].unit.as_deref(), Some("mV"));
     }
 }
+
+#[test]
+fn mixed_complex_tables_retain_their_domain_and_signal_representation() {
+    for (analysis, coordinate_type, domain) in [
+        (
+            "transient",
+            "time",
+            rspice_formats::WaveformDomain::Transient,
+        ),
+        ("dc_sweep", "value", rspice_formats::WaveformDomain::DcSweep),
+        ("ac", "frequency", rspice_formats::WaveformDomain::Ac),
+    ] {
+        let decoded = decode_export(json!({
+            "analysis": analysis,
+            "scale": {"name":"axis", "type":coordinate_type, "values":[1.0, 2.0]},
+            "signals": [
+                {"name":"out", "unit":"mA", "real":[-0.0, 4.0], "imag":[2.0, -1.0]},
+                {"name":"Re(out)", "values":[3.0, -0.0]}
+            ]
+        }));
+        assert_eq!(decoded.domain, domain);
+        assert_eq!(decoded.coordinate_name, "axis");
+        assert_eq!(decoded.signals.len(), 2);
+        assert_eq!(decoded.signals[0].real[0].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(
+            decoded.signals[0].imag.as_deref(),
+            Some([2.0, -1.0].as_slice())
+        );
+        assert_eq!(decoded.signals[0].unit.as_deref(), Some("mA"));
+        assert!(decoded.signals[1].imag.is_none());
+        assert_eq!(decoded.signals[1].real[1].to_bits(), (-0.0_f64).to_bits());
+    }
+}

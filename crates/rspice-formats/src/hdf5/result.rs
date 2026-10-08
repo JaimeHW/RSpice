@@ -359,4 +359,50 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn typed_complex_tables_obey_the_readers_physical_column_limit() {
+        let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "Complex columns", 0.0)
+            .with_waveforms(
+                (0..512)
+                    .map(|index| {
+                        RetainedWaveform::new(
+                            format!("magnitude{index}"),
+                            vec![0.0, 1.0],
+                            vec![5.0, 5.0],
+                        )
+                        .with_complex_components(
+                            format!("signal{index}"),
+                            vec![3.0, 3.0],
+                            vec![4.0, 4.0],
+                        )
+                    })
+                    .collect(),
+            );
+        let error =
+            prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap_err();
+        assert!(matches!(
+            error,
+            Hdf5ProjectionError::ColumnLimit { columns: 1025 }
+        ));
+        analysis.waveforms.last_mut().unwrap().complex = None;
+        let export =
+            prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+        let mut bytes = Vec::new();
+        rspice_core::io::write_hdf5(&mut bytes, &export.document).unwrap();
+        let decoded = decode_hdf5(
+            &bytes,
+            Hdf5Limits {
+                max_columns: MAX_COLUMNS,
+                max_values: 4096,
+                coordinate_names: &["time"],
+            },
+            "hdf5",
+        )
+        .unwrap();
+        assert_eq!(export.columns, 512);
+        assert_eq!(decoded.signals.len(), 512);
+        assert!(decoded.signals[0].imag.is_some());
+        assert!(decoded.signals[511].imag.is_none());
+    }
 }

@@ -37,8 +37,8 @@ fn native_export_counts_the_magnitude_retained_by_complex_imports() {
         // the file also retains a magnitude beside the two original components.
         let wire_only_budget = (coordinate.len() * 3 * size_of::<f64>()) as u64;
         let error = encode_native_bundle(kind, &dataset, wire_only_budget)
-            .err()
-            .expect("publication must budget the retained magnitude array");
+            .map(|bytes| bytes.len())
+            .expect_err("publication must budget the retained magnitude array");
         assert!(
             error
                 .to_string()
