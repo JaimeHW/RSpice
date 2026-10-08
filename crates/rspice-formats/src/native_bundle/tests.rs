@@ -4,6 +4,7 @@ use super::reader::read_zip_member;
 use super::*;
 use std::io::{Cursor, Write as _};
 
+mod admission;
 mod numeric_precision;
 
 const MAX_RESULT_DATASET_BYTES: u64 = 64 * 1024 * 1024;
@@ -13,6 +14,9 @@ fn limits() -> NativeBundleReadLimits {
         max_members: 1_024,
         max_expanded_bytes: MAX_RESULT_DATASET_BYTES,
         max_member_bytes: MAX_RESULT_DATASET_BYTES,
+        max_rows: 1_000_000,
+        max_columns: 1_024,
+        max_numeric_values: MAX_RESULT_DATASET_BYTES as usize / size_of::<f64>(),
     }
 }
 
@@ -44,6 +48,7 @@ fn native_publication_checks_json_and_archive_growth_before_allocating_past_the_
                 max_members: 2,
                 max_expanded_bytes: exact,
                 max_member_bytes: exact,
+                ..limits()
             },
         )
         .unwrap();
@@ -144,6 +149,7 @@ fn native_export_counts_the_magnitude_retained_by_complex_imports() {
                 max_members: 10,
                 max_expanded_bytes: retained_budget,
                 max_member_bytes: retained_budget,
+                ..limits()
             },
         )
         .unwrap();
@@ -468,15 +474,24 @@ fn native_decode_preserves_record_names_in_json_errors() {
 }
 
 fn pack_dataset(document: &serde_json::Value) -> Vec<u8> {
-    let dataset = serde_json::to_vec(document).unwrap();
+    pack_source(
+        &serde_json::to_string(document).unwrap(),
+        NativeBundleKind::Result,
+    )
+}
+
+fn pack_source(source: &str, kind: NativeBundleKind) -> Vec<u8> {
     use sha2::Digest as _;
     let manifest = serde_json::to_vec(&serde_json::json!({
-        "schema": "rspice-result-bundle/1",
+        "schema": kind.manifest_schema(),
         "dataset_member": "dataset.json",
-        "dataset_sha256": format!("{:x}", sha2::Sha256::digest(&dataset)),
+        "dataset_sha256": format!("{:x}", sha2::Sha256::digest(source.as_bytes())),
     }))
     .unwrap();
-    zip_bytes(&[("manifest.json", &manifest), ("dataset.json", &dataset)])
+    zip_bytes(&[
+        ("manifest.json", &manifest),
+        ("dataset.json", source.as_bytes()),
+    ])
 }
 
 #[test]

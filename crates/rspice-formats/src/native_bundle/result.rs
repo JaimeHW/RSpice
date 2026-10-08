@@ -85,6 +85,9 @@ mod tests {
                         max_members: 10,
                         max_member_bytes: 1_000_000,
                         max_expanded_bytes: 1_000_000,
+                        max_rows: 1_000_000,
+                        max_columns: 1_024,
+                        max_numeric_values: 1_000_000 / size_of::<f64>(),
                     },
                 )
                 .unwrap();

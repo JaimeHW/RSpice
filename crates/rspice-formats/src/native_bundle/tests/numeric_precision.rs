@@ -1,19 +1,5 @@
 use super::*;
 
-fn bundle(source: &str, kind: NativeBundleKind) -> Vec<u8> {
-    use sha2::Digest as _;
-    let manifest = serde_json::to_vec(&serde_json::json!({
-        "schema": kind.manifest_schema(),
-        "dataset_member": "dataset.json",
-        "dataset_sha256": format!("{:x}", sha2::Sha256::digest(source.as_bytes())),
-    }))
-    .unwrap();
-    zip_bytes(&[
-        ("manifest.json", &manifest),
-        ("dataset.json", source.as_bytes()),
-    ])
-}
-
 fn source(coordinate: &str, real: &str, imaginary: &str, complex: bool) -> String {
     let samples = if complex {
         format!(r#""real":[{real},null],"imag":[{imaginary},null]"#)
@@ -43,7 +29,7 @@ fn native_bundles_refuse_lossy_numeric_literals_in_every_sample_component() {
                     let mut numbers = ["0.0", "1.0", "2.0"];
                     numbers[component] = literal;
                     let source = source(numbers[0], numbers[1], numbers[2], complex);
-                    let error = decode_native_bundle(&bundle(&source, kind), kind, limits())
+                    let error = decode_native_bundle(&pack_source(&source, kind), kind, limits())
                         .expect_err("a checked bundle must not silently alter numeric samples");
                     let expected = if literal.contains('e') {
                         "underflow"
@@ -76,7 +62,8 @@ fn native_bundles_preserve_exact_floats_large_integers_and_missing_samples() {
             let expected = literal.parse::<f64>().unwrap();
             for complex in [false, true] {
                 let source = source(literal, literal, literal, complex);
-                let decoded = decode_native_bundle(&bundle(&source, kind), kind, limits()).unwrap();
+                let decoded =
+                    decode_native_bundle(&pack_source(&source, kind), kind, limits()).unwrap();
                 assert_eq!(
                     decoded.coordinate[0].to_bits(),
                     expected.to_bits(),

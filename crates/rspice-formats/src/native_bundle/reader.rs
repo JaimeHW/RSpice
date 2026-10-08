@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
+mod admission;
 mod json_samples;
 
 /// Bounds supplied by the importing transaction.
@@ -14,6 +15,12 @@ pub struct NativeBundleReadLimits {
     pub max_members: usize,
     pub max_expanded_bytes: u64,
     pub max_member_bytes: u64,
+    /// Maximum samples in any coordinate or signal component.
+    pub max_rows: usize,
+    /// Maximum signals plus the shared coordinate column.
+    pub max_columns: usize,
+    /// Retained values, including the magnitude beside both complex components.
+    pub max_numeric_values: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +146,7 @@ pub fn decode_native_bundle(
             "dataset.json SHA-256 does not match the signed manifest identity".into(),
         ));
     }
+    admission::check(&dataset_bytes, limits)?;
     let dataset: NativeDataset =
         serde_json::from_slice(&dataset_bytes).map_err(|error| NativeBundleError::Json {
             context: "dataset.json is invalid",

@@ -84,6 +84,9 @@ pub(super) fn parse_native_bundle(
             max_members: MAX_ARCHIVE_MEMBERS,
             max_expanded_bytes: MAX_ARCHIVE_EXPANDED_BYTES,
             max_member_bytes: MAX_RESULT_DATASET_BYTES,
+            max_rows: MAX_RESULT_ROWS,
+            max_columns: MAX_RESULT_COLUMNS,
+            max_numeric_values: MAX_RESULT_VALUES,
         },
     )
     .map_err(|error| adapter_error(format, error))?;

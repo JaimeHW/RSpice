@@ -1287,6 +1287,9 @@ mod tests {
                     max_members: 2,
                     max_expanded_bytes: MAX_RESULT_DATASET_BYTES,
                     max_member_bytes: MAX_RESULT_DATASET_BYTES,
+                    max_rows: MAX_RESULT_ROWS,
+                    max_columns: MAX_RESULT_COLUMNS,
+                    max_numeric_values: MAX_RESULT_VALUES,
                 },
             )
             .unwrap();
