@@ -611,10 +611,29 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
     let mut real_traces = Vec::new();
 
     for column in &table.columns {
-        let ColumnData::Real(values) = &column.data else {
+        let Some((node, digital)) = inner_name(&column.name, DIGITAL_COLUMN_PREFIX)
+            .map(|node| (node, true))
+            .or_else(|| inner_name(&column.name, REAL_COLUMN_PREFIX).map(|node| (node, false)))
+        else {
             continue;
         };
-        if let Some(node) = inner_name(&column.name, DIGITAL_COLUMN_PREFIX) {
+        // Recognized event columns are part of the dump's contract. Refuse
+        // unsupported samples instead of publishing only the other signals.
+        let values = match &column.data {
+            ColumnData::Real(values) => Ok(values),
+            ColumnData::NullableReal(_) => Err("undefined"),
+            ColumnData::Complex { .. } => Err("complex"),
+        }
+        .map_err(|kind| {
+            conversion_error(
+                path,
+                format!(
+                    "event column '{}' contains {kind} samples; VCD requires defined real event samples",
+                    column.name
+                ),
+            )
+        })?;
+        if digital {
             let mut points: Vec<DigitalTracePoint> = Vec::new();
             for (time, value) in table.scale.iter().zip(values) {
                 let state = grid_digital_state(path, &column.name, *value)?;
@@ -631,7 +650,7 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
                 node_name: node.to_string(),
                 points,
             });
-        } else if let Some(node) = inner_name(&column.name, REAL_COLUMN_PREFIX) {
+        } else {
             let mut points: Vec<RealTracePoint> = Vec::new();
             for (time, value) in table.scale.iter().zip(values) {
                 if points.last().is_some_and(|last| last.value == *value) {

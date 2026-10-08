@@ -792,6 +792,8 @@ converted from its grid `D(node)`/`E(node)` columns, which is lossy: `0`, `1`
 and `0.5` become `0`, `1` and `x`, one change per level held rather than one
 per grid point, and the drive strength those columns already dropped is not
 recovered. A source with neither event timelines nor such columns is refused.
+Named event columns containing undefined or complex samples are rejected before
+publication, so an unsupported trace cannot disappear from a successful dump.
 Version 1 RAW event plots require real columns and a time coordinate in seconds.
 Conflicting unit metadata, complex components, malformed rows, and invalid times
 are rejected before selection or publication, including in redundant bus plots.
