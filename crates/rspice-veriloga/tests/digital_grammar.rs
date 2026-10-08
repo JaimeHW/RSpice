@@ -966,13 +966,13 @@ fn four_state_literals_are_refused_in_the_continuous_domain() {
     assert!(
         message.contains("four-state literal")
             && message.contains("no value in the continuous (analog) domain")
-            && message.contains("`always`/`initial` process"),
+            && message.contains("supported in discrete expressions"),
         "expected a domain diagnostic naming the construct and where it is legal, got {message:?}"
     );
 }
 
 #[test]
-fn part_selects_are_refused_in_the_continuous_domain() {
+fn part_selects_of_analog_owned_arrays_are_refused() {
     let message = analyze_error(
         "module analog_part_select(p, n);\n\
          \x20   inout p, n;\n\
@@ -986,7 +986,8 @@ fn part_selects_are_refused_in_the_continuous_domain() {
          endmodule\n",
     );
     assert!(
-        message.contains("part-select") && message.contains("continuous (analog) domain"),
+        message.contains("packed analog read of `bus`")
+            && message.contains("requires discrete storage"),
         "expected a part-select domain diagnostic, got {message:?}"
     );
 }
@@ -1262,7 +1263,7 @@ fn digital_content_in_an_instantiated_child_is_refused() {
     let error = compile_error(source, Some("parent"));
     let message = error.to_string();
     assert!(
-        message.contains("module `child` contains a"),
+        message.contains("digital instance `u1` of module `child`"),
         "expected the child's digital content to be named, got {message:?}"
     );
 }
@@ -2638,7 +2639,7 @@ endmodule
             .iter()
             .any(|error| error
                 .message
-                .contains("analog input `count` has an incompatible digital type")),
+                .contains("analog input 'count' has an incompatible digital type")),
         "a packed 32-bit tag cannot replace a signed integer input"
     );
 
@@ -2667,7 +2668,7 @@ endmodule
 }
 
 #[test]
-fn module_integer_ownership_refuses_dual_writes_and_overwide_groups() {
+fn module_integer_ownership_checks_domains_widths_and_array_storage() {
     for kind in ["real", "integer"] {
         for analog in ["analog value=2;", "analog initial value=2;"] {
             let error = analyze_error(&format!(
@@ -2685,8 +2686,18 @@ fn module_integer_ownership_refuses_dual_writes_and_overwide_groups() {
         ));
         assert!(error.contains("31-bit grouping limit"), "{error}");
     }
-    let array = analyze_error("module bad; integer values[0:1]; initial values[0]=1; endmodule");
-    assert!(array.contains("array of `integer`"), "{array}");
+    let analyzed = analyze("module owned; integer values[0:1]; initial values[0]=1; endmodule");
+    let array = &only_module(&analyzed).digital.signals[0];
+    assert_eq!(array.name, "values");
+    assert_eq!(
+        array.class,
+        rspice_veriloga::semantic::DigitalSignalClass::Variable(DigitalVariableKind::Integer)
+    );
+    assert_eq!(array.width, 32);
+    assert_eq!(
+        array.dimensions,
+        [rspice_veriloga::semantic::VectorBounds { msb: 0, lsb: 1 }]
+    );
 }
 
 #[test]
