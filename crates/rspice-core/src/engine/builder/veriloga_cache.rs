@@ -330,7 +330,8 @@ use super::*;
 // a warning-free source from one whose warnings were discarded.
 // Version 106 separates connection-configuration and source-specialization variants.
 // Version 107 preserves physical vector lanes and topology-bound selectors (HIR 125).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 112;
+// Version 113 preserves local packed net views through positional aliases (HIR 131).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 113;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

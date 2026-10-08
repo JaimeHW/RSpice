@@ -27,19 +27,19 @@
 //!   and time scale. The resulting temporary net binds through the ordinary
 //!   net path below. Existing constant selections keep their direct path.
 //!
-//! * **A port declared as a net collapses.** The port and the net it is
-//!   connected to become one elaborated signal, named by the connecting scope.
+//! * **A port declared as a net collapses.** Equal-width nets with matching
+//!   packed bounds and signedness share one elaborated signal. Differing views
+//!   retain their own declarations and join the same positional wire bits, so
+//!   each body uses its local coordinates and signed expression semantics.
 //!   Section 12.3.9.3 makes an inout connection exactly this — a bidirectional
 //!   join, which no assignment in either direction describes — and section
 //!   12.3.10, which asks what net type results when two dissimilar nets are
 //!   connected, only has a question to answer because the two nets *become
-//!   one*. For an input or an output the collapse and the assignment readings
-//!   are observationally identical whenever both sides are plain nets and no
-//!   delay is written, because a continuous assignment with one driver and no
-//!   delay reproduces its source exactly; the collapse is chosen because it
-//!   costs no process, no driver, and no scheduling delta. The cases where the
-//!   two readings *do* differ are refused below rather than silently resolved
-//!   in favour of the cheaper one.
+//!   one*. Collapsing nets retains every original driver and lets either
+//!   body's reads observe the shared resolution. It adds no assignment process,
+//!   copied driver value or scheduling delta. A generated input binding whose
+//!   formal view differs from its actual instead uses an assignment, including
+//!   when the actual is a variable with no net resolution to share.
 //!
 //! * **A bit- or part-select input/output connection becomes an implicit
 //!   continuous assignment.** An inout connection instead aliases the selected
@@ -239,6 +239,7 @@ struct Binding {
     width: u32,
     /// Coordinates in this occurrence, independent of a collapsed outer name.
     range: super::VectorBounds,
+    signed: bool,
     /// Whether the elaborated signal is a variable (`reg`) rather than a net.
     is_variable: bool,
     /// Whether *this view* of the signal is an input port.
@@ -274,6 +275,7 @@ impl Scope {
                     elaborated: signal.name.clone(),
                     width: signal.width,
                     range: signal.range.unwrap_or(super::VectorBounds::SCALAR),
+                    signed: signal.signedness.is_signed(),
                     is_variable: signal.class.is_variable(),
                     // The compiled module's own ports are its boundary with
                     // the rest of the circuit, not something an enclosing
@@ -593,6 +595,7 @@ impl DigitalElaborator<'_> {
                     elaborated: own,
                     width: declared.width,
                     range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                    signed: declared.signedness.is_signed(),
                     is_variable,
                     is_input_port: port.direction == PortDirection::Input,
                 },
@@ -687,6 +690,7 @@ impl DigitalElaborator<'_> {
                         elaborated: own,
                         width: declared.width,
                         range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                        signed: declared.signedness.is_signed(),
                         is_variable,
                         is_input_port: port.direction == PortDirection::Input,
                     }
@@ -731,15 +735,53 @@ impl DigitalElaborator<'_> {
                             elaborated: own,
                             width: declared.width,
                             range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                            signed: declared.signedness.is_signed(),
                             is_variable: true,
                             is_input_port: false,
                         }
+                    } else if declared.width != 0
+                        && (declared.range.unwrap_or(super::VectorBounds::SCALAR) != outer.range
+                            || declared.signedness.is_signed() != outer.signed)
+                    {
+                        // Collapse connectivity without erasing the formal's view.
+                        // Reusing the outer signal ID would make body selections
+                        // and signed operations use the parent's declaration.
+                        if port.direction == PortDirection::Input {
+                            // Generated converter instances may bind directly to
+                            // a differently shaped variable. Inputs copy its
+                            // value; variables cannot join a wire's resolution.
+                            port_drivers.push(implicit_port_assignment(
+                                &own,
+                                &outer.elaborated,
+                                span,
+                            ));
+                        } else {
+                            for bit in 0..declared.width {
+                                bit_aliases.push(super::digital::ElaboratedDigitalBitAlias {
+                                    left: own.clone(),
+                                    left_bit: bit,
+                                    right: outer.elaborated.clone(),
+                                    right_bit: bit,
+                                    span,
+                                });
+                            }
+                        }
+                        Binding {
+                            elaborated: own,
+                            width: declared.width,
+                            range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                            signed: declared.signedness.is_signed(),
+                            is_variable: false,
+                            is_input_port: outer.is_input_port
+                                || port.direction == PortDirection::Input,
+                        }
                     } else {
-                        // Section 12.3.9.3 / 12.3.10: the two nets are one.
+                        // Matching views can share storage as well as connectivity.
                         Binding {
                             elaborated: outer.elaborated,
                             width: outer.width,
                             range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                            signed: declared.signedness.is_signed(),
                             is_variable: outer.is_variable,
                             is_input_port: outer.is_input_port
                                 || port.direction == PortDirection::Input,
@@ -761,6 +803,7 @@ impl DigitalElaborator<'_> {
                 elaborated: qualify(path, &declared.name),
                 width: declared.width,
                 range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
+                signed: declared.signedness.is_signed(),
                 is_variable: declared.class.is_variable(),
                 is_input_port: false,
             });

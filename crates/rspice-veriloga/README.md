@@ -159,8 +159,8 @@ can drive whole physical input vectors through per-lane authored converters;
 selected physical lanes can connect to scalar digital formals. Scalar potential
 and flow accesses resolve constant coordinates, including analog `genvar` loops
 and custom nature accesses. Shape and selector dependencies require source
-specialization when their parameters change. Artifact schema 130 and core cache
-record 112 invalidate models compiled before these checks.
+specialization when their parameters change. Artifact schema 131 and core cache
+record 113 invalidate models compiled before these checks.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.
@@ -184,6 +184,9 @@ the parent's parameter and time scope, without requiring connect rules. Existing
 type/coordinate-compatible net bindings and constant selections retain their direct
 binding path. Equal-width inputs with different signedness or bit numbering use
 assignment conversion to retain the child's declared interpretation.
+Equal-width output/inout nets retain local packed bounds and signedness through
+positional wire aliases when their declarations differ. Body selections and signed
+operations use the local declaration; original drivers still share resolution.
 General expressions interleaved with physical net lanes in one concatenation,
 vector-valued/named branch forms, unpacked net/port arrays, complete inherited
 discipline resolution, and library/view selection remain open.

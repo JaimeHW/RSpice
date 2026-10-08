@@ -259,22 +259,41 @@ endmodule
         .compile_canonical_ir_module(source, Some("top"))
         .unwrap();
     let plan = &artifact.digital;
-    assert_eq!(plan.bit_aliases.len(), 2);
+    assert_eq!(plan.bit_aliases.len(), 6);
     assert_eq!(
         plan.drivers.len(),
         1,
         "a wire identity must not synthesize a feedback driver"
     );
-    for (alias, (left, right)) in plan.bit_aliases.iter().zip([(1, 2), (0, 1)]) {
-        assert_eq!(plan.signal(alias.left.signal).unwrap().name, "m.child.io");
-        assert_eq!(plan.signal(alias.right.signal).unwrap().name, "bus");
-        assert_eq!((alias.left.bit, alias.right.bit), (left, right));
-    }
+    let mut aliases = plan
+        .bit_aliases
+        .iter()
+        .map(|alias| {
+            (
+                plan.signal(alias.left.signal).unwrap().name.as_str(),
+                alias.left.bit,
+                plan.signal(alias.right.signal).unwrap().name.as_str(),
+                alias.right.bit,
+            )
+        })
+        .collect::<Vec<_>>();
+    aliases.sort_unstable();
+    assert_eq!(
+        aliases,
+        [
+            ("m.child.io", 0, "m.io", 1),
+            ("m.child.io", 1, "m.io", 2),
+            ("m.io", 0, "bus", 0),
+            ("m.io", 1, "bus", 1),
+            ("m.io", 2, "bus", 2),
+            ("m.io", 3, "bus", 3),
+        ]
+    );
     let encoded = serde_json::to_vec(plan).unwrap();
     let decoded: CanonicalDigitalPlan = serde_json::from_slice(&encoded).unwrap();
     decoded.validate().unwrap();
     let mut changed = decoded.clone();
-    changed.bit_aliases[0].right.bit = 0;
+    changed.bit_aliases[0].right.bit ^= 1;
     assert!(
         changed
             .validate()
