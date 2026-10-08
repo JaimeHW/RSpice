@@ -21,11 +21,7 @@ pub(super) fn currents(
         return Err(failure("invalid incoming companion interval"));
     }
     // Line histories need their own incoming-wave integration certificate.
-    if !circuit.tlines.is_empty()
-        || !circuit
-            .behavioral_sources
-            .has_smooth_physical_time_equations()
-    {
+    if !circuit.tlines.is_empty() || !circuit.behavioral_sources.has_smooth_physical_equations() {
         return Ok(None);
     }
     // Require each forcing value to be unchanged, before summing into KCL.

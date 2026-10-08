@@ -24,6 +24,7 @@ pub(crate) mod integrals;
 mod physical;
 pub(crate) use history::BehavioralAcceptedState;
 pub(crate) use integrals::BehavioralFqPoint;
+pub(crate) use physical::PhysicalCurrentSample;
 pub(crate) mod periodicity;
 mod quasi_periodic;
 pub(crate) use quasi_periodic::QuasiPeriodicClockBasis;
@@ -201,6 +202,8 @@ impl BehavioralReferenceError {
 #[derive(Clone, Copy)]
 pub(crate) enum DerivativeTarget<'a> {
     Node(usize),
+    /// Physical event Jacobian, including unregularized polynomial slopes.
+    PhysicalNode(usize),
     Branch(usize),
     NodeDirection(&'a [Derivative]),
     Time,
@@ -1306,6 +1309,8 @@ fn eval_behavioral_expr_with_derivative(
         // corners must not silently publish a zero or regularized current.
         let qualified = match expr {
             Expr::Time
+            | Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
             | Expr::Unary {
                 op: UnaryOp::Neg, ..
             } => true,
@@ -1325,8 +1330,7 @@ fn eval_behavioral_expr_with_derivative(
                 op: BinaryOp::Pow,
                 right,
                 ..
-            } => matches!(right.as_ref(),
-                Expr::Const(value) if value.is_finite() && *value >= 0.0 && value.fract() == 0.0),
+            } => crate::expr::constant_over_time(right),
             Expr::Function {
                 func:
                     Function::Abs
@@ -1394,7 +1398,11 @@ fn eval_behavioral_expr_with_derivative(
             let idx = *context.program.node_map.get(name)?;
             let value = *context.node_values.get(idx)?;
             let derivative = match context.target {
-                DerivativeTarget::Node(target_idx) if target_idx == idx => 1.0.into(),
+                DerivativeTarget::Node(target_idx) | DerivativeTarget::PhysicalNode(target_idx)
+                    if target_idx == idx =>
+                {
+                    1.0.into()
+                }
                 DerivativeTarget::NodeDirection(direction) => *direction.get(idx)?,
                 _ => 0.0.into(),
             };
@@ -1440,8 +1448,20 @@ fn eval_behavioral_expr_with_derivative(
                 };
                 return derivative_pair(bool_value(truth), 0.0);
             }
-            if matches!(context.target, DerivativeTarget::Time) && *op == BinaryOp::Pow {
-                // The time rule uses the polynomial derivative at zero too;
+            if matches!(
+                context.target,
+                DerivativeTarget::Time | DerivativeTarget::PhysicalNode(_)
+            ) && *op == BinaryOp::Pow
+                && !crate::expr::constant_over_time(expr)
+            {
+                if !right_value.is_finite()
+                    || right_value < 0.0
+                    || right_value.fract() != 0.0
+                    || right_derivative != 0.0
+                {
+                    return None;
+                }
+                // The physical rule uses the polynomial derivative at zero too;
                 // Xyce's Newton rule deliberately zeroes that derivative.
                 return derivative_pair(
                     left_value.powf(right_value),

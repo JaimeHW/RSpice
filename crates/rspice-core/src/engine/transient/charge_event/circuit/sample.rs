@@ -250,18 +250,30 @@ impl PreparedEventCircuit<'_> {
             }
         }
         for source in &self.circuit.behavioral_sources.current_sources {
-            let [value, slope] = self.behavioral_time_values(
-                &source.name,
-                source.physical_time_program(),
-                time,
-                options,
-                abort,
-            )?;
+            let (value, slope, partials) = if source.physical_time_program().is_some() {
+                let [value, slope] = self.behavioral_time_values(
+                    &source.name,
+                    source.physical_time_program(),
+                    time,
+                    options,
+                    abort,
+                )?;
+                (value, slope, Vec::new())
+            } else {
+                let sample = self.behavioral_current_sample(source, state, time, options, abort)?;
+                (sample.value, sample.time_partial, sample.partials)
+            };
             for (row, sign) in [(source.node_pos, 1.0), (source.node_neg, -1.0)] {
                 sample.f.stamp_rhs(row, -sign * value);
+                for &(column, partial) in &partials {
+                    sample.f.stamp(row, column + 1, sign * partial);
+                }
                 if row != 0 {
+                    // Preserve numeric-domain failures for Newton backtracking.
+                    // Stamp/index/quota faults still remain independently visible.
                     sample.f_time[row - 1] =
-                        sum([(sample.f_time[row - 1], 1.0), (slope, sign)].into_iter())?;
+                        sum([(sample.f_time[row - 1], 1.0), (slope, sign)].into_iter())
+                            .unwrap_or(Value::NAN);
                 }
             }
         }

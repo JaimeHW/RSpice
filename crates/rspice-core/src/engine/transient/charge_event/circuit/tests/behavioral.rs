@@ -77,3 +77,71 @@ fn behavioral_derivative_workspace_preserves_typed_limits_and_cancellation() {
             .is_ok()
     );
 }
+
+#[test]
+fn nodal_behavioral_current_supplies_algebraic_coordinate_rates_and_domain_backtracking() {
+    let circuit = build(
+        "nodal current rates\nB0 x 0 V={1+time^2}\nB1 0 y I={.001*(v(x)+time)^3}\nR1 y 0 1k\n.end\n",
+    );
+    let options = options();
+    let x = circuit.get_node_by_name("x").unwrap() - 1;
+    let y = circuit.get_node_by_name("y").unwrap() - 1;
+    let mut incoming = vec![0.0; circuit.matrix_size()];
+    incoming[x] = 1.25;
+    incoming[y] = 1.75_f64.powi(3);
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let topology = sampler
+        .topology(0.5, SourceTimeSide::RightLimit, &options, &NoAbort)
+        .unwrap();
+    let result = topology
+        .solve(
+            &incoming,
+            &vec![0.0; incoming.len()],
+            &options,
+            &NoAbort,
+            |state, abort| {
+                sampler.sample(0.5, SourceTimeSide::RightLimit, state, &[], &options, abort)
+            },
+        )
+        .unwrap();
+    close(result.solution[y], 1.75_f64.powi(3), 1e-12);
+    close(result.coordinate_rates[x].unwrap(), 1.0, 1e-12);
+    close(
+        result.coordinate_rates[y].unwrap(),
+        6.0 * 1.75_f64.powi(2),
+        1e-12,
+    );
+
+    let circuit = build("nonlinear trial domain\nB1 n 0 I={exp(v(n))}\n.end\n");
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let invalid = sampler
+        .sample(
+            0.0,
+            SourceTimeSide::RightLimit,
+            &[1000.0],
+            &[],
+            &options,
+            &NoAbort,
+        )
+        .unwrap();
+    assert!(invalid.nonfinite(1).unwrap());
+    let valid = sampler
+        .sample(
+            0.0,
+            SourceTimeSide::RightLimit,
+            &[0.0],
+            &[],
+            &options,
+            &NoAbort,
+        )
+        .unwrap();
+    assert!(!valid.nonfinite(1).unwrap());
+    close(valid.f.values[0], 1.0, 1e-15);
+    close(entry(&valid.f, 0, 0), 1.0, 1e-15);
+    let mut bounded = options.clone();
+    bounded.limits.max_result_values = 32_000;
+    assert!(
+        matches!(sampler.sample(0.0, SourceTimeSide::RightLimit, &[0.0], &[], &bounded, &NoAbort),
+        Err(SimulationError::ResourceLimit(e)) if e.limit == 32_000 && e.requested > e.limit)
+    );
+}

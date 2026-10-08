@@ -25,7 +25,7 @@
       "id": "C03",
       "status": "in_progress",
       "requirement": "GP transient excess phase",
-      "qualification_task": "Qualify exact-delay GP across polarities, dialects, bias regimes, feedback/private nodes, parameters, restart, resource limits and performance. tests/gp_feedback_weil.rs provides independent ngspice feedback oracles with intrinsic and nonlinear base resistance and packed adaptive continuation for Weil and exact delay, including UIC startup. Complete CCVS voltage-impulse descriptors, circuit-dependent/switched/stateful behavioral providers and remaining device/instance support. Complete defined generalized interval algebra, nested integration and derived-expression propagation; diagnose undefined products and point domains. Add voltage-impulse and envelope observations, circuit assembly, nonlinear coupling and atomic acceptance. Guarded refusals do not constitute implemented support."
+      "qualification_task": "Qualify exact-delay GP across polarities, dialects, bias regimes, feedback/private nodes, parameters, restart, resource limits and performance. tests/gp_feedback_weil.rs provides independent ngspice feedback oracles with intrinsic and nonlinear base resistance and packed adaptive continuation for Weil and exact delay, including UIC startup. Smooth nodal behavioral currents have physical value/Jacobian/time-partial equations and analytical GP/startup/nonlinear-decay/packed-continuation tests in gp_phase_regimes. Complete CCVS voltage-impulse descriptors, circuit-dependent voltage and branch-current-controlled behavioral equations, switched/stateful behavioral providers and remaining device/instance support. Complete defined generalized interval algebra, nested integration and derived-expression propagation; diagnose undefined products and point domains. Add voltage-impulse and envelope observations, circuit assembly, nonlinear coupling and atomic acceptance. Guarded refusals do not constitute implemented support."
     },
     {
       "id": "C04",
@@ -428,7 +428,7 @@
       "symbol": "admitted_family",
       "owner": "C03",
       "status": "incomplete_physical_event_population",
-      "qualification_task": "Provide residual, charge, derivative, sided forcing, impulse and state equations for admissible devices accompanying exact-delay GP. Complete the remaining 24 of 38 families and instance predicates, including CCVS voltage impulses and circuit-dependent/switched/stateful behavioral expressions. Removing guards or skipping stamps does not establish support."
+      "qualification_task": "Provide residual, charge, derivative, sided forcing, impulse and state equations for admissible devices accompanying exact-delay GP. Complete the remaining 24 of 38 families and instance predicates, including CCVS voltage impulses, circuit-dependent behavioral voltage equations, branch-current control and switched/stateful expressions. Smooth nodal behavioral currents are exercised through gp_phase_regimes with independent decay/GP equations and packed continuation. Removing guards or skipping stamps does not establish support."
     }
   ],
   "ignored_tests": [

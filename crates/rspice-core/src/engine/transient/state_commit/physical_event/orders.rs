@@ -119,11 +119,10 @@ pub(super) fn classify(
     }
     let mut has_cause = false;
     let mut has_unknown = false;
-    // Prescribed smooth B-forcing has identical sides at every clock. Future
-    // switched/stateful providers need their own event causes and certificates.
-    let mut invariant = circuit
-        .behavioral_sources
-        .has_smooth_physical_time_equations();
+    // Smooth B-equations have identical sides at fixed coordinates. Nodal
+    // current dependence belongs to F and its Jacobian; switched/stateful
+    // providers still need their own event causes and certificates.
+    let mut invariant = circuit.behavioral_sources.has_smooth_physical_equations();
     // A C1 constitutive chart has continuous rate-system coefficients at
     // fixed coordinates. With continuous forcing in that regular system,
     // its coordinate rates and the GP input's first derivative are continuous.

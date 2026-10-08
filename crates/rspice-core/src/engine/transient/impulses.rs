@@ -132,8 +132,8 @@ pub(super) fn initialize(
             | DerivedTransientBranchCurrentKind::IndependentCurrentSource
             // Native VCCS output is finite for the finite-voltage event class.
             | DerivedTransientBranchCurrentKind::VoltageControlledCurrentSource
-            // The admitted prescribed B-current is finite and memoryless;
-            // its impulse is zero even when a voltage-source impulse occurs.
+            // Admitted B-currents depend on finite nodal values and time.
+            // They have no current impulse across a finite voltage jump.
             | DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {}
             _ => {
                 return Err(failure(

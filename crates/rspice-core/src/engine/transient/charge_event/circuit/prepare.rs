@@ -43,9 +43,7 @@ impl<'a> PreparedEventCircuit<'a> {
                 line.supports_sided_history_events() && line.ltra_branch_matrix_indices().is_none()
             })
             && circuit.resistors.thermal.iter().all(Option::is_none)
-            && circuit
-                .behavioral_sources
-                .has_smooth_physical_time_equations()
+            && circuit.behavioral_sources.has_smooth_physical_equations()
             && circuit
                 .capacitors
                 .value_expressions
@@ -275,9 +273,18 @@ impl<'a> PreparedEventCircuit<'a> {
         }
         for source in &circuit.behavioral_sources.current_sources {
             check_abort(abort)?;
-            source
-                .physical_time_program()
-                .ok_or_else(|| behavioral::unsupported(&source.name))?;
+            if !source.has_smooth_physical_current_equation() {
+                return Err(behavioral::unsupported(&source.name));
+            }
+            if source
+                .bound_solution_indices()
+                .any(|column| column >= nodes)
+            {
+                return Err(error(format!(
+                    "behavioral current '{}' has an invalid nodal binding",
+                    source.name
+                )));
+            }
             terminals(source.node_pos, source.node_neg)?;
         }
         let controlled_voltage = &circuit.vcvs;
