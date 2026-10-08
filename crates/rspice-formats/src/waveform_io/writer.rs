@@ -216,12 +216,20 @@ impl WaveformWriter {
         dataset: &WaveformDataset,
         num_ports: usize,
     ) -> Result<Vec<f64>, TouchstoneError> {
-        let default_z0 = dataset
-            .metadata
-            .get("z0")
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite() && *v > 0.0)
-            .unwrap_or(50.0);
+        // The standard default applies only when no reference is supplied.
+        // An invalid authored reference must never become a different network.
+        let default_z0 = || match dataset.metadata.get("z0") {
+            None => Ok(50.0),
+            Some(value) => {
+                value
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|source| TouchstoneError::InvalidFloat {
+                        detail: format!("Invalid Touchstone reference impedance '{value}'"),
+                        source,
+                    })
+            }
+        };
 
         let values = match dataset.metadata.get("z0_ports") {
             Some(raw) => {
@@ -241,7 +249,7 @@ impl WaveformWriter {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 if parsed.is_empty() {
-                    vec![default_z0; num_ports]
+                    vec![default_z0()?; num_ports]
                 } else if parsed.len() == 1 {
                     vec![parsed[0]; num_ports]
                 } else if parsed.len() == num_ports {
@@ -255,13 +263,13 @@ impl WaveformWriter {
                     .into());
                 }
             }
-            None => vec![default_z0; num_ports],
+            None => vec![default_z0()?; num_ports],
         };
 
         for (idx, value) in values.iter().enumerate() {
             if !value.is_finite() || *value <= 0.0 {
                 return Err(format!(
-                    "Touchstone reference impedance for port {} must be positive",
+                    "Touchstone reference impedance for port {} must be finite and positive",
                     idx + 1
                 )
                 .into());
@@ -833,6 +841,31 @@ mod tests {
                     .contains("version")
             );
         }
+    }
+
+    #[test]
+    fn invalid_reference_metadata_is_not_replaced_with_fifty_ohms() {
+        let writer = WaveformWriter::new(WaveformFormat::Touchstone);
+        for reference in ["NaN", "inf", "0", "-1", "invalid"] {
+            let mut dataset = sample_touchstone_dataset();
+            dataset.metadata.remove("z0_ports");
+            dataset.metadata.insert("z0".into(), reference.into());
+            let error = writer.write_text(&dataset).expect_err(reference);
+            assert!(error.to_string().contains("reference"), "{error}");
+        }
+        let mut dataset = sample_touchstone_dataset();
+        dataset.metadata.remove("z0_ports");
+        dataset.metadata.remove("z0");
+        let default = writer.write_text(&dataset).unwrap();
+        assert!(default.contains("# Hz S RI R 50\n"));
+        dataset.metadata.insert("z0".into(), "75".into());
+        let explicit = writer.write_text(&dataset).unwrap();
+        assert!(explicit.contains("# Hz S RI R 75\n"));
+        // Complete per-port references take precedence over the unused fallback.
+        let mut dataset = sample_touchstone_dataset();
+        dataset.metadata.insert("z0".into(), "unused".into());
+        let explicit = writer.write_text(&dataset).unwrap();
+        assert!(explicit.contains("[Reference] 5e1 7.5e1\n"));
     }
 
     #[test]
