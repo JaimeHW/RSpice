@@ -2,6 +2,126 @@
 use super::*;
 
 impl SemanticAnalyzer {
+    pub(super) fn analog_array_value_type(
+        &self,
+        name: &str,
+        module: &AnalyzedModule,
+    ) -> Option<crate::array_values::ArrayType> {
+        use crate::array_values::{ArrayType, ElementType};
+        let name = self.resolve_substituted_name(&name.into());
+        let array = self.arrays.get(&name)?;
+        let dimensions = if array.declared_dimensions.is_empty() {
+            vec![(array.lower, array.lower.checked_add(array.len as i64 - 1)?)]
+        } else {
+            array.declared_dimensions.clone()
+        };
+        let mut element = match module.variables.get(array.base)?.var_type {
+            VarType::Real => ElementType::Real,
+            VarType::Integer => ElementType::Integral {
+                width: 32,
+                signed: true,
+            },
+            VarType::String => ElementType::String,
+        };
+        if let Some(signal) = module
+            .digital
+            .signals
+            .iter()
+            .find(|signal| signal.name == name)
+        {
+            element = if signal.class.is_real() {
+                ElementType::Real
+            } else {
+                ElementType::Integral {
+                    width: signal.width,
+                    signed: signal.signedness.is_signed(),
+                }
+            };
+        }
+        Some(ArrayType {
+            layout: crate::array_index::UnpackedArrayLayout::new(
+                &dimensions,
+                Self::MAX_ARRAY_ELEMENTS,
+            )
+            .ok()?,
+            element,
+        })
+    }
+
+    pub(super) fn analyze_whole_array_assignment(
+        &mut self,
+        assign: &AssignmentStmt,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<bool> {
+        let LValue::Variable { name, span } = &assign.target else {
+            return Ok(false);
+        };
+        let name = self.resolve_substituted_name(name);
+        let Some(array) = self.arrays.get(&name).cloned() else {
+            return Ok(false);
+        };
+        let target = self
+            .analog_array_value_type(&name, module)
+            .ok_or_else(|| self.array_coordinate_error(&name, "has no array-value type", *span))?;
+        let elements = crate::array_values::assignment_elements(&assign.value, &target, |name| {
+            self.analog_array_value_type(name, module)
+        })
+        .map_err(|detail| self.array_coordinate_error(&name, &detail, assign.value.span()))?;
+        let var_type = module.variables[array.base].var_type;
+        let mut captured = Vec::with_capacity(elements.len());
+        // Capture every RHS before modifying any destination, including self
+        // permutations and expressions with function output/inout effects.
+        for expression in elements {
+            self.local_counter += 1;
+            let temp: SmolStr = format!("$rspice$array_value${}", self.local_counter).into();
+            self.register_function_temp(module, temp.clone(), var_type, *span)?;
+            self.analyze_assignment(
+                &AssignmentStmt {
+                    target: LValue::Variable {
+                        name: temp.clone(),
+                        span: *span,
+                    },
+                    value: expression,
+                    span: assign.span,
+                },
+                module,
+                sink,
+            )?;
+            captured.push(temp);
+        }
+        for (ordinal, temp) in captured.into_iter().enumerate() {
+            let slot = target
+                .layout
+                .declaration_slot(ordinal)
+                .expect("array assignment element");
+            let index = array.lower + slot as i64;
+            self.analyze_assignment(
+                &AssignmentStmt {
+                    target: LValue::ArrayAccess {
+                        name: name.clone(),
+                        normalized: true,
+                        index: Box::new(Expression::Number(NumberLit {
+                            value: index as f64,
+                            raw: index.to_string().into(),
+                            span: *span,
+                        })),
+                        additional_indices: Vec::new(),
+                        span: *span,
+                    },
+                    value: Expression::Identifier(Identifier {
+                        name: temp,
+                        span: *span,
+                    }),
+                    span: assign.span,
+                },
+                module,
+                sink,
+            )?;
+        }
+        Ok(true)
+    }
+
     pub(super) fn array_coordinate_error(
         &self,
         name: &str,

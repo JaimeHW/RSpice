@@ -844,6 +844,11 @@ impl SemanticAnalyzer {
                     layout.clone()
                 } else {
                     let layout = super::AnalyzedArray {
+                        declared_dimensions: signal
+                            .dimensions
+                            .iter()
+                            .map(|axis| (axis.msb, axis.lsb))
+                            .collect(),
                         dimensions: signal
                             .dimensions
                             .iter()
@@ -975,6 +980,7 @@ impl SemanticAnalyzer {
                     continue;
                 }
                 super::AnalyzedArray {
+                    declared_dimensions: array.declared_dimensions.clone(),
                     dimensions: array.dimensions.clone(),
                     base: array.base,
                     lower: bounds.msb.min(bounds.lsb),
@@ -988,6 +994,7 @@ impl SemanticAnalyzer {
                     continue;
                 }
                 super::AnalyzedArray {
+                    declared_dimensions: Vec::new(),
                     dimensions: Vec::new(),
                     base: slot,
                     lower: 0,
@@ -1013,6 +1020,7 @@ impl SemanticAnalyzer {
                 .insert(signal.name.clone(), validity_name.clone());
             if signal.unpacked.is_some() {
                 let validity_layout = super::AnalyzedArray {
+                    declared_dimensions: Vec::new(),
                     dimensions: Vec::new(),
                     base: validity_base,
                     lower: layout.lower,
@@ -2077,9 +2085,9 @@ impl SemanticAnalyzer {
                     Resolution::ProcessLocal(local) => local.unpacked.is_some(),
                     _ => false,
                 };
-                if unpacked {
+                if unpacked && !procedural {
                     self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
-                        "whole-array assignment to `{name}` requires array-valued assignment lowering"
+                        "continuous whole-array assignment to `{name}` requires array connection elaboration"
                     )), *span);
                 }
             }

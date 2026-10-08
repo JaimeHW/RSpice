@@ -603,7 +603,7 @@ pub(super) fn initializers(
     let layout =
         crate::array_index::UnpackedArrayLayout::new(&axes, 65536).expect("analyzed array layout");
     let elements =
-        super::local_arrays::initializer_elements(expression, &layout).map_err(refuse)?;
+        crate::array_values::initializer_elements(expression, &layout).map_err(refuse)?;
     let mut element = signal.clone();
     element.unpacked = None;
     element.dimensions.clear();

@@ -247,6 +247,8 @@ pub enum AnalyzedRegion {
 /// variable storage starting at `base`
 #[derive(Debug, Clone)]
 pub struct AnalyzedArray {
+    /// Source axes, including one-dimensional direction, for array values.
+    pub declared_dimensions: Vec<(i64, i64)>,
     /// Authored multidimensional axes; empty for an existing one-dimensional layout.
     pub dimensions: Vec<(i64, i64)>,
     /// First element's index in the variables list

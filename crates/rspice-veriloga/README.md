@@ -712,7 +712,18 @@ and checked coordinates; schema 114 extends the analog paths. This execution
 coverage uses the portable digital runtime; native/generated digital execution
 and the remaining platform/restart qualification are separate requirements.
 
-Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
+Whole-array variable assignments accept nested assignment patterns and copies
+between equivalent element types with equal extents on every unpacked axis.
+Schema 116 captures all right-hand values before writing destinations, preserving
+self permutations, authored array direction, mixed real/integer reads and digital
+four-state widths. Module and static local digital arrays retain complete values
+across blocking/nonblocking delays, repeated event controls, and checkpoint restore.
+Analog copies retain their numerical derivatives and per-cell ownership checks.
+Aggregate analog event coalescing remains open: an event-controlled whole-array
+assignment currently publishes its element assignments through the occurrence
+journal. That behavior is not qualified as an atomic whole-array notification.
+
+Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, partial-array values and slices, replicated
 initializer patterns, cross-instance scheduling qualification,
 full parameter-dependent shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
 are still open.

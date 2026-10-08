@@ -1,8 +1,78 @@
 //! Static local arrays use the same element store and operations as module arrays.
 use super::super::digital::{DigitalArray, DigitalArrayRef, DigitalLocalStorage};
 use super::*;
+use crate::array_values::initializer_elements;
 
 impl ProcessLowerer<'_> {
+    pub(super) fn array_value_type(&self, name: &str) -> Option<crate::array_values::ArrayType> {
+        use crate::array_values::{ArrayType, ElementType};
+        if let Some(array) = self.array_declaration(name) {
+            return Some(ArrayType {
+                layout: array.layout().ok()?,
+                element: if self.real_signal(array.storage.base) {
+                    ElementType::Real
+                } else {
+                    ElementType::Integral {
+                        width: self.width_of(array.storage.base),
+                        signed: self.signed_signal(array.storage.base),
+                    }
+                },
+            });
+        }
+        self.analog_array(name)?;
+        let variable = &self.analog_variables[name];
+        let element = match variable.quantity {
+            super::super::digital::DigitalAnalogQuantity::RealVariable => ElementType::Real,
+            super::super::digital::DigitalAnalogQuantity::IntegerVariable => {
+                ElementType::Integral {
+                    width: 32,
+                    signed: true,
+                }
+            }
+            _ => return None,
+        };
+        let layout = if variable.declared_dimensions.is_empty() {
+            variable.array_layout()?
+        } else {
+            crate::array_index::UnpackedArrayLayout::new(&variable.declared_dimensions, 65_536)
+                .ok()?
+        };
+        Some(ArrayType { layout, element })
+    }
+
+    pub(super) fn array_assignment(
+        &mut self,
+        block: BlockId,
+        assign: &DigitalAssign,
+    ) -> Option<Result<(Vec<DigitalLValue>, Vec<ValueId>), String>> {
+        let DigitalLValue::Identifier { name, span } = &assign.target else {
+            return None;
+        };
+        self.array_declaration(name)?;
+        let array = self.array_value_type(name).expect("validated target array");
+        let elements =
+            match crate::array_values::assignment_elements(&assign.value, &array, |name| {
+                self.array_value_type(name)
+            }) {
+                Ok(elements) => elements,
+                Err(error) => return Some(Err(error)),
+            };
+        let mut targets = Vec::with_capacity(elements.len());
+        let mut values = Vec::with_capacity(elements.len());
+        for (ordinal, element) in elements.into_iter().enumerate() {
+            let target = crate::array_values::digital_target(name, &array.layout, ordinal, *span);
+            let value = if self.lvalue_is_real(&target) {
+                self.real_expression(block, &element)
+            } else {
+                let width = self.lvalue_width(&target);
+                self.assigned_value(block, &element, width)
+            };
+            targets.push(target);
+            values.push(value);
+        }
+        Some(Ok((targets, values)))
+    }
+
     pub(super) fn declare_local_array(
         &mut self,
         block: BlockId,
@@ -239,46 +309,4 @@ impl ProcessLowerer<'_> {
             declaration.shared.into_iter().collect()
         }
     }
-}
-
-/// Read nested patterns in authored dimension order. Leaf expressions may themselves
-/// be packed concatenations; only the unpacked rank determines the pattern depth.
-pub(crate) fn initializer_elements<'a>(
-    expression: &'a Expression,
-    layout: &crate::array_index::UnpackedArrayLayout,
-) -> Result<Vec<&'a Expression>, String> {
-    let mut elements = Vec::with_capacity(layout.len());
-    let mut pending = vec![(expression, 0)];
-    while let Some((expression, depth)) = pending.pop() {
-        if depth == layout.axes().len() {
-            elements.push(expression);
-            continue;
-        }
-        let Expression::ArrayLiteral(literal) = expression else {
-            return Err(format!(
-                "array initializer dimension {} requires an array literal",
-                depth + 1
-            ));
-        };
-        let expected = layout.axes()[depth].len();
-        if literal.first_replication().is_some() {
-            return Err(
-                "replicated array initialization requires element-pattern expansion".into(),
-            );
-        }
-        if literal.elements.len() != expected {
-            return Err(format!(
-                "array initializer dimension {} requires {expected} elements, found {}",
-                depth + 1,
-                literal.elements.len()
-            ));
-        }
-        for element in literal.elements.iter().rev() {
-            let ArrayLiteralElement::Value(value) = element else {
-                unreachable!("replication rejected")
-            };
-            pending.push((value, depth + 1));
-        }
-    }
-    Ok(elements)
 }

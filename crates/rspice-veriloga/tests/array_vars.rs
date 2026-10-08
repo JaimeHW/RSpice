@@ -53,6 +53,32 @@ fn terminal_current(device: &mut VerilogADevice, voltages: &[f64]) -> f64 {
 }
 
 #[test]
+fn whole_array_values_capture_self_permutations_and_exact_jacobians() {
+    let model = compile(
+        r#"
+module array_values(p,n); inout p,n; electrical p,n;
+ real source[3:2], copied[-2:-1];
+ analog begin
+   source='{V(p,n)*V(p,n),3*V(p,n)};
+   source='{source[2],source[3]};
+   copied=source;
+   I(p,n)<+copied[-2]+2*copied[-1];
+ end
+endmodule
+"#,
+    );
+    let mut device = model.device("X", &[1, 0]);
+    for voltage in [0.5, -0.25] {
+        let (matrix, rhs) = collect_stamps(&mut device, &[voltage]);
+        assert!((matrix[&(0, 0)] - (3.0 + 4.0 * voltage)).abs() < 1e-12);
+        assert!((rhs[&0] - 2.0 * voltage * voltage).abs() < 1e-12);
+        model.observe(&mut device);
+        assert_eq!(device.variable("copied[-2]"), Some(3.0 * voltage));
+        assert_eq!(device.variable("copied[-1]"), Some(voltage * voltage));
+    }
+}
+
+#[test]
 fn array_shape_bounds_are_exact_and_extents_are_checked_before_allocation() {
     for (bounds, detail) in [
         ("0:1.5", "finite integers"),

@@ -337,6 +337,7 @@ impl SemanticAnalyzer {
                     self.arrays.insert(
                         name.clone(),
                         AnalyzedArray {
+                            declared_dimensions: Vec::new(),
                             dimensions: Vec::new(),
                             base: 0,
                             lower,
@@ -416,6 +417,7 @@ impl SemanticAnalyzer {
             ] {
                 if is_array {
                     let layout = AnalyzedArray {
+                        declared_dimensions: Vec::new(),
                         dimensions: Vec::new(),
                         base,
                         lower,

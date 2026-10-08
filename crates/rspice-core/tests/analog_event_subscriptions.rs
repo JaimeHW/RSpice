@@ -1163,7 +1163,6 @@ endmodule
     assert!((fall.time - 251.5e-12).abs() < 1e-15, "{trace:?}");
 }
 
-
 #[test]
 fn absdelta_interval_budget_reaches_engine_execution_as_a_resource_error() {
     let source = Source::new(
@@ -1884,5 +1883,168 @@ module wrapper(p); inout p; electrical p; ordered child(p); endmodule
         evaluate(candidate, 300e-12, 200e-12);
         candidate.accept_trial().unwrap();
         assert_eq!(counts(candidate), [8, 8, 1]);
+    }
+}
+
+#[test]
+fn whole_array_values_copy_before_writes_across_domains_and_hierarchy() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module arrays(inp,p); inout inp,p; electrical inp,p;
+ real a[2:1][-1:0], b[5:6][4:3], one[4:3], forward[-2:-1];
+ real sampled[0:1];
+ analog begin
+   a='{'{V(inp),2*V(inp)},'{3*V(inp),4*V(inp)}};
+   b=a;
+   b='{'{b[5][3],b[5][4]},'{b[6][3],b[6][4]}};
+   one='{b[5][4],b[6][3]}; forward=one;
+   I(p)<+(V(p)-(sampled[0]+10*sampled[1]))/1000;
+ end
+ initial begin
+   sampled='{0.0,0.0};
+   #100; sampled=forward;
+   #100; sampled='{sampled[1],sampled[0]};
+ end
+endmodule
+module wrapped(inp,p); inout inp,p; electrical inp,p; arrays child(inp,p); endmodule
+"#,
+    );
+    for module in ["arrays", "wrapped"] {
+        let deck = Netlist::parse(&format!("* whole array mixed feedback\nVin inp 0 2\nX1 inp p {module}\nRp p 0 1k\n.va \"{}\" {module} module={module}\n.end\n", source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.35e-9, 25e-12).unwrap();
+        for (time, expected) in [(50e-12, 0.0), (150e-12, 32.0), (250e-12, 23.0)] {
+            let actual = voltage(&result, "p", time);
+            assert!(
+                (actual - expected).abs() < 1e-8,
+                "{module}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn whole_array_values_keep_wide_bits_locals_and_deferred_captures() {
+    let text = r#"
+`timescale 1ps/1ps
+module arrays(p); inout p; electrical p;
+ reg [69:0] words[3:2], copied[-1:0];
+ integer values[1:0], delayed[0:1], latched[4:3], blocking[0:1];
+ integer matrix[1:0][-2:-1], mirror[4:5][3:2];
+ integer score=0, scalar_latched; reg clock=0;
+ initial begin #50 clock=1; #50 clock=0; #50 clock=1; end
+ initial begin: local_scope
+   reg [69:0] local_words[8:9];
+   words='{70'h20000000000000000x,70'h10000000000000000z};
+   copied=words; local_words=copied;
+   words='{words[2],words[3]};
+   matrix='{'{1,2},'{3,4}}; mirror=matrix;
+   mirror='{'{mirror[4][2],mirror[4][3]},'{mirror[5][2],mirror[5][3]}};
+   if ((local_words[8]===70'h20000000000000000x) &&
+       (words[3]===70'h10000000000000000z) && mirror[4][3]==2 && mirror[5][2]==3) score=score+1;
+   values='{1,2}; delayed<=#100 values;
+   latched<=repeat(2) @(posedge clock) values;
+   scalar_latched<=repeat(2) @(posedge clock) values[1];
+   values='{9,8};
+   blocking=repeat(2) @(posedge clock) values;
+   if (delayed[0]==1 && delayed[1]==2 && blocking[0]==9 && blocking[1]==8)
+      score=score+2;
+   #1;
+   if (latched[4]==1 && latched[3]==2 && scalar_latched==1 && local_words[9]===70'h10000000000000000z)
+      score=score+4;
+ end
+ analog I(p)<+(V(p)-score)/1000;
+endmodule
+"#;
+    let source = Source::new(text);
+    let deck = Netlist::parse(&format!(
+        "* array captured waits\nX1 p arrays\nRp p 0 1k\n.va \"{}\" arrays\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 250e-12, 20e-12).unwrap();
+    for (time, expected) in [(25e-12, 0.5), (175e-12, 3.5)] {
+        assert!((voltage(&result, "p", time) - expected).abs() < 1e-9);
+    }
+    use rspice_core::xspice::{event_scheduler::SchedulerLimits, verilog::MixedSignalHost};
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let compile = || {
+        MixedSignalHost::compile(text, None, "arrays", &[1], SchedulerLimits::default()).unwrap()
+    };
+    let advance = |host: &mut MixedSignalHost, time, step| {
+        host.begin_trial(
+            time,
+            step,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap();
+        settle_standalone_observer(host, &[0.0]);
+        host.accept_trial().unwrap();
+    };
+    let mut host = compile();
+    advance(&mut host, 0.0, 0.0);
+    advance(&mut host, 50e-12, 50e-12);
+    let checkpoint = host.checkpoint().unwrap();
+    let mut restored = compile();
+    restored.restore(&checkpoint).unwrap();
+    for candidate in [&mut host, &mut restored] {
+        for (time, step) in [(100e-12, 50e-12), (150e-12, 50e-12), (151e-12, 1e-12)] {
+            advance(candidate, time, step);
+        }
+        assert_eq!(
+            u32::from_str_radix(&candidate.read_digital("score").unwrap(), 2).unwrap(),
+            7
+        );
+    }
+}
+
+#[test]
+fn whole_array_values_publish_event_owned_cells_and_reject_incompatible_values() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module arrays(p); inout p; electrical p;
+ real data[4:3]; integer count=0;
+ analog @(timer(100p)) begin data='{0.25,0.5}; data='{data[3],data[4]}; end
+ always @(data[4]) count=count+1;
+ analog I(p)<+(V(p)-(count+10*data[4]+100*data[3]))/1000;
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* array assignment occurrences\nX1 p arrays\nRp p 0 1k\n.va \"{}\" arrays\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 200e-12, 20e-12).unwrap();
+    assert!((voltage(&result, "p", 150e-12) - 16.0).abs() < 1e-9);
+    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for (declarations, assignment, reason) in [
+        ("real a[0:1],b[0:2];", "a=b;", "equal extents"),
+        ("real a[0:1][0:1],b[0:3];", "a=b;", "equal extents"),
+        ("real a[0:1]; integer b[0:1];", "a=b;", "equivalent"),
+        ("real a[0:1];", "a='{1.0};", "requires 2 elements"),
+        ("real a[0:1];", "a={1.0,2.0};", "assignment pattern"),
+    ] {
+        for domain in ["analog", "initial"] {
+            let text =
+                format!("module invalid; {declarations} {domain} begin {assignment} end endmodule");
+            let error = compiler
+                .compile_runtime_with_qualifications(
+                    &text,
+                    None,
+                    rspice_veriloga::RuntimeQualificationOptions::NONE,
+                )
+                .unwrap_err();
+            assert!(
+                error.to_string().contains(reason),
+                "{domain} {assignment}: {error}"
+            );
+        }
     }
 }

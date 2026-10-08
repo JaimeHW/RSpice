@@ -2427,6 +2427,7 @@ impl SemanticAnalyzer {
             });
         }
         Some(AnalyzedArray {
+            declared_dimensions: axes.clone(),
             dimensions: if axes.len() > 1 { axes } else { Vec::new() },
             base,
             lower,
@@ -5345,6 +5346,9 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
+        if self.analyze_whole_array_assignment(assign, module, sink)? {
+            return Ok(());
+        }
         // `symbol_name` is the declared symbol checked for kind/type;
         // `target_name` is the storage slot (for const-index array elements
         // they differ: symbol `arr`, storage `arr[k]`)

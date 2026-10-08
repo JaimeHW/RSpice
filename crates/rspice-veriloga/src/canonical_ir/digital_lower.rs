@@ -61,7 +61,7 @@
 //!
 //! - A process-local `string`: a process computes in four-state and real
 //!   values, and a string is neither.
-//! - Multidimensional process-local arrays and whole-array values.
+//! - Partial unpacked-array values and array-valued function arguments.
 //! - A non-constant part-select bound.
 //!
 //! Refused before this pass, and still refused: tasks and functions,
@@ -91,7 +91,7 @@
 mod constants;
 mod expressions;
 mod local_arrays;
-pub(crate) use local_arrays::initializer_elements as array_initializer_elements;
+pub(crate) use crate::array_values::initializer_elements as array_initializer_elements;
 mod local_storage;
 use constants::ResolvedConstants;
 
@@ -284,6 +284,7 @@ pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDi
 
 #[derive(Clone)]
 struct AnalogVariable {
+    declared_dimensions: Vec<(i64, i64)>,
     target: SmolStr,
     event_signal: Option<SmolStr>,
     event_assigned: bool,
@@ -330,6 +331,7 @@ pub(crate) fn lower_module(
             Some((
                 variable.name.clone(),
                 AnalogVariable {
+                    declared_dimensions: Vec::new(),
                     target: variable.name.clone(),
                     event_signal: None,
                     event_assigned: module
@@ -354,6 +356,7 @@ pub(crate) fn lower_module(
             variables.insert(
                 name.clone(),
                 AnalogVariable {
+                    declared_dimensions: array.declared_dimensions.clone(),
                     target: name.clone(),
                     event_signal: None,
                     event_assigned: false,
@@ -2351,19 +2354,35 @@ impl ProcessLowerer<'_> {
     /// Capture the RHS at encounter. A nonblocking assignment queues
     /// the captured value and continues; a blocking one suspends until delivery.
     fn assign(&mut self, block: BlockId, assign: &DigitalAssign, nonblocking: bool) -> BlockId {
-        // A real target takes the real half of the expression grammar and none
-        // of the section 5.4.1 sizing: there is no width for the target to seed
-        // and no truncation for the write to apply.
-        let mut carried = if self.lvalue_is_real(&assign.target) {
-            [self.real_expression(block, &assign.value)]
+        let (targets, mut carried) = if let Some(array) = self.array_assignment(block, assign) {
+            match array {
+                Ok(assignment) => assignment,
+                Err(message) => {
+                    self.error(message, assign.span);
+                    return block;
+                }
+            }
         } else {
-            let context = self.lvalue_width(&assign.target);
-            [self.assigned_value(block, &assign.value, context)]
+            let value = if self.lvalue_is_real(&assign.target) {
+                self.real_expression(block, &assign.value)
+            } else {
+                let context = self.lvalue_width(&assign.target);
+                self.assigned_value(block, &assign.value, context)
+            };
+            (vec![assign.target.clone()], vec![value])
         };
         if let Some(TimingControl::Event(event)) = &assign.timing
             && let Some(count) = &event.repeat
         {
-            return self.repeated_assignment(block, assign, event, count, carried[0], nonblocking);
+            return self.repeated_assignment(
+                block,
+                assign,
+                event,
+                count,
+                &targets,
+                &carried,
+                nonblocking,
+            );
         }
         if nonblocking && let Some(control) = &assign.timing {
             let wait = match control {
@@ -2374,14 +2393,18 @@ impl ProcessLowerer<'_> {
                     Some(&DigitalStatement::BlockingAssign(assign.clone())),
                 ),
             };
-            self.write_with_wait(block, &assign.target, carried[0], true, Some(wait));
+            for (target, value) in targets.iter().zip(&carried) {
+                self.write_with_wait(block, target, *value, true, Some(wait.clone()));
+            }
             return block;
         }
         let block = match &assign.timing {
             Some(control) => self.wait(block, control, None, &mut carried),
             None => block,
         };
-        self.write(block, &assign.target, carried[0], nonblocking);
+        for (target, value) in targets.iter().zip(carried) {
+            self.write(block, target, value, nonblocking);
+        }
         block
     }
 
@@ -2391,7 +2414,8 @@ impl ProcessLowerer<'_> {
         assign: &DigitalAssign,
         event: &crate::ast::EventControl,
         count: &Expression,
-        captured: ValueId,
+        targets: &[DigitalLValue],
+        captured: &[ValueId],
         nonblocking: bool,
     ) -> BlockId {
         let count = self.repeat_count(block, count);
@@ -2409,9 +2433,15 @@ impl ProcessLowerer<'_> {
                 else_args: Vec::new(),
             },
         );
-        let mut waiting_value = [self.builder.carry_value(captured, block, waiting)];
+        let mut waiting_value: Vec<_> = captured
+            .iter()
+            .map(|&value| self.builder.carry_value(value, block, waiting))
+            .collect();
         let waiting_count = self.builder.carry_value(count, block, waiting);
-        let immediate_value = self.builder.carry_value(captured, block, immediate);
+        let immediate_value: Vec<_> = captured
+            .iter()
+            .map(|&value| self.builder.carry_value(value, block, immediate))
+            .collect();
         self.builder.seal_block(waiting);
         self.builder.seal_block(immediate);
         // A zero count bypasses evaluation of the event expression entirely.
@@ -2428,14 +2458,20 @@ impl ProcessLowerer<'_> {
             event: Box::new(event_wait),
         };
         let waiting_exit = if nonblocking {
-            self.write_with_wait(waiting, &assign.target, waiting_value[0], true, Some(wait));
+            for (target, &value) in targets.iter().zip(&waiting_value) {
+                self.write_with_wait(waiting, target, value, true, Some(wait.clone()));
+            }
             waiting
         } else {
             let resume = self.suspend(waiting, wait, &mut waiting_value);
-            self.write(resume, &assign.target, waiting_value[0], false);
+            for (target, value) in targets.iter().zip(waiting_value) {
+                self.write(resume, target, value, false);
+            }
             resume
         };
-        self.write(immediate, &assign.target, immediate_value, nonblocking);
+        for (target, value) in targets.iter().zip(immediate_value) {
+            self.write(immediate, target, value, nonblocking);
+        }
         for exit in [waiting_exit, immediate] {
             self.builder.set_terminator(
                 exit,

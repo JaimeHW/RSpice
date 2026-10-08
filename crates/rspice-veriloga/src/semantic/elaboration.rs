@@ -770,6 +770,7 @@ impl<'a> HierarchyElaborator<'a> {
             self.flattened.arrays.insert(
                 mapped_name,
                 AnalyzedArray {
+                    declared_dimensions: array.declared_dimensions.clone(),
                     dimensions: array.dimensions.clone(),
                     base: variable_base + array.base,
                     lower: array.lower,
