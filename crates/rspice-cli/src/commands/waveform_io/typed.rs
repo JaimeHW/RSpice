@@ -70,6 +70,16 @@ fn append_payload_columns(
                 projection.conversion_matrix(matrix)?;
             }
         }
+        ResultPayload::Pxf(payload) => {
+            // The qualified transfer names its sidebands, but that pair and
+            // the offset axis do not identify the physical input frequency
+            // without the carrier (especially when the output sideband is 0).
+            projection.constant(
+                "fundamental_frequency".into(),
+                SignalUnit::Hertz,
+                payload.fundamental_frequency,
+            )?;
+        }
         ResultPayload::Distortion(payload) => {
             if let Some(ratio) = payload.f2_over_f1 {
                 projection.constant("f2_over_f1".into(), SignalUnit::Dimensionless, ratio)?;

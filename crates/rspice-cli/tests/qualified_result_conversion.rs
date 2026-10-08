@@ -218,6 +218,130 @@ fn comparison_checks_each_qualified_response_independently() {
 }
 
 #[test]
+fn pxf_comparison_distinguishes_carriers_when_the_output_is_at_baseband() {
+    let dir = test_dir("pxf_carrier_compare");
+    let input = run_document(&dir, "pxf");
+    let mut original = read_json(&input);
+    original["payload"]["inputSideband"] = 1.into();
+    original["signals"][0]["qualifier"]["input"] = 1.into();
+    std::fs::write(&input, serde_json::to_vec(&original).unwrap()).unwrap();
+    let other = dir.join("other-carrier.json");
+    original["payload"]["fundamentalFrequency"] = 2000.0.into();
+    std::fs::write(&other, serde_json::to_vec(&original).unwrap()).unwrap();
+    let result = cli(&[
+        "compare",
+        input.to_str().unwrap(),
+        other.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(result.status.code(), Some(3), "{result:?}");
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["comparison_passed"], false);
+    assert_eq!(report["max_diff_variable"], "fundamental_frequency");
+}
+
+#[test]
+fn direct_pxf_tables_retain_the_carrier_frequency() {
+    let dir = test_dir("pxf_direct_carrier");
+    let input = run_document(&dir, "pxf");
+    let points = read_json(&input)["pointCount"].as_u64().unwrap() as usize;
+    let deck = dir.join("pxf.cir");
+    for format in ["csv", "tsv", "ascii", "raw", "hdf5"] {
+        let requested = dir.join(format!("direct.{format}"));
+        let result = cli(&[
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            requested.to_str().unwrap(),
+            "-f",
+            format,
+        ]);
+        assert!(result.status.success(), "{format}: {result:?}");
+        let output = dir.join(format!("direct.pxf-001.{format}"));
+        let decoded = dir.join(format!("direct-{format}.json"));
+        let result = cli(&[
+            "convert",
+            output.to_str().unwrap(),
+            decoded.to_str().unwrap(),
+            "--to",
+            "json",
+        ]);
+        assert!(result.status.success(), "{format}: {result:?}");
+        let table = read_json(&decoded);
+        let carrier = table["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|column| column["name"] == "fundamental_frequency")
+            .unwrap();
+        assert_eq!(
+            carrier
+                .get("values")
+                .or_else(|| carrier.get("real"))
+                .unwrap(),
+            &serde_json::json!(vec![1000.0; points])
+        );
+        if !matches!(format, "csv" | "tsv") {
+            assert_eq!(carrier["unit"], "Hz");
+        }
+    }
+}
+
+#[test]
+fn malformed_pxf_coordinates_cannot_replace_existing_exports() {
+    let dir = test_dir("invalid_pxf_payload");
+    let input = run_document(&dir, "pxf");
+    let original = read_json(&input);
+    for (defect, diagnostic) in [
+        ("carrier", "fundamental frequency"),
+        ("output", "output frequency disagrees"),
+        ("qualifier", "signal qualifier disagrees"),
+        ("minimum_sideband", "outside the analyzed sideband span"),
+        ("offset", "strictly increasing"),
+        ("delay", "interval midpoints"),
+    ] {
+        let mut value = original.clone();
+        match defect {
+            "carrier" => value["payload"]["fundamentalFrequency"] = (-1000.0).into(),
+            "output" => value["signals"][1]["values"]["samples"][0] = 1234.0.into(),
+            "qualifier" => value["signals"][0]["qualifier"]["input"] = 1.into(),
+            "minimum_sideband" => {
+                value["payload"]["inputSideband"] = i32::MIN.into();
+                value["payload"]["maxSideband"] = i32::MAX.into();
+                value["signals"][0]["qualifier"]["input"] = i32::MIN.into();
+            }
+            "offset" => value["axes"][0]["values"]["values"][0] = (-1.0).into(),
+            "delay" => value["payload"]["groupDelay"][0]["frequency"] = 1234.0.into(),
+            _ => panic!("unknown defect: {defect}"),
+        }
+        std::fs::write(&input, serde_json::to_vec(&value).unwrap()).unwrap();
+        for format in ["json", "csv", "tsv", "ascii", "raw", "hdf5"] {
+            let output = dir.join(format!("protected.{format}"));
+            std::fs::write(&output, "predecessor").unwrap();
+            let result = cli(&[
+                "convert",
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+                "--to",
+                format,
+            ]);
+            assert_eq!(
+                result.status.code(),
+                Some(1),
+                "{defect}, {format}: {result:?}"
+            );
+            let report: Value = serde_json::from_slice(&result.stderr).unwrap();
+            assert_eq!(report["error"]["code"], "conversion_error", "{report}");
+            assert!(
+                String::from_utf8_lossy(&result.stderr).contains(diagnostic),
+                "{defect}, {format}: {report}"
+            );
+            assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
+        }
+    }
+}
+
+#[test]
 fn literal_names_cannot_overwrite_qualified_response_identity() {
     let dir = test_dir("qualified_collision");
     let input = run_document(&dir, "pac");
@@ -279,7 +403,7 @@ fn comparison_includes_pac_conversion_matrix_and_physical_frequencies() {
 #[test]
 fn numeric_rf_payloads_survive_all_table_formats() {
     let dir = test_dir("rf_payload_roundtrip");
-    for family in ["pac", "disto"] {
+    for family in ["pac", "disto", "pxf"] {
         let input = run_document(&dir, family);
         let document = read_json(&input);
         let mut expected = Vec::new();
@@ -297,6 +421,15 @@ fn numeric_rf_payloads_survive_all_table_formats() {
                     band["absoluteFrequencies"].clone(),
                 ));
             }
+        } else if family == "pxf" {
+            expected.push((
+                "fundamental_frequency".to_string(),
+                "Hz",
+                serde_json::json!(vec![
+                    1000.0;
+                    document["pointCount"].as_u64().unwrap() as usize
+                ]),
+            ));
         } else {
             expected.push((
                 "f2_over_f1".to_string(),

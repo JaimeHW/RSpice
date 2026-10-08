@@ -506,8 +506,9 @@ fn pac_export_table(
 
 /// Publish one periodic transfer function over its offset-frequency axis.
 ///
-/// Two columns: the complex transfer the card's sideband pair names, and the
-/// absolute frequency the converted response appears at. The output frequency
+/// Publish the complex transfer, its carrier, and the absolute frequency the
+/// converted response appears at. Retaining the carrier also identifies the
+/// physical input frequency from the offset and input sideband. Each frequency
 /// is a real column in a complex table, so it carries a zero imaginary part in
 /// the rawfile and HDF5 renderings exactly as a rawfile's own scale does.
 fn export_pxf(
@@ -518,6 +519,10 @@ fn export_pxf(
     card: &PxfCard,
     result: &rspice_core::analysis::pxf::PxfResult,
 ) -> Result<(), CliError> {
+    use rspice_core::execution::{
+        SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
+    };
+
     let analysis_id = artifact.analysis;
     let offsets = result
         .points
@@ -559,6 +564,12 @@ fn export_pxf(
                 var_type: "frequency".to_string(),
                 data: ColumnData::Real(result.points.iter().map(|point| point.freq_out).collect()),
             },
+            ExportColumn {
+                unit: Some("Hz".to_string()),
+                name: "fundamental_frequency".to_string(),
+                var_type: "frequency".to_string(),
+                data: ColumnData::Real(vec![result.fundamental_freq; offsets.len()]),
+            },
         ],
     };
     let schema = super::document::distinct_schema([
@@ -573,6 +584,15 @@ fn export_pxf(
             "output_frequency",
             rspice_core::execution::SignalKind::Scalar,
             rspice_core::execution::SignalValueType::Real,
+        ),
+        SignalDescriptor::new(
+            "fundamental_frequency",
+            "fundamental_frequency",
+            SignalKind::Scalar,
+            SignalUnit::Hertz,
+            SignalValueType::Real,
+            SignalShape::Vector,
+            SignalOwner::Analysis,
         ),
     ])?;
 
