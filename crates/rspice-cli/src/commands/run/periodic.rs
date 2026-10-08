@@ -569,7 +569,7 @@ fn export_pxf(
                             // the artifact does not record; see `from_pxf`.
                             rspice_core::execution::SignalUnit::Unspecified,
                         ),
-                        ColumnData::NullableReal(_) => {
+                        ColumnData::NullableReal(_) | ColumnData::NullableComplex(_) => {
                             return Err(CliError::InvalidArgument {
                                 message: "PXF transfer samples must be defined".into(),
                                 suggestion: None,

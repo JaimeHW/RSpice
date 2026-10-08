@@ -257,6 +257,7 @@ fn validate_table_shape(
     for column in &table.columns {
         retained_values = retained_values.saturating_add(match &column.data {
             ColumnData::NullableReal(values) => values.len(),
+            ColumnData::NullableComplex(values) => values.len().saturating_mul(2),
             ColumnData::Real(values) => values.len(),
             ColumnData::Complex { real, imag } => real.len().saturating_add(imag.len()),
         });
@@ -275,6 +276,19 @@ fn validate_table_shape(
                     return Err(conversion_error(
                         path,
                         "nullable series contains a nonfinite value",
+                    ));
+                }
+            }
+            ColumnData::NullableComplex(values) => {
+                validate_series_len(path, &column.name, "samples", values.len(), expected)?;
+                if values
+                    .iter()
+                    .flatten()
+                    .any(|value| !value.re.is_finite() || !value.im.is_finite())
+                {
+                    return Err(conversion_error(
+                        path,
+                        "nullable complex series contains a nonfinite value",
                     ));
                 }
             }
@@ -800,20 +814,8 @@ fn parse_delimited(
                 unit: None,
                 var_type: signal_var_type(&inner),
                 name: inner,
-                data: ColumnData::Complex {
-                    real: values
-                        .into_iter()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            conversion_error(path, "complex real samples must be present")
-                        })?,
-                    imag: imag
-                        .into_iter()
-                        .collect::<Option<Vec<_>>>()
-                        .ok_or_else(|| {
-                            conversion_error(path, "complex imaginary samples must be present")
-                        })?,
-                },
+                data: ColumnData::optional_complex_parts(values, imag)
+                    .map_err(|error| conversion_error(path, format!("signal '{name}': {error}")))?,
             });
             continue;
         }
@@ -905,6 +907,35 @@ pub(super) fn parse_untyped_json(
             .collect()
     };
 
+    let to_optional_f64_vec =
+        |value: &serde_json::Value, what: &str| -> Result<Vec<Option<f64>>, CliError> {
+            let values = value
+                .as_array()
+                .ok_or_else(|| conversion_error(path, format!("'{what}' is not an array")))?;
+            let requested = parsed_values.get().saturating_add(values.len());
+            enforce_table_value_limits(path, requested, resource_limits)?;
+            parsed_values.set(requested);
+            values
+                .iter()
+                .map(|value| {
+                    if value.is_null() {
+                        Ok(None)
+                    } else {
+                        value
+                            .as_f64()
+                            .filter(|value| value.is_finite())
+                            .map(Some)
+                            .ok_or_else(|| {
+                                conversion_error(
+                                    path,
+                                    format!("'{what}' samples must be finite numbers or null"),
+                                )
+                            })
+                    }
+                })
+                .collect()
+        };
+
     // Preferred schema: {"analysis", "scale": {"name", "values"}, "signals": [...]}
     if let Some(scale_obj) = value.get("scale") {
         if scale_obj.get("real").is_some() || scale_obj.get("imag").is_some() {
@@ -943,47 +974,26 @@ pub(super) fn parse_untyped_json(
                         ),
                     ));
                 }
-                let values = values
-                    .as_array()
-                    .ok_or_else(|| conversion_error(path, "signal values must be an array"))?;
-                let requested = parsed_values.get().saturating_add(values.len());
-                enforce_table_value_limits(path, requested, resource_limits)?;
-                parsed_values.set(requested);
-                ColumnData::optional_real(
-                    values
-                        .iter()
-                        .map(|v| {
-                            if v.is_null() {
-                                Ok(None)
-                            } else {
-                                v.as_f64()
-                                    .filter(|n| n.is_finite())
-                                    .map(Some)
-                                    .ok_or_else(|| {
-                                        conversion_error(
-                                            path,
-                                            "signal values must be finite numbers or null",
-                                        )
-                                    })
-                            }
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                )
+                let values = to_optional_f64_vec(values, &name)?;
+                validate_series_len(path, &name, "values", values.len(), scale.len())?;
+                ColumnData::optional_real(values)
             } else {
-                ColumnData::Complex {
-                    real: to_f64_vec(
-                        signal.get("real").ok_or_else(|| {
-                            conversion_error(path, "signal has no 'values' or 'real'")
-                        })?,
-                        &name,
-                    )?,
-                    imag: to_f64_vec(
-                        signal.get("imag").ok_or_else(|| {
-                            conversion_error(path, "complex signal has no 'imag'")
-                        })?,
-                        &name,
-                    )?,
-                }
+                let real = to_optional_f64_vec(
+                    signal.get("real").ok_or_else(|| {
+                        conversion_error(path, "signal has no 'values' or 'real'")
+                    })?,
+                    &format!("{name}.real"),
+                )?;
+                validate_series_len(path, &name, "real", real.len(), scale.len())?;
+                let imag = to_optional_f64_vec(
+                    signal
+                        .get("imag")
+                        .ok_or_else(|| conversion_error(path, "complex signal has no 'imag'"))?,
+                    &format!("{name}.imag"),
+                )?;
+                validate_series_len(path, &name, "imag", imag.len(), scale.len())?;
+                ColumnData::optional_complex_parts(real, imag)
+                    .map_err(|error| conversion_error(path, format!("signal '{name}': {error}")))?
             };
             columns.push(ExportColumn {
                 unit: read_unit(signal)?,
@@ -1129,26 +1139,14 @@ pub(super) fn result_document_table(
         let name = signal.descriptor().display_name().to_string();
         let data = match signal.values() {
             SeriesValues::Real { samples } => ColumnData::optional_real(samples.clone()),
-            SeriesValues::Complex { samples } => {
-                if samples.iter().all(Option::is_none) {
-                    continue;
-                }
-                let mut real = Vec::with_capacity(samples.len());
-                let mut imag = Vec::with_capacity(samples.len());
-                for sample in samples {
-                    let sample = sample.ok_or_else(|| {
-                        conversion_error(
-                            path,
-                            format!(
-                                "series '{name}' has an absent sample, which a flat table cannot represent"
-                            ),
-                        )
-                    })?;
-                    real.push(sample.real);
-                    imag.push(sample.imaginary);
-                }
-                ColumnData::Complex { real, imag }
-            }
+            SeriesValues::Complex { samples } => ColumnData::optional_complex(
+                samples
+                    .iter()
+                    .map(|sample| {
+                        sample.map(|value| rspice_core::Complex64::new(value.real, value.imaginary))
+                    })
+                    .collect(),
+            ),
             other => {
                 return Err(conversion_error(
                     path,

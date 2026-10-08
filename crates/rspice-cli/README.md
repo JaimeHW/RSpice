@@ -771,7 +771,12 @@ payload before selecting or converting data. Value budgets include event
 histories and other retained evidence omitted from the selected output.
 Legacy JSON table signals use either `values` or both `real` and `imag` arrays;
 mixing these representations is rejected. Their real coordinates use `values`
-only. Validation covers all signals before variable selection.
+only. Real samples may be `null`; complex samples use `null` in both component
+arrays at the same position. CSV/TSV use two empty component fields for an
+undefined complex sample. RAW and HDF5 retain an explicit validity mask, so
+undefined samples remain distinct from zero through conversion, clipping and
+comparison. Entirely undefined numeric signals are retained. Validation covers
+all signals before variable selection.
 For tables, `max_result_values` counts coordinate values and both components
 of complex samples. HDF5 readers admit the combined dataset and measurement
 value count before decoding any section, including sections not selected.

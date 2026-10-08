@@ -632,7 +632,7 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
             let values = match &column.data {
                 ColumnData::Real(values) => Ok(values),
                 ColumnData::NullableReal(_) => Err("undefined"),
-                ColumnData::Complex { .. } => Err("complex"),
+                ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => Err("complex"),
             }
             .map_err(unsupported)?;
             let mut points: Vec<DigitalTracePoint> = Vec::new();
@@ -667,7 +667,9 @@ fn grid_event_traces(path: &Path, table: &ExportTable) -> Result<RawEventTraces,
                     seconds_factor,
                     values.iter().copied(),
                 )?,
-                ColumnData::Complex { .. } => return Err(unsupported("complex")),
+                ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
+                    return Err(unsupported("complex"));
+                }
             };
             real_traces.push(RealTrace {
                 node_name: node.to_string(),

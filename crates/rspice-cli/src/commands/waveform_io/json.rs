@@ -105,8 +105,8 @@ impl Scope {
             (Self::AllNumbers, _) => Self::AllNumbers,
             (Self::Table, "scale") => Self::Scale,
             (Self::Table, "signals") => Self::Signals,
-            (Self::Scale, "values") | (Self::Signal, "real" | "imag") => Self::Samples,
-            (Self::Signal, "values") => Self::NullableSamples,
+            (Self::Scale, "values") => Self::Samples,
+            (Self::Signal, "values" | "real" | "imag") => Self::NullableSamples,
             _ => Self::Other,
         }
     }

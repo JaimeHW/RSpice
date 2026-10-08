@@ -22,6 +22,7 @@ fn unsupported_event_columns_cannot_publish_partial_dumps() {
         for (payload, cause) in [
             (json!({"values":[1,null]}), "undefined"),
             (json!({"real":[0,1],"imag":[1,2]}), "complex"),
+            (json!({"real":[null,1],"imag":[null,2]}), "complex"),
         ] {
             let mut event = payload;
             event["name"] = json!(name);

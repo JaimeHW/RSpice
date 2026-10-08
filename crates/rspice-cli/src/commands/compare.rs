@@ -540,6 +540,21 @@ fn comparison_data(
                 values.extend([real, imag]);
                 validity.extend([None, None]);
             }
+            ColumnData::NullableComplex(series) => {
+                variables.extend([
+                    format!("Re({})", column.name),
+                    format!("Im({})", column.name),
+                ]);
+                variable_types.extend([column.var_type.clone(), column.var_type]);
+                units.extend([column.unit.clone(), column.unit]);
+                let defined: Vec<bool> = series.iter().map(Option::is_some).collect();
+                validity.extend([Some(defined.clone()), Some(defined)]);
+                let (real, imag) = series
+                    .into_iter()
+                    .map(|value| value.map_or((0.0, 0.0), |value| (value.re, value.im)))
+                    .unzip();
+                values.extend([real, imag]);
+            }
         }
     }
     let mut seen = HashSet::new();

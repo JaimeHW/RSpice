@@ -578,7 +578,9 @@ pub(crate) fn table_data(
     let mut waveform = Hdf5WaveformSection::new(table.scale_name.clone(), table.scale.clone());
     for column in &table.columns {
         match &column.data {
-            ColumnData::NullableReal(_) => unreachable!("dense encoding removes nullable columns"),
+            ColumnData::NullableReal(_) | ColumnData::NullableComplex(_) => {
+                unreachable!("dense encoding removes nullable columns")
+            }
             ColumnData::Real(values) => waveform.add_typed_signal(
                 column.name.clone(),
                 column.var_type.clone(),
