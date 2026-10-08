@@ -129,3 +129,91 @@ fn expanded_port_references_obey_both_table_value_limits() {
         assert_eq!(std::fs::read_to_string(&output).unwrap(), "predecessor");
     }
 }
+
+#[test]
+fn flat_sp_runs_retain_mixed_port_references_in_every_format() {
+    let dir = test_dir("sp_run_references");
+    let deck = dir.join("network.cir");
+    write_deck(&deck);
+    for format in ["csv", "tsv", "ascii", "raw", "hdf5"] {
+        let output = dir.join(format!("network.{format}"));
+        let table = dir.join(format!("table-{format}.json"));
+        run(&deck, &output, format);
+        convert(&output, &table, "json");
+        assert_references(&read_json(&table), !matches!(format, "csv" | "tsv"));
+    }
+}
+
+#[test]
+fn flat_sp_noise_exports_state_the_physical_units() {
+    let dir = test_dir("sp_noise_units");
+    let deck = dir.join("network.cir");
+    write_deck(&deck);
+    let source = std::fs::read_to_string(&deck)
+        .unwrap()
+        .replace("Z0 75", "Z0 50")
+        .replace("3k\n", "3k DONOISE\n");
+    std::fs::write(&deck, source).unwrap();
+    for format in ["ascii", "raw", "hdf5"] {
+        let output = dir.join(format!("network.{format}"));
+        let table_path = dir.join(format!("table-{format}.json"));
+        run(&deck, &output, format);
+        convert(&output, &table_path, "json");
+        let table = read_json(&table_path);
+        for (name, unit) in [
+            ("S_1_1", "1"),
+            ("S_2_1", "1"),
+            ("CY_A2_per_Hz_1_1", "A^2/Hz"),
+            ("noise_reference_temperature_K", "K"),
+            ("noise_normalization_4kT_J", "J"),
+            ("noise_resistance_ohm", "ohm"),
+            ("noise_factor_linear", "1"),
+            ("minimum_noise_factor_linear", "1"),
+            ("optimum_source_reflection", "1"),
+        ] {
+            assert_eq!(signal(&table, name)["unit"], unit, "{format}: {name}");
+        }
+    }
+}
+
+#[test]
+fn configured_sparam_retains_its_impedance_override_and_dimensionless_units() {
+    let dir = test_dir("sparam_units");
+    let deck = dir.join("network.cir");
+    std::fs::write(
+        &deck,
+        "* configured ports\nR1 in out 50\n.AC LIN 3 1k 3k\n.END\n",
+    )
+    .unwrap();
+    for format in ["ascii", "hdf5"] {
+        let output = dir.join(format!("network.{format}"));
+        let table_path = dir.join(format!("table-{format}.json"));
+        let result = cli(&[
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+            "-f",
+            format,
+            "--sparam",
+            "in,0,out,0",
+            "--sparam-z0",
+            "75",
+        ]);
+        assert!(result.status.success(), "{result:?}");
+        convert(&output, &table_path, "json");
+        let table = read_json(&table_path);
+        for name in ["S11", "S21", "S12", "S22"] {
+            assert_eq!(signal(&table, name)["unit"], "1", "{format}");
+        }
+        for name in ["Z0(1)", "Z0(2)"] {
+            let reference = signal(&table, name);
+            assert_eq!(reference["unit"], "ohm");
+            let values = reference
+                .get("values")
+                .or_else(|| reference.get("real"))
+                .unwrap();
+            assert_eq!(values, &serde_json::json!([75.0, 75.0, 75.0]));
+        }
+    }
+}

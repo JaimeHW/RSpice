@@ -921,7 +921,10 @@ endmodule"#,
                 "{format}, early={early}"
             );
             for (index, row) in rows.iter().enumerate() {
-                assert_eq!(row.len(), 9);
+                assert_eq!(row.len(), if format == "csv" { 11 } else { 9 });
+                if format == "csv" {
+                    assert_eq!(&row[9..], &[50.0, 50.0]);
+                }
                 assert_eq!(row[0], expected_frequencies[index]);
                 let expected = if index + 1 == rows.len() {
                     [0.0, 0.5, 0.5, -0.25]

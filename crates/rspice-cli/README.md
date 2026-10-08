@@ -224,9 +224,12 @@ Frequency-domain notes:
   frequency, and an explicit magnitude ratio to the F1 response. Two-tone cards
   use the SPICE ratio contract `0 < f2/f1 < 1`, with F2 fixed relative to the
   first swept F1 point.
-- `.SP` exports S-parameters only. It needs voltage sources annotated
-  `portnum=<n> [z0=<ohms>]`, numbered densely from 1, and the optional ngspice
-  SP-noise flag parses without producing noise output.
+- `.SP` exports dimensionless S-parameters and each port's reference impedance.
+  It needs voltage sources annotated `portnum=<n> [z0=<ohms>]`, numbered densely
+  from 1. `DONOISE` also exports the current-noise covariance, temperature,
+  thermal normalization, and two-port noise parameters when applicable.
+  Noise results require CSV, TSV, raw, ASCII, JSON, or HDF5 output; Touchstone
+  output cannot retain the complete covariance and normalization provenance.
 
 A handful of analyses can instead be requested from the command line. When one
 of these flags is present it runs **instead of** the netlist's analysis cards;
@@ -485,8 +488,8 @@ shapes:
 | `.TF` | Gain, input impedance, output impedance |
 | Pole-zero | `pole(i)`/`zero(i)` complex columns |
 | `.SENS` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
-| `.SP` | `S_i_j` complex columns for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
-| `--sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
+| `.SP` | Dimensionless `S_i_j` complex columns and `Z0(port)` reference impedances in ohms for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
+| `--sparam` | Dimensionless `S11`/`S21`/`S12`/`S22` complex columns over frequency and `Z0(1)`/`Z0(2)` in ohms (Touchstone instead when `-o` ends in `.s2p`) |
 
 TF, pole-zero, sensitivity, DCMATCH and periodic stability support HDF5
 through a general `table` section. The group retains its analysis identity,
@@ -748,7 +751,12 @@ Touchstone `.sNp` and `.ts` inputs are auto-detected; `convert --from touchstone
 selects the parser for another extension. RI, magnitude/angle and dB/angle
 values become complex coefficients on a hertz coordinate. Port references
 remain numeric `Z0(port)` columns, so two equal coefficient arrays with
-unequal reference impedances do not compare equal. If a file carries noise,
+unequal reference impedances do not compare equal. Typed `.SP` JSON conversion
+also retains these reference columns; direct flat `.SP` and `--sparam` output
+appends them after the coefficient and noise columns. Formats with quantity
+metadata retain dimensionless scattering coefficients, covariance in A²/Hz,
+temperature in K, thermal normalization in J, and noise resistance in ohms.
+If a Touchstone file carries noise,
 select `--section network` or `--section noise`: the latter keeps its own
 frequency grid, noise resistance in ohms, optimum complex reflection, and
 reference temperature. All sections are parsed and bounded before selection.

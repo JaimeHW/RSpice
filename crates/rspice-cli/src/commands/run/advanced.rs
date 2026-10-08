@@ -16,9 +16,11 @@
 //! tagging each corner's output so workers never collide.
 
 use rspice_core::analysis::s_param;
+use rspice_core::execution::SignalSchema;
 
 use super::RunContext;
 use crate::cli::{CliError, map_atomic_output_error};
+use crate::commands::export_table::ExportTable;
 use crate::commands::{publish, truncate};
 
 fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
@@ -855,44 +857,18 @@ fn publish_sparam_run(
         write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering)?;
         ctx.record_output(output_path.clone());
     } else {
-        let signals = sparameter_export_signals(run, &frequencies, &scattering, kind == "sparam");
-        super::document::publish_analysis_result(
+        let (table, schema) = sparameter_export_table(run, frequencies, &scattering, kind)?;
+        super::document::publish_table_result(
             ctx,
             output_path,
             analysis_id,
-            super::document::complex_schema(&signals)?,
+            schema,
+            &table,
             || {
                 rspice_core::execution::AnalysisResultDocument::from_s_parameters(
                     analysis_id,
                     &run.scattering,
                 )
-            },
-            |path, format| {
-                if matches!(format, crate::cli::OutputFormat::Hdf5) {
-                    let mut hdf5 = crate::hdf5::Hdf5SimulationData::new();
-                    hdf5.title = "S-Parameters".to_string();
-                    hdf5.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-                    let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
-                    for signal in &signals {
-                        section.add_signal(
-                            signal.display_name.clone(),
-                            signal.unit_symbol(),
-                            signal.real.clone(),
-                            signal.imag.clone(),
-                        );
-                    }
-                    hdf5.ac = Some(section);
-                    crate::hdf5::write_hdf5(path, &hdf5)
-                        .map_err(|err| super::shared::map_hdf5_output_error(path, err))
-                } else {
-                    super::export::complex_table(
-                        kind,
-                        "S-Parameters",
-                        frequencies.clone(),
-                        &signals,
-                    )
-                    .write(path, format)
-                }
             },
         )?;
 
@@ -955,27 +931,49 @@ fn scattering_cube(result: &s_param::SParameterResult) -> Vec<Vec<Vec<rspice_cor
         .collect()
 }
 
-fn sparameter_export_signals(
+fn sparameter_export_table(
     run: &rspice_core::engine::SParameterRun,
-    frequencies: &[f64],
+    frequencies: Vec<f64>,
     scattering: &[Vec<Vec<rspice_core::Complex64>>],
-    legacy_names: bool,
-) -> Vec<crate::commands::run_signals::ComplexSignal> {
-    use crate::commands::run_signals::{ComplexSignal, SignalKind};
+    kind: &str,
+) -> Result<(ExportTable, SignalSchema), CliError> {
+    use crate::commands::export_table::{ColumnData, ExportColumn, stated_unit, unit_type};
+    use rspice_core::execution::{
+        SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
+    };
 
     let count = run.ports.len();
-    let mut signals = Vec::with_capacity(
-        count * count + run.port_noise.as_ref().map_or(0, |_| count * count + 6),
+    let mut columns = Vec::with_capacity(
+        count * count + count + run.port_noise.as_ref().map_or(0, |_| count * count + 6),
     );
-    let mut push = |name: String, values: &[rspice_core::Complex64], kind: SignalKind| {
-        signals.push(ComplexSignal {
-            display_name: name.clone(),
-            raw_name: name,
-            kind,
-            real: values.iter().map(|value| value.re).collect(),
-            imag: values.iter().map(|value| value.im).collect(),
+    let mut descriptors = Vec::with_capacity(columns.capacity());
+    let mut push = |name: String, data: ColumnData, unit: SignalUnit| {
+        let value_type = if matches!(data, ColumnData::Complex { .. }) {
+            SignalValueType::Complex
+        } else {
+            SignalValueType::Real
+        };
+        columns.push(ExportColumn {
+            name: name.clone(),
+            var_type: unit_type(&unit, "parameter").to_string(),
+            unit: stated_unit(&unit),
+            data,
         });
+        descriptors.push(SignalDescriptor::new(
+            &name,
+            &name,
+            SignalKind::Scalar,
+            unit,
+            value_type,
+            SignalShape::Scalar,
+            SignalOwner::Analysis,
+        ));
     };
+    let complex = |values: &[rspice_core::Complex64]| ColumnData::Complex {
+        real: values.iter().map(|value| value.re).collect(),
+        imag: values.iter().map(|value| value.im).collect(),
+    };
+    let legacy_names = kind == "sparam";
 
     for (row, columns) in scattering.iter().enumerate() {
         for (column, series) in columns.iter().enumerate() {
@@ -989,7 +987,7 @@ fn sparameter_export_signals(
             } else {
                 format!("S_{}_{}", row + 1, column + 1)
             };
-            push(name, series, SignalKind::Voltage);
+            push(name, complex(series), SignalUnit::Dimensionless);
         }
     }
 
@@ -1010,23 +1008,23 @@ fn sparameter_export_signals(
                     .collect::<Vec<_>>();
                 push(
                     format!("CY_A2_per_Hz_{}_{}", row + 1, column + 1),
-                    &series,
-                    SignalKind::Scalar,
+                    complex(&series),
+                    SignalUnit::Custom("A^2/Hz".to_string()),
                 );
             }
         }
         let constant = |value| vec![rspice_core::Complex64::new(value, 0.0); frequencies.len()];
         push(
             "noise_reference_temperature_K".to_string(),
-            &constant(noise.reference_temperature_kelvin),
-            SignalKind::Scalar,
+            complex(&constant(noise.reference_temperature_kelvin)),
+            SignalUnit::Custom("K".to_string()),
         );
         push(
             "noise_normalization_4kT_J".to_string(),
-            &constant(
+            complex(&constant(
                 4.0 * rspice_core::constants::K_BOLTZMANN * noise.reference_temperature_kelvin,
-            ),
-            SignalKind::Scalar,
+            )),
+            SignalUnit::Custom("J".to_string()),
         );
         if let Some(parameters) = &noise.two_port {
             let real_values = |project: fn(&s_param::TwoPortNoise) -> f64| {
@@ -1037,18 +1035,18 @@ fn sparameter_export_signals(
             };
             push(
                 "noise_resistance_ohm".to_string(),
-                &real_values(|parameter| parameter.noise_resistance),
-                SignalKind::Scalar,
+                complex(&real_values(|parameter| parameter.noise_resistance)),
+                SignalUnit::Ohm,
             );
             push(
                 "noise_factor_linear".to_string(),
-                &real_values(|parameter| parameter.noise_factor),
-                SignalKind::Scalar,
+                complex(&real_values(|parameter| parameter.noise_factor)),
+                SignalUnit::Dimensionless,
             );
             push(
                 "minimum_noise_factor_linear".to_string(),
-                &real_values(|parameter| parameter.minimum_noise_factor),
-                SignalKind::Scalar,
+                complex(&real_values(|parameter| parameter.minimum_noise_factor)),
+                SignalUnit::Dimensionless,
             );
             let optimum = parameters
                 .iter()
@@ -1056,12 +1054,33 @@ fn sparameter_export_signals(
                 .collect::<Vec<_>>();
             push(
                 "optimum_source_reflection".to_string(),
-                &optimum,
-                SignalKind::Scalar,
+                complex(&optimum),
+                SignalUnit::Dimensionless,
             );
         }
     }
-    signals
+    // Append references so established matrix/noise column ordering stays
+    // stable. Each coefficient is meaningful only with its port normalization.
+    for port in &run.ports {
+        push(
+            format!("Z0({})", port.number),
+            ColumnData::Real(vec![port.z0; frequencies.len()]),
+            SignalUnit::Ohm,
+        );
+    }
+    let schema = super::document::distinct_schema(descriptors)?;
+    Ok((
+        ExportTable {
+            scale_unit: Some("Hz".to_string()),
+            analysis: kind.to_string(),
+            plot_name: "S-Parameters".to_string(),
+            scale_name: "frequency".to_string(),
+            scale_type: "frequency".to_string(),
+            scale: frequencies,
+            columns,
+        },
+        schema,
+    ))
 }
 
 fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> bool {

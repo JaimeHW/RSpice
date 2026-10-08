@@ -361,7 +361,14 @@ fn numeric_noise_forms_are_explicit_and_do_not_claim_disabled_work() {
     assert_eq!(keyword, enabled);
 
     let names = SpTable::read(&disabled_path).signal_names();
-    assert!(names.iter().all(|name| name.starts_with("S_")), "{names:?}");
+    assert!(
+        names
+            .iter()
+            .all(|name| name.starts_with("S_") || name.starts_with("Z0(")),
+        "{names:?}"
+    );
+    assert!(names.contains(&"Z0(1)".to_string()));
+    assert!(names.contains(&"Z0(2)".to_string()));
     assert!(
         !names
             .iter()
