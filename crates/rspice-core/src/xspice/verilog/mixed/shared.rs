@@ -230,6 +230,7 @@ pub(crate) struct MixedDigitalCoordinator {
     accepted_time: Option<f64>,
     accepted_observers: Vec<AbsDeltaState>,
     accepted_observation_probes: Vec<Option<f64>>,
+    max_interval_events: usize,
     /// Smallest interval the analog solver is allowed to advance by, or zero
     /// when nothing has declared one.
     ///
@@ -561,6 +562,7 @@ impl MixedDigitalCoordinator {
             host.resolution = resolution;
         }
         Ok(Self {
+            max_interval_events: crate::ResourceLimits::default().max_mixed_interval_events,
             accepted_observers: vec![AbsDeltaState::default(); digital.plan().absdelta.len()],
             accepted_observation_probes: if digital.plan().absdelta.is_empty() {
                 Vec::new()
@@ -587,6 +589,7 @@ impl MixedDigitalCoordinator {
         Self {
             accepted_observers: vec![AbsDeltaState::default(); self.accepted_observers.len()],
             accepted_observation_probes: vec![None; self.accepted_observation_probes.len()],
+            max_interval_events: self.max_interval_events,
             digital: MixedCell::new(self.digital.fresh()),
             maps: self.maps.clone(),
             instance_of_process: self.instance_of_process.clone(),
@@ -885,6 +888,7 @@ impl MixedDigitalCoordinator {
             observation_probes: self.accepted_observation_probes.clone(),
             observation_time: self.accepted_time,
             observation_refinement: None,
+            observation_work: 0,
             rollback: Some(rollback),
             time,
             tick,
@@ -917,6 +921,8 @@ pub(crate) struct SharedTrialCursor {
     observation_probes: Vec<Option<f64>>,
     observation_time: Option<f64>,
     observation_refinement: Option<f64>,
+    /// Work persists across repeated settlement within this trial.
+    observation_work: usize,
     rollback: Option<MixedCell<DigitalHost>>,
     time: f64,
     tick: u64,
@@ -1132,11 +1138,12 @@ impl MixedDigitalCoordinator {
     /// Apply all A/D decisions together, preserving analog activation provenance.
     pub(crate) fn publish_adc(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
     ) -> Result<bool, MixedSignalError> {
-        self.publish_adc_with(cursor, hosts, solution, None)
+        self.publish_adc_with(abort, cursor, hosts, solution, None)
     }
 
     /// Every circuit A/D transition of this settle pass, in ascending crossing
@@ -1207,13 +1214,14 @@ impl MixedDigitalCoordinator {
 
     pub(crate) fn publish_adc_with(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
         mut participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<bool, MixedSignalError> {
         if !self.accepted_observers.is_empty() {
-            return self.publish_observed_interval(cursor, hosts, solution, participant);
+            return self.publish_observed_interval(abort, cursor, hosts, solution, participant);
         }
         self.collect_adc_publications(cursor, hosts)?;
         // The analog candidate instant, which every group publishes against:

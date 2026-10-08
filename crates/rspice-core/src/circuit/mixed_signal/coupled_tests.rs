@@ -245,6 +245,7 @@ fn stamp(
     let mut rhs = vec![0.0; solution.len()];
     circuit.stamp_transient_linear_direct(matrix, &mut rhs);
     circuit.stamp_mixed_transient_trial(
+        &crate::abort_signal::NoAbort,
         matrix,
         &mut rhs,
         0.0,
@@ -439,6 +440,7 @@ fn coupled_acceptance_refusal_restores_shared_drivers_models_and_resources_befor
         let captures = resource.captures.load(Ordering::Relaxed);
         let mut projected = Vec::new();
         let result = circuit.accept_mixed_transient_with(
+            &crate::abort_signal::NoAbort,
             0.0,
             0.0,
             &mut solution,
@@ -587,6 +589,7 @@ fn coupled_acceptance_evaluates_each_model_once_across_a_voltage_projection() {
         crate::xspice::settle_cost::reset();
         circuit
             .accept_mixed_transient_with(
+                &crate::abort_signal::NoAbort,
                 time,
                 dt,
                 &mut solution,
@@ -847,6 +850,7 @@ endmodule
     let mut projected = Vec::new();
     circuit
         .accept_mixed_transient_with(
+            &crate::abort_signal::NoAbort,
             0.0,
             0.0,
             &mut solution,
@@ -1252,6 +1256,7 @@ fn a_probe_an_inspection_and_an_acceptance_publish_one_settle() {
     let mut projected = Vec::new();
     circuit
         .accept_mixed_transient_with(
+            &crate::abort_signal::NoAbort,
             0.0,
             0.0,
             &mut solution,
@@ -1285,7 +1290,9 @@ fn a_probe_an_inspection_and_an_acceptance_publish_one_settle() {
                 None,
             )
             .expect("the candidate opens on every kind");
-        trial.settle(&solution).expect("the boundary settles");
+        trial
+            .settle(&crate::abort_signal::NoAbort, &solution)
+            .expect("the boundary settles");
         let record = trial.settle_record();
         // Dropped rather than committed, on every kind including the
         // acceptance: what is compared is the settle, not the promotion.
@@ -1346,7 +1353,9 @@ fn only_an_acceptance_trial_may_be_prepared_for_commit() {
                 None,
             )
             .expect("the candidate opens");
-        trial.settle(&solution).expect("the boundary settles");
+        trial
+            .settle(&crate::abort_signal::NoAbort, &solution)
+            .expect("the boundary settles");
         let refusal = trial
             .prepare()
             .err()
@@ -1435,6 +1444,7 @@ fn the_candidate_ledger_survives_a_rolled_back_probe() {
         let rollback = accepting.capture_xspice_acceptance();
         let mut projected = Vec::new();
         let result = accepting.accept_mixed_transient_with(
+            &crate::abort_signal::NoAbort,
             0.0,
             0.0,
             &mut solution,
@@ -1562,4 +1572,157 @@ fn a_parked_ledger_is_forgotten_at_analysis_restart_and_checkpoint_restore() {
             .all(|ledger| ledger.carried_candidate().is_none()),
         "and the forgetting is the bracket's, so it repeats"
     );
+}
+
+#[test]
+fn absdelta_interval_limits_and_cancellation_restore_every_trial_kind() {
+    use crate::abort_signal::{CountingAbort, NoAbort};
+    let engine = crate::Engine::default();
+    let deck = crate::Netlist::parse("interval observer\nRa a 0 1k\n.end\n").unwrap();
+    let mut baseline = engine.build_circuit(&deck).unwrap();
+    let a = baseline.get_node_by_name("a").unwrap();
+    let host = compile_unstarted(
+        r#"
+`timescale 1ps/1ps
+module observer(a);
+ input a; electrical a;
+ integer first=0, second=0;
+ always @(absdelta(V(a),0.015625,1p)) first=first+1;
+ always @(absdelta(V(a),0.015625,1p)) second=second+1;
+endmodule
+"#,
+        None,
+        "observer",
+        &[a],
+        SchedulerLimits {
+            max_events_per_tick: 32,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    baseline.add_mixed_signal_host(host).unwrap();
+    baseline
+        .finalize_mixed_digital(&Default::default(), &rspice_veriloga::NoPipelineControl)
+        .unwrap();
+    baseline.begin_veriloga_analysis(2).unwrap();
+    baseline.start_mixed_digital_execution().unwrap();
+    let size = baseline.matrix_size();
+    let entries: Vec<_> = (0..size).map(|i| (i, i, 1.0)).collect();
+    let matrix = crate::solver::StaticMatrix::from_triplets(size, size, &entries).unwrap();
+    baseline.link_indices(&matrix);
+    let mut solution = vec![0.0; size];
+    baseline
+        .accept_mixed_transient_with(
+            &NoAbort,
+            0.0,
+            0.0,
+            &mut solution,
+            XspiceCompanionPolicy {
+                coefficients: &backward_euler(),
+                xyce_one_step_order2: false,
+            },
+            true,
+            false,
+            None,
+            false,
+            &mut Vec::new(),
+            |_, _, _, _| Ok(()),
+        )
+        .unwrap();
+    let count = |host: &MixedSignalHost, name| {
+        u32::from_str_radix(&host.read_digital(name).unwrap(), 2).unwrap()
+    };
+    assert_eq!(count(&baseline.mixed_signal_hosts[0], "first"), 1);
+    assert_eq!(count(&baseline.mixed_signal_hosts[0], "second"), 1);
+    solution[a - 1] = 1.0;
+    for kind in [
+        TrialKind::Probe,
+        TrialKind::Inspection,
+        TrialKind::Acceptance,
+    ] {
+        let mut circuit = baseline.clone();
+        for cancelled in [true, false] {
+            circuit
+                .scheduler
+                .mixed_digital_coordinator
+                .as_mut()
+                .unwrap()
+                .set_interval_event_limit(80);
+            let abort = CountingAbort::new(4);
+            let mut trial = circuit
+                .open_trial(
+                    Candidate {
+                        time: 1e-9,
+                        dt: 1e-9,
+                        analysis_step: Some((false, false)),
+                    },
+                    kind,
+                    XspiceCompanionPolicy {
+                        coefficients: &backward_euler(),
+                        xyce_one_step_order2: false,
+                    },
+                    None,
+                )
+                .unwrap();
+            let error = trial
+                .settle(if cancelled { &abort } else { &NoAbort }, &solution)
+                .unwrap_err();
+            if cancelled {
+                assert!(matches!(error, SimulationError::Aborted), "{error}");
+                assert_eq!(abort.count(), 5);
+                assert_eq!(abort.polls_after_abort(), 0);
+            } else {
+                assert!(
+                    matches!(error, SimulationError::ResourceLimit(error)
+                    if error.resource == crate::ResourceKind::MixedIntervalEvents
+                        && error.limit == 80 && error.requested == 82),
+                    "{error}"
+                );
+            }
+            assert!(
+                count(&trial.hosts_mut()[0], "first") > 1,
+                "refusal occurs after speculative execution"
+            );
+            drop(trial);
+            assert_eq!(count(&circuit.mixed_signal_hosts[0], "first"), 1);
+            assert_eq!(count(&circuit.mixed_signal_hosts[0], "second"), 1);
+        }
+        circuit
+            .scheduler
+            .mixed_digital_coordinator
+            .as_mut()
+            .unwrap()
+            .set_interval_event_limit(128);
+        let mut retry = circuit
+            .open_trial(
+                Candidate {
+                    time: 1e-9,
+                    dt: 1e-9,
+                    analysis_step: Some((false, false)),
+                },
+                kind,
+                XspiceCompanionPolicy {
+                    coefficients: &backward_euler(),
+                    xyce_one_step_order2: false,
+                },
+                None,
+            )
+            .unwrap();
+        retry.settle(&NoAbort, &solution).unwrap();
+        assert_eq!(count(&retry.hosts_mut()[0], "first"), 65);
+        assert_eq!(count(&retry.hosts_mut()[0], "second"), 65);
+        retry.settle(&NoAbort, &solution).unwrap();
+        assert_eq!(
+            count(&retry.hosts_mut()[0], "first"),
+            65,
+            "settlement does not replay the interval"
+        );
+        if kind == TrialKind::Acceptance {
+            retry.prepare().unwrap().commit();
+        }
+        drop(retry);
+        let expected = if kind == TrialKind::Acceptance { 65 } else { 1 };
+        assert_eq!(count(&circuit.mixed_signal_hosts[0], "first"), expected);
+        assert_eq!(count(&circuit.mixed_signal_hosts[0], "second"), expected);
+    }
 }

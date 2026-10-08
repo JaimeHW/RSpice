@@ -252,6 +252,7 @@ impl Engine {
             if circuit.has_mixed_signal_hosts() {
                 let (mixed_discontinuity, (discontinuity, history)) = circuit
                     .accept_mixed_transient_with(
+                        abort,
                         time,
                         dt,
                         solution,
@@ -620,6 +621,7 @@ mod tests {
                     matrix.values_mut().fill(0.0);
                     circuit
                         .stamp_mixed_transient_trial(
+                            &NoAbort,
                             &mut matrix,
                             &mut probe_rhs,
                             time,

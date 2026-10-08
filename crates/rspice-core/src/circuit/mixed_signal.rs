@@ -281,6 +281,7 @@ impl CircuitData {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn stamp_mixed_transient_trial(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         time: Value,
@@ -291,6 +292,7 @@ impl CircuitData {
         final_step: bool,
     ) -> Result<(), SimulationError> {
         self.stamp_mixed_trial(
+            abort,
             matrix,
             rhs,
             Candidate {
@@ -304,8 +306,10 @@ impl CircuitData {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn stamp_mixed_trial(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         candidate: Candidate,
@@ -325,7 +329,7 @@ impl CircuitData {
         };
         let mut trial = self.open_trial(candidate, kind, companion, None)?;
         let stamped = (|| {
-            trial.settle(voltages)?;
+            trial.settle(abort, voltages)?;
             if trial.has_code_models() {
                 // The same settled code-model candidate supplies its stamps.
                 trial
@@ -367,6 +371,7 @@ impl CircuitData {
         time: Value,
     ) -> Result<(), SimulationError> {
         self.stamp_mixed_trial(
+            &crate::abort_signal::NoAbort,
             matrix,
             rhs,
             Candidate {
@@ -391,6 +396,7 @@ impl CircuitData {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn accept_mixed_transient_with<T>(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         time: Value,
         dt: Value,
         solution: &mut [Value],
@@ -427,7 +433,7 @@ impl CircuitData {
             let mut wave = None;
             let mut moved: Vec<usize> = Vec::new();
             for pass in 0..MAX_BOUNDARY_SETTLE_PASSES {
-                wave = trial.settle_projection_pass(solution, pass, &moved, wave.take())?;
+                wave = trial.settle_projection_pass(abort, solution, pass, &moved, wave.take())?;
                 let num_nodes = trial.circuit_mut().num_nodes();
                 let (updates, refusal) = trial.circuit_mut().project_xspice_voltage_outputs(
                     solution,
@@ -455,7 +461,7 @@ impl CircuitData {
                 )));
             }
         } else {
-            trial.settle(solution)?;
+            trial.settle(abort, solution)?;
         }
         let discontinuity = trial.evaluate(solution)?;
         // Reserve every HDL candidate before native state can be promoted.
@@ -510,7 +516,7 @@ impl CircuitData {
                 },
                 None,
             )?;
-            trial.settle(voltages)?;
+            trial.settle(&crate::abort_signal::NoAbort, voltages)?;
             discontinuity |= trial.evaluate(voltages)?;
             trial.prepare()?.commit();
         }
@@ -530,6 +536,7 @@ impl CircuitData {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn visit_mixed_transient_candidate_task(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         time: Value,
         dt: Value,
         voltages: &[Value],
@@ -556,7 +563,7 @@ impl CircuitData {
         )?;
         let inspected = (|| {
             let mut discontinuity = false;
-            trial.settle(voltages)?;
+            trial.settle(abort, voltages)?;
             // An A/D crossing this settled trial placed strictly inside its
             // own interval is a root the solver is asked to land on.
             let mut refinement = trial.interior_root(minimum_timestep)?;

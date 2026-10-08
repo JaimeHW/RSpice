@@ -61,13 +61,21 @@ impl DigitalActiveParticipant for InterpolatedParticipant<'_, '_> {
 }
 
 impl MixedDigitalCoordinator {
+    pub(crate) fn set_interval_event_limit(&mut self, limit: usize) {
+        self.max_interval_events = limit;
+    }
+
     fn capture_observation_probes(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
     ) -> Result<Vec<Option<f64>>, MixedSignalError> {
         let mut samples = vec![None; self.probes.len()];
-        for (host, map) in hosts.iter_mut().zip(&self.maps) {
+        for (index, (host, map)) in hosts.iter_mut().zip(&self.maps).enumerate() {
+            if index.is_multiple_of(16) && abort.is_aborted() {
+                return Err(MixedSignalError::Aborted);
+            }
             host.sample_discrete_inputs()?;
             let classify = if host.trial.as_ref().is_some_and(|trial| trial.probe) {
                 analog_trial_error
@@ -137,6 +145,7 @@ impl MixedDigitalCoordinator {
 
     pub(super) fn publish_observed_interval(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         cursor: &mut SharedTrialCursor,
         hosts: &mut [MixedSignalHost],
         solution: &[f64],
@@ -145,9 +154,12 @@ impl MixedDigitalCoordinator {
         if cursor.observation_refinement.is_some() {
             return Ok(false);
         }
-        let endpoint = self.capture_observation_probes(hosts, solution)?;
+        let endpoint = self.capture_observation_probes(abort, hosts, solution)?;
         let mut observers = Vec::with_capacity(cursor.observers.len());
         for (index, observer) in self.digital.plan().absdelta.iter().enumerate() {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                return Err(MixedSignalError::Aborted);
+            }
             let mut values = [0.0; 5];
             for (value, probe) in values.iter_mut().zip(observer.operands) {
                 *value = endpoint[usize::from(probe)].ok_or_else(|| {
@@ -187,9 +199,10 @@ impl MixedDigitalCoordinator {
         let mut published = false;
         let mut external_endpoint =
             participant.is_some() && cursor.observation_time != Some(cursor.time);
-        let mut work = 0;
-        let limit = self.digital.scheduler_limits().max_events_per_tick;
         loop {
+            if abort.is_aborted() {
+                return Err(MixedSignalError::Aborted);
+            }
             let observation_time = observers
                 .iter()
                 .filter_map(|entry| entry.next.map(|event| event.sample.time))
@@ -217,18 +230,37 @@ impl MixedDigitalCoordinator {
             let Some(time) = next else {
                 break;
             };
-            work += 1;
-            if work > limit {
-                return Err(MixedSignalError::TrialProtocol {
-                    detail: format!(
-                        "absdelta interval exceeds the configured event-work budget of {limit}"
-                    ),
-                });
-            }
+            // Count independent observer/ADC publications even when they share
+            // an instant. A scheduled or external-only slot also consumes work.
+            // This counter belongs to the trial, not one settlement call.
+            let activations = observers
+                .iter()
+                .filter(|observer| observer.next.is_some_and(|event| event.sample.time == time))
+                .count()
+                .saturating_add(
+                    self.publications[adc..]
+                        .iter()
+                        .take_while(|entry| entry.crossing == time)
+                        .count(),
+                )
+                .saturating_add(usize::from(scheduled == Some(time)))
+                .saturating_add(usize::from(external_time == Some(time)))
+                .max(1);
+            let requested = cursor.observation_work.saturating_add(activations);
+            crate::resource::ResourceLimitError::ensure(
+                crate::ResourceKind::MixedIntervalEvents,
+                requested,
+                self.max_interval_events,
+            )
+            .map_err(MixedSignalError::ResourceLimit)?;
+            cursor.observation_work = requested;
             let bank = self.interpolate_observation_probes(cursor, &endpoint, time);
             let mut drives = Vec::new();
             let mut publication_tick = cursor.published_tick;
             for (index, observer) in observers.iter_mut().enumerate() {
+                if index.is_multiple_of(64) && abort.is_aborted() {
+                    return Err(MixedSignalError::Aborted);
+                }
                 if let Some(event) = observer.next
                     && event.sample.time == time
                 {

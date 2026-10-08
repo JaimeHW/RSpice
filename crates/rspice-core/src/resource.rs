@@ -61,6 +61,8 @@ pub enum ResourceKind {
     TransportHistoryBytes,
     /// Accepted records retained by one transport-delay site after pruning.
     TransportHistoryRecords,
+    /// Publications and queued time slots processed in an interpolated mixed interval.
+    MixedIntervalEvents,
     /// Concurrent worker threads used by one engine or frontend workload.
     ParallelWorkers,
     /// Independent runs requested from a batch analysis.
@@ -87,6 +89,7 @@ impl ResourceKind {
             Self::ResultValues => "result_values",
             Self::TransportHistoryBytes => "transport_history_bytes",
             Self::TransportHistoryRecords => "transport_history_records",
+            Self::MixedIntervalEvents => "mixed_interval_events",
             Self::ParallelWorkers => "parallel_workers",
             Self::BatchRuns => "batch_runs",
         }
@@ -513,6 +516,11 @@ pub struct ResourceLimits {
     /// and fixed-size device state. Caller-owned input checkpoints are excluded;
     /// their restored copies must fit the new analysis's budget.
     pub max_transport_history_bytes: usize,
+    /// Maximum work in one interpolated mixed observer trial interval. Each
+    /// observer/ADC publication and each queued HDL/external time slot counts;
+    /// simultaneous independent observers count separately. Inner slot work
+    /// retains its scheduler limits. Rejection releases the interval count.
+    pub max_mixed_interval_events: usize,
     /// Maximum concurrent worker threads used by one engine or frontend workload.
     pub max_parallel_workers: usize,
     /// Maximum independent runs in one batch analysis.
@@ -537,6 +545,7 @@ impl Default for ResourceLimits {
             max_analysis_points: 2_000_000,
             max_result_values: 25_000_000,
             max_transport_history_bytes: 256 * 1024 * 1024,
+            max_mixed_interval_events: 1_000_000,
             max_parallel_workers: 64,
             max_batch_runs: 10_000,
         }
@@ -562,6 +571,7 @@ impl ResourceLimits {
             max_analysis_points: usize::MAX,
             max_result_values: usize::MAX,
             max_transport_history_bytes: usize::MAX,
+            max_mixed_interval_events: usize::MAX,
             max_parallel_workers: usize::MAX,
             max_batch_runs: usize::MAX,
         }

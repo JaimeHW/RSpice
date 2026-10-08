@@ -434,5 +434,11 @@ pub(in crate::circuit) fn swap_candidate_ledgers(
 pub(super) fn shared_error(
     error: crate::xspice::verilog::MixedSignalError,
 ) -> crate::SimulationError {
-    crate::SimulationError::Circuit(format!("mixed circuit digital execution: {error}"))
+    match error {
+        crate::xspice::verilog::MixedSignalError::Aborted => crate::SimulationError::Aborted,
+        crate::xspice::verilog::MixedSignalError::ResourceLimit(error) => error.into(),
+        error => {
+            crate::SimulationError::Circuit(format!("mixed circuit digital execution: {error}"))
+        }
+    }
 }

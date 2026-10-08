@@ -1168,3 +1168,30 @@ endmodule
     assert!((rise.time - 126.5e-12).abs() < 1e-15, "{trace:?}");
     assert!((fall.time - 251.5e-12).abs() < 1e-15, "{trace:?}");
 }
+
+
+#[test]
+fn absdelta_interval_budget_reaches_engine_execution_as_a_resource_error() {
+    let source = Source::new(
+        r#"
+module observer(a);
+ input a; electrical a; integer count=0;
+ always @(absdelta(V(a),0.125)) count=count+1;
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* interval budget\nV1 a 0 PWL(0 0 1n 1)\nX1 a observer\n.va \"{}\" observer module=observer\n.end\n", source.path()
+    )).unwrap();
+    let mut config = rspice_core::SimulationConfig::default();
+    config.resource_limits.max_mixed_interval_events = 0;
+    let error = Engine::new(config)
+        .run_tran(&deck, 1e-9, 400e-12)
+        .unwrap_err();
+    assert!(
+        matches!(error, rspice_core::SimulationError::ResourceLimit(error)
+        if error.resource == rspice_core::ResourceKind::MixedIntervalEvents
+            && error.limit == 0 && error.requested == 1),
+        "{error}"
+    );
+}

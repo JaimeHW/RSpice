@@ -4516,6 +4516,7 @@ impl Engine {
         if resume.is_none() && !uic_requested && circuit.has_any_veriloga_devices() {
             Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
             origin_model_finish = Self::inspect_transient_model_candidate(
+                abort,
                 &mut circuit,
                 0.0,
                 0.0,
@@ -4625,6 +4626,7 @@ impl Engine {
         if resume.is_none() && uic_requested && circuit.has_any_veriloga_devices() {
             Self::evaluate_analog_candidate(&mut circuit, &mut matrix, &solution)?;
             origin_model_finish = Self::inspect_transient_model_candidate(
+                abort,
                 &mut circuit,
                 0.0,
                 0.0,
@@ -7602,6 +7604,7 @@ impl Engine {
                     if circuit.has_any_veriloga_devices() {
                         Self::evaluate_analog_candidate(&mut circuit, &mut matrix, $candidate_solution)?;
                         let model_candidate = Self::inspect_transient_model_candidate(
+                            abort,
                             &mut circuit, $candidate_time, dt, $candidate_solution,
                             XspiceCompanionPolicy { coefficients: &coeff, xyce_one_step_order2 },
                             timestep.hard_min_dt(), analysis_initial_step, analysis_final_step,
@@ -7933,6 +7936,8 @@ impl Engine {
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 let transient_system_context = residual::TransientSystemContext {
+                    #[cfg(feature = "veriloga")]
+                    abort,
                     bjt_phase: trial_phase_context,
                     source_time_side: trial_source_side,
                     coeff: &coeff,
@@ -8831,6 +8836,8 @@ impl Engine {
                                     step_time,
                                     dt,
                                     &residual::TransientSystemContext {
+                                        #[cfg(feature = "veriloga")]
+                                        abort,
                                         bjt_phase: trial_phase_context,
                                         source_time_side: trial_source_side,
                                         coeff: &coeff,
@@ -9047,6 +9054,8 @@ impl Engine {
                         step_time,
                         dt,
                         &residual::TransientSystemContext {
+                            #[cfg(feature = "veriloga")]
+                            abort,
                             bjt_phase: trial_phase_context,
                             source_time_side: trial_source_side,
                             coeff: &coeff,

@@ -59,6 +59,8 @@ fn require_cached_source_side(
 /// context is constructed locally at each use site (the histories are
 /// mutated when a step is accepted) and dropped before the commit walks.
 pub(super) struct TransientSystemContext<'a> {
+    #[cfg(feature = "veriloga")]
+    pub(super) abort: &'a dyn AbortSignal,
     /// Independent-source equation convention for this trial, also used by
     /// physical residual proofs and source-constraint projection.
     pub(super) source_time_side: SourceTimeSide,
@@ -1859,6 +1861,7 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         if circuit.has_mixed_signal_hosts() {
             circuit.stamp_mixed_transient_trial(
+                ctx.abort,
                 matrix,
                 rhs,
                 time,
@@ -3104,6 +3107,8 @@ D2 in out DMOD
         let coeff = CompanionCoefficients::backward_euler();
         let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
         let mut ctx = TransientSystemContext {
+            #[cfg(feature = "veriloga")]
+            abort: &crate::abort_signal::NoAbort,
             bjt_phase: Default::default(),
             source_time_side,
             coeff: &coeff,
@@ -3326,6 +3331,8 @@ M1 d g 0 0 NM W=10u L=1u
         let coeff = CompanionCoefficients::backward_euler();
         let baseline_diag_gmin = engine.config.convergence_config.gmin_target.max(0.0);
         let mut ctx = TransientSystemContext {
+            #[cfg(feature = "veriloga")]
+            abort: &crate::abort_signal::NoAbort,
             bjt_phase: Default::default(),
             source_time_side,
             coeff: &coeff,
@@ -3915,6 +3922,8 @@ Q1 C B E 0 QN
         let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
+            #[cfg(feature = "veriloga")]
+            abort: &crate::abort_signal::NoAbort,
             bjt_phase: Default::default(),
             source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
@@ -4363,6 +4372,8 @@ Q1 C B E 0 QN
             let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
             let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
+                #[cfg(feature = "veriloga")]
+                abort: &crate::abort_signal::NoAbort,
                 bjt_phase: Default::default(),
                 source_time_side: crate::circuit::SourceTimeSide::Published,
                 coeff: &coeff,

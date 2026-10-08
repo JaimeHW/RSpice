@@ -278,6 +278,7 @@ impl Engine {
 
     #[allow(clippy::too_many_arguments)]
     pub(super) fn inspect_transient_model_candidate(
+        abort: &dyn AbortSignal,
         circuit: &mut CircuitData,
         time: f64,
         dt: f64,
@@ -316,6 +317,7 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         let (mixed_refinement_time, mixed_discontinuity) = circuit
             .visit_mixed_transient_candidate_task(
+                abort,
                 time,
                 dt,
                 solution,
@@ -330,6 +332,7 @@ impl Engine {
         #[cfg(not(feature = "veriloga"))]
         let (mixed_refinement_time, mixed_discontinuity) = (None, false);
         let _ = (
+            abort,
             dt,
             solution,
             companion,
@@ -350,6 +353,7 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
             #[cfg(feature = "veriloga")]
             circuit.visit_mixed_transient_candidate_task(
+                abort,
                 time,
                 dt,
                 solution,

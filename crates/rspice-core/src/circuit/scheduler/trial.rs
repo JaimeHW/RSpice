@@ -69,6 +69,8 @@ pub(in crate::circuit) fn mixed_error(instance: &str, error: MixedSignalError) -
     // including a non-finite value at an ACCEPTED point, which only
     // `MixedSignalHost::stamp_trial` can ever produce this variant for.
     match error {
+        MixedSignalError::Aborted => SimulationError::Aborted,
+        MixedSignalError::ResourceLimit(error) => error.into(),
         MixedSignalError::AnalogNonFinite { .. } => SimulationError::from(
             crate::device::StampError::nonfinite_trial(instance, message),
         ),
@@ -356,7 +358,11 @@ impl Trial<'_> {
     /// The one settle of a probe, an inspection, an operating point and an
     /// uncoupled acceptance; the coupled acceptance reaches the same body once
     /// per projection pass through [`Self::settle_projection_pass`].
-    pub(in crate::circuit) fn settle(&mut self, solution: &[Value]) -> Result<(), SimulationError> {
+    pub(in crate::circuit) fn settle(
+        &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
         let Some(bindings) = self.bindings.clone() else {
             let Self {
                 coordinator,
@@ -365,6 +371,7 @@ impl Trial<'_> {
                 ..
             } = self;
             return settle_lanes(
+                abort,
                 coordinator.as_mut().expect("an open trial owns its wheel"),
                 cursor.as_mut().expect("an open trial owns its cursor"),
                 hosts,
@@ -404,6 +411,7 @@ impl Trial<'_> {
             resources,
         );
         settle_lanes(
+            abort,
             coordinator.as_mut().expect("an open trial owns its wheel"),
             cursor.as_mut().expect("an open trial owns its cursor"),
             hosts,
@@ -425,6 +433,7 @@ impl Trial<'_> {
     /// does not undo the first one.
     pub(in crate::circuit) fn settle_projection_pass(
         &mut self,
+        abort: &dyn crate::abort_signal::AbortSignal,
         solution: &[Value],
         pass: u32,
         moved: &[usize],
@@ -478,6 +487,7 @@ impl Trial<'_> {
             )
         };
         settle_lanes(
+            abort,
             coordinator.as_mut().expect("an open trial owns its wheel"),
             cursor.as_mut().expect("an open trial owns its cursor"),
             hosts,
@@ -770,6 +780,7 @@ fn mixed_integration_coefficients(
 /// bridges against the candidate solution, publish the A/D decisions in
 /// ascending crossing order and run the participants to quiet.
 fn settle_lanes(
+    abort: &dyn crate::abort_signal::AbortSignal,
     coordinator: &mut MixedDigitalCoordinator,
     cursor: &mut SharedTrialCursor,
     hosts: &mut [MixedSignalHost],
@@ -844,10 +855,14 @@ fn settle_lanes(
         // All A/D decisions are published before any dependent HDL process
         // runs. Analog equations read the resulting bank only after quiet.
         moved |= match &mut participant {
-            Some(participant) => {
-                coordinator.publish_adc_with(cursor, hosts, solution, Some(&mut **participant))
-            }
-            None => coordinator.publish_adc(cursor, hosts, solution),
+            Some(participant) => coordinator.publish_adc_with(
+                abort,
+                cursor,
+                hosts,
+                solution,
+                Some(&mut **participant),
+            ),
+            None => coordinator.publish_adc(abort, cursor, hosts, solution),
         }
         .map_err(shared_error)?;
         moved |= coordinator.synchronize(hosts).map_err(shared_error)?;

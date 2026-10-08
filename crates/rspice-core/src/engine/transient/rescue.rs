@@ -384,6 +384,8 @@ mod tests {
         let accepted = circuit.behavioral_sources.clone();
         let coeff = CompanionCoefficients::backward_euler();
         let ctx = residual::TransientSystemContext {
+            #[cfg(feature = "veriloga")]
+            abort: &crate::abort_signal::NoAbort,
             bjt_phase: Default::default(),
             source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,
@@ -464,6 +466,8 @@ mod tests {
             .unwrap();
         let coeff = CompanionCoefficients::backward_euler();
         let ctx = residual::TransientSystemContext {
+            #[cfg(feature = "veriloga")]
+            abort: &crate::abort_signal::NoAbort,
             bjt_phase: Default::default(),
             source_time_side: crate::circuit::SourceTimeSide::Published,
             coeff: &coeff,

@@ -9632,6 +9632,11 @@ impl Engine {
                         error
                     }
                 })?;
+            if let Some(coordinator) = &mut circuit.scheduler.mixed_digital_coordinator {
+                coordinator.set_interval_event_limit(
+                    self.config.resource_limits.max_mixed_interval_events,
+                );
+            }
             if circuit.has_coupled_event_nets() {
                 // Explicit and generated converters share the same physical
                 // root contract once the complete event domain is enrolled.

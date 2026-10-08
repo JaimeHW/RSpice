@@ -505,6 +505,10 @@ impl fmt::Display for BoundaryNetActivity {
 /// A failure at the mixed transient boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MixedSignalError {
+    /// The caller cancelled work before the trial could commit.
+    Aborted,
+    /// A valid workload exceeded its configured resource budget.
+    ResourceLimit(crate::resource::ResourceLimitError),
     /// Source compilation or analog runtime construction failed.
     Compile { detail: String },
     /// Digital execution failed.
@@ -551,6 +555,8 @@ pub enum MixedSignalError {
 impl fmt::Display for MixedSignalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Aborted => f.write_str("mixed Verilog execution aborted"),
+            Self::ResourceLimit(error) => fmt::Display::fmt(error, f),
             Self::Compile { detail } => write!(f, "mixed Verilog compilation failed: {detail}"),
             Self::Digital(error) => write!(f, "mixed Verilog digital execution failed: {error}"),
             Self::Analog { detail } => write!(f, "mixed Verilog analog execution failed: {detail}"),

@@ -27,6 +27,8 @@ fn source_event_sides_solve_and_prove_distinct_analog_equilibria() {
     let coeff = CompanionCoefficients::backward_euler();
     let static_history = vec![0.0; size];
     let mut ctx = TransientSystemContext {
+        #[cfg(feature = "veriloga")]
+        abort: &crate::abort_signal::NoAbort,
         bjt_phase: Default::default(),
         source_time_side: SourceTimeSide::Published,
         coeff: &coeff,
