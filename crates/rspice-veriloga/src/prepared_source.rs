@@ -26,6 +26,7 @@ pub struct PreparedSourceDependency {
 pub struct PreparedRuntimeSource {
     pub(crate) source_package: String,
     pub(crate) replay_module: Option<smol_str::SmolStr>,
+    pub(crate) replay_configuration: Option<Box<crate::ConnectionConfiguration>>,
     pub(crate) source: String,
     pub(crate) analyzed: crate::semantic::AnalyzedFile,
     pub(crate) dependencies: Vec<PreparedSourceDependency>,
@@ -43,15 +44,40 @@ impl PreparedRuntimeSource {
     /// Input identity for a selected runtime, including preserved assignments.
     pub fn runtime_source_identity(&self, module: Option<&str>) -> CompileResult<[u8; 32]> {
         let compiler = VerilogACompiler::new(self.compiler_options.clone());
-        let module = compiler
-            .select_analyzed_module(&self.analyzed, module.or(self.replay_module.as_deref()))?;
+        let selected = self.selected_module(module)?;
+        let name = match selected {
+            Some(name) if self.analyzed.source.items.iter().any(|item| {
+                matches!(item, crate::ast::Item::ConnectModule(module) if module.name == name)
+            }) => {
+                if self.analyzed.modules.contains_key(name) {
+                    return Err(crate::CompileError::ModuleSelection(format!(
+                        "'{name}' names both an ordinary module and a connect module"
+                    )));
+                }
+                name
+            }
+            _ => compiler.select_analyzed_module(&self.analyzed, selected)?.name.as_str(),
+        };
         Ok(runtime_source_identity(
             &crate::canonical_ir::source_identity(&self.source),
-            &module.name,
+            name,
             &crate::parameter_override::specialization_identity(
                 &self.analyzed.source_specialization,
             ),
         ))
+    }
+
+    // Root assignments were applied during artifact preparation. They cannot be
+    // interpreted as overrides for another module in the retained source.
+    fn selected_module<'a>(&'a self, module: Option<&'a str>) -> CompileResult<Option<&'a str>> {
+        if let (Some(requested), Some(original)) = (module, self.replay_module.as_deref())
+            && requested != original
+        {
+            return Err(crate::CompileError::ModuleSelection(format!(
+                "artifact preparation belongs to module '{original}'; cannot select '{requested}'"
+            )));
+        }
+        Ok(module.or(self.replay_module.as_deref()))
     }
 
     pub fn is_connect_library(&self) -> bool {
@@ -140,7 +166,7 @@ impl PreparedRuntimeSource {
     ) -> CompileResult<CompiledRuntimeFile> {
         VerilogACompiler::new(self.compiler_options.clone()).compile_prepared_runtime_with_control(
             self,
-            module.or(self.replay_module.as_deref()),
+            self.selected_module(module)?,
             Some(configuration),
             control,
         )
@@ -158,7 +184,12 @@ impl PreparedRuntimeSource {
         &self,
         error: &crate::CompileError,
     ) -> Vec<crate::SourceCompileDiagnostic> {
-        self.source_map.diagnostics(&self.source, error)
+        match self.replay_configuration.as_deref() {
+            Some(configuration) => {
+                self.diagnostics_for_error_with_connections(configuration, error)
+            }
+            None => self.source_map.diagnostics(&self.source, error),
+        }
     }
 
     /// Map configured-compilation errors against the frozen device or library.
@@ -169,7 +200,7 @@ impl PreparedRuntimeSource {
         configuration: &crate::ConnectionConfiguration,
         error: &crate::CompileError,
     ) -> Vec<crate::SourceCompileDiagnostic> {
-        let original = self.diagnostics_for_error(error);
+        let original = self.source_map.diagnostics(&self.source, error);
         let external =
             crate::compile_diagnostics(configuration.library().preprocessed_source(), error);
         original
@@ -199,8 +230,8 @@ impl PreparedRuntimeSource {
     ) -> CompileResult<CompiledRuntimeFile> {
         VerilogACompiler::new(self.compiler_options.clone()).compile_prepared_runtime_with_control(
             self,
-            module.or(self.replay_module.as_deref()),
-            None,
+            self.selected_module(module)?,
+            self.replay_configuration.as_deref(),
             control,
         )
     }
@@ -224,6 +255,9 @@ pub(crate) fn runtime_source_identity(
 impl VerilogACompiler {
     /// Recover the exact retained input of an already validated runtime. This
     /// never opens a source path; its containing registration owns provenance.
+    /// The preparation is bound to the artifact's root module and assignments.
+    /// Default compilation reuses its captured connection configuration; an
+    /// explicit configuration replaces that selection.
     pub fn prepare_artifact_runtime_source(
         &self,
         artifact: &crate::canonical_ir::CanonicalIrArtifact,
@@ -264,6 +298,7 @@ impl VerilogACompiler {
         Ok(PreparedRuntimeSource {
             source_package: artifact.metadata.source_package.to_string(),
             replay_module: Some(artifact.hir.module_name.clone()),
+            replay_configuration: artifact.connections.configuration().cloned().map(Box::new),
             source: source.to_owned(),
             analyzed,
             dependencies: Vec::new(),

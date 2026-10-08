@@ -499,6 +499,8 @@ pub enum VirtualSourceError {
     },
     #[error("virtual bundle contains {actual} source bytes; limit is {limit}")]
     BundleTooLarge { actual: usize, limit: usize },
+    #[error("virtual device and connection library contain {actual} expanded source bytes; limit is {limit}")]
+    ExpandedSourceTooLarge { actual: usize, limit: usize },
     #[error("module selection contains {actual} bytes; limit is {limit}")]
     ModuleNameTooLong { actual: usize, limit: usize },
     #[error("virtual runtime artifact integrity failed: {0}")]

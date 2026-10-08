@@ -2046,6 +2046,7 @@ impl VerilogACompiler {
             diagnostics,
             source_package,
             replay_module: None,
+            replay_configuration: None,
             source: preprocessed.source,
             analyzed,
             dependencies,

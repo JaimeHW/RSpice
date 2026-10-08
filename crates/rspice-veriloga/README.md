@@ -140,6 +140,14 @@ Canonical artifacts retain typed root assignments separately from source text;
 reconfiguration and later partial overrides preserve prior assignments and their
 `$param_given` meaning. `prepare_artifact_runtime_source` reconstructs this input
 without filesystem access, with diagnostics labeled as preprocessed coordinates.
+That preparation is bound to its original root module; default replay preserves
+its captured configuration, while an explicit configuration can replace it.
+`PreparedVirtualSource` exposes the same named selection and configured compilation,
+including optional backend qualifications and cancellation. The combined expanded
+device/library input obeys `max_expanded_bytes`; the device's original dependency
+graph stays separate from the library retained in the canonical artifact. The
+virtual runtime contract includes that selection, and external error diagnostics
+carry the exact retained library text labeled as preprocessed coordinates.
 Vector/array connection insertion, inherited discipline resolution across the
 complete hierarchy, and library/view selection remain open.
 

@@ -757,25 +757,35 @@ fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
         enable_ams: true,
         ..Default::default()
     });
-    let own_library = CONFIGURED_LIBRARY
-        .split("connectrules high")
-        .next()
-        .unwrap();
-    let original = compiler
-        .compile_runtime(&format!("{CONFIGURED_DEVICE}\n{own_library}"), Some("top"))
-        .unwrap();
-    let runtime = compiler
-        .specialize_mixed_runtime(&original.canonical_ir, &[("N", 2.0)], &NoPipelineControl)
-        .unwrap();
     let bundle = VirtualSourceBundle::new(
         "rules.vams",
         [VirtualSourceFile::new("rules.vams", CONFIGURED_LIBRARY)],
     )
     .unwrap();
-    let library = compiler
+    let prepared_library = compiler
+        .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+        .unwrap();
+    let low = prepared_library.connection_configuration("low").unwrap();
+    let library = prepared_library.connection_artifact().unwrap();
+    let bundle = VirtualSourceBundle::new(
+        "top.vams",
+        [VirtualSourceFile::new("top.vams", CONFIGURED_DEVICE)],
+    )
+    .unwrap();
+    let mut original = compiler
         .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
         .unwrap()
-        .connection_artifact()
+        .compile_runtime_with_connections("top", &low, &NoPipelineControl)
+        .unwrap();
+    original.runtime =
+        serde_json::from_slice(&serde_json::to_vec(&original.runtime).unwrap()).unwrap();
+    original.validate_integrity().unwrap();
+    let runtime = compiler
+        .specialize_mixed_runtime(
+            &original.runtime.canonical_ir,
+            &[("N", 2.0)],
+            &NoPipelineControl,
+        )
         .unwrap();
     let prefix = format!(
         "__rspice_project__/configured-hierarchy-{}",

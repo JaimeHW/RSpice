@@ -48,6 +48,14 @@ impl PreparedVirtualSource {
         self.prepared.connection_artifact()
     }
 
+    /// Seal one named rule block from this frozen virtual library.
+    pub fn connection_configuration(
+        &self,
+        block: &str,
+    ) -> Result<crate::ConnectionConfiguration, String> {
+        self.prepared.connection_configuration(block)
+    }
+
     pub fn dependency_closure(&self) -> &[VirtualSourceDependency] {
         &self.dependency_closure
     }
@@ -61,20 +69,39 @@ impl PreparedVirtualSource {
     }
 
     pub(crate) fn diagnose(&self, error: CompileError) -> VirtualRuntimeCompileFailure {
-        let diagnostics = self
-            .prepared
-            .diagnostics_for_error(&error)
+        self.diagnose_with_connections(error, None)
+    }
+
+    fn diagnose_with_connections(
+        &self,
+        error: CompileError,
+        configuration: Option<&crate::ConnectionConfiguration>,
+    ) -> VirtualRuntimeCompileFailure {
+        let mapped = match configuration {
+            Some(configuration) => self
+                .prepared
+                .diagnostics_for_error_with_connections(configuration, &error),
+            None => self.prepared.diagnostics_for_error(&error),
+        };
+        let diagnostics = mapped
             .into_iter()
-            .map(|diagnostic| {
+            .zip(crate::compile_diagnostics(&self.prepared.source, &error))
+            .map(|(diagnostic, raw)| {
                 let logical_path = diagnostic
                     .path
                     .map(|path| virtual_source::path_to_logical(std::path::Path::new(&path)));
-                let source = logical_path.as_deref().and_then(|path| {
-                    self.dependency_closure
-                        .iter()
-                        .find(|document| document.logical_path == path)
-                        .map(|document| document.source.clone())
-                });
+                let external = configuration
+                    .filter(|_| raw.span.as_ref().is_some_and(|span| span.source_id == 1));
+                let source = if let Some(configuration) = external {
+                    Some(configuration.library().preprocessed_source().to_owned())
+                } else {
+                    logical_path.as_deref().and_then(|path| {
+                        self.dependency_closure
+                            .iter()
+                            .find(|document| document.logical_path == path)
+                            .map(|document| document.source.clone())
+                    })
+                };
                 crate::VirtualSourceDiagnostic {
                     phase: diagnostic.phase,
                     code: diagnostic.code,
@@ -108,6 +135,42 @@ impl PreparedVirtualSource {
         qualifications: RuntimeQualificationOptions,
         control: &dyn PipelineControl,
     ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
+        self.compile_runtime_selected(module_name, None, qualifications, control)
+    }
+
+    /// Compile using an explicit rule block and its sealed library. External
+    /// library bytes are retained separately from the original device bundle.
+    pub fn compile_runtime_with_connections(
+        &self,
+        module_name: &str,
+        configuration: &crate::ConnectionConfiguration,
+        control: &dyn PipelineControl,
+    ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
+        self.compile_runtime_with_connections_and_qualifications_and_control(
+            module_name,
+            configuration,
+            RuntimeQualificationOptions::NONE,
+            control,
+        )
+    }
+
+    pub fn compile_runtime_with_connections_and_qualifications_and_control(
+        &self,
+        module_name: &str,
+        configuration: &crate::ConnectionConfiguration,
+        qualifications: RuntimeQualificationOptions,
+        control: &dyn PipelineControl,
+    ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
+        self.compile_runtime_selected(module_name, Some(configuration), qualifications, control)
+    }
+
+    fn compile_runtime_selected(
+        &self,
+        module_name: &str,
+        configuration: Option<&crate::ConnectionConfiguration>,
+        qualifications: RuntimeQualificationOptions,
+        control: &dyn PipelineControl,
+    ) -> Result<VirtualRuntimeCompilation, VirtualRuntimeCompileFailure> {
         virtual_source::validate_compile_request(&self.source_bundle, module_name, self.limits)
             .map_err(CompileError::from)
             .map_err(VirtualRuntimeCompileFailure::unmapped)?;
@@ -118,16 +181,55 @@ impl PreparedVirtualSource {
             control,
         );
         *measurements.metrics_mut() = self.prepared.metrics.clone();
+        let configured;
+        let analyzed = if let Some(configuration) = configuration {
+            measurements
+                .checkpoint(PipelinePhase::Semantic)
+                .map_err(CompileError::from)
+                .map_err(VirtualRuntimeCompileFailure::unmapped)?;
+            let library = configuration.library().preprocessed_source();
+            // A transported library is already expanded. Bound the combined
+            // retained input before parsing or cloning either syntax tree.
+            let expanded_bytes = if library == self.prepared.source {
+                self.prepared.source.len()
+            } else {
+                self.prepared.source.len().saturating_add(library.len())
+            };
+            if expanded_bytes > self.limits.max_expanded_bytes {
+                return Err(VirtualRuntimeCompileFailure::unmapped(
+                    crate::VirtualSourceError::ExpandedSourceTooLarge {
+                        actual: expanded_bytes,
+                        limit: self.limits.max_expanded_bytes,
+                    }
+                    .into(),
+                ));
+            }
+            measurements.metrics_mut().preprocessed_bytes =
+                crate::metrics::usize_to_u64(expanded_bytes);
+            configured = configuration
+                .apply(
+                    &self.prepared.source,
+                    &self.prepared.analyzed,
+                    &mut measurements,
+                )
+                .map_err(|error| self.diagnose_with_connections(error, Some(configuration)))?;
+            &configured
+        } else {
+            &self.prepared.analyzed
+        };
         let runtime = compiler
             .compile_runtime_analyzed_measured(
                 &self.prepared.source_package,
                 &self.prepared.source,
-                &self.prepared.analyzed,
+                analyzed,
                 Some(module_name),
                 qualifications,
                 &mut measurements,
             )
-            .map_err(|error| self.diagnose(error))?;
+            .map_err(|error| match configuration {
+                Some(configuration) => self.diagnose_with_connections(error, Some(configuration)),
+                None => self.diagnose(error),
+            })?;
         let compiler_contract_identity = virtual_source::compiler_contract_identity(
             &self.prepared.compiler_options,
             self.source_bundle.root_path(),
@@ -249,6 +351,7 @@ impl VerilogACompiler {
         Ok(PreparedVirtualSource {
             prepared: PreparedRuntimeSource {
                 replay_module: None,
+                replay_configuration: None,
                 source_map: crate::prepared_diagnostics::PreparedSourceMap::new(
                     &preprocessed,
                     |path| {
