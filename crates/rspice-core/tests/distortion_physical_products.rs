@@ -203,3 +203,133 @@ fn diode_harmonics_scale_with_their_volterra_order() {
         );
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn reactive_loading_preserves_small_polynomial_and_cascaded_products() {
+    use rspice_core::{Complex64 as C, SimulationConfig, SpiceDialect};
+
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for (a1, a2, p1, p2) in [(0.01, 0.003, 0.0_f64, 0.0_f64), (0.003, 0.01, 37.0, -61.0)] {
+            for capacitance in [1e-4, 1e-3] {
+                for (quadratic, cubic) in [(0.3, 0.4), (0.3, 0.0), (0.0, 0.0)] {
+                    let deck = Netlist::parse(&format!(
+                        "reactive polynomial distortion\nV1 in 0 DC 0 DISTOF1 {a1} {p1} DISTOF2 {a2} {p2}\n\
+                         R1 in out 1\nB1 out 0 I={{{quadratic}*v(out)^2+{cubic}*v(out)^3}}\n\
+                         C1 out 0 {capacitance}\n.options GMIN=0\n.end\n"
+                    )).unwrap();
+                    for f1 in [1e3, 1.4e3, 2.1e3, 1e4] {
+                        let f2 = 700.0;
+                        // Expand I = q*v^2 + c*v^3 in peak complex phasors.
+                        // These equations include both direct curvature and the
+                        // cascaded quadratic response through the RC feedback.
+                        let linear = |f| C::new(1.0, std::f64::consts::TAU * f * capacitance);
+                        let u1 = C::from_polar(a1, p1.to_radians()) / linear(f1);
+                        let u2 = C::from_polar(a2, p2.to_radians()) / linear(f2);
+                        let h2 = -0.5 * quadratic * u1 * u1 / linear(2.0 * f1);
+                        let sum = -quadratic * u1 * u2 / linear(f1 + f2);
+                        let diff = -quadratic * u1 * u2.conj() / linear(f1 - f2);
+                        let h3 =
+                            -(quadratic * u1 * h2 + 0.25 * cubic * u1 * u1 * u1) / linear(3.0 * f1);
+                        let im3 = -(quadratic * (u1 * diff + u2.conj() * h2)
+                            + 0.75 * cubic * u1 * u1 * u2.conj())
+                            / linear(2.0 * f1 - f2);
+                        for ratio in [None, Some(f2 / f1)] {
+                            let result = engine.run_distortion(&deck, &[f1], ratio).unwrap();
+                            let point = &result.points[0];
+                            let node = point
+                                .fundamental_f1
+                                .node_names
+                                .iter()
+                                .position(|name| name.eq_ignore_ascii_case("out"))
+                                .unwrap();
+                            assert!(
+                                (point.fundamental_f1.voltages[node] - u1).norm()
+                                    < 1e-12 * u1.norm()
+                            );
+                            let products = if ratio.is_some() {
+                                vec![
+                                    (DistortionProduct::Sum, sum),
+                                    (DistortionProduct::Difference, diff),
+                                    (DistortionProduct::ThirdOrderDifference, im3),
+                                ]
+                            } else {
+                                vec![
+                                    (DistortionProduct::SecondHarmonic, h2),
+                                    (DistortionProduct::ThirdHarmonic, h3),
+                                ]
+                            };
+                            for (product, expected) in products {
+                                let actual =
+                                    point.product(product).unwrap().response.voltages[node];
+                                // Do not let an absolute floor hide tiny higher-order
+                                // products. The purely linear case must remain zero.
+                                let tolerance = if product.order() == 2 { 2e-5 } else { 2e-3 };
+                                let error = (actual - expected).norm();
+                                assert!(
+                                    error <= tolerance * expected.norm(),
+                                    "{dialect:?}, C={capacitance}, q={quadratic}, c={cubic}, F1={f1}, \
+                                     A1={a1}, A2={a2}, {product:?}: {actual:?}, expected {expected:?}, error={error}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn saturated_outer_probes_cannot_erase_resolved_local_curvature() {
+    use rspice_core::{Complex64 as C, SimulationConfig, SpiceDialect};
+    let bias = 0.01;
+    let slope = 100.0_f64;
+    let scale = 1e-8;
+    let t = (slope * bias).tanh();
+    let g = 1.0 - t * t;
+    let second = -2.0 * scale * slope.powi(2) * t * g;
+    let third = scale * slope.powi(3) * (-2.0 * g * g + 4.0 * t * t * g);
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for (amplitude, phase) in [(0.001_f64, 0.0_f64), (0.003, 37.0)] {
+            // The local derivatives are nonzero, but distant tanh probes
+            // saturate exactly and would give falsely "precise" zero curvature.
+            let deck = Netlist::parse(&format!(
+                "local saturation curvature\nV1 out 0 DC {bias} DISTOF1 {amplitude} {phase}\n\
+                 B1 out 0 I={{{scale}*tanh({slope}*v(out))}}\n.options GMIN=0\n.end\n"
+            ))
+            .unwrap();
+            let result = engine.run_distortion(&deck, &[1e3], None).unwrap();
+            for (product, derivative, divisor, tolerance) in [
+                (DistortionProduct::SecondHarmonic, second, 4.0, 2e-5),
+                (DistortionProduct::ThirdHarmonic, third, 24.0, 2e-3),
+            ] {
+                let response = &result.points[0].product(product).unwrap().response;
+                let branch = response
+                    .branch_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case("V1"))
+                    .unwrap();
+                let order = product.order() as i32;
+                let expected = -derivative * amplitude.powi(order) / divisor
+                    * C::from_polar(1.0, f64::from(order) * phase.to_radians());
+                let actual = response.currents[branch];
+                assert!(
+                    (actual - expected).norm() < tolerance * expected.norm(),
+                    "{dialect:?} {product:?}: {actual:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+}

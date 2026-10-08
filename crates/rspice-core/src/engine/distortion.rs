@@ -6,6 +6,9 @@
 //! same circuit-wide path and includes mixed derivatives across coupled
 //! device terminals.
 
+mod refinement;
+use refinement::{DerivativeEstimate, OperatorSample, refine};
+
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{
@@ -463,31 +466,16 @@ impl VolterraContext<'_> {
         else {
             return Ok(zero_vector(vector.len()));
         };
-        let h = Value::EPSILON.cbrt();
-        let coarse = self.central_first_difference(output_frequency, &normalized, vector, h)?;
-        let fine = self.central_first_difference(output_frequency, &normalized, vector, 0.5 * h)?;
-        Ok(coarse
-            .iter()
-            .zip(fine.iter())
-            .map(|(coarse, fine)| direction_scale * (4.0 * *fine - *coarse) / 3.0)
-            .collect())
-    }
-
-    fn central_first_difference(
-        &mut self,
-        output_frequency: Value,
-        direction: &[Value],
-        vector: &[Complex64],
-        h: Value,
-    ) -> Result<Vec<Complex64>, SimulationError> {
-        let plus = self.operator_product_at_offset(output_frequency, &[(direction, h)], vector)?;
-        let minus =
-            self.operator_product_at_offset(output_frequency, &[(direction, -h)], vector)?;
-        Ok(plus
-            .iter()
-            .zip(minus.iter())
-            .map(|(plus, minus)| (*plus - *minus) / (2.0 * h))
-            .collect())
+        refine(Value::EPSILON.cbrt(), self.abort, |h| {
+            let plus =
+                self.operator_product_at_offset(output_frequency, &[(&normalized, h)], vector)?;
+            let minus =
+                self.operator_product_at_offset(output_frequency, &[(&normalized, -h)], vector)?;
+            Ok(DerivativeEstimate::from_stencil(
+                &[(&plus, 1.0), (&minus, -1.0)],
+                direction_scale / (2.0 * h),
+            ))
+        })
     }
 
     fn real_second_operator_derivative(
@@ -507,31 +495,32 @@ impl VolterraContext<'_> {
         else {
             return Ok(zero_vector(vector.len()));
         };
-        let h = Value::EPSILON.sqrt().sqrt();
-        let pp = self.operator_product_at_offset(
-            output_frequency,
-            &[(&first, h), (&second, h)],
-            vector,
-        )?;
-        let pm = self.operator_product_at_offset(
-            output_frequency,
-            &[(&first, h), (&second, -h)],
-            vector,
-        )?;
-        let mp = self.operator_product_at_offset(
-            output_frequency,
-            &[(&first, -h), (&second, h)],
-            vector,
-        )?;
-        let mm = self.operator_product_at_offset(
-            output_frequency,
-            &[(&first, -h), (&second, -h)],
-            vector,
-        )?;
-        let scale = first_scale * second_scale / (4.0 * h * h);
-        Ok((0..vector.len())
-            .map(|index| scale * (pp[index] - pm[index] - mp[index] + mm[index]))
-            .collect())
+        refine(Value::EPSILON.sqrt().sqrt(), self.abort, |h| {
+            let pp = self.operator_product_at_offset(
+                output_frequency,
+                &[(&first, h), (&second, h)],
+                vector,
+            )?;
+            let pm = self.operator_product_at_offset(
+                output_frequency,
+                &[(&first, h), (&second, -h)],
+                vector,
+            )?;
+            let mp = self.operator_product_at_offset(
+                output_frequency,
+                &[(&first, -h), (&second, h)],
+                vector,
+            )?;
+            let mm = self.operator_product_at_offset(
+                output_frequency,
+                &[(&first, -h), (&second, -h)],
+                vector,
+            )?;
+            Ok(DerivativeEstimate::from_stencil(
+                &[(&pp, 1.0), (&pm, -1.0), (&mp, -1.0), (&mm, 1.0)],
+                first_scale * second_scale / (4.0 * h * h),
+            ))
+        })
     }
 
     fn operator_product_at_offset(
@@ -539,7 +528,7 @@ impl VolterraContext<'_> {
         output_frequency: Value,
         offsets: &[(&[Value], Value)],
         vector: &[Complex64],
-    ) -> Result<Vec<Complex64>, SimulationError> {
+    ) -> Result<OperatorSample, SimulationError> {
         check_abort(self.abort)?;
         let mut state = self.operating_state.to_vec();
         for &(direction, coefficient) in offsets {
@@ -568,7 +557,20 @@ impl VolterraContext<'_> {
         let product = operator.multiply_vector(vector)?;
         ensure_finite_vector(&product, "perturbed small-signal operator product")?;
         check_abort(self.abort)?;
-        Ok(product)
+        let mut roundoff = Vec::with_capacity(product.len());
+        for row in 0..product.len() {
+            check_abort(self.abort)?;
+            let entries = operator.row_entries(row)?;
+            let operations = 8.0 * entries.len() as Value + 16.0;
+            let scale: Value = entries
+                .map(|(column, coefficient)| coefficient.norm() * vector[column].norm())
+                .sum();
+            roundoff.push(operations * Value::EPSILON * scale);
+        }
+        Ok(OperatorSample {
+            values: product,
+            roundoff,
+        })
     }
 }
 
