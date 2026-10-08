@@ -97,6 +97,7 @@ pub mod codegen;
 mod complex_arithmetic;
 pub mod connect;
 mod connection_artifact;
+mod connection_configuration;
 pub mod disciplines;
 pub mod error;
 pub mod expr_converter;
@@ -219,6 +220,7 @@ pub struct ConnectSpecification {
 }
 
 pub use connection_artifact::ConnectionLibraryArtifact;
+pub use connection_configuration::ConnectionConfiguration;
 pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency};
 pub use prepared_virtual_source::PreparedVirtualSource;
 pub use source_diagnostics::SourceCompileDiagnostic;
@@ -829,11 +831,21 @@ impl VerilogACompiler {
             self.options.performance_budget.clone(),
             control,
         );
-        self.compile_runtime_specialized_measured(
+        let mut analyzed = self.analyze_preprocessed_with_parameters(
             &artifact.metadata.source_package,
             source,
             Some(&artifact.hir.module_name),
             parameters,
+            &mut measurements,
+        )?;
+        if let Some(configuration) = artifact.connections.configuration() {
+            analyzed = configuration.apply(source, &analyzed, &mut measurements)?;
+        }
+        self.compile_runtime_analyzed_measured(
+            &artifact.metadata.source_package,
+            source,
+            &analyzed,
+            Some(&artifact.hir.module_name),
             RuntimeQualificationOptions::default(),
             &mut measurements,
         )
@@ -905,8 +917,20 @@ impl VerilogACompiler {
             &report.targets,
             qualifications,
         );
-        report.diagnostics =
-            runtime_report::semantic_warning_diagnostics(preprocessed, &analyzed.warnings);
+        report.diagnostics = analyzed
+            .warnings
+            .iter()
+            .flat_map(|warning| {
+                let source = analyzed
+                    .connection_configuration
+                    .as_deref()
+                    .filter(|_| warning.span.source.raw() == 1)
+                    .map_or(preprocessed, |configuration| {
+                        configuration.library().preprocessed_source()
+                    });
+                runtime_report::semantic_warning_diagnostics(source, std::slice::from_ref(warning))
+            })
+            .collect();
         measurements.record(PipelinePhase::RuntimeQualification, phase_started.elapsed())?;
         report.enforce_fallback_policy(qualifications)?;
         measurements.checkpoint(PipelinePhase::IntegrityValidation)?;
@@ -1278,7 +1302,13 @@ impl VerilogACompiler {
         )
         .map_err(Self::canonical_ir_error)?
         .with_digital(digital);
-        if analyzed.source.items.iter().any(|item| {
+        if let Some(configuration) = analyzed.connection_configuration.as_deref() {
+            artifact = artifact.with_connection_configuration(
+                source,
+                configuration,
+                module.hierarchical_connections,
+            );
+        } else if analyzed.source.items.iter().any(|item| {
             matches!(
                 item,
                 ast::Item::ConnectModule(_) | ast::Item::ConnectRules(_)
@@ -1385,7 +1415,8 @@ impl VerilogACompiler {
             source
                 .items
                 .insert(index + 1, ast::Item::Module(module.clone()));
-            let promoted = SemanticAnalyzer::new().analyze(&source)?;
+            let mut promoted = SemanticAnalyzer::new().analyze(&source)?;
+            promoted.connection_configuration = analyzed.connection_configuration.clone();
             let selected = self.select_analyzed_module(&promoted, Some(name))?;
             return semantic::retain_packed_parameters(semantic::lower_flow_probes(
                 semantic::elaborate_executable_module(&promoted, selected)?,
@@ -1943,6 +1974,7 @@ impl VerilogACompiler {
         &self,
         prepared: &PreparedRuntimeSource,
         module_name: Option<&str>,
+        configuration: Option<&ConnectionConfiguration>,
         control: &dyn PipelineControl,
     ) -> CompileResult<CompiledRuntimeFile> {
         let mut measurements = metrics::MetricsRecorder::with_control(
@@ -1952,7 +1984,15 @@ impl VerilogACompiler {
         );
         *measurements.metrics_mut() = prepared.metrics.clone();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
-        let executable = self.select_executable_module(&prepared.analyzed, module_name)?;
+        let analyzed = match configuration {
+            Some(configuration) => std::borrow::Cow::Owned(configuration.apply(
+                &prepared.source,
+                &prepared.analyzed,
+                &mut measurements,
+            )?),
+            None => std::borrow::Cow::Borrowed(&prepared.analyzed),
+        };
+        let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&prepared.source).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
@@ -1974,15 +2014,34 @@ impl VerilogACompiler {
         let canonical_ir = self.build_canonical_ir_artifact_from_module(
             &prepared.source_package,
             &prepared.source,
-            &prepared.analyzed,
+            &analyzed,
             &executable,
             &mut measurements,
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
 
+        let mut diagnostics = prepared.diagnostics.clone();
+        if let Some(configuration) = configuration {
+            for warning in analyzed
+                .warnings
+                .iter()
+                .filter(|warning| warning.span.source.raw() == 1)
+            {
+                diagnostics.extend(
+                    runtime_report::semantic_warning_diagnostics(
+                        configuration.library().preprocessed_source(),
+                        std::slice::from_ref(warning),
+                    )
+                    .into_iter()
+                    .map(|diagnostic| {
+                        connection_configuration::library_diagnostic(configuration, diagnostic)
+                    }),
+                );
+            }
+        }
         Ok(CompiledRuntimeFile {
-            diagnostics: prepared.diagnostics.clone(),
+            diagnostics,
             model,
             canonical_ir,
             dependencies: prepared

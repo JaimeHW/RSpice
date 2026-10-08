@@ -126,10 +126,19 @@ Selected authored connect bodies execute through the shared mixed runtime at
 deck boundaries and typed scalar HDL hierarchy boundaries. Internal insertion
 uses the source closure's rules after parameter/generate specialization and
 preserves merged/split grouping, authored loading, and real-net resolution.
-Vector/array connection insertion, inherited discipline resolution across the
-complete hierarchy, and rebinding internal connections to separately selected
-external rule libraries remain implementation work. A deck selection that differs
-from already compiled internal connection rules reports an explicit error.
+`PreparedRuntimeSource::connection_configuration(name)` seals an explicit named
+selection. `compile_runtime_with_connections` applies that selection before
+hierarchy elaboration, including a separately prepared library and its helpers.
+The canonical artifact retains both the original device source and the selected
+library/block; parameter specialization replays that exact configuration. Library
+compiler directives retain their own scope, conflicting physical definitions are
+rejected, and external diagnostics name the retained preprocessed library.
+
+Automatic deck-wide discovery must still be moved ahead of compilation to use
+this API for cold sources and rebind cached devices. A deck selection differing
+from already compiled internal connections is rejected until re-elaboration has
+occurred. Vector/array connection insertion, inherited discipline resolution
+across the complete hierarchy, and library/view selection remain open.
 
 `prepare_file_runtime_source` freezes one analyzed file/include closure before
 module selection. It can describe a standalone connection library or compile

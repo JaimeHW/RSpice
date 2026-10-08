@@ -63,23 +63,57 @@ pub enum CanonicalConnectionContext {
     Source(SmolStr),
     /// The source's selected rules are already part of the executable hierarchy.
     ElaboratedSource(SmolStr),
+    /// The original device closure plus an explicit selected library/block.
+    Configured {
+        source: SmolStr,
+        configuration: Box<crate::ConnectionConfiguration>,
+        elaborated: bool,
+    },
 }
 
 impl CanonicalConnectionContext {
     pub fn source(&self) -> Option<&str> {
         match self {
             Self::None => None,
-            Self::Source(source) | Self::ElaboratedSource(source) => Some(source),
+            Self::Source(source)
+            | Self::ElaboratedSource(source)
+            | Self::Configured { source, .. } => Some(source),
         }
     }
 
     pub fn is_elaborated(&self) -> bool {
-        matches!(self, Self::ElaboratedSource(_))
+        matches!(
+            self,
+            Self::ElaboratedSource(_)
+                | Self::Configured {
+                    elaborated: true,
+                    ..
+                }
+        )
+    }
+
+    pub fn configuration(&self) -> Option<&crate::ConnectionConfiguration> {
+        match self {
+            Self::Configured { configuration, .. } => Some(configuration),
+            _ => None,
+        }
     }
 
     fn identity(&self) -> [u8; 32] {
         match self {
             Self::None => [0; 32],
+            Self::Configured {
+                source,
+                configuration,
+                elaborated,
+            } => {
+                let mut hash = blake3::Hasher::new();
+                hash.update(b"rspice.configured-connections\0");
+                hash.update(blake3::hash(source.as_bytes()).as_bytes());
+                hash.update(&configuration.identity());
+                hash.update(&[u8::from(*elaborated)]);
+                *hash.finalize().as_bytes()
+            }
             Self::Source(source) => *blake3::hash(source.as_bytes()).as_bytes(),
             Self::ElaboratedSource(source) => {
                 let mut hash = blake3::Hasher::new();
@@ -157,6 +191,21 @@ impl CanonicalIrArtifact {
         self
     }
 
+    pub(crate) fn with_connection_configuration(
+        mut self,
+        source: &str,
+        configuration: &crate::ConnectionConfiguration,
+        elaborated: bool,
+    ) -> Self {
+        self.connections = CanonicalConnectionContext::Configured {
+            source: source.into(),
+            configuration: Box::new(configuration.clone()),
+            elaborated,
+        };
+        self.connection_identity = self.connections.identity();
+        self
+    }
+
     pub fn validate(&self) -> IrValidationResult {
         let mut diagnostics =
             validate_parts(&self.metadata, &self.hir, &self.mir, &self.noise_sources);
@@ -182,6 +231,11 @@ impl CanonicalIrArtifact {
             diagnostics.push(artifact_error(
                 "elaboration-bound parameters require retained parameter source",
             ));
+        }
+        if let Some(configuration) = self.connections.configuration()
+            && let Err(error) = configuration.validate_integrity()
+        {
+            diagnostics.push(artifact_error(error));
         }
         let connection_identity = self.connections.identity();
         if self.connection_identity != connection_identity {

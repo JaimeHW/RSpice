@@ -454,3 +454,174 @@ endconnectrules
         }
     }
 }
+
+
+#[test]
+fn configured_hierarchy_replays_library_and_block_after_transport_and_specialization() {
+    use rspice_veriloga::{CompilerOptions, NoPipelineControl, VerilogACompiler};
+    const DEVICE: &str = r#"
+`timescale 1ns/1ps
+`default_transition 9n
+module source(q);
+ output q; logic q; reg q;
+ initial begin q=0; #0.1 q=1; end
+endmodule
+module top(p);
+ inout p; electrical p;
+ parameter integer N=1;
+ source first(p);
+ generate if (N==2) begin : extra
+  source second(p);
+ end endgenerate
+endmodule
+"#;
+    const LIBRARY: &str = r#"
+module stage(d,a);
+ input d; logic d;
+ output a; electrical a;
+ parameter real level=1;
+ analog I(a)<+(V(a)-transition(d ? level : 0.0))/1000;
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ parameter real level=1;
+ stage #(.level(level)) body(d,a);
+endmodule
+connectrules low;
+ connect drive split #(.level(1.0));
+endconnectrules
+connectrules high;
+ connect drive split #(.level(3.0));
+endconnectrules
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for external in [false, true] {
+        let device = Source::new(&if external {
+            DEVICE.to_owned()
+        } else {
+            format!("{DEVICE}\n`default_transition 1n\n{LIBRARY}")
+        });
+        let library = Source::new(LIBRARY);
+        let prepared = compiler.prepare_file_runtime_source(&device.0).unwrap();
+        let library_prepared = compiler.prepare_file_runtime_source(&library.0).unwrap();
+        let mut identities = Vec::new();
+        for (block, expected) in [("low", 2.0 / 3.0), ("high", 2.0)] {
+            let configuration = if external {
+                &library_prepared
+            } else {
+                &prepared
+            }
+            .connection_configuration(block)
+            .unwrap();
+            let compiled = prepared
+                .compile_runtime_with_connections(Some("top"), &configuration, &NoPipelineControl)
+                .unwrap();
+            identities.push(compiled.canonical_ir.connection_identity);
+            let serialized = serde_json::to_vec(&compiled.canonical_ir).unwrap();
+            let artifact: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+                serde_json::from_slice(&serialized).unwrap();
+            artifact.validate().unwrap();
+            assert_eq!(artifact.connections.configuration(), Some(&configuration));
+            // The global registration consumes a real cache slot. Instance N=2
+            // then forces a source specialization of the transported selection.
+            rspice_core::register_precompiled_veriloga_runtime_with_dependencies(
+                &device.0,
+                &[],
+                compiled.model,
+                artifact,
+            )
+            .unwrap();
+            let library_import = if external {
+                format!(".va \"{}\" converters module=stage\n", library.path())
+            } else {
+                String::new()
+            };
+            let deck = Netlist::parse(&format!(
+                "* selected hierarchy configuration\n.options connectrules={block}\nX1 p top N=2\nRp p 0 1k\n.va \"{}\" top\n{library_import}.end\n", device.path(),
+            )).unwrap();
+            let result = Engine::default().run_tran(&deck, 1.6e-9, 50e-12).unwrap();
+            let actual = voltage(&result, "p", 1.5e-9);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "external={external}, block={block}: {actual} != {expected}"
+            );
+            let mut tampered: serde_json::Value = serde_json::from_slice(&serialized).unwrap();
+            tampered["connections"]["Configured"]["configuration"]["block"] = "different".into();
+            let altered: rspice_veriloga::canonical_ir::CanonicalIrArtifact =
+                serde_json::from_value(tampered).unwrap();
+            assert!(
+                altered.validate().is_err(),
+                "changing the selected block must invalidate the artifact"
+            );
+        }
+        assert_ne!(identities[0], identities[1]);
+    }
+}
+
+#[test]
+fn configured_library_conflicts_keep_external_source_coordinates() {
+    use rspice_veriloga::{CompilerOptions, NoPipelineControl, VerilogACompiler};
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for (device_prefix, library_prefix, expected) in [
+        (
+            "",
+            "module top(p); inout p; electrical p; analog I(p)<+V(p); endmodule",
+            "ordinary module 'top'",
+        ),
+        (
+            "nature Shared; units=\"V\"; access=VS; abstol=1u; endnature",
+            "nature Shared; units=\"A\"; access=IS; abstol=1u; endnature",
+            "nature 'Shared'",
+        ),
+    ] {
+        let device = Source::new(&format!(
+            "{device_prefix}\nmodule top(p); inout p; electrical p; analog I(p)<+V(p); endmodule"
+        ));
+        let library = Source::new(&format!(
+            r#"{library_prefix}
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 1.0 : 0.0))/1000;
+endmodule
+connectrules chosen; connect drive; endconnectrules
+"#
+        ));
+        let prepared = compiler.prepare_file_runtime_source(&device.0).unwrap();
+        let library_prepared = compiler.prepare_file_runtime_source(&library.0).unwrap();
+        assert!(
+            library_prepared
+                .connection_configuration("missing")
+                .is_err()
+        );
+        let configuration = library_prepared.connection_configuration("chosen").unwrap();
+        let error = prepared
+            .compile_runtime_with_connections(Some("top"), &configuration, &NoPipelineControl)
+            .unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+        let diagnostics = prepared.diagnostics_for_error_with_connections(&configuration, &error);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].path.as_deref(),
+            Some(
+                format!(
+                    "{} (preprocessed)",
+                    configuration.library().source_package()
+                )
+                .as_str()
+            )
+        );
+        assert!(diagnostics[0].line.is_some());
+        assert!(
+            prepared.diagnostics_for_error(&error)[0].path.is_none(),
+            "external bytes must never be mapped to the device file"
+        );
+    }
+}

@@ -96,6 +96,37 @@ impl PreparedRuntimeSource {
         })
     }
 
+    /// Select from this already analyzed closure without parsing it again.
+    pub fn connection_configuration(
+        &self,
+        block: &str,
+    ) -> Result<crate::ConnectionConfiguration, String> {
+        self.analyzed
+            .connect_rules
+            .select_block(block)
+            .map_err(|error| error.to_string())?;
+        Ok(crate::ConnectionConfiguration::selected(
+            crate::ConnectionLibraryArtifact::from_prepared(&self.source_package, &self.source),
+            block,
+        ))
+    }
+
+    /// Elaborate with an explicit design configuration. The immutable original
+    /// preparation remains reusable for a different selection.
+    pub fn compile_runtime_with_connections(
+        &self,
+        module: Option<&str>,
+        configuration: &crate::ConnectionConfiguration,
+        control: &dyn PipelineControl,
+    ) -> CompileResult<CompiledRuntimeFile> {
+        VerilogACompiler::new(self.compiler_options.clone()).compile_prepared_runtime_with_control(
+            self,
+            module,
+            Some(configuration),
+            control,
+        )
+    }
+
     pub fn compile_runtime(&self, module: Option<&str>) -> CompileResult<CompiledRuntimeFile> {
         self.compile_runtime_with_control(module, &NoPipelineControl)
     }
@@ -111,6 +142,34 @@ impl PreparedRuntimeSource {
         self.source_map.diagnostics(&self.source, error)
     }
 
+    /// Map configured-compilation errors against the frozen device or library.
+    /// External library locations refer to its retained preprocessed document;
+    /// original include/macro coordinates are not part of library transport.
+    pub fn diagnostics_for_error_with_connections(
+        &self,
+        configuration: &crate::ConnectionConfiguration,
+        error: &crate::CompileError,
+    ) -> Vec<crate::SourceCompileDiagnostic> {
+        let original = self.diagnostics_for_error(error);
+        let external =
+            crate::compile_diagnostics(configuration.library().preprocessed_source(), error);
+        original
+            .into_iter()
+            .zip(external)
+            .map(|(original, external)| {
+                if external
+                    .span
+                    .as_ref()
+                    .is_some_and(|span| span.source_id == 1)
+                {
+                    crate::connection_configuration::library_diagnostic(configuration, external)
+                } else {
+                    original
+                }
+            })
+            .collect()
+    }
+
     /// Compile one selected module with the options frozen at preparation.
     /// The returned metrics include the shared preparation prefix as provenance;
     /// progress callbacks only announce work actually performed by this call.
@@ -120,6 +179,6 @@ impl PreparedRuntimeSource {
         control: &dyn PipelineControl,
     ) -> CompileResult<CompiledRuntimeFile> {
         VerilogACompiler::new(self.compiler_options.clone())
-            .compile_prepared_runtime_with_control(self, module, control)
+            .compile_prepared_runtime_with_control(self, module, None, control)
     }
 }

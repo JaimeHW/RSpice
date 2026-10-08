@@ -28,6 +28,8 @@ pub struct AnalyzedFile {
     /// that an overriding discipline is compatible with the one it overrides —
     /// are the author's to see at compile time.
     pub connect_rules: crate::connect::ConnectRuleTable,
+    /// Explicit design selection, retained for executable identity and replay.
+    pub connection_configuration: Option<Box<crate::ConnectionConfiguration>>,
 }
 
 /// One non-fatal finding raised by semantic analysis.

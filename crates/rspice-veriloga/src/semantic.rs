@@ -691,6 +691,7 @@ impl SemanticAnalyzer {
             modules,
             warnings: std::mem::take(&mut self.warnings),
             connect_rules,
+            connection_configuration: None,
         })
     }
 

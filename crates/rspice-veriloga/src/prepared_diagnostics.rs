@@ -111,6 +111,9 @@ impl PreparedSourceMap {
         source: &str,
         span: &CompileDiagnosticSpan,
     ) -> Option<SourceCoordinates<'_>> {
+        if span.source_id != 0 {
+            return None;
+        }
         let offset = usize::try_from(span.byte_start).ok()?;
         let index = self
             .segments
