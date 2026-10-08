@@ -98,7 +98,12 @@ pub fn read_touchstone_bytes_with_limit(
     let mut saw_end = false;
     let mut in_information = false;
 
-    for (line_index, raw_line) in text.lines().enumerate() {
+    // Touchstone permits LF, CRLF and bare CR. Avoid copying the whole source
+    // to normalize it, and count a CRLF pair as one diagnostic line.
+    let lines = text
+        .split_terminator('\n')
+        .flat_map(|line| line.strip_suffix('\r').unwrap_or(line).split('\r'));
+    for (line_index, raw_line) in lines.enumerate() {
         let line_number = line_index + 1;
         let line = raw_line
             .split_once('!')
@@ -440,11 +445,8 @@ pub fn read_touchstone_bytes_with_limit(
         return Err("Touchstone v2 two-port data requires [Two-Port Data Order]; coefficient ordering cannot be inferred".into());
     }
     let two_port_order = declared_two_port_order.unwrap_or(TwoPortOrder::TwentyOneTwelve);
-    if !matches!(two_port_order, TwoPortOrder::TwentyOneTwelve)
-        && matrix_format != MatrixFormat::Full
-    {
-        return Err("[Two-Port Data Order] 12_21 requires a full two-port matrix".into());
-    }
+    // Two-port triangular data carries 11, 21 (=12), 22 for either declared
+    // order. Only a full matrix needs the ordering distinction.
 
     let record_width = values_per_frequency(num_ports, matrix_format)
         .ok_or_else(|| "Touchstone matrix dimensions overflow".to_owned())?;

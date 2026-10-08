@@ -794,6 +794,8 @@ destination is replaced. V2 imports use the required `[Number of Ports]`
 declaration, which overrides the filename. V2 files must also declare their
 frequency count and two-port ordering; duplicate declarations and incomplete
 per-port reference lists are rejected instead of guessing their meaning.
+Both full and triangular matrices are supported, including either two-port
+ordering declaration. LF, CRLF, and CR line endings preserve the same samples.
 If a Touchstone file carries noise,
 select `--section network` or `--section noise`: the latter keeps its own
 frequency grid, noise resistance in ohms, optimum complex reflection, and

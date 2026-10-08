@@ -225,3 +225,61 @@ fn version_two_port_declarations_override_filename_hints() {
         assert_eq!(signal(&table, "Z0(2)")["values"], serde_json::json!([75.0]));
     }
 }
+
+#[test]
+fn triangular_two_port_networks_accept_both_declared_orders() {
+    let dir = test_dir("touchstone_triangular_order");
+    let input = dir.join("source.ts");
+    let output = dir.join("decoded.json");
+    for matrix in ["Lower", "Upper"] {
+        for order in ["21_12", "12_21"] {
+            let source = TWO_PORT
+                .replace(
+                    "[Two-Port Data Order] 21_12",
+                    &format!("[Two-Port Data Order] {order}"),
+                )
+                .replace(
+                    "[Network Data]",
+                    &format!("[Matrix Format] {matrix}\n[Network Data]"),
+                )
+                .replace("0.2 0 0.3 0", "0.25 0");
+            std::fs::write(&input, source).unwrap();
+            let result = convert(&input, &output);
+            assert!(result.status.success(), "{matrix}, {order}: {result:?}");
+            let table = read_json(&output);
+            for (name, expected) in [("S11", 0.1), ("S12", 0.25), ("S21", 0.25), ("S22", 0.4)] {
+                assert_eq!(signal(&table, name)["real"], serde_json::json!([expected]));
+            }
+        }
+    }
+}
+
+#[test]
+fn every_standard_line_ending_preserves_comments_and_samples() {
+    let dir = test_dir("touchstone_line_endings");
+    let output = dir.join("decoded.json");
+    for (extension, source) in [
+        (
+            "s1p",
+            "! network\n# Hz S RI R 50 ! options\n1 0.25 0 ! sample\n",
+        ),
+        ("ts", TWO_PORT),
+    ] {
+        let input = dir.join(format!("source.{extension}"));
+        let mut baseline = None;
+        for ending in ["\n", "\r\n", "\r"] {
+            std::fs::write(&input, source.replace('\n', ending)).unwrap();
+            let result = convert(&input, &output);
+            assert!(
+                result.status.success(),
+                "{extension}, {ending:?}: {result:?}"
+            );
+            let table = read_json(&output);
+            if let Some(expected) = &baseline {
+                assert_eq!(&table, expected);
+            } else {
+                baseline = Some(table);
+            }
+        }
+    }
+}
