@@ -834,3 +834,112 @@ fn absdelta_incomplete_execution_and_invalid_source_are_explicit() {
         );
     }
 }
+
+#[test]
+fn absdelta_shared_circuit_samples_interpolated_values_and_resolves_feedback() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module observer(a,p,t);
+ input a; electrical a;
+ inout p,t; electrical p,t;
+ parameter real delta=0.25;
+ real sampled=0,last=0; integer count=0,clock=0,seen_clock=0;
+ initial #650 clock=1;
+ always @(absdelta(V(a),delta,1p,1u)) begin
+   sampled=V(a); last=$abstime; count=count+1; seen_clock=clock;
+ end
+ analog begin I(p)<+(V(p)-(10*count+sampled))/1000; I(t)<+(V(t)-(last*1e9+10*seen_clock))/1000; end
+endmodule
+module wrapper(a,p,q,t,u);
+ input a; electrical a;
+ inout p,q,t,u; electrical p,q,t,u;
+ observer #(.delta(0.25)) first(a,p,t);
+ observer #(.delta(0.4)) second(a,q,u);
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!("* interpolated observers and feedback\nV1 a 0 PWL(0 0 1n 1)\nX1 a p q t u wrapper\nRp p 0 1k\nRq q 0 1k\nRt t 0 1k\nRu u 0 1k\n.va \"{}\" wrapper module=wrapper\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1.1e-9, 170e-12).unwrap();
+    for (time, p, q, t, u) in [
+        (0.2e-9, 5.0, 5.0, 0.0, 0.0),
+        (0.3e-9, 10.125, 5.0, 0.125, 0.0),
+        (0.55e-9, 15.25, 10.2, 0.25, 0.2),
+        (0.85e-9, 20.375, 15.4, 5.375, 5.4),
+        (1.05e-9, 25.5, 15.4, 5.5, 5.4),
+    ] {
+        for (node, expected) in [("p", p), ("q", q), ("t", t), ("u", u)] {
+            let index = result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(node))
+                .unwrap();
+            let point = result
+                .time
+                .iter()
+                .rposition(|value| *value <= time)
+                .unwrap();
+            let actual = result.voltage_waveform(index + 1)[point];
+            assert!(
+                (actual - expected).abs() < 1e-4,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn absdelta_digital_only_observation_does_not_force_analog_sampling_steps() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module observer(a,ok,done);
+ input a; electrical a;
+ output ok,done; reg ok=1,done=0;
+ real derived,sampled,observed; integer count=0;
+ analog derived=2*V(a);
+ always @(absdelta(V(a),0.125,1p,1u)) begin
+   sampled=V(a); observed=derived; count=count+1;
+   if (sampled-$abstime*1e9>1u || $abstime*1e9-sampled>1u) ok=0;
+   if (observed-2*$abstime*1e9>2u || 2*$abstime*1e9-observed>2u) ok=0;
+   if (count==9) done=1;
+   if (count>9) ok=0;
+ end
+endmodule
+module flag_reader(a,ok,done);
+ input a; electrical a;
+ input ok,done;
+ integer flags=0;
+ always @(ok or done) flags=ok+2*done;
+ analog I(a)<+0;
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* pure observer\nV1 a 0 PWL(0 0 1n 1)\nX1 a ok done observer\nX2 a ok done flag_reader\n.va \"{}\" observer module=observer\n.va \"{}\" flag_reader module=flag_reader\n.end\n",
+        source.path(), source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.1e-9, 400e-12).unwrap();
+    assert!(
+        result
+            .time
+            .windows(2)
+            .any(|pair| pair[1] - pair[0] > 150e-12),
+        "observer must leave intervals spanning multiple sample events: {:?}",
+        result.time
+    );
+    for node in ["ok", "done"] {
+        let trace = result
+            .digital_traces
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("missing {node} trace: {:?}", result.digital_traces));
+        assert_eq!(
+            trace.points.last().unwrap().value.state,
+            rspice_core::xspice::DigitalState::One,
+            "{node}: {:?}",
+            trace.points
+        );
+    }
+}

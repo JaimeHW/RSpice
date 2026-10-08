@@ -265,7 +265,12 @@ impl AbsDeltaInterval {
             .state
             .event
             .expect("enabled observer has an initial event");
-        let mut earliest = (event.time + self.time_tolerance).max(start.time.next_up());
+        let next_time = if start.time == self.endpoint.time {
+            start.time
+        } else {
+            start.time.next_up()
+        };
+        let mut earliest = (event.time + self.time_tolerance).max(next_time);
         if earliest - event.time < self.time_tolerance {
             earliest = earliest.next_up();
         }

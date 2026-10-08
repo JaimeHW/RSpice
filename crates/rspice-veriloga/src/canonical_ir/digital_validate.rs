@@ -438,6 +438,7 @@ impl CanonicalDigitalPlan {
             }
         }
         for observer in &self.absdelta {
+            observer.time_scale.validate().map_err(error)?;
             let valid = self.signal(observer.signal).is_some_and(|signal| {
                 !signal.kind.is_real() && signal.width == 32 && signal.local.is_none()
                     && matches!(&signal.initial_value, Some(super::digital::DigitalInitialValue::FourState(value)) if value.to_u64() == Some(0))

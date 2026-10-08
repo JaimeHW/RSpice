@@ -681,7 +681,8 @@ fn lower_with_analog_variables(
     let mut absdelta = Vec::new();
     let mut add_events = |bindings: &[crate::semantic::AnalogEventBinding],
                           scope: &HashMap<&str, DigitalSignalId>,
-                          variables: &HashMap<SmolStr, AnalogVariable>| {
+                          variables: &HashMap<SmolStr, AnalogVariable>,
+                          time_scale: crate::time_scale::ModuleTimeScale| {
         for binding in bindings {
             if let Some(operands) = &binding.observation {
                 let Some(signal) = scope.get(binding.signal.as_str()).copied() else {
@@ -717,6 +718,7 @@ fn lower_with_analog_variables(
                 }
                 if complete {
                     absdelta.push(super::digital::DigitalAbsDeltaObserver {
+                        time_scale,
                         signal,
                         operands: ids,
                         span: binding.span.into(),
@@ -761,7 +763,12 @@ fn lower_with_analog_variables(
             }
         }
     };
-    add_events(&digital.analog_events, &module_scope, analog_variables);
+    add_events(
+        &digital.analog_events,
+        &module_scope,
+        analog_variables,
+        digital.time_scale,
+    );
     for (instance, scope) in digital.instances.iter().zip(&frame_scopes) {
         let variables = instance
             .analog_variables
@@ -772,7 +779,12 @@ fn lower_with_analog_variables(
                     .map(|v| (local.clone(), v.clone()))
             })
             .collect();
-        add_events(&instance.analog_events, scope, &variables);
+        add_events(
+            &instance.analog_events,
+            scope,
+            &variables,
+            instance.time_scale,
+        );
     }
     diagnostics.extend(reject_overdriven_real_nets(&signals, &drivers));
 

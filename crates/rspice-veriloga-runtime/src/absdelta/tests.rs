@@ -126,6 +126,17 @@ fn one_analog_interval_produces_multiple_unquantized_events() {
         0.0,
         "candidate enumeration cannot mutate accepted history"
     );
+    let (plateau, events) = consume(interval(initial, 1.0, 0.0, controls()));
+    assert!(events.is_empty());
+    let (_, events) = consume(interval(plateau, 1.0, 1.0, controls()));
+    assert_eq!(events.len(), 1, "a same-time analog jump emits once");
+    assert_eq!(
+        events[0].sample,
+        AbsDeltaSample {
+            time: 1.0,
+            value: 1.0
+        }
+    );
 }
 
 #[test]

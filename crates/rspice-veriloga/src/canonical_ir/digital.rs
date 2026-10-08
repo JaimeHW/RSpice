@@ -806,6 +806,7 @@ pub struct CanonicalDigitalPlan {
 /// slots in expr, delta, time_tol, expr_tol, enable order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DigitalAbsDeltaObserver {
+    pub time_scale: crate::time_scale::ModuleTimeScale,
     pub signal: DigitalSignalId,
     pub operands: [DigitalAnalogProbeId; 5],
     pub span: SourceSpanRef,

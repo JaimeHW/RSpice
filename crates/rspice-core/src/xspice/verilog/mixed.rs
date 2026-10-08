@@ -1041,6 +1041,7 @@ struct MixedState {
 
 #[derive(Clone)]
 struct ActiveTrial {
+    observation_refinement: Option<f64>,
     start_digital: bool,
     /// Whether the discrete half moved something the analog equations read,
     /// anywhere in the circuit, inside this trial — a D/A bridge's bit or a
@@ -1400,6 +1401,11 @@ impl MixedSignalHost {
                 detail: error.to_string(),
             }
         })?;
+        if !runtime.canonical_ir.digital.absdelta.is_empty() {
+            return Err(MixedSignalError::Compile {
+                detail: "absdelta interval observers require shared interpolated-event execution; standalone execution is not yet connected".into(),
+            });
+        }
         let mut host = Self::from_compiled(
             instance,
             Arc::new(runtime.model),
@@ -1480,11 +1486,6 @@ impl MixedSignalHost {
                     "module `{}` has no digital processes or drivers for the mixed host",
                     canonical_ir.mir.module_name
                 ),
-            });
-        }
-        if !canonical_ir.digital.absdelta.is_empty() {
-            return Err(MixedSignalError::Compile {
-                detail: "absdelta interval observers require shared interpolated-event execution, which is not yet connected".into(),
             });
         }
 
@@ -1744,6 +1745,11 @@ impl MixedSignalHost {
     /// its accepted control calls have been handled by the analysis host.
     pub(crate) fn start_digital_execution(&mut self) -> Result<(), MixedSignalError> {
         self.require_idle("start digital execution")?;
+        if !self.state.digital.is_view() && !self.state.digital.plan().absdelta.is_empty() {
+            return Err(MixedSignalError::Compile {
+                detail: "absdelta interval observers require shared interpolated-event execution; standalone execution is not yet connected".into(),
+            });
+        }
         if self.analog.has_accepted_analog_tasks() {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "analog initialization tasks must be handled before digital execution"
@@ -2751,6 +2757,7 @@ impl MixedSignalHost {
             .dac_moved
             .resize(self.state.bridges.dac.len(), false);
         self.trial = Some(ActiveTrial {
+            observation_refinement: None,
             start_digital,
             digital_feedback: false,
             scheduled_activation,
@@ -3137,7 +3144,10 @@ impl MixedSignalHost {
         if first_allowed - start < minimum_timestep {
             first_allowed = first_allowed.next_up();
         }
-        let mut earliest: Option<f64> = None;
+        let mut earliest = trial.observation_refinement.and_then(|event| {
+            let target = event.max(first_allowed);
+            (target < time && time - target > tolerance).then_some(target)
+        });
         for (moved, crossing) in trial
             .vectors
             .adc_moved

@@ -2,6 +2,8 @@
 use super::super::host::{DigitalActiveExchange, DigitalActiveParticipant};
 use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
+mod observations;
+use rspice_veriloga_runtime::absdelta::AbsDeltaState;
 use crate::xspice::event_scheduler::EventTarget;
 use crate::xspice::event_scheduler::SchedulerError;
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
@@ -226,6 +228,8 @@ pub(crate) struct MixedDigitalCoordinator {
     resolution: TimeResolution,
     enabled: bool,
     accepted_time: Option<f64>,
+    accepted_observers: Vec<AbsDeltaState>,
+    accepted_observation_probes: Vec<Option<f64>>,
     /// Smallest interval the analog solver is allowed to advance by, or zero
     /// when nothing has declared one.
     ///
@@ -557,6 +561,12 @@ impl MixedDigitalCoordinator {
             host.resolution = resolution;
         }
         Ok(Self {
+            accepted_observers: vec![AbsDeltaState::default(); digital.plan().absdelta.len()],
+            accepted_observation_probes: if digital.plan().absdelta.is_empty() {
+                Vec::new()
+            } else {
+                probes.clone()
+            },
             digital: MixedCell::new(digital),
             maps,
             instance_of_process,
@@ -575,6 +585,8 @@ impl MixedDigitalCoordinator {
 
     pub(crate) fn fresh(&self) -> Self {
         Self {
+            accepted_observers: vec![AbsDeltaState::default(); self.accepted_observers.len()],
+            accepted_observation_probes: vec![None; self.accepted_observation_probes.len()],
             digital: MixedCell::new(self.digital.fresh()),
             maps: self.maps.clone(),
             instance_of_process: self.instance_of_process.clone(),
@@ -825,10 +837,20 @@ impl MixedDigitalCoordinator {
         let scheduled_activation = self.digital.next_tick().is_some_and(|next| next <= tick);
         let rollback = self.digital.clone();
         Ok(SharedTrialCursor {
+            observers: self.accepted_observers.clone(),
+            observation_probes: self.accepted_observation_probes.clone(),
+            observation_time: self.accepted_time,
+            observation_refinement: None,
             rollback: Some(rollback),
             time,
             tick,
-            published_tick: tick,
+            published_tick: if self.accepted_observers.is_empty() {
+                tick
+            } else {
+                hdl_tick(self.accepted_time.unwrap_or(0.0), |at| {
+                    at.nearest_tick(self.resolution)
+                })?
+            },
             probe,
             scheduled_activation,
         })
@@ -847,6 +869,10 @@ impl MixedDigitalCoordinator {
 /// explicit [`MixedDigitalCoordinator::commit_trial`] — the same discipline,
 /// enforced in the one place that owns both halves.
 pub(crate) struct SharedTrialCursor {
+    observers: Vec<AbsDeltaState>,
+    observation_probes: Vec<Option<f64>>,
+    observation_time: Option<f64>,
+    observation_refinement: Option<f64>,
     rollback: Option<MixedCell<DigitalHost>>,
     time: f64,
     tick: u64,
@@ -950,6 +976,14 @@ impl MixedDigitalCoordinator {
         solution: &[f64],
         participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<(), MixedSignalError> {
+        if !self.accepted_observers.is_empty() {
+            if participant.is_some() {
+                return Err(MixedSignalError::Compile { detail: "absdelta with XSPICE participants requires interpolated external-event scheduling, which is not yet connected".into() });
+            }
+            if cursor.time > 0.0 && cursor.observation_time != Some(cursor.time) {
+                return Ok(());
+            }
+        }
         let coordinator = self;
         for (host, map) in hosts.iter().zip(&coordinator.maps) {
             host.validate_solution(solution)?;
@@ -1108,6 +1142,9 @@ impl MixedDigitalCoordinator {
         solution: &[f64],
         mut participant: Option<&mut dyn DigitalActiveParticipant>,
     ) -> Result<bool, MixedSignalError> {
+        if !self.accepted_observers.is_empty() {
+            return self.publish_observed_interval(cursor, hosts, solution, participant);
+        }
         self.collect_adc_publications(cursor, hosts)?;
         // The analog candidate instant, which every group publishes against:
         // the continuous half has a solution at the trial's endpoint and
@@ -1193,6 +1230,18 @@ impl MixedDigitalCoordinator {
             result.map_err(|error| coordinator.execution_error(error))?;
             published_any = true;
         }
+        let counters = self.publish_counter_events_with(cursor, hosts, solution, participant)?;
+        Ok(published_any || counters)
+    }
+
+    fn publish_counter_events_with(
+        &mut self,
+        cursor: &mut SharedTrialCursor,
+        hosts: &mut [MixedSignalHost],
+        solution: &[f64],
+        mut participant: Option<&mut dyn DigitalActiveParticipant>,
+    ) -> Result<bool, MixedSignalError> {
+        let mut published_any = false;
         // Prepare occurrences at the candidate solution before publishing them.
         // Publish one assignment occurrence per wave; repeat-event controls must
         // retain multiple writes even when the associated data did not change.
@@ -1318,6 +1367,8 @@ impl MixedDigitalCoordinator {
             "a numerical probe cannot commit shared digital state"
         );
         self.accepted_time = Some(cursor.time);
+        self.accepted_observers = std::mem::take(&mut cursor.observers);
+        self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
         cursor.rollback = None;
     }
 
