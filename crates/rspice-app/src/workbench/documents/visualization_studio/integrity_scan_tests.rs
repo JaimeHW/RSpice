@@ -30,6 +30,16 @@ fn app_with_exact_source() -> RSpiceApp {
     app
 }
 
+#[test]
+fn an_unavailable_midpoint_cannot_create_a_numeric_marker() {
+    let mut app = app_with_exact_source();
+    app.state.simulation.retained.runs[0].analyses[0].waveforms[0].y =
+        vec![-1.25, f64::NAN, 4.0].into();
+    assert!(source_midpoint(&app.state).is_none());
+    add_marker_at_midpoint(&mut app);
+    assert!(app.state.workbench.visualization_studio.markers.is_empty());
+}
+
 fn activate_voltage_wave_pane(app: &mut RSpiceApp) -> AnalysisPresentationKey {
     let run = app.state.simulation.active_run().expect("active run");
     let analysis = app

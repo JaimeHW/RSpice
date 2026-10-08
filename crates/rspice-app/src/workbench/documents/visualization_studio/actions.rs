@@ -461,13 +461,14 @@ pub(super) fn source_midpoint(
         return None;
     }
     let index = count / 2;
+    let y = waveform.sample(index)?;
     Some((
         run.dataset_id,
         analysis.id,
         waveform.name.clone(),
         index,
         waveform.x[index],
-        waveform.y[index],
+        y,
     ))
 }
 
