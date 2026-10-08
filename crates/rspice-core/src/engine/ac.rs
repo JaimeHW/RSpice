@@ -420,7 +420,7 @@ struct XspiceAcOutputElement<'a> {
     output_index: usize,
     pos: usize,
     neg: usize,
-    force_current_output: bool,
+    output_type: crate::xspice::PortType,
 }
 
 impl Engine {
@@ -758,7 +758,8 @@ impl Engine {
                     matrix.add(row, *node - 1, signed);
                 }
             }
-            crate::xspice::PortConnection::Differential(pos, neg) => {
+            crate::xspice::PortConnection::Differential(pos, neg)
+            | crate::xspice::PortConnection::VoltageOutput { pos, neg } => {
                 if *pos > 0 {
                     matrix.add(row, *pos - 1, signed);
                 }
@@ -813,7 +814,8 @@ impl Engine {
                             matrix.add(row, *node - 1, signed);
                         }
                     }
-                    crate::xspice::AnalogInputConnection::Differential(pos, neg) => {
+                    crate::xspice::AnalogInputConnection::Differential(pos, neg)
+                    | crate::xspice::AnalogInputConnection::VoltageOutput { pos, neg } => {
                         if *pos > 0 {
                             matrix.add(row, *pos - 1, signed);
                         }
@@ -1057,18 +1059,17 @@ impl Engine {
             output_index,
             pos,
             neg,
-            force_current_output,
+            output_type,
         } = element;
         let (conductance, _) =
             instance.analog_vector_small_signal_contribution_at(port_idx, output_index);
-        let stamp_as_current_output = force_current_output
-            || matches!(
-                port.default_type,
-                crate::xspice::PortType::Current
-                    | crate::xspice::PortType::DifferentialCurrent
-                    | crate::xspice::PortType::Conductance
-                    | crate::xspice::PortType::DifferentialConductance
-            );
+        let stamp_as_current_output = matches!(
+            output_type,
+            crate::xspice::PortType::Current
+                | crate::xspice::PortType::DifferentialCurrent
+                | crate::xspice::PortType::Conductance
+                | crate::xspice::PortType::DifferentialConductance
+        );
         if stamp_as_current_output {
             let self_conductance =
                 Self::xspice_ac_current_output_self_conductance(port, conductance);
@@ -1087,7 +1088,7 @@ impl Engine {
             );
             return;
         }
-        match port.default_type {
+        match output_type {
             crate::xspice::PortType::Voltage
             | crate::xspice::PortType::DifferentialVoltage
             | crate::xspice::PortType::Hybrid
@@ -1168,7 +1169,7 @@ impl Engine {
                                         output_index,
                                         pos: node,
                                         neg: 0,
-                                        force_current_output: false,
+                                        output_type: port.default_type,
                                     },
                                     frequency_hz,
                                     num_nodes,
@@ -1189,7 +1190,7 @@ impl Engine {
                                                 output_index,
                                                 pos: *node,
                                                 neg: 0,
-                                                force_current_output: false,
+                                                output_type: element.output_type(port.default_type),
                                             },
                                             frequency_hz,
                                             num_nodes,
@@ -1199,6 +1200,10 @@ impl Engine {
                                         pos,
                                         neg,
                                     )
+                                    | crate::xspice::AnalogInputConnection::VoltageOutput {
+                                        pos,
+                                        neg,
+                                    }
                                     | crate::xspice::AnalogInputConnection::Hybrid {
                                         pos,
                                         neg,
@@ -1214,7 +1219,7 @@ impl Engine {
                                                 output_index,
                                                 pos: *pos,
                                                 neg: *neg,
-                                                force_current_output: false,
+                                                output_type: element.output_type(port.default_type),
                                             },
                                             frequency_hz,
                                             num_nodes,
@@ -1234,7 +1239,7 @@ impl Engine {
                                                 output_index,
                                                 pos: *pos,
                                                 neg: *neg,
-                                                force_current_output: true,
+                                                output_type: element.output_type(port.default_type),
                                             },
                                             frequency_hz,
                                             num_nodes,
@@ -1325,7 +1330,7 @@ impl Engine {
                     continue;
                 }
 
-                match port.default_type {
+                match connection.output_type(port.default_type) {
                     crate::xspice::PortType::Voltage
                     | crate::xspice::PortType::DifferentialVoltage
                     | crate::xspice::PortType::Hybrid
@@ -1343,7 +1348,8 @@ impl Engine {
                                     ac_matrix.add_real(*node - 1, br_idx, 1.0);
                                 }
                             }
-                            crate::xspice::PortConnection::Differential(pos, neg) => {
+                            crate::xspice::PortConnection::Differential(pos, neg)
+                            | crate::xspice::PortConnection::VoltageOutput { pos, neg } => {
                                 if *pos > 0 {
                                     ac_matrix.add_real(br_idx, *pos - 1, 1.0);
                                     ac_matrix.add_real(*pos - 1, br_idx, 1.0);
@@ -1418,6 +1424,7 @@ impl Engine {
                                     );
                                 }
                                 crate::xspice::PortConnection::Differential(pos, neg)
+                                | crate::xspice::PortConnection::VoltageOutput { pos, neg }
                                 | crate::xspice::PortConnection::CurrentOutput { pos, neg } => {
                                     Self::stamp_xspice_ac_current_self_conductance(
                                         ac_matrix,
@@ -1452,7 +1459,8 @@ impl Engine {
                                         );
                                     }
                                 }
-                                crate::xspice::PortConnection::Differential(pos, neg) => {
+                                crate::xspice::PortConnection::Differential(pos, neg)
+                                | crate::xspice::PortConnection::VoltageOutput { pos, neg } => {
                                     if *pos > 0 {
                                         Self::stamp_xspice_ac_control_partial(
                                             ac_matrix,
@@ -1524,6 +1532,7 @@ impl Engine {
                                     }
                                 }
                                 crate::xspice::PortConnection::Differential(pos, neg)
+                                | crate::xspice::PortConnection::VoltageOutput { pos, neg }
                                 | crate::xspice::PortConnection::CurrentOutput { pos, neg } => {
                                     if *pos > 0 {
                                         Self::stamp_xspice_ac_vector_control_partial(

@@ -389,7 +389,7 @@ impl Drop for TableFile {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn table_poles_include_all_controls_of_current_outputs() {
+fn table_poles_include_all_controls_and_selected_output_types() {
     for (dimensions, path, ports) in [
         (2, "virtual://pole-descriptor/table2d", "x x"),
         (3, "virtual://pole-descriptor/table3d", "x x x"),
@@ -410,6 +410,18 @@ fn table_poles_include_all_controls_of_current_outputs() {
         let bias = 1.25_f64;
         let product = bias.powi(dimensions as i32);
         let slope = dimensions as f64 * bias.powi(dimensions as i32 - 1);
+        for (output, gain) in [("%v(drive)", 1), ("%vd[drive 0]", 1), ("%vd[0 drive]", -1)] {
+            assert_feedback_pole(
+                &voltage_feedback(
+                    &format!("table{dimensions}d(file=\"{path}\" order=2 gain={gain})"),
+                    &format!("{ports} {output}"),
+                    "",
+                    2.0 * bias + product,
+                ),
+                bias,
+                -2.0 - slope,
+            );
+        }
         // A positive product drawn through the default current output adds
         // conductance to the shunt. The series probe preserves that polarity.
         let netlist = Netlist::parse(&format!(

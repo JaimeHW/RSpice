@@ -1920,7 +1920,8 @@ impl CircuitData {
                         add_rhs_if_present(rhs, row, current);
                     }
                 }
-                crate::xspice::PortConnection::Differential(pos, neg) => {
+                crate::xspice::PortConnection::Differential(pos, neg)
+                | crate::xspice::PortConnection::VoltageOutput { pos, neg } => {
                     if *pos > 0 {
                         let pos_row = *pos - 1;
                         add_matrix_if_present(matrix, pos_row, pos_row, conductance);
@@ -1956,7 +1957,8 @@ impl CircuitData {
                         add_matrix_if_present(matrix, branch_row, *node - 1, -partial);
                     }
                 }
-                crate::xspice::PortConnection::Differential(pos, neg) => {
+                crate::xspice::PortConnection::Differential(pos, neg)
+                | crate::xspice::PortConnection::VoltageOutput { pos, neg } => {
                     if *pos > 0 {
                         add_matrix_if_present(matrix, branch_row, *pos - 1, -partial);
                     }
@@ -2057,7 +2059,11 @@ impl CircuitData {
                         stamp_current_control_column(matrix, pos, neg, *node - 1, partial);
                     }
                 }
-                crate::xspice::PortConnection::Differential(ctrl_pos, ctrl_neg) => {
+                crate::xspice::PortConnection::Differential(ctrl_pos, ctrl_neg)
+                | crate::xspice::PortConnection::VoltageOutput {
+                    pos: ctrl_pos,
+                    neg: ctrl_neg,
+                } => {
                     if *ctrl_pos > 0 {
                         stamp_current_control_column(matrix, pos, neg, *ctrl_pos - 1, partial);
                     }
@@ -2594,7 +2600,7 @@ impl CircuitData {
                                 }
                                 match element {
                                     crate::xspice::AnalogInputConnection::Node(node) => {
-                                        match port.default_type {
+                                        match element.output_type(port.default_type) {
                                             crate::xspice::PortType::Voltage
                                             | crate::xspice::PortType::DifferentialVoltage
                                             | crate::xspice::PortType::Hybrid
@@ -2646,11 +2652,15 @@ impl CircuitData {
                                         pos,
                                         neg,
                                     )
+                                    | crate::xspice::AnalogInputConnection::VoltageOutput {
+                                        pos,
+                                        neg,
+                                    }
                                     | crate::xspice::AnalogInputConnection::Hybrid {
                                         pos,
                                         neg,
                                         ..
-                                    } => match port.default_type {
+                                    } => match element.output_type(port.default_type) {
                                         crate::xspice::PortType::Voltage
                                         | crate::xspice::PortType::DifferentialVoltage
                                         | crate::xspice::PortType::Hybrid
@@ -2758,7 +2768,7 @@ impl CircuitData {
                         );
                         continue;
                     }
-                    match port.default_type {
+                    match connection.output_type(port.default_type) {
                         crate::xspice::PortType::Voltage
                         | crate::xspice::PortType::DifferentialVoltage
                         | crate::xspice::PortType::Hybrid
@@ -2849,7 +2859,8 @@ impl CircuitData {
                                         }
                                         add_rhs_if_present(rhs, br, branch_rhs);
                                     }
-                                    crate::xspice::PortConnection::Differential(pos, neg) => {
+                                    crate::xspice::PortConnection::Differential(pos, neg)
+                                    | crate::xspice::PortConnection::VoltageOutput { pos, neg } => {
                                         if *pos > 0 {
                                             let pos_row = *pos - 1;
                                             add_matrix_if_present(matrix, br, pos_row, 1.0);
@@ -2900,7 +2911,8 @@ impl CircuitData {
                         | crate::xspice::PortType::DifferentialConductance => {
                             let (pos, neg) = match connection {
                                 crate::xspice::PortConnection::Analog(node) => (*node, 0),
-                                crate::xspice::PortConnection::Differential(pos, neg) => {
+                                crate::xspice::PortConnection::Differential(pos, neg)
+                                | crate::xspice::PortConnection::VoltageOutput { pos, neg } => {
                                     (*pos, *neg)
                                 }
                                 _ => continue,
@@ -3106,16 +3118,6 @@ impl CircuitData {
                 let Some(port) = ports.get(port_idx) else {
                     continue;
                 };
-                if !matches!(
-                    port.default_type,
-                    crate::xspice::PortType::Voltage
-                        | crate::xspice::PortType::DifferentialVoltage
-                        | crate::xspice::PortType::Hybrid
-                        | crate::xspice::PortType::DifferentialHybrid
-                ) {
-                    continue;
-                }
-
                 if port.is_vector {
                     if !instance.has_analog_vector_contributions(port_idx) {
                         continue;
@@ -3160,6 +3162,10 @@ impl CircuitData {
                                         pos,
                                         neg,
                                     )
+                                    | crate::xspice::AnalogInputConnection::VoltageOutput {
+                                        pos,
+                                        neg,
+                                    }
                                     | crate::xspice::AnalogInputConnection::Hybrid {
                                         pos,
                                         neg,
@@ -3194,6 +3200,7 @@ impl CircuitData {
                         project_voltage_pair(solution, *node, 0, value, &mut rollback);
                     }
                     crate::xspice::PortConnection::Differential(pos, neg)
+                    | crate::xspice::PortConnection::VoltageOutput { pos, neg }
                     | crate::xspice::PortConnection::Hybrid { pos, neg, .. } => {
                         project_voltage_pair(solution, *pos, *neg, value, &mut rollback);
                     }

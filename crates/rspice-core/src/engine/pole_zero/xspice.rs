@@ -58,7 +58,10 @@ impl<'a> RationalDescriptor<'a> {
             }
             let input = match instance.connection(input_port) {
                 Some(PortConnection::Analog(node)) => node_pair(*node, 0),
-                Some(PortConnection::Differential(pos, neg)) => node_pair(*pos, *neg),
+                Some(
+                    PortConnection::Differential(pos, neg)
+                    | PortConnection::VoltageOutput { pos, neg },
+                ) => node_pair(*pos, *neg),
                 Some(
                     PortConnection::CurrentProbe { branch_ordinal, .. }
                     | PortConnection::BranchCurrent { branch_ordinal }
@@ -89,6 +92,7 @@ impl<'a> RationalDescriptor<'a> {
             let (pos, neg) = match connection {
                 PortConnection::Analog(node) => (*node, 0),
                 PortConnection::Differential(pos, neg)
+                | PortConnection::VoltageOutput { pos, neg }
                 | PortConnection::CurrentOutput { pos, neg }
                 | PortConnection::Hybrid { pos, neg, .. } => (*pos, *neg),
                 _ => {
@@ -98,11 +102,10 @@ impl<'a> RationalDescriptor<'a> {
                     ));
                 }
             };
-            let current_output = matches!(connection, PortConnection::CurrentOutput { .. })
-                || matches!(
-                    instance.ports()[port_index].default_type,
-                    PortType::Current | PortType::DifferentialCurrent
-                );
+            let current_output = matches!(
+                connection.output_type(instance.ports()[port_index].default_type),
+                PortType::Current | PortType::DifferentialCurrent
+            );
             let (output, voltage_output) = if current_output {
                 (node_pair(pos, neg), None)
             } else {

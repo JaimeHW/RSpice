@@ -250,6 +250,13 @@ fn current_output_connection_allowed(port: &PortSpec) -> bool {
     })
 }
 
+fn voltage_output_connection_allowed(port: &PortSpec) -> bool {
+    port.direction == super::PortDirection::Out
+        && port_declares_type(port, |port_type| {
+            matches!(port_type, PortType::Voltage | PortType::DifferentialVoltage)
+        })
+}
+
 fn hybrid_connection_allowed(port: &PortSpec) -> bool {
     port_declares_type(port, |port_type| {
         matches!(port_type, PortType::Hybrid | PortType::DifferentialHybrid)
@@ -278,6 +285,7 @@ fn typed_analog_vector_connection_allowed(
             branch_current_connection_allowed(port)
         }
         AnalogInputConnection::CurrentOutput { .. } => current_output_connection_allowed(port),
+        AnalogInputConnection::VoltageOutput { .. } => voltage_output_connection_allowed(port),
         AnalogInputConnection::Hybrid { .. } => hybrid_connection_allowed(port),
     })
 }
@@ -503,6 +511,7 @@ fn validate_port_connection(
         | PortConnection::NamedBranchCurrent { .. }
         | PortConnection::NamedCurrentSource { .. } => branch_current_connection_allowed(port),
         PortConnection::CurrentOutput { .. } => current_output_connection_allowed(port),
+        PortConnection::VoltageOutput { .. } => voltage_output_connection_allowed(port),
         PortConnection::Hybrid { .. } => hybrid_connection_allowed(port),
         PortConnection::AnalogVector(_) => analog_connection_allowed(port),
         PortConnection::TypedAnalogVector(elements) => {
@@ -548,6 +557,8 @@ pub enum AnalogInputConnection {
     /// Explicit differential current-source output element. Positive output
     /// current flows from `pos` to `neg`.
     CurrentOutput { pos: usize, neg: usize },
+    /// Explicit voltage-source output imposing V(pos) - V(neg).
+    VoltageOutput { pos: usize, neg: usize },
     /// Hybrid/resistance port element. The branch current is the input and the
     /// same branch imposes the model's output voltage.
     Hybrid {
@@ -571,12 +582,35 @@ pub enum AnalogInputConnection {
 }
 
 impl AnalogInputConnection {
+    /// Terminals of an analog output; branch-current inputs have no output terminals.
+    pub(crate) fn output_nodes(&self) -> Option<(usize, usize)> {
+        match self {
+            Self::Node(node) => Some((*node, 0)),
+            Self::Differential(pos, neg)
+            | Self::VoltageOutput { pos, neg }
+            | Self::CurrentOutput { pos, neg }
+            | Self::Hybrid { pos, neg, .. } => Some((*pos, *neg)),
+            _ => None,
+        }
+    }
+
+    /// Resolve explicit output selections without changing the model's defaults.
+    pub(crate) fn output_type(&self, default: PortType) -> PortType {
+        match self {
+            Self::VoltageOutput { .. } => PortType::Voltage,
+            Self::CurrentOutput { .. } => PortType::Current,
+            Self::Hybrid { .. } => PortType::Hybrid,
+            _ => default,
+        }
+    }
+
     pub(crate) fn primary_node(&self) -> Option<usize> {
         match self {
             AnalogInputConnection::Node(node) => Some(*node),
             AnalogInputConnection::Differential(pos, _) => Some(*pos),
             AnalogInputConnection::CurrentProbe { pos, .. }
             | AnalogInputConnection::CurrentOutput { pos, .. }
+            | AnalogInputConnection::VoltageOutput { pos, .. }
             | AnalogInputConnection::Hybrid { pos, .. } => Some(*pos),
             AnalogInputConnection::BranchCurrent { .. }
             | AnalogInputConnection::NamedBranchCurrent { .. }
@@ -588,6 +622,7 @@ impl AnalogInputConnection {
         match self {
             AnalogInputConnection::Node(node) => *node = remap(*node),
             AnalogInputConnection::Differential(pos, neg)
+            | AnalogInputConnection::VoltageOutput { pos, neg }
             | AnalogInputConnection::CurrentProbe { pos, neg, .. }
             | AnalogInputConnection::CurrentOutput { pos, neg }
             | AnalogInputConnection::Hybrid { pos, neg, .. } => {
@@ -624,7 +659,8 @@ impl AnalogInputConnection {
 
         match self {
             AnalogInputConnection::Node(node) => node_voltage(solution, *node),
-            AnalogInputConnection::Differential(pos, neg) => {
+            AnalogInputConnection::Differential(pos, neg)
+            | AnalogInputConnection::VoltageOutput { pos, neg } => {
                 node_voltage(solution, *pos) - node_voltage(solution, *neg)
             }
             AnalogInputConnection::CurrentProbe { branch_ordinal, .. }
@@ -751,6 +787,8 @@ pub enum PortConnection {
     /// Explicit differential current-source output. Positive output current
     /// flows from `pos` to `neg`.
     CurrentOutput { pos: usize, neg: usize },
+    /// Explicit voltage-source output imposing V(pos) - V(neg).
+    VoltageOutput { pos: usize, neg: usize },
     /// Hybrid/resistance port. The branch current is the input and the same
     /// branch imposes the model's output voltage.
     Hybrid {
@@ -776,6 +814,28 @@ pub enum PortConnection {
 }
 
 impl PortConnection {
+    /// Terminals of an analog output; branch-current inputs have no output terminals.
+    pub(crate) fn output_nodes(&self) -> Option<(usize, usize)> {
+        match self {
+            Self::Analog(node) => Some((*node, 0)),
+            Self::Differential(pos, neg)
+            | Self::VoltageOutput { pos, neg }
+            | Self::CurrentOutput { pos, neg }
+            | Self::Hybrid { pos, neg, .. } => Some((*pos, *neg)),
+            _ => None,
+        }
+    }
+
+    /// Resolve explicit output selections without changing the model's defaults.
+    pub(crate) fn output_type(&self, default: PortType) -> PortType {
+        match self {
+            Self::VoltageOutput { .. } => PortType::Voltage,
+            Self::CurrentOutput { .. } => PortType::Current,
+            Self::Hybrid { .. } => PortType::Hybrid,
+            _ => default,
+        }
+    }
+
     /// Get the primary node (for single connections)
     pub fn primary_node(&self) -> Option<usize> {
         match self {
@@ -793,6 +853,7 @@ impl PortConnection {
             PortConnection::RealVector(v) => v.first().copied(),
             PortConnection::CurrentProbe { pos, .. }
             | PortConnection::CurrentOutput { pos, .. }
+            | PortConnection::VoltageOutput { pos, .. }
             | PortConnection::Hybrid { pos, .. } => Some(*pos),
             PortConnection::BranchCurrent { .. }
             | PortConnection::NamedBranchCurrent { .. }
@@ -1658,7 +1719,8 @@ impl XspiceInstance {
                     let v = node_voltage(solution, *node);
                     self.context.set_input_analog(&port.name, v);
                 }
-                PortConnection::Differential(pos, neg) => {
+                PortConnection::Differential(pos, neg)
+                | PortConnection::VoltageOutput { pos, neg } => {
                     self.context.set_input_analog(
                         &port.name,
                         node_voltage(solution, *pos) - node_voltage(solution, *neg),
@@ -1995,7 +2057,8 @@ impl XspiceInstance {
         fn typed_element(element: &AnalogInputConnection, visit: &mut impl FnMut(usize)) {
             match element {
                 AnalogInputConnection::Node(node) => visit(*node),
-                AnalogInputConnection::Differential(pos, neg) => {
+                AnalogInputConnection::Differential(pos, neg)
+                | AnalogInputConnection::VoltageOutput { pos, neg } => {
                     visit(*pos);
                     visit(*neg);
                 }
@@ -2011,7 +2074,8 @@ impl XspiceInstance {
             }
             match connection {
                 PortConnection::Analog(node) => visit(*node),
-                PortConnection::Differential(pos, neg) => {
+                PortConnection::Differential(pos, neg)
+                | PortConnection::VoltageOutput { pos, neg } => {
                     visit(*pos);
                     visit(*neg);
                 }
@@ -2232,7 +2296,8 @@ impl XspiceInstance {
                 PortConnection::Analog(node) => {
                     self.context.set_port_node(&port.name, *node);
                 }
-                PortConnection::Differential(pos, neg) => {
+                PortConnection::Differential(pos, neg)
+                | PortConnection::VoltageOutput { pos, neg } => {
                     self.context.set_port_terminals(&port.name, *pos, *neg);
                 }
                 PortConnection::CurrentProbe {
@@ -2289,6 +2354,7 @@ impl XspiceInstance {
                             .map(|element| match element {
                                 AnalogInputConnection::Node(node) => (*node, 0),
                                 AnalogInputConnection::Differential(pos, neg)
+                                | AnalogInputConnection::VoltageOutput { pos, neg }
                                 | AnalogInputConnection::CurrentOutput { pos, neg }
                                 | AnalogInputConnection::CurrentProbe { pos, neg, .. }
                                 | AnalogInputConnection::Hybrid { pos, neg, .. } => (*pos, *neg),
@@ -2443,7 +2509,10 @@ impl XspiceInstance {
                 Some(PortConnection::Analog(node)) => {
                     push_non_ground_node_index(&mut nodes, *node);
                 }
-                Some(PortConnection::Differential(pos, neg))
+                Some(
+                    PortConnection::Differential(pos, neg)
+                    | PortConnection::VoltageOutput { pos, neg },
+                )
                 | Some(PortConnection::CurrentOutput { pos, neg })
                 | Some(PortConnection::Hybrid { pos, neg, .. }) => {
                     push_non_ground_node_index(&mut nodes, *pos);
@@ -2461,6 +2530,7 @@ impl XspiceInstance {
                                 push_non_ground_node_index(&mut nodes, *node);
                             }
                             AnalogInputConnection::Differential(pos, neg)
+                            | AnalogInputConnection::VoltageOutput { pos, neg }
                             | AnalogInputConnection::CurrentOutput { pos, neg }
                             | AnalogInputConnection::Hybrid { pos, neg, .. } => {
                                 push_non_ground_node_index(&mut nodes, *pos);
@@ -2562,7 +2632,10 @@ impl XspiceInstance {
                 continue;
             };
 
-            match (port.default_type, &self.connections[i]) {
+            match (
+                self.connections[i].output_type(port.default_type),
+                &self.connections[i],
+            ) {
                 (
                     PortType::Voltage | PortType::DifferentialVoltage,
                     PortConnection::Analog(node),
@@ -2583,10 +2656,14 @@ impl XspiceInstance {
                 }
                 (
                     PortType::Voltage | PortType::DifferentialVoltage,
-                    PortConnection::Differential(pos, neg),
+                    PortConnection::Differential(pos, neg)
+                    | PortConnection::VoltageOutput { pos, neg },
                 )
                 | (
-                    PortType::Voltage | PortType::DifferentialVoltage,
+                    PortType::Voltage
+                    | PortType::DifferentialVoltage
+                    | PortType::Hybrid
+                    | PortType::DifferentialHybrid,
                     PortConnection::Hybrid { pos, neg, .. },
                 ) => {
                     if let Some(branch_ordinal) = self.branch_ordinal_at(i)
@@ -2623,6 +2700,7 @@ impl XspiceInstance {
                     | PortType::Conductance
                     | PortType::DifferentialConductance,
                     PortConnection::Differential(pos, neg)
+                    | PortConnection::VoltageOutput { pos, neg }
                     | PortConnection::CurrentOutput { pos, neg },
                 ) => stamp_current_output(
                     &mut matrix_add,
@@ -2858,6 +2936,7 @@ impl XspiceInstance {
             match connection {
                 PortConnection::Analog(node) => transitions.push(((*node, 0), transition)),
                 PortConnection::Differential(pos, neg)
+                | PortConnection::VoltageOutput { pos, neg }
                 | PortConnection::CurrentOutput { pos, neg }
                 | PortConnection::Hybrid { pos, neg, .. } => {
                     transitions.push(((*pos, *neg), transition));
@@ -2989,6 +3068,7 @@ impl XspiceInstance {
                     *node = remap(*node);
                 }
                 PortConnection::Differential(pos, neg)
+                | PortConnection::VoltageOutput { pos, neg }
                 | PortConnection::CurrentOutput { pos, neg }
                 | PortConnection::Hybrid { pos, neg, .. } => {
                     *pos = remap(*pos);
@@ -3032,6 +3112,41 @@ impl XspiceInstance {
         }
     }
 
+    pub(crate) fn for_each_analog_output(
+        &self,
+        mut visit: impl FnMut(&PortSpec, PortType, usize, usize),
+    ) {
+        for (port, connection) in self.ports.iter().zip(&self.connections) {
+            if port.direction != super::PortDirection::Out {
+                continue;
+            }
+            let mut visit_selected = |kind, nodes: Option<(usize, usize)>| {
+                if let Some((pos, neg)) = nodes {
+                    visit(port, kind, pos, neg);
+                }
+            };
+            match connection {
+                PortConnection::AnalogVector(nodes) => {
+                    for node in nodes {
+                        visit_selected(port.default_type, Some((*node, 0)));
+                    }
+                }
+                PortConnection::TypedAnalogVector(elements) => {
+                    for element in elements {
+                        visit_selected(
+                            element.output_type(port.default_type),
+                            element.output_nodes(),
+                        );
+                    }
+                }
+                _ => visit_selected(
+                    connection.output_type(port.default_type),
+                    connection.output_nodes(),
+                ),
+            }
+        }
+    }
+
     /// Assign an MNA branch ordinal to a voltage-type output port.
     pub fn set_output_branch(&mut self, port_idx: usize, branch_ordinal: usize) -> CmResult<()> {
         let ports = &self.ports;
@@ -3043,10 +3158,10 @@ impl XspiceInstance {
         };
         let is_output = port.direction == super::PortDirection::Out;
         let is_voltage_port = matches!(
-            port.default_type,
+            self.connections[port_idx].output_type(port.default_type),
             PortType::Voltage | PortType::DifferentialVoltage
         );
-        if !is_output || !is_voltage_port {
+        if !is_output || port.is_vector || !is_voltage_port {
             return Err(CmError::Internal(format!(
                 "Port '{}' on instance {} is not a voltage output",
                 port.name, self.name
@@ -3058,6 +3173,7 @@ impl XspiceInstance {
                 port_idx, self.name
             )));
         }
+        validate_branch_ordinal(&self.name, &port.name, branch_ordinal)?;
         self.output_branches[port_idx] = Some(branch_ordinal);
         Ok(())
     }
@@ -3078,8 +3194,15 @@ impl XspiceInstance {
             )));
         };
         let is_output = port.direction == super::PortDirection::Out;
+        let selected_type = match &self.connections[port_idx] {
+            PortConnection::TypedAnalogVector(elements) => elements
+                .get(element_idx)
+                .map(|element| element.output_type(port.default_type))
+                .unwrap_or(port.default_type),
+            _ => port.default_type,
+        };
         let is_voltage_port = matches!(
-            port.default_type,
+            selected_type,
             PortType::Voltage | PortType::DifferentialVoltage
         );
         if !is_output || !port.is_vector || !is_voltage_port {
@@ -3095,6 +3218,7 @@ impl XspiceInstance {
                 element_idx, port.name, self.name, width
             )));
         }
+        validate_branch_ordinal(&self.name, &port.name, branch_ordinal)?;
         self.output_vector_branches
             .insert((port_idx, element_idx), branch_ordinal);
         Ok(())
@@ -3119,6 +3243,12 @@ impl XspiceInstance {
         port_idx: usize,
         element_idx: usize,
     ) -> Option<usize> {
+        if let Some(PortConnection::TypedAnalogVector(elements)) = self.connections.get(port_idx)
+            && let Some(AnalogInputConnection::Hybrid { branch_ordinal, .. }) =
+                elements.get(element_idx)
+        {
+            return Some(*branch_ordinal);
+        }
         self.output_vector_branches
             .get(&(port_idx, element_idx))
             .copied()

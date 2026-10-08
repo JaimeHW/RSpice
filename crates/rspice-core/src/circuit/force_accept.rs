@@ -297,47 +297,14 @@ impl CircuitData {
             push_pair(node_pos, node_neg);
         });
         for instance in &self.xspice_instances {
-            for (port_idx, port) in instance.ports().iter().enumerate() {
-                let is_voltage_output = matches!(port.direction, crate::xspice::PortDirection::Out)
-                    && matches!(
-                        port.default_type,
-                        crate::xspice::PortType::Voltage
-                            | crate::xspice::PortType::DifferentialVoltage
-                    );
-                if !is_voltage_output {
-                    continue;
+            instance.for_each_analog_output(|_, kind, pos, neg| {
+                if matches!(
+                    kind,
+                    crate::xspice::PortType::Voltage | crate::xspice::PortType::DifferentialVoltage
+                ) {
+                    push_pair(pos, neg);
                 }
-                match instance.connection_at(port_idx) {
-                    Some(crate::xspice::PortConnection::Analog(node)) => push_pair(*node, 0),
-                    Some(crate::xspice::PortConnection::AnalogVector(nodes)) => {
-                        for node in nodes {
-                            push_pair(*node, 0);
-                        }
-                    }
-                    Some(crate::xspice::PortConnection::Differential(pos, neg)) => {
-                        push_pair(*pos, *neg)
-                    }
-                    Some(crate::xspice::PortConnection::TypedAnalogVector(elements)) => {
-                        for element in elements {
-                            match element {
-                                crate::xspice::AnalogInputConnection::Node(node) => {
-                                    push_pair(*node, 0);
-                                }
-                                crate::xspice::AnalogInputConnection::Differential(pos, neg)
-                                | crate::xspice::AnalogInputConnection::CurrentOutput {
-                                    pos,
-                                    neg,
-                                }
-                                | crate::xspice::AnalogInputConnection::Hybrid {
-                                    pos, neg, ..
-                                } => push_pair(*pos, *neg),
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            });
         }
 
         pairs
@@ -381,57 +348,20 @@ impl CircuitData {
             Self::mark_force_accept_protected_node(&mut mask, node_neg);
         });
         for instance in &self.xspice_instances {
-            for (port_idx, port) in instance.ports().iter().enumerate() {
-                let is_voltage_output = matches!(port.direction, crate::xspice::PortDirection::Out)
-                    && matches!(
-                        port.default_type,
-                        crate::xspice::PortType::Voltage
-                            | crate::xspice::PortType::DifferentialVoltage
-                    );
-                if !is_voltage_output {
-                    continue;
+            instance.for_each_analog_output(|port, kind, pos, neg| {
+                // Keep legacy protection for current overrides of voltage-default
+                // models, while protecting explicit voltage outputs of other models.
+                if matches!(
+                    kind,
+                    crate::xspice::PortType::Voltage | crate::xspice::PortType::DifferentialVoltage
+                ) || matches!(
+                    port.default_type,
+                    crate::xspice::PortType::Voltage | crate::xspice::PortType::DifferentialVoltage
+                ) {
+                    Self::mark_force_accept_protected_node(&mut mask, pos);
+                    Self::mark_force_accept_protected_node(&mut mask, neg);
                 }
-                match instance.connection_at(port_idx) {
-                    Some(crate::xspice::PortConnection::Analog(node)) => {
-                        Self::mark_force_accept_protected_node(&mut mask, *node);
-                    }
-                    Some(crate::xspice::PortConnection::AnalogVector(nodes)) => {
-                        for node in nodes {
-                            Self::mark_force_accept_protected_node(&mut mask, *node);
-                        }
-                    }
-                    Some(crate::xspice::PortConnection::Differential(pos, neg)) => {
-                        Self::mark_force_accept_protected_node(&mut mask, *pos);
-                        Self::mark_force_accept_protected_node(&mut mask, *neg);
-                    }
-                    Some(crate::xspice::PortConnection::CurrentOutput { pos, neg }) => {
-                        Self::mark_force_accept_protected_node(&mut mask, *pos);
-                        Self::mark_force_accept_protected_node(&mut mask, *neg);
-                    }
-                    Some(crate::xspice::PortConnection::TypedAnalogVector(elements)) => {
-                        for element in elements {
-                            match element {
-                                crate::xspice::AnalogInputConnection::Node(node) => {
-                                    Self::mark_force_accept_protected_node(&mut mask, *node);
-                                }
-                                crate::xspice::AnalogInputConnection::Differential(pos, neg)
-                                | crate::xspice::AnalogInputConnection::CurrentOutput {
-                                    pos,
-                                    neg,
-                                }
-                                | crate::xspice::AnalogInputConnection::Hybrid {
-                                    pos, neg, ..
-                                } => {
-                                    Self::mark_force_accept_protected_node(&mut mask, *pos);
-                                    Self::mark_force_accept_protected_node(&mut mask, *neg);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            });
         }
 
         // A mixed Verilog-AMS module's D/A bridge drives its deck node from the

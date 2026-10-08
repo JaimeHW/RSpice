@@ -100,3 +100,131 @@ fn compact_voltage_vectors_retain_explicit_types_and_bare_defaults() {
         ]
     );
 }
+
+struct TableFile(&'static str);
+
+impl TableFile {
+    fn linear(path: &'static str) -> Self {
+        let mut data = String::from("4\n4\n0 1 2 3\n0 1 2 3\n");
+        for y in 0..4 {
+            for x in 0..4 {
+                data.push_str(&format!("{} ", 2 * x + 3 * y));
+            }
+            data.push('\n');
+        }
+        rspice_core::xspice::register_data_file(path, data).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for TableFile {
+    fn drop(&mut self) {
+        let _ = rspice_core::xspice::unregister_data_file(self.0);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn explicit_table_voltage_outputs_preserve_dc_ac_polarity_and_load_independence() {
+    let file = TableFile::linear("virtual://voltage-ports/dc-ac");
+    for (port, dc, ac) in [
+        ("%v(out)", 3.5, 2.0),
+        ("%vd[out ref]", 13.5, 2.0),
+        ("%vd[ref out]", 6.5, -2.0),
+    ] {
+        for load in [2.0, 10.0] {
+            let deck = format!(
+                "Explicit table voltage\nVX x 0 DC 1 AC 1\nVY y 0 0.5\nVREF ref 0 10\nA1 x y {port} cm\n.model cm table2d(file=\"{}\" order=2)\nRLOAD out 0 {load}\n.end\n",
+                file.0
+            );
+            let netlist = Netlist::parse(&deck).unwrap();
+            let engine = Engine::default();
+            let op = engine.run_dc_op(&netlist).unwrap();
+            let out = op
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            assert!(
+                (op.node_voltages[out] - dc).abs() < 1e-9,
+                "{port}, load={load}: {op:?}"
+            );
+            let points = engine.run_ac(&netlist, &[1.0, 1e6]).unwrap();
+            for point in points {
+                let out = point
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                assert!(
+                    (point.voltages[out].re - ac).abs() < 1e-9,
+                    "{port}: {point:?}"
+                );
+                assert!(point.voltages[out].im.abs() < 1e-9, "{port}: {point:?}");
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn explicit_table_voltage_outputs_follow_transient_inputs() {
+    let file = TableFile::linear("virtual://voltage-ports/transient");
+    for (port, reference, polarity) in [
+        ("%v(out)", 0.0, 1.0),
+        ("%vd[out ref]", 10.0, 1.0),
+        ("%vd[ref out]", 10.0, -1.0),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "Transient table voltage\nVX x 0 PWL(0 0 1u 1 2u 1)\nVY y 0 0.5\nVREF ref 0 10\nA1 x y {port} cm\n.model cm table2d(file=\"{}\" order=2)\nRLOAD out 0 2\nCLOAD out 0 1n\n.end\n", file.0
+        )).unwrap();
+        let result = Engine::default().run_tran(&netlist, 2e-6, 1e-7).unwrap();
+        let out = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .unwrap();
+        assert!(result.time.len() > 10);
+        assert!((result.time.last().unwrap() - 2e-6).abs() < 1e-15);
+        for (time, value) in result.time.iter().zip(&result.voltages[out]) {
+            let expected = reference + polarity * (1.5 + 2.0 * (time / 1e-6).min(1.0));
+            assert!(
+                (value - expected).abs() < 1e-7,
+                "{port}: t={time}, value={value}, expected={expected}"
+            );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn vector_voltage_selection_preserves_neighboring_current_outputs() {
+    let path = "virtual://voltage-ports/mixed-vector";
+    rspice_core::xspice::register_data_file(path, "0 1 2 3 4\n1e-6 2 3 4 5\n").unwrap();
+    let _file = TableFile(path);
+    for ports in ["[%v(a) %vd[0 b] %i(c) d]", "%v(a) %vd[0 b] %i(c) d"] {
+        let netlist = Netlist::parse(&format!(
+            "Mixed vector outputs\nA1 {ports} fs\n.model fs filesource(file=\"{path}\")\nRA a 0 2\nRB b 0 2\nRC c 0 2\nRD d 0 2\n.end\n"
+        )).unwrap();
+        let result = Engine::default().run_tran(&netlist, 1e-6, 1e-7).unwrap();
+        for (name, offset, gain) in [
+            ("a", 1.0, 1.0),
+            ("b", 2.0, -1.0),
+            ("c", 3.0, -2.0),
+            ("d", 4.0, 1.0),
+        ] {
+            let node = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            for (time, value) in result.time.iter().zip(&result.voltages[node]) {
+                let expected = gain * (offset + time / 1e-6);
+                assert!(
+                    (value - expected).abs() < 1e-7,
+                    "{ports}, {name}: t={time}, value={value}, expected={expected}"
+                );
+            }
+        }
+    }
+}

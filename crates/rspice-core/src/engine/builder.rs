@@ -2631,6 +2631,7 @@ fn collect_analog_connection_nodes(
         PortConnection::Analog(node) => insert_non_ground_node(nodes, *node),
         PortConnection::Differential(pos, neg)
         | PortConnection::CurrentProbe { pos, neg, .. }
+        | PortConnection::VoltageOutput { pos, neg }
         | PortConnection::CurrentOutput { pos, neg }
         | PortConnection::Hybrid { pos, neg, .. } => {
             insert_non_ground_node(nodes, *pos);
@@ -2647,6 +2648,7 @@ fn collect_analog_connection_nodes(
                     AnalogInputConnection::Node(node) => insert_non_ground_node(nodes, *node),
                     AnalogInputConnection::Differential(pos, neg)
                     | AnalogInputConnection::CurrentProbe { pos, neg, .. }
+                    | AnalogInputConnection::VoltageOutput { pos, neg }
                     | AnalogInputConnection::CurrentOutput { pos, neg }
                     | AnalogInputConnection::Hybrid { pos, neg, .. } => {
                         insert_non_ground_node(nodes, *pos);
@@ -2709,6 +2711,7 @@ fn count_discrete_connection_endpoints(
         | PortConnection::TypedAnalogVector(_)
         | PortConnection::CurrentProbe { .. }
         | PortConnection::CurrentOutput { .. }
+        | PortConnection::VoltageOutput { .. }
         | PortConnection::Hybrid { .. }
         | PortConnection::BranchCurrent { .. }
         | PortConnection::NamedBranchCurrent { .. }
@@ -3916,74 +3919,51 @@ fn assign_xspice_output_branches(
     instance: &mut crate::xspice::XspiceInstance,
     instance_name: &str,
 ) -> Result<(), SimulationError> {
-    let ports_spec = instance.ports().to_vec();
-    for (port_idx, port_spec) in ports_spec.iter().enumerate() {
-        let is_output = matches!(port_spec.direction, crate::xspice::PortDirection::Out);
-        let is_voltage_port = matches!(
-            port_spec.default_type,
-            crate::xspice::PortType::Voltage | crate::xspice::PortType::DifferentialVoltage
-        );
-        if !is_output || !is_voltage_port {
+    use crate::xspice::{PortConnection, PortDirection, PortType};
+    let ports = instance.ports().to_vec();
+    for (port_idx, port) in ports.iter().enumerate() {
+        if port.direction != PortDirection::Out {
             continue;
         }
-
-        let connection = instance.connection_at(port_idx).cloned();
-        match connection {
-            Some(crate::xspice::PortConnection::Analog(_))
-            | Some(crate::xspice::PortConnection::Differential(_, _)) => {
-                let branch_name = format!("{}#{}", instance_name, port_spec.name);
-                let branch_ordinal = circuit.allocate_branch_named(&branch_name);
-                instance
-                    .set_output_branch(port_idx, branch_ordinal)
-                    .map_err(|e| {
-                        SimulationError::Circuit(format!(
-                            "Failed to assign branch for XSPICE instance '{}' port '{}': {}",
-                            instance_name, port_spec.name, e
-                        ))
-                    })?;
+        let Some(connection) = instance.connection_at(port_idx).cloned() else {
+            continue;
+        };
+        let mut assign = |kind, element_idx: Option<usize>| -> Result<(), SimulationError> {
+            if !matches!(kind, PortType::Voltage | PortType::DifferentialVoltage) {
+                return Ok(());
             }
-            Some(crate::xspice::PortConnection::AnalogVector(nodes)) => {
-                for element_idx in 0..nodes.len() {
-                    let branch_name =
-                        format!("{}#{}[{}]", instance_name, port_spec.name, element_idx);
-                    let branch_ordinal = circuit.allocate_branch_named(&branch_name);
-                    instance
-                        .set_output_vector_branch(port_idx, element_idx, branch_ordinal)
-                        .map_err(|e| {
-                            SimulationError::Circuit(format!(
-                                "Failed to assign branch for XSPICE instance '{}' port '{}[{}]': {}",
-                                instance_name, port_spec.name, element_idx, e
-                            ))
-                        })?;
+            let port_name = match element_idx {
+                Some(index) => format!("{}[{}]", port.name, index),
+                None => port.name.clone(),
+            };
+            let branch = circuit.allocate_branch_named(&format!("{instance_name}#{port_name}"));
+            let result = match element_idx {
+                Some(index) => instance.set_output_vector_branch(port_idx, index, branch),
+                None => instance.set_output_branch(port_idx, branch),
+            };
+            result.map_err(|error| SimulationError::Circuit(format!(
+                "Failed to assign branch for XSPICE instance '{instance_name}' port '{port_name}': {error}"
+            )))
+        };
+        match &connection {
+            PortConnection::AnalogVector(nodes) => {
+                for index in 0..nodes.len() {
+                    assign(port.default_type, Some(index))?;
                 }
             }
-            Some(crate::xspice::PortConnection::TypedAnalogVector(elements)) => {
-                for (element_idx, element_connection) in elements.iter().enumerate() {
-                    let needs_voltage_branch = matches!(
-                        element_connection,
-                        crate::xspice::AnalogInputConnection::Node(_)
-                            | crate::xspice::AnalogInputConnection::Differential(_, _)
-                    );
-                    if !needs_voltage_branch {
-                        continue;
+            PortConnection::TypedAnalogVector(elements) => {
+                for (index, element) in elements.iter().enumerate() {
+                    if element.output_nodes().is_some() {
+                        assign(element.output_type(port.default_type), Some(index))?;
                     }
-                    let branch_name =
-                        format!("{}#{}[{}]", instance_name, port_spec.name, element_idx);
-                    let branch_ordinal = circuit.allocate_branch_named(&branch_name);
-                    instance
-                        .set_output_vector_branch(port_idx, element_idx, branch_ordinal)
-                        .map_err(|e| {
-                            SimulationError::Circuit(format!(
-                                "Failed to assign branch for XSPICE instance '{}' port '{}[{}]': {}",
-                                instance_name, port_spec.name, element_idx, e
-                            ))
-                        })?;
                 }
+            }
+            _ if connection.output_nodes().is_some() => {
+                assign(connection.output_type(port.default_type), None)?;
             }
             _ => {}
         }
     }
-
     Ok(())
 }
 
@@ -9417,96 +9397,7 @@ impl Engine {
                     instance.set_digital_delay_type(self.config.digital_delay_type);
                     instance.set_resource_limits(self.config.resource_limits);
 
-                    // Allocate MNA branch variables for voltage-driven XSPICE outputs.
-                    // This allows stamping exact branch equations (like independent/controlled V sources)
-                    // instead of approximating these ports as nodal current injections.
-                    let ports_spec = instance.ports().to_vec();
-                    for (port_idx, port_spec) in ports_spec.iter().enumerate() {
-                        let is_output =
-                            matches!(port_spec.direction, crate::xspice::PortDirection::Out);
-                        let is_voltage_port = matches!(
-                            port_spec.default_type,
-                            crate::xspice::PortType::Voltage
-                                | crate::xspice::PortType::DifferentialVoltage
-                        );
-                        if !is_output || !is_voltage_port {
-                            continue;
-                        }
-
-                        let connection = instance.connection_at(port_idx).cloned();
-                        match connection {
-                            Some(crate::xspice::PortConnection::Analog(_))
-                            | Some(crate::xspice::PortConnection::Differential(_, _)) => {
-                                let branch_name = format!("{}#{}", element.name, port_spec.name);
-                                let branch_ordinal = circuit.allocate_branch_named(&branch_name);
-                                instance
-                                    .set_output_branch(port_idx, branch_ordinal)
-                                    .map_err(|e| {
-                                        SimulationError::Circuit(format!(
-                                            "Failed to assign branch for XSPICE instance '{}' port '{}': {}",
-                                            element.name, port_spec.name, e
-                                        ))
-                                    })?;
-                            }
-                            Some(crate::xspice::PortConnection::AnalogVector(nodes)) => {
-                                for element_idx in 0..nodes.len() {
-                                    let branch_name = format!(
-                                        "{}#{}[{}]",
-                                        element.name, port_spec.name, element_idx
-                                    );
-                                    let branch_ordinal =
-                                        circuit.allocate_branch_named(&branch_name);
-                                    instance
-                                        .set_output_vector_branch(
-                                            port_idx,
-                                            element_idx,
-                                            branch_ordinal,
-                                        )
-                                        .map_err(|e| {
-                                            SimulationError::Circuit(format!(
-                                                "Failed to assign branch for XSPICE instance '{}' port '{}[{}]': {}",
-                                                element.name, port_spec.name, element_idx, e
-                                            ))
-                                        })?;
-                                }
-                            }
-                            Some(crate::xspice::PortConnection::TypedAnalogVector(elements)) => {
-                                for (element_idx, element_connection) in elements.iter().enumerate()
-                                {
-                                    let needs_voltage_branch = matches!(
-                                        element_connection,
-                                        crate::xspice::AnalogInputConnection::Node(_)
-                                            | crate::xspice::AnalogInputConnection::Differential(
-                                                _,
-                                                _
-                                            )
-                                    );
-                                    if !needs_voltage_branch {
-                                        continue;
-                                    }
-                                    let branch_name = format!(
-                                        "{}#{}[{}]",
-                                        element.name, port_spec.name, element_idx
-                                    );
-                                    let branch_ordinal =
-                                        circuit.allocate_branch_named(&branch_name);
-                                    instance
-                                        .set_output_vector_branch(
-                                            port_idx,
-                                            element_idx,
-                                            branch_ordinal,
-                                        )
-                                        .map_err(|e| {
-                                            SimulationError::Circuit(format!(
-                                                "Failed to assign branch for XSPICE instance '{}' port '{}[{}]': {}",
-                                                element.name, port_spec.name, element_idx, e
-                                            ))
-                                        })?;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    assign_xspice_output_branches(&mut circuit, &mut instance, &element.name)?;
 
                     instance.init().map_err(|e| {
                         SimulationError::Circuit(format!(

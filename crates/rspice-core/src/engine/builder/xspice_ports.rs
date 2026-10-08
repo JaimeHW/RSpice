@@ -162,6 +162,22 @@ fn coerce_xspice_connection_named(
         };
 
     match parsed_port {
+        XspicePort::ExplicitVoltage(name)
+            if port_spec.direction == crate::xspice::PortDirection::Out =>
+        {
+            Ok(PortConnection::VoltageOutput {
+                pos: resolve_xspice_node(circuit, name),
+                neg: 0,
+            })
+        }
+        XspicePort::DifferentialVoltage { pos, neg }
+            if port_spec.direction == crate::xspice::PortDirection::Out =>
+        {
+            Ok(PortConnection::VoltageOutput {
+                pos: resolve_xspice_node(circuit, pos),
+                neg: resolve_xspice_node(circuit, neg),
+            })
+        }
         XspicePort::Digital(name) if expects_real => Err(SimulationError::Circuit(format!(
             "XSPICE real port '{}' must use a bare real node name, got bracketed digital node '{}'",
             port_spec.name, name
@@ -647,6 +663,22 @@ fn coerce_xspice_vector_connection(
         }
 
         let element = match port {
+            XspicePort::ExplicitVoltage(name) if port_spec.direction == PortDirection::Out => {
+                all_simple_nodes = false;
+                AnalogInputConnection::VoltageOutput {
+                    pos: resolve_xspice_node(circuit, name),
+                    neg: 0,
+                }
+            }
+            XspicePort::DifferentialVoltage { pos, neg }
+                if port_spec.direction == PortDirection::Out =>
+            {
+                all_simple_nodes = false;
+                AnalogInputConnection::VoltageOutput {
+                    pos: resolve_xspice_node(circuit, pos),
+                    neg: resolve_xspice_node(circuit, neg),
+                }
+            }
             XspicePort::DigitalInverted(_) | XspicePort::DigitalVectorMixed(_) => {
                 return Err(SimulationError::Circuit(format!(
                     "XSPICE analog vector port '{}' cannot group inverted digital connection {:?}",
@@ -1249,5 +1281,175 @@ mod tests {
             &connections[0],
             PortConnection::AnalogVector(nodes) if nodes.len() == 1 && nodes[0] > 0
         ));
+    }
+
+    #[test]
+    fn mixed_output_vector_types_control_branches_dc_ac_and_projection() {
+        use crate::xspice::{
+            AnalysisType, CmContext, CmResult, CodeModel, ParamSpec, XspiceInstance,
+        };
+        use std::sync::Arc;
+
+        struct MixedOutputs(Vec<PortSpec>);
+        impl CodeModel for MixedOutputs {
+            fn name(&self) -> &str {
+                "mixed_outputs"
+            }
+            fn ports(&self) -> &[PortSpec] {
+                &self.0
+            }
+            fn parameters(&self) -> &[ParamSpec] {
+                &[]
+            }
+            fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+                Ok(())
+            }
+            fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+                let input = ctx.input("in");
+                ctx.set_output_vector("out", (1..=4).map(|i| 2.0 * i as f64 * input).collect())
+            }
+            fn output_vector_input_partials(
+                &self,
+                _ctx: &CmContext,
+                _port: &str,
+                index: usize,
+            ) -> Vec<(String, f64)> {
+                vec![("in".to_string(), 2.0 * (index + 1) as f64)]
+            }
+        }
+
+        for default in [PortType::Current, PortType::Voltage] {
+            let engine = Engine::default();
+            let mut circuit = engine.build_circuit(&Netlist::parse(
+                "Vector circuit\nVX x 0 DC 1 AC 1\nVREF ref 0 10\nRA a 0 2\nRB b 0 2\nRC c 0 2\nRD d 0 2\n.end\n"
+            ).unwrap()).unwrap();
+            let mut output = PortSpec::vector_output("out", default);
+            output.allowed_types = vec![
+                PortType::Voltage,
+                PortType::DifferentialVoltage,
+                PortType::Current,
+                PortType::DifferentialCurrent,
+            ];
+            let model = Arc::new(MixedOutputs(vec![
+                PortSpec::input("in", PortType::Voltage),
+                output,
+            ]));
+            let port_netlist = Netlist::parse(
+                "Mixed outputs\nA1 x %v(a) %vd[ref b] %id[c ref] d mixed_outputs\n.end\n",
+            )
+            .unwrap();
+            let crate::netlist::ElementKind::Xspice { ports: parsed, .. } =
+                &port_netlist.elements[0].kind
+            else {
+                panic!("XSPICE element");
+            };
+            let connections = coerce_xspice_connections(
+                &mut circuit,
+                model.ports(),
+                parsed,
+                "A1",
+                "mixed_outputs",
+            )
+            .unwrap();
+            let mut instance =
+                XspiceInstance::new("A1", model, connections, &[], &[], &[], &[]).unwrap();
+            assert!(
+                instance.set_output_branch(1, 1).is_err(),
+                "vector requires element branches"
+            );
+            assert!(
+                instance.set_output_vector_branch(1, 0, 0).is_err(),
+                "branch ordinals are one-based"
+            );
+            assert!(
+                instance.set_output_vector_branch(1, 2, 1).is_err(),
+                "current output has no voltage branch"
+            );
+            assert!(
+                instance.set_output_vector_branch(1, 4, 1).is_err(),
+                "element must exist"
+            );
+            assign_xspice_output_branches(&mut circuit, &mut instance, "A1").unwrap();
+            assert!(instance.branch_vector_output_ordinal(1, 0).is_some());
+            assert!(instance.branch_vector_output_ordinal(1, 1).is_some());
+            assert!(instance.branch_vector_output_ordinal(1, 2).is_none());
+            assert_eq!(
+                instance.branch_vector_output_ordinal(1, 3).is_some(),
+                default == PortType::Voltage
+            );
+            instance.init().unwrap();
+            circuit.add_xspice_instance(instance);
+
+            let row = |name: &str| circuit.get_node_by_name(name).unwrap() - 1;
+            let (x, reference, a, b, c, d) =
+                (row("x"), row("ref"), row("a"), row("b"), row("c"), row("d"));
+            let mut initial = vec![0.0; circuit.matrix_size()];
+            initial[x] = 1.0;
+            initial[reference] = 10.0;
+            circuit
+                .try_evaluate_xspice_with_analysis(0.0, 1e-9, &initial, AnalysisType::DcOp)
+                .unwrap();
+            let mut matrix = engine.build_matrix(&circuit).unwrap();
+            circuit.link_indices(&matrix);
+            let mut rhs = vec![0.0; circuit.matrix_size()];
+            circuit.stamp_dc_direct(&mut matrix, &mut rhs);
+            circuit.stamp_xspice(&mut matrix, &mut rhs).unwrap();
+            let dc = matrix.solve(&rhs).unwrap();
+            let default_gain = if default == PortType::Voltage {
+                8.0
+            } else {
+                -16.0
+            };
+            for (row, expected) in [(a, 2.0), (b, 6.0), (c, -12.0), (d, default_gain)] {
+                assert!((dc[row] - expected).abs() < 1e-10, "{default:?}: {dc:?}");
+            }
+            circuit
+                .try_evaluate_xspice_with_analysis(0.0, 1e-9, &dc, AnalysisType::Ac)
+                .unwrap();
+            let mut ac_matrix =
+                Engine::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc, 1.0).unwrap();
+            let ac = ac_matrix
+                .solve(&Engine::build_ac_excitation_rhs(&circuit))
+                .unwrap();
+            for (row, expected) in [(a, 2.0), (b, -4.0), (c, -12.0), (d, default_gain)] {
+                assert!(
+                    (ac[row].re - expected).abs() < 1e-10 && ac[row].im.abs() < 1e-10,
+                    "{default:?}: {ac:?}"
+                );
+            }
+
+            let pairs = circuit.ideal_voltage_output_pairs();
+            assert!(pairs.contains(&(reference + 1, b + 1)));
+            assert!(
+                !pairs.contains(&(c + 1, reference + 1)),
+                "a current source is not an ideal voltage constraint"
+            );
+            let protected = circuit.force_accept_protected_nodes();
+            assert!(protected[a] && protected[b]);
+            circuit
+                .try_evaluate_xspice_with_analysis(0.0, 1e-9, &dc, AnalysisType::Transient)
+                .unwrap();
+            let mut projected = dc.clone();
+            projected[a] += 1.0;
+            projected[b] += 1.0;
+            projected[c] += 1.0;
+            projected[d] += 1.0;
+            let (_, result) = circuit.project_xspice_voltage_outputs(
+                &mut projected,
+                circuit.num_nodes(),
+                Some(0.0),
+            );
+            result.unwrap();
+            assert!((projected[a] - 2.0).abs() < 1e-10);
+            assert!((projected[reference] - projected[b] - 4.0).abs() < 1e-10);
+            assert!((projected[c] - (dc[c] + 1.0)).abs() < 1e-10);
+            let expected_d = dc[d]
+                + if default == PortType::Voltage {
+                    0.0
+                } else {
+                    1.0
+                };
+            assert!((projected[d] - expected_d).abs() < 1e-10);
+        }
     }
 }
