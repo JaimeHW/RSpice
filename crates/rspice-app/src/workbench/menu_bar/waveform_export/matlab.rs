@@ -15,9 +15,10 @@
 //! header that would say what a variable *is*, so a noise spectrum published
 //! here would come back as an anonymous sweep.
 //!
-//! An AC signal is one complex array rather than two real ones, because
-//! MATLAB has a complex numeric class and using it is what makes `abs(V_out)`
-//! work in the reader's hands.
+//! Each retained complex signal is one MATLAB complex array in any analysis
+//! domain. Real traces remain real, including an AC magnitude without retained
+//! phase. MATLAB's complex class makes operations such as `abs(V_out)` work
+//! directly on the original rectangular samples.
 //!
 //! # What it does not carry, and is told instead
 //!
@@ -127,14 +128,6 @@ pub(super) fn export_matlab(
             return;
         }
     };
-    if !prepared.zeroed_imaginary.is_empty() {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-            "An AC signal is published as a complex array. {} retained no imaginary part and \
-             were written with a zero one: {}.",
-            prepared.zeroed_imaginary.len(),
-            prepared.zeroed_imaginary.join(", ")
-        )));
-    }
 
     let default_name = format!("waveforms.{EXTENSION}");
     let (published_path, export) = match io.show_save_dialog(SaveDialogConfig {
@@ -280,7 +273,6 @@ mod tests {
             vec![0.0, -0.5, -0.25],
         )];
         let export = prepared(AnalysisType::Ac, &waveforms).expect("prepares");
-        assert!(export.zeroed_imaginary.is_empty());
         let bytes = encode_matlab(&export).expect("encodes");
 
         let file = matfile::MatFile::parse(std::io::Cursor::new(&bytes)).expect("MATLAB parses it");
@@ -377,14 +369,13 @@ mod tests {
     }
 
     #[test]
-    fn an_ac_trace_with_no_retained_phase_is_published_with_zero_and_named() {
+    fn an_ac_trace_with_no_retained_phase_remains_real() {
         let waveforms = [waveform("V(out)", vec![1.0, 10.0], vec![1.0, 0.5])];
         let export = prepared(AnalysisType::Ac, &waveforms).expect("prepares");
-        assert_eq!(export.zeroed_imaginary, ["V(out)"]);
         let bytes = encode_matlab(&export).expect("encodes");
         let parsed = parse_result_dataset("waveforms.mat", &bytes).expect("re-imports");
-        let complex = parsed.waveforms[0].complex.as_ref().expect("a pair");
-        assert_eq!(complex.imag.as_slice(), [0.0, 0.0]);
+        assert!(parsed.waveforms[0].complex.is_none());
+        assert_eq!(parsed.waveforms[0].y.as_slice(), [1.0, 0.5]);
     }
 
     #[test]

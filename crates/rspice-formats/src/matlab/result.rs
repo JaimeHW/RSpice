@@ -73,22 +73,18 @@ pub struct MatlabExport {
     pub note: String,
     /// The note did not fit the header's descriptive-text field.
     pub note_truncated: bool,
-    /// Signals published with a zero imaginary part because the displayed
-    /// trace retained none.
-    pub zeroed_imaginary: Vec<String>,
 }
 
-/// The variable name an analysis publishes its coordinate under, and whether
-/// its signals are complex.
+/// The variable name an analysis publishes its coordinate under.
 ///
 /// These are exactly the names `result_import_adapters::parse_matlab_v5`
 /// recognises a coordinate by, so a file written here reopens as the analysis
 /// it was.
-const fn coordinate_variable(analysis: AnalysisType) -> Option<(&'static str, bool)> {
+const fn coordinate_variable(analysis: AnalysisType) -> Option<&'static str> {
     match analysis {
-        AnalysisType::Transient => Some(("time", false)),
-        AnalysisType::DcSweep => Some(("sweep", false)),
-        AnalysisType::Ac => Some(("frequency", true)),
+        AnalysisType::Transient => Some("time"),
+        AnalysisType::DcSweep => Some("sweep"),
+        AnalysisType::Ac => Some("frequency"),
         _ => None,
     }
 }
@@ -97,7 +93,7 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
     analysis: &AnalysisResult<W>,
     waveforms: &[&W],
 ) -> Result<MatlabExport, MatlabProjectionError> {
-    let Some((coordinate_name, spectral)) = coordinate_variable(analysis.analysis_type) else {
+    let Some(coordinate_name) = coordinate_variable(analysis.analysis_type) else {
         return Err(MatlabProjectionError::UnsupportedAnalysis {
             analysis: analysis.analysis_type,
             label: analysis.label.clone(),
@@ -133,7 +129,6 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
     let coordinate_source =
         crate::waveform_io::result::axis_signal_for_analysis_type(analysis.analysis_type).0;
     let mut entries = vec![note_entry(coordinate_name, coordinate_source, None)];
-    let mut zeroed_imaginary = Vec::new();
     for waveform in waveforms {
         let waveform = (*waveform).as_ref();
         // Every variable stands on the one coordinate, because that is what
@@ -144,21 +139,13 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
                 signal: waveform.name.clone(),
             });
         }
-        let (source, real, imag) = match (spectral, &waveform.complex) {
-            (true, Some(complex)) => (
+        let (source, real, imag) = match &waveform.complex {
+            Some(complex) => (
                 complex.source_name.clone(),
                 complex.real.as_ref().to_vec(),
                 Some(complex.imag.as_ref().to_vec()),
             ),
-            (true, None) => {
-                zeroed_imaginary.push(waveform.name.clone());
-                (
-                    waveform.name.clone(),
-                    waveform.y.as_ref().to_vec(),
-                    Some(vec![0.0; rows]),
-                )
-            }
-            (false, _) => (waveform.name.clone(), waveform.y.as_ref().to_vec(), None),
+            None => (waveform.name.clone(), waveform.y.as_ref().to_vec(), None),
         };
         let name = names.allocate(&source);
         entries.push(note_entry(&name, &source, waveform.unit.as_deref()));
@@ -180,6 +167,52 @@ pub fn prepare_matlab<W: AsRef<RetainedWaveform>>(
         rows,
         note,
         note_truncated,
-        zeroed_imaginary,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::matlab::reader::{MatlabReadLimits, decode_matlab_v5};
+
+    #[test]
+    fn matlab_preserves_each_signal_representation_in_every_waveform_domain() {
+        for kind in [
+            AnalysisType::Transient,
+            AnalysisType::DcSweep,
+            AnalysisType::Ac,
+        ] {
+            let analysis = AnalysisResult::new(1, kind, "Mixed representations", 0.0)
+                .with_waveforms(vec![
+                    RetainedWaveform::new("magnitude", vec![1.0, 2.0], vec![99.0, 99.0])
+                        .with_complex_components("out", vec![-0.0, 4.0], vec![2.0, -1.0]),
+                    RetainedWaveform::new("scalar", vec![1.0, 2.0], vec![3.0, -0.0]),
+                ]);
+            let export =
+                prepare_matlab(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+            let bytes =
+                crate::matlab::write_mat_v5(&export.header_text, &export.variables).unwrap();
+            let decoded = decode_matlab_v5(
+                &bytes,
+                MatlabReadLimits {
+                    max_variables: 10,
+                    min_rows: 1,
+                    coordinate_names: &["time", "frequency", "sweep"],
+                },
+                "matlab-v5",
+            )
+            .unwrap();
+            assert_eq!(decoded.signals.len(), 2);
+            assert_eq!(decoded.signals[0].name, "out");
+            assert_eq!(decoded.signals[0].real[0].to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(decoded.signals[0].real[1], 4.0);
+            assert_eq!(
+                decoded.signals[0].imag.as_deref(),
+                Some([2.0, -1.0].as_slice())
+            );
+            assert_eq!(decoded.signals[1].name, "scalar");
+            assert_eq!(decoded.signals[1].real[1].to_bits(), (-0.0_f64).to_bits());
+            assert!(decoded.signals[1].imag.is_none());
+        }
+    }
 }
