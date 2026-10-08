@@ -360,16 +360,11 @@ pub(super) fn prepare(
                 }
             }
             let upper = if lower_kind.is_none()
+                && rule.discrete.direction != PortDirection::Inout
                 && !matches!(
                     boundary.actual,
                     Expression::Identifier(_) | Expression::Number(_)
                 ) {
-                if rule.discrete.direction == PortDirection::Inout {
-                    return Err(error(
-                        "bidirectional mixed connections to selected lanes require net alias elaboration",
-                        span,
-                    ));
-                }
                 let mut tap: SmolStr = format!("{}__actual", insertion.instance).into();
                 while !used.insert(tap.clone()) {
                     tap = format!("{tap}_").into();

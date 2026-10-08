@@ -805,6 +805,22 @@ pub struct DigitalElaborationParameter {
     pub bounds: Option<crate::semantic::VectorBounds>,
 }
 
+/// One bit in normalized storage order (zero is the least significant bit).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct DigitalNetBit {
+    pub signal: DigitalSignalId,
+    pub bit: u32,
+}
+
+/// An electrical identity between wire bits, not a value-copying driver.
+/// Transitive aliases retain every original driver's independent contribution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalBitAlias {
+    pub left: DigitalNetBit,
+    pub right: DigitalNetBit,
+    pub span: SourceSpanRef,
+}
+
 /// The discrete-domain half of a module, lowered.
 ///
 /// Lifted out beside the analog body rather than folded into it, for the same
@@ -828,6 +844,8 @@ pub struct CanonicalDigitalPlan {
     pub signals: Vec<DigitalSignal>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub arrays: Vec<DigitalArray>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bit_aliases: Vec<DigitalBitAlias>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processes: Vec<CfgDigitalProcess>,
     /// Every continuous driver in the module, in declaration order.
@@ -865,6 +883,7 @@ impl CanonicalDigitalPlan {
     pub fn has_executable_content(&self) -> bool {
         !self.signals.is_empty()
             || !self.arrays.is_empty()
+            || !self.bit_aliases.is_empty()
             || !self.processes.is_empty()
             || !self.drivers.is_empty()
             || !self.analog_probes.is_empty()

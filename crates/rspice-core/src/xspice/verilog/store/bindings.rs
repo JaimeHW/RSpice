@@ -24,21 +24,20 @@ pub(crate) struct DigitalBitChange {
     pub starts_publication: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct DigitalBitConnection {
-    pub signal: DigitalSignalId,
-    pub bit: u32,
-}
+pub(crate) use rspice_veriloga::canonical_ir::digital::DigitalNetBit as DigitalBitConnection;
 
 #[derive(Clone)]
 struct BitNet {
     members: Vec<DigitalBitConnection>,
     contributions: Vec<(usize, u32)>,
+    external_nets: Vec<usize>,
 }
 
 #[derive(Clone)]
 struct BitTopology {
     nets: Vec<BitNet>,
+    /// Stable caller net identities mapped onto connected components.
+    external_nets: Vec<usize>,
     by_signal: Vec<Vec<usize>>,
     external_sources: Vec<(usize, EventTarget)>,
     external_by_net: Vec<Vec<usize>>,
@@ -90,28 +89,34 @@ impl DigitalSignalStore {
         &mut self,
         nets: &[Vec<DigitalBitConnection>],
     ) -> Result<(), String> {
-        if self.connected.is_some() {
+        if self.connected.as_ref().is_some_and(|bits| {
+            !bits.topology.external_nets.is_empty() || bits.topology.external_attached
+        }) {
             return Err("digital bit connections are already installed".into());
         }
-        let mut topology = BitTopology {
-            nets: Vec::new(),
-            by_signal: vec![Vec::new(); self.values.len()],
-            external_sources: Vec::new(),
-            external_by_net: vec![Vec::new(); nets.len()],
-            other_driver_observers: Vec::new(),
-            observed: vec![false; nets.len()],
-            external_attached: false,
-        };
-        let mut claimed = BTreeSet::new();
-        for (net_index, offered) in nets.iter().enumerate() {
-            let mut members = offered.clone();
-            members.sort_unstable();
-            members.dedup();
-            if members.is_empty() {
-                return Err(format!("digital event net {net_index} has no endpoints"));
+        // Source aliases and circuit event nets share one union graph. Caller
+        // net IDs stay stable even when HDL hierarchy joins two circuit nets.
+        let mut groups = nets.to_vec();
+        groups.extend(
+            self.plan
+                .bit_aliases
+                .iter()
+                .map(|alias| vec![alias.left, alias.right]),
+        );
+        let mut parents: Vec<_> = (0..groups.len()).collect();
+        fn root(parents: &mut [usize], mut index: usize) -> usize {
+            while parents[index] != index {
+                parents[index] = parents[parents[index]];
+                index = parents[index];
             }
-            let mut contributions = BTreeSet::new();
-            for member in &members {
+            index
+        }
+        let mut claimed = std::collections::BTreeMap::new();
+        for (group, members) in groups.iter().enumerate() {
+            if members.is_empty() {
+                return Err(format!("digital event net {group} has no endpoints"));
+            }
+            for &member in members {
                 let signal = usize::from(member.signal);
                 if signal >= self.values.len()
                     || self.kinds[signal].is_real()
@@ -119,16 +124,53 @@ impl DigitalSignalStore {
                     || member.bit >= self.widths[signal]
                 {
                     return Err(format!(
-                        "digital event net {net_index} requires a declared wire bit, got signal {signal} bit {}",
+                        "digital event net {group} requires a declared wire bit, got signal {signal} bit {}",
                         member.bit
                     ));
                 }
-                if !claimed.insert(*member) {
-                    return Err(format!(
-                        "signal {signal} bit {} belongs to two distinct event nets",
-                        member.bit
-                    ));
+                if let Some(&previous) = claimed.get(&member) {
+                    let left = root(&mut parents, previous);
+                    let right = root(&mut parents, group);
+                    parents[left.max(right)] = left.min(right);
+                } else {
+                    claimed.insert(member, group);
                 }
+            }
+        }
+        let mut topology = BitTopology {
+            nets: Vec::new(),
+            external_nets: Vec::with_capacity(nets.len()),
+            by_signal: vec![Vec::new(); self.values.len()],
+            external_sources: Vec::new(),
+            external_by_net: Vec::new(),
+            other_driver_observers: Vec::new(),
+            observed: vec![false; nets.len()],
+            external_attached: false,
+        };
+        let mut components = std::collections::BTreeMap::new();
+        for (group, members) in groups.into_iter().enumerate() {
+            let representative = root(&mut parents, group);
+            let net = *components.entry(representative).or_insert_with(|| {
+                let index = topology.nets.len();
+                topology.nets.push(BitNet {
+                    members: Vec::new(),
+                    contributions: Vec::new(),
+                    external_nets: Vec::new(),
+                });
+                index
+            });
+            topology.nets[net].members.extend(members);
+            if group < nets.len() {
+                topology.external_nets.push(net);
+                topology.nets[net].external_nets.push(group);
+            }
+        }
+        for (net_index, net) in topology.nets.iter_mut().enumerate() {
+            net.members.sort_unstable();
+            net.members.dedup();
+            let mut contributions = BTreeSet::new();
+            for member in &net.members {
+                let signal = usize::from(member.signal);
                 if topology.by_signal[signal].last() != Some(&net_index) {
                     topology.by_signal[signal].push(net_index);
                 }
@@ -141,11 +183,9 @@ impl DigitalSignalStore {
                     }
                 }
             }
-            topology.nets.push(BitNet {
-                members,
-                contributions: contributions.into_iter().collect(),
-            });
+            net.contributions = contributions.into_iter().collect();
         }
+        topology.external_by_net = vec![Vec::new(); topology.nets.len()];
         self.connected = Some(ConnectedBits::fresh(Arc::new(topology)));
         Ok(())
     }
@@ -159,7 +199,10 @@ impl DigitalSignalStore {
     }
 
     pub(crate) fn connected_value(&self, net: usize) -> Option<DigitalValue> {
-        self.connected.as_ref()?.resolved.get(net).copied()
+        let bits = self.connected.as_ref()?;
+        bits.resolved
+            .get(*bits.topology.external_nets.get(net)?)
+            .copied()
     }
 
     /// Validate the complete external topology before assigning any identity.
@@ -172,7 +215,7 @@ impl DigitalSignalStore {
         if connected.topology.external_attached {
             return Err("external bit participants are already attached".into());
         }
-        let count = connected.topology.nets.len();
+        let count = connected.topology.external_nets.len();
         if let Some(net) = observed
             .iter()
             .copied()
@@ -200,7 +243,7 @@ impl DigitalSignalStore {
             topology.observed[net] = true;
         }
         for (index, (net, _)) in drivers.iter().enumerate() {
-            topology.external_by_net[*net].push(index);
+            topology.external_by_net[topology.external_nets[*net]].push(index);
             topology.observed[*net] = true;
         }
         let sources = &topology.external_sources;
@@ -313,7 +356,9 @@ impl DigitalSignalStore {
         let mut nets = BTreeSet::new();
         for (driver, value) in drives {
             connected.external_values[driver.0] = *value;
-            nets.insert(connected.topology.external_sources[driver.0].0);
+            nets.insert(
+                connected.topology.external_nets[connected.topology.external_sources[driver.0].0],
+            );
         }
         let publication_start = self.external_changes.len();
         for net in nets {
@@ -404,16 +449,18 @@ impl DigitalSignalStore {
         }
         let previous = std::mem::replace(&mut connected.resolved[net_index], resolved);
         if previous != resolved {
-            self.trace_resolved_bit(net_index, resolved);
-        }
-        if previous != resolved && topology.observed[net_index] {
-            self.external_changes
-                .push(ExternalNetChange::Bits(DigitalBitChange {
-                    net: net_index,
-                    previous,
-                    value: resolved,
-                    starts_publication: self.external_changes.len() == publication_start,
-                }));
+            for &net in &net.external_nets {
+                self.trace_resolved_bit(net, resolved);
+                if topology.observed[net] {
+                    self.external_changes
+                        .push(ExternalNetChange::Bits(DigitalBitChange {
+                            net,
+                            previous,
+                            value: resolved,
+                            starts_publication: self.external_changes.len() == publication_start,
+                        }));
+                }
+            }
         }
         for member in &net.members {
             connected
@@ -467,5 +514,97 @@ fn hdl_bit(value: DigitalValue) -> FourStateBit {
         DigitalState::Unknown | DigitalState::UnknownR | DigitalState::UnknownZ => {
             FourStateBit::Unknown
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bit_alias_connections_join_external_groups_without_renumbering_or_feedback() {
+        let source = "module leaf(io); inout io; wire io; endmodule module top(bus); inout [3:2] bus; wire [3:2] bus; leaf child(bus[2]); endmodule";
+        let artifact = rspice_veriloga::VerilogACompiler::new(Default::default())
+            .compile_canonical_ir_module(source, Some("top"))
+            .unwrap();
+        let plan = Arc::new(artifact.digital);
+        let signal = |name: &str| {
+            plan.signals
+                .iter()
+                .find(|signal| signal.name == name)
+                .unwrap()
+                .id
+        };
+        let bus = signal("bus");
+        let child = signal("child.io");
+        let mut store = DigitalSignalStore::from_plan(plan);
+        store
+            .connect_bits(&[
+                vec![DigitalBitConnection {
+                    signal: bus,
+                    bit: 0,
+                }],
+                vec![DigitalBitConnection {
+                    signal: child,
+                    bit: 0,
+                }],
+            ])
+            .unwrap();
+        let target = |node_id, instance: &str| EventTarget {
+            node_id,
+            instance: instance.into(),
+            port_name: "io".into(),
+            driver_index: 0,
+        };
+        let drivers = store
+            .attach_external_bits(&[0, 1], &[(0, target(10, "a")), (1, target(20, "b"))])
+            .unwrap();
+        store.observe_other_drivers(&drivers).unwrap();
+        for (left, right, expected) in [
+            (
+                DigitalValue::one(),
+                DigitalValue::high_z(),
+                DigitalValue::one(),
+            ),
+            (
+                DigitalValue::one(),
+                DigitalValue::zero(),
+                DigitalValue::unknown(),
+            ),
+            (
+                DigitalValue::high_z(),
+                DigitalValue::zero(),
+                DigitalValue::zero(),
+            ),
+            (
+                DigitalValue::high_z(),
+                DigitalValue::high_z(),
+                DigitalValue::high_z(),
+            ),
+        ] {
+            store.publish_external_drives(&[(drivers[0], left), (drivers[1], right)]);
+            for net in [0, 1] {
+                assert_eq!(store.connected_value(net), Some(expected));
+            }
+            assert_eq!(store.other_driver_value(drivers[0]), Some(right));
+            assert_eq!(store.other_driver_value(drivers[1]), Some(left));
+            let changes = store.take_external_bit_changes();
+            assert_eq!(
+                changes.iter().map(|change| change.net).collect::<Vec<_>>(),
+                [0, 1]
+            );
+            assert_eq!(store.values[usize::from(bus)].bit(0), hdl_bit(expected));
+            assert_eq!(
+                store.values[usize::from(bus)].bit(1),
+                FourStateBit::HighImpedance
+            );
+            assert_eq!(store.values[usize::from(child)].bit(0), hdl_bit(expected));
+        }
+        let mut fresh = DigitalSignalStore::from_plan(Arc::clone(&store.plan));
+        fresh.inherit_bit_connections(&store);
+        assert_eq!(fresh.external_sources(), store.external_sources());
+        fresh.publish_external_drives(&[(drivers[1], DigitalValue::one())]);
+        assert_eq!(fresh.connected_value(0), Some(DigitalValue::one()));
+        assert_eq!(fresh.connected_value(1), Some(DigitalValue::one()));
     }
 }

@@ -1030,3 +1030,74 @@ connectrules selected; connect drive {mode}; connect sense; endconnectrules
         }
     }
 }
+
+#[test]
+fn bit_alias_connections_keep_driver_handoff_and_analog_loading() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module load(a,p);
+ inout a; electrical a;
+ output p; electrical p;
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module top(p,q,m);
+ output p,q,m; electrical p,q,m;
+ wire [5:4] bus;
+ reg [1:0] value;
+ integer code;
+ initial begin value=2'b10; #1 value=2'bzz; #1 value=2'b01; #1 value=2'bzz; end
+ assign bus=value;
+ load first(bus[5],p);
+ load second(bus[4],q);
+ always @(bus) begin
+  if(bus===2'b10) code=1;
+  else if(bus===2'b11) code=2;
+  else if(bus===2'b0x) code=3;
+  else if(bus===2'bzz) code=4;
+  else code=9;
+ end
+ analog V(m)<+code;
+endmodule
+connectmodule bidirectional(d,a);
+ inout d; logic d;
+ inout a; electrical a;
+ reg drive;
+ wire high, low;
+ initial begin drive=1'bz; #1 drive=1; #1 drive=0; #1 drive=1'bz; end
+ assign d=drive;
+ assign high=(d===1'b1);
+ assign low=(d===1'b0);
+ analog I(a)<+(high*(V(a)-3.0)+low*V(a))/1000;
+endmodule
+connectrules selected; connect bidirectional; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!("* selected bidirectional lanes\nX1 p q m top\nRp p 0 1k\nRq q 0 1k\nRm m 0 1k\n.va \"{}\" top module=top\n.end\n", source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 3.8e-9, 50e-12).unwrap();
+    let observed: Vec<_> = [0.5e-9, 1.5e-9, 2.5e-9, 3.5e-9]
+        .into_iter()
+        .map(|time| {
+            (
+                time,
+                voltage(&result, "m", time),
+                voltage(&result, "p", time),
+                voltage(&result, "q", time),
+            )
+        })
+        .collect();
+    for (time, code, p, q) in [
+        (0.5e-9, 1.0, 1.5, 0.0),
+        (1.5e-9, 2.0, 1.5, 1.5),
+        (2.5e-9, 3.0, 0.0, 0.0),
+        (3.5e-9, 4.0, 0.0, 0.0),
+    ] {
+        for (node, expected) in [("m", code), ("p", p), ("q", q)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node} at {time}: {actual}, expected {expected}; full trace {observed:?}"
+            );
+        }
+    }
+}

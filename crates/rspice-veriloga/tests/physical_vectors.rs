@@ -77,6 +77,18 @@ endmodule
 fn physical_vector_errors_do_not_silently_collapse_topology() {
     let cases = [
         (
+            "module leaf(a); inout a; wire a; endmodule module top; wire [3:2] bus; leaf l(bus[1]); endmodule",
+            "requires an in-range wire selection",
+        ),
+        (
+            "module leaf(a); inout [1:0] a; wire [1:0] a; endmodule module top; wire [3:2] bus; leaf l(bus[2:3]); endmodule",
+            "requires an in-range wire selection",
+        ),
+        (
+            "module leaf(a); inout a; wire a; endmodule module top; reg [3:2] bus; leaf l(bus[2]); endmodule",
+            "variable connected to the `inout` port",
+        ),
+        (
             "module top(p); parameter [3:0] k=2; inout [0:1] p; electrical [0:1] p; real sample; initial begin : local_scope reg [3:0] k; k=1; sample=V(p[k[0]]); end endmodule",
             "process-local storage",
         ),
@@ -203,4 +215,60 @@ endmodule
         Some(5.0)
     );
     compiler().compile_runtime(source, Some("top")).unwrap();
+}
+
+#[test]
+fn bidirectional_selections_keep_wire_identity_and_validate_artifacts() {
+    use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
+    let source = r#"
+module leaf(io);
+ inout [6:7] io; wire [6:7] io;
+ assign io=2'bzz;
+endmodule
+module middle(io);
+ parameter integer PICK=8;
+ inout [9:6] io; wire [9:6] io;
+ leaf child(io[PICK:PICK-1]);
+endmodule
+module top(bus);
+ inout [2:5] bus; wire [2:5] bus;
+ middle m(bus);
+endmodule
+"#;
+    let artifact = compiler()
+        .compile_canonical_ir_module(source, Some("top"))
+        .unwrap();
+    let plan = &artifact.digital;
+    assert_eq!(plan.bit_aliases.len(), 2);
+    assert_eq!(
+        plan.drivers.len(),
+        1,
+        "a wire identity must not synthesize a feedback driver"
+    );
+    for (alias, (left, right)) in plan.bit_aliases.iter().zip([(1, 2), (0, 1)]) {
+        assert_eq!(plan.signal(alias.left.signal).unwrap().name, "m.child.io");
+        assert_eq!(plan.signal(alias.right.signal).unwrap().name, "bus");
+        assert_eq!((alias.left.bit, alias.right.bit), (left, right));
+    }
+    let encoded = serde_json::to_vec(plan).unwrap();
+    let decoded: CanonicalDigitalPlan = serde_json::from_slice(&encoded).unwrap();
+    decoded.validate().unwrap();
+    let mut changed = decoded.clone();
+    changed.bit_aliases[0].right.bit = 0;
+    assert!(
+        changed
+            .validate()
+            .unwrap_err()
+            .iter()
+            .any(|d| d.to_string().contains("identity is stale"))
+    );
+    let mut invalid = decoded;
+    invalid.bit_aliases[0].right.bit = 4;
+    assert!(
+        invalid
+            .validate()
+            .unwrap_err()
+            .iter()
+            .any(|d| d.to_string().contains("in-range four-state wire bit"))
+    );
 }

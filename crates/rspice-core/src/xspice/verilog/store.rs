@@ -577,7 +577,7 @@ impl DigitalSignalStore {
             });
         }
 
-        Self {
+        let mut store = Self {
             values,
             reals,
             kinds,
@@ -609,7 +609,13 @@ impl DigitalSignalStore {
             expression_scratch: DigitalEvalScratch::new(),
             expression_error: None,
             expression_captures: Vec::new(),
+        };
+        if !store.plan.bit_aliases.is_empty() {
+            store
+                .connect_bits(&[])
+                .expect("validated HDL wire-bit aliases");
         }
+        store
     }
 
     /// Publish one converged analog solution's probe values into the store.

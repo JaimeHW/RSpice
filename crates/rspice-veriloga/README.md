@@ -159,11 +159,15 @@ can drive whole physical input vectors through per-lane authored converters;
 selected physical lanes can connect to scalar digital formals. Scalar potential
 and flow accesses resolve constant coordinates, including analog `genvar` loops
 and custom nature accesses. Shape and selector dependencies require source
-specialization when their parameters change. Artifact schema 125 and core cache
-record 107 invalidate models compiled before these checks.
+specialization when their parameters change. Artifact schema 126 and core cache
+record 108 invalidate models compiled before these checks.
+Constant four-state wire bit/part selections can connect bidirectional HDL ports
+and scalar authored mixed boundaries. Explicit aliases retain each original driver,
+resolve contention, and release with `Z` through hierarchy and linked designs.
+External event-net identities survive aliases that join multiple circuit nets.
 Whole physical vectors connected to packed digital formals, vector-valued/named
-branch forms, unpacked net/port arrays, bidirectional lane aliases, complete
-inherited discipline resolution, and library/view selection remain open.
+branch forms, unpacked net/port arrays, complete inherited discipline resolution,
+and library/view selection remain open.
 Escaped node names retain distinct lane identities; escaped ground and comma-bearing
 names still require structured branch labels, and the full escaped-identifier
 language surface remains part of language qualification.

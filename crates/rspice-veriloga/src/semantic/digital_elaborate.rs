@@ -36,13 +36,10 @@
 //!   two readings *do* differ are refused below rather than silently resolved
 //!   in favour of the cheaper one.
 //!
-//! * **A bit- or part-select connection becomes an implicit continuous
-//!   assignment**, in the direction the port's own direction gives it. Some of
-//!   a net's bits are not a net, so there is nothing to join: an input port is
-//!   *driven from* the selected bits and an output port *drives* them, and each
-//!   is a real driver with a real identity on a real net. Driving four bits of
-//!   an eight-bit net is what a driver's write *select* exists for, so the
-//!   other four keep whatever else drives them.
+//! * **A bit- or part-select input/output connection becomes an implicit
+//!   continuous assignment.** An inout connection instead aliases the selected
+//!   wire bits. Each original driver contributes to the shared resolution, and
+//!   releasing one side cannot leave a copied value driving the other side.
 //!
 //! * **A variable output port becomes an implicit continuous assignment.**
 //!   Section 12.3.9.2 permits an output port to be a variable, and a variable
@@ -76,9 +73,6 @@
 //! * a port connection that is neither a declared net nor a bit- or
 //!   part-select of one — an arbitrary expression, a constant, a concatenation
 //!   (section 12.3.9);
-//! * a bit- or part-select connected to an `inout` port, because section
-//!   12.3.9.3 makes that connection a bidirectional join of two nets and no
-//!   assignment in either direction describes one;
 //! * a connection naming something that is not a declared discrete-domain
 //!   signal, because this compiler does not create implicit nets (section
 //!   4.5);
@@ -96,8 +90,8 @@ use super::{
     ElaboratedDigitalSignal,
 };
 use crate::ast::{
-    ArrayAccessExpr, ContinuousAssign, DigitalExpr, DigitalLValue, Expression,
-    Identifier, Module, ModuleInstance, PartSelectExpr, PortDirection,
+    ArrayAccessExpr, ContinuousAssign, DigitalExpr, DigitalLValue, Expression, Identifier, Module,
+    ModuleInstance, PartSelectExpr, PortDirection,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -239,6 +233,8 @@ struct Binding {
     /// The name this signal has in the flat scope.
     elaborated: SmolStr,
     width: u32,
+    /// Coordinates in this occurrence, independent of a collapsed outer name.
+    range: super::VectorBounds,
     /// Whether the elaborated signal is a variable (`reg`) rather than a net.
     is_variable: bool,
     /// Whether *this view* of the signal is an input port.
@@ -273,6 +269,7 @@ impl Scope {
                 Binding {
                     elaborated: signal.name.clone(),
                     width: signal.width,
+                    range: signal.range.unwrap_or(super::VectorBounds::SCALAR),
                     is_variable: signal.class.is_variable(),
                     // The compiled module's own ports are its boundary with
                     // the rest of the circuit, not something an enclosing
@@ -475,7 +472,7 @@ impl DigitalElaborator<'_> {
             path,
         )?;
         let borrowed: Vec<_> = connections.iter().map(Option::as_ref).collect();
-        let (signals, mut scope, port_drivers) =
+        let (signals, mut scope, port_drivers, bit_aliases) =
             self.bind_ports(instance, child, parent_scope, path, &borrowed)?;
         scope.connections = super::node_vectors::ConnectionScope::new(child_source, child);
 
@@ -517,6 +514,7 @@ impl DigitalElaborator<'_> {
             processes: child.digital.processes.clone(),
             continuous_assigns: child.digital.continuous_assigns.clone(),
             port_drivers,
+            bit_aliases,
             constants: child.digital.constants.clone(),
             span: instance.span,
         });
@@ -534,7 +532,7 @@ impl DigitalElaborator<'_> {
     ///
     /// Returns the instance's signals with the name each takes in the flat
     /// scope, the scope its body resolves against, and the implicit continuous
-    /// assignments its variable output ports produce.
+    /// assignments and wire-bit aliases its port connections produce.
     fn bind_ports(
         &self,
         instance: &ModuleInstance,
@@ -546,9 +544,11 @@ impl DigitalElaborator<'_> {
         Vec<ElaboratedDigitalSignal>,
         Scope,
         Vec<AnalyzedContinuousAssign>,
+        Vec<super::digital::ElaboratedDigitalBitAlias>,
     )> {
         let mut bindings: HashMap<SmolStr, Binding> = HashMap::new();
         let mut port_drivers = Vec::new();
+        let mut bit_aliases = Vec::new();
 
         for (index, port) in child.ports.iter().enumerate() {
             let Some(declared) = child
@@ -579,7 +579,7 @@ impl DigitalElaborator<'_> {
             let resizes_variable = is_variable && !declared.class.is_real();
             let own = qualify(path, &port.name);
             let form = connections[index]
-                .map(|expression| connection_form(expression, path, &port.name))
+                .map(|expression| connection_form(expression, parent_scope, path, &port.name))
                 .transpose()?;
             let binding = match form {
                 // An unconnected port is a net of its own. IEEE 1364-2005
@@ -588,14 +588,12 @@ impl DigitalElaborator<'_> {
                 None => Binding {
                     elaborated: own,
                     width: declared.width,
+                    range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                     is_variable,
                     is_input_port: port.direction == PortDirection::Input,
                 },
-                // Some of a net's bits, not a net. The two cannot be joined —
-                // one net has one width — so section 12.3.9's *other* reading
-                // applies: the port keeps its own signal and the connection is
-                // an implicit continuous assignment, in whichever direction the
-                // port's own direction makes it.
+                // Input/output selections keep their assignment semantics;
+                // an inout selection joins normalized wire bits directly.
                 Some(ConnectionForm::Select { name, select, span }) => {
                     let outer = lookup_connection(name, parent_scope, path, &port.name, span)?;
                     let width = select.width(span)?;
@@ -645,27 +643,46 @@ impl DigitalElaborator<'_> {
                                 span,
                             ));
                         }
-                        // Section 12.3.9.3 makes an inout connection a
-                        // bidirectional join of two nets. A select is not a
-                        // net, and neither direction of assignment describes
-                        // the join, so there is nothing honest to build.
                         PortDirection::Inout => {
-                            return Err(semantic_error(
-                                SemanticErrorKind::UnsupportedFeature(format!(
-                                    "the `inout` port `{}` of instance `{path}` is connected to \
-                                     a select of `{}`; IEEE 1364-2005 section 12.3.9.3 makes an \
-                                     inout connection a bidirectional join of two nets, which no \
-                                     assignment in either direction describes — connect a \
-                                     declared net by name",
-                                    port.name, outer.elaborated
-                                )),
-                                span,
-                            ));
+                            if outer.is_variable {
+                                return Err(variable_connection_error(&outer, port, path, span));
+                            }
+                            if outer.is_input_port {
+                                return Err(input_port_connection_error(&outer, port, path, span));
+                            }
+                            let coordinates = select.coordinates(span)?;
+                            if outer.width == 0
+                                || !outer.range.contains(coordinates.msb)
+                                || !outer.range.contains(coordinates.lsb)
+                                || (coordinates.msb != coordinates.lsb
+                                    && (coordinates.msb > coordinates.lsb)
+                                        != (outer.range.msb > outer.range.lsb))
+                            {
+                                return Err(semantic_error(
+                                    SemanticErrorKind::InvalidContribution(format!(
+                                        "inout port '{path}.{}' requires an in-range wire selection with the declared direction",
+                                        port.name
+                                    )),
+                                    span,
+                                ));
+                            }
+                            for (position, coordinate) in
+                                coordinates.indices_msb_first().enumerate()
+                            {
+                                bit_aliases.push(super::digital::ElaboratedDigitalBitAlias {
+                                    left: own.clone(),
+                                    left_bit: declared.width - 1 - position as u32,
+                                    right: outer.elaborated.clone(),
+                                    right_bit: outer.range.position_of(coordinate) as u32,
+                                    span,
+                                });
+                            }
                         }
                     }
                     Binding {
                         elaborated: own,
                         width: declared.width,
+                        range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                         is_variable,
                         is_input_port: port.direction == PortDirection::Input,
                     }
@@ -709,6 +726,7 @@ impl DigitalElaborator<'_> {
                         Binding {
                             elaborated: own,
                             width: declared.width,
+                            range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                             is_variable: true,
                             is_input_port: false,
                         }
@@ -717,6 +735,7 @@ impl DigitalElaborator<'_> {
                         Binding {
                             elaborated: outer.elaborated,
                             width: outer.width,
+                            range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                             is_variable: outer.is_variable,
                             is_input_port: outer.is_input_port
                                 || port.direction == PortDirection::Input,
@@ -737,6 +756,7 @@ impl DigitalElaborator<'_> {
             let binding = bindings.get(&declared.name).cloned().unwrap_or(Binding {
                 elaborated: qualify(path, &declared.name),
                 width: declared.width,
+                range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                 is_variable: declared.class.is_variable(),
                 is_input_port: false,
             });
@@ -746,7 +766,7 @@ impl DigitalElaborator<'_> {
             });
             scope.signals.insert(declared.name.clone(), binding);
         }
-        Ok((signals, scope, port_drivers))
+        Ok((signals, scope, port_drivers, bit_aliases))
     }
 }
 
@@ -834,7 +854,7 @@ pub(super) fn specialize_module(
 /// IEEE 1364-2005 section 12.3.9 permits an arbitrary expression, and reads a
 /// connection two ways depending on what it is. These are the two this compiler
 /// can build something honest out of, and they take the two different readings:
-/// a whole net collapses, a select becomes an implicit continuous assignment.
+/// a whole net collapses; selected inouts alias bits and other selections assign.
 /// Everything else — a concatenation, a constant, an arithmetic expression —
 /// is refused where it is written.
 enum ConnectionForm<'a> {
@@ -843,45 +863,44 @@ enum ConnectionForm<'a> {
     /// `.a(bus[3])` or `.a(bus[7:4])` — some of a declared net's bits.
     Select {
         name: &'a SmolStr,
-        select: SelectBounds<'a>,
+        select: SelectBounds,
         span: Span,
     },
 }
 
 /// Which bits of a net a connection selects.
-enum SelectBounds<'a> {
-    Bit(&'a Expression),
-    Part {
-        msb: &'a Expression,
-        lsb: &'a Expression,
-    },
+enum SelectBounds {
+    Bit(Expression),
+    Part { msb: Expression, lsb: Expression },
 }
 
-impl SelectBounds<'_> {
-    /// How many bits the select carries.
-    ///
-    /// A bit select is one, with no evaluation: the index does not have to be
-    /// known here, and a generate-unrolled `carry[i+1]` is folded where it is
-    /// lowered. A part select's *bounds* are what give its width, so those must
-    /// fold, and a pair that does not is refused rather than guessed at.
+impl SelectBounds {
+    fn coordinates(&self, span: Span) -> CompileResult<super::VectorBounds> {
+        let bounds = match self {
+            Self::Bit(index) => constant_bound(index).map(|index| (index, index)),
+            Self::Part { msb, lsb } => constant_bound(msb).zip(constant_bound(lsb)),
+        };
+        let Some((msb, lsb)) = bounds else {
+            return Err(semantic_error(SemanticErrorKind::UnsupportedFeature(
+                "a part-select or bidirectional connection requires integer coordinates at elaboration".into()
+            ), span));
+        };
+        let bounds = super::VectorBounds { msb, lsb };
+        if bounds.width() > super::MAX_DIGITAL_VECTOR_WIDTH {
+            return Err(semantic_error(
+                SemanticErrorKind::UnsupportedFeature(
+                    "port selection exceeds the supported width".into(),
+                ),
+                span,
+            ));
+        }
+        Ok(bounds)
+    }
+
     fn width(&self, span: Span) -> CompileResult<u32> {
         match self {
             Self::Bit(_) => Ok(1),
-            Self::Part { msb, lsb } => {
-                let (Some(msb), Some(lsb)) = (constant_bound(msb), constant_bound(lsb)) else {
-                    return Err(semantic_error(
-                        SemanticErrorKind::UnsupportedFeature(
-                            "a part-select port connection whose bounds this compiler cannot \
-                             fold to constants; IEEE 1364-2005 section 5.2.1 requires constant \
-                             bounds, and the width of the connection is what the port must \
-                             agree with"
-                                .to_string(),
-                        ),
-                        span,
-                    ));
-                };
-                Ok(msb.abs_diff(lsb) as u32 + 1)
-            }
+            Self::Part { .. } => Ok(self.coordinates(span)?.width()),
         }
     }
 
@@ -893,14 +912,14 @@ impl SelectBounds<'_> {
                 packed: None,
                 discrete_validity: None,
                 array: SmolStr::from(elaborated),
-                index: Box::new((*index).clone()),
+                index: Box::new(index.clone()),
                 span,
             }),
             Self::Part { msb, lsb } => {
                 Expression::Digital(DigitalExpr::PartSelect(PartSelectExpr {
                     name: SmolStr::from(elaborated),
-                    msb: Box::new((*msb).clone()),
-                    lsb: Box::new((*lsb).clone()),
+                    msb: Box::new(msb.clone()),
+                    lsb: Box::new(lsb.clone()),
                     span,
                 }))
             }
@@ -912,13 +931,13 @@ impl SelectBounds<'_> {
         match self {
             Self::Bit(index) => DigitalLValue::BitSelect {
                 name: SmolStr::from(elaborated),
-                index: Box::new((*index).clone()),
+                index: Box::new(index.clone()),
                 span,
             },
             Self::Part { msb, lsb } => DigitalLValue::PartSelect {
                 name: SmolStr::from(elaborated),
-                msb: Box::new((*msb).clone()),
-                lsb: Box::new((*lsb).clone()),
+                msb: Box::new(msb.clone()),
+                lsb: Box::new(lsb.clone()),
                 span,
             },
         }
@@ -929,21 +948,32 @@ impl SelectBounds<'_> {
 /// meaning.
 fn connection_form<'a>(
     expression: &'a Expression,
+    scope: &Scope,
     path: &str,
     port: &str,
 ) -> CompileResult<ConnectionForm<'a>> {
+    let close = |value: &Expression| match crate::canonical_ir::digital_lower::elaboration_constant(
+        value,
+        &scope.constants,
+        scope.time_scale,
+    ) {
+        Some(crate::numeric_literal::NumericLiteralValue::Integer(value)) => {
+            super::exact_integer_expression(value, expression.span())
+        }
+        _ => value.clone(),
+    };
     match expression {
         Expression::Identifier(identifier) => Ok(ConnectionForm::Net(identifier)),
         Expression::ArrayAccess(access) => Ok(ConnectionForm::Select {
             name: &access.array,
-            select: SelectBounds::Bit(&access.index),
+            select: SelectBounds::Bit(close(&access.index)),
             span: access.span,
         }),
         Expression::Digital(DigitalExpr::PartSelect(select)) => Ok(ConnectionForm::Select {
             name: &select.name,
             select: SelectBounds::Part {
-                msb: &select.msb,
-                lsb: &select.lsb,
+                msb: close(&select.msb),
+                lsb: close(&select.lsb),
             },
             span: select.span,
         }),
@@ -979,37 +1009,14 @@ fn lookup_connection(
     })
 }
 
-/// Fold a select bound to a constant.
-///
-/// Deliberately minimal, and deliberately here rather than shared with the
-/// analyzer's evaluator: what reaches this is a bound written on a port
-/// connection, after any generate genvar has been substituted, so what has to
-/// fold is a literal or a small arithmetic expression over literals. A bound
-/// that needs more is refused with the clause.
+/// Coordinates already closed in their parent's typed constant scope.
 fn constant_bound(expression: &Expression) -> Option<i64> {
-    match expression {
-        Expression::Number(number) if number.value.fract() == 0.0 && number.value.is_finite() => {
-            Some(number.value as i64)
-        }
-        Expression::Unary(unary) => {
-            let operand = constant_bound(&unary.operand)?;
-            match unary.op {
-                crate::ast::UnaryOp::Neg => operand.checked_neg(),
-                crate::ast::UnaryOp::Pos => Some(operand),
-                _ => None,
-            }
-        }
-        Expression::Binary(binary) => {
-            let left = constant_bound(&binary.left)?;
-            let right = constant_bound(&binary.right)?;
-            match binary.op {
-                crate::ast::BinaryOp::Add => left.checked_add(right),
-                crate::ast::BinaryOp::Sub => left.checked_sub(right),
-                crate::ast::BinaryOp::Mul => left.checked_mul(right),
-                crate::ast::BinaryOp::Div => left.checked_div(right),
-                _ => None,
-            }
-        }
+    match crate::canonical_ir::digital_lower::elaboration_constant(
+        expression,
+        &super::DigitalConstants::default(),
+        Default::default(),
+    ) {
+        Some(crate::numeric_literal::NumericLiteralValue::Integer(value)) => Some(value),
         _ => None,
     }
 }

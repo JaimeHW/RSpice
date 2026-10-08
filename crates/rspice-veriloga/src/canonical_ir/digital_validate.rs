@@ -183,6 +183,7 @@ impl CanonicalDigitalPlan {
                 &self.elaboration_parameters,
                 &self.signals,
                 &self.arrays,
+                &self.bit_aliases,
                 &self.processes,
                 &self.drivers,
                 &self.analog_probes,
@@ -299,6 +300,22 @@ impl CanonicalDigitalPlan {
                 )));
             }
         }
+        for alias in &self.bit_aliases {
+            for endpoint in [alias.left, alias.right] {
+                let Some(signal) = self.signal(endpoint.signal) else {
+                    return Err(error("digital bit alias names an unknown signal"));
+                };
+                if signal.kind.is_real()
+                    || signal.procedurally_assignable
+                    || endpoint.bit >= signal.width
+                {
+                    return Err(error(
+                        "digital bit alias requires an in-range four-state wire bit",
+                    ));
+                }
+            }
+        }
+
         let mut arrays = HashSet::new();
         let mut array_cells = vec![false; self.signals.len()];
         for array in &self.arrays {

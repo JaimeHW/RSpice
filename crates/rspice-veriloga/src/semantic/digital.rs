@@ -477,6 +477,16 @@ pub struct AnalyzedContinuousAssign {
     pub span: Span,
 }
 
+/// A wire-bit identity in fully qualified elaborated names and normalized positions.
+#[derive(Debug, Clone)]
+pub struct ElaboratedDigitalBitAlias {
+    pub left: SmolStr,
+    pub left_bit: u32,
+    pub right: SmolStr,
+    pub right_bit: u32,
+    pub span: Span,
+}
+
 /// One instantiated digital module, elaborated into the compiled module.
 ///
 /// A frame, not a tree: hierarchy elaboration walks the instance tree once and
@@ -520,6 +530,7 @@ pub struct ElaboratedDigitalInstance {
     /// this instance's variable. They are the one construct here that is not
     /// something the author wrote.
     pub port_drivers: Vec<AnalyzedContinuousAssign>,
+    pub bit_aliases: Vec<ElaboratedDigitalBitAlias>,
     /// The instantiated module's *own* integer parameters and localparams.
     ///
     /// Not the parent's, and not the parent's merged with the child's. A

@@ -1918,15 +1918,15 @@ fn unelaborated_instance_constructs_refuse_by_name() {
             vec!["connected to an expression", "12.3.9"],
         ),
         (
-            "a bit-select connected to an inout port",
+            "a runtime bit-select connected to an inout port",
             hierarchy(
                 "module pass(io, a);\n\
                  \x20   inout io;\n     input a;\n     wire io, a;\n\
                  \x20   assign io = a;\n\
                  endmodule\n",
-                "    wire [1:0] bus;\n     wire x;\n     pass g1(bus[0], x);",
+                "    wire [1:0] bus;\n     wire x; integer index;\n     pass g1(bus[index], x);",
             ),
-            vec!["bidirectional join", "12.3.9.3"],
+            vec!["bidirectional connection requires integer coordinates at elaboration"],
         ),
         (
             "an undeclared connection name",
