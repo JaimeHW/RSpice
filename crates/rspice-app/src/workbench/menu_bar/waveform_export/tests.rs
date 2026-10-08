@@ -1527,6 +1527,7 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
     assert_eq!(reopened.analysis_type, AnalysisType::Transient);
     assert_eq!(reopened.waveforms[0].name, "V(out)");
     assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+    assert_eq!(reopened.waveforms[0].unit, None);
     drop(result_files);
 
     let ac = AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![complex_waveform(
@@ -1564,6 +1565,7 @@ fn engineering_export_ui_publishes_reopenable_native_real_and_complex_bundles() 
     // ordinary waveform name describes the magnitude trace the result viewer
     // materializes from those authoritative rectangular samples.
     assert_eq!(reopened.waveforms[0].name, "|V(out)|");
+    assert_eq!(reopened.waveforms[0].unit, None);
     let complex = reopened.waveforms[0]
         .complex
         .as_ref()

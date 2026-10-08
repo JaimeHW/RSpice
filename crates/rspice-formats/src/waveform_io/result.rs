@@ -3,11 +3,11 @@
 mod export;
 mod runtime_export;
 pub(crate) use export::axis_signal_for_analysis_type;
-#[cfg(any(feature = "native-bundle", feature = "result-hdf5"))]
+#[cfg(feature = "result-hdf5")]
 pub(crate) use export::signal_type_from_waveform_name;
 pub use export::{WaveformProjectionError, project_waveforms};
 #[cfg(feature = "native-bundle")]
-pub(crate) use export::{axis_signal_for_analysis, complex_signal_type, validate_shared_x_axis};
+pub(crate) use export::{axis_signal_for_analysis, validate_shared_x_axis};
 pub use runtime_export::project_sparameter_waveforms;
 
 use super::{TouchstoneError, WaveformSignal};
