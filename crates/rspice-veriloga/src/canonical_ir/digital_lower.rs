@@ -930,6 +930,7 @@ fn lower_continuous_assign(
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
         constant_expression: false,
@@ -1157,6 +1158,7 @@ fn lower_process(
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        analog_local_inputs: process.analog_local_inputs.clone(),
         process: None,
         local_arrays: Vec::new(),
         constant_expression: false,
@@ -1461,6 +1463,7 @@ impl ProcessBuilder {
 }
 
 struct ProcessLowerer<'a> {
+    analog_local_inputs: HashMap<Span, SmolStr>,
     process: Option<DigitalProcessId>,
     local_arrays: Vec<super::digital::DigitalArray>,
     /// Closed parameter expressions may use pure analog math intrinsics.

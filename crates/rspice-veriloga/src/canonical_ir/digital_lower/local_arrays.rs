@@ -47,6 +47,39 @@ impl ProcessLowerer<'_> {
             );
             return;
         };
+        if let Some(signal) = self.analog_local_signal(local) {
+            let Some(array) = self.arrays.get(&signal).copied() else {
+                self.invariant("analog local array has no shared layout", dimension.span);
+                return;
+            };
+            if array.lower != msb.min(lsb) || array.len != len {
+                self.invariant(
+                    "analog local array disagrees with its shared layout",
+                    dimension.span,
+                );
+                return;
+            }
+            let initial = self.read_local(block, local);
+            for offset in 0..array.len {
+                let index = array.lower + i64::from(offset);
+                let signal = array.element(index).expect("validated shared array");
+                self.bind_local_identity(local, signal, Some(index));
+                self.builder.push(
+                    block,
+                    CfgValueType::Effect,
+                    CfgValueKind::DigitalBlockingWrite {
+                        target: DigitalWriteTarget {
+                            signal,
+                            select: DigitalWriteSelect::Whole,
+                        },
+                        value: initial,
+                    },
+                );
+            }
+            self.locals[usize::from(local)].array = Some((VectorBounds { msb, lsb }, array));
+            self.locals[usize::from(local)].shared = Some(array.base);
+            return;
+        }
         let Some(base) = u32::try_from(self.signals.len()).ok() else {
             self.error(
                 "process-local array signal IDs exceed supported storage",

@@ -3,6 +3,36 @@ use super::super::digital::DigitalLocalStorage;
 use super::*;
 
 impl ProcessLowerer<'_> {
+    pub(super) fn analog_local_signal(&mut self, local: DigitalLocalId) -> Option<DigitalSignalId> {
+        let declaration = &self.locals[usize::from(local)];
+        let name = self.analog_local_inputs.get(&declaration.span)?;
+        if let Some(signal) = self.index.get(name.as_str()) {
+            Some(*signal)
+        } else {
+            self.invariant("analog local input has no shared signal", declaration.span);
+            None
+        }
+    }
+
+    pub(super) fn bind_local_identity(
+        &mut self,
+        local: DigitalLocalId,
+        signal: DigitalSignalId,
+        element: Option<i64>,
+    ) {
+        self.signals[usize::from(signal)].local = Some(DigitalLocalStorage {
+            element,
+            process: self
+                .process
+                .expect("local declaration belongs to a process"),
+            declaration: local,
+            name: self.locals[usize::from(local)]
+                .name
+                .clone()
+                .expect("source local"),
+        });
+    }
+
     pub(super) fn prepare_local_storage(
         &mut self,
         entry: BlockId,
@@ -11,6 +41,11 @@ impl ProcessLowerer<'_> {
     ) {
         let mut required = BTreeSet::new();
         self.storage_dependencies(statement, &mut required);
+        required.extend(self.locals.iter().enumerate().filter_map(|(id, local)| {
+            self.analog_local_inputs
+                .contains_key(&local.span)
+                .then_some(DigitalLocalId::from(id))
+        }));
         // Read every startup SSA definition before changing any local's representation.
         let initial: Vec<_> = required
             .into_iter()
@@ -20,6 +55,12 @@ impl ProcessLowerer<'_> {
             .map(|local| (local, self.read_local(entry, local)))
             .collect();
         for (local, value) in initial {
+            if let Some(signal) = self.analog_local_signal(local) {
+                self.bind_local_identity(local, signal, None);
+                self.locals[usize::from(local)].shared = Some(signal);
+                self.write_local(entry, local, value);
+                continue;
+            }
             let declaration = &self.locals[usize::from(local)];
             let name = declaration.name.clone().expect("source local");
             let mut storage_name = format!("$local:{process}:{local}:{name}");

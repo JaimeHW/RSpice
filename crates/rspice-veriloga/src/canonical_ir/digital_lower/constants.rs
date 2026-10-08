@@ -72,6 +72,7 @@ fn scalar_impl(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
         constant_expression: true,
@@ -440,6 +441,7 @@ fn resolve_one(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
         constant_expression: true,
@@ -647,6 +649,7 @@ pub(super) fn initializer(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
         constant_expression: true,

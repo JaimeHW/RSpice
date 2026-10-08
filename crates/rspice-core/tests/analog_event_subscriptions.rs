@@ -1384,3 +1384,254 @@ endmodule
     host.accept_trial().unwrap();
     assert_eq!(host.read_digital("q").unwrap(), "1");
 }
+
+#[test]
+fn local_event_operands_cross_timer_and_scope_survive_hierarchy() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module local_detector(a,out);
+ input a; electrical a; inout out; electrical out;
+ parameter real BASE=0.125;
+ real threshold=99;
+ integer hits=0, nested_hits=0, ticks=0;
+ initial begin : watch_input
+   real threshold=BASE;
+   integer direction=1;
+   real tolerance=1p;
+   reg [1:0] enabled=1;
+   repeat (2) begin
+     @(cross(V(a)-threshold,direction,tolerance,1u,enabled[0])) begin
+       hits=hits+1; threshold=threshold+0.25;
+     end
+   end
+   begin : nested
+     real threshold=BASE+0.625;
+     @(cross(V(a)-threshold,1,1p,1u)) nested_hits=nested_hits+1;
+   end
+ end
+ initial begin : clocked
+   real start=125p, period=500p;
+   repeat (3) @(timer(start,period,1p,1)) ticks=ticks+1;
+ end
+ analog I(out)<+(V(out)-(hits+10*nested_hits+100*ticks))/1000;
+endmodule
+module local_wrapper(a,p,q);
+ input a; electrical a; inout p,q; electrical p,q;
+ local_detector first(a,p);
+ local_detector #(.BASE(0.2)) second(a,q);
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* local event operand bindings\nV1 a 0 pwl(0 0 1n 1)\nX1 a p q local_wrapper\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" local_wrapper module=local_wrapper\n.end\n", source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 0.95e-9, 70e-12).unwrap();
+    for (name, expected_times) in [
+        ("p", vec![0.0, 125e-12, 375e-12, 625e-12, 750e-12]),
+        ("q", vec![0.0, 125e-12, 200e-12, 450e-12, 625e-12, 825e-12]),
+    ] {
+        let node = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .unwrap();
+        let wave = result.voltage_waveform(node + 1);
+        let times: Vec<_> = result
+            .time
+            .iter()
+            .zip(wave.iter())
+            .enumerate()
+            .filter(|(i, (_, v))| *i == 0 || (**v - wave[*i - 1]).abs() > 0.25)
+            .map(|(_, (&t, _))| t)
+            .collect();
+        assert_eq!(times.len(), expected_times.len(), "{name}: {times:?}");
+        for (&actual, expected) in times.iter().zip(expected_times) {
+            assert!(
+                (actual - expected).abs() < 2e-15,
+                "{name}: {actual} != {expected}"
+            );
+        }
+    }
+    for (time, p, q) in [
+        (0.15e-9, 50.5, 50.0),
+        (0.4e-9, 51.0, 50.5),
+        (0.65e-9, 101.0, 101.0),
+        (0.79e-9, 106.0, 101.0),
+        (0.88e-9, 106.0, 106.0),
+    ] {
+        for (name, expected) in [("p", p), ("q", q)] {
+            let node = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            let sample = result.time.iter().rposition(|t| *t <= time).unwrap();
+            let actual = result.voltage_waveform(node + 1)[sample];
+            assert!(
+                (actual - expected).abs() < 1e-5,
+                "{name}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn local_event_operands_absdelta_arrays_restore_and_resume() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let source = r#"
+`timescale 1ps/1ps
+module local_observer(a);
+ input a; electrical a;
+ integer count=0;
+ initial begin : observe
+   real step[3:2]='{0.25,0.5};
+   integer index=3;
+   reg [1:0] enabled=1;
+   forever begin
+     @(absdelta(V(a),step[index],1p,1u,enabled[0])) begin
+       count=count+1;
+       if (count==3) index<=2;
+     end
+   end
+ end
+endmodule
+"#;
+    let compile = || {
+        MixedSignalHost::compile(
+            source,
+            None,
+            "local_observer",
+            &[1],
+            SchedulerLimits::default(),
+        )
+        .unwrap()
+    };
+    let mut host = compile();
+    let begin = |host: &mut MixedSignalHost, time, dt| {
+        host.begin_trial(
+            time,
+            dt,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap()
+    };
+    let count = |host: &MixedSignalHost| {
+        u32::from_str_radix(&host.read_digital("count").unwrap(), 2).unwrap()
+    };
+    begin(&mut host, 0.0, 0.0);
+    settle_standalone_observer(&mut host, &[0.0]);
+    host.accept_trial().unwrap();
+    assert_eq!(count(&host), 1);
+    begin(&mut host, 0.5e-9, 0.5e-9);
+    settle_standalone_observer(&mut host, &[0.5]);
+    assert_eq!(count(&host), 3);
+    host.reject_trial().unwrap();
+    assert_eq!(count(&host), 1);
+    begin(&mut host, 0.5e-9, 0.5e-9);
+    settle_standalone_observer(&mut host, &[0.5]);
+    host.accept_trial().unwrap();
+    assert_eq!(count(&host), 3);
+    let checkpoint = host.checkpoint().unwrap();
+    let mut resumed = compile();
+    resumed.restore(&checkpoint).unwrap();
+    for candidate in [&mut host, &mut resumed] {
+        begin(candidate, 1e-9, 0.5e-9);
+        settle_standalone_observer(candidate, &[1.0]);
+        candidate.accept_trial().unwrap();
+        assert_eq!(count(candidate), 4);
+    }
+}
+
+#[test]
+fn local_event_operands_do_not_capture_shadowed_electrical_nodes() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    for function in ["cross(V(a),1)", "absdelta(V(a),0.1)"] {
+        let source = format!(
+            "module local_shadow(a); input a; electrical a; initial begin real a=0; @({function}) a=1; end endmodule"
+        );
+        let error = MixedSignalHost::compile(
+            &source,
+            None,
+            "local_shadow",
+            &[1],
+            SchedulerLimits::default(),
+        )
+        .err()
+        .expect("a local cannot name a probe node")
+        .to_string();
+        assert!(
+            error.contains("analog access names process-local storage"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn local_event_operands_retract_counter_without_replaying_and_survive_rejection() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let source = r#"
+`timescale 1ps/1ps
+module local_above(a);
+ input a; electrical a; integer count=0;
+ initial begin
+   real threshold=0.25;
+   repeat(2) @(above(V(a)-threshold)) begin
+     count=count+1; threshold=threshold+0.25;
+   end
+ end
+endmodule
+"#;
+    let mut host = MixedSignalHost::compile(
+        source,
+        None,
+        "local_above",
+        &[1],
+        SchedulerLimits::default(),
+    )
+    .unwrap();
+    let begin = |host: &mut MixedSignalHost, time, dt| {
+        host.begin_trial(
+            time,
+            dt,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap()
+    };
+    let count = |host: &MixedSignalHost| {
+        u32::from_str_radix(&host.read_digital("count").unwrap(), 2).unwrap()
+    };
+    begin(&mut host, 0.0, 0.0);
+    settle_standalone_observer(&mut host, &[0.0]);
+    host.accept_trial().unwrap();
+    for reject in [true, false] {
+        begin(&mut host, 1e-9, 1e-9);
+        settle_standalone_observer(&mut host, &[0.25]);
+        assert_eq!(count(&host), 1);
+        if reject {
+            host.reject_trial().unwrap();
+            assert_eq!(count(&host), 0);
+        } else {
+            host.accept_trial().unwrap();
+        }
+    }
+    let checkpoint = host.checkpoint().unwrap();
+    for replay in 0..2 {
+        if replay == 1 {
+            host.restore(&checkpoint).unwrap();
+        }
+        begin(&mut host, 2e-9, 1e-9);
+        settle_standalone_observer(&mut host, &[0.5]);
+        host.accept_trial().unwrap();
+        assert_eq!(count(&host), 2);
+    }
+}

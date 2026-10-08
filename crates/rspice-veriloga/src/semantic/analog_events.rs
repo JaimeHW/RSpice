@@ -1,7 +1,7 @@
 //! Lower cross-domain event subscriptions to retained analog occurrence counters.
 //! Analog operators keep their ordinary state, root detection and rollback. A
 //! private digital signal carries occurrence counts, independently of data values.
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::ast::*;
 use crate::error::{CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -24,6 +24,7 @@ pub(super) struct LoweredAnalogEvents {
     pub module: Module,
     pub bindings: Vec<AnalogEventBinding>,
     pub candidates: BTreeSet<SmolStr>,
+    pub local_inputs: Vec<HashMap<Span, SmolStr>>,
 }
 
 pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
@@ -74,6 +75,9 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
             .chain(source.nets.iter().flat_map(|net| net.names.iter().cloned()))
             .chain(source.branches.iter().map(|branch| branch.name.clone()))
             .collect(),
+        local_scopes: Vec::new(),
+        local_inputs: HashMap::new(),
+        local_declarations: Vec::new(),
         bindings: Vec::new(),
         functions: Vec::new(),
         observers: Vec::new(),
@@ -88,9 +92,14 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
         candidates,
     };
     lower.names.extend(analog_local_names);
+    let mut local_inputs = Vec::new();
     for process in &mut module.digital_processes {
         lower.statement(&mut process.body, &BTreeSet::new())?;
+        local_inputs.push(std::mem::take(&mut lower.local_inputs));
     }
+    module
+        .digital_variables
+        .append(&mut lower.local_declarations);
     // A declaration initializer on a net is a continuous assignment too.
     for value in module
         .continuous_assigns
@@ -110,6 +119,7 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
             module,
             bindings: Vec::new(),
             candidates: lower.candidates,
+            local_inputs,
         });
     }
     let block = module.analog_block.get_or_insert(AnalogBlock {
@@ -191,10 +201,23 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
         module,
         bindings: lower.bindings,
         candidates: lower.candidates,
+        local_inputs,
     })
 }
 
+#[derive(Clone)]
+struct LocalDeclaration {
+    kind: Option<DigitalVariableKind>,
+    signedness: Signedness,
+    range: Option<VectorRange>,
+    dimensions: Vec<ArrayDimension>,
+    span: Span,
+}
+
 struct Lower {
+    local_scopes: Vec<HashMap<SmolStr, LocalDeclaration>>,
+    local_inputs: HashMap<Span, SmolStr>,
+    local_declarations: Vec<DigitalVariableDecl>,
     names: BTreeSet<SmolStr>,
     bindings: Vec<AnalogEventBinding>,
     functions: Vec<(EventExpr, AnalogEventBinding)>,
@@ -273,6 +296,85 @@ impl Lower {
             },
         );
     }
+    /// Bind each lexical declaration to one digital storage bank. Only the
+    /// extracted analog expression uses this private name; source locals keep
+    /// their scope and ordinary initialization, writes and suspension semantics.
+    fn bind_local_operands(&mut self, expression: &mut Expression) -> CompileResult<()> {
+        let mut pending = vec![expression];
+        while let Some(expression) = pending.pop() {
+            if let Expression::BranchAccess(access) = expression {
+                let names: Vec<_> = match access {
+                    BranchAccess::Nodes { pos, neg, .. } => {
+                        std::iter::once(&*pos).chain(neg.iter()).collect()
+                    }
+                    BranchAccess::Branch { name, .. } => vec![&*name],
+                };
+                if let Some(name) = names.into_iter().find(|name| {
+                    self.local_scopes
+                        .iter()
+                        .any(|scope| scope.contains_key(*name))
+                }) {
+                    return invalid(
+                        format!(
+                            "analog access names process-local storage `{name}`, not a continuous net or branch"
+                        ),
+                        access.span(),
+                    );
+                }
+            }
+            let name = match expression {
+                Expression::Identifier(id) => Some(&mut id.name),
+                Expression::ArrayAccess(access) => Some(&mut access.array),
+                Expression::Digital(DigitalExpr::PartSelect(select)) => Some(&mut select.name),
+                Expression::Digital(DigitalExpr::ArraySelect(select)) => Some(&mut select.name),
+                _ => None,
+            };
+            if let Some(name) = name
+                && let Some(declaration) = self
+                    .local_scopes
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(name))
+                    .cloned()
+            {
+                if let Some(signal) = self.local_inputs.get(&declaration.span) {
+                    *name = signal.clone();
+                } else {
+                    let Some(kind) = declaration.kind else {
+                        return invalid(
+                            "analog event operands require numeric local storage",
+                            declaration.span,
+                        );
+                    };
+                    let mut index = self.local_declarations.len();
+                    let signal: SmolStr = loop {
+                        let name: SmolStr = format!("$rspice$analog_local${index}").into();
+                        if self.names.insert(name.clone()) {
+                            break name;
+                        }
+                        index += 1;
+                    };
+                    self.local_declarations.push(DigitalVariableDecl {
+                        kind,
+                        signedness: declaration.signedness,
+                        range: declaration.range,
+                        items: vec![DigitalDeclItem {
+                            name: signal.clone(),
+                            dimensions: declaration.dimensions,
+                            init: None,
+                            span: declaration.span,
+                        }],
+                        span: declaration.span,
+                    });
+                    self.local_inputs.insert(declaration.span, signal.clone());
+                    *name = signal;
+                }
+            }
+            super::flow_probes::for_child_mut(expression, &mut |child| pending.push(child));
+        }
+        Ok(())
+    }
+
     fn timing(
         &mut self,
         timing: &mut TimingControl,
@@ -285,13 +387,17 @@ impl Lower {
             return Ok(());
         };
         for term in terms {
+            if matches!(&term.signal, Expression::Call(call)
+                if matches!(call.name.as_str(), "absdelta" | "cross" | "above" | "timer"))
+            {
+                self.bind_local_operands(&mut term.signal)?;
+            }
             if let Expression::Call(call) = &term.signal
                 && call.name == "absdelta"
             {
                 if term.edge.is_some() {
                     return invalid("absdelta cannot have a digital edge qualifier", term.span);
                 }
-                validate_operand_scope(&term.signal, locals, term.span)?;
                 if !(2..=5).contains(&call.args.len())
                     || call.args[..2]
                         .iter()
@@ -335,22 +441,6 @@ impl Lower {
                 if term.edge.is_some() {
                     return invalid(
                         "an analog event function cannot have a digital edge qualifier",
-                        term.span,
-                    );
-                }
-                let mut local = None;
-                super::flow_probes::visit_expression(&term.signal, &mut |e| {
-                    if let Expression::Identifier(id) = e {
-                        if locals.contains(&id.name) {
-                            local = Some(id.name.clone());
-                        }
-                    }
-                });
-                if let Some(name) = local {
-                    return unsupported(
-                        format!(
-                            "analog event operand uses process-local '{name}', which requires an analog subscription storage binding"
-                        ),
                         term.span,
                     );
                 }
@@ -409,6 +499,46 @@ impl Lower {
         }
         match statement {
             DigitalStatement::Block(block) => {
+                let mut scope = HashMap::new();
+                for declaration in &block.variables {
+                    for item in &declaration.items {
+                        scope.insert(
+                            item.name.clone(),
+                            LocalDeclaration {
+                                kind: match declaration.var_type {
+                                    VarType::Real => Some(DigitalVariableKind::Real),
+                                    VarType::Integer => Some(DigitalVariableKind::Integer),
+                                    VarType::String => None,
+                                },
+                                signedness: Signedness::Signed,
+                                range: matches!(declaration.var_type, VarType::Integer).then(
+                                    || VectorRange {
+                                        msb: number(31, item.span),
+                                        lsb: number(0, item.span),
+                                        span: item.span,
+                                    },
+                                ),
+                                dimensions: item.dimensions.clone(),
+                                span: item.span,
+                            },
+                        );
+                    }
+                }
+                for declaration in &block.digital_variables {
+                    for item in &declaration.items {
+                        scope.insert(
+                            item.name.clone(),
+                            LocalDeclaration {
+                                kind: Some(declaration.kind),
+                                signedness: declaration.signedness,
+                                range: declaration.range.clone(),
+                                dimensions: item.dimensions.clone(),
+                                span: item.span,
+                            },
+                        );
+                    }
+                }
+                self.local_scopes.push(scope);
                 let mut locals = locals.clone();
                 locals.extend(
                     block
@@ -426,6 +556,7 @@ impl Lower {
                 for statement in &mut block.statements {
                     self.statement(statement, &locals)?;
                 }
+                self.local_scopes.pop();
             }
             DigitalStatement::Timing(statement) => {
                 self.timing(&mut statement.control, locals)?;
@@ -473,33 +604,6 @@ impl Lower {
 
 fn implicit(timing: &TimingControl) -> bool {
     matches!(timing, TimingControl::Event(event) if matches!(event.sensitivity, Sensitivity::Implicit))
-}
-
-fn validate_operand_scope(
-    expression: &Expression,
-    locals: &BTreeSet<SmolStr>,
-    span: Span,
-) -> CompileResult<()> {
-    let mut local = None;
-    super::flow_probes::visit_expression(expression, &mut |expression| {
-        let name = match expression {
-            Expression::Identifier(id) => &id.name,
-            Expression::ArrayAccess(access) => &access.array,
-            _ => return,
-        };
-        if locals.contains(name) {
-            local = Some(name.clone());
-        }
-    });
-    if let Some(name) = local {
-        return unsupported(
-            format!(
-                "analog event operand uses process-local '{name}', which requires an analog subscription storage binding"
-            ),
-            span,
-        );
-    }
-    Ok(())
 }
 
 fn event_function(expression: &Expression) -> CompileResult<Option<EventExpr>> {

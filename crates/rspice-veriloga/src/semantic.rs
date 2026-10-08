@@ -1937,6 +1937,14 @@ impl SemanticAnalyzer {
         self.analyze_digital(module, &mut analyzed);
         if let Some(lowered) = &event_lowering {
             analyzed.digital.analog_events = lowered.bindings.clone();
+            for (process, inputs) in analyzed
+                .digital
+                .processes
+                .iter_mut()
+                .zip(&lowered.local_inputs)
+            {
+                process.analog_local_inputs = inputs.clone();
+            }
         }
 
         // Phase 10: Module-level variable initializers run before the

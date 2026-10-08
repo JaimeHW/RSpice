@@ -438,6 +438,8 @@ pub struct AnalyzedDigitalSignal {
 /// A process with its static sensitivity resolved.
 #[derive(Debug, Clone)]
 pub struct AnalyzedDigitalProcess {
+    /// Shared storage aliases for lexical locals read by extracted analog events.
+    pub analog_local_inputs: HashMap<Span, SmolStr>,
     pub id: DigitalProcessId,
     pub kind: DigitalProcessKind,
     /// Signals the process's opening event control waits on.
@@ -1712,6 +1714,7 @@ impl SemanticAnalyzer {
         self.digital_scopes.clear();
 
         AnalyzedDigitalProcess {
+            analog_local_inputs: HashMap::new(),
             id: process.id,
             kind: process.kind,
             sensitivity,

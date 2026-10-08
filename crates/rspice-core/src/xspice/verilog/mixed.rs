@@ -984,6 +984,7 @@ struct TrialScratch {
 /// makes an opened trial cost no allocation at all.
 #[derive(Clone, Default)]
 struct TrialVectors {
+    analog_events: Vec<analog_events::AnalogEventTrial>,
     /// Ordinary published variables and reporting scalars need their pre-trial
     /// image for exact readback and checkpoint rollback.
     analog_evaluation: VerilogAEvaluationSnapshot,
@@ -2722,6 +2723,7 @@ impl MixedSignalHost {
             &self.discrete_inputs,
             &mut self.scratch.trial.discrete_at_trial_start,
         );
+        self.prepare_analog_event_trial()?;
         let rollback = self.state.digital.clone();
         let previous_inputs = self.analog_inputs;
         self.analog

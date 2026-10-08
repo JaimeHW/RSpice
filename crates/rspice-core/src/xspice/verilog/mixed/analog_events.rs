@@ -1,6 +1,28 @@
 //! Publish retained analog occurrences through the existing analog causal lane.
 use super::*;
 
+const COUNTER_MASK: u32 = i32::MAX as u32;
+
+/// Analog evaluation may withdraw an occurrence after its digital consequence
+/// changes an event operand. Delivery cannot withdraw that consequence. Count
+/// occurrences relative to each domain's accepted origin, retaining the largest
+/// count observed during this trial. Rejection discards this speculative bank.
+#[derive(Clone)]
+pub(super) struct AnalogEventTrial {
+    analog_origin: u32,
+    digital_origin: u32,
+    occurrences: u32,
+}
+
+impl AnalogEventTrial {
+    fn observe(&mut self, counter: u32) -> u32 {
+        self.occurrences = self
+            .occurrences
+            .max(counter.wrapping_sub(self.analog_origin) & COUNTER_MASK);
+        self.digital_origin.wrapping_add(self.occurrences) & COUNTER_MASK
+    }
+}
+
 pub(super) fn event_bank(
     targets: &[(DigitalSignalId, u32)],
     read: impl Fn(DigitalSignalId) -> Option<u64>,
@@ -20,6 +42,64 @@ pub(super) fn event_bank(
     Ok(drives)
 }
 impl MixedSignalHost {
+    fn analog_event_counter(&self, name: &str) -> Result<u32, MixedSignalError> {
+        let value = self
+            .analog
+            .variable(name)
+            .ok_or_else(|| MixedSignalError::InvalidBridge {
+                detail: format!("analog event counter '{name}' has no retained evaluation"),
+            })?;
+        if !value.is_finite()
+            || value.fract() != 0.0
+            || value < 0.0
+            || value > f64::from(COUNTER_MASK)
+        {
+            return Err(MixedSignalError::InvalidBridge {
+                detail: format!("invalid analog event counter '{name}': {value}"),
+            });
+        }
+        Ok(value as u32)
+    }
+
+    pub(super) fn prepare_analog_event_trial(&mut self) -> Result<(), MixedSignalError> {
+        self.scratch.trial.analog_events.clear();
+        for probe in &self.state.digital.plan().analog_probes {
+            let Some(signal) = probe.event_signal else {
+                continue;
+            };
+            let rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget::Variable { name } =
+                &probe.target
+            else {
+                unreachable!("validated event probe")
+            };
+            let analog_origin = if self.state.started {
+                self.analog_event_counter(name)?
+            } else {
+                0
+            };
+            // Shared views acquire their initialized counter values when the
+            // coordinator starts the first trial. Their logical origin is zero.
+            let digital_origin = if self.state.started {
+                self.state
+                    .digital
+                    .read(signal)
+                    .and_then(FourStateValue::to_u64)
+                    .filter(|value| *value <= u64::from(COUNTER_MASK))
+                    .ok_or_else(|| MixedSignalError::InvalidBridge {
+                        detail: "analog event counter lost its initialized signal".into(),
+                    })? as u32
+            } else {
+                0
+            };
+            self.scratch.trial.analog_events.push(AnalogEventTrial {
+                analog_origin,
+                digital_origin,
+                occurrences: 0,
+            });
+        }
+        Ok(())
+    }
+
     /// Prepare this candidate through the same evaluation used for matrix assembly.
     /// Settlement may precede stamping, especially when accepting a refined root.
     /// Reading retained counters before this preparation would publish old events.
@@ -61,19 +141,34 @@ impl MixedSignalHost {
             else {
                 unreachable!("validated event probe")
             };
-            let value =
-                self.analog
-                    .variable(name)
-                    .ok_or_else(|| MixedSignalError::InvalidBridge {
-                        detail: format!("analog event counter '{name}' has no retained evaluation"),
-                    })?;
-            if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > i32::MAX as f64
-            {
-                return Err(MixedSignalError::InvalidBridge {
-                    detail: format!("invalid analog event counter '{name}': {value}"),
-                });
+            let value = self.analog_event_counter(name)?;
+            let trial = self.trial.as_mut().expect("active analog event trial");
+            let target = trial.vectors.analog_events[targets.len()].observe(value);
+            targets.push((signal, target));
+        }
+        // Preserve the cause before its digital handler can change the event
+        // operand and erase the model's candidate root on reevaluation.
+        if targets.iter().any(|(signal, target)| {
+            self.state
+                .digital
+                .read(*signal)
+                .and_then(FourStateValue::to_u64)
+                != Some(u64::from(*target))
+        }) && let Some(root) = self
+            .analog
+            .try_transient_event_refinement_time()
+            .map_err(|error| classify(&error))?
+        {
+            let trial = self.trial.as_mut().expect("active analog event trial");
+            let start = self.state.accepted_time;
+            let tolerance = endpoint_root_window(trial.time_seconds, start, self.analog_step_floor);
+            if self.state.started && root > start && trial.time_seconds - root > tolerance {
+                trial.observation_refinement = Some(
+                    trial
+                        .observation_refinement
+                        .map_or(root, |previous| previous.min(root)),
+                );
             }
-            targets.push((signal, value as u32));
         }
         Ok(targets)
     }
