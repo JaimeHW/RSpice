@@ -69,6 +69,99 @@ fn fft_publication_fixture() -> (
     (netlist, transient.fft_results)
 }
 
+#[test]
+fn fft_decimal_underflow_is_refused_in_metadata_bins_and_harmonics() {
+    use crate::commands::waveform_io::parse_delimited_record;
+    let (netlist, original) = fft_publication_fixture();
+    let directory = FftTestDirectory::new();
+    for (format, separator) in [(OutputFormat::Csv, ','), (OutputFormat::Tsv, '\t')] {
+        for incomplete in [false, true] {
+            let path = directory.0.join("source");
+            let mut results = original.clone();
+            if incomplete {
+                results[0].status = rspice_core::engine::TransientFftStatus::IncompleteHistory {
+                    available_start: 0.0,
+                    available_stop: 0.1e-3,
+                };
+                results[0].bins.clear();
+                results[0].metrics = None;
+            }
+            write_fft_output(
+                &path,
+                format,
+                "tran-001",
+                &fft_test_identities(2),
+                None,
+                &results,
+                &netlist,
+                None,
+            )
+            .unwrap();
+            let text = std::fs::read_to_string(&path).unwrap();
+            FftBundle::from_delimited(
+                &path,
+                &text,
+                separator,
+                rspice_core::ResourceLimits::default(),
+            )
+            .unwrap();
+            let rows = text
+                .lines()
+                .map(|row| parse_delimited_record(row, separator).unwrap())
+                .collect::<Vec<_>>();
+            let fields: &[&str] = if incomplete {
+                &["available_start_s", "available_stop_s"]
+            } else {
+                &[
+                    "start_time_s",
+                    "alpha",
+                    "frequency_hz",
+                    "imaginary",
+                    "thd_db",
+                    "sfdr_spur_frequency_hz",
+                    "harmonic_phase_degrees",
+                ]
+            };
+            for field in fields {
+                let column = rows[0].iter().position(|name| name == field).unwrap();
+                let mut corrupted = rows.clone();
+                let mut modified = false;
+                for row in corrupted.iter_mut().skip(1) {
+                    if !row[column].is_empty() {
+                        row[column] = "1e-999".into();
+                        modified = true;
+                        // Repeated metadata must remain consistent across rows;
+                        // sample and harmonic fields need only one bad value.
+                        if column >= 44 {
+                            break;
+                        }
+                    }
+                }
+                assert!(modified, "populated numeric field {field}");
+                let mut writer = csv::WriterBuilder::new()
+                    .delimiter(separator as u8)
+                    .from_writer(Vec::new());
+                for row in corrupted {
+                    writer.write_record(row).unwrap();
+                }
+                let corrupted = String::from_utf8(writer.into_inner().unwrap()).unwrap();
+                let error = FftBundle::from_delimited(
+                    &path,
+                    &corrupted,
+                    separator,
+                    rspice_core::ResourceLimits::default(),
+                )
+                .err()
+                .expect("underflow refusal");
+                assert!(
+                    error.to_string().contains("underflow") && error.to_string().contains(field),
+                    "{field}: {error}"
+                );
+            }
+        }
+    }
+}
+
 fn assert_fft_publication_rejected_for_every_format(
     directory: &FftTestDirectory,
     label: &str,

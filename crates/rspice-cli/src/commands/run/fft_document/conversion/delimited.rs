@@ -21,6 +21,23 @@ impl Fields {
             .parse()
             .map_err(|_| format!("invalid FFT {name}: '{}'", self.text(name)))
     }
+    fn decimal(&self, name: &str) -> Result<f64, String> {
+        let value = self.number(name)?;
+        if rspice_formats::numeric::decimal_underflowed(self.text(name), value) {
+            return Err(format!(
+                "FFT {name}: '{}' underflows to zero",
+                self.text(name)
+            ));
+        }
+        Ok(value)
+    }
+    fn optional_decimal(&self, name: &str) -> Result<Option<f64>, String> {
+        if self.text(name).is_empty() {
+            Ok(None)
+        } else {
+            self.decimal(name).map(Some)
+        }
+    }
     fn optional<T: std::str::FromStr>(&self, name: &str) -> Result<Option<T>, String> {
         if self.text(name).is_empty() {
             Ok(None)
@@ -45,8 +62,8 @@ impl Fields {
                 rspice_core::engine::TransientFftStatus::Complete
             }
             "incomplete-history" => rspice_core::engine::TransientFftStatus::IncompleteHistory {
-                available_start: self.number("available_start_s")?,
-                available_stop: self.number("available_stop_s")?,
+                available_start: self.decimal("available_start_s")?,
+                available_stop: self.decimal("available_stop_s")?,
             },
             _ => return Err("invalid FFT status or history bounds".into()),
         };
@@ -65,15 +82,15 @@ impl Fields {
                     sfdr_db: "dB".into(),
                     sfdr_spur_frequency: "Hz".into(),
                 },
-                fundamental_magnitude: self.number("fundamental_magnitude")?,
-                thd_ratio: self.number("thd_ratio")?,
-                thd_db: self.number("thd_db")?,
-                sndr_db: self.number("sndr_db")?,
-                enob_bits: self.number("enob_bits")?,
-                snr_db: self.number("snr_db")?,
-                sfdr_db: self.number("sfdr_db")?,
+                fundamental_magnitude: self.decimal("fundamental_magnitude")?,
+                thd_ratio: self.decimal("thd_ratio")?,
+                thd_db: self.decimal("thd_db")?,
+                sndr_db: self.decimal("sndr_db")?,
+                enob_bits: self.decimal("enob_bits")?,
+                snr_db: self.decimal("snr_db")?,
+                sfdr_db: self.decimal("sfdr_db")?,
                 sfdr_spur_bin: self.optional("sfdr_spur_bin")?,
-                sfdr_spur_frequency_hz: self.optional("sfdr_spur_frequency_hz")?,
+                sfdr_spur_frequency_hz: self.optional_decimal("sfdr_spur_frequency_hz")?,
                 largest_harmonics: Vec::new(),
             })
         };
@@ -93,9 +110,9 @@ impl Fields {
                 unit,
             },
             sampling: FftRawSampling {
-                start_time_s: self.number("start_time_s")?,
-                stop_time_s: self.number("stop_time_s")?,
-                sample_interval_s: self.number("sample_interval_s")?,
+                start_time_s: self.decimal("start_time_s")?,
+                stop_time_s: self.decimal("stop_time_s")?,
+                sample_interval_s: self.decimal("sample_interval_s")?,
                 point_count: self.number("point_count")?,
                 accurate_sampling: self.number("accurate_sampling")?,
             },
@@ -104,9 +121,9 @@ impl Fields {
                 mode: self.string("mode"),
                 window: self.string("window"),
                 window_name: self.string("window_name"),
-                alpha: self.number("alpha")?,
-                coherent_gain: self.number("coherent_gain")?,
-                frequency_resolution_hz: self.number("frequency_resolution_hz")?,
+                alpha: self.decimal("alpha")?,
+                coherent_gain: self.decimal("coherent_gain")?,
+                frequency_resolution_hz: self.decimal("frequency_resolution_hz")?,
                 fundamental_bin: self.number("fundamental_bin")?,
                 minimum_metric_bin: self.number("minimum_metric_bin")?,
                 maximum_metric_bin: self.number("maximum_metric_bin")?,
@@ -212,11 +229,11 @@ impl FftBundle {
                     bins.push(DecodedFftRawBin {
                         analysis_id: result.analysis_id.clone(),
                         index: fields.number("bin_index").map_err(err)?,
-                        frequency_hz: fields.number("frequency_hz").map_err(err)?,
-                        real: fields.number("real").map_err(err)?,
-                        imaginary: fields.number("imaginary").map_err(err)?,
-                        magnitude: fields.number("magnitude").map_err(err)?,
-                        phase_degrees: fields.number("phase_degrees").map_err(err)?,
+                        frequency_hz: fields.decimal("frequency_hz").map_err(err)?,
+                        real: fields.decimal("real").map_err(err)?,
+                        imaginary: fields.decimal("imaginary").map_err(err)?,
+                        magnitude: fields.decimal("magnitude").map_err(err)?,
+                        phase_degrees: fields.decimal("phase_degrees").map_err(err)?,
                     });
                 }
                 "largest_harmonic"
@@ -230,10 +247,10 @@ impl FftBundle {
                     metrics.largest_harmonics.push(FftRawHarmonic {
                         rank: fields.number("harmonic_rank").map_err(err)?,
                         bin: fields.number("harmonic_bin").map_err(err)?,
-                        frequency_hz: fields.number("harmonic_frequency_hz").map_err(err)?,
-                        magnitude: fields.number("harmonic_magnitude").map_err(err)?,
-                        magnitude_db: fields.number("harmonic_magnitude_db").map_err(err)?,
-                        phase_degrees: fields.number("harmonic_phase_degrees").map_err(err)?,
+                        frequency_hz: fields.decimal("harmonic_frequency_hz").map_err(err)?,
+                        magnitude: fields.decimal("harmonic_magnitude").map_err(err)?,
+                        magnitude_db: fields.decimal("harmonic_magnitude_db").map_err(err)?,
+                        phase_degrees: fields.decimal("harmonic_phase_degrees").map_err(err)?,
                     });
                 }
                 "unavailable"
