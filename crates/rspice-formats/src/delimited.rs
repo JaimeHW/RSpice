@@ -214,13 +214,20 @@ pub fn decode_delimited_waveforms(
 
         for (signal_index, values) in signal_values.iter_mut().enumerate() {
             let column = signal_index + 2;
-            values.push(parse_finite_cell(
-                record.get(signal_index + 1),
-                line,
-                column,
-                &headers[signal_index + 1].name,
-                headers[signal_index + 1].unit,
-            )?);
+            let cell = record.get(signal_index + 1);
+            // An explicit empty signal cell is unavailable; a missing field,
+            // nonnumeric token, or non-finite literal remains malformed input.
+            values.push(if cell == Some("") {
+                f64::NAN
+            } else {
+                parse_finite_cell(
+                    cell,
+                    line,
+                    column,
+                    &headers[signal_index + 1].name,
+                    headers[signal_index + 1].unit,
+                )?
+            });
         }
     }
     if coordinate.len() < limits.min_rows {

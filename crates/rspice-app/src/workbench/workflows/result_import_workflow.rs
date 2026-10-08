@@ -844,7 +844,12 @@ fn result_import_preview(ui: &mut egui::Ui, draft: &ResultImportDialogState) {
                     for row in 0..draft.sample_count.min(MAX_PREVIEW_ROWS) {
                         ui.monospace(format!("{:.6e}", included[0].x[row]));
                         for waveform in &included {
-                            ui.monospace(format!("{:.6e}", waveform.y[row]));
+                            ui.monospace(
+                                waveform
+                                    .sample(row)
+                                    .map(|value| format!("{value:.6e}"))
+                                    .unwrap_or_else(|| "Unavailable".into()),
+                            );
                         }
                         ui.end_row();
                     }
@@ -1275,6 +1280,65 @@ mod tests {
             assert_eq!(reimported.coordinate_unit.as_deref(), Some(canonical));
             assert_eq!(reimported.coordinate, [0.0, end]);
         }
+    }
+
+    #[test]
+    fn nullable_raw_survives_review_retention_project_reload_and_reexport() {
+        let mut bytes = b"Title: gaps\nPlotname: Transient Analysis\n".to_vec();
+        rspice_core::io::ltspice_raw::write_raw_table_layout_metadata(
+            &mut bytes,
+            &[],
+            &[Some("s".into()), Some("V".into()), Some("1".into())],
+            None,
+        )
+        .unwrap();
+        bytes.extend_from_slice(b"Flags: real\nNo. Variables: 3\nNo. Points: 3\nVariables:\n0 time time\n1 V(out) nullable_real:voltage\n2 Valid(V(out)) nullable_validity:voltage\nValues:\n0 0 1 1\n1 1 0 0\n2 2 -0 1\n");
+        let mut state = loaded_project_state();
+        stage_imported_result_dataset(&mut state, "gaps.raw", &bytes).unwrap();
+        assert_eq!(state.workbench.result_import.waveforms.len(), 1);
+        assert_eq!(state.workbench.result_import.waveforms[0].sample(1), None);
+        commit_result_import_draft(&mut state).unwrap();
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+        let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+        assert!(
+            project.file.simulation_results_warning.is_none(),
+            "{:?}",
+            project.file.simulation_results_warning
+        );
+        let simulation =
+            crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+        let restored = &simulation.active_run().unwrap().analyses[0];
+        restored.validate_retained_evidence().unwrap();
+        assert_eq!(restored.waveforms[0].sample(1), None);
+        assert_eq!(restored.waveforms[0].y[2].to_bits(), (-0.0_f64).to_bits());
+        let projected = rspice_formats::waveform_io::result::project_waveforms(
+            restored,
+            &[&restored.waveforms[0]],
+            false,
+        )
+        .unwrap();
+        let csv = rspice_formats::WaveformWriter::new(rspice_formats::WaveformFormat::Csv)
+            .write_text(&projected)
+            .unwrap();
+        let parsed = parse_result_dataset("gaps.csv", csv.as_bytes()).unwrap();
+        assert_eq!(parsed.waveforms[0].sample(1), None);
+        assert_eq!(parsed.waveforms[0].y[2].to_bits(), (-0.0_f64).to_bits());
+        use rspice_formats::native_bundle::{
+            NativeBundleKind, encode_native_bundle, result::project_native_bundle,
+        };
+        let native = project_native_bundle(
+            restored,
+            &[&restored.waveforms[0]],
+            rspice_formats::WaveformDomain::Transient,
+        )
+        .unwrap();
+        let bytes =
+            encode_native_bundle(NativeBundleKind::Dataset, &native, MAX_RESULT_DATASET_BYTES)
+                .unwrap();
+        let parsed = parse_result_dataset("gaps.rspicedata", &bytes).unwrap();
+        assert_eq!(parsed.waveforms[0].sample(1), None);
+        assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("V"));
     }
 
     #[test]

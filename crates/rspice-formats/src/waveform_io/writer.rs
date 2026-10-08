@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Debug)]
 pub enum WaveformWriteError {
+    InvalidData(String),
     UnsupportedFormat(WaveformFormat),
     CoordinatesDiffer,
     Touchstone(TouchstoneError),
@@ -12,6 +13,7 @@ pub enum WaveformWriteError {
 impl std::fmt::Display for WaveformWriteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidData(message) => f.write_str(message),
             Self::UnsupportedFormat(format) => write!(f, "Format {format:?} is read-only or unsupported for export; writable waveform formats are Csv, Tsv, and Touchstone"),
             Self::CoordinatesDiffer => f.write_str("Delimited export requires identical coordinates; export the separately sampled traces individually or use a result bundle"),
             Self::Touchstone(source) => source.fmt(f),
@@ -23,7 +25,7 @@ impl std::error::Error for WaveformWriteError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Touchstone(source) => Some(source),
-            Self::UnsupportedFormat(_) | Self::CoordinatesDiffer => None,
+            Self::InvalidData(_) | Self::UnsupportedFormat(_) | Self::CoordinatesDiffer => None,
         }
     }
 }
@@ -433,6 +435,17 @@ impl WaveformWriter {
         dataset: &WaveformDataset,
         delimiter: char,
     ) -> Result<String, WaveformWriteError> {
+        if dataset
+            .x_signal
+            .as_ref()
+            .is_some_and(|signal| signal.data.iter().any(|value| !value.is_finite()))
+            || dataset
+                .signals
+                .iter()
+                .any(|signal| signal.data.iter().any(|value| value.is_infinite()))
+        {
+            return Err(WaveformWriteError::InvalidData("Delimited export requires finite coordinates and finite or explicitly unavailable signal samples".into()));
+        }
         let axis = dataset
             .x_signal
             .as_ref()
@@ -494,6 +507,36 @@ impl WaveformWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delimited_gaps_roundtrip_as_empty_cells_without_becoming_zeroes() {
+        for (format, delimiter) in [(WaveformFormat::Csv, b','), (WaveformFormat::Tsv, b'\t')] {
+            let mut dataset = sample_dataset();
+            dataset.x_signal.as_mut().unwrap().data = vec![0.0, 1.0, 2.0];
+            dataset.signals.truncate(1);
+            dataset.signals[0].data = vec![1.0, f64::NAN, -0.0];
+            let text = WaveformWriter::new(format).write_text(&dataset).unwrap();
+            assert!(!text.contains("NaN"));
+            let decoded = crate::delimited::decode_delimited_waveforms(
+                &text,
+                delimiter,
+                crate::delimited::DelimitedReadLimits {
+                    max_columns: 4,
+                    max_rows: 5,
+                    max_header_bytes: 128,
+                    min_rows: 1,
+                },
+            )
+            .unwrap();
+            assert!(decoded.signal_values[0][1].is_nan());
+            assert_eq!(decoded.signal_values[0][2].to_bits(), (-0.0_f64).to_bits());
+            dataset.signals[0].data[1] = f64::INFINITY;
+            assert!(WaveformWriter::new(format).write_text(&dataset).is_err());
+            dataset.signals[0].data[1] = 0.0;
+            dataset.x_signal.as_mut().unwrap().data[1] = f64::NAN;
+            assert!(WaveformWriter::new(format).write_text(&dataset).is_err());
+        }
+    }
 
     fn sample_dataset() -> WaveformDataset {
         let mut dataset = WaveformDataset::new("Transient");

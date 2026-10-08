@@ -96,15 +96,20 @@ impl AnalysisStackCsv {
         let analysis_type = csv_text(analysis.analysis_type.short_label());
         let trace = csv_text(trace);
         for (sample_index, (&x, &y)) in x.iter().zip(y).enumerate() {
-            if !x.is_finite() || !y.is_finite() {
+            if !x.is_finite() || y.is_infinite() {
                 return Err(AnalysisStackCsvError::NonFiniteSample {
                     trace,
                     component: component.to_owned(),
                     sample_index,
                 });
             }
+            let y_cell = if y.is_nan() {
+                String::new()
+            } else {
+                format!("{y:.17e}")
+            };
             self.contents.push_str(&format!(
-                "{dataset},{},{label},{analysis_type},{trace},{component},{sample_index},{x:.17e},{y:.17e}\n",
+                "{dataset},{},{label},{analysis_type},{trace},{component},{sample_index},{x:.17e},{y_cell}\n",
                 analysis.id,
             ));
             self.rows += 1;

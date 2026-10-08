@@ -115,6 +115,10 @@ pub struct WaveformSignal {
     /// Unit (V, A, s, Hz, etc.)
     pub unit: String,
     /// Data values
+    #[serde(
+        serialize_with = "crate::numeric::sample_serde::serialize",
+        deserialize_with = "crate::numeric::sample_serde::deserialize"
+    )]
     pub data: Vec<f64>,
     /// Optional coordinates for a signal sampled separately from the dataset axis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -174,7 +178,7 @@ impl WaveformSignal {
 
     /// Get value at index
     pub fn get(&self, idx: usize) -> Option<f64> {
-        self.data.get(idx).copied()
+        self.data.get(idx).copied().filter(|value| !value.is_nan())
     }
 }
 
