@@ -1,0 +1,2 @@
+# Preserve the published source bytes for provenance checks on every host.
+* -text

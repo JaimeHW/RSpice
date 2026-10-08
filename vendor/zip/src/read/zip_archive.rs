@@ -105,6 +105,7 @@ impl<R> ZipArchive<R> {
             dir_start: central_start,
             config: Config {
                 archive_offset: ArchiveOffset::Known(initial_offset),
+                ..Config::default()
             },
             comment,
             zip64_extensible_data_sector,
@@ -165,6 +166,12 @@ impl<R: Read + Seek> ZipArchive<R> {
                     );
                 }
                 Err(e) => {
+                    // Resource admission is terminal. Trying an earlier footer
+                    // would both bypass this policy and select a different
+                    // archive than the one whose metadata was refused.
+                    if matches!(e, ZipError::FileCountLimit { .. }) {
+                        return Err(e);
+                    }
                     last_err = Some(e);
                 }
             }
@@ -179,6 +186,14 @@ impl<R: Read + Seek> ZipArchive<R> {
         config: Config,
         reader: &mut R,
     ) -> Result<SharedBuilder, ZipError> {
+        if let Some(limit) = config.max_files
+            && dir_info.number_of_files > limit
+        {
+            return Err(ZipError::FileCountLimit {
+                files: dir_info.number_of_files,
+                limit,
+            });
+        }
         // If the parsed number of files is greater than the offset then
         // something fishy is going on and we shouldn't trust number_of_files.
         let file_capacity = if dir_info.number_of_files > dir_info.directory_start as usize {

@@ -17,12 +17,25 @@ pub(crate) enum ArchiveReadError {
 ///
 /// ZIP64 uses the same fixed central header and name/extra/comment lengths.
 /// The backend supplies its resolved directory offset, including any prefix.
-/// This check does not bound the backend's earlier metadata allocation.
+/// The backend first admits the advertised count before reserving metadata.
 pub(crate) fn open_unique_archive(
     bytes: &[u8],
     max_members: usize,
 ) -> Result<ZipArchive<Cursor<&[u8]>>, ArchiveReadError> {
-    let archive = ZipArchive::new(Cursor::new(bytes)).map_err(ArchiveReadError::Zip)?;
+    let archive = ZipArchive::with_config(
+        zip::read::Config {
+            max_files: Some(max_members),
+            ..Default::default()
+        },
+        Cursor::new(bytes),
+    )
+    .map_err(|error| match error {
+        ZipError::FileCountLimit { files, limit } => ArchiveReadError::MemberCount {
+            members: files,
+            limit,
+        },
+        error => ArchiveReadError::Zip(error),
+    })?;
     if archive.len() > max_members {
         return Err(ArchiveReadError::MemberCount {
             members: archive.len(),

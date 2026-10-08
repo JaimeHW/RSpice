@@ -1,0 +1,29 @@
+{
+  "purpose": "Bound ZIP central-directory entry allocation before result import metadata is materialized.",
+  "base_provenance": "RSPICE_VENDOR.json",
+  "modified_upstream_files": [
+    "src/read/config.rs",
+    "src/read/zip_archive.rs",
+    "src/result.rs"
+  ],
+  "changes": [
+    "Add Config.max_files with an unlimited default for existing callers.",
+    "Check the declared entry count before Vec reservation and entry decoding, including ZIP64.",
+    "Return a typed FileCountLimit refusal without falling back to an earlier archive footer."
+  ],
+  "consumer": "crates/rspice-formats/src/zip/reader.rs",
+  "regressions": "crates/rspice-formats/src/zip/reader/tests.rs",
+  "update_requirements": [
+    "Verify the new registry package checksum and refresh the upstream file hashes.",
+    "Reapply this entry-admission behavior or use an equivalent upstream API before changing the workspace ZIP version pin.",
+    "Refresh patched_files_sha256 for reviewed changes and run tools/security/test_vendor_audit_lock.py to preserve integrity and advisory coverage.",
+    "Verify the repaired Python source distribution retains the patch package and passes Cargo locked metadata validation.",
+    "Run format regression tests, desktop application compilation, strict CLI/format Clippy, and WebAssembly compilation.",
+    "The published library package omits upstream test fixtures; the consumer regression suite exercises the patched API."
+  ],
+  "patched_files_sha256": {
+    "src/read/config.rs": "48f96942a6ae4a8fa9d075095b8f968517a155edb2114dcdd84946f67a008b75",
+    "src/read/zip_archive.rs": "911470db8dd5cb9d8ccc71e685f0014ddc3b9d38e3e7d660f9ce0b80f26a04c7",
+    "src/result.rs": "36574aa0cf470ce7be5d3c95e7a9cb774fe0e8fc381edae851da7c22561c8966"
+  }
+}

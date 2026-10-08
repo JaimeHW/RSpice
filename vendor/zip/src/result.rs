@@ -30,6 +30,14 @@ pub enum ZipError {
 
     /// Compression method not supported
     CompressionMethodNotSupported(u16),
+
+    /// Advertised archive members exceed the configured admission limit.
+    FileCountLimit {
+        /// Number of entries declared by the archive directory.
+        files: usize,
+        /// Maximum entries admitted by the caller.
+        limit: usize,
+    },
 }
 
 impl ZipError {
@@ -58,6 +66,9 @@ impl Display for ZipError {
             Self::CompressionMethodNotSupported(id) => {
                 write!(f, "compression method not supported: {id}")
             }
+            Self::FileCountLimit { files, limit } => {
+                write!(f, "archive has {files} members; the limit is {limit}")
+            }
         }
     }
 }
@@ -70,7 +81,8 @@ impl Error for ZipError {
             | Self::UnsupportedArchive(_)
             | Self::FileNotFound
             | Self::InvalidPassword
-            | Self::CompressionMethodNotSupported(_) => None,
+            | Self::CompressionMethodNotSupported(_)
+            | Self::FileCountLimit { .. } => None,
         }
     }
 }
@@ -80,6 +92,7 @@ impl From<ZipError> for io::Error {
         let kind = match &err {
             ZipError::Io(err) => err.kind(),
             ZipError::InvalidArchive(_) => io::ErrorKind::InvalidData,
+            ZipError::FileCountLimit { .. } => io::ErrorKind::InvalidData,
             ZipError::UnsupportedArchive(_) | ZipError::CompressionMethodNotSupported(_) => {
                 io::ErrorKind::Unsupported
             }

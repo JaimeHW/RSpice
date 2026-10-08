@@ -49,6 +49,12 @@ members = [
     "tools/xspice-catalog-dump",
     "tools/veriloga-catalog-dump",
 ]
+exclude = ["vendor/zip"]
+
+[patch.crates-io]
+# ZIP metadata admission must run before the backend reserves its member index.
+# Provenance and the small local patch are recorded beside the vendored source.
+zip = { path = "vendor/zip" }
 
 [workspace.package]
 version = "0.1.0"
@@ -60,6 +66,7 @@ repository = "https://github.com/JaimeHW/RSpice"
 rust-version = "1.94"
 
 [workspace.dependencies]
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Core dependencies - faer for high-performance sparse linear algebra
 faer = { version = "0.24", default-features = false, features = ["std"] }
 thiserror = "2.0"

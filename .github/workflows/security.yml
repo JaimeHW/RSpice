@@ -56,7 +56,10 @@ jobs:
       - name: Cargo deny policy
         run: cargo deny check --metadata-path target/security-metadata.json advisories bans licenses sources
       - name: RustSec audit
-        run: cargo audit --deny warnings --file Cargo.lock
+        run: |
+          cargo audit --deny warnings --file Cargo.lock
+          python3 tools/security/vendor_audit_lock.py
+          cargo audit --deny warnings --file target/security-vendor-audit.lock
       - name: Generate CycloneDX SBOMs
         run: |
           cargo cyclonedx --format json --target all --override-filename bom

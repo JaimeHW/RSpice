@@ -2,6 +2,73 @@ use super::*;
 use crate::zip::deterministic_stored_zip;
 use std::io::{Read as _, Write as _};
 
+fn invalid_member_metadata(zip64: bool) -> Vec<u8> {
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    if zip64 {
+        writer.set_raw_zip64_extensible_data_sector(Box::new([]));
+    }
+    for name in ["first", "second"] {
+        writer
+            .start_file(
+                name,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        writer.write_all(b"samples").unwrap();
+    }
+    let mut bytes = writer.finish().unwrap().into_inner();
+    let archive = ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
+    let header = archive.central_directory_start() as usize;
+    // Claim a name longer than the source. The advertised entry limit must
+    // win before the backend reserves that name or decodes the first entry.
+    bytes[header + 28..header + 30].copy_from_slice(&u16::MAX.to_le_bytes());
+    bytes
+}
+
+#[test]
+fn metadata_limit_precedes_central_entry_allocation_and_decoding() {
+    for zip64 in [false, true] {
+        let bytes = invalid_member_metadata(zip64);
+        for limit in [0, 1] {
+            assert!(
+                matches!(open_unique_archive(&bytes, limit), Err(ArchiveReadError::MemberCount { members: 2, limit: refused }) if refused == limit)
+            );
+        }
+        assert!(matches!(
+            open_unique_archive(&bytes, 2),
+            Err(ArchiveReadError::Zip(_))
+        ));
+    }
+}
+
+#[test]
+fn metadata_limit_cannot_fall_back_to_an_earlier_archive() {
+    for zip64 in [false, true] {
+        let mut bytes = deterministic_stored_zip(&[("earlier", b"old samples")]).unwrap();
+        bytes.extend(invalid_member_metadata(zip64));
+        assert!(matches!(
+            open_unique_archive(&bytes, 1),
+            Err(ArchiveReadError::MemberCount {
+                members: 2,
+                limit: 1
+            })
+        ));
+    }
+}
+
+#[test]
+fn metadata_limit_counts_entries_before_duplicate_names_are_collapsed() {
+    let bytes = deterministic_stored_zip(&[("signal", b"one"), ("signal", b"two")]).unwrap();
+    assert!(matches!(
+        open_unique_archive(&bytes, 1),
+        Err(ArchiveReadError::MemberCount {
+            members: 2,
+            limit: 1
+        })
+    ));
+}
+
 #[test]
 fn source_directory_checks_do_not_confuse_member_contents_with_headers() {
     let content = b"PK\x01\x02 payload, not another directory entry";

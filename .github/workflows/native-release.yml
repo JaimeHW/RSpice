@@ -350,6 +350,8 @@ jobs:
           cargo metadata --locked --all-features --format-version 1 > target/security-metadata.json
           cargo deny check --metadata-path target/security-metadata.json advisories bans licenses sources
           cargo audit --deny warnings --file Cargo.lock
+          python tools/security/vendor_audit_lock.py
+          cargo audit --deny warnings --file target/security-vendor-audit.lock
       - name: Generate release SBOMs and checksums
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}

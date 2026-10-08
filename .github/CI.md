@@ -86,6 +86,14 @@ workflows must not be dispatched merely to test CI.
 Native publication also requires the reusable CI and nightly qualification
 workflows to pass for the release commit; building an archive is insufficient.
 
+Local crates.io patches retain upstream advisory coverage. The security and
+native release gates verify the vendored source hashes and generate an
+audit-only lockfile with the original registry identities using
+`tools/security/vendor_audit_lock.py`. Both that file and the committed build
+lockfile are scanned. Updating a local patch requires refreshing its reviewed
+hashes in `RSPICE_PATCH.json`; an upstream update also requires refreshing
+`RSPICE_VENDOR.json`. The generated audit lockfile must never be used for builds.
+
 Workbench automation currently uses Chromium; Rust boundary tests use Firefox.
 Mobile rows prove portable solver compilation, not a native tablet application.
 WebKit/Safari, full Firefox workbench interaction, physical
