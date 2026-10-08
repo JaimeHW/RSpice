@@ -11,6 +11,7 @@ use crate::cli::OutputFormat;
 use crate::cli::{CliError, InputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::hdf5::read_hdf5_sections_with_limits;
+use rspice_formats::delimited::layout::{ColumnKind, infer_layout, parse_layout_record};
 use std::path::Path;
 
 mod delimited;
@@ -740,9 +741,21 @@ fn parse_delimited(
     let mut scale = Vec::new();
     let mut series: Vec<Vec<Option<f64>>> = vec![Vec::new(); header.len().saturating_sub(1)];
     let mut parsed_values = 0_usize;
+    let mut layout = None;
     for (line_number, line) in lines {
+        if layout.is_some() {
+            return Err(conversion_error(
+                path,
+                "the table layout record must be unique and final",
+            ));
+        }
         let fields = parse_delimited_record(line, separator)
             .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
+        layout = parse_layout_record(&header[1..], &fields)
+            .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
+        if layout.is_some() {
+            continue;
+        }
         let parse = |field: &str, column: &str| {
             let token = field.trim();
             let value = token.parse::<f64>().map_err(|_| {
@@ -792,18 +805,16 @@ fn parse_delimited(
     }
 
     let mut columns: Vec<ExportColumn> = Vec::with_capacity(series.len());
-    let mut iter = header.iter().skip(1).zip(series).peekable();
-    while let Some((name, values)) = iter.next() {
-        // Fold adjacent `Re(x)` / `Im(x)` pairs back into one complex column.
-        let complex_pair = complex_part_name(name, "Re(").and_then(|inner| {
-            let has_matching_imag = iter.peek().is_some_and(|(next_name, _)| {
-                complex_part_name(next_name, "Im(").as_deref() == Some(inner.as_str())
-            });
-            has_matching_imag
-                .then(|| iter.next().map(|(_, imag)| (inner, imag)))
-                .flatten()
-        });
-        if let Some((inner, imag)) = complex_pair {
+    let layout = layout.unwrap_or_else(|| infer_layout(&header[1..]));
+    let mut iter = header.iter().skip(1).zip(series).zip(layout);
+    while let Some(((name, values), kind)) = iter.next() {
+        if kind == ColumnKind::ComplexReal {
+            // Both inferred and explicit layouts validate adjacent pair names.
+            let inner = complex_part_name(name, "Re(")
+                .ok_or_else(|| conversion_error(path, "invalid complex real header"))?;
+            let ((_, imag), _) = iter
+                .next()
+                .ok_or_else(|| conversion_error(path, "missing complex imaginary column"))?;
             columns.push(ExportColumn {
                 unit: None,
                 var_type: signal_var_type(&inner),

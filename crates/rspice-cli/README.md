@@ -706,7 +706,13 @@ JSON, HDF5 and RSpice RAW table conversion preserve explicitly declared signal
 and coordinate units. Comparison requires matching units, including the case
 of SI prefixes (`mV` differs from `MV`); it does not perform unit conversion.
 Legacy files without unit metadata use their declared quantity types when
-available. CSV/TSV retain numbers and column names only.
+available. CSV/TSV retain numbers, column names and real/complex representation,
+but do not carry units or quantity types. Adjacent `Re(x)`/`Im(x)` headers
+normally identify one complex signal. When those names instead identify
+independent real signals, exports append a final `# RSpiceTableLayoutV1` record
+with one `real`, `complex_real` or `complex_imag` cell per signal column.
+RSpice validates and consumes this record; other numeric-table readers should
+skip it. Ordinary exports retain their plain header-and-samples layout.
 RAW tables preserve exact plot titles, scale names, signal names and variable
 types in versioned RSpice metadata when those labels need escaping. Their header
 declarations escape whitespace, control characters and literal percent signs so

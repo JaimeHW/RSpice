@@ -19,6 +19,7 @@
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::publish;
 use crate::commands::run_signals::{ComplexSignal, ScalarSignal};
+use rspice_formats::delimited::layout::{ColumnKind, RECORD_MARKER, complex_pair_name};
 use std::io::Write;
 use std::path::Path;
 
@@ -737,6 +738,39 @@ impl ExportTable {
                     ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
                         write!(writer, "{0}{1:.17e}{0}{2:.17e}", delimiter, re, im)
                             .map_err(io_err)?;
+                    }
+                }
+            }
+            writeln!(writer).map_err(io_err)?;
+        }
+
+        // Adjacent real signals can legitimately be named Re(x) and Im(x).
+        // Declare their representation only when legacy inference would merge
+        // them, keeping ordinary numeric CSV/TSV exports unchanged.
+        let needs_layout = self.columns.windows(2).any(|pair| {
+            pair.iter().all(|column| {
+                matches!(
+                    column.data,
+                    ColumnData::Real(_) | ColumnData::NullableReal(_)
+                )
+            }) && complex_pair_name(&pair[0].name, &pair[1].name).is_some()
+        });
+        if needs_layout {
+            write!(writer, "{RECORD_MARKER}").map_err(io_err)?;
+            for column in &self.columns {
+                match column.data {
+                    ColumnData::Real(_) | ColumnData::NullableReal(_) => {
+                        write!(writer, "{delimiter}{}", ColumnKind::Real.as_str())
+                            .map_err(io_err)?;
+                    }
+                    ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
+                        write!(
+                            writer,
+                            "{delimiter}{}{delimiter}{}",
+                            ColumnKind::ComplexReal.as_str(),
+                            ColumnKind::ComplexImag.as_str()
+                        )
+                        .map_err(io_err)?;
                     }
                 }
             }
