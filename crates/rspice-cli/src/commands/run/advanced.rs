@@ -844,7 +844,7 @@ fn publish_sparam_run(
     };
     let analysis_id = resolved.analysis(kind)?;
     let output_path = &resolved.path;
-    if touchstone_extension_matches(output_path, run.ports.len()) {
+    if touchstone_extension_matches(output_path, run.ports.len())? {
         if run.port_noise.is_some() {
             return Err(CliError::InvalidArgument {
                 message: format!(
@@ -1084,9 +1084,32 @@ fn sparameter_export_table(
     ))
 }
 
-fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> bool {
-    path.extension().is_some_and(|ext| {
-        ext.eq_ignore_ascii_case("snp") || ext.eq_ignore_ascii_case(format!("s{}p", num_ports))
+fn touchstone_extension_matches(
+    path: &std::path::Path,
+    num_ports: usize,
+) -> Result<bool, CliError> {
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return Ok(false);
+    };
+    if extension.eq_ignore_ascii_case("snp") {
+        return Ok(true);
+    }
+    let Some(ports) = extension
+        .strip_prefix(['s', 'S'])
+        .and_then(|value| value.strip_suffix(['p', 'P']))
+        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+    else {
+        return Ok(false);
+    };
+    if ports.parse::<usize>().ok() == Some(num_ports) && num_ports > 0 {
+        return Ok(true);
+    }
+    Err(CliError::InvalidArgument {
+        message: format!(
+            "Touchstone output '{}' declares {ports} ports, but the result has {num_ports}",
+            path.display()
+        ),
+        suggestion: Some(format!("use an .s{num_ports}p extension for this network")),
     })
 }
 
