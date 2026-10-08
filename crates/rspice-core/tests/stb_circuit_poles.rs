@@ -207,3 +207,69 @@ fn retained_stb_spectra_validate_and_legacy_results_stay_indeterminate() {
             .is_err()
     );
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn nested_pole_workspace_limits_preserve_a_valid_stb_sweep_and_total_budget() {
+    // A five-unknown descriptor reaches multiple nested exact reducers. Its
+    // optional spectrum must not turn a valid loop sweep into a circuit error.
+    let netlist = Netlist::parse("Budgeted loop\nE1 out 0 sense 0 -100\nVprobe out drive 0\nR1 drive sense 1k\nC1 sense 0 159.154943091895n\n.stb lin 3 10 1meg probe=Vprobe\n.end\n").unwrap();
+    let config = StbConfig::try_from(&netlist.analyses[0]).unwrap();
+    let reference = Engine::default().run_stb(&netlist, config.clone()).unwrap();
+    let mut missing = 0;
+    let mut available = 0;
+    for budget in [46, 250, 600, 900, 1200, 1404, 1450, 1499, 1600, 2048, 4096] {
+        let mut policy = rspice_core::SimulationConfig::default();
+        policy.resource_limits.max_result_values = budget;
+        let engine = Engine::try_new(policy).unwrap();
+        let result = engine
+            .run_stb(&netlist, config.clone())
+            .unwrap_or_else(|error| panic!("budget {budget}: {error}"));
+        assert_eq!(result.loop_gains, reference.loop_gains);
+        assert_eq!(result.result.margins, reference.result.margins);
+        result
+            .result
+            .validate_with_abort(&ResourceLimits::default(), &NoAbort)
+            .unwrap();
+        match &result.result.circuit_poles {
+            CircuitPoleEvidence::Unavailable {
+                cause:
+                    CircuitPoleFailure::ResourceLimit {
+                        requested,
+                        limit,
+                        resource,
+                    },
+            } => {
+                missing += 1;
+                assert_eq!(resource, "result_values");
+                assert_eq!(*limit, budget);
+                assert!(
+                    *requested > *limit,
+                    "budget {budget}: {requested} <= {limit}"
+                );
+                assert_eq!(
+                    result.result.stability_verdict(),
+                    StabilityVerdict::Indeterminate
+                );
+            }
+            CircuitPoleEvidence::Available { .. } => {
+                available += 1;
+                assert_eq!(result.result.circuit_poles, reference.result.circuit_poles);
+            }
+            other => panic!("budget {budget}: {other:?}"),
+        }
+        match engine.run_pole_spectrum(&netlist) {
+            Ok(spectrum) => assert_eq!(
+                &spectrum,
+                reference.result.circuit_poles.spectrum().unwrap()
+            ),
+            Err(rspice_core::SimulationError::ResourceLimit(error)) => {
+                assert_eq!(error.resource, rspice_core::ResourceKind::ResultValues);
+                assert_eq!(error.limit, budget);
+                assert!(error.requested > error.limit);
+            }
+            other => panic!("budget {budget}: {other:?}"),
+        }
+    }
+    assert!(missing > 0 && available > 0);
+}

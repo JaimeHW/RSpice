@@ -66,6 +66,30 @@ pub(crate) fn finite_dynamics(
     abort: &dyn AbortSignal,
     certify_stability: bool,
 ) -> Result<FiniteDynamics, FiniteDescriptorError> {
+    extract_finite_dynamics(g, c, limits, abort, certify_stability).map_err(|mut error| {
+        // Reducers reserve the other live matrices and integer coefficients
+        // by shrinking their local budgets. Report the same excess against
+        // the owner's total, including those reservations, at this boundary.
+        if let FiniteDescriptorError::Constraint(ConstraintError::ResourceLimit(resource)) =
+            &mut error
+            && resource.resource == crate::resource::ResourceKind::ResultValues
+        {
+            resource.requested = resource
+                .requested
+                .saturating_add(limits.max_result_values.saturating_sub(resource.limit));
+            resource.limit = limits.max_result_values;
+        }
+        error
+    })
+}
+
+fn extract_finite_dynamics(
+    g: &[Vec<Value>],
+    c: &[Vec<Value>],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+    certify_stability: bool,
+) -> Result<FiniteDynamics, FiniteDescriptorError> {
     check_abort(abort)?;
     let n = g.len();
     if n == 0 || c.len() != n || g.iter().chain(c).any(|row| row.len() != n) {
@@ -218,20 +242,11 @@ pub(crate) fn finite_dynamics(
                 .saturating_add(algebraic.retained_words)
                 .saturating_add(rates.retained_words),
         );
-        Some(
-            super::hurwitz::rational_rows_are_hurwitz(&certificate_rows, certificate_limits, abort)
-                .map_err(|mut error| {
-                    if let ConstraintError::ResourceLimit(resource) = &mut error
-                        && resource.resource == crate::resource::ResourceKind::ResultValues
-                    {
-                        resource.requested = resource.requested.saturating_add(
-                            limits.max_result_values - certificate_limits.max_result_values,
-                        );
-                        resource.limit = limits.max_result_values;
-                    }
-                    error
-                })?,
-        )
+        Some(super::hurwitz::rational_rows_are_hurwitz(
+            &certificate_rows,
+            certificate_limits,
+            abort,
+        )?)
     } else {
         None
     };
