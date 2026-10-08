@@ -555,7 +555,7 @@ fn project_results_restore_rejects_invalid_overlay_references() {
     seal_legacy_unattributed(&mut run_two);
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 42,
+        schema_version: ProjectSimulationResultsData::default().schema_version,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
             ProjectSimulationRun::from(&run_two),
@@ -588,7 +588,7 @@ fn project_results_validation_rejects_duplicate_run_ids() {
     seal_legacy_unattributed(&mut run_duplicate);
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 42,
+        schema_version: ProjectSimulationResultsData::default().schema_version,
         runs: vec![
             ProjectSimulationRun::from(&run_one),
             ProjectSimulationRun::from(&run_duplicate),
@@ -900,7 +900,7 @@ fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
     let dataset_id = DatasetId::new();
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 42,
+        schema_version: ProjectSimulationResultsData::default().schema_version,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -984,7 +984,7 @@ fn project_results_validation_rejects_non_monotonic_waveform_x() {
     let dataset_id = DatasetId::new();
     let results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 42,
+        schema_version: ProjectSimulationResultsData::default().schema_version,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),
@@ -1067,7 +1067,7 @@ fn project_results_preserve_core_noise_mechanism_labels() {
     let dataset_id = DatasetId::new();
     let mut results: ProjectSimulationResults = ProjectSimulationResultsData {
         retained_dataset_limit: None,
-        schema_version: 42,
+        schema_version: ProjectSimulationResultsData::default().schema_version,
         runs: vec![ProjectSimulationRun {
             job_id: None,
             run_id: Some(run_id),

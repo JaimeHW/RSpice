@@ -22,9 +22,14 @@ fn project(sample: f64, complex: bool) -> ProjectSimulationResults {
         );
     }
     let mut run = SimulationRun::new(1, 0.0, ExecutionTarget::LocalDesktop);
-    run.add_analysis(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![waveform]),
-    );
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0).with_waveforms(vec![waveform]);
+    analysis.import_source = Some(rspice_results::result_import::ResultImportSource {
+        source_name: "gaps.raw".into(),
+        format: rspice_results::result_import::ResultImportFormat::SpiceRaw,
+        coordinate: None,
+    });
+    run.add_analysis(analysis);
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.lifecycle = SimulationRunLifecycle::Completed;

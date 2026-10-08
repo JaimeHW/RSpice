@@ -606,7 +606,7 @@ fn schema_v16_cannot_inject_periodic_evidence_or_overwrite_an_existing_payload()
 fn current_schema_rejects_successful_periodic_results_without_the_typed_payload() {
     for analysis_type in [AnalysisType::Pss, AnalysisType::Pstb] {
         let mut current = persisted_periodic_at_schema_v16(analysis_type);
-        current.schema_version = 42;
+        current.schema_version = ProjectSimulationResultsData::default().schema_version;
         let error = current
             .validate()
             .expect_err("current periodic success cannot omit its typed evidence");

@@ -336,10 +336,25 @@ mod tests {
                 _ => panic!("expected sampled values"),
             }
             #[cfg(feature = "engine-evidence")]
-            crate::analysis_result::AnalysisResult::new(1, AnalysisType::Transient, "TRAN", 0.0)
-                .with_waveforms(imported.waveforms)
-                .validate_retained_evidence()
-                .unwrap();
+            {
+                let mut analysis = crate::analysis_result::AnalysisResult::new(
+                    1,
+                    AnalysisType::Transient,
+                    "TRAN",
+                    0.0,
+                )
+                .with_waveforms(imported.waveforms);
+                assert!(
+                    analysis.validate_retained_evidence().is_err(),
+                    "native solver NaNs must still be rejected"
+                );
+                analysis.import_source = Some(crate::result_import::ResultImportSource {
+                    source_name: "gaps.raw".into(),
+                    format: ResultImportFormat::SpiceRaw,
+                    coordinate: None,
+                });
+                analysis.validate_retained_evidence().unwrap();
+            }
         }
         for (real, imag) in [
             (vec![f64::INFINITY], None),

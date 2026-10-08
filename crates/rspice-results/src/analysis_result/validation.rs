@@ -80,6 +80,15 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                     waveform.name
                 ));
             }
+            // Imported adapters explicitly admit unavailable source samples.
+            // A solver NaN still indicates invalid native evidence; accepting
+            // an external gap must not mask a numerical engine failure.
+            if self.import_source.is_none() && waveform.has_missing_samples() {
+                return Err(format!(
+                    "native retained waveform '{}' contains an unavailable sample without import attribution",
+                    waveform.name
+                ));
+            }
             if waveform
                 .unit
                 .as_ref()
