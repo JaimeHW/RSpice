@@ -702,30 +702,33 @@ fn lower_with_analog_variables(
     }
 
     let mut bit_aliases = Vec::new();
-    for instance in &digital.instances {
-        for alias in &instance.bit_aliases {
-            let (Some(&left), Some(&right)) = (
-                elaborated_scope.get(alias.left.as_str()),
-                elaborated_scope.get(alias.right.as_str()),
-            ) else {
-                diagnostics.push(DigitalLoweringDiagnostic::invariant(
-                    "wire-bit alias has no elaborated signal",
-                    alias.span.into(),
-                ));
-                continue;
-            };
-            bit_aliases.push(super::digital::DigitalBitAlias {
-                left: super::digital::DigitalNetBit {
-                    signal: left,
-                    bit: alias.left_bit,
-                },
-                right: super::digital::DigitalNetBit {
-                    signal: right,
-                    bit: alias.right_bit,
-                },
-                span: alias.span.into(),
-            });
-        }
+    for alias in digital.bit_aliases.iter().chain(
+        digital
+            .instances
+            .iter()
+            .flat_map(|instance| &instance.bit_aliases),
+    ) {
+        let (Some(&left), Some(&right)) = (
+            elaborated_scope.get(alias.left.as_str()),
+            elaborated_scope.get(alias.right.as_str()),
+        ) else {
+            diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                "wire-bit alias has no elaborated signal",
+                alias.span.into(),
+            ));
+            continue;
+        };
+        bit_aliases.push(super::digital::DigitalBitAlias {
+            left: super::digital::DigitalNetBit {
+                signal: left,
+                bit: alias.left_bit,
+            },
+            right: super::digital::DigitalNetBit {
+                signal: right,
+                bit: alias.right_bit,
+            },
+            span: alias.span.into(),
+        });
     }
 
     let mut absdelta = Vec::new();

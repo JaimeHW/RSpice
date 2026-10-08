@@ -1101,3 +1101,171 @@ connectrules selected; connect bidirectional; endconnectrules
         }
     }
 }
+
+#[test]
+fn physical_buses_feed_packed_inputs_with_merged_loading_across_hierarchy() {
+    for (mode, peak) in [("merged", 1.0), ("split", 0.75)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module receiver(d,p);
+ parameter integer BASE=0;
+ input [BASE:BASE+1] d; logic [BASE:BASE+1] d;
+ output p; electrical p;
+ analog V(p)<+(d[BASE] ? 1.0 : 0.0)+(d[BASE+1] ? 2.0 : 0.0);
+endmodule
+module bank(a,p,q);
+ parameter integer BASE=3;
+ input [BASE:BASE-1] a; electrical [BASE:BASE-1] a;
+ output p,q; electrical p,q;
+ receiver #(.BASE(-2)) first(a,p);
+ receiver #(.BASE(10)) second(.d(a[BASE:BASE-1]),.p(q));
+endmodule
+module top(p,q,r,s,t);
+ output p,q,r,s,t; electrical p,q,r,s,t;
+ electrical [7:8] v;
+ reg phase;
+ initial begin phase=0; #1 phase=1; end
+ analog begin
+  I(v[7])<+(V(v[7])-(phase ? 0.0 : 3.0))/1000;
+  I(v[8])<+(V(v[8])-(phase ? 3.0 : 0.0))/1000;
+  V(s)<+V(v[7]); V(t)<+V(v[8]);
+ end
+ bank #(.BASE(5)) nested(.a(v),.p(p),.q(q));
+ receiver root_observer({{v[7],v[8]}},r);
+endmodule
+connectmodule sample(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+ always #0.1 d=V(a)>0.5;
+ analog I(a)<+V(a)/1000;
+endmodule
+connectrules selected; connect sample {mode}; endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!("* physical buses into packed inputs\nX1 p q r s t top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\nRt t 0 1k\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+        for (time, code, first, second) in [(0.5e-9, 1.0, peak, 0.0), (1.5e-9, 2.0, 0.0, peak)] {
+            for (node, expected) in [
+                ("p", code),
+                ("q", code),
+                ("r", code),
+                ("s", first),
+                ("t", second),
+            ] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{mode} {node} at {time}: {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn packed_variable_outputs_drive_whole_physical_buses() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module driver(d);
+ output [2:3] d; logic [2:3] d; reg [2:3] d;
+ initial begin d=2'b10; #1 d=2'b01; end
+endmodule
+module top(p,q);
+ output p,q; electrical p,q;
+ electrical [8:7] v;
+ driver source(v);
+ analog begin
+  I(v[8])<+V(v[8])/1000; I(v[7])<+V(v[7])/1000;
+  V(p)<+V(v[8]); V(q)<+V(v[7]);
+ end
+endmodule
+connectmodule drive(d,a);
+ input d; logic d;
+ output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectrules selected; connect drive; endconnectrules
+"#,
+    );
+    let deck=Netlist::parse(&format!("* variable packed outputs into physical bus\nX1 p q top\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+    for (time, p, q) in [(0.5e-9, 1.5, 0.0), (1.5e-9, 0.0, 1.5)] {
+        for (node, expected) in [("p", p), ("q", q)] {
+            assert!(
+                (voltage(&result, node, time) - expected).abs() < 1e-7,
+                "{node} at {time}"
+            );
+        }
+    }
+}
+
+#[test]
+fn physical_buses_join_packed_inouts_with_distinct_merged_and_split_drivers() {
+    for (mode, initial_voltage, active_voltage, first_code, second_code) in [
+        ("merged", 0.0, 1.5, 9.0, 9.0),
+        ("split", 1.0, 2.0, 1.0, 2.0),
+    ] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module driver(d,p);
+ parameter [1:0] PATTERN=2'b10;
+ inout [4:5] d; logic [4:5] d;
+ output p; electrical p;
+ reg [1:0] drive;
+ integer code;
+ initial begin drive=PATTERN; #1 drive=2'bzz; #1 drive=PATTERN; #1 drive=2'bzz; end
+ assign d=drive;
+ always @(d) begin
+  if(d===2'b10) code=1;
+  else if(d===2'b01) code=2;
+  else if(d===2'b11) code=3;
+  else if(d===2'bzz) code=4;
+  else code=9;
+ end
+ analog V(p)<+code;
+endmodule
+module top(p,q,s,t);
+ output p,q,s,t; electrical p,q,s,t;
+ electrical [7:8] v;
+ driver #(.PATTERN(2'b10)) first(v,p);
+ driver #(.PATTERN(2'b01)) second(v[7:8],q);
+ analog begin
+  I(v[7])<+V(v[7])/1000; I(v[8])<+V(v[8])/1000;
+  V(s)<+V(v[7]); V(t)<+V(v[8]);
+ end
+endmodule
+connectmodule bidirectional(d,a);
+ inout d; logic d;
+ inout a; electrical a;
+ reg drive;
+ wire high, low;
+ initial begin drive=1'bz; #1 drive=1; #1 drive=0; #1 drive=1'bz; end
+ assign d=drive;
+ assign high=(d===1'b1); assign low=(d===1'b0);
+ analog I(a)<+(high*(V(a)-3.0)+low*V(a))/1000;
+endmodule
+connectrules selected; connect bidirectional {mode}; endconnectrules
+"#
+        ));
+        let deck=Netlist::parse(&format!("* physical bus with packed inout drivers\nX1 p q s t top\nRp p 0 1k\nRq q 0 1k\nRs s 0 1k\nRt t 0 1k\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 3.8e-9, 50e-12).unwrap();
+        for (time, p, q, physical) in [
+            (0.5e-9, first_code, second_code, initial_voltage),
+            (1.5e-9, 3.0, 3.0, active_voltage),
+            (2.5e-9, 9.0, 9.0, 0.0),
+            (3.5e-9, 4.0, 4.0, 0.0),
+        ] {
+            for (node, expected) in [("p", p), ("q", q), ("s", physical), ("t", physical)] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{mode} {node} at {time}: {actual}, expected {expected}"
+                );
+            }
+        }
+    }
+}

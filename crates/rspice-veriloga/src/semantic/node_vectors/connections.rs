@@ -4,6 +4,7 @@ use super::*;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConnectionScope {
     nodes: HashMap<SmolStr, NodeVector>,
+    physical: HashSet<SmolStr>,
     digital: HashMap<SmolStr, (Option<VectorBounds>, bool)>,
     constants: DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
@@ -11,19 +12,29 @@ pub(crate) struct ConnectionScope {
 
 impl ConnectionScope {
     pub fn new(source: &Module, analyzed: &AnalyzedModule) -> Self {
+        let digital: HashMap<_, _> = analyzed
+            .digital
+            .signals
+            .iter()
+            .map(|signal| {
+                (
+                    signal.name.clone(),
+                    (signal.range, !signal.dimensions.is_empty()),
+                )
+            })
+            .collect();
+        let physical = analyzed
+            .ports
+            .iter()
+            .filter(|port| !digital.contains_key(&port.name))
+            .map(|port| port.name.clone())
+            .chain(analyzed.internal_nodes.iter().map(|node| node.name.clone()))
+            .chain(analyzed.ground_nodes.iter().cloned())
+            .collect();
         Self {
             nodes: analyzed.physical_nodes.vectors.clone(),
-            digital: analyzed
-                .digital
-                .signals
-                .iter()
-                .map(|signal| {
-                    (
-                        signal.name.clone(),
-                        (signal.range, !signal.dimensions.is_empty()),
-                    )
-                })
-                .collect(),
+            physical,
+            digital,
             constants: DigitalConstants::from_module(source),
             time_scale: source.time_scale,
         }
@@ -33,13 +44,30 @@ impl ConnectionScope {
         &self,
         actual: &Expression,
     ) -> CompileResult<Option<Vec<Expression>>> {
-        let name = match actual {
-            Expression::Identifier(id) => Some(&id.name),
-            Expression::ArrayAccess(access) => Some(&access.array),
-            Expression::Digital(DigitalExpr::PartSelect(select)) => Some(&select.name),
-            _ => None,
-        };
-        if !name.is_some_and(|name| self.nodes.contains_key(name)) {
+        fn elements(scope: &ConnectionScope, values: &[ArrayLiteralElement], depth: usize) -> bool {
+            if depth > MAX_REPLICATION_NESTING {
+                return true;
+            }
+            values.iter().any(|value| match value {
+                ArrayLiteralElement::Value(value) => contains(scope, value, depth),
+                ArrayLiteralElement::Replication(replication) => {
+                    elements(scope, &replication.elements, depth + 1)
+                }
+            })
+        }
+        fn contains(scope: &ConnectionScope, actual: &Expression, depth: usize) -> bool {
+            let name = match actual {
+                Expression::Identifier(id) => &id.name,
+                Expression::ArrayAccess(access) => &access.array,
+                Expression::Digital(DigitalExpr::PartSelect(select)) => &select.name,
+                Expression::ArrayLiteral(concat) => {
+                    return elements(scope, &concat.elements, depth + 1);
+                }
+                _ => return false,
+            };
+            scope.nodes.contains_key(name) || scope.physical.contains(name)
+        }
+        if !contains(self, actual, 0) {
             return Ok(None);
         }
         let mut lanes = Vec::new();

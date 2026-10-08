@@ -42,6 +42,9 @@ pub struct AnalyzedDigital {
     pub elaboration_parameters: Vec<AnalyzedPackedParameter>,
     /// Declared nets and variables, in declaration order.
     pub signals: Vec<AnalyzedDigitalSignal>,
+    /// Occurrence-local wire identities created by connection elaboration.
+    /// Instance flattening qualifies these names alongside ordinary signals.
+    pub bit_aliases: Vec<ElaboratedDigitalBitAlias>,
     /// Processes with their static sensitivity resolved, in declaration order.
     pub processes: Vec<AnalyzedDigitalProcess>,
     /// Continuous assignments, in declaration order.
@@ -160,6 +163,7 @@ impl AnalyzedDigital {
             || !self.processes.is_empty()
             || !self.continuous_assigns.is_empty()
             || !self.instances.is_empty()
+            || !self.bit_aliases.is_empty()
     }
 
     /// The first discrete-domain construct a backend would have to execute.
@@ -477,7 +481,8 @@ pub struct AnalyzedContinuousAssign {
     pub span: Span,
 }
 
-/// A wire-bit identity in fully qualified elaborated names and normalized positions.
+/// A wire-bit identity in elaboration names and normalized positions.
+/// Module-local identities acquire qualified names when their instance is bound.
 #[derive(Debug, Clone)]
 pub struct ElaboratedDigitalBitAlias {
     pub left: SmolStr,
@@ -725,6 +730,7 @@ impl SemanticAnalyzer {
             time_scale: module.time_scale,
             elaboration_parameters: std::mem::take(&mut analyzed.digital.elaboration_parameters),
             signals,
+            bit_aliases: Vec::new(),
             processes,
             continuous_assigns,
             // A module is analyzed on its own, so it knows nothing yet about

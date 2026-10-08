@@ -5,6 +5,7 @@
 //! this adapter supplies typed segments and ordinary executable module bodies.
 
 mod actual;
+mod packed;
 
 use super::digital_elaborate::{SpecializationKey, SpecializedModule, specialize_module};
 use super::{AnalyzedFile, AnalyzedModule, DigitalSignalClass, SemanticAnalyzer};
@@ -49,6 +50,7 @@ impl SignalIdentity {
     }
 }
 
+#[derive(Clone)]
 struct Endpoint {
     identity: SignalIdentity,
     segment: NetSegment,
@@ -136,8 +138,17 @@ struct BoundarySignal {
     signal: Signal,
     actual: Expression,
     upper_kind: Option<DigitalNetKind>,
-    // Segment -> source instance, connection, and the lower net's type.
-    sites: HashMap<usize, (usize, usize, Option<DigitalNetKind>)>,
+    sites: HashMap<usize, ConnectionSite>,
+}
+
+struct ConnectionSite {
+    kind: Option<DigitalNetKind>,
+    target: ConnectionTarget,
+}
+
+enum ConnectionTarget {
+    Scalar { instance: usize, port: usize },
+    Packed { net: SmolStr, bit: u32 },
 }
 
 /// Insert at typed module boundaries after generate specialization. Concrete
@@ -156,6 +167,8 @@ pub(super) fn prepare(
     let mut signals: BTreeMap<SignalIdentity, BoundarySignal> = BTreeMap::new();
     let scope = super::node_vectors::ConnectionScope::new(source, module);
     let mut prepared = source.clone();
+    let mut used = declared_names(source);
+    let mut aliases = module.digital.bit_aliases.clone();
     let constants = super::instance_parameters::constants(source);
     for (instance_index, instance) in source.instances.iter().enumerate() {
         let Some(child) = analyzed.modules.get(&instance.module) else {
@@ -196,6 +209,27 @@ pub(super) fn prepare(
             let Some(lower) = endpoint(child_source, child, &port.name) else {
                 continue;
             };
+            if lower.net_kind.is_some()
+                && lower.width > 1
+                && let Some(lanes) = scope.physical_selection(actual)?
+            {
+                packed::Connections {
+                    source,
+                    module,
+                    constants: &constants,
+                    prepared: &mut prepared,
+                    used: &mut used,
+                    signals: &mut signals,
+                }
+                .connect(
+                    child,
+                    instance,
+                    (instance_index, port_index),
+                    &lower,
+                    &lanes,
+                )?;
+                continue;
+            }
             // A selected discrete actual can only create a mixed boundary at
             // a continuous formal. Leave ordinary digital selection semantics
             // to the digital hierarchy binder, including dynamic expressions.
@@ -243,14 +277,19 @@ pub(super) fn prepare(
             ));
             boundary.sites.insert(
                 lower_index,
-                (instance_index, connection_index, lower.net_kind),
+                ConnectionSite {
+                    kind: lower.net_kind,
+                    target: ConnectionTarget::Scalar {
+                        instance: instance_index,
+                        port: connection_index,
+                    },
+                },
             );
         }
     }
     if signals.is_empty() {
         return Ok(None);
     }
-    let mut used = declared_names(source);
     for boundary in signals.into_values() {
         let resolved = resolve_disciplines(
             &boundary.signal,
@@ -288,7 +327,7 @@ pub(super) fn prepare(
                     span,
                 ));
             }
-            let lower_kind = boundary.sites[&insertion.bindings[0].lower].2;
+            let lower_kind = boundary.sites[&insertion.bindings[0].lower].kind;
             let value_kind = boundary.signal.segments[if lower_kind.is_some() {
                 insertion.bindings[0].lower
             } else {
@@ -342,20 +381,34 @@ pub(super) fn prepare(
                 });
             }
             let private_expression = Expression::Identifier(Identifier {
-                name: private,
+                name: private.clone(),
                 span,
             });
             for binding in &insertion.bindings {
-                let (instance_index, connection_index, kind) = boundary.sites[&binding.lower];
-                if kind != lower_kind {
+                let site = &boundary.sites[&binding.lower];
+                if site.kind != lower_kind {
                     return Err(error(
                         "merged connection has incompatible discrete net resolution types",
                         span,
                     ));
                 }
-                match &mut prepared.instances[instance_index].connections[connection_index] {
-                    Connection::Named { signal, .. } | Connection::Ordered { signal, .. } => {
-                        *signal = Some(private_expression.clone());
+                match &site.target {
+                    ConnectionTarget::Scalar { instance, port } => {
+                        match &mut prepared.instances[*instance].connections[*port] {
+                            Connection::Named { signal, .. }
+                            | Connection::Ordered { signal, .. } => {
+                                *signal = Some(private_expression.clone());
+                            }
+                        }
+                    }
+                    ConnectionTarget::Packed { net, bit } => {
+                        aliases.push(super::digital::ElaboratedDigitalBitAlias {
+                            left: private.clone(),
+                            left_bit: 0,
+                            right: net.clone(),
+                            right_bit: *bit,
+                            span,
+                        });
                     }
                 }
             }
@@ -443,6 +496,7 @@ pub(super) fn prepare(
         module.default_discipline.clone(),
     )?;
     analyzed.hierarchical_connections = true;
+    analyzed.digital.bit_aliases = aliases;
     Ok(Some(Arc::new(SpecializedModule {
         source: prepared,
         analyzed,

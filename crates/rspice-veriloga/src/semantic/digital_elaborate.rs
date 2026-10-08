@@ -766,6 +766,21 @@ impl DigitalElaborator<'_> {
             });
             scope.signals.insert(declared.name.clone(), binding);
         }
+        for alias in &child.digital.bit_aliases {
+            let mut alias = alias.clone();
+            let qualify = |name: &SmolStr| -> CompileResult<SmolStr> {
+                scope
+                    .signals
+                    .get(name)
+                    .map(|binding| binding.elaborated.clone())
+                    .ok_or_else(|| {
+                        internal_error(format!("prepared wire alias '{path}.{name}' has no signal"))
+                    })
+            };
+            alias.left = qualify(&alias.left)?;
+            alias.right = qualify(&alias.right)?;
+            bit_aliases.push(alias);
+        }
         Ok((signals, scope, port_drivers, bit_aliases))
     }
 }

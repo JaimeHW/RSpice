@@ -272,3 +272,64 @@ endmodule
             .any(|d| d.to_string().contains("in-range four-state wire bit"))
     );
 }
+
+#[test]
+fn physical_to_packed_buses_retain_merged_aliases_through_specialization_and_replay() {
+    use std::collections::HashSet;
+    for (mode, drivers) in [("merged", 2), ("split", 4)] {
+        let source = format!(
+            r#"
+module receiver(d);
+ input [2:3] d; logic [2:3] d;
+endmodule
+module top(p);
+ parameter integer BASE=7;
+ inout [BASE:BASE+1] p; electrical [BASE:BASE+1] p;
+ receiver first(p);
+ receiver second(p[BASE:BASE+1]);
+ analog begin I(p[BASE])<+V(p[BASE])/1000; I(p[BASE+1])<+V(p[BASE+1])/1000; end
+endmodule
+connectmodule sample(a,d);
+ input a; electrical a;
+ output d; logic d; reg d;
+ initial d=0;
+ always #1 d=V(a)>0.5;
+endmodule
+connectrules selected; connect sample {mode}; endconnectrules
+"#
+        );
+        let compiler = compiler();
+        let compiled = compiler.compile_runtime(&source, Some("top")).unwrap();
+        let check = |ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact| {
+            assert_eq!(ir.digital.bit_aliases.len(), 4);
+            assert_eq!(
+                ir.digital
+                    .bit_aliases
+                    .iter()
+                    .map(|alias| alias.left.signal)
+                    .collect::<HashSet<_>>()
+                    .len(),
+                drivers
+            );
+            ir.validate().unwrap();
+        };
+        check(&compiled.canonical_ir);
+        let assigned = compiler
+            .specialize_mixed_runtime(
+                &compiled.canonical_ir,
+                &[("BASE", -3.0)],
+                &NoPipelineControl,
+            )
+            .unwrap();
+        check(&assigned.canonical_ir);
+        let prepared = compiler
+            .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+            .unwrap();
+        let replayed = prepared.compile_runtime(None).unwrap();
+        check(&replayed.canonical_ir);
+        assert_eq!(
+            assigned.canonical_ir.digital.content_identity,
+            replayed.canonical_ir.digital.content_identity
+        );
+    }
+}
