@@ -235,45 +235,6 @@ fn preserve_gap_separators(values: &[f64], indices: &mut [usize]) {
     }
 }
 
-#[cfg(test)]
-mod gap_tests {
-    use super::*;
-
-    #[test]
-    fn bounded_caches_and_previews_do_not_join_segments_across_gaps() {
-        let mut values = (0..120).map(|value| (value % 9) as f64).collect::<Vec<_>>();
-        for index in [1, 10, 12, 19, 53, 54, 55, 77, 96, 118] {
-            values[index] = f64::NAN;
-        }
-        let waveform =
-            RetainedWaveform::new("gaps", (0..120).map(f64::from).collect::<Vec<_>>(), values);
-        for budget in 2..=120 {
-            let indices = waveform.display_sample_indices(budget);
-            assert!(indices.len() <= budget);
-            for pair in indices.windows(2) {
-                assert!(pair[0] < pair[1]);
-                if waveform.y[pair[0]].is_finite() && waveform.y[pair[1]].is_finite() {
-                    assert!(
-                        waveform.y[pair[0]..=pair[1]]
-                            .iter()
-                            .all(|value| value.is_finite())
-                    );
-                }
-            }
-            let preview = waveform.clone().into_bounded_preview(budget).unwrap();
-            for index in 1..preview.x.len() {
-                if preview.y[index - 1].is_finite() && preview.y[index].is_finite() {
-                    assert!(
-                        waveform.y[preview.x[index - 1] as usize..=preview.x[index] as usize]
-                            .iter()
-                            .all(|value| value.is_finite())
-                    );
-                }
-            }
-        }
-    }
-}
-
 fn extrema_cache_indices(values: &[f64], limit: usize) -> Vec<usize> {
     if values.len() <= limit {
         return (0..values.len()).collect();
@@ -334,4 +295,43 @@ fn extrema_cache_indices(values: &[f64], limit: usize) -> Vec<usize> {
     }
     debug_assert_eq!(indices.len(), limit);
     indices
+}
+
+#[cfg(test)]
+mod gap_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_caches_and_previews_do_not_join_segments_across_gaps() {
+        let mut values = (0..120).map(|value| (value % 9) as f64).collect::<Vec<_>>();
+        for index in [1, 10, 12, 19, 53, 54, 55, 77, 96, 118] {
+            values[index] = f64::NAN;
+        }
+        let waveform =
+            RetainedWaveform::new("gaps", (0..120).map(f64::from).collect::<Vec<_>>(), values);
+        for budget in 2..=120 {
+            let indices = waveform.display_sample_indices(budget);
+            assert!(indices.len() <= budget);
+            for pair in indices.windows(2) {
+                assert!(pair[0] < pair[1]);
+                if waveform.y[pair[0]].is_finite() && waveform.y[pair[1]].is_finite() {
+                    assert!(
+                        waveform.y[pair[0]..=pair[1]]
+                            .iter()
+                            .all(|value| value.is_finite())
+                    );
+                }
+            }
+            let preview = waveform.clone().into_bounded_preview(budget).unwrap();
+            for index in 1..preview.x.len() {
+                if preview.y[index - 1].is_finite() && preview.y[index].is_finite() {
+                    assert!(
+                        waveform.y[preview.x[index - 1] as usize..=preview.x[index] as usize]
+                            .iter()
+                            .all(|value| value.is_finite())
+                    );
+                }
+            }
+        }
+    }
 }
