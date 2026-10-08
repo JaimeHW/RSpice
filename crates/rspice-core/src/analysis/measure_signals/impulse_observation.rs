@@ -131,9 +131,9 @@ impl<'a> Resolver<'a, '_> {
         let canonical = |node: &str| {
             canonical_measure_signal_name(&format!("V({})", self.ground.canonical_node(node)))
         };
-        if nodes.len() == 2 && canonical(nodes[0]) == canonical(nodes[1])
-            || nodes.iter().all(|node| self.ground.is_ground(node))
-        {
+        let same_node = matches!(nodes.as_slice(), [positive, negative]
+            if canonical(positive) == canonical(negative));
+        if same_node || nodes.iter().all(|node| self.ground.is_ground(node)) {
             return Ok(Form {
                 constant: Some(0.0),
                 terms: Vec::new(),
@@ -152,7 +152,11 @@ impl<'a> Resolver<'a, '_> {
             }
             let name = canonical(node);
             let trace = match self.voltage_aliases.get(&name) {
-                Some(Some(index)) => &traces[*index],
+                Some(Some(index)) => traces.get(*index).ok_or_else(|| {
+                    failure(format!(
+                        "voltage impulse alias '{name}' has no retained trace"
+                    ))
+                })?,
                 Some(None) => {
                     return Err(failure(format!(
                         "voltage impulse alias '{name}' is ambiguous"
@@ -192,9 +196,9 @@ impl<'a> Resolver<'a, '_> {
         let canonical = canonical_measure_signal_name(authored);
         if n_probe_voltage_name(&canonical)
             .is_some_and(|voltage| self.retained_voltages.contains(&voltage))
+            && let Some((_, arguments)) = split_equation_output_operator(&canonical)
         {
             // A retained node takes precedence over a same-named device output.
-            let (_, arguments) = split_equation_output_operator(&canonical).unwrap();
             return self.voltage("V", &arguments);
         }
         if let Some((prefix, nodes)) = split_equation_output_operator(&canonical)
