@@ -576,6 +576,9 @@ including folded buses as vectors. It does not list sampled analog columns;
 an event-free dump has an empty schema. Real event units remain unspecified,
 as they are in the dump itself.
 
+Touchstone coordinate artifacts also register their complex, dimensionless
+S-matrix series. Their reference impedances remain in the Touchstone header.
+
 An implicit axis sweep whose topology and complete signal schema are identical
 at every coordinate keeps the single wide aggregated table instead.
 

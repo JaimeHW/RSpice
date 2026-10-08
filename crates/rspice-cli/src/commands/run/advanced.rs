@@ -854,8 +854,15 @@ fn publish_sparam_run(
                 suggestion: Some("use CSV, TSV, raw, or HDF5 output for .SP DONOISE".to_string()),
             });
         }
+        let publication = super::PublishedResult {
+            analysis_id: analysis_id.tag(),
+            result_kind: None,
+            schema: touchstone_schema(run.ports.len())?,
+            artifact: output_path.clone(),
+            source_sample_presence: None,
+        };
         write_touchstone_nport(output_path, &run.ports, &frequencies, &scattering)?;
-        ctx.record_output(output_path.clone());
+        ctx.record_published(publication);
     } else {
         let (table, schema) = sparameter_export_table(run, frequencies, &scattering, kind)?;
         super::document::publish_table_result(
@@ -1082,6 +1089,33 @@ fn sparameter_export_table(
         },
         schema,
     ))
+}
+
+/// Touchstone carries one complex series per matrix entry. Reference
+/// impedances live in its header, rather than as additional series.
+fn touchstone_schema(ports: usize) -> Result<SignalSchema, CliError> {
+    use rspice_core::execution::{
+        SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
+    };
+    super::document::distinct_schema((1..=ports).flat_map(|row| {
+        (1..=ports).map(move |column| {
+            // Match the shared Touchstone reader's unambiguous matrix names.
+            let name = if ports <= 9 {
+                format!("S{row}{column}")
+            } else {
+                format!("S{row}_{column}")
+            };
+            SignalDescriptor::new(
+                &name,
+                &name,
+                SignalKind::Scalar,
+                SignalUnit::Dimensionless,
+                SignalValueType::Complex,
+                SignalShape::Scalar,
+                SignalOwner::Analysis,
+            )
+        })
+    }))
 }
 
 fn touchstone_extension_matches(

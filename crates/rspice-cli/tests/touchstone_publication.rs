@@ -68,3 +68,55 @@ fn equivalent_port_count_extensions_write_readable_networks() {
         assert_eq!(table["signals"].as_array().unwrap().len(), 6);
     }
 }
+
+#[test]
+fn stepped_touchstone_manifests_describe_every_network() {
+    let dir = test_dir("touchstone_step_schema");
+    let deck = dir.join("network.cir");
+    let output = dir.join("network.s2p");
+    std::fs::write(&deck, format!("{CIRCUIT}.STEP PARAM r LIST 50 100\n.END\n")).unwrap();
+    let result = run(&deck, &output);
+    assert!(result.status.success(), "{result:?}");
+    let manifest = read_json(&dir.join("network.step_schema.json"));
+    let entries = manifest["analyses"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "the network needs a schema entry");
+    let entry = &entries[0];
+    assert_eq!(entry["analysis_id"], "sp-001");
+    let schema = entry["union_schema"].as_array().unwrap();
+    let names = schema
+        .iter()
+        .map(|descriptor| descriptor["display_name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["S11", "S12", "S21", "S22"]);
+    for descriptor in schema {
+        assert_eq!(descriptor["unit"], "dimensionless");
+        assert_eq!(descriptor["value_type"], "complex");
+    }
+    let coordinates = entry["coordinates"].as_array().unwrap();
+    let set = common::AxisRunSet::read(&output);
+    assert_eq!(coordinates.len(), 2);
+    assert_eq!(set.coordinates.len(), 2);
+    for (index, (coordinate, run)) in coordinates.iter().zip(&set.coordinates).enumerate() {
+        let path = dir.join(coordinate["artifact"].as_str().unwrap());
+        assert_eq!(path, run.only_artifact());
+        assert_eq!(
+            coordinate["validity"],
+            serde_json::json!([true, true, true, true])
+        );
+        assert!(coordinate["source_signal_indices"].is_null());
+        let decoded = dir.join("decoded.json");
+        let result = convert(&path, &decoded);
+        assert!(result.status.success(), "{result:?}");
+        let table = read_json(&decoded);
+        let s11 = table["signals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|signal| signal["name"] == "S11")
+            .unwrap();
+        let expected = if index == 0 { 1.0 / 3.0 } else { 0.5 };
+        for value in s11["real"].as_array().unwrap() {
+            assert!((value.as_f64().unwrap() - expected).abs() < 1e-12);
+        }
+    }
+}
