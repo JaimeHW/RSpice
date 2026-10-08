@@ -882,6 +882,13 @@ pub enum CfgValueKind {
     FourStateConstant(digital_value::FourStateValue),
     /// A signed 32-bit integer constant.
     IntegerConstant(i32),
+    /// Evaluate every unpacked coordinate once, check each dimension, and
+    /// produce a flat storage index. An unavailable/out-of-range coordinate
+    /// produces X, retaining ordinary digital array read/write semantics.
+    DigitalArrayOffset {
+        dimensions: Vec<(i64, i64)>,
+        indices: Vec<(ValueId, bool)>,
+    },
     /// Read one unpacked element, preserving its real or packed value domain.
     DigitalArrayRead {
         array: super::digital::DigitalArrayRef,
@@ -1356,6 +1363,7 @@ impl CfgValueKind {
 
             Self::FourStateConstant(_)
             | Self::IntegerConstant(_)
+            | Self::DigitalArrayOffset { .. }
             | Self::DigitalArrayRead { .. }
             | Self::DigitalArrayBlockingWrite { .. }
             | Self::DigitalBitBlockingWrite { .. }
@@ -1707,6 +1715,9 @@ impl CfgValueKind {
                 .into_iter()
                 .chain(select.operand())
                 .collect(),
+            Self::DigitalArrayOffset { indices, .. } => {
+                indices.iter().map(|&(index, _)| index).collect()
+            }
             Self::DigitalArrayRead { index, .. } => vec![*index],
             Self::DigitalBitBlockingWrite { index, value, .. } => vec![*index, *value],
             Self::DigitalBitNonblockingWrite {
@@ -2071,6 +2082,11 @@ impl CfgValueKind {
                 *input = map(*input);
                 *value = map(*value);
                 select.map_operands(&mut map);
+            }
+            Self::DigitalArrayOffset { indices, .. } => {
+                for (index, _) in indices {
+                    *index = map(*index);
+                }
             }
             Self::DigitalArrayRead { index, .. } => *index = map(*index),
             Self::DigitalBitBlockingWrite { index, value, .. } => {

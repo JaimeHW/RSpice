@@ -1870,7 +1870,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         // is merely slow beats a wrong answer that is silent.
         CfgValueKind::FourStateConstant(_)
         | CfgValueKind::IntegerConstant(_)
-        | CfgValueKind::DigitalArrayRead { .. }
+        | CfgValueKind::DigitalArrayOffset { .. }
+            | CfgValueKind::DigitalArrayRead { .. }
             | CfgValueKind::DigitalArrayBlockingWrite { .. }
             | CfgValueKind::DigitalBitBlockingWrite { .. }
             | CfgValueKind::DigitalBitNonblockingWrite { .. }

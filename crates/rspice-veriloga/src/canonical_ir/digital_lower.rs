@@ -1069,6 +1069,7 @@ fn append_signal(
             ));
         }
         arrays.push(super::digital::DigitalArray {
+            dimensions: Vec::new(),
             name,
             bounds: (bounds.msb, bounds.lsb),
             storage,

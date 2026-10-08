@@ -107,10 +107,31 @@ fn process(function: CfgFunction) -> CfgDigitalProcess {
 
 /// Two elements, an independently changing address and a sampled output.
 fn fixture(lower: i64, real: bool, real_index: bool) -> CanonicalDigitalPlan {
+    shaped_fixture(lower, real, real_index, Vec::new())
+}
+
+fn shaped_fixture(
+    lower: i64,
+    real: bool,
+    real_index: bool,
+    dimensions: Vec<(i64, i64)>,
+) -> CanonicalDigitalPlan {
+    let scalar_bounds = [(lower, lower + 1)];
+    let shape = crate::array_index::UnpackedArrayLayout::new(
+        if dimensions.is_empty() {
+            &scalar_bounds
+        } else {
+            &dimensions
+        },
+        65_536,
+    )
+    .unwrap();
+    let index_base = shape.len() as u32;
+    let output = index_base + shape.axes().len() as u32;
     let array = DigitalArrayRef {
         base: id(0),
-        lower,
-        len: 2,
+        lower: if dimensions.is_empty() { lower } else { 0 },
+        len: shape.len() as u32,
     };
     let element_type = if real {
         CfgValueType::Real
@@ -124,15 +145,38 @@ fn fixture(lower: i64, real: bool, real_index: bool) -> CanonicalDigitalPlan {
     };
     let mut builder = SsaBuilder::new();
     let entry = builder.create_block();
-    let index = builder.push(
-        entry,
-        index_type,
-        if real_index {
-            CfgValueKind::DigitalRealSignalRead { signal: id(2) }
-        } else {
-            CfgValueKind::DigitalSignalRead { signal: id(2) }
-        },
-    );
+    let coordinates: Vec<_> = (0..shape.axes().len())
+        .map(|axis| {
+            (
+                builder.push(
+                    entry,
+                    index_type,
+                    if real_index {
+                        CfgValueKind::DigitalRealSignalRead {
+                            signal: id(index_base + axis as u32),
+                        }
+                    } else {
+                        CfgValueKind::DigitalSignalRead {
+                            signal: id(index_base + axis as u32),
+                        }
+                    },
+                ),
+                true,
+            )
+        })
+        .collect();
+    let index = if dimensions.is_empty() {
+        coordinates[0].0
+    } else {
+        builder.push(
+            entry,
+            CfgValueType::FourState { width: 64 },
+            CfgValueKind::DigitalArrayOffset {
+                dimensions: dimensions.clone(),
+                indices: coordinates,
+            },
+        )
+    };
     let a = builder.push_leaf(
         element_type,
         if real {
@@ -175,7 +219,7 @@ fn fixture(lower: i64, real: bool, real_index: bool) -> CanonicalDigitalPlan {
         CfgValueType::Effect,
         CfgValueKind::DigitalBlockingWrite {
             target: DigitalWriteTarget {
-                signal: id(3),
+                signal: id(output),
                 select: DigitalWriteSelect::Whole,
             },
             value: sample,
@@ -209,7 +253,7 @@ fn fixture(lower: i64, real: bool, real_index: bool) -> CanonicalDigitalPlan {
         CfgValueType::Effect,
         CfgValueKind::DigitalBlockingWrite {
             target: DigitalWriteTarget {
-                signal: id(2),
+                signal: id(index_base),
                 select: DigitalWriteSelect::Whole,
             },
             value: next_index,
@@ -217,23 +261,284 @@ fn fixture(lower: i64, real: bool, real_index: bool) -> CanonicalDigitalPlan {
     );
     builder.set_terminator(entry, CfgTerminator::Return);
     builder.seal_all_blocks();
+    let declaration = DigitalArray {
+        name: "a".into(),
+        bounds: if dimensions.is_empty() {
+            (lower + 1, lower)
+        } else {
+            (0, shape.len() as i64 - 1)
+        },
+        dimensions,
+        storage: array,
+    };
+    let mut signals: Vec<_> = (0..shape.len())
+        .map(|offset| {
+            signal(
+                offset as u32,
+                declaration
+                    .element_name_with_layout(&shape, offset)
+                    .unwrap()
+                    .to_string(),
+                real,
+                8,
+            )
+        })
+        .collect();
+    signals.extend((0..shape.axes().len()).map(|axis| {
+        signal(
+            index_base + axis as u32,
+            format!("index{axis}"),
+            real_index,
+            96,
+        )
+    }));
+    signals.push(signal(output, "out".into(), real, 8));
     CanonicalDigitalPlan {
-        signals: vec![
-            signal(0, format!("a[{lower}]"), real, 8),
-            signal(1, format!("a[{}]", lower + 1), real, 8),
-            signal(2, "index".into(), real_index, 96),
-            signal(3, "out".into(), real, 8),
-        ],
-        arrays: vec![DigitalArray {
-            name: "a".into(),
-            bounds: (lower + 1, lower),
-            storage: array,
-        }],
+        signals,
+        arrays: vec![declaration],
         processes: vec![process(builder.finish(entry).unwrap())],
         ..Default::default()
     }
     .seal()
     .unwrap()
+}
+
+#[test]
+fn multidimensional_arrays_execute_exact_coordinates_and_capture_updates() {
+    let mut scratch = DigitalEvalScratch::new();
+    for lower in [i64::MIN, (1i64 << 53) + 1, i64::MAX - 1] {
+        for real in [false, true] {
+            let plan = shaped_fixture(lower, real, false, vec![(lower + 1, lower), (-2, 0)]);
+            assert_eq!(plan.signals[0].name, format!("a[{lower}][-2]"));
+            assert_eq!(plan.signals[5].name, format!("a[{}][0]", lower + 1));
+            for row in 0..2 {
+                for column in 0..3 {
+                    let mut store = Store::new(&plan);
+                    store.bits[6] = FourStateValue::from_integer(96, i128::from(lower) + row);
+                    store.bits[7] = FourStateValue::from_integer(96, -2 + column);
+                    start_in(&plan, &plan.processes[0], &mut store, &mut scratch, 1000).unwrap();
+                    let selected = (row * 3 + column) as usize;
+                    assert_eq!(store.writes, [id(selected as u32), id(8), id(6)]);
+                    let update = store.deferred.pop().unwrap();
+                    assert_eq!(update.target.signal, id(selected as u32));
+                    assert_eq!(update.wait, Some(DigitalWaitRequest::Delay(5)));
+                    // Both coordinates may change before a captured NBA is applied.
+                    store.bits[6] = FourStateValue::from_integer(96, i128::from(lower) + 1 - row);
+                    store.bits[7] = FourStateValue::from_integer(96, -column);
+                    let update = update.clone();
+                    apply_deferred(&plan, &mut store, &update).unwrap();
+                    if real {
+                        assert_eq!(store.reals[8], 1.25);
+                        assert_eq!(store.reals[selected], -3.5);
+                        assert!(
+                            store.reals[..6]
+                                .iter()
+                                .enumerate()
+                                .all(|(i, v)| i == selected || *v == 0.0)
+                        );
+                    } else {
+                        assert_eq!(store.bits[8].to_u64(), Some(0x35));
+                        assert_eq!(store.bits[selected].to_u64(), Some(0xc9));
+                        assert!(
+                            store.bits[..6]
+                                .iter()
+                                .enumerate()
+                                .all(|(i, v)| i == selected || v.to_u64() == Some(0))
+                        );
+                    }
+                }
+            }
+        }
+    }
+    let plan = shaped_fixture(-2, true, true, vec![(-2, -1), (4, 5)]);
+    let mut store = Store::new(&plan);
+    store.reals[4] = -1.5;
+    store.reals[5] = 4.5;
+    start_in(&plan, &plan.processes[0], &mut store, &mut scratch, 1000).unwrap();
+    assert_eq!(store.deferred[0].target.signal, id(1));
+}
+
+#[test]
+fn multidimensional_invalid_coordinates_do_not_alias_and_shapes_are_validated() {
+    let source = shaped_fixture(0, false, false, vec![(1, 0), (0, 2)]);
+    let known = |v| FourStateValue::from_integer(96, v);
+    for (row, column) in [
+        (known(0), known(3)),
+        (known(1), known(-1)),
+        (known(2), known(0)),
+        (known(0), FourStateValue::splat(96, FourStateBit::Unknown)),
+        (
+            FourStateValue::splat(96, FourStateBit::HighImpedance),
+            known(0),
+        ),
+        (known(i128::from(i64::MAX) + 1), known(0)),
+    ] {
+        let mut store = Store::new(&source);
+        store.bits[6] = row;
+        store.bits[7] = column;
+        start(&source, &source.processes[0], &mut store).unwrap();
+        assert_eq!(store.writes, [id(8), id(6)]);
+        assert!(store.deferred.is_empty());
+        assert_eq!(
+            store.bits[8],
+            FourStateValue::splat(8, FourStateBit::Unknown)
+        );
+        assert!(
+            store.bits[..6]
+                .iter()
+                .all(|value| value.to_u64() == Some(0))
+        );
+    }
+    for defect in 0..7 {
+        let mut broken = source.clone();
+        if defect < 3 {
+            match defect {
+                0 => broken.arrays[0].dimensions = vec![(0, 2), (0, 2)],
+                1 => broken.arrays[0].dimensions = vec![(0, 5)],
+                2 => broken.signals[0].name = "a[0][3]".into(),
+                _ => unreachable!(),
+            }
+        } else {
+            let value = broken.processes[0]
+                .function
+                .values
+                .iter_mut()
+                .find(|value| matches!(value.kind, CfgValueKind::DigitalArrayOffset { .. }))
+                .unwrap();
+            let CfgValueKind::DigitalArrayOffset {
+                dimensions,
+                indices,
+            } = &mut value.kind
+            else {
+                unreachable!()
+            };
+            match defect {
+                3 => {
+                    indices.pop();
+                }
+                4 => dimensions.clear(),
+                5 => dimensions[0] = (i64::MIN, i64::MAX),
+                6 => value.value_type = CfgValueType::Real,
+                _ => unreachable!(),
+            }
+        }
+        assert!(
+            broken.seal().is_err(),
+            "accepted multidimensional defect {defect}"
+        );
+    }
+}
+
+#[test]
+fn multidimensional_arrays_link_serialize_and_observe_coordinate_changes() {
+    let mut source = shaped_fixture(0, false, false, vec![(1, 0), (-2, 0)]);
+    let array = source.arrays[0].storage;
+    let mut builder = SsaBuilder::new();
+    let entry = builder.create_block();
+    let resume = builder.create_block();
+    let indices = (6..8)
+        .map(|signal| {
+            (
+                builder.push(
+                    entry,
+                    CfgValueType::FourState { width: 96 },
+                    CfgValueKind::DigitalSignalRead { signal: id(signal) },
+                ),
+                true,
+            )
+        })
+        .collect();
+    let index = builder.push(
+        entry,
+        CfgValueType::FourState { width: 64 },
+        CfgValueKind::DigitalArrayOffset {
+            dimensions: source.arrays[0].dimensions.clone(),
+            indices,
+        },
+    );
+    let read = builder.push(
+        entry,
+        CfgValueType::FourState { width: 8 },
+        CfgValueKind::DigitalArrayRead {
+            array,
+            index,
+            signed: false,
+        },
+    );
+    builder.set_terminator(
+        entry,
+        CfgTerminator::Wait {
+            wait: DigitalWait::Expressions(vec![DigitalEventExpression {
+                value: read,
+                edge: None,
+                assignment: None,
+            }]),
+            resume,
+            resume_args: vec![],
+        },
+    );
+    builder.set_terminator(resume, CfgTerminator::Return);
+    builder.seal_all_blocks();
+    source.processes[0] = process(builder.finish(entry).unwrap());
+    let source = source.seal().unwrap();
+    let linked = link_digital_plans(
+        &[
+            DigitalLinkInstance {
+                name: "u2",
+                plan: &source,
+                ports: &[],
+            },
+            DigitalLinkInstance {
+                name: "u1",
+                plan: &source,
+                ports: &[],
+            },
+        ],
+        &[],
+        &crate::NoPipelineControl,
+    )
+    .unwrap();
+    let plan: CanonicalDigitalPlan =
+        serde_json::from_str(&serde_json::to_string(&linked.plan).unwrap()).unwrap();
+    plan.validate().unwrap();
+    assert_eq!(plan.arrays[0].dimensions, [(1, 0), (-2, 0)]);
+    assert_eq!(plan.signals[0].name, "u1.a[0][-2]");
+    assert_eq!(plan.signals[14].name, "u2.a[1][0]");
+    let mut store = Store::new(&plan);
+    store.bits[6] = FourStateValue::from_integer(96, 0);
+    store.bits[7] = FourStateValue::from_integer(96, -2);
+    let DigitalProcessOutcome::Suspended(suspension) =
+        start(&plan, &plan.processes[0], &mut store).unwrap()
+    else {
+        panic!("must wait")
+    };
+    let (DigitalWaitRequest::Expressions(mut event), resume) = suspension.into_parts() else {
+        panic!("expression wait")
+    };
+    assert_eq!(event.dependencies(), &(0..8).map(id).collect::<Vec<_>>());
+    let mut scratch = DigitalEvalScratch::new();
+    store.bits[5] = FourStateValue::from_u64(8, 9);
+    assert!(
+        !event
+            .observe(&plan, id(5), &mut store, &mut scratch)
+            .unwrap()
+    );
+    store.bits[6] = FourStateValue::from_integer(96, 1);
+    assert!(
+        !event
+            .observe(&plan, id(6), &mut store, &mut scratch)
+            .unwrap()
+    );
+    store.bits[7] = FourStateValue::from_integer(96, 0);
+    assert!(
+        event
+            .observe(&plan, id(7), &mut store, &mut scratch)
+            .unwrap()
+    );
+    assert_eq!(
+        super::digital_eval::resume(&plan, &plan.processes[0], &resume, &mut store).unwrap(),
+        DigitalProcessOutcome::Finished
+    );
 }
 
 #[test]

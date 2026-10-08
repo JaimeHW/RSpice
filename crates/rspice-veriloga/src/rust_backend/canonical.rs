@@ -566,6 +566,9 @@ fn kernel_region_metrics(
                 write!(out, "four-state:{}", value.spelling())
             }
             CfgValueKind::IntegerConstant(value) => write!(out, "integer:{value}"),
+            CfgValueKind::DigitalArrayOffset { dimensions, indices } => {
+                write!(out, "digital-array-offset:{dimensions:?}:{:?}", indices.iter().map(|(_, signed)| signed).collect::<Vec<_>>())
+            }
             CfgValueKind::DigitalArrayRead { array, signed, .. } => {
                 write!(out, "digital-array-read:{array:?}:{signed}")
             }

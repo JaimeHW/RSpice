@@ -302,6 +302,16 @@ impl CanonicalDigitalPlan {
         let mut arrays = HashSet::new();
         let mut array_cells = vec![false; self.signals.len()];
         for array in &self.arrays {
+            let layout = array
+                .layout()
+                .map_err(|_| error("digital array has an invalid multidimensional shape"))?;
+            if layout.len() != array.storage.len as usize
+                || (!array.dimensions.is_empty()
+                    && (array.dimensions.len() < 2
+                        || array.bounds != (0, i64::from(array.storage.len) - 1)))
+            {
+                return Err(error("digital array dimensions disagree with flat storage"));
+            }
             let range = array
                 .storage
                 .cell_range()
@@ -350,7 +360,13 @@ impl CanonicalDigitalPlan {
                 }
                 if *occupied
                     || !cell.procedurally_assignable
-                    || cell.name != format!("{}[{index}]", array.name)
+                    || Some(&cell.name)
+                        != array
+                            .element_name_with_layout(
+                                &layout,
+                                (slot - array.storage.base.index()) as usize,
+                            )
+                            .as_ref()
                     || (
                         cell.kind,
                         cell.width,
@@ -753,6 +769,28 @@ impl CanonicalDigitalPlan {
                             if value.value_type != query.value_type() {
                                 return Err(error(
                                     "digital time query has the wrong value domain or width",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalArrayOffset {
+                            dimensions,
+                            indices,
+                        } => {
+                            if dimensions.len() != indices.len()
+                                || crate::array_index::UnpackedArrayLayout::new(dimensions, 65_536)
+                                    .is_err()
+                                || value.value_type != (CfgValueType::FourState { width: 64 })
+                                || indices.iter().any(|(index, _)| {
+                                    !matches!(
+                                        function.value(*index).value_type,
+                                        CfgValueType::Real
+                                            | CfgValueType::Integer
+                                            | CfgValueType::FourState { .. }
+                                    )
+                                })
+                            {
+                                return Err(error(
+                                    "digital array coordinates require a bounded shape, one numeric operand per dimension, and a 64-bit result",
                                 ));
                             }
                         }

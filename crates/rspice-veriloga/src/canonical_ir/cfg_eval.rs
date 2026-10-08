@@ -1443,6 +1443,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             // wrong waveform rather than an error.
             CfgValueKind::FourStateConstant(_)
             | CfgValueKind::IntegerConstant(_)
+            | CfgValueKind::DigitalArrayOffset { .. }
             | CfgValueKind::DigitalArrayRead { .. }
             | CfgValueKind::DigitalArrayBlockingWrite { .. }
             | CfgValueKind::DigitalBitBlockingWrite { .. }

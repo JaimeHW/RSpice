@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 113 retains multidimensional digital array shapes and checked coordinate operations.
 /// Version 107 retains event-assigned analog reads and continuous-driver dependencies.
 /// Version 106 binds analog event occurrence probes to private digital signals.
 /// Version 105 binds relocated mixed-hierarchy numeric inputs to explicit digital signals.
@@ -110,7 +111,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 112;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 113;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

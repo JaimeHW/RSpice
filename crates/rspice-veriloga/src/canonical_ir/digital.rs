@@ -385,9 +385,44 @@ impl DigitalArrayRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalArray {
     pub name: SmolStr,
-    /// Left/right bounds as authored, retained for declaration-order operations.
+    /// Authored bounds for a one-dimensional array; zero-based flat bounds for
+    /// a multidimensional array, whose declaration order is in `dimensions`.
     pub bounds: (i64, i64),
+    /// Authored multidimensional bounds. Empty retains the one-dimensional
+    /// representation above; multiple dimensions use zero-based flat storage.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<(i64, i64)>,
     pub storage: DigitalArrayRef,
+}
+
+impl DigitalArray {
+    pub fn layout(
+        &self,
+    ) -> Result<crate::array_index::UnpackedArrayLayout, crate::array_index::ArrayShapeError> {
+        let bounds = if self.dimensions.is_empty() {
+            std::slice::from_ref(&self.bounds)
+        } else {
+            &self.dimensions
+        };
+        crate::array_index::UnpackedArrayLayout::new(bounds, 65_536)
+    }
+
+    pub fn element_name(&self, offset: usize) -> Option<SmolStr> {
+        self.element_name_with_layout(&self.layout().ok()?, offset)
+    }
+
+    pub(crate) fn element_name_with_layout(
+        &self,
+        layout: &crate::array_index::UnpackedArrayLayout,
+        offset: usize,
+    ) -> Option<SmolStr> {
+        let mut name = self.name.to_string();
+        for index in layout.indices(offset)? {
+            use std::fmt::Write;
+            write!(name, "[{index}]").expect("writing to a string");
+        }
+        Some(name.into())
+    }
 }
 
 /// A static lexical declaration whose value needs scheduler-visible storage.

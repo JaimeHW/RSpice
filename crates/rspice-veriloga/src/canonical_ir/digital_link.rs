@@ -630,6 +630,7 @@ fn relocate_value(
             *driver = drivers[driver];
         }
         CfgValueKind::FourStateConstant(_)
+        | CfgValueKind::DigitalArrayOffset { .. }
         | CfgValueKind::IntegerConstant(_)
         | CfgValueKind::RealConstant(_)
         | CfgValueKind::BlockParameter

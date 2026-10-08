@@ -567,6 +567,7 @@ pub enum DigitalEvalError {
     InvalidWriteTarget(DigitalSignalId),
     /// A pure packed update has invalid width or selection metadata.
     InvalidPackedUpdate(ValueId),
+    InvalidArrayShape(ValueId),
     /// The environment has no value for a declared signal.
     SignalUnavailable(DigitalSignalId),
     /// The plan does not declare an analog probe a node names.
@@ -731,6 +732,9 @@ impl std::fmt::Display for DigitalEvalError {
             ),
             Self::InvalidRepeatCount { value, detail } => {
                 write!(f, "invalid repeat count {value:?}: {detail}")
+            }
+            Self::InvalidArrayShape(value) => {
+                write!(f, "invalid array shape at value {}", usize::from(*value))
             }
             Self::InvalidEventExpression { value, detail } => {
                 write!(f, "event expression {}: {detail}", usize::from(*value))
@@ -1242,6 +1246,8 @@ pub struct DigitalEvalScratch {
     expression: Option<Box<DigitalEvalScratch>>,
     event_identity: Option<[u8; 32]>,
     event_programs: HashMap<(DigitalProcessId, ValueId), Arc<DigitalEventProgram>>,
+    /// Validated immutable layouts, shared by all accesses of the same shape.
+    array_layouts: HashMap<Vec<(i64, i64)>, crate::array_index::UnpackedArrayLayout>,
     /// Immutable live-value lists, computed once per process that needs a sample.
     analog_read_plans: HashMap<DigitalProcessId, Arc<AnalogReadPlan>>,
     /// One control-flow edge's arguments, refilled per edge.
@@ -1547,6 +1553,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         scratch.table.enter(function.values.len());
         if scratch.event_identity != Some(plan.content_identity) {
             scratch.event_programs.clear();
+            scratch.array_layouts.clear();
             scratch.analog_read_plans.clear();
             scratch.event_identity = Some(plan.content_identity);
         }
@@ -2149,6 +2156,47 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             }
             CfgValueKind::FourStateConstant(value) => Ok(DigitalScalar::FourState(value.clone())),
             CfgValueKind::IntegerConstant(value) => Ok(DigitalScalar::Integer(*value)),
+            CfgValueKind::DigitalArrayOffset {
+                dimensions,
+                indices,
+            } => {
+                if dimensions.len() != indices.len() {
+                    return Err(DigitalEvalError::InvalidArrayShape(id));
+                }
+                if !self.scratch.array_layouts.contains_key(dimensions) {
+                    let layout = crate::array_index::UnpackedArrayLayout::new(dimensions, 65_536)
+                        .map_err(|_| DigitalEvalError::InvalidArrayShape(id))?;
+                    self.scratch
+                        .array_layouts
+                        .insert(dimensions.clone(), layout);
+                }
+                let layout = &self.scratch.array_layouts[dimensions];
+                let mut offset = 0usize;
+                for (axis, &(index, signed)) in layout.axes().iter().zip(indices) {
+                    let Some(index) = self.selection_index(index, signed)? else {
+                        return Ok(DigitalScalar::FourState(FourStateValue::splat(
+                            64,
+                            FourStateBit::Unknown,
+                        )));
+                    };
+                    let Ok(coordinate) = crate::array_index::checked_integer_array_slot(
+                        index,
+                        0,
+                        axis.len(),
+                        axis.left.min(axis.right),
+                    ) else {
+                        return Ok(DigitalScalar::FourState(FourStateValue::splat(
+                            64,
+                            FourStateBit::Unknown,
+                        )));
+                    };
+                    offset += coordinate * axis.stride();
+                }
+                Ok(DigitalScalar::FourState(FourStateValue::from_u64(
+                    64,
+                    offset as u64,
+                )))
+            }
             CfgValueKind::DigitalArrayRead {
                 array,
                 index,

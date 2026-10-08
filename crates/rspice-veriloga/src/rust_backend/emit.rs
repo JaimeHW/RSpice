@@ -2429,6 +2429,7 @@ impl Emitter<'_> {
 
             CfgValueKind::FourStateConstant(_)
             | CfgValueKind::IntegerConstant(_)
+            | CfgValueKind::DigitalArrayOffset { .. }
             | CfgValueKind::DigitalArrayRead { .. }
             | CfgValueKind::DigitalArrayBlockingWrite { .. }
             | CfgValueKind::DigitalBitBlockingWrite { .. }

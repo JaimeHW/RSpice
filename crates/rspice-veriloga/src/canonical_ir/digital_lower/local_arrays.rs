@@ -158,6 +158,7 @@ impl ProcessLowerer<'_> {
         }
         let bounds = VectorBounds { msb, lsb };
         self.local_arrays.push(DigitalArray {
+            dimensions: Vec::new(),
             name: storage_name.into(),
             bounds: (msb, lsb),
             storage: array,
