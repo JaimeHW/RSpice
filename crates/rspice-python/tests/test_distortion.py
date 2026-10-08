@@ -1,6 +1,7 @@
 """Third-order harmonic and two-tone Volterra distortion contracts."""
 
 import math
+import pickle
 
 import numpy as np
 import pytest
@@ -103,7 +104,9 @@ def test_two_tone_products_and_fixed_f2_contract(engine) -> None:
     assert result.is_two_tone
     assert result.f2_frequency == pytest.approx(900.0)
     assert result.f2_over_f1 == pytest.approx(0.9)
-    assert result.available_products == ["f1+f2", "f1-f2", "2f1-f2"]
+    assert result.available_products == [
+        "f1+f2", "f1-f2", "2f1-f2", "2f1", "2f2", "2f2-f1"
+    ]
     assert result.fundamental_f2 is not None
     np.testing.assert_allclose(result.fundamental_f2.frequencies, [900.0, 900.0])
     np.testing.assert_allclose(result.product("sum").frequencies, [1900.0, 2900.0])
@@ -111,6 +114,19 @@ def test_two_tone_products_and_fixed_f2_contract(engine) -> None:
         result.product("difference").frequencies, [100.0, 1100.0]
     )
     np.testing.assert_allclose(result.product("im3").frequencies, [1100.0, 3100.0])
+
+    np.testing.assert_allclose(result.product("2f1").frequencies, [2000.0, 4000.0])
+    np.testing.assert_allclose(result.product("2f2").frequencies, [1800.0, 1800.0])
+    np.testing.assert_allclose(result.product("2f2-f1").frequencies, [800.0, 200.0])
+    for label, amplitude, tolerance in [
+        ("2f1", _diode_current() * (1e-3) ** 2 / (4.0 * VT**2), 2e-5),
+        ("2f2", _diode_current() * (2e-3) ** 2 / (4.0 * VT**2), 2e-5),
+        ("2f2-f1", _diode_current() * 1e-3 * (2e-3) ** 2 / (8.0 * VT**3), 2e-3),
+    ]:
+        np.testing.assert_allclose(
+            np.abs(result.product(label).branch_current_complex("V1")),
+            amplitude, rtol=tolerance,
+        )
 
     expected_im2 = _diode_current() * 1e-3 * 2e-3 / (2.0 * VT**2)
     expected_im3 = _diode_current() * (1e-3) ** 2 * 2e-3 / (8.0 * VT**3)
@@ -190,3 +206,27 @@ def test_numpy_exports_are_owned_copies(engine) -> None:
     assert first.flags.owndata
     first[0] = 123.0
     assert result.f1_frequencies[0] == pytest.approx(1e3)
+
+
+def test_second_tone_dc_and_conjugated_phasors_survive_pickle(engine) -> None:
+    deck = TWO_TONE_DIODE.replace(
+        "DISTOF1 1m 0 DISTOF2 2m 0", "DISTOF1 1m 30 DISTOF2 2m -20"
+    )
+    result = engine.run_distortion(
+        rspice.Netlist.parse(deck), [1e3, 1.4e3, 1.8e3, 2.2e3, 2.6e3], f2_over_f1=0.9
+    )
+    amplitude = _diode_current() * 1e-3 * (2e-3) ** 2 / (8.0 * VT**3)
+    phasor = -amplitude * np.exp(-70j * np.pi / 180.0)
+    expected = np.array(
+        [phasor, phasor, complex(phasor.real, 0), phasor.conjugate(), phasor.conjugate()]
+    )
+    for retained in [result, pickle.loads(pickle.dumps(result))]:
+        product = retained.product("2f2-f1")
+        np.testing.assert_array_equal(product.frequencies, [800, 400, 0, 400, 800])
+        np.testing.assert_allclose(product.branch_current_complex("V1"), expected, rtol=2e-3)
+        assert product.branch_current_complex("V1")[2].imag == 0
+        np.testing.assert_allclose(
+            retained.product("2f2").branch_current_complex("V1"),
+            -_diode_current() * (2e-3) ** 2 / (4.0 * VT**2) * np.exp(-40j * np.pi / 180.0),
+            rtol=2e-5,
+        )

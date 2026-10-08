@@ -1369,10 +1369,15 @@ class TestDistortionResult:
         original = engine.run_distortion(
             rspice.Netlist.parse(deck), [1e3, 2e3], f2_over_f1=0.9
         )
-        assert original.available_products == ["f1+f2", "f1-f2", "2f1-f2"]
+        assert original.available_products == [
+            "f1+f2", "f1-f2", "2f1-f2", "2f1", "2f2", "2f2-f1"
+        ]
         thermal_voltage = 300.15 * 1.380649e-23 / 1.602176634e-19
         diode_bias_current = 1e-12 * np.exp(0.5 / thermal_voltage)
         expected_currents = {
+            "2f1": diode_bias_current * (1e-3) ** 2 / (4.0 * thermal_voltage**2),
+            "2f2": diode_bias_current * (2e-3) ** 2 / (4.0 * thermal_voltage**2),
+            "2f2-f1": diode_bias_current * 1e-3 * (2e-3) ** 2 / (8.0 * thermal_voltage**3),
             "f1+f2": diode_bias_current * 1e-3 * 2e-3 / (2.0 * thermal_voltage**2),
             "f1-f2": diode_bias_current * 1e-3 * 2e-3 / (2.0 * thermal_voltage**2),
             "2f1-f2": diode_bias_current
@@ -1403,7 +1408,7 @@ class TestDistortionResult:
             np.testing.assert_allclose(
                 np.abs(original_product.branch_current_complex("V1")),
                 expected_currents[product],
-                rtol=2e-5 if product in ("f1+f2", "f1-f2") else 2e-3,
+                rtol=2e-5 if product in ("f1+f2", "f1-f2", "2f1", "2f2") else 2e-3,
             )
             np.testing.assert_array_equal(
                 restored_product.voltage_complex("out"),
@@ -1415,6 +1420,23 @@ class TestDistortionResult:
                 original_product.branch_current_complex("V1"),
                 err_msg=product,
             )
+
+    def test_legacy_two_tone_pickle_keeps_its_original_product_population(self, engine):
+        deck = DISTORTION_DECK.replace("DISTOF1 1m 0", "DISTOF1 1m 0 DISTOF2 2m 0")
+        current = engine.run_distortion(rspice.Netlist.parse(deck), [1e3], f2_over_f1=0.9)
+        rebuild, state = current.__reduce__()
+        legacy_state = list(state)
+        legacy_labels = ["f1+f2", "f1-f2", "2f1-f2"]
+        legacy_state[4] = [row for row in state[4] if row[0] in legacy_labels]
+        legacy = round_trip(rebuild(*legacy_state))
+        assert legacy.available_products == legacy_labels
+        for label in legacy_labels:
+            np.testing.assert_array_equal(
+                legacy.product(label).branch_current_complex("V1"),
+                current.product(label).branch_current_complex("V1"),
+            )
+        with pytest.raises(ValueError, match="not available"):
+            legacy.product("2f2-f1")
 
     def test_an_unknown_product_label_is_rejected(self):
         with pytest.raises(ValueError, match="unknown distortion product"):

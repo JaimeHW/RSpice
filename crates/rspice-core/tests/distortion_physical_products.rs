@@ -333,3 +333,195 @@ fn saturated_outer_probes_cannot_erase_resolved_local_curvature() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn both_im3_sidebands_and_second_harmonics_match_complex_polynomial_feedback() {
+    use rspice_core::{Complex64, SimulationConfig, SpiceDialect};
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for (a1, a2, p1, p2) in [(0.01, 0.003, 0.0_f64, 0.0_f64), (0.003, 0.01, 37.0, -61.0)] {
+            for capacitance in [0.0, 1e-4] {
+                for conductance_slope in [0.0, 1e-4] {
+                    let deck = Netlist::parse(&format!(
+                    "polynomial two-tone feedback\nV1 in 0 DC 0 DISTOF1 {a1} {p1} DISTOF2 {a2} {p2}\nR1 in out 1\nB1 out 0 I={{{conductance_slope}*freq*v(out)+.3*v(out)^2+.4*v(out)^3}}\nC1 out 0 {capacitance}\n.options GMIN=0\n.end\n"
+                )).unwrap();
+                    // Include an IM2/IM3 coincidence (1050), DC (1400), and a
+                    // negative signed IM3 (2100); keep F2 fixed at 700 Hz.
+                    let result = engine
+                        .run_distortion(&deck, &[1000.0, 1050.0, 1400.0, 2100.0], Some(0.7))
+                        .unwrap();
+                    let f2 = 700.0;
+                    for point in &result.points {
+                        let f1 = point.fundamental_f1.frequency;
+                        let output = point
+                            .fundamental_f1
+                            .node_names
+                            .iter()
+                            .position(|name| name.eq_ignore_ascii_case("out"))
+                            .unwrap();
+                        let linear = |frequency: f64| {
+                            Complex64::new(
+                                1.0 + conductance_slope * frequency.abs(),
+                                std::f64::consts::TAU * frequency * capacitance,
+                            )
+                        };
+                        let u1 = Complex64::from_polar(a1, p1.to_radians()) / linear(f1);
+                        let u2 = Complex64::from_polar(a2, p2.to_radians()) / linear(f2);
+                        let harmonic1 = -0.15 * u1 * u1 / linear(2.0 * f1);
+                        let harmonic2 = -0.15 * u2 * u2 / linear(2.0 * f2);
+                        let sum = -0.3 * u1 * u2 / linear(f1 + f2);
+                        let difference = -0.3 * u1 * u2.conj() / linear(f1 - f2);
+                        let im3_f1 = -(0.3 * (u1 * difference + u2.conj() * harmonic1)
+                            + 0.3 * u1 * u1 * u2.conj())
+                            / linear(2.0 * f1 - f2);
+                        let im3_f2 = -(0.3 * (u2 * difference.conj() + u1.conj() * harmonic2)
+                            + 0.3 * u2 * u2 * u1.conj())
+                            / linear(2.0 * f2 - f1);
+                        let expected = [
+                            (DistortionProduct::Sum, f1 + f2, sum),
+                            (DistortionProduct::Difference, f1 - f2, difference),
+                            (
+                                DistortionProduct::ThirdOrderDifference,
+                                2.0 * f1 - f2,
+                                im3_f1,
+                            ),
+                            (DistortionProduct::SecondHarmonic, 2.0 * f1, harmonic1),
+                            (DistortionProduct::SecondHarmonicF2, 2.0 * f2, harmonic2),
+                            (
+                                DistortionProduct::ThirdOrderDifferenceF2,
+                                2.0 * f2 - f1,
+                                im3_f2,
+                            ),
+                        ];
+                        assert_eq!(point.products.len(), expected.len());
+                        for (product, signed_frequency, value) in expected {
+                            let response = &point.product(product).unwrap().response;
+                            assert_eq!(response.frequency, signed_frequency.abs());
+                            let value = if signed_frequency < 0.0 {
+                                value.conj()
+                            } else if signed_frequency == 0.0 {
+                                Complex64::new(value.re, 0.0)
+                            } else {
+                                value
+                            };
+                            let actual = response.voltages[output];
+                            let tolerance = if product.order() == 2 { 2e-5 } else { 2e-3 };
+                            assert!(
+                                (actual - value).norm() < tolerance * value.norm(),
+                                "{dialect:?}, C={capacitance}, frequency conductance={conductance_slope}, amplitudes={a1}/{a2}, F1={f1}, {product:?}: {actual:?} vs {value:?}"
+                            );
+                            if signed_frequency == 0.0 {
+                                assert_eq!(actual.im, 0.0, "DC is a real contribution");
+                            }
+                        }
+                        if f1 == 1050.0 {
+                            let second = &point
+                                .product(DistortionProduct::Difference)
+                                .unwrap()
+                                .response;
+                            let third = &point
+                                .product(DistortionProduct::ThirdOrderDifferenceF2)
+                                .unwrap()
+                                .response;
+                            assert_eq!(second.frequency, third.frequency);
+                            assert_ne!(second.voltages[output], third.voltages[output]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn second_tone_charge_products_use_the_signed_frequency_before_conjugation() {
+    use rspice_core::{Complex64 as C, SimulationConfig, SpiceDialect};
+    let charge_second = 1e-12 * 0.5 * 0.8_f64.powf(-1.5);
+    let charge_third = 1e-12 * 0.5 * 1.5 * 0.8_f64.powf(-2.5);
+    let a1 = 1e-3_f64;
+    let a2 = 0.4e-3_f64;
+    let deck = Netlist::parse(
+        "two-tone depletion charge\nV1 out 0 DC .2 DISTOF1 1m 37 DISTOF2 .4m -61\nD1 out 0 DM\n.model DM D(IS=1e-12 N=1 CJO=1p VJ=1 M=.5 FC=.5 TT=0)\n.end\n"
+    ).unwrap();
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        // Reference device constants: Xyce 7.10 N_DEV_Const.h and
+        // ngspice 46 const.h; the diode compatibility laws intentionally differ.
+        let vt = TEMP_REFERENCE
+            * if dialect == SpiceDialect::Xyce {
+                1.3806226e-23 / 1.6021918e-19
+            } else {
+                1.38064852e-23 / 1.6021766208e-19
+            };
+        let bias_current = 1e-12 * (0.2 / vt).exp();
+        let result = Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
+            .run_distortion(&deck, &[1e6, 1.8e6, 2.6e6], Some(0.9))
+            .unwrap();
+        for point in &result.points {
+            let f1 = point.fundamental_f1.frequency;
+            for (
+                product,
+                frequency,
+                coefficient,
+                phase,
+                static_derivative,
+                charge_derivative,
+                tolerance,
+            ) in [
+                (
+                    DistortionProduct::SecondHarmonicF2,
+                    1.8e6,
+                    a2.powi(2) / 4.0,
+                    -122.0_f64,
+                    bias_current / vt.powi(2),
+                    charge_second,
+                    3e-5,
+                ),
+                (
+                    DistortionProduct::ThirdOrderDifferenceF2,
+                    1.8e6 - f1,
+                    a1 * a2.powi(2) / 8.0,
+                    -159.0_f64,
+                    bias_current / vt.powi(3),
+                    charge_third,
+                    3e-3,
+                ),
+            ] {
+                // KCL at the ideal source gives -(I^(n) + jw Q^(n))*tone.
+                // Conjugation also changes the displacement-current phase.
+                let raw = -C::new(
+                    static_derivative,
+                    std::f64::consts::TAU * frequency * charge_derivative,
+                ) * C::from_polar(coefficient, phase.to_radians());
+                let expected = if frequency < 0.0 {
+                    raw.conj()
+                } else if frequency == 0.0 {
+                    C::new(raw.re, 0.0)
+                } else {
+                    raw
+                };
+                let response = &point.product(product).unwrap().response;
+                let branch = response
+                    .branch_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case("V1"))
+                    .unwrap();
+                let actual = response.currents[branch];
+                assert_eq!(response.frequency, frequency.abs());
+                assert!(
+                    (actual - expected).norm() < tolerance * expected.norm(),
+                    "{dialect:?}, F1={f1}, {product:?}: {actual:?} vs {expected:?}"
+                );
+            }
+        }
+    }
+}

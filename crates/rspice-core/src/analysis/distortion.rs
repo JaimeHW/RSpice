@@ -16,6 +16,10 @@ pub enum DistortionProduct {
     Difference,
     /// Third-order intermodulation product at `2*F1-F2`.
     ThirdOrderDifference,
+    /// Second harmonic of the fixed second tone at `2*F2`.
+    SecondHarmonicF2,
+    /// Third-order intermodulation product at `abs(2*F2-F1)`.
+    ThirdOrderDifferenceF2,
 }
 
 impl DistortionProduct {
@@ -27,14 +31,33 @@ impl DistortionProduct {
             Self::Sum => "f1+f2",
             Self::Difference => "f1-f2",
             Self::ThirdOrderDifference => "2f1-f2",
+            Self::SecondHarmonicF2 => "2f2",
+            Self::ThirdOrderDifferenceF2 => "2f2-f1",
         }
     }
 
     /// Volterra order of this product.
     pub const fn order(self) -> usize {
         match self {
-            Self::SecondHarmonic | Self::Sum | Self::Difference => 2,
-            Self::ThirdHarmonic | Self::ThirdOrderDifference => 3,
+            Self::SecondHarmonic | Self::SecondHarmonicF2 | Self::Sum | Self::Difference => 2,
+            Self::ThirdHarmonic | Self::ThirdOrderDifference | Self::ThirdOrderDifferenceF2 => 3,
+        }
+    }
+
+    /// Complete product population returned by the core for one tone mode.
+    /// Consumers use this inventory to retain every computed product.
+    pub const fn for_mode(two_tone: bool) -> &'static [Self] {
+        if two_tone {
+            &[
+                Self::Sum,
+                Self::Difference,
+                Self::ThirdOrderDifference,
+                Self::SecondHarmonic,
+                Self::SecondHarmonicF2,
+                Self::ThirdOrderDifferenceF2,
+            ]
+        } else {
+            &[Self::SecondHarmonic, Self::ThirdHarmonic]
         }
     }
 }
@@ -44,7 +67,10 @@ impl DistortionProduct {
 pub struct DistortionProductResult {
     pub product: DistortionProduct,
     /// Actual sinusoidal peak phasors, not an unscaled internal Volterra
-    /// kernel. The frequency is the physical product frequency.
+    /// kernel. Frequencies are nonnegative; a negative signed product is
+    /// conjugated onto its positive frequency. At zero frequency the value
+    /// is the real DC contribution. Coincident products remain separate
+    /// order/tone contributions, not a measurement of their summed spectrum.
     pub response: AcResult,
 }
 

@@ -1399,11 +1399,15 @@ pub enum DistortionProductTag {
     Difference,
     /// `2*F1-F2`.
     ThirdOrderDifference,
+    /// `2*F2`.
+    SecondHarmonicF2,
+    /// `abs(2*F2-F1)`, including a real DC contribution at zero.
+    ThirdOrderDifferenceF2,
 }
 
 impl DistortionProductTag {
     /// Stable SPICE-oriented product label (`2f1`, `3f1`, `f1+f2`, `f1-f2`,
-    /// `2f1-f2`).
+    /// `2f1-f2`, `2f2`, `2f2-f1`).
     pub const fn label(self) -> &'static str {
         self.to_core().label()
     }
@@ -1421,6 +1425,8 @@ impl DistortionProductTag {
             Self::Sum => DistortionProduct::Sum,
             Self::Difference => DistortionProduct::Difference,
             Self::ThirdOrderDifference => DistortionProduct::ThirdOrderDifference,
+            Self::SecondHarmonicF2 => DistortionProduct::SecondHarmonicF2,
+            Self::ThirdOrderDifferenceF2 => DistortionProduct::ThirdOrderDifferenceF2,
         }
     }
 }
@@ -1433,6 +1439,8 @@ impl From<DistortionProduct> for DistortionProductTag {
             DistortionProduct::Sum => Self::Sum,
             DistortionProduct::Difference => Self::Difference,
             DistortionProduct::ThirdOrderDifference => Self::ThirdOrderDifference,
+            DistortionProduct::SecondHarmonicF2 => Self::SecondHarmonicF2,
+            DistortionProduct::ThirdOrderDifferenceF2 => Self::ThirdOrderDifferenceF2,
         }
     }
 }

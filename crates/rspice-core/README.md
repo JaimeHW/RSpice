@@ -830,6 +830,17 @@ Advanced analyses, all flat under `analysis/`:
 | S-parameters | `s_param.rs`, `s_param/` |
 | `.MEAS` evaluation | `measure.rs`, `measure_signals.rs`, `measurements/` |
 
+`.DISTO` retains sinusoidal peak phasors. Harmonic mode returns `2f1` and
+`3f1`; two-tone mode fixes F2 at `ratio * F1_start` and returns `f1+f2`,
+`f1-f2`, `2f1-f2`, `2f1`, `2f2`, and `2f2-f1`. Use
+`DistortionProduct::for_mode` to enumerate the returned products. Exhaustive
+SDK matches must handle `SecondHarmonicF2` and `ThirdOrderDifferenceF2`.
+A negative signed product is conjugated onto its positive physical frequency;
+a zero-frequency product is a real DC contribution. Products that share a
+frequency retain their separate tone/order identities. Sum those contributions
+explicitly when forming a composite spectrum. Control expressions such as
+`disto("2f2-f1",i(V1))` and typed documents retain the same product identities.
+
 Transfer-function results retain `gain_unit`: voltage/current gain is in ohms,
 current/voltage gain is in siemens, and equal-quantity gains are dimensionless.
 The engine determines these units from the elaborated input source and output

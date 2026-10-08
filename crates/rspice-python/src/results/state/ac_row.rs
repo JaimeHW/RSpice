@@ -47,6 +47,8 @@ pub(crate) fn distortion_product_from_label(label: &str) -> PyResult<DistortionP
         "f1+f2" => Ok(DistortionProduct::Sum),
         "f1-f2" => Ok(DistortionProduct::Difference),
         "2f1-f2" => Ok(DistortionProduct::ThirdOrderDifference),
+        "2f2" => Ok(DistortionProduct::SecondHarmonicF2),
+        "2f2-f1" => Ok(DistortionProduct::ThirdOrderDifferenceF2),
         other => Err(crate::errors::value_error(format!(
             "unknown distortion product '{other}' in pickled state"
         ))),

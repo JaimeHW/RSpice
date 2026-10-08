@@ -287,7 +287,7 @@ pub struct Hdf5DistortionSignal {
 /// A stable spectral identity and its response across the swept F1 values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5DistortionSeries {
-    /// `f1`, `f2`, `2f1`, `3f1`, `f1+f2`, `f1-f2`, or `2f1-f2`.
+    /// `f1`, `f2`, `2f1`, `3f1`, `f1+f2`, `f1-f2`, `2f1-f2`, `2f2`, or `2f2-f1`.
     pub label: String,
     pub is_product: bool,
     /// Physical output frequency for every swept F1 row.
@@ -363,7 +363,21 @@ impl Hdf5DistortionSection {
         }
 
         let count = self.f1_frequency.len();
-        let expected_series: &[(&str, bool)] = if self.mode == "two_tone" {
+        // Retain readability of existing five-spectrum files. New core
+        // results additionally carry both second harmonics and the other IM3.
+        let expected_series: &[(&str, bool)] = if self.mode == "two_tone" && self.series.len() == 8
+        {
+            &[
+                ("f1", false),
+                ("f2", false),
+                ("f1+f2", true),
+                ("f1-f2", true),
+                ("2f1-f2", true),
+                ("2f1", true),
+                ("2f2", true),
+                ("2f2-f1", true),
+            ]
+        } else if self.mode == "two_tone" {
             &[
                 ("f1", false),
                 ("f2", false),

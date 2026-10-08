@@ -227,6 +227,39 @@ fn two_tone_accepts_ratio_below_one_and_exports_fixed_f2_products() {
         product_frequencies(&document, "third-order-difference"),
         [1_100.0, 2_100.0, 3_100.0]
     );
+    assert_eq!(
+        product_frequencies(&document, "second-harmonic"),
+        [2000.0, 3000.0, 4000.0]
+    );
+    assert_eq!(
+        product_frequencies(&document, "second-harmonic-f2"),
+        [1800.0; 3]
+    );
+    assert_eq!(
+        product_frequencies(&document, "third-order-difference-f2"),
+        [800.0, 300.0, 200.0]
+    );
+    for (tag, expected, tolerance) in [
+        (
+            "second-harmonic",
+            diode_bias_current() * A1.powi(2) / (4.0 * thermal_voltage().powi(2)),
+            2e-5,
+        ),
+        (
+            "second-harmonic-f2",
+            diode_bias_current() * A2.powi(2) / (4.0 * thermal_voltage().powi(2)),
+            2e-5,
+        ),
+        (
+            "third-order-difference-f2",
+            diode_bias_current() * A1 * A2.powi(2) / (8.0 * thermal_voltage().powi(3)),
+            2e-3,
+        ),
+    ] {
+        for actual in magnitudes(&product(&document, "i(v1)", tag)) {
+            assert_close(actual, expected, tolerance, tag);
+        }
+    }
     // f2 = 0.9 * f1 is published as its own fundamental tone, not as a column
     // of a repeated constant.
     assert_eq!(
@@ -308,7 +341,14 @@ fn dedicated_hdf5_section_round_trips_product_identity_and_provenance() {
     let dir = test_dir("hdf5");
     let hdf5_path = dir.join("two_tone.h5");
     let csv_path = dir.join("roundtrip.csv");
-    let output = run(&fixture("disto_two_tone.cir"), Some((&hdf5_path, "hdf5")));
+    let deck = dir.join("two_tone_dc.cir");
+    let source = std::fs::read_to_string(fixture("disto_two_tone.cir")).unwrap();
+    std::fs::write(
+        &deck,
+        source.replace(".disto lin 3 1k 2k 0.9", ".disto lin 3 1k 2.6k 0.9"),
+    )
+    .unwrap();
+    let output = run(&deck, Some((&hdf5_path, "hdf5")));
     assert!(
         output.status.success(),
         "HDF5 DISTO export failed:\n{}",
@@ -338,6 +378,9 @@ fn dedicated_hdf5_section_round_trips_product_identity_and_provenance() {
         "f2_over_f1",
         "frequency(f2)",
         "frequency(f1+f2)",
+        "frequency(2f2)",
+        "frequency(2f2-f1)",
+        "Re(peak(2f2-f1:I(V1)))",
         "Re(peak(2f1-f2:I(V1)))",
         "magnitude(2f1-f2:I(V1))",
         "phase_deg(2f1-f2:I(V1))",
@@ -346,6 +389,28 @@ fn dedicated_hdf5_section_round_trips_product_identity_and_provenance() {
         assert!(
             header.contains(required),
             "round-trip HDF5 lost '{required}':\n{header}"
+        );
+    }
+    let mut reader = csv::Reader::from_reader(common::delimited_data_text(&csv, b',').as_bytes());
+    let headers = reader.headers().unwrap().clone();
+    let frequency = headers
+        .iter()
+        .position(|name| name == "frequency(2f2-f1)")
+        .unwrap();
+    let current = headers
+        .iter()
+        .position(|name| name == "Re(peak(2f2-f1:I(V1)))")
+        .unwrap();
+    let rows = reader.records().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(rows.len(), 3);
+    let expected = -diode_bias_current() * A1 * A2.powi(2) / (8.0 * thermal_voltage().powi(3));
+    for (row, expected_frequency) in rows.iter().zip([800.0, 0.0, 800.0]) {
+        assert_eq!(row[frequency].parse::<f64>().unwrap(), expected_frequency);
+        assert_close(
+            row[current].parse().unwrap(),
+            expected,
+            2e-3,
+            "round-trip IM3 current",
         );
     }
 }

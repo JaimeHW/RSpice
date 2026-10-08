@@ -28,6 +28,8 @@ impl Band {
             "f1+f2" => Self::Product(DistortionProduct::Sum),
             "f1-f2" => Self::Product(DistortionProduct::Difference),
             "2f1-f2" => Self::Product(DistortionProduct::ThirdOrderDifference),
+            "2f2" => Self::Product(DistortionProduct::SecondHarmonicF2),
+            "2f2-f1" => Self::Product(DistortionProduct::ThirdOrderDifferenceF2),
             _ => {
                 return Err(command_error(
                     line,

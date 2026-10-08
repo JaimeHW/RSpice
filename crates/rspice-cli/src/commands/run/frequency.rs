@@ -301,18 +301,7 @@ fn distortion_projection(
         series.push(distortion_series(ctx, "f2", false, f2_rows)?);
     }
 
-    let product_kinds: &[DistortionProduct] = if result.is_two_tone() {
-        &[
-            DistortionProduct::Sum,
-            DistortionProduct::Difference,
-            DistortionProduct::ThirdOrderDifference,
-        ]
-    } else {
-        &[
-            DistortionProduct::SecondHarmonic,
-            DistortionProduct::ThirdHarmonic,
-        ]
-    };
+    let product_kinds = DistortionProduct::for_mode(result.is_two_tone());
     for &product in product_kinds {
         let rows = result
             .points

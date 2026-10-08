@@ -61,6 +61,8 @@ fn qualified_name(signal: &Value) -> String {
                 "sum" => "f1+f2",
                 "difference" => "f1-f2",
                 "third-order-difference" => "2f1-f2",
+                "second-harmonic-f2" => "2f2",
+                "third-order-difference-f2" => "2f2-f1",
                 other => panic!("{other}"),
             };
             format!("peak({label}:{name})")
@@ -261,9 +263,12 @@ fn numeric_rf_payloads_survive_all_table_formats() {
             ));
             for product in payload["products"].as_array().unwrap() {
                 let label = match product["product"].as_str().unwrap() {
+                    "second-harmonic" => "2f1",
                     "sum" => "f1+f2",
                     "difference" => "f1-f2",
                     "third-order-difference" => "2f1-f2",
+                    "second-harmonic-f2" => "2f2",
+                    "third-order-difference-f2" => "2f2-f1",
                     other => panic!("{other}"),
                 };
                 expected.push((

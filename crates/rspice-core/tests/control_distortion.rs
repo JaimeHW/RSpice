@@ -94,7 +94,7 @@ fn explicit_and_run_distortion_preserve_every_direct_spectrum() {
             assert_eq!(document(&circuit, index), expected);
             assert_eq!(
                 result(&circuit, index).retained_value_count(),
-                if ratio.is_some() { 75 } else { 45 }
+                if ratio.is_some() { 120 } else { 45 }
             );
         }
     }
@@ -316,4 +316,72 @@ fn failure_cancellation_and_cumulative_limits_preserve_datasets_and_ordinals() {
         format!("disto{}", previous + 1)
     );
     assert_eq!(document(&circuit, 0), original);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn second_tone_products_retain_dc_conjugation_identity_and_document_roundtrip() {
+    use rspice_core::constants::{TEMP_REFERENCE, thermal_voltage};
+    let mut circuit = circuit("");
+    execute(&mut circuit, "disto", "lin 5 1k 2.6k .9").unwrap();
+    let vt = thermal_voltage(TEMP_REFERENCE);
+    let bias = 1e-12 * (0.5 / vt).exp();
+    let amplitude = bias * 1e-3 * (0.5e-3_f64).powi(2) / (8.0 * vt.powi(3));
+    let negative_current = -ComplexValue::from_polar(amplitude, (-70.0_f64).to_radians());
+    let current = print(&mut circuit, "disto(\"2f2-f1\",i(V1))");
+    let frequency = print(&mut circuit, "disto(\"2f2-f1\",frequency)");
+    assert_eq!(
+        frequency[0].y.samples,
+        [800.0, 400.0, 0.0, 400.0, 800.0].map(ComplexValue::from)
+    );
+    for (index, actual) in current[0].y.samples.iter().enumerate() {
+        let expected = if index < 2 {
+            negative_current
+        } else if index == 2 {
+            ComplexValue::new(negative_current.re, 0.0)
+        } else {
+            negative_current.conj()
+        };
+        assert!((*actual - expected).norm() < 0.003 * amplitude);
+    }
+    assert_eq!(current[0].y.unit, SignalUnit::Ampere);
+    let harmonic = print(&mut circuit, "disto(\"2f2\",i(V1))");
+    let expected = -ComplexValue::from_polar(
+        bias * (0.5e-3_f64).powi(2) / (4.0 * vt.powi(2)),
+        (-40.0_f64).to_radians(),
+    );
+    assert!(
+        harmonic[0]
+            .y
+            .samples
+            .iter()
+            .all(|actual| (*actual - expected).norm() < 2e-5 * expected.norm())
+    );
+    let doc = document(&circuit, 0);
+    let json = serde_json::to_string(&doc).unwrap();
+    let restored: AnalysisResultDocument = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored, doc);
+    assert!(json.contains("second-harmonic-f2") && json.contains("third-order-difference-f2"));
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn two_tone_budget_includes_every_new_spectrum() {
+    let deck = Netlist::parse(&format!("{DECK}.end\n")).unwrap();
+    for limit in [119, 120] {
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_result_values = limit;
+        let result =
+            Engine::new(config).run_distortion(&deck, &[1000.0, 1800.0, 2600.0], Some(0.9));
+        if limit == 119 {
+            let Err(SimulationError::ResourceLimit(error)) = result else {
+                panic!("missing result budget refusal");
+            };
+            assert_eq!(error.resource, ResourceKind::ResultValues);
+            assert_eq!(error.requested, 120);
+            assert_eq!(error.limit, 119);
+        } else {
+            assert_eq!(result.unwrap().retained_value_count(), 120);
+        }
+    }
 }

@@ -93,7 +93,8 @@ impl Engine {
 
         let f2 = f2_over_f1.map(|ratio| ratio * frequencies[0]);
         let num_nodes = circuit.num_nodes();
-        let response_count: usize = if f2_over_f1.is_some() { 5 } else { 3 };
+        let response_count =
+            DistortionProduct::for_mode(two_tone).len() + 1 + usize::from(two_tone);
         let response_values = circuit.matrix_size().saturating_mul(2).saturating_add(1);
         engine.ensure_result_shape(
             frequencies.len(),
@@ -329,13 +330,18 @@ impl VolterraContext<'_> {
         let h11 = self.solve_forcing(2.0 * f1, &forcing_2f1)?;
         let output_frequency = 2.0 * f1 - f2;
 
-        let mut forcing_third = self.second_order_forcing(output_frequency, h1, &h1m2)?;
-        scale_vector_in_place(&mut forcing_third, 4.0 / 3.0);
-        let second_partition = self.second_order_forcing(output_frequency, &h2_conjugate, &h11)?;
-        add_scaled_vector(&mut forcing_third, &second_partition, 2.0 / 3.0);
-        let cubic = self.third_order_forcing(output_frequency, h1, h1, &h2_conjugate)?;
-        add_scaled_vector(&mut forcing_third, &cubic, 1.0);
-        let h11m2 = self.solve_forcing(output_frequency, &forcing_third)?;
+        let h11m2 =
+            self.third_order_difference(output_frequency, h1, &h2_conjugate, &h11, &h1m2)?;
+        let forcing_2f2 = self.second_order_forcing(2.0 * f2, &h2, &h2)?;
+        let h22 = self.solve_forcing(2.0 * f2, &forcing_2f2)?;
+        let other_frequency = 2.0 * f2 - f1;
+        let h22m1 = self.third_order_difference(
+            other_frequency,
+            &h2,
+            &conjugate_vector(h1),
+            &h22,
+            &conjugate_vector(&h1m2),
+        )?;
 
         Ok(DistortionPointResult {
             fundamental_f1,
@@ -387,8 +393,76 @@ impl VolterraContext<'_> {
                         branch_names,
                     },
                 ),
+                make_product_result(
+                    self.circuit,
+                    DistortionProduct::SecondHarmonic,
+                    2.0 * f1,
+                    &h11,
+                    2.0,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
+                ),
+                make_product_result(
+                    self.circuit,
+                    DistortionProduct::SecondHarmonicF2,
+                    2.0 * f2,
+                    &h22,
+                    2.0,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
+                ),
+                make_product_result(
+                    self.circuit,
+                    DistortionProduct::ThirdOrderDifferenceF2,
+                    other_frequency.abs(),
+                    &h22m1,
+                    6.0,
+                    DistortionNaming {
+                        num_nodes: self.num_nodes,
+                        node_names,
+                        branch_names,
+                    },
+                ),
             ],
         })
+    }
+
+    /// Symmetric Volterra recurrence for either third-order difference.
+    /// Conjugate the entire frequency tuple when its signed output is
+    /// negative. Every device then sees its ordinary positive-frequency
+    /// operator, including models with explicit frequency dependence.
+    fn third_order_difference(
+        &mut self,
+        output_frequency: Value,
+        repeated: &[Complex64],
+        other_conjugate: &[Complex64],
+        repeated_second: &[Complex64],
+        difference: &[Complex64],
+    ) -> Result<Vec<Complex64>, SimulationError> {
+        if output_frequency < 0.0 {
+            return self.third_order_difference(
+                -output_frequency,
+                &conjugate_vector(repeated),
+                &conjugate_vector(other_conjugate),
+                &conjugate_vector(repeated_second),
+                &conjugate_vector(difference),
+            );
+        }
+        let mut forcing = self.second_order_forcing(output_frequency, repeated, difference)?;
+        scale_vector_in_place(&mut forcing, 4.0 / 3.0);
+        let second_partition =
+            self.second_order_forcing(output_frequency, other_conjugate, repeated_second)?;
+        add_scaled_vector(&mut forcing, &second_partition, 2.0 / 3.0);
+        let cubic =
+            self.third_order_forcing(output_frequency, repeated, repeated, other_conjugate)?;
+        add_scaled_vector(&mut forcing, &cubic, 1.0);
+        self.solve_forcing(output_frequency, &forcing)
     }
 
     /// Taylor coefficient `(F'' + jw*Q'')/2` contracted with two complex
@@ -601,6 +675,11 @@ fn validate_distortion_request(
     }
     if let Some(ratio) = f2_over_f1 {
         let f2 = ratio * frequencies[0];
+        if !f2.is_finite() || f2 <= 0.0 {
+            return Err(SimulationError::Circuit(
+                "Distortion F2 frequency must be representable and positive".to_string(),
+            ));
+        }
         if let Some((index, frequency)) = frequencies
             .iter()
             .enumerate()
@@ -609,6 +688,15 @@ fn validate_distortion_request(
             return Err(SimulationError::Circuit(format!(
                 "Distortion F1 frequency at index {index} ({frequency}) must be greater than the fixed F2 frequency ({f2})"
             )));
+        }
+    }
+    let f2 = f2_over_f1.map(|ratio| ratio * frequencies[0]);
+    for &f1 in frequencies {
+        let highest = f2.map_or(3.0 * f1, |f2| (2.0 * f1).max(2.0 * f2).max(f1 + f2));
+        if !highest.is_finite() {
+            return Err(SimulationError::Circuit(
+                "Distortion product frequency exceeds the finite range".to_string(),
+            ));
         }
     }
     Ok(())
@@ -702,14 +790,18 @@ fn make_ac_result(
         node_names,
         branch_names,
     } = naming;
-    let voltages = kernel[..num_nodes]
-        .iter()
-        .map(|value| sinusoid_scale * *value)
-        .collect::<Vec<_>>();
-    let mut currents = kernel[num_nodes..]
-        .iter()
-        .map(|value| sinusoid_scale * *value)
-        .collect::<Vec<_>>();
+    // The +/- tuple contributions coincide at DC: the supplied sinusoid
+    // scale already includes both, leaving its real part as the DC value.
+    let physical = |value: &Complex64| {
+        let value = sinusoid_scale * *value;
+        if frequency == 0.0 {
+            Complex64::new(value.re, 0.0)
+        } else {
+            value
+        }
+    };
+    let voltages = kernel[..num_nodes].iter().map(physical).collect::<Vec<_>>();
+    let mut currents = kernel[num_nodes..].iter().map(physical).collect::<Vec<_>>();
     let mut scaled_solution = Vec::with_capacity(voltages.len() + currents.len());
     scaled_solution.extend_from_slice(&voltages);
     scaled_solution.extend_from_slice(&currents);
@@ -831,6 +923,9 @@ mod tests {
         assert!(validate_distortion_request(&[1.0], Some(1.0)).is_err());
         assert!(validate_distortion_request(&[1.0], Some(0.9)).is_ok());
         assert!(validate_distortion_request(&[1.0, 0.5], Some(0.9)).is_err());
+        assert!(validate_distortion_request(&[Value::MAX], None).is_err());
+        assert!(validate_distortion_request(&[Value::MAX], Some(0.9)).is_err());
+        assert!(validate_distortion_request(&[Value::from_bits(1)], Some(0.5)).is_err());
     }
 
     #[test]

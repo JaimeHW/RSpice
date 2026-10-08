@@ -1,8 +1,8 @@
 //! Third-order Volterra distortion results (`.DISTO`).
 //!
 //! Products are addressed by the stable labels `2f1`, `3f1`, `f1+f2`, `f1-f2`,
-//! and `2f1-f2` rather than by ordinal, so a pickled result stays readable
-//! across builds and a caller's string matches the deck's own notation.
+//! `2f1-f2`, `2f2`, and `2f2-f1`. Pickled results retain these labels and
+//! their original product population across builds.
 
 use super::*;
 
@@ -32,8 +32,8 @@ fn require_matching_distortion_schema(
 /// Third-order Volterra distortion sweep.
 ///
 /// Every returned `AcResult` contains actual sinusoidal peak phasors at the
-/// physical product frequency. They are not internal Volterra kernels or
-/// pre-normalized distortion ratios.
+/// physical product frequency. A negative signed product is conjugated onto
+/// its positive frequency; a zero-frequency product is a real DC contribution.
 #[pyclass(name = "DistortionResult", module = "rspice")]
 #[derive(Debug)]
 pub struct PyDistortionResult {
@@ -80,18 +80,7 @@ impl PyDistortionResult {
                 "malformed distortion result: no F1 points",
             ));
         }
-        let product_kinds: &[DistortionProduct] = if result.is_two_tone() {
-            &[
-                DistortionProduct::Sum,
-                DistortionProduct::Difference,
-                DistortionProduct::ThirdOrderDifference,
-            ]
-        } else {
-            &[
-                DistortionProduct::SecondHarmonic,
-                DistortionProduct::ThirdHarmonic,
-            ]
-        };
+        let product_kinds = DistortionProduct::for_mode(result.is_two_tone());
         let f1_frequencies = result
             .points
             .iter()
@@ -194,6 +183,8 @@ impl PyDistortionResult {
             "f1+f2" | "sum" | "im2sum" => DistortionProduct::Sum,
             "f1-f2" | "difference" | "im2difference" => DistortionProduct::Difference,
             "2f1-f2" | "im3" | "thirdorderdifference" => DistortionProduct::ThirdOrderDifference,
+            "2f2" | "secondharmonicf2" => DistortionProduct::SecondHarmonicF2,
+            "2f2-f1" | "thirdorderdifferencef2" => DistortionProduct::ThirdOrderDifferenceF2,
             _ => {
                 return Err(crate::errors::value_error(format!(
                     "unknown distortion product '{name}'; available products: {}",

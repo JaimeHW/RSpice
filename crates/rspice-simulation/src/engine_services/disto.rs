@@ -170,9 +170,8 @@ fn poll_disto_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), 
 ///
 /// Test-only. The shipping path is
 /// [`run_disto_analysis_with_source_path_and_abort`], reached from
-/// `simulation::runner::spec::frequency`. Primary execution solves HB per
-/// sweep point and retains the dedicated circuit-wide Volterra solver's
-/// second- and third-order products. Excitation comes only from authored
+/// `simulation::runner::spec::frequency`. Execution retains the dedicated
+/// circuit-wide Volterra solver's second- and third-order products. Excitation comes only from authored
 /// `DISTOF1`/`DISTOF2` source annotations.
 #[cfg(test)]
 pub fn run_disto_analysis_with_abort(
@@ -267,18 +266,7 @@ fn convert_distortion_result(
             "DISTO engine returned an inconsistent sweep basis".to_owned(),
         ));
     }
-    let expected_products: &[DistortionProduct] = if requested_ratio.is_some() {
-        &[
-            DistortionProduct::Sum,
-            DistortionProduct::Difference,
-            DistortionProduct::ThirdOrderDifference,
-        ]
-    } else {
-        &[
-            DistortionProduct::SecondHarmonic,
-            DistortionProduct::ThirdHarmonic,
-        ]
-    };
+    let expected_products = DistortionProduct::for_mode(requested_ratio.is_some());
 
     let first = &result.points[0].fundamental_f1;
     validate_ac_response(first, frequencies[0], None, "DISTO F1 response")?;
@@ -457,7 +445,7 @@ fn validate_ac_response(
 ) -> Result<(), DistoRunError> {
     if response.frequency.to_bits() != expected_frequency.to_bits()
         || !response.frequency.is_finite()
-        || response.frequency <= 0.0
+        || response.frequency < 0.0
         || response.node_names.len() != response.voltages.len()
         || response.branch_names.len() != response.currents.len()
         || response
@@ -504,11 +492,13 @@ fn product_frequency(
     f2: Option<Value>,
 ) -> Result<Value, DistoRunError> {
     let frequency = match (product, f2) {
-        (DistortionProduct::SecondHarmonic, None) => 2.0 * f1,
+        (DistortionProduct::SecondHarmonic, _) => 2.0 * f1,
         (DistortionProduct::ThirdHarmonic, None) => 3.0 * f1,
         (DistortionProduct::Sum, Some(f2)) => f1 + f2,
         (DistortionProduct::Difference, Some(f2)) => f1 - f2,
         (DistortionProduct::ThirdOrderDifference, Some(f2)) => 2.0 * f1 - f2,
+        (DistortionProduct::SecondHarmonicF2, Some(f2)) => 2.0 * f2,
+        (DistortionProduct::ThirdOrderDifferenceF2, Some(f2)) => (2.0 * f2 - f1).abs(),
         _ => {
             return Err(DistoRunError::Data(format!(
                 "DISTO product {} is inconsistent with the selected tone mode",
@@ -516,7 +506,7 @@ fn product_frequency(
             )));
         }
     };
-    if !frequency.is_finite() || frequency <= 0.0 {
+    if !frequency.is_finite() || frequency < 0.0 {
         return Err(DistoRunError::Data(format!(
             "DISTO product {} has invalid frequency {frequency}",
             product.label()
@@ -665,5 +655,63 @@ mod tests {
                 .as_ref()
                 .is_some_and(|values| values.iter().all(|value| *value == 0.0))
         );
+    }
+
+    #[test]
+    fn second_tone_products_preserve_dc_and_conjugated_current_ratios() {
+        let config = DistoRunConfig {
+            start_freq: 1e3,
+            stop_freq: 2.6e3,
+            points_per_unit: 5,
+            sweep: DistoFrequencySweep::Linear,
+            f2_over_f1: Some(0.9),
+        };
+        let data = run_disto_analysis_with_abort(
+            "two-tone service\nV1 out 0 DC .5 DISTOF1 1m 30 DISTOF2 2m -20\nD1 out 0 DM\n.model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n.options GMIN=0\n.end\n",
+            &config, &NoAbort,
+        ).unwrap();
+        let trace = data
+            .traces
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case("I(V1)"))
+            .unwrap();
+        assert!(trace.thd_percent.is_none());
+        assert_eq!(trace.products.len(), 6);
+        let vt = rspice_core::constants::thermal_voltage(rspice_core::constants::TEMP_REFERENCE);
+        let bias = 1e-12 * (0.5 / vt).exp();
+        let fundamental = -Complex64::from_polar(bias * 1e-3 / vt, 30.0_f64.to_radians());
+        let im3 = -Complex64::from_polar(
+            bias * 1e-3 * (2e-3_f64).powi(2) / (8.0 * vt.powi(3)),
+            (-70.0_f64).to_radians(),
+        );
+        let harmonic = -Complex64::from_polar(
+            bias * (2e-3_f64).powi(2) / (4.0 * vt.powi(2)),
+            (-40.0_f64).to_radians(),
+        );
+        for (product, phasor) in [
+            (DistortionProduct::ThirdOrderDifferenceF2, im3),
+            (DistortionProduct::SecondHarmonicF2, harmonic),
+        ] {
+            let output = trace
+                .products
+                .iter()
+                .find(|p| p.product == product)
+                .unwrap();
+            for (index, ratio) in output.ratios.iter().enumerate() {
+                let expected = if product == DistortionProduct::ThirdOrderDifferenceF2 && index == 2
+                {
+                    Complex64::new(phasor.re, 0.0)
+                } else if product == DistortionProduct::ThirdOrderDifferenceF2 && index > 2 {
+                    phasor.conj()
+                } else {
+                    phasor
+                } / fundamental;
+                let tolerance = if product.order() == 2 { 2e-5 } else { 2e-3 };
+                assert!(
+                    (*ratio - expected).norm() < tolerance * expected.norm(),
+                    "{product:?} at {index}: {ratio:?} vs {expected:?}"
+                );
+            }
+        }
     }
 }

@@ -608,3 +608,56 @@ fn unsupported_root_and_fft_section_schemas_are_rejected() {
         assert!(matches!(fft_error, Hdf5Error::InvalidSchema(_)));
     }
 }
+
+#[test]
+fn distortion_reads_legacy_and_complete_two_tone_populations() {
+    let directory = TestDirectory::new("distortion-populations");
+    let path = directory.0.join("distortion.h5");
+    let products = [
+        ("f1", [1000.0, 1800.0, 2600.0]),
+        ("f2", [900.0; 3]),
+        ("f1+f2", [1900.0, 2700.0, 3500.0]),
+        ("f1-f2", [100.0, 900.0, 1700.0]),
+        ("2f1-f2", [1100.0, 2700.0, 4300.0]),
+        ("2f1", [2000.0, 3600.0, 5200.0]),
+        ("2f2", [1800.0; 3]),
+        ("2f2-f1", [800.0, 0.0, 800.0]),
+    ];
+    let series = products
+        .iter()
+        .enumerate()
+        .map(|(index, (label, frequencies))| Hdf5DistortionSeries {
+            label: (*label).into(),
+            is_product: index >= 2,
+            physical_frequency: frequencies.to_vec(),
+            signals: vec![Hdf5DistortionSignal {
+                name: "I(V1)".into(),
+                var_type: "current".into(),
+                real: vec![1.0; 3],
+                imag: vec![0.0; 3],
+                magnitude: vec![1.0; 3],
+                phase_degrees: vec![0.0; 3],
+                magnitude_ratio_to_f1: (index != 0).then(|| vec![1.0; 3]),
+            }],
+        })
+        .collect::<Vec<_>>();
+    for count in [5, 8] {
+        let section = Hdf5DistortionSection {
+            mode: "two_tone".into(),
+            f2_over_f1: Some(0.9),
+            phasor_convention: "actual_sinusoidal_peak".into(),
+            ratio_normalization: "magnitude_over_same_signal_f1_magnitude".into(),
+            f1_frequency: products[0].1.to_vec(),
+            series: series[..count].to_vec(),
+        };
+        let data = Hdf5SimulationData {
+            distortion: Some(section.clone()),
+            ..Hdf5SimulationData::default()
+        };
+        write_hdf5(&path, &data).unwrap();
+        assert_eq!(read_hdf5(&path).unwrap(), data);
+        let mut incomplete = section;
+        incomplete.series.pop();
+        assert!(incomplete.validate().is_err());
+    }
+}
