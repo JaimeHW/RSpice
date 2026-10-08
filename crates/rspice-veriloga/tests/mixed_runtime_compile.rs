@@ -555,8 +555,8 @@ endmodule
         );
         let error = compiler
             .compile_runtime(&invalid, None)
-            .err()
-            .expect("invalid bound");
+            .map(|_| ())
+            .expect_err("invalid bound");
         assert!(error.to_string().contains(diagnostic), "{bound}: {error}");
     }
 }
@@ -580,8 +580,8 @@ fn packed_selection_validation_distinguishes_scalars_from_one_bit_vectors() {
         );
         let error = compiler
             .compile_runtime(&source, None)
-            .err()
-            .expect("scalar selection");
+            .map(|_| ())
+            .expect_err("scalar selection");
         assert!(
             error
                 .to_string()
@@ -654,8 +654,8 @@ endmodule
         );
         let error = compiler
             .compile_runtime(&source, None)
-            .err()
-            .expect("invalid packed read");
+            .map(|_| ())
+            .expect_err("invalid packed read");
         assert!(error.to_string().contains(diagnostic), "{read}: {error}");
     }
 }

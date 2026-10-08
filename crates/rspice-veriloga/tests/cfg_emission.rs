@@ -726,7 +726,8 @@ fn projected_array_indexed_read_scales_and_preserves_executed_path() {
         (f64::NAN, 0, 1),
         (0.0, usize::MAX, 1),
     ] {
-        assert!(!(ctx.checked_evaluation_input_indexed(&[4.0, 7.0], index, base, len) > 0.0));
+        let positive = ctx.checked_evaluation_input_indexed(&[4.0, 7.0], index, base, len) > 0.0;
+        assert!(!positive);
         assert!(ctx.take_evaluation_error().is_some());
     }
 }

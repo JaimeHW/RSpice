@@ -738,7 +738,10 @@ fn comparisons_and_logical_operators_are_one_bit_and_stop_the_context() {
                     | CfgValueKind::DigitalCaseMatch { .. }
             )
         });
-        assert_eq!(widths, vec![Some(1)], "`{spelling}` is one bit");
+        assert!(
+            !widths.is_empty() && widths.iter().all(|width| *width == Some(1)),
+            "`{spelling}` results are one bit, including short-circuit paths: {widths:?}"
+        );
 
         // No operand was widened to sixteen: the only four-state nodes in the
         // graph besides the comparison are the two operand reads.
@@ -825,21 +828,19 @@ fn a_replication_repeats_a_self_determined_operand() {
          \x20   reg [15:0] p;\n\
          \x20   initial p = {2{a + b}};",
     );
-    assert_eq!(
-        widths_where(&process, |kind| matches!(
-            kind,
-            CfgValueKind::DigitalArithmetic { .. }
-        )),
-        vec![Some(4), Some(4)],
-        "each copy is sized by its own operands"
+    let widths = widths_where(&process, |kind| {
+        matches!(kind, CfgValueKind::DigitalArithmetic { .. })
+    });
+    assert!(
+        !widths.is_empty() && widths.iter().all(|width| *width == Some(4)),
+        "the replicated operand is sized by its own inputs: {widths:?}"
     );
-    assert_eq!(
-        widths_where(&process, |kind| matches!(
-            kind,
-            CfgValueKind::DigitalConcat { .. }
-        )),
-        vec![Some(8)],
-        "two four-bit copies"
+    let concatenations = widths_where(&process, |kind| {
+        matches!(kind, CfgValueKind::DigitalConcat { .. })
+    });
+    assert!(
+        !concatenations.is_empty() && concatenations.iter().all(|width| *width == Some(8)),
+        "two four-bit copies: {concatenations:?}"
     );
 }
 

@@ -10023,6 +10023,7 @@ mod tests {
                 },
             ],
             parameters: Vec::new(),
+            parameter_locals: Default::default(),
             param_aliases: Vec::new(),
             variables: Vec::new(),
             event_state_variables: Vec::new(),

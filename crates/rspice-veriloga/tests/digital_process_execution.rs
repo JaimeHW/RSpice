@@ -1789,23 +1789,19 @@ fn a_for_loop_runs_its_body_once_per_pass() {
     assert_eq!(harness.get("q"), "1111");
 }
 
-/// A select whose index is a process-local is refused, by name, rather than
-/// silently folded to the counter's initial value.
+/// A process-local index is evaluated on every loop iteration.
 #[test]
-fn a_select_indexed_by_a_process_local_is_refused() {
-    let error = VerilogACompiler::new(CompilerOptions::default())
-        .compile_canonical_ir(&digital_module(
-            "    reg [3:0] q;\n\
+fn a_select_indexed_by_a_process_local_follows_the_counter() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q;\n\
          \x20   initial begin : work\n\
          \x20       integer i;\n\
          \x20       for (i = 0; i < 4; i = i + 1) q[i] = 1'b1;\n\
          \x20   end",
-        ))
-        .expect_err("a runtime select bound must be refused");
-    assert!(
-        error.to_string().contains("must have constant bounds"),
-        "{error}"
     );
+    harness.set("q", "0000");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "1111");
 }
 
 /// A `for` whose condition is false at the start runs its body no times.
@@ -4718,9 +4714,10 @@ fn a_single_bit_vector_names_its_one_bit_by_its_bound() {
 fn a_local_shadowing_a_parameter_is_not_folded_into_a_select() {
     let section = "parameter integer index = 0; reg [1:0] q;
          initial begin : work integer index; index = 1; q[index] = 1'b1; end";
-    VerilogACompiler::default()
-        .compile_canonical_ir(&digital_module(section))
-        .expect_err("a runtime local must not be replaced by the shadowed parameter");
+    let mut harness = Harness::new(section);
+    harness.set("q", "00");
+    expect_finished(harness.run());
+    assert_eq!(harness.get("q"), "10");
 }
 
 #[test]
@@ -4733,13 +4730,30 @@ fn digital_index_boundaries_do_not_panic_or_clamp() {
         ),
         (
             "parameter real idx = -1e30; reg q, seen; initial seen = q[idx];",
-            "real value",
+            "scalar has no selectable bits",
         ),
     ] {
         let error = VerilogACompiler::default()
             .compile_canonical_ir(&digital_module(section))
             .expect_err("unsupported index forms must fail explicitly");
         assert!(error.to_string().contains(diagnostic), "{section}: {error}");
+    }
+    for index in ["1e30", "-1e30", "-64'sh8000000000000000"] {
+        let mut harness = Harness::new(&format!(
+            "reg [0:0] q; reg seen; initial begin q[{index}]=1'b0; seen=q[{index}]; end"
+        ));
+        harness.set("q", "1");
+        expect_finished(harness.run());
+        assert_eq!(
+            harness.get("q"),
+            "1",
+            "{index}: out-of-range writes do nothing"
+        );
+        assert_eq!(
+            harness.get("seen"),
+            "x",
+            "{index}: out-of-range reads are unknown"
+        );
     }
     // Negating the minimum signed 64-bit value wraps at its declared width.
     // Read indices now execute as digital expressions: the wrapped value
@@ -5058,8 +5072,8 @@ fn dynamic_bit_writes_validate_source_and_artifact_types() {
     ] {
         let error = VerilogACompiler::default()
             .compile_canonical_ir(&format!("module bad; {body} endmodule"))
-            .err()
-            .expect("invalid or unsupported select");
+            .map(|_| ())
+            .expect_err("invalid or unsupported select");
         assert!(error.to_string().contains(expected), "{body}: {error}");
         assert!(
             !error.to_string().contains("Internal error"),
@@ -5749,7 +5763,9 @@ fn packed_parameter_selections_validate_bounds_before_sizing() {
         let compiled =
             std::panic::catch_unwind(|| VerilogACompiler::default().compile_canonical_ir(&source))
                 .expect("invalid source must return a diagnostic, never panic");
-        let error = compiled.err().expect("invalid selection was accepted");
+        let error = compiled
+            .map(|_| ())
+            .expect_err("invalid selection was accepted");
         assert!(
             error.to_string().contains(diagnostic),
             "{selection}: {error}"
@@ -6864,8 +6880,8 @@ fn analog_integer_packed_reads_validate_types_and_ownership() {
         let source = format!("module invalid(p); inout p; electrical p; {body} endmodule");
         let error = VerilogACompiler::default()
             .compile_canonical_ir(&source)
-            .err()
-            .expect("invalid packed read/write");
+            .map(|_| ())
+            .expect_err("invalid packed read/write");
         assert!(error.to_string().contains(diagnostic), "{body}: {error}");
     }
 }

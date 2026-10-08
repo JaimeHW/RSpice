@@ -1551,7 +1551,6 @@ mod tests {
                         layout,
                     },
                 ],
-                ..Default::default()
             };
             let real = crate::vm::Vm::new(&mut context).execute(&program);
             let complex = SmallSignalVm::new(&context, 1e3).unwrap().execute(&program);
