@@ -182,6 +182,9 @@ pub(super) fn run(
             ControlAnalysisResult::PoleZero(result) => {
                 AnalysisResultDocument::from_pole_zero(dataset.analysis_id, result)
             }
+            ControlAnalysisResult::Stability(result) => {
+                AnalysisResultDocument::from_stability(dataset.analysis_id, &result.result)
+            }
             ControlAnalysisResult::Distortion(result) => {
                 AnalysisResultDocument::from_distortion(dataset.analysis_id, result)
             }
@@ -298,6 +301,73 @@ fn source_error(mut error: WasmError, line: usize, script: &ControlScriptSource)
 #[cfg(test)]
 mod tests {
     use super::super::*;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn stability_control_preserves_direct_documents_and_scalar_determinations() {
+        use rspice_core::execution::result_document::{ScalarUnavailability, ScalarValue};
+        let source = "STB\nE1 out 0 sense 0 -100\nVprobe out drive 0\nR1 drive sense 1k\nC1 sense 0 159.154943091895n\n";
+        for nyquist in ["yes", "no"] {
+            for zero in [false, true] {
+                let source = if zero {
+                    source.replace("-100", "0")
+                } else {
+                    source.into()
+                };
+                let command = format!("stb lin 3 10 1meg probe=Vprobe nyquist={nyquist}");
+                let direct =
+                    run_authored_deck_document_detailed(&format!("{source}.{command}\n.end\n"))
+                        .unwrap();
+                for cards in [
+                    format!(".control\n{command}"),
+                    format!(".{command}\n.control\nrun"),
+                ] {
+                    let control = run_authored_deck_document_detailed(&format!(
+                        "{source}{cards}\nprint loopgain gain_margin dc_loop_gain_db\n.endc\n.end\n"
+                    ))
+                    .unwrap();
+                    assert_eq!(control.control_datasets, ["stb1"]);
+                    assert_eq!(control.results[0].payload(), direct.results[0].payload());
+                    assert_eq!(control.results[0].signals(), direct.results[0].signals());
+                    assert_eq!(control.results[0].axes(), direct.results[0].axes());
+                    assert_eq!(control.results[0].scalars(), direct.results[0].scalars());
+                    let presentation = &control.control_presentations[0];
+                    let rspice_core::engine::ControlPresentationKind::Print(traces) =
+                        &presentation.kind
+                    else {
+                        panic!("PRINT");
+                    };
+                    assert_eq!(traces[0].x.unit, SignalUnit::Hertz);
+                    assert_eq!(traces[0].y.unit, SignalUnit::Dimensionless);
+                    assert_eq!(presentation.scalars[0].position, 1);
+                    assert_eq!(presentation.scalars[1].position, 2);
+                    assert_eq!(
+                        presentation.scalars[0].scalar.value(),
+                        &ScalarValue::Unavailable {
+                            reason: ScalarUnavailability::NoCrossover
+                        }
+                    );
+                    if zero {
+                        assert!(
+                            traces[0]
+                                .y
+                                .samples
+                                .iter()
+                                .all(|value| *value == rspice_core::ComplexValue::default())
+                        );
+                        assert_eq!(
+                            presentation.scalars[1].scalar.value(),
+                            &ScalarValue::Unavailable {
+                                reason: ScalarUnavailability::NegativeInfinity
+                            }
+                        );
+                    } else {
+                        assert!(traces[0].y.samples[0].im.abs() > 0.1);
+                    }
+                }
+            }
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]

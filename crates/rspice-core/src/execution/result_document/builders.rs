@@ -1909,6 +1909,89 @@ impl AnalysisResultDocument {
         Ok(Self::builder(analysis, ResultPayload::DcMatch(payload), 0).scalars(scalars))
     }
 
+    /// Shared scalar determinations for documents and control expressions.
+    pub(crate) fn stability_scalars(
+        result: &StbResult,
+    ) -> Result<Vec<ResultScalar>, ResultDocumentError> {
+        const LOCATION: &str = "stability result";
+        let margins = &result.margins;
+        let margin_scalar = |name, display, unit, value| {
+            derived_metric_scalar(
+                LOCATION,
+                name,
+                display,
+                unit,
+                ScalarUnavailability::NoCrossover,
+                value,
+            )
+        };
+        Ok(vec![
+            margin_scalar(
+                "gain_margin_db",
+                "Gain margin",
+                decibel(),
+                margins.gain_margin.map(|m| m.value),
+            )?,
+            margin_scalar(
+                "gain_margin_frequency",
+                "Gain margin frequency",
+                SignalUnit::Hertz,
+                margins.gain_margin.map(|m| m.frequency),
+            )?,
+            margin_scalar(
+                "phase_margin_degrees",
+                "Phase margin",
+                SignalUnit::Degree,
+                margins.phase_margin.map(|m| m.value),
+            )?,
+            margin_scalar(
+                "phase_margin_frequency",
+                "Phase margin frequency",
+                SignalUnit::Hertz,
+                margins.phase_margin.map(|m| m.frequency),
+            )?,
+            ResultScalar::new(
+                "dc_loop_gain",
+                "DC return ratio",
+                Some(SignalUnit::Dimensionless),
+                ScalarValue::Complex {
+                    value: margins.dc_loop_gain.map(Into::into),
+                },
+            )?,
+            match margins.dc_gain_db() {
+                Some(value) => real_or_unbounded_scalar(
+                    LOCATION,
+                    "dc_loop_gain_db",
+                    "DC loop gain",
+                    decibel(),
+                    value,
+                )?,
+                None => ResultScalar::new(
+                    "dc_loop_gain_db",
+                    "DC loop gain",
+                    Some(decibel()),
+                    ScalarValue::Real { value: None },
+                )?,
+            },
+            margin_scalar(
+                "unity_gain_bandwidth",
+                "Unity gain bandwidth",
+                SignalUnit::Hertz,
+                margins.unity_gain_bandwidth(),
+            )?,
+            boolean_scalar(
+                "multiple_unity_gain_crossovers",
+                "Multiple unity-gain crossovers",
+                margins.num_crossovers > 1,
+            )?,
+            count_scalar(
+                "unity_gain_crossovers",
+                "Unity gain crossovers",
+                margins.num_crossovers,
+            )?,
+        ])
+    }
+
     /// Project one `.STB` loop-gain result.
     pub fn from_stability(
         analysis: AnalysisInstanceId,
@@ -2011,82 +2094,7 @@ impl AnalysisResultDocument {
             )?,
         ];
 
-        let margins = &result.margins;
-        let margin_scalar = |name, display, unit, value| {
-            derived_metric_scalar(
-                LOCATION,
-                name,
-                display,
-                unit,
-                ScalarUnavailability::NoCrossover,
-                value,
-            )
-        };
-        let scalars = vec![
-            margin_scalar(
-                "gain_margin_db",
-                "Gain margin",
-                decibel(),
-                margins.gain_margin.map(|m| m.value),
-            )?,
-            margin_scalar(
-                "gain_margin_frequency",
-                "Gain margin frequency",
-                SignalUnit::Hertz,
-                margins.gain_margin.map(|m| m.frequency),
-            )?,
-            margin_scalar(
-                "phase_margin_degrees",
-                "Phase margin",
-                SignalUnit::Degree,
-                margins.phase_margin.map(|m| m.value),
-            )?,
-            margin_scalar(
-                "phase_margin_frequency",
-                "Phase margin frequency",
-                SignalUnit::Hertz,
-                margins.phase_margin.map(|m| m.frequency),
-            )?,
-            ResultScalar::new(
-                "dc_loop_gain",
-                "DC return ratio",
-                Some(SignalUnit::Dimensionless),
-                ScalarValue::Complex {
-                    value: margins.dc_loop_gain.map(Into::into),
-                },
-            )?,
-            match margins.dc_gain_db() {
-                Some(value) => real_or_unbounded_scalar(
-                    LOCATION,
-                    "dc_loop_gain_db",
-                    "DC loop gain",
-                    decibel(),
-                    value,
-                )?,
-                None => ResultScalar::new(
-                    "dc_loop_gain_db",
-                    "DC loop gain",
-                    Some(decibel()),
-                    ScalarValue::Real { value: None },
-                )?,
-            },
-            margin_scalar(
-                "unity_gain_bandwidth",
-                "Unity gain bandwidth",
-                SignalUnit::Hertz,
-                margins.unity_gain_bandwidth(),
-            )?,
-            boolean_scalar(
-                "multiple_unity_gain_crossovers",
-                "Multiple unity-gain crossovers",
-                margins.num_crossovers > 1,
-            )?,
-            count_scalar(
-                "unity_gain_crossovers",
-                "Unity gain crossovers",
-                margins.num_crossovers,
-            )?,
-        ];
+        let scalars = Self::stability_scalars(result)?;
 
         let mut nyquist = Vec::with_capacity(result.nyquist_points.len());
         for point in &result.nyquist_points {

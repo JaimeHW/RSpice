@@ -897,6 +897,13 @@ pub(super) fn run_stb(
         .run_stb_with_abort(ctx.netlist, config, &crate::abort::ProcessAbort)
         .map_err(|source| map_frequency_error(ctx, "STB", source))?;
 
+    finish_stb_result(ctx, &stb)
+}
+
+pub(super) fn finish_stb_result(
+    ctx: &RunContext<'_>,
+    stb: &rspice_core::engine::StbAnalysisResult,
+) -> Result<(), CliError> {
     if !ctx.args.allow_nonfinite {
         for (freq, gain) in stb.frequencies.iter().zip(stb.loop_gains.iter()) {
             if !gain.re.is_finite() || !gain.im.is_finite() {

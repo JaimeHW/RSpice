@@ -52,6 +52,7 @@ pub enum ControlAnalysisResult {
     Ac(Vec<AcResult>),
     AcTable(FrequencyDataResult<AcResult>),
     Distortion(Box<crate::analysis::DistortionAnalysisResult>),
+    Stability(Box<super::StbAnalysisResult>),
     Noise(Vec<crate::analysis::NoiseResult>),
     NoiseTable(FrequencyDataResult<crate::analysis::NoiseResult>),
     DcSweep(Box<super::DcSweepResult>),
@@ -100,7 +101,7 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" => {
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb" => {
                 Self::Analysis
             }
             "run" => Self::Run,
@@ -376,6 +377,19 @@ impl ControlCircuit {
                 (
                     "tran",
                     ControlAnalysisResult::Transient(Box::new(result)),
+                    count,
+                )
+            }
+            AnalysisCommand::Stb { .. } => {
+                let config = crate::analysis::StbConfig::try_from(&analysis)
+                    .map_err(|error| command_error(line, error.to_string()))?;
+                let result = bounded
+                    .run_stb_with_abort(&netlist, config, abort)
+                    .map_err(|error| simulation_error(line, error))?;
+                let count = result.retained_value_count();
+                (
+                    kind,
+                    ControlAnalysisResult::Stability(Box::new(result)),
                     count,
                 )
             }

@@ -97,6 +97,7 @@ pub(super) fn identity(
         AnalysisCommand::PoleZero { .. } => ("pz", crate::identity::AnalysisKind::PoleZero),
         AnalysisCommand::Sensitivity { .. } => ("sens", crate::identity::AnalysisKind::Sensitivity),
         AnalysisCommand::Disto { .. } => ("disto", crate::identity::AnalysisKind::Distortion),
+        AnalysisCommand::Stb { .. } => ("stb", crate::identity::AnalysisKind::Stb),
         _ => {
             return Err(command_error(
                 line,

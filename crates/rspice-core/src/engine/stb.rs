@@ -120,6 +120,16 @@ pub struct StbAnalysisResult {
     pub probe_name: String,
 }
 
+impl StbAnalysisResult {
+    /// All retained primary, derived and circuit-pole numeric values.
+    pub fn retained_value_count(&self) -> usize {
+        self.frequencies
+            .len()
+            .saturating_add(self.loop_gains.len().saturating_mul(2))
+            .saturating_add(self.result.retained_value_count())
+    }
+}
+
 impl Engine {
     /// Run loop-stability analysis at the probe source named in
     /// `config.probe_node`.
@@ -581,6 +591,7 @@ mod tests {
                 if compute_nyquist { point_count } else { 0 }
             );
             assert_eq!(actual_retained_result_values(&result), exact_limit);
+            assert_eq!(result.retained_value_count(), exact_limit);
         }
     }
 

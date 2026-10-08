@@ -5,6 +5,7 @@ mod distortion;
 mod noise;
 mod pole_zero;
 mod sensitivity;
+mod stability;
 mod transfer;
 use crate::ComplexValue;
 use crate::engine::SensitivityCardResult;
@@ -23,7 +24,10 @@ pub(super) fn resolve_scalar(
         Some(value) => Ok(Some(value)),
         None => match pole_zero::resolve_scalar(circuit, name)? {
             Some(value) => Ok(Some(value)),
-            None => sensitivity::resolve_scalar(circuit, name),
+            None => match sensitivity::resolve_scalar(circuit, name)? {
+                Some(value) => Ok(Some(value)),
+                None => stability::resolve_scalar(circuit, name),
+            },
         },
     }
 }
@@ -128,6 +132,7 @@ enum Column {
     PoleZero(pole_zero::PoleZeroColumn),
     Sensitivity(sensitivity::SensitivityColumn),
     Distortion(distortion::DistortionColumn),
+    Stability(stability::StabilityColumn),
 }
 
 struct Selected<'a> {
@@ -163,6 +168,7 @@ impl ControlNamedDataset {
             ControlAnalysisResult::Noise(points)
             | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => points.len(),
             ControlAnalysisResult::Distortion(result) => result.points.len(),
+            ControlAnalysisResult::Stability(result) => result.frequencies.len(),
             ControlAnalysisResult::DcSweep(result) => result.points.len(),
             ControlAnalysisResult::Transient(result) => result.time.len(),
         }
@@ -181,7 +187,8 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
             | ControlAnalysisResult::NoiseTable(_)
-            | ControlAnalysisResult::Distortion(_) => SignalUnit::Hertz,
+            | ControlAnalysisResult::Distortion(_)
+            | ControlAnalysisResult::Stability(_) => SignalUnit::Hertz,
             ControlAnalysisResult::DcSweep(result) => result
                 .axes
                 .last()
@@ -203,7 +210,8 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
             | ControlAnalysisResult::NoiseTable(_)
-            | ControlAnalysisResult::Distortion(_) => "frequency",
+            | ControlAnalysisResult::Distortion(_)
+            | ControlAnalysisResult::Stability(_) => "frequency",
             ControlAnalysisResult::DcSweep(result) => {
                 result.axes.last().map_or("sweep", |a| a.name.as_str())
             }
@@ -232,6 +240,7 @@ impl ControlNamedDataset {
                 .points
                 .get(row)
                 .map(|point| point.fundamental_f1.frequency),
+            ControlAnalysisResult::Stability(result) => result.frequencies.get(row).copied(),
             ControlAnalysisResult::DcSweep(result) => result.points.get(row).map(|p| p.sweep_value),
             ControlAnalysisResult::Transient(result) => result.time.get(row).copied(),
         }
@@ -241,7 +250,8 @@ impl ControlNamedDataset {
         match &self.result {
             ControlAnalysisResult::TransferFunction(_)
             | ControlAnalysisResult::PoleZero(_)
-            | ControlAnalysisResult::Sensitivity(_) => &[],
+            | ControlAnalysisResult::Sensitivity(_)
+            | ControlAnalysisResult::Stability(_) => &[],
             ControlAnalysisResult::Distortion(result) => result
                 .points
                 .first()
@@ -270,6 +280,11 @@ impl Selected<'_> {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::Stability(column), ControlAnalysisResult::Stability(result)) => {
+                column.sample(result, row)
+            }
+            (Column::Stability(_), _)
+            | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::Stability(_)) => None,
             (Column::Distortion(column), ControlAnalysisResult::Distortion(result)) => {
                 column.sample(result, row)
             }
@@ -444,6 +459,7 @@ impl ControlCircuit {
             && let Some(mut selected) = transfer::select(dataset, name)
                 .or(pole_zero::select_gain(dataset, name))
                 .or(sensitivity::select(dataset, name))
+                .or(stability::select(dataset, name))
                 .or(noise::select(dataset, name, line)?)
         {
             if let Some(unit) = self.vector_units.get(&selected.id) {
@@ -495,7 +511,8 @@ impl ControlCircuit {
             let names = match &dataset.result {
                 ControlAnalysisResult::TransferFunction(_)
                 | ControlAnalysisResult::PoleZero(_)
-                | ControlAnalysisResult::Sensitivity(_) => {
+                | ControlAnalysisResult::Sensitivity(_)
+                | ControlAnalysisResult::Stability(_) => {
                     return Err(unavailable(line, dataset, name));
                 }
                 ControlAnalysisResult::DcSweep(result) => {
@@ -749,8 +766,8 @@ impl ControlCircuit {
                 };
                 if command.name == "print"
                     && x.is_none()
-                    // Only transfer scalars can have this determination. Do
-                    // not evaluate a root index here and again while binding.
+                    // Preserve scalar determinations without broadcasting a
+                    // margin over the sweep. Root indices are evaluated once.
                     && match &y {
                         Expr::Param(_) => true,
                         Expr::FnCall { name, .. } => name.rsplit('.').next() == Some("OUTPUT_IMPEDANCE_AT_V"),
@@ -758,7 +775,8 @@ impl ControlCircuit {
                     }
                     && let Ok(selected) = self.direct(&y, variables, line, abort)
                     && let Some(scalar) =
-                        transfer::unbounded(&selected, &label, traces.len() + scalars.len(), line)?
+                        stability::printed_scalar(&selected, &label, traces.len() + scalars.len(), line)?
+                            .or(transfer::unbounded(&selected, &label, traces.len() + scalars.len(), line)?)
                 {
                     resolver.charge(2)?;
                     scalars.push(scalar);

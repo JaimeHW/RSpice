@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "Complete the remaining 19 of 29 control dispositions, producer dependencies and bounded orchestration. Preserve direct/control numerical equivalence, complex scalar bindings, physical units, immutable dataset identity and atomic publication. Extend qualification for earlier-card and eager-parameter temperatures, statistical/runtime binding, physical overrides, whole-run memory, cancellation, configuration and performance. Existing parser and analysis regression tests remain required."
+      "qualification_task": "Complete the remaining 17 of 29 control dispositions, producer dependencies and bounded orchestration. Preserve direct/control numerical equivalence, complex scalar bindings, physical units, immutable dataset identity and atomic publication. Extend qualification for earlier-card and eager-parameter temperatures, statistical/runtime binding, physical overrides, whole-run memory, cancellation, configuration and performance. Existing parser and analysis regression tests remain required."
     },
     {
       "id": "C05",
@@ -212,9 +212,9 @@
         "path": "src/engine/stb.rs",
         "symbol": "run_stb_with_abort"
       },
-      "control_host": "missing",
+      "control_host": "implemented",
       "owner": "C04",
-      "qualification_task": "Public control/direct numerical equivalence, identity, units, options, cancellation and retained-value limits remain required. tests/stb_precision.rs qualifies small/large single-pole gains and loaded high-gain return ratios in both probe orientations; tests/stb_loopgain.rs remains the ordinary loop-gain oracle. Study progress is qualified. tests/stb_dc_gain.rs qualifies independent zero-frequency measurements, zero/undefined DC, document consistency and legacy relabeling. Complete the remaining margin-availability and control-publication contracts."
+      "qualification_task": "Control STB reuses the bounded cancellable solver and retains complex loop gain, Bode/Nyquist data, natural poles, independently measured DC and typed margin availability. tests/control_stability.rs covers direct/run equivalence, an analytical feedback loop, units, scalar expressions, immutable identity, cancellation and cumulative limits. CLI/WASM publish the shared document and scalar determinations. tests/stb_precision.rs, tests/stb_loopgain.rs, tests/stb_dc_gain.rs and tests/stb_circuit_poles.rs retain direct-solver oracles. Broader model, option and performance qualification remains C04 work."
     },
     {
       "variant": "Disto",
@@ -492,7 +492,8 @@
     "tests/pole_zero_descriptor_rank.rs",
     "tests/pole_zero_high_frequency.rs",
     "tests/stb_precision.rs",
-    "tests/stb_dc_gain.rs"
+    "tests/stb_dc_gain.rs",
+    "tests/control_stability.rs"
   ],
   "open_inventory_tasks": [
     "Enumerate every per-instance predicate and pair it with supported/unsupported numerical fixtures; family declarations alone are insufficient.",
