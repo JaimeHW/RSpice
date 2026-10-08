@@ -1,6 +1,6 @@
-// Independent ABI 19 release fixture. Keep these bytes and opcodes explicit:
+// Independent ABI 20 release fixture. Keep these bytes and opcodes explicit:
 // deriving them from the compiler would let both sides drift together.
-const ABI = 19;
+const ABI = 20;
 const HEADER_BYTES = 176; // ABI 16 adds immutable evaluation-input pointer/length.
 const FRAME_BYTES = 8368; // Header plus the bounded 1,024-element operand region.
 const STACK_BYTES = 8368; // Preserve the WASM stack's 16-byte alignment.
@@ -97,6 +97,8 @@ export async function qualifyAbi(wasm) {
       ["integer rounding", 300, [-7.75], -8],
       ["signed integer addition", 330, [-2147483648, 1], -2147483647],
       ["checked derivative", 340, [4, 0.25], 0.25],
+      ["available discrete value", 341, [1, 4.5], 4.5],
+      ["discrete signed zero", 341, [1, -0], -0],
       ["overflowing products", 250, [2 ** 800, 2 ** 700, 2 ** 750, 2 ** 650], 2 ** 100],
       ["underflowing products", 250, [2 ** -800, 2 ** -700, 2 ** -750, 2 ** -650], 2 ** -100],
       ["subnormal quotient", 250, [2 ** -800, 2 ** -600, 2 ** -326, 1], 2 ** -1074],
@@ -156,6 +158,15 @@ export async function qualifyAbi(wasm) {
     for (const [label, opcode, operands] of [
       ["nonfinite integer", 300, [NaN]],
       ["invalid derivative primal", 340, [NaN, 0.25]],
+      // ABI 20 accepts only a validity lane of one with a finite value.
+      ["unavailable discrete value", 341, [0, 4.5]],
+      ["negative zero discrete validity", 341, [-0, -0]],
+      ["fractional discrete validity", 341, [0.5, 4.5]],
+      ["invalid discrete validity", 341, [2, 4.5]],
+      ["nonfinite discrete validity", 341, [NaN, 4.5]],
+      ["discrete NaN", 341, [1, NaN]],
+      ["discrete positive infinity", 341, [1, Infinity]],
+      ["discrete negative infinity", 341, [1, -Infinity]],
       ["unknown operation", 249, [1]],
       ["query value without a runtime session", 470, []],
       ["query presence without a runtime session", 471, []],

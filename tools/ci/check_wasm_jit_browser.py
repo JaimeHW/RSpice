@@ -33,8 +33,12 @@ EXPECTED_STAMPS = 20000
 # application (402). Reviewed against the pre-refactor 43d4d30c9 contract:
 # the header, operand region and helper signatures are unchanged. These
 # stateful actions must refuse the fixture's missing runtime session.
-EXPECTED_WASM_JIT_ABI_VERSION = 19
-EXPECTED_ABI_CHECKS = 46
+# ABI 20 adds discrete-value validation (341): a validity lane of exactly one
+# and a finite value are required. The fixture checks preservation of signed
+# zero and refusal of unavailable values, malformed validity and nonfinite
+# values. Frame layout and helper signatures remain unchanged.
+EXPECTED_WASM_JIT_ABI_VERSION = 20
+EXPECTED_ABI_CHECKS = 56
 
 # The page runs on a real clock, so the runner cannot bound it with
 # --virtual-time-budget and read the DOM afterwards: a virtual clock reports a
