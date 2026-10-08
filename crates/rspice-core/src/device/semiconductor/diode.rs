@@ -66,7 +66,7 @@ impl DiodeLevel {
     }
 }
 
-/// HSPICE-style temperature-equation coefficients (ngspice `dio` TLEV/TLEVC).
+/// SPICE temperature-equation coefficients (ngspice TLEV/TLEVC and Xyce TIKF).
 ///
 /// `tlev` selects the saturation-current and breakdown-voltage laws; `tlevc`
 /// selects the junction-potential and depletion-capacitance laws. The two are
@@ -106,6 +106,8 @@ pub(crate) struct DiodeTemperatureModel {
     pub ttt1: Value,
     /// Transit-time quadratic temperature coefficient (TTT2).
     pub ttt2: Value,
+    /// Forward high-injection knee linear temperature coefficient (TIKF).
+    pub tikf: Value,
 }
 
 impl Default for DiodeTemperatureModel {
@@ -127,6 +129,7 @@ impl Default for DiodeTemperatureModel {
             tm2: 0.0,
             ttt1: 0.0,
             ttt2: 0.0,
+            tikf: 0.0,
         }
     }
 }
@@ -356,7 +359,7 @@ pub struct Diode {
     pub tnom_c: Option<Value>,
     /// Which formulation the `.model` card's LEVEL selector chose.
     pub level: DiodeLevel,
-    /// HSPICE-style TLEV/TLEVC temperature-equation coefficients.
+    /// Temperature-equation coefficients, including TLEV/TLEVC and TIKF.
     pub(crate) temperature_model: DiodeTemperatureModel,
     /// Evaluate as Xyce's native diode rather than ngspice's.
     ///
@@ -942,6 +945,11 @@ impl Diode {
         if let Some(v) = params.get("IKF").or_else(|| params.get("IK")).copied() {
             self.forward_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
         }
+        if let Some(&v) = params.get("TIKF")
+            && v.is_finite()
+        {
+            self.temperature_model.tikf = v;
+        }
         if let Some(&v) = params.get("IKR") {
             self.reverse_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
         }
@@ -1231,7 +1239,8 @@ impl Diode {
     /// at the SPICE3 default temperature level: IS/JSW follow the
     /// activation-energy / XTI law, VJ/CJ0 and PHP/CJSW follow the
     /// bandgap-shift mapping, and BV is converted to the matched
-    /// breakdown voltage used by the reverse branch.
+    /// breakdown voltage used by the reverse branch. An authored TIKF
+    /// scales the forward injection knee relative to the same nominal temperature.
     ///
     /// Call once after model parameters and junction scaling are applied.
     pub fn set_temperature(&mut self, temp_kelvin: Value, default_tnom_kelvin: Value) {
@@ -1361,6 +1370,15 @@ impl Diode {
         let delta_t = temp - tnom;
         let log_t_ratio = (temp / tnom).ln();
         let temperature = self.temperature_model;
+        self.candidate_eval_valid = false;
+
+        // Xyce N_DEV_Diode.C: tIKF = IKF * (1 + TIKF * (Temp - TNOM)).
+        // Its current law disables the knee when tIKF is nonpositive; the
+        // positive-factor fallback used by RS/TT would incorrectly retain it.
+        if temperature.tikf != 0.0 && self.forward_knee_current > 0.0 {
+            self.forward_knee_current =
+                (self.forward_knee_current * (1.0 + temperature.tikf * delta_t)).max(0.0);
+        }
 
         // Silicon bandgap at both temperatures. TLEV 0 and 1 pin the classic
         // 1.16 eV / 7.02e-4 / 1108 silicon fit; TLEV 2 lets the card supply
@@ -3320,6 +3338,40 @@ mod tests {
         let dt = temp - (273.15 + 25.0);
         assert!((d.rs - 4.0 * (1.0 + 4.5778e-5 * dt)).abs() <= 1e-12);
         assert!(d.rs < 4.0, "a cold junction lowers RS on a positive TRS");
+    }
+
+    #[test]
+    fn tikf_temperature_changes_invalidate_current_cache_and_disable_nonpositive_knees() {
+        for (coefficient, expected) in [(0.01, 2e-3), (-0.005, 5e-4), (-0.01, 0.0), (-0.02, 0.0)] {
+            let params = [
+                ("IS", 1e-14),
+                ("IKF", 1e-3),
+                ("TIKF", coefficient),
+                ("TNOM", 27.0),
+                ("EG", 0.0),
+                ("XTI", 0.0),
+                ("CJO", 0.0),
+                ("TT", 0.0),
+            ]
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect();
+            let mut diode = Diode::spice_defaults("d".into(), 1, 0).with_model_params(&params);
+            diode.set_xyce_compatibility(true);
+            diode.update(&[0.7]);
+            let before = diode.candidate_current_and_conductance(0.7);
+            diode.set_temperature_xyce_7(400.15, 310.15);
+            assert!((diode.forward_knee_current - expected).abs() < 1e-17);
+            assert!(!diode.candidate_eval_valid);
+            assert_ne!(diode.candidate_current_and_conductance(0.7), before);
+            assert_eq!(
+                diode.candidate_current_and_conductance(0.7),
+                diode.current_and_conductance(0.7)
+            );
+            if expected == 0.0 {
+                assert!(diode.has_monotone_c1_conduction());
+            }
+        }
     }
 
     /// The tunneling saturation current rides its own XTITUN exponent and KEG

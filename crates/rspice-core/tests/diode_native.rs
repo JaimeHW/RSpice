@@ -446,3 +446,76 @@ fn diode_xyce_injection_keeps_recombination_and_sidewall_outside_the_knee() {
         }
     }
 }
+
+#[test]
+fn diode_xyce_tikf_controls_temperature_resolved_current_and_charge() {
+    // Xyce 7.10 updateTemperature resolves tIKF before evaluating F/G/TT.
+    for (temperature, nominal, coefficient) in [
+        (127.0, 27.0, 0.01),
+        (-23.0, 27.0, 0.01),
+        (27.0, 27.0, 0.01),
+        (127.0, 27.0, -0.005),
+        (127.0, 27.0, -0.01),
+        (127.0, 27.0, -0.02),
+        (77.0, 77.0, 0.02),
+        (127.0, 77.0, 0.02),
+        (127.0, 27.0, 0.0),
+    ] {
+        let vt = (temperature + 273.15) * 1.380_622_6e-23 / 1.602_191_8e-19;
+        let ratio: f64 = (temperature + 273.15) / (nominal + 273.15);
+        let saturation = 1e-14 * ((ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln()).exp();
+        let voltage = vt * (1.0_f64 + 1e-3 / saturation).ln();
+        let knee = 1e-3 * (1.0 + coefficient * (temperature - nominal));
+        for gmin in [0.0, 1e-3] {
+            let normal = saturation * (voltage / vt).exp_m1() + gmin * voltage;
+            let normal_g = saturation * (voltage / vt).exp() / vt + gmin;
+            let (expected_i, expected_g) = if knee > 0.0 {
+                let ratio = normal / knee;
+                (
+                    normal / (1.0 + ratio).sqrt(),
+                    normal_g * (1.0 + 0.5 * ratio) / (1.0 + ratio).powf(1.5),
+                )
+            } else {
+                (normal, normal_g)
+            };
+            for route in 0..3 {
+                let (instance, global) = match route {
+                    0 => (format!("TEMP={temperature}"), String::new()),
+                    1 => (format!("DTEMP={}", temperature - 27.0), String::new()),
+                    _ => (String::new(), format!(".temp {temperature}")),
+                };
+                let deck = Netlist::parse_with_options(
+                    &format!("Xyce diode temperature knee\nV1 n 0 DC {voltage:.17e} AC 1\nD1 n 0 dm {instance}\n.model dm D(IS=1e-14 N=1 EG=1.11 XTI=3 IKF=1m TIKF={coefficient} CJO=0 TT=2n TNOM={nominal})\n{global}\n.options GMIN={gmin} RELTOL=1e-8 ABSTOL=1e-15 VNTOL=1e-12\n.end\n"),
+                    rspice_core::netlist::NetlistParseOptions {
+                        expression_dialect: rspice_core::config::ExpressionDialect::Xyce,
+                        ..Default::default()
+                    },
+                ).unwrap();
+                assert!(deck.diagnostics.is_empty());
+                let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+                config.convergence_config.gmin_target = 0.0;
+                let engine = Engine::new(config);
+                let point = engine.run_dc_op(&deck).unwrap();
+                for current in [
+                    -branch_current(&point, "V1"),
+                    point.try_dc_observable_named("I(D1)").unwrap(),
+                ] {
+                    assert!(
+                        (current - expected_i).abs() < 1e-14 + 1e-9 * expected_i.abs(),
+                        "route={route} TEMP={temperature} TNOM={nominal} TIKF={coefficient} GMIN={gmin}: {current:e} vs {expected_i:e}"
+                    );
+                }
+                let ac = engine.run_ac(&deck, &[1e7]).unwrap();
+                let index = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case("v1"))
+                    .unwrap();
+                let actual = -ac[0].currents[index];
+                let expected_b = std::f64::consts::TAU * 1e7 * 2e-9 * expected_g;
+                assert!((actual.re - expected_g).abs() < 1e-13 + 1e-9 * expected_g.abs());
+                assert!((actual.im - expected_b).abs() < 1e-13 + 1e-9 * expected_b.abs());
+            }
+        }
+    }
+}
