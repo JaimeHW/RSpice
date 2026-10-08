@@ -65,6 +65,7 @@ pub struct AnalyzedDigital {
 /// A scalar parameter retained exactly outside the analog numeric ABI.
 #[derive(Debug, Clone)]
 pub struct AnalyzedPackedParameter {
+    pub is_given: bool,
     pub name: SmolStr,
     pub aliases: Vec<SmolStr>,
     pub is_public: bool,

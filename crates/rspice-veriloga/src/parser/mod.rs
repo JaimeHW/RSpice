@@ -1323,6 +1323,7 @@ impl<'a> Parser<'a> {
             };
 
             decls.push(ParameterDecl {
+                is_given: false,
                 param_type,
                 type_is_explicit,
                 signedness,

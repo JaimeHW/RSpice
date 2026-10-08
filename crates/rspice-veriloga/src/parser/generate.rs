@@ -571,6 +571,7 @@ impl Unroller<'_> {
             .retain(|parameter| !self.bindings.contains_key(&parameter.name));
         for (name, value) in &self.bindings {
             environment.definitions.push(ParameterDecl {
+                is_given: false,
                 param_type: ParamType::Integer,
                 type_is_explicit: true,
                 signedness: None,
@@ -595,6 +596,7 @@ impl Unroller<'_> {
     /// A genvar initializer/update has the assignment context of an integer.
     fn genvar_assignment(&self, expression: &Expression, context: &str) -> Result<i64, ParseError> {
         let declaration = ParameterDecl {
+            is_given: false,
             param_type: ParamType::Integer,
             type_is_explicit: true,
             signedness: None,

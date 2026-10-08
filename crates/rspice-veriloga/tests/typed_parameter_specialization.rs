@@ -9,6 +9,76 @@ fn compiler() -> VerilogACompiler {
         ..Default::default()
     })
 }
+
+#[test]
+fn packed_parameter_given_preserves_explicit_defaults_and_aliases() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module packed_given(p);
+ inout p; electrical p;
+ parameter [128:0] CODE=129'h1_00000000_00000000_00000000_000000xz;
+ aliasparam PATTERN=CODE;
+ parameter real GAIN=1;
+ parameter real LEVEL=$param_given(PATTERN)?10.0:1.0;
+ localparam real EXTRA=$param_given(CODE)?2.0:0.0;
+ analog I(p)<+LEVEL+EXTRA+3*$param_given(PATTERN)+$param_given(GAIN);
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    for supplied in [None, Some("CODE"), Some("PATTERN")] {
+        let report = if let Some(name) = supplied {
+            compiler
+                .specialize_mixed_runtime_typed(
+                    &original.canonical_ir,
+                    &[(
+                        name,
+                        ScalarParameterValue::Bits {
+                            value: bits("129'h1_00000000_00000000_00000000_000000xz"),
+                            signed: false,
+                        },
+                    )],
+                    &NoPipelineControl,
+                )
+                .unwrap()
+        } else {
+            original.clone()
+        };
+        let encoded = serde_json::to_vec(&report).unwrap();
+        let decoded: rspice_veriloga::RuntimeCompileReport =
+            serde_json::from_slice(&encoded).unwrap();
+        decoded.validate_integrity().unwrap();
+        assert_eq!(
+            decoded.abi.elaboration_parameters[0].is_given,
+            supplied.is_some()
+        );
+        assert_eq!(decoded.abi.elaboration_parameters[0].aliases, ["PATTERN"]);
+        let mut damaged = decoded.clone();
+        damaged.canonical_ir.digital.elaboration_parameters[0].is_given = supplied.is_none();
+        assert!(damaged.validate_integrity().is_err());
+        if supplied.is_some() {
+            assert_ne!(
+                decoded.canonical_ir.digital.content_identity,
+                original.canonical_ir.digital.content_identity
+            );
+        }
+        let mut device = rspice_veriloga::device::VerilogADevice::try_new_with_canonical_ir(
+            "given",
+            decoded.model,
+            &decoded.canonical_ir,
+            &[1],
+        )
+        .unwrap();
+        let expected = if supplied.is_some() { 15.0 } else { 1.0 };
+        assert_eq!(device.try_evaluate().unwrap()[0], expected, "{supplied:?}");
+        assert!(device.try_set_parameter("GAIN", 2.0).unwrap());
+        assert_eq!(device.try_evaluate().unwrap()[0], expected + 1.0);
+    }
+}
+
 fn bits(raw: &str) -> FourStateValue {
     FourStateValue::from_literal(&rspice_veriloga::four_state::decode(raw).unwrap())
 }
@@ -1290,6 +1360,15 @@ endmodule
     let restored: rspice_veriloga::RuntimeCompileReport = serde_json::from_slice(&encoded).unwrap();
     restored.validate_integrity().unwrap();
     assert_eq!(current(&restored, &mut make_device(&restored)), 3359.0);
+    assert_eq!(restored.canonical_ir.digital.elaboration_parameters.len(), 2);
+    assert!(
+        restored
+            .canonical_ir
+            .digital
+            .elaboration_parameters
+            .iter()
+            .all(|value| value.is_given)
+    );
     assert!(!restored.canonical_ir.digital.has_executable_content());
 }
 

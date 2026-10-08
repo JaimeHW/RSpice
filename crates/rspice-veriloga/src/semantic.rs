@@ -1596,6 +1596,7 @@ impl SemanticAnalyzer {
             }
 
             analyzed.parameters.push(AnalyzedParameter {
+                is_given: param.is_given,
                 name: param.name.clone(),
                 is_public: true,
                 scope,
@@ -1842,6 +1843,7 @@ impl SemanticAnalyzer {
                     .digital
                     .elaboration_parameters
                     .push(AnalyzedPackedParameter {
+                        is_given: false,
                         name: localparam.name.clone(),
                         aliases: Vec::new(),
                         is_public: false,
@@ -6401,6 +6403,9 @@ impl SemanticAnalyzer {
                     identifier.name
                 )));
             };
+            if let Some(given) = self.exact_parameter_constants.is_given(canonical) {
+                return Ok(Some(real(if given { 1.0 } else { 0.0 })));
+            }
             // Keep this as a name query. A same-spelled local variable is not
             // an operand, and both executable backends receive the same key.
             return Ok(Some(Expression::SystemFunction(SystemFunction {

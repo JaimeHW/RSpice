@@ -474,6 +474,7 @@ impl DigitalElaborator<'_> {
         let mut source = source.clone();
         for (index, value) in values {
             source.parameters[index].default = Some(value);
+            source.parameters[index].is_given = true;
         }
         validate_parameter_ranges(&source, path)?;
         crate::parser::expand_specialized_generates(&mut source)?;

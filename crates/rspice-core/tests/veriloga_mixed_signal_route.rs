@@ -3311,3 +3311,61 @@ endmodule
         }
     }
 }
+
+#[test]
+fn packed_given_distinguishes_omitted_and_explicit_defaults_in_loaded_instances() {
+    for mixed in [false, true] {
+        let process = if mixed { "initial #1 q=1;" } else { "" };
+        let model = ModelFile::new(
+            "packed_given",
+            &format!(
+                r#"
+`timescale 1ns/1ps
+module packed_given(p);
+ inout p; electrical p;
+ parameter [7:0] CODE=4;
+ aliasparam PATTERN=CODE;
+ parameter real GAIN=1;
+ parameter real LEVEL=$param_given(PATTERN)?10.0:1.0;
+ integer q=0;
+ {process}
+ analog I(p)<+(V(p)-LEVEL-2*$param_given(CODE)-3*$param_given(GAIN)-q)/1000;
+endmodule
+"#
+            ),
+        );
+        let deck = format!(
+            "* packed supplied state\n\
+             Xa pa packed_given\n\
+             Xb pb packed_given CODE=4\n\
+             Xc pc packed_given pattern=4\n\
+             Xd pd packed_given CODE=4 GAIN=1\n\
+             Xe pe packed_given GAIN=1\n\
+             Ra pa 0 1k\nRb pb 0 1k\nRc pc 0 1k\nRd pd 0 1k\nRe pe 0 1k\n\
+             .va \"{}\" packed_given module=packed_given\n.end\n",
+            model.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.1e-9);
+        for (node, before) in [
+            ("pa", 0.5),
+            ("pb", 6.0),
+            ("pc", 6.0),
+            ("pd", 7.5),
+            ("pe", 2.0),
+        ] {
+            for (&time, &value) in result.time.iter().zip(waveform(&result, node).iter()) {
+                let expected = if mixed && time > 1.1e-9 {
+                    before + 0.5
+                } else if time < 0.9e-9 || !mixed {
+                    before
+                } else {
+                    continue;
+                };
+                assert!(
+                    (value - expected).abs() < 1e-8,
+                    "mixed={mixed}: {node} at {time}: {value}"
+                );
+            }
+        }
+    }
+}

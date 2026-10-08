@@ -67,6 +67,7 @@ pub(crate) fn retain_packed_parameters(
                 .digital
                 .elaboration_parameters
                 .push(AnalyzedPackedParameter {
+                    is_given: parameter.is_given,
                     name: parameter.name,
                     aliases: Vec::new(),
                     is_public: parameter.is_public,

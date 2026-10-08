@@ -9,11 +9,18 @@ use super::*;
 /// Numeric parameters stay symbolic even if their current defaults are known.
 #[derive(Default)]
 pub(super) struct ExactParameterConstants {
-    names: HashSet<SmolStr>,
+    given: HashMap<SmolStr, bool>,
     source: DigitalConstants,
 }
 
 impl ExactParameterConstants {
+    /// Exact parameters have no mutable runtime slot. Their supplied state is
+    /// fixed by source elaboration just like their value. Numeric queries must
+    /// remain symbolic and continue to use the device's given-state ABI.
+    pub(super) fn is_given(&self, name: &str) -> Option<bool> {
+        self.given.get(name).copied()
+    }
+
     pub(super) fn source(&self) -> &DigitalConstants {
         &self.source
     }
@@ -45,7 +52,8 @@ impl ExactParameterConstants {
     fn retain_literal(&mut self, declaration: &ParameterDecl, value: &Expression) {
         let mut declaration = declaration.clone();
         declaration.default = Some(value.clone());
-        self.names.insert(declaration.name.clone());
+        self.given
+            .insert(declaration.name.clone(), declaration.is_given);
         self.source.definitions.push(declaration);
     }
 }
@@ -68,7 +76,7 @@ impl SemanticAnalyzer {
                 _ => None,
             };
             if let Some(name) = name {
-                closed &= self.exact_parameter_constants.names.contains(name);
+                closed &= self.exact_parameter_constants.given.contains_key(name);
             }
         });
         closed
@@ -83,7 +91,7 @@ impl SemanticAnalyzer {
         let mut packed = false;
         flow_probes::visit_expression(expression, &mut |value| {
             packed |= matches!(value, Expression::Identifier(value)
-                if self.exact_parameter_constants.names.contains(&value.name))
+                if self.exact_parameter_constants.given.contains_key(&value.name))
                 || matches!(value, Expression::Digital(_) | Expression::ArrayLiteral(_))
                 || matches!(value, Expression::Number(value) if value.raw.contains('\''));
         });
@@ -198,7 +206,7 @@ impl SemanticAnalyzer {
         let mut packed = false;
         flow_probes::visit_expression(operand, &mut |value| {
             packed |= matches!(value, Expression::Identifier(value)
-                if self.exact_parameter_constants.names.contains(&value.name))
+                if self.exact_parameter_constants.given.contains_key(&value.name))
                 || matches!(value, Expression::Digital(_) | Expression::ArrayLiteral(_))
                 || matches!(value, Expression::Number(value) if value.raw.contains('\''));
         });

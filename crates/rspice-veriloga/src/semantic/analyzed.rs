@@ -299,6 +299,8 @@ pub struct AnalyzedPort {
 /// Analyzed parameter
 #[derive(Debug, Clone)]
 pub struct AnalyzedParameter {
+    /// Supplied in the elaborated source; retained for exact parameters.
+    pub is_given: bool,
     pub name: SmolStr,
     /// Whether this parameter belongs to the selected module's public ABI.
     /// Parameters of flattened child instances remain runtime slots so their

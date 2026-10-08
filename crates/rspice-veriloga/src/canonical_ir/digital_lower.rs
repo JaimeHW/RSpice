@@ -611,6 +611,7 @@ fn lower_with_analog_variables(
                         }
                     };
                     super::digital::DigitalElaborationParameter {
+                        is_given: parameter.is_given,
                         name: qualify(&parameter.name),
                         aliases: parameter.aliases.iter().map(qualify).collect(),
                         is_public: path.is_empty() && parameter.is_public,

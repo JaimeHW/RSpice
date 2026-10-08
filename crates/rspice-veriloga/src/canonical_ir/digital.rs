@@ -732,6 +732,8 @@ pub struct DigitalDriver {
 /// Changing it requires source specialization, including all shapes and processes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalElaborationParameter {
+    /// Explicit source assignment, including an assignment equal to the default.
+    pub is_given: bool,
     pub name: SmolStr,
     pub aliases: Vec<SmolStr>,
     pub is_public: bool,

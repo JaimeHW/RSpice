@@ -453,6 +453,8 @@ pub enum PortDirection {
 /// Parameter declaration
 #[derive(Debug, Clone)]
 pub struct ParameterDecl {
+    /// Explicit assignment in this elaborated source scope, independent of value.
+    pub is_given: bool,
     /// Parameter type (real, integer, string)
     pub param_type: ParamType,
     /// Whether the source wrote an explicit parameter type. Scalar parameters

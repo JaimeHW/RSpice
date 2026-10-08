@@ -1089,6 +1089,7 @@ impl VerilogACompiler {
                 }
                 parameter.default =
                     Some(value.assigned_expression(parameter, selected.time_scale)?);
+                parameter.is_given = true;
             }
             parser::expand_specialized_generates(selected)?;
         }

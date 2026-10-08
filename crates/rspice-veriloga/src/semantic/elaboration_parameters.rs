@@ -119,6 +119,7 @@ impl HierarchyElaborator<'_> {
         let mut source = source.clone();
         for (index, value) in values {
             source.parameters[index].default = Some(value);
+            source.parameters[index].is_given = true;
         }
         crate::parser::expand_specialized_generates(&mut source)?;
         let mut analyzer = SemanticAnalyzer::new();
