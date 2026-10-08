@@ -373,3 +373,168 @@ fn validate_effects(
         }
     }
 }
+
+/// Constant substitution for a loop counter is sound only while its body
+/// cannot write that storage. Include output/inout copy-outs in expression
+/// operands and respect declarations that shadow the counter inside a block.
+pub(super) fn may_write_variable(
+    statement: &AnalogStatement,
+    name: &SmolStr,
+    functions: &HashMap<SmolStr, FunctionDef>,
+) -> bool {
+    let expression =
+        |expression: &Expression| expression_may_write_variable(expression, name, functions);
+    let assignment = |assignment: &AssignmentStmt| {
+        assignment.target_name() == name
+            || expression(&assignment.value)
+            || matches!(&assignment.target, LValue::ArrayAccess { index, .. } if expression(index))
+    };
+    let body = |statement: &AnalogStatement| may_write_variable(statement, name, functions);
+    match statement {
+        AnalogStatement::Assignment(assign) => assignment(assign),
+        AnalogStatement::Block(block) => {
+            if block
+                .variables
+                .iter()
+                .flat_map(|decl| &decl.items)
+                .any(|item| item.name == *name)
+            {
+                return false;
+            }
+            block
+                .variables
+                .iter()
+                .flat_map(|decl| &decl.items)
+                .filter_map(|item| item.init.as_ref())
+                .any(expression)
+                || block.statements.iter().any(body)
+        }
+        AnalogStatement::Conditional(branch) => {
+            expression(&branch.condition)
+                || body(&branch.then_branch)
+                || branch.else_branch.as_deref().is_some_and(body)
+        }
+        AnalogStatement::Case(case) => {
+            expression(&case.expr)
+                || case
+                    .items
+                    .iter()
+                    .any(|item| item.matches.iter().any(expression) || body(&item.statement))
+                || case.default.as_deref().is_some_and(body)
+        }
+        AnalogStatement::For(loop_) => {
+            loop_.var == *name
+                || expression(&loop_.init)
+                || expression(&loop_.condition)
+                || assignment(&loop_.update)
+                || body(&loop_.body)
+        }
+        AnalogStatement::While(loop_) => expression(&loop_.condition) || body(&loop_.body),
+        AnalogStatement::Repeat(loop_) => expression(&loop_.count) || body(&loop_.body),
+        AnalogStatement::Contribution(contribution) => expression(&contribution.value),
+        AnalogStatement::IndirectContribution(contribution) => {
+            expression(&contribution.lhs) || expression(&contribution.rhs)
+        }
+        AnalogStatement::EventControl(control) => {
+            event_may_write_variable(&control.event, name, functions) || body(&control.statement)
+        }
+        AnalogStatement::Call(call) => call.args.iter().any(expression),
+        AnalogStatement::Disable(_) | AnalogStatement::Null(_) => false,
+    }
+}
+
+fn expression_may_write_variable(
+    expression: &Expression,
+    name: &SmolStr,
+    functions: &HashMap<SmolStr, FunctionDef>,
+) -> bool {
+    let mut writes = false;
+    flow_probes::visit_expression(expression, &mut |expression| match expression {
+        Expression::Call(call) => {
+            if let Some(function) = functions.get(&call.name) {
+                writes |= function
+                    .params
+                    .iter()
+                    .zip(&call.args)
+                    .any(|(formal, actual)| {
+                        formal.direction != ParamDirection::Input
+                            && matches!(actual, Expression::Identifier(id) if id.name == *name)
+                    });
+            }
+        }
+        Expression::SystemFunction(call) => {
+            // System functions may update caller storage (for example a random
+            // seed). Runtime lowering is safe if such an argument is present.
+            writes |= call
+                .args
+                .iter()
+                .any(|arg| matches!(arg, Expression::Identifier(id) if id.name == *name));
+        }
+        _ => {}
+    });
+    writes
+}
+
+fn event_may_write_variable(
+    event: &EventExpr,
+    name: &SmolStr,
+    functions: &HashMap<SmolStr, FunctionDef>,
+) -> bool {
+    let mut expressions = Vec::new();
+    match event {
+        EventExpr::InitialStep { .. } | EventExpr::FinalStep { .. } => return false,
+        EventExpr::Posedge { signal, .. } | EventExpr::Negedge { signal, .. } => {
+            expressions.push(signal)
+        }
+        EventExpr::Cross {
+            signal,
+            direction,
+            time_tol,
+            expr_tol,
+            enable,
+            ..
+        } => {
+            expressions.push(signal);
+            expressions.extend(
+                [direction, time_tol, expr_tol, enable]
+                    .into_iter()
+                    .filter_map(|e| e.as_deref()),
+            );
+        }
+        EventExpr::Above {
+            signal,
+            time_tol,
+            expr_tol,
+            enable,
+            ..
+        } => {
+            expressions.push(signal);
+            expressions.extend(
+                [time_tol, expr_tol, enable]
+                    .into_iter()
+                    .filter_map(|e| e.as_deref()),
+            );
+        }
+        EventExpr::Timer {
+            start,
+            period,
+            time_tol,
+            enable,
+            ..
+        } => {
+            expressions.push(start);
+            expressions.extend(
+                [period, time_tol, enable]
+                    .into_iter()
+                    .filter_map(|e| e.as_deref()),
+            );
+        }
+        EventExpr::Or { left, right, .. } => {
+            return event_may_write_variable(left, name, functions)
+                || event_may_write_variable(right, name, functions);
+        }
+    }
+    expressions
+        .into_iter()
+        .any(|expression| expression_may_write_variable(expression, name, functions))
+}

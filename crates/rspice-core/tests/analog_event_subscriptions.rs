@@ -355,16 +355,29 @@ module invalid(a);
 endmodule
 "#
         );
-        let error =
-            MixedSignalHost::compile(&source, None, "invalid", &[1], SchedulerLimits::default())
-                .err()
-                .expect("an unclocked analog variable is not an event-driven source");
-        assert!(
-            error
-                .to_string()
-                .contains("not assigned exclusively in analog event statements"),
-            "{error}"
-        );
+        for source in [
+            source.clone(),
+            source.replace(
+                "assign held_value=sample;",
+                "reg tick=0; real observed; always @* observed=sample+(tick ? 1 : 0);",
+            ),
+        ] {
+            let error = MixedSignalHost::compile(
+                &source,
+                None,
+                "invalid",
+                &[1],
+                SchedulerLimits::default(),
+            )
+            .err()
+            .expect("an unclocked analog variable is not an event-driven source");
+            assert!(
+                error
+                    .to_string()
+                    .contains("not assigned exclusively in analog event statements"),
+                "{error}"
+            );
+        }
     }
 }
 
@@ -424,5 +437,157 @@ endmodule
                 "{name}@{time}: {actual} != {expected}"
             );
         }
+    }
+}
+
+#[test]
+fn implicit_sensitivity_subscribes_to_analog_assignments_with_lexical_scope() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module implicit_events(a,p,q,h);
+ input a; electrical a;
+ inout p,q,h; electrical p,q,h;
+ real sample=0.25, analog_shadow, observed=0, captured=0;
+ integer seen=0, shadow_value=0;
+ reg tick=0;
+ initial begin #100 tick=1; #300 tick=0; end
+ initial captured=repeat(2) @* sample;
+ always @* begin observed=sample; if (sample>0.5) seen=seen+1; end
+ always @* begin : lexical
+   real analog_shadow;
+   analog_shadow=tick ? 2 : 4;
+   shadow_value=analog_shadow;
+ end
+ analog begin
+   analog_shadow=V(a);
+   @(timer(125p,250p)) sample=0.75;
+   I(p)<+(V(p)-(observed+10*seen))/1000;
+   I(q)<+(V(q)-shadow_value)/1000;
+   I(h)<+(V(h)-captured)/1000;
+ end
+endmodule
+module wrapper(a,p,q,h);
+ input a; electrical a;
+ inout p,q,h; electrical p,q,h;
+ implicit_events child(a,p,q,h);
+endmodule
+"#,
+    );
+    for module in ["implicit_events", "wrapper"] {
+        let deck = Netlist::parse(&format!(
+            "* implicit analog subscriptions\nV1 a 0 1\nX1 a p q h {module}\nRp p 0 1k\nRq q 0 1k\nRh h 0 1k\n.va \"{}\" {module} module={module}\n.end\n",source.path()
+        )).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.8e-9, 70e-12).unwrap();
+        for (time, p, q, h) in [
+            (0.2e-9, 5.375, 1.0, 0.0),
+            (0.45e-9, 10.375, 2.0, 0.125),
+            (0.7e-9, 15.375, 2.0, 0.125),
+        ] {
+            for (node, expected) in [("p", p), ("q", q), ("h", h)] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{module} {node}@{time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn loop_body_and_function_writes_control_the_actual_iteration_count() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module changing_loops(p,q);
+ inout p,q; electrical p,q;
+ integer k=0,j=0,k_seen=0,j_seen=0;
+ real unused;
+ analog function real advance;
+   inout value; integer value;
+   begin value=value+1; advance=0; end
+ endfunction
+ analog @(timer(125p,500p)) begin
+   for(k=0;k<5;k=k+1) k=k+1;
+   for(j=0;j<5;j=j+1) unused=advance(j);
+ end
+ always @(k) k_seen=k_seen+1;
+ always @(j) j_seen=j_seen+1;
+ analog I(p)<+(V(p)-(100*k+k_seen))/1000;
+ analog I(q)<+(V(q)-(100*j+j_seen))/1000;
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* loop body mutates its counter\nX1 p q changing_loops\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" changing_loops\n.end\n",source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 0.8e-9, 70e-12).unwrap();
+    for (time, expected) in [(0.2e-9, 303.5), (0.7e-9, 307.0)] {
+        for node in ["p", "q"] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn event_wait_rearming_preserves_nonblocking_and_continuous_feedback() {
+    for feedback in [
+        "reg q=0; initial #100 q=1; always @(q) q<=~q;",
+        "reg seed=0; wire q; initial #100 seed=1; assign q=seed ? ((q===1'b1) ? 1'b0 : 1'b1) : 1'b0;",
+    ] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ps/1ps
+module feedback(p);
+ inout p; electrical p;
+ {feedback}
+ analog I(p)<+V(p)/1000;
+endmodule
+"#
+        ));
+        let deck = Netlist::parse(&format!(
+            "* genuine event feedback\nX1 p feedback\nRp p 0 1k\n.va \"{}\" feedback\n.end\n",
+            source.path()
+        ))
+        .unwrap();
+        let error = Engine::default()
+            .run_tran(&deck, 0.2e-9, 70e-12)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("did not settle"),
+            "{feedback}: {error}"
+        );
+    }
+}
+
+#[test]
+fn constant_loop_event_sites_keep_independent_subscriptions() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module event_sites(p);
+ inout p; electrical p;
+ integer k, sample=0, seen=0;
+ analog for(k=0;k<2;k=k+1) @(timer((k+1)*125p)) sample=sample+1;
+ always @(sample) seen=seen+1;
+ analog I(p)<+(V(p)-(sample+10*seen))/1000;
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!(
+        "* independent unrolled event sites\nX1 p event_sites\nRp p 0 1k\n.va \"{}\" event_sites\n.end\n",source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 0.4e-9, 40e-12).unwrap();
+    for (time, expected) in [(0.18e-9, 5.5), (0.3e-9, 11.0)] {
+        let actual = voltage(&result, "p", time);
+        assert!(
+            (actual - expected).abs() < 1e-7,
+            "p@{time}: {actual} != {expected}"
+        );
     }
 }

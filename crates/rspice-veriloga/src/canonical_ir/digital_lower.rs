@@ -3202,7 +3202,15 @@ impl ProcessLowerer<'_> {
         if let Some(local) = self.lookup_local(name) {
             return self.local_read_dependencies(local);
         }
-        if let Some(array) = self.digital_array(name) {
+        self.module_read_dependencies(name)
+    }
+
+    fn module_read_dependencies(&self, name: &str) -> Vec<DigitalSignalId> {
+        if let Some(array) = self
+            .index
+            .get(name)
+            .and_then(|signal| self.arrays.get(signal))
+        {
             array
                 .cell_range()
                 .expect("validated array shape")

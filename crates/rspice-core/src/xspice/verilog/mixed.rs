@@ -6756,7 +6756,7 @@ module mixed_osc(p, n, seed, q);
   inout p, n; electrical p, n;
   input seed; output q; wire seed; reg q;
   always @(q or seed) begin
-    case (q) 1'b1: q = 1'b0; default: q = 1'b1; endcase
+    case (q) 1'b1: q <= 1'b0; default: q <= 1'b1; endcase
   end
   analog I(p, n) <+ V(p, n);
 endmodule

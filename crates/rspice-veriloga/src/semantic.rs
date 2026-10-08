@@ -3630,7 +3630,12 @@ impl SemanticAnalyzer {
             false
         };
 
-        if static_unrollable {
+        let body_writes_counter = function_effects::may_write_variable(
+            &for_stmt.body,
+            &for_stmt.var,
+            &self.user_functions,
+        );
+        if static_unrollable && !body_writes_counter {
             let init_value = init_value.expect("checked");
             let iteration_count = self.static_for_iteration_count(for_stmt, init_value)?;
             if iteration_count <= Self::MAX_STATIC_UNROLL_ITERATIONS

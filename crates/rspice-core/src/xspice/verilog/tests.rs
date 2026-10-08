@@ -726,8 +726,8 @@ fn a_vector_column_of_the_wrong_width_is_refused() {
 // Oscillation
 // ===========================================================================
 
-/// A combinational loop with no delay in it, which IEEE 1364-2005 leaves as a
-/// hang. `~x` is `x`, so an inverter feeding itself settles in four-state
+/// An NBA feedback loop with no delay, which IEEE 1364-2005 leaves as a
+/// hang. The update occurs after the process re-arms its event control. `~x` is `x`, so an inverter feeding itself settles in four-state
 /// logic; a `case` that maps every ambiguous value to a defined one does not,
 /// and is the smallest thing that really oscillates.
 const OSCILLATOR: &str = "\
@@ -738,8 +738,8 @@ module osc(seed, y);
   reg y;
   always @(y or seed) begin
     case (y)
-      1'b1: y = 1'b0;
-      default: y = 1'b1;
+      1'b1: y <= 1'b0;
+      default: y <= 1'b1;
     endcase
   end
 endmodule

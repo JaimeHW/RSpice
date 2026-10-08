@@ -5,28 +5,72 @@
 use crate::ast::*;
 
 pub(super) fn visit_roots(body: &DigitalStatement, visit: &mut impl FnMut(&Expression)) {
+    walk_roots(body, &Default::default(), false, &mut |expr, _| visit(expr));
+}
+
+/// Read roots contributing to an implicit event control, with lexical shadows
+/// resolved before the caller selects module storage. Declarations initialize
+/// once, and explicit nested sensitivity terms do not extend the outer read set.
+pub(super) fn visit_sensitivity_roots(
+    body: &DigitalStatement,
+    locals: &std::collections::BTreeSet<smol_str::SmolStr>,
+    visit: &mut impl FnMut(&Expression, &std::collections::BTreeSet<smol_str::SmolStr>),
+) {
+    walk_roots(body, locals, true, visit);
+}
+
+fn walk_roots(
+    body: &DigitalStatement,
+    initial_locals: &std::collections::BTreeSet<smol_str::SmolStr>,
+    sensitivity_only: bool,
+    visit: &mut impl FnMut(&Expression, &std::collections::BTreeSet<smol_str::SmolStr>),
+) {
     enum Work<'a> {
         Statement(&'a DigitalStatement),
         Assignment(&'a DigitalAssign),
         Target(&'a DigitalLValue),
-        Timing(&'a TimingControl),
+        Timing(&'a TimingControl, bool),
+        Leave(Vec<smol_str::SmolStr>),
     }
+    let mut locals = initial_locals.clone();
     let mut pending = vec![Work::Statement(body)];
     while let Some(work) = pending.pop() {
         match work {
+            Work::Leave(names) => {
+                for name in names {
+                    locals.remove(&name);
+                }
+            }
             Work::Statement(statement) => match statement {
                 DigitalStatement::Block(block) => {
-                    for declaration in &block.variables {
-                        for item in &declaration.items {
-                            if let Some(value) = &item.init {
-                                visit(value);
+                    let names = block
+                        .variables
+                        .iter()
+                        .flat_map(|decl| &decl.items)
+                        .map(|item| item.name.clone())
+                        .chain(
+                            block
+                                .digital_variables
+                                .iter()
+                                .flat_map(|decl| &decl.items)
+                                .map(|item| item.name.clone()),
+                        )
+                        .filter(|name| locals.insert(name.clone()))
+                        .collect();
+                    pending.push(Work::Leave(names));
+                    if !sensitivity_only {
+                        for declaration in &block.variables {
+                            for item in &declaration.items {
+                                if let Some(value) = &item.init {
+                                    visit(value, &locals);
+                                }
                             }
                         }
-                    }
-                    for declaration in &block.digital_variables {
-                        for item in &declaration.items {
-                            if let Some(value) = &item.init {
-                                visit(value);
+                        for declaration in &block.digital_variables {
+                            for item in &declaration.items {
+                                if let Some(value) = &item.init {
+                                    visit(value, &locals);
+                                }
                             }
                         }
                     }
@@ -37,41 +81,41 @@ pub(super) fn visit_roots(body: &DigitalStatement, visit: &mut impl FnMut(&Expre
                     pending.push(Work::Assignment(assign))
                 }
                 DigitalStatement::Conditional(conditional) => {
-                    visit(&conditional.condition);
+                    visit(&conditional.condition, &locals);
                     if let Some(branch) = &conditional.else_branch {
                         pending.push(Work::Statement(branch));
                     }
                     pending.push(Work::Statement(&conditional.then_branch));
                 }
                 DigitalStatement::Case(case) => {
-                    visit(&case.selector);
+                    visit(&case.selector, &locals);
                     if let Some(branch) = &case.default {
                         pending.push(Work::Statement(branch));
                     }
                     for item in &case.items {
                         for label in &item.labels {
-                            visit(label);
+                            visit(label, &locals);
                         }
                         pending.push(Work::Statement(&item.statement));
                     }
                 }
                 DigitalStatement::For(loop_) => {
-                    visit(&loop_.condition);
+                    visit(&loop_.condition, &locals);
                     pending.push(Work::Assignment(&loop_.init));
                     pending.push(Work::Assignment(&loop_.update));
                     pending.push(Work::Statement(&loop_.body));
                 }
                 DigitalStatement::While(loop_) => {
-                    visit(&loop_.condition);
+                    visit(&loop_.condition, &locals);
                     pending.push(Work::Statement(&loop_.body));
                 }
                 DigitalStatement::Repeat(loop_) => {
-                    visit(&loop_.count);
+                    visit(&loop_.count, &locals);
                     pending.push(Work::Statement(&loop_.body));
                 }
                 DigitalStatement::Forever(loop_) => pending.push(Work::Statement(&loop_.body)),
                 DigitalStatement::Timing(timing) => {
-                    pending.push(Work::Timing(&timing.control));
+                    pending.push(Work::Timing(&timing.control, !sensitivity_only));
                     if let Some(statement) = &timing.statement {
                         pending.push(Work::Statement(statement));
                     }
@@ -79,37 +123,37 @@ pub(super) fn visit_roots(body: &DigitalStatement, visit: &mut impl FnMut(&Expre
                 DigitalStatement::Null(_) => {}
             },
             Work::Assignment(assign) => {
-                visit(&assign.value);
+                visit(&assign.value, &locals);
                 pending.push(Work::Target(&assign.target));
                 if let Some(timing) = &assign.timing {
-                    pending.push(Work::Timing(timing));
+                    pending.push(Work::Timing(timing, true));
                 }
             }
             Work::Target(target) => match target {
                 DigitalLValue::Identifier { .. } => {}
                 DigitalLValue::ArraySelect(select) => {
                     for child in select.children() {
-                        visit(child);
+                        visit(child, &locals);
                     }
                 }
-                DigitalLValue::BitSelect { index, .. } => visit(index),
+                DigitalLValue::BitSelect { index, .. } => visit(index, &locals),
                 DigitalLValue::PartSelect { msb, lsb, .. } => {
-                    visit(msb);
-                    visit(lsb);
+                    visit(msb, &locals);
+                    visit(lsb, &locals);
                 }
                 DigitalLValue::Concat { elements, .. } => {
                     pending.extend(elements.iter().map(Work::Target))
                 }
             },
-            Work::Timing(timing) => match timing {
-                TimingControl::Delay(delay) => visit(&delay.value),
+            Work::Timing(timing, read_repeat) => match timing {
+                TimingControl::Delay(delay) => visit(&delay.value, &locals),
                 TimingControl::Event(event) => {
-                    if let Some(count) = &event.repeat {
-                        visit(count);
+                    if read_repeat && let Some(count) = &event.repeat {
+                        visit(count, &locals);
                     }
-                    if let Sensitivity::Explicit(terms) = &event.sensitivity {
+                    if !sensitivity_only && let Sensitivity::Explicit(terms) = &event.sensitivity {
                         for term in terms {
-                            visit(&term.signal);
+                            visit(&term.signal, &locals);
                         }
                     }
                 }

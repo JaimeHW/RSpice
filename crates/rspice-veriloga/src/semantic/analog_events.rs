@@ -194,6 +194,21 @@ impl Lower {
             }
         });
     }
+    fn implicit_reads(&mut self, statement: &DigitalStatement, locals: &BTreeSet<SmolStr>) {
+        super::digital_walk::visit_sensitivity_roots(
+            statement,
+            locals,
+            &mut |expression, locals| {
+                super::flow_probes::visit_expression(expression, &mut |expression| {
+                    if let Expression::Identifier(id) = expression {
+                        if self.candidates.contains(&id.name) && !locals.contains(&id.name) {
+                            self.variable_binding(&id.name, id.span);
+                        }
+                    }
+                });
+            },
+        );
+    }
     fn timing(
         &mut self,
         timing: &mut TimingControl,
@@ -259,6 +274,30 @@ impl Lower {
         locals: &BTreeSet<SmolStr>,
     ) -> CompileResult<()> {
         match statement {
+            DigitalStatement::Timing(timing) if implicit(&timing.control) => {
+                if let Some(body) = &timing.statement {
+                    self.implicit_reads(body, locals);
+                }
+            }
+            DigitalStatement::BlockingAssign(assign)
+            | DigitalStatement::NonblockingAssign(assign)
+                if assign.timing.as_ref().is_some_and(implicit) =>
+            {
+                self.implicit_reads(statement, locals)
+            }
+            DigitalStatement::For(loop_) => {
+                for assign in [&loop_.init, &loop_.update] {
+                    if assign.timing.as_ref().is_some_and(implicit) {
+                        self.implicit_reads(
+                            &DigitalStatement::BlockingAssign((**assign).clone()),
+                            locals,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+        match statement {
             DigitalStatement::Block(block) => {
                 let mut locals = locals.clone();
                 locals.extend(
@@ -320,6 +359,10 @@ impl Lower {
         }
         Ok(())
     }
+}
+
+fn implicit(timing: &TimingControl) -> bool {
+    matches!(timing, TimingControl::Event(event) if matches!(event.sensitivity, Sensitivity::Implicit))
 }
 
 fn event_function(expression: &Expression) -> CompileResult<Option<EventExpr>> {

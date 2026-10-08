@@ -276,25 +276,11 @@ impl ProcessLowerer<'_> {
             .flat_map(|local| self.local_read_dependencies(local))
             // Resolve module bindings directly: an outer shadow must not replace
             // a read already resolved in a nested lexical region.
-            .chain(module.into_iter().flat_map(|name| {
-                self.index
-                    .get(name.as_str())
+            .chain(
+                module
                     .into_iter()
-                    .flat_map(|signal| {
-                        self.arrays.get(signal).map_or_else(
-                            || vec![*signal],
-                            |array| {
-                                array
-                                    .cell_range()
-                                    .into_iter()
-                                    .flatten()
-                                    .map(DigitalSignalId::new)
-                                    .collect()
-                            },
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            }))
+                    .flat_map(|name| self.module_read_dependencies(&name)),
+            )
             .collect()
     }
 }
