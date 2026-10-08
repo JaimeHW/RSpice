@@ -82,6 +82,11 @@ pub enum ComplexColumnError {
     DuplicateComponent(String),
     MissingReal(String),
     MissingImaginary(String),
+    InconsistentUnits {
+        name: String,
+        real: Option<String>,
+        imag: Option<String>,
+    },
 }
 
 impl std::fmt::Display for ComplexColumnError {
@@ -94,6 +99,12 @@ impl std::fmt::Display for ComplexColumnError {
             Self::MissingImaginary(name) => write!(
                 f,
                 "complex signal '{name}' is missing its imaginary component"
+            ),
+            Self::InconsistentUnits { name, real, imag } => write!(
+                f,
+                "complex signal '{name}' has inconsistent component units: real {}, imaginary {}",
+                real.as_deref().unwrap_or("(unstated)"),
+                imag.as_deref().unwrap_or("(unstated)")
             ),
         }
     }
@@ -168,7 +179,11 @@ pub fn exact_unsigned_integer(identity: &str, value: u64) -> Result<f64, ExactIn
     }
 }
 
-type ComplexComponentColumns = (Option<Vec<f64>>, Option<Vec<f64>>);
+type NumericComponentColumn = (Vec<f64>, Option<String>);
+type ComplexComponentColumns = (
+    Option<NumericComponentColumn>,
+    Option<NumericComponentColumn>,
+);
 
 fn complex_component(name: &str) -> Option<(String, bool)> {
     for (suffix, imag) in [
@@ -201,13 +216,26 @@ fn complex_component(name: &str) -> Option<(String, bool)> {
 pub fn combine_real_imag_columns(
     columns: Vec<(String, Vec<f64>)>,
 ) -> Result<Vec<DecodedNumericSignal>, ComplexColumnError> {
+    combine_real_imag_columns_with_units(
+        columns
+            .into_iter()
+            .map(|(name, values)| (name, values, None)),
+    )
+}
+
+/// Preserve each plain column's literal unit. Complex components must declare
+/// the same unit (or both leave it unstated); silently choosing either unit
+/// would change the meaning of the other component's samples.
+pub(crate) fn combine_real_imag_columns_with_units(
+    columns: impl IntoIterator<Item = (String, Vec<f64>, Option<String>)>,
+) -> Result<Vec<DecodedNumericSignal>, ComplexColumnError> {
     let mut plain = Vec::new();
     let mut complex: BTreeMap<String, ComplexComponentColumns> = BTreeMap::new();
-    for (name, values) in columns {
+    for (name, values, unit) in columns {
         if let Some((base, imag)) = complex_component(&name) {
             let entry = complex.entry(base.clone()).or_default();
             let slot = if imag { &mut entry.1 } else { &mut entry.0 };
-            if slot.replace(values).is_some() {
+            if slot.replace((values, unit)).is_some() {
                 return Err(ComplexColumnError::DuplicateComponent(name));
             }
         } else {
@@ -215,16 +243,27 @@ pub fn combine_real_imag_columns(
                 name,
                 real: values,
                 imag: None,
-                unit: None,
+                unit,
             });
         }
     }
     for (name, (real, imag)) in complex {
+        let (real, real_unit) =
+            real.ok_or_else(|| ComplexColumnError::MissingReal(name.clone()))?;
+        let (imag, imag_unit) =
+            imag.ok_or_else(|| ComplexColumnError::MissingImaginary(name.clone()))?;
+        if real_unit != imag_unit {
+            return Err(ComplexColumnError::InconsistentUnits {
+                name,
+                real: real_unit,
+                imag: imag_unit,
+            });
+        }
         plain.push(DecodedNumericSignal {
-            name: name.clone(),
-            real: real.ok_or_else(|| ComplexColumnError::MissingReal(name.clone()))?,
-            imag: Some(imag.ok_or_else(|| ComplexColumnError::MissingImaginary(name.clone()))?),
-            unit: None,
+            name,
+            real,
+            imag: Some(imag),
+            unit: real_unit,
         });
     }
     Ok(plain)

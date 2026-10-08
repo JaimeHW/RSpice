@@ -6,6 +6,9 @@ use std::sync::Arc;
 
 use crate::table::EngineeringTableSource;
 
+#[cfg(test)]
+mod unit_tests;
+
 #[derive(Debug)]
 pub enum ParquetTableError {
     Arrow(arrow_schema::ArrowError),
@@ -75,6 +78,11 @@ pub enum ColumnarReadFailure {
     },
     InexactInteger(crate::numeric::ExactIntegerError),
     MissingCoordinate(String),
+    InvalidUnit {
+        column: String,
+        unit: String,
+    },
+    Coordinate(String),
     AnalysisDomain(crate::UnsupportedWaveformDomain),
     ComplexColumns(crate::numeric::ComplexColumnError),
 }
@@ -118,6 +126,10 @@ impl std::fmt::Display for ColumnarReadFailure {
             Self::MissingCoordinate(name) => {
                 write!(f, "schema metadata names missing coordinate '{name}'")
             }
+            Self::InvalidUnit { column, unit } => {
+                write!(f, "column '{column}' has invalid unit metadata {unit:?}")
+            }
+            Self::Coordinate(detail) => f.write_str(detail),
             Self::AnalysisDomain(source) => source.fmt(f),
             Self::ComplexColumns(source) => source.fmt(f),
         }
@@ -232,7 +244,7 @@ pub struct ColumnarLimits {
 
 struct DecodedColumnarTable {
     metadata: HashMap<String, String>,
-    columns: Vec<(String, Vec<f64>)>,
+    columns: Vec<(String, Vec<f64>, Option<String>)>,
 }
 
 fn adapter_error(format: &str, reason: ColumnarReadFailure) -> ColumnarReadError {
@@ -274,14 +286,14 @@ fn finish_columnar_table(
         .unwrap_or_else(|| columns[0].0.clone());
     let coordinate_index = columns
         .iter()
-        .position(|(name, _)| name == &coordinate_name)
+        .position(|(name, _, _)| name == &coordinate_name)
         .ok_or_else(|| {
             adapter_error(
                 format,
                 ColumnarReadFailure::MissingCoordinate(coordinate_name.clone()),
             )
         })?;
-    let coordinate = columns.remove(coordinate_index).1;
+    let (_, coordinate, coordinate_unit) = columns.remove(coordinate_index);
     let domain = metadata
         .get("rspice.analysis")
         .map(|value| {
@@ -291,15 +303,19 @@ fn finish_columnar_table(
         })
         .transpose()?
         .unwrap_or_else(|| crate::WaveformDomain::from_coordinate_name(&coordinate_name));
-    let signals = crate::numeric::combine_real_imag_columns(columns)
+    let signals = crate::numeric::combine_real_imag_columns_with_units(columns)
         .map_err(|error| adapter_error(format, ColumnarReadFailure::ComplexColumns(error)))?;
-    Ok(crate::numeric::DecodedNumericDataset {
-        coordinate_unit: None,
+    let mut dataset = crate::numeric::DecodedNumericDataset {
+        coordinate_unit,
         domain,
         coordinate_name,
         coordinate,
         signals,
-    })
+    };
+    dataset
+        .normalize_coordinate_unit()
+        .map_err(|error| adapter_error(format, ColumnarReadFailure::Coordinate(error)))?;
+    Ok(dataset)
 }
 
 fn decode_arrow_ipc_table(
@@ -395,7 +411,7 @@ struct ColumnarAccumulator<'a> {
     limits: ColumnarLimits,
     schema: Option<arrow_schema::SchemaRef>,
     rows: usize,
-    columns: Vec<(String, Vec<f64>)>,
+    columns: Vec<(String, Vec<f64>, Option<String>)>,
     coordinate_name: Option<String>,
 }
 
@@ -427,8 +443,29 @@ impl<'a> ColumnarAccumulator<'a> {
             self.columns = schema
                 .fields()
                 .iter()
-                .map(|field| (field.name().clone(), Vec::new()))
-                .collect();
+                .map(|field| {
+                    // Older table exports use an empty string for an unstated
+                    // unit. Keep that spelling compatible without treating it
+                    // as an assertion that the column is dimensionless.
+                    let unit = field
+                        .metadata()
+                        .get("unit")
+                        .filter(|unit| !unit.is_empty())
+                        .cloned();
+                    if let Some(unit) = &unit
+                        && (unit.trim().is_empty() || unit.chars().any(char::is_control))
+                    {
+                        return Err(adapter_error(
+                            self.format,
+                            ColumnarReadFailure::InvalidUnit {
+                                column: field.name().clone(),
+                                unit: unit.clone(),
+                            },
+                        ));
+                    }
+                    Ok((field.name().clone(), Vec::new(), unit))
+                })
+                .collect::<Result<_, _>>()?;
             self.schema = Some(schema.clone());
         }
         if self.schema.as_ref() != Some(&schema) {
@@ -463,7 +500,7 @@ impl<'a> ColumnarAccumulator<'a> {
             ));
         }
         for (index, array) in batch.columns().iter().enumerate() {
-            let (name, column) = &mut self.columns[index];
+            let (name, column, _) = &mut self.columns[index];
             let is_coordinate = self
                 .coordinate_name
                 .as_ref()
@@ -958,10 +995,10 @@ mod tests {
                 ("rspice.analysis".into(), " AC ".into()),
             ]),
             columns: vec![
-                ("gain_IM".into(), vec![-0.0]),
-                ("x".into(), vec![3.0]),
-                ("gain_RE".into(), vec![1.0]),
-                ("plain".into(), vec![4.0]),
+                ("gain_IM".into(), vec![-0.0], None),
+                ("x".into(), vec![3.0], None),
+                ("gain_RE".into(), vec![1.0], None),
+                ("plain".into(), vec![4.0], None),
             ],
         };
         let decoded = finish_columnar_table("arrow_ipc", table()).unwrap();
