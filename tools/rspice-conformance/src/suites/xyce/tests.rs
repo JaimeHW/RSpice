@@ -470,6 +470,7 @@ fn hierarchical_team_resistance_probes_resolve_xyce_colon_aliases() {
 
     let transient = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 1.0],
         step_sizes: vec![0.0; 2],
         voltages: Vec::new(),
@@ -4613,6 +4614,7 @@ fn uic_initial_current_source_probe_reports_zero() {
     .expect("deck parses");
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 1.0e-3],
         step_sizes: vec![0.0; 2],
         voltages: vec![vec![0.0, -10.0]],
@@ -4648,6 +4650,7 @@ fn transient_resistor_power_probe_uses_recorded_branch_current() {
     .expect("deck parses");
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 1.0e-3],
         step_sizes: vec![0.0; 2],
         voltages: vec![vec![1.0, 3.0]],
@@ -4683,6 +4686,7 @@ fn transient_resistor_instance_parameters_work_in_direct_expression_and_stateful
     .expect("resistor instance-parameter deck parses");
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 1.0e-3],
         step_sizes: vec![0.0; 2],
         voltages: vec![vec![0.0, 0.0]],
@@ -4731,6 +4735,7 @@ fn transient_voltage_source_power_probe_uses_recorded_branch_current() {
     .expect("deck parses");
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 1.0e-3],
         step_sizes: vec![0.0; 2],
         voltages: vec![vec![2.0, 3.0]],
@@ -4980,6 +4985,7 @@ fn transient_comparison_accounts_for_printed_time_quantization() {
     let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![2.99999996, 3.0],
         step_sizes: vec![0.0; 2],
         voltages: vec![vec![1.7336955179822779e-3, 0.0]],
@@ -5022,6 +5028,7 @@ fn transient_comparison_uses_local_samples_inside_prn_time_neighborhood() {
     let time = 2.96913385e-6;
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![time, 2.96913387e-6],
         step_sizes: vec![0.0; 2],
         voltages: vec![vec![3.984804681e-4, 0.0]],
@@ -5355,6 +5362,7 @@ fn transient_output_interval_corridor_uses_adjacent_reference_rows() {
     };
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 0.25, 0.5, 0.75, 1.0],
         step_sizes: vec![0.0; 5],
         voltages: vec![vec![1.0, 0.75, 0.5, 0.25, 0.0]],
@@ -14943,6 +14951,7 @@ fn reference_grid_diagnostic_does_not_replace_the_native_integrated_rms_contract
     };
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 0.5, 1.0],
         step_sizes: vec![0.0; 3],
         voltages: vec![vec![0.0, 1.0, 0.0]],
@@ -22999,6 +23008,7 @@ R1 1 0 1
     .expect("global temperature probe fixture parses");
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0],
         step_sizes: vec![0.0],
         voltages: vec![vec![1.0]],
@@ -23145,6 +23155,7 @@ fn transient_lead_currents_use_typed_traces_expressions_and_hierarchy_aliases() 
     .expect("transient lead-current fixture parses");
     let result = TransientResult {
         current_impulses: None,
+        voltage_impulses: None,
         time: vec![0.0, 1.0],
         step_sizes: vec![0.0, 1.0],
         voltages: Vec::new(),

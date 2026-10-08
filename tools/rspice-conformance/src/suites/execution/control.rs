@@ -380,7 +380,10 @@ impl ExecutionRunner {
                                 ControlAnalysisResult::Noise(_)
                                 | ControlAnalysisResult::AcTable(_)
                                 | ControlAnalysisResult::NoiseTable(_)
-                                | ControlAnalysisResult::DcSweep(_) => {
+                                | ControlAnalysisResult::DcSweep(_)
+                                | ControlAnalysisResult::TransferFunction(_)
+                                | ControlAnalysisResult::PoleZero(_)
+                                | ControlAnalysisResult::Sensitivity(_) => {
                                     // Version 1 contracts admit OP, AC and TRAN
                                     // only. New engine analyses need their own
                                     // oracle contract before they can qualify.

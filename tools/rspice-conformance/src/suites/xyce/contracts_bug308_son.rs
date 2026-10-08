@@ -1337,6 +1337,7 @@ mod tests {
         );
         let shared_wrong_result = TransientResult {
             current_impulses: None,
+            voltage_impulses: None,
             time: vec![0.0, 1.0e-9],
             step_sizes: vec![0.0, 1.0e-9],
             voltages: vec![
