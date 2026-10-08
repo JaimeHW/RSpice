@@ -116,7 +116,7 @@ fn invalid_analysis_numeric_fields_fail_before_direct_or_control_publication() {
     std::fs::write(&valid, "projected frequency\nV1 in 0 1 AC 1\nR1 in 0 1k\n.control\nac lin 3 1 {real(2+1j)}\n.endc\n.end\n").unwrap();
     passed(&run(&valid, &dir.join("projected.csv"), &[]));
     let csv = std::fs::read_to_string(dir.join("projected.ac-001.csv")).unwrap();
-    let frequencies = csv
+    let frequencies = common::delimited_data_text(&csv, b',')
         .lines()
         .skip(1)
         .map(|line| line.split(',').next().unwrap().parse::<f64>().unwrap())
@@ -146,7 +146,7 @@ fn linear_unit_step_sweeps_publish_every_frequency_through_all_routes() {
             dir.join(format!("{route}.ac-001.csv"))
         };
         let csv = std::fs::read_to_string(published).unwrap();
-        let frequencies = csv
+        let frequencies = common::delimited_data_text(&csv, b',')
             .lines()
             .skip(1)
             .map(|line| line.split(',').next().unwrap().parse::<f64>().unwrap())
@@ -202,7 +202,7 @@ fn original_bjt_control_loop_publishes_six_datasets_and_its_plot() {
         let data =
             std::fs::read_to_string(dir.join(format!("result.ac-{ordinal:03}.csv"))).unwrap();
         assert!(data.starts_with("frequency,"));
-        assert_eq!(data.lines().count(), 58);
+        assert_eq!(common::delimited_data_text(&data, b',').lines().count(), 58);
     }
     let plot = document(&dir.join("result.control-001.json"));
     assert_eq!(plot["schema"], "rspice.control-presentation");

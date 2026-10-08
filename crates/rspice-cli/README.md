@@ -714,17 +714,26 @@ Every compared signal must have at least one pair of defined samples. Linear
 interpolation requires two defined endpoints; held event signals retain their
 undefined state until the first recorded value.
 
-JSON, HDF5 and RSpice RAW table conversion preserve explicitly declared signal
+JSON, HDF5, RSpice RAW and CSV/TSV table conversion preserve explicitly declared signal
 and coordinate units. Comparison requires matching units, including the case
 of SI prefixes (`mV` differs from `MV`); it does not perform unit conversion.
 Legacy files without unit metadata use their declared quantity types when
-available. CSV/TSV retain numbers, column names and real/complex representation,
-but do not carry units or quantity types. Adjacent `Re(x)`/`Im(x)` headers
+available. CSV/TSV retain numbers, column names and real/complex representation.
+Adjacent `Re(x)`/`Im(x)` headers
 normally identify one complex signal. When those names instead identify
 independent real signals, exports append a final `# RSpiceTableLayoutV1` record
 with one `real`, `complex_real` or `complex_imag` cell per signal column.
-RSpice validates and consumes this record; other numeric-table readers should
-skip it. Ordinary exports retain their plain header-and-samples layout.
+When units, quantities, analysis labels or titles cannot be inferred from the
+headers, exports instead append `# RSpiceTableLayoutV2`. Its second cell contains
+CSV-escaped JSON with `analysis`, `title` and `columns`; each physical column
+declares its exact `name`, `kind`, `quantity` and `unit`, coordinate first.
+Remaining cells are empty. This metadata preserves literal unit symbols and
+sample values, including absent units, without interpreting unit-like signal names.
+RSpice validates the metadata against the headers and requires a unique final
+record. Other numeric-table readers should skip these metadata records. Exports
+whose metadata is fully inferable retain their plain header-and-samples layout.
+Application imports normalize declared coordinate units to their canonical units;
+explicit signal units and values retain their original numeric representation.
 RAW tables preserve exact plot titles, scale names, signal names and variable
 types in versioned RSpice metadata when those labels need escaping. Their header
 declarations escape whitespace, control characters and literal percent signs so
@@ -757,7 +766,7 @@ declarations are rejected instead of falling back to inferred quantities.
 `--interpolate` resamples analog signals linearly and holds digital and real
 event signals until their next transition. A digital quantity type or `logic`
 unit on either input preserves those transitions when the other input has no
-type metadata, as with CSV/TSV. It never extrapolates or resamples between
+type metadata, as with legacy unannotated CSV/TSV. It never extrapolates or resamples between
 differently declared coordinate units.
 
 RAW and HDF5 inputs are validated in full before any section is selected.

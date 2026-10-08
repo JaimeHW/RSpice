@@ -51,7 +51,7 @@ fn resistor_instances_preserve_seeded_samples_across_construction_paths() {
                 ".OP",
             );
             for (name, expected) in ["I(V1)", "I(V2)"].into_iter().zip(&expected) {
-                let current = csv
+                let current = common::delimited_data_text(&csv, b',')
                     .lines()
                     .filter_map(|line| line.split_once(','))
                     .find(|(signal, _)| signal.eq_ignore_ascii_case(name))
@@ -76,7 +76,7 @@ fn thermal_transient_retains_the_resolved_nominal_temperature() {
          .MODEL rm R(LEVEL=2 TNOM={TNOM+20} RESISTIVITY={TNOM} HEATCAPACITY=1)",
         ".TRAN 1m 3m",
     );
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(&csv, b',').lines();
     let headers: Vec<_> = lines.next().unwrap().split(',').collect();
     let column = |signal: &str| {
         headers

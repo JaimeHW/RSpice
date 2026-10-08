@@ -69,7 +69,7 @@ fn step_sweep_exports_table() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("step sweep table must be written");
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(&csv, b',').lines();
     let header = lines.next().expect("header");
     assert!(
         header.to_uppercase().starts_with("RVAL"),
@@ -275,7 +275,7 @@ fn transfer_function_exports_scalars() {
     let csv = std::fs::read_to_string(out.with_file_name("tf.tf.csv").as_path())
         .or_else(|_| std::fs::read_to_string(&out))
         .expect("tf table");
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(&csv, b',').lines();
     let header = lines.next().expect("header").to_lowercase();
     let row = lines.next().expect("data row");
     let col = |name: &str| -> f64 {
@@ -327,7 +327,7 @@ fn pole_zero_exports_complex_singularities() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("pz table");
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(&csv, b',').lines();
     let header = lines.next().expect("header");
     assert!(
         header.contains("Re(pole(1))"),
@@ -513,7 +513,10 @@ fn sensitivity_exports_table() {
     let csv = std::fs::read_to_string(&out).expect("sensitivity table");
     assert!(csv.contains("dV(out)/d(rtop)"), "column header: {csv}");
     // dV(out)/dRtop = -V*R2/(R1+R2)^2 = -1.25e-3 V/ohm
-    let row = csv.lines().nth(1).expect("data row");
+    let row = common::delimited_data_text(&csv, b',')
+        .lines()
+        .nth(1)
+        .expect("data row");
     let value: f64 = row.split(',').nth(1).unwrap().parse().unwrap();
     assert!(
         (value + 1.25e-3).abs() < 5e-5,
@@ -554,7 +557,7 @@ fn netlist_dc_sensitivity_supports_branch_current_and_device_filter() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("branch-current sensitivity table");
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(&csv, b',').lines();
     let header = lines.next().expect("header");
     assert_eq!(
         header, "point,dI(V1)/d(R1)",
@@ -603,10 +606,13 @@ fn netlist_dc_sensitivity_parameter_filter_selects_only_matching_device() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("filtered voltage sensitivity table");
-    let header = csv.lines().next().expect("header");
+    let header = common::delimited_data_text(&csv, b',')
+        .lines()
+        .next()
+        .expect("header");
     assert_eq!(header, "point,dV(OUT)/d(R2)", "unexpected filters: {csv}");
     assert!(!header.contains("R1"), "R1 must be excluded: {csv}");
-    let derivative: f64 = csv
+    let derivative: f64 = common::delimited_data_text(&csv, b',')
         .lines()
         .nth(1)
         .and_then(|row| row.split(',').nth(1))

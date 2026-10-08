@@ -30,20 +30,20 @@ fn explicit_temperature_wins_in_scalar_control_corner_and_parameter_sweep_runs()
             }
             let text = std::fs::read_to_string(path).unwrap();
             if name == "implicit" {
-                let index = text
+                let index = common::delimited_data_text(&text, b',')
                     .lines()
                     .next()
                     .unwrap()
                     .split(',')
                     .position(|col| col.eq_ignore_ascii_case("V(OUT)"))
                     .unwrap();
-                for row in text.lines().skip(1) {
+                for row in common::delimited_data_text(&text, b',').lines().skip(1) {
                     let value: f64 = row.split(',').nth(index).unwrap().parse().unwrap();
                     assert!((value - 0.5).abs() < 1e-9, "{name}: {text}");
                     checked += 1;
                 }
             } else {
-                let row = text
+                let row = common::delimited_data_text(&text, b',')
                     .lines()
                     .find(|row| row.to_ascii_lowercase().starts_with("v(out),"))
                     .unwrap();

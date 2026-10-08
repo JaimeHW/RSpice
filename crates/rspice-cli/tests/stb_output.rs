@@ -460,6 +460,7 @@ E3 b2 0 n2 0 1\nR3 b2 n3 1k\nC3 n3 0 159.154943091895n\n\
             String::from_utf8_lossy(&output.stderr)
         );
         let content = std::fs::read_to_string(output_path).unwrap();
+        let content = common::delimited_data_text(&content, b',');
         let start = content
             .lines()
             .position(|line| line.contains("loopgain_mag_db"))

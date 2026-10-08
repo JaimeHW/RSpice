@@ -155,7 +155,9 @@ fn save_flag_normalizes_nodes_with_the_decks_ground_policy() {
     );
     let csv = std::fs::read_to_string(&out).expect("ground-normalized CSV");
     assert!(
-        csv.lines().any(|line| line.starts_with("\"V(out,0)\",")),
+        common::delimited_data_text(&csv, b',')
+            .lines()
+            .any(|line| line.starts_with("\"V(out,0)\",")),
         "ground alias must be canonicalized in effective save selection: {csv}"
     );
 
@@ -191,7 +193,7 @@ fn save_flag_exports_differential_voltage_waveform() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("csv");
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(&csv, b',').lines();
     assert_eq!(
         lines.next(),
         Some("time,\"V(in,out)\""),
@@ -247,10 +249,12 @@ fn save_flag_quotes_differential_voltage_in_dc_csv() {
 
     let csv = std::fs::read_to_string(&out).expect("csv");
     assert!(
-        csv.lines().any(|line| line.starts_with("\"V(in,out)\",")),
+        common::delimited_data_text(&csv, b',')
+            .lines()
+            .any(|line| line.starts_with("\"V(in,out)\",")),
         "DC OP CSV must quote differential probe names as one field: {csv}"
     );
-    let value = csv
+    let value = common::delimited_data_text(&csv, b',')
         .lines()
         .skip(1)
         .find_map(|line| line.rsplit_once(',').map(|(_, value)| value))

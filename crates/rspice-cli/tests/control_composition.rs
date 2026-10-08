@@ -39,14 +39,14 @@ fn documents(dir: &Path, prefix: &str) -> Vec<Value> {
 }
 fn last_csv(path: &Path, column: &str) -> (f64, f64) {
     let content = std::fs::read_to_string(path).unwrap();
-    let index = content
+    let index = common::delimited_data_text(&content, b',')
         .lines()
         .next()
         .unwrap()
         .split(',')
         .position(|name| name.eq_ignore_ascii_case(column))
         .unwrap();
-    let row = content
+    let row = common::delimited_data_text(&content, b',')
         .lines()
         .last()
         .unwrap()

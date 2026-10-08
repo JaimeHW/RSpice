@@ -49,7 +49,7 @@ fn assert_success(output: &Output) {
 }
 
 fn csv_column(csv: &str, name: &str) -> Vec<f64> {
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(csv, b',').lines();
     let header = lines.next().expect("CSV header");
     let index = header
         .split(',')
@@ -67,7 +67,8 @@ fn csv_column(csv: &str, name: &str) -> Vec<f64> {
 }
 
 fn op_csv_value(csv: &str, name: &str) -> f64 {
-    csv.lines()
+    common::delimited_data_text(csv, b',')
+        .lines()
         .skip(1)
         .find_map(|line| {
             let (signal, value) = line.split_once(',')?;
@@ -96,7 +97,7 @@ fn op_save_device_parameter_exports_the_qualified_authored_signal() {
         "unexpected ID: {current}"
     );
     assert_eq!(
-        csv.lines().count(),
+        common::delimited_data_text(&csv, b',').lines().count(),
         2,
         "SAVE must restrict OP output: {csv}"
     );

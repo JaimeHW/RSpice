@@ -19,7 +19,8 @@
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::publish;
 use crate::commands::run_signals::{ComplexSignal, ScalarSignal};
-use rspice_formats::delimited::layout::{ColumnKind, RECORD_MARKER, complex_pair_name};
+use rspice_formats::delimited::layout::{ColumnKind, RECORD_MARKER, infer_layout};
+use rspice_formats::delimited::metadata::{ColumnMetadata, TableMetadata};
 use std::io::Write;
 use std::path::Path;
 
@@ -684,6 +685,38 @@ impl ExportTable {
         delimiter: char,
     ) -> Result<(), CliError> {
         let io_err = |e: std::io::Error| CliError::output_error(path, e);
+        let metadata = self.delimited_metadata();
+        let headers = metadata
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>();
+        let record = metadata
+            .record(&headers)
+            .map_err(|error| io_err(std::io::Error::new(std::io::ErrorKind::InvalidData, error)))?;
+        let quantities_need_metadata = self.scale_unit.is_some()
+            || self.analysis != "converted"
+            || self.plot_name != "Converted Data"
+            || self.scale_type != super::waveform_io::scale_var_type(&self.scale_name)
+            || self.columns.iter().any(|column| {
+                column.unit.is_some()
+                    || column.var_type != super::waveform_io::signal_var_type(&column.name)
+            });
+        let kinds = metadata.columns[1..]
+            .iter()
+            .map(|column| column.kind)
+            .collect::<Vec<_>>();
+        let record = if quantities_need_metadata {
+            Some(record)
+        } else if kinds != infer_layout(&headers[1..]) {
+            Some(
+                std::iter::once(RECORD_MARKER.to_owned())
+                    .chain(kinds.into_iter().map(|kind| kind.as_str().to_owned()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
 
         write!(writer, "{}", delimited_cell(&self.scale_name, delimiter)).map_err(io_err)?;
         for column in &self.columns {
@@ -738,40 +771,50 @@ impl ExportTable {
             writeln!(writer).map_err(io_err)?;
         }
 
-        // Adjacent real signals can legitimately be named Re(x) and Im(x).
-        // Declare their representation only when legacy inference would merge
-        // them, keeping ordinary numeric CSV/TSV exports unchanged.
-        let needs_layout = self.columns.windows(2).any(|pair| {
-            pair.iter().all(|column| {
-                matches!(
-                    column.data,
-                    ColumnData::Real(_) | ColumnData::NullableReal(_)
-                )
-            }) && complex_pair_name(&pair[0].name, &pair[1].name).is_some()
-        });
-        if needs_layout {
-            write!(writer, "{RECORD_MARKER}").map_err(io_err)?;
-            for column in &self.columns {
-                match column.data {
-                    ColumnData::Real(_) | ColumnData::NullableReal(_) => {
-                        write!(writer, "{delimiter}{}", ColumnKind::Real.as_str())
-                            .map_err(io_err)?;
-                    }
-                    ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
-                        write!(
-                            writer,
-                            "{delimiter}{}{delimiter}{}",
-                            ColumnKind::ComplexReal.as_str(),
-                            ColumnKind::ComplexImag.as_str()
-                        )
-                        .map_err(io_err)?;
-                    }
+        if let Some(record) = record {
+            for (index, field) in record.iter().enumerate() {
+                if index > 0 {
+                    write!(writer, "{delimiter}").map_err(io_err)?;
                 }
+                write!(writer, "{}", delimited_cell(field, delimiter)).map_err(io_err)?;
             }
             writeln!(writer).map_err(io_err)?;
         }
 
         Ok(())
+    }
+
+    fn delimited_metadata(&self) -> TableMetadata {
+        let mut columns = vec![ColumnMetadata {
+            name: self.scale_name.clone(),
+            kind: ColumnKind::Real,
+            quantity: Some(self.scale_type.clone()),
+            unit: self.scale_unit.clone(),
+        }];
+        for column in &self.columns {
+            let mut add = |name, kind| {
+                columns.push(ColumnMetadata {
+                    name,
+                    kind,
+                    quantity: Some(column.var_type.clone()),
+                    unit: column.unit.clone(),
+                })
+            };
+            match column.data {
+                ColumnData::Real(_) | ColumnData::NullableReal(_) => {
+                    add(column.name.clone(), ColumnKind::Real)
+                }
+                ColumnData::Complex { .. } | ColumnData::NullableComplex(_) => {
+                    add(format!("Re({})", column.name), ColumnKind::ComplexReal);
+                    add(format!("Im({})", column.name), ColumnKind::ComplexImag);
+                }
+            }
+        }
+        TableMetadata {
+            analysis: Some(self.analysis.clone()),
+            title: Some(self.plot_name.clone()),
+            columns,
+        }
     }
 
     fn write_json<W: Write + ?Sized>(&self, writer: &mut W, path: &Path) -> Result<(), CliError> {
@@ -919,10 +962,26 @@ mod tests {
                 .expect("publish CSV table");
 
             let expected = format!("time,V(out)\n{:.17e},{:.17e}\n", 0.0_f64, 1.25_f64);
-            assert_eq!(
-                std::fs::read(&destination).expect("read published CSV"),
-                expected.as_bytes()
-            );
+            let actual = std::fs::read_to_string(&destination).expect("read published CSV");
+            assert!(actual.starts_with(&expected));
+            let records = csv::ReaderBuilder::new()
+                .has_headers(false)
+                .from_reader(actual.as_bytes())
+                .records()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(records.len(), 3);
+            let layout = rspice_formats::delimited::metadata::parse_table_record(
+                &records[0].iter().collect::<Vec<_>>(),
+                &records[2].iter().collect::<Vec<_>>(),
+            )
+            .unwrap()
+            .unwrap();
+            let metadata = layout.metadata.unwrap();
+            assert_eq!(metadata.analysis.as_deref(), Some("tran"));
+            assert_eq!(metadata.title.as_deref(), Some("Transient Analysis"));
+            assert_eq!(metadata.columns[1].quantity.as_deref(), Some("voltage"));
+            assert!(metadata.columns.iter().all(|column| column.unit.is_none()));
             assert!(
                 rspice_output::stale_artifacts(&destination)
                     .expect("inspect CSV staging artifacts")

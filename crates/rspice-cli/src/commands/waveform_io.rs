@@ -11,7 +11,8 @@ use crate::cli::OutputFormat;
 use crate::cli::{CliError, InputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::hdf5::read_hdf5_sections_with_limits;
-use rspice_formats::delimited::layout::{ColumnKind, infer_layout, parse_layout_record};
+use rspice_formats::delimited::layout::{ColumnKind, infer_layout};
+use rspice_formats::delimited::metadata::parse_table_record;
 use std::path::Path;
 
 mod delimited;
@@ -706,7 +707,7 @@ fn parse_delimited(
         }
         let fields = parse_delimited_record(line, separator)
             .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
-        layout = parse_layout_record(&header[1..], &fields)
+        layout = parse_table_record(&header, &fields)
             .map_err(|message| conversion_error(path, format!("row {line_number}: {message}")))?;
         if layout.is_some() {
             continue;
@@ -760,9 +761,13 @@ fn parse_delimited(
     }
 
     let mut columns: Vec<ExportColumn> = Vec::with_capacity(series.len());
-    let layout = layout.unwrap_or_else(|| infer_layout(&header[1..]));
-    let mut iter = header.iter().skip(1).zip(series).zip(layout);
-    while let Some(((name, values), kind)) = iter.next() {
+    let (kinds, metadata) = layout.map_or_else(
+        || (infer_layout(&header[1..]), None),
+        |layout| (layout.kinds, layout.metadata),
+    );
+    let mut iter = header.iter().enumerate().skip(1).zip(series).zip(kinds);
+    while let Some((((index, name), values), kind)) = iter.next() {
+        let column_metadata = metadata.as_ref().map(|metadata| &metadata.columns[index]);
         if kind == ColumnKind::ComplexReal {
             // Both inferred and explicit layouts validate adjacent pair names.
             let inner = complex_part_name(name, "Re(")
@@ -771,8 +776,10 @@ fn parse_delimited(
                 .next()
                 .ok_or_else(|| conversion_error(path, "missing complex imaginary column"))?;
             columns.push(ExportColumn {
-                unit: None,
-                var_type: signal_var_type(&inner),
+                unit: column_metadata.and_then(|column| column.unit.clone()),
+                var_type: column_metadata
+                    .and_then(|column| column.quantity.clone())
+                    .unwrap_or_else(|| signal_var_type(&inner)),
                 name: inner,
                 data: ColumnData::optional_complex_parts(values, imag)
                     .map_err(|error| conversion_error(path, format!("signal '{name}': {error}")))?,
@@ -780,19 +787,32 @@ fn parse_delimited(
             continue;
         }
         columns.push(ExportColumn {
-            unit: None,
+            unit: column_metadata.and_then(|column| column.unit.clone()),
             name: name.clone(),
-            var_type: signal_var_type(name),
+            var_type: column_metadata
+                .and_then(|column| column.quantity.clone())
+                .unwrap_or_else(|| signal_var_type(name)),
             data: ColumnData::optional_real(values),
         });
     }
 
     let scale_name = header[0].clone();
     Ok(ExportTable {
-        scale_unit: None,
-        analysis: "converted".to_string(),
-        plot_name: "Converted Data".to_string(),
-        scale_type: scale_var_type(&scale_name),
+        scale_unit: metadata
+            .as_ref()
+            .and_then(|metadata| metadata.columns[0].unit.clone()),
+        analysis: metadata
+            .as_ref()
+            .and_then(|metadata| metadata.analysis.clone())
+            .unwrap_or_else(|| "converted".to_owned()),
+        plot_name: metadata
+            .as_ref()
+            .and_then(|metadata| metadata.title.clone())
+            .unwrap_or_else(|| "Converted Data".to_owned()),
+        scale_type: metadata
+            .as_ref()
+            .and_then(|metadata| metadata.columns[0].quantity.clone())
+            .unwrap_or_else(|| scale_var_type(&scale_name)),
         scale_name,
         scale,
         columns,
@@ -1252,7 +1272,7 @@ fn complex_part_name(name: &str, prefix: &str) -> Option<String> {
     rest.strip_suffix(')').map(|inner| inner.to_string())
 }
 
-fn signal_var_type(name: &str) -> String {
+pub(super) fn signal_var_type(name: &str) -> String {
     let upper = name.trim_start().to_ascii_uppercase();
     if upper.starts_with("D(") {
         "digital".to_string()
@@ -1274,7 +1294,7 @@ fn hdf5_signal_var_type(signal: &crate::hdf5::Hdf5Signal) -> String {
     }
 }
 
-fn scale_var_type(name: &str) -> String {
+pub(super) fn scale_var_type(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "frequency" | "freq" | "frequency_hz" | "hz" => "frequency",

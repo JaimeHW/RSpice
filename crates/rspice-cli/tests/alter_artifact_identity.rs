@@ -39,7 +39,7 @@ fn colliding_labels_keep_every_result_and_checkpoint_in_serial_and_parallel_runs
             .iter()
             .map(|path| {
                 let content = std::fs::read_to_string(path).unwrap();
-                let mut lines = content.lines();
+                let mut lines = common::delimited_data_text(&content, b',').lines();
                 let column = lines
                     .next()
                     .unwrap()

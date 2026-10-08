@@ -101,6 +101,63 @@ pub fn read_json(path: &Path) -> serde_json::Value {
         .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
 }
 
+/// Read numeric records while validating optional final table metadata.
+#[allow(dead_code)]
+pub fn read_numeric_csv(path: &Path) -> (Vec<String>, Vec<Vec<Option<f64>>>) {
+    let text = std::fs::read_to_string(path).unwrap();
+    let mut reader =
+        csv::ReaderBuilder::new().from_reader(delimited_data_text(&text, b',').as_bytes());
+    let headers = reader
+        .headers()
+        .unwrap()
+        .iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    for record in reader.records() {
+        let record = record.unwrap();
+        let fields = record.iter().collect::<Vec<_>>();
+        rows.push(
+            fields
+                .into_iter()
+                .map(|field| (!field.is_empty()).then(|| field.parse().expect("numeric field")))
+                .collect(),
+        );
+    }
+    (headers, rows)
+}
+
+/// Keep the exact header/sample text for format and numerical assertions,
+/// consuming only a validated, unique final metadata record.
+#[allow(dead_code)]
+pub fn delimited_data_text(text: &str, delimiter: u8) -> &str {
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(delimiter)
+        .flexible(true)
+        .from_reader(text.as_bytes());
+    let headers = reader
+        .headers()
+        .unwrap()
+        .iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut end = None;
+    for record in reader.records() {
+        assert!(end.is_none(), "table metadata must be unique and final");
+        let record = record.unwrap();
+        let fields = record.iter().collect::<Vec<_>>();
+        if rspice_formats::delimited::metadata::parse_table_record(&headers, &fields)
+            .unwrap()
+            .is_some()
+        {
+            end = Some(usize::try_from(record.position().unwrap().byte()).unwrap());
+        } else {
+            assert_eq!(fields.len(), headers.len(), "ragged delimited data record");
+        }
+    }
+    &text[..end.unwrap_or(text.len())]
+}
+
 /// Where an axis run commits the manifest that names its complete coordinate
 /// set, and where it publishes the coordinate schema union.
 ///

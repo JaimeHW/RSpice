@@ -52,7 +52,8 @@ fn run_deck(tag: &str, deck_body: &str, extra_args: &[&str]) -> Run {
 }
 
 fn header_columns(csv: &str) -> Vec<String> {
-    csv.lines()
+    common::delimited_data_text(csv, b',')
+        .lines()
         .next()
         .expect("CSV header")
         .split(',')
@@ -61,7 +62,7 @@ fn header_columns(csv: &str) -> Vec<String> {
 }
 
 fn csv_column(csv: &str, name: &str) -> Vec<f64> {
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(csv, b',').lines();
     let header = lines.next().expect("CSV header");
     let index = header
         .split(',')

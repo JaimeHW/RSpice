@@ -398,22 +398,17 @@ fn typed_table_coordinates_and_quantities_survive_json_hdf5_and_raw() {
 
 /// Parse a CSV file into (header, rows).
 fn read_csv(path: &Path) -> (Vec<String>, Vec<Vec<f64>>) {
-    let text = std::fs::read_to_string(path).expect("read csv");
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let header: Vec<String> = lines
-        .next()
-        .expect("csv header")
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .collect();
-    let rows = lines
-        .map(|line| {
-            line.split(',')
-                .map(|field| field.trim().parse::<f64>().expect("numeric field"))
-                .collect()
-        })
-        .collect();
-    (header, rows)
+    let (headers, rows) = common::read_numeric_csv(path);
+    (
+        headers,
+        rows.into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|value| value.expect("present numeric sample"))
+                    .collect()
+            })
+            .collect(),
+    )
 }
 
 #[test]
@@ -1289,16 +1284,7 @@ fn event_plots_reach_a_table_through_a_dump_with_only_the_drive_band_lost() {
     // column spelling every other RSpice surface uses.
     let table = dir.join("events.csv");
     convert(&dump, &table, "csv", &[]);
-    let text = std::fs::read_to_string(&table).unwrap();
-    let mut lines = text.lines();
-    let header: Vec<_> = lines.next().unwrap().split(',').collect();
-    let rows: Vec<Vec<Option<f64>>> = lines
-        .map(|line| {
-            line.split(',')
-                .map(|field| (!field.is_empty()).then(|| field.parse().unwrap()))
-                .collect()
-        })
-        .collect();
+    let (header, rows) = common::read_numeric_csv(&table);
     assert_eq!(header[0], "time");
     let digital = header
         .iter()

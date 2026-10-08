@@ -115,7 +115,7 @@ fn flat_exports_and_typed_conversion_keep_duplicate_frequency_rows_aligned() {
                         .unwrap(),
                 );
                 let csv = std::fs::read_to_string(&converted).unwrap();
-                let mut lines = csv.lines();
+                let mut lines = common::delimited_data_text(&csv, b',').lines();
                 let header = lines.next().unwrap().split(',').collect::<Vec<_>>();
                 let parameter = header
                     .iter()
@@ -150,7 +150,7 @@ fn flat_exports_and_typed_conversion_keep_duplicate_frequency_rows_aligned() {
                             .unwrap(),
                     );
                     let clipped = std::fs::read_to_string(&converted).unwrap();
-                    let rows = clipped
+                    let rows = common::delimited_data_text(&clipped, b',')
                         .lines()
                         .skip(1)
                         .map(|line| {

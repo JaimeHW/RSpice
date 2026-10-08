@@ -240,6 +240,7 @@ fn assert_parseable(path: &Path, tag: &str, format: &str) {
 fn assert_delimited(bytes: &[u8], delimiter: char, label_column: bool, tag: &str, format: &str) {
     let text = std::str::from_utf8(bytes)
         .unwrap_or_else(|_| panic!("non-UTF8 {format} output for {tag} (binary bytes?)"));
+    let text = common::delimited_data_text(text, delimiter as u8);
     let mut lines = text.lines().filter(|line| !line.trim().is_empty());
 
     let header = lines
@@ -359,6 +360,7 @@ rload out 0 1k
 ";
     let path = run_export(&dir, "csv_time_precision", deck, "csv");
     let text = std::fs::read_to_string(&path).expect("read csv");
+    let text = common::delimited_data_text(&text, b',');
     let times = text
         .lines()
         .skip(1)
@@ -390,7 +392,8 @@ fn transient_output_time_points_project_the_export_without_truncating_the_solve(
         "csv",
     );
     let text = std::fs::read_to_string(&path).expect("read scheduled csv");
-    let times = text
+    let data = common::delimited_data_text(&text, b',');
+    let times = data
         .lines()
         .skip(1)
         .map(|line| {
@@ -446,7 +449,7 @@ fn compression_preserves_the_authored_interval_output_lattice() {
 
     // The lattice really is the authored one, not an accident of both runs
     // being uncompressed.
-    let times = plain_text
+    let times = common::delimited_data_text(&plain_text, b',')
         .lines()
         .skip(1)
         .map(|line| {
@@ -478,6 +481,7 @@ fn current_column_index(header: &str, name: &str) -> usize {
 }
 
 fn numeric_csv_rows(text: &str) -> Vec<Vec<f64>> {
+    let text = common::delimited_data_text(text, b',');
     text.lines()
         .skip(1)
         .filter(|line| !line.trim().is_empty())
@@ -556,6 +560,7 @@ fn dc_sweep_print_exports_branch_current() {
     let dir = test_dir("dc_current_print");
     let path = run_export(&dir, "dc_current_print", DC_CURRENT_PRINT_DECK, "csv");
     let text = std::fs::read_to_string(&path).expect("read csv");
+    let text = common::delimited_data_text(&text, b',');
     let header = text.lines().next().expect("csv header");
     let current_column = current_column_index(header, "I(v1)");
     assert!(
@@ -575,6 +580,7 @@ fn transient_print_exports_branch_current() {
     let dir = test_dir("tran_current_print");
     let path = run_export(&dir, "tran_current_print", TRAN_CURRENT_PRINT_DECK, "csv");
     let text = std::fs::read_to_string(&path).expect("read csv");
+    let text = common::delimited_data_text(&text, b',');
     let header = text.lines().next().expect("csv header");
     let current_column = current_column_index(header, "I(v1)");
     assert!(
@@ -642,6 +648,7 @@ fn transient_export_includes_xspice_digital_traces() {
     let dir = test_dir("tran_xspice_digital");
     let path = run_export(&dir, "tran_xspice_digital", XSPICE_DIGITAL_TRAN_DECK, "csv");
     let text = std::fs::read_to_string(&path).expect("read csv");
+    let text = common::delimited_data_text(&text, b',');
     let header = text.lines().next().expect("csv header");
     let digital_column = current_column_index(header, "D(d)");
     let values: Vec<f64> = text
@@ -847,6 +854,7 @@ fn transient_save_selects_xspice_digital_trace_by_raw_node() {
         "csv",
     );
     let text = std::fs::read_to_string(&path).expect("read csv");
+    let text = common::delimited_data_text(&text, b',');
     let header = text.lines().next().expect("csv header");
 
     assert!(

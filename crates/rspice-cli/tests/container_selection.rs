@@ -204,7 +204,8 @@ fn repeated_hdf5_families_are_selected_by_group_and_all_sections_are_validated()
             "second",
         ]);
         assert!(converted.status.success(), "{converted:?}");
-        for line in std::fs::read_to_string(&csv).unwrap().lines().skip(1) {
+        let content = std::fs::read_to_string(&csv).unwrap();
+        for line in common::delimited_data_text(&content, b',').lines().skip(1) {
             assert_eq!(line.split(',').nth(1).unwrap().parse::<f64>().unwrap(), 2.0);
         }
         hdf5(&right, family, &[99.0]);

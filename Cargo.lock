@@ -5397,6 +5397,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "clap_complete",
+ "csv",
  "ctrlc",
  "dirs",
  "env_filter",

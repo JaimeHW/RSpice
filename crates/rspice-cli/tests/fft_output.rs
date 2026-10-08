@@ -125,6 +125,7 @@ fn model_finish_preserves_the_waveform_and_each_authored_fft_identity() {
             }
         } else {
             let text = std::fs::read_to_string(&waveform).unwrap();
+            let text = common::delimited_data_text(&text, b',');
             let endpoint: f64 = text
                 .lines()
                 .last()

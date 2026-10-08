@@ -73,6 +73,7 @@ fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destinatio
 
 fn last_vout(path: &std::path::Path) -> (f64, f64) {
     let text = std::fs::read_to_string(path).expect("read csv");
+    let text = common::delimited_data_text(&text, b',');
     let header: Vec<&str> = text.lines().next().expect("header").split(',').collect();
     let vout_col = header
         .iter()
@@ -87,8 +88,7 @@ fn last_vout(path: &std::path::Path) -> (f64, f64) {
 }
 
 fn csv_times(path: &std::path::Path) -> Vec<f64> {
-    std::fs::read_to_string(path)
-        .expect("read csv")
+    common::delimited_data_text(&std::fs::read_to_string(path).expect("read csv"), b',')
         .lines()
         .skip(1)
         .map(|line| {
@@ -180,8 +180,9 @@ fn xyce_bug_1284_job_writes_20ns_checkpoint_and_file_resumes_to_50ns() {
         "BUG_1284 checkpoint reader failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let final_time = std::fs::read_to_string(&resumed_csv)
-        .expect("read resumed transient output")
+    let resumed_text =
+        std::fs::read_to_string(&resumed_csv).expect("read resumed transient output");
+    let final_time = common::delimited_data_text(&resumed_text, b',')
         .lines()
         .last()
         .expect("resumed transient has samples")
@@ -975,6 +976,7 @@ fn native_sp_card_matches_series_resistor_analytics() {
     );
 
     let text = std::fs::read_to_string(&csv).expect("csv output");
+    let text = common::delimited_data_text(&text, b',');
     let mut lines = text.lines();
     let header: Vec<&str> = lines.next().expect("header").split(',').collect();
     let idx = |name: &str| {

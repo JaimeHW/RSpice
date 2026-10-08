@@ -35,6 +35,7 @@ struct SpTable {
 impl SpTable {
     fn read(path: &Path) -> Self {
         let text = std::fs::read_to_string(path).expect("read SP CSV");
+        let text = common::delimited_data_text(&text, b',');
         let mut lines = text.lines().filter(|line| !line.trim().is_empty());
         let header = lines
             .next()

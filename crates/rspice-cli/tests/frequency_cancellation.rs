@@ -56,7 +56,7 @@ endmodule"#,
             String::from_utf8_lossy(&output.stderr)
         );
         let csv = std::fs::read_to_string(&artifact).expect("accepted finish publishes CSV");
-        let rows = csv
+        let rows = common::delimited_data_text(&csv, b',')
             .lines()
             .filter(|line| !line.trim().is_empty())
             .collect::<Vec<_>>();

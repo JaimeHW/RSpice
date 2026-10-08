@@ -69,7 +69,7 @@ fn checkpoint_siblings(checkpoint: &Path) -> Vec<PathBuf> {
 }
 
 fn csv_column(csv: &str, name: &str) -> Vec<f64> {
-    let mut lines = csv.lines();
+    let mut lines = common::delimited_data_text(csv, b',').lines();
     let header = lines.next().expect("CSV header");
     let index = header
         .split(',')
@@ -87,12 +87,15 @@ fn csv_column(csv: &str, name: &str) -> Vec<f64> {
 }
 
 fn optional_scalar_csv_value(csv: &str, name: &str) -> Option<f64> {
-    csv.lines().skip(1).find_map(|line| {
-        let (signal, value) = line.split_once(',')?;
-        signal
-            .eq_ignore_ascii_case(name)
-            .then(|| value.parse().expect("numeric scalar CSV value"))
-    })
+    common::delimited_data_text(csv, b',')
+        .lines()
+        .skip(1)
+        .find_map(|line| {
+            let (signal, value) = line.split_once(',')?;
+            signal
+                .eq_ignore_ascii_case(name)
+                .then(|| value.parse().expect("numeric scalar CSV value"))
+        })
 }
 
 fn scalar_csv_value(csv: &str, name: &str) -> f64 {
@@ -1347,7 +1350,9 @@ fn stepped_measurement_exports_identify_every_coordinate_run() {
         String::from_utf8_lossy(&csv_run.stderr)
     );
     let csv = std::fs::read_to_string(&csv_path).expect("read measurement CSV");
-    let lines = csv.lines().collect::<Vec<_>>();
+    let lines = common::delimited_data_text(&csv, b',')
+        .lines()
+        .collect::<Vec<_>>();
     assert_eq!(
         lines[0],
         "netlist,name,value,expected,tolerance,passed,error,run,raw_value,failure_limit,failure_limit_exceeded,record_index,event_axis,trigger_axis,target_axis,aggregate_policy"
