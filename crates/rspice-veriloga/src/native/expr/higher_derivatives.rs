@@ -60,6 +60,20 @@ impl Algebra {
         }
         let node = match &lowerer.expression(id)?.kind {
             HirExprKind::Number { value, .. } => Node::Const(*value),
+            HirExprKind::ArrayIndex {
+                operand,
+                lower,
+                len,
+            } => {
+                let inner = self.import(lowerer, *operand)?;
+                Node::Unary(
+                    UnaryOp::ArrayIndex {
+                        lower: *lower,
+                        len: *len,
+                    },
+                    inner,
+                )
+            }
             HirExprKind::Unary { op, operand } => {
                 let inner = self.import(lowerer, *operand)?;
                 match op.as_str() {
@@ -210,6 +224,12 @@ impl Algebra {
             Node::Unary(op, inner) => {
                 self.emit(lowerer, inner)?;
                 match op {
+                    UnaryOp::ArrayIndex { lower, len } => {
+                        lowerer.append_unary(NativeOp::CheckedArrayIndex {
+                            lower,
+                            len: len as usize,
+                        })
+                    }
                     UnaryOp::Pos | UnaryOp::ToReal => Ok(()),
                     UnaryOp::Neg => lowerer.append_unary(NativeOp::Neg),
                     UnaryOp::Not => lowerer.append_unary(NativeOp::Logical(LogicalOp::Not)),

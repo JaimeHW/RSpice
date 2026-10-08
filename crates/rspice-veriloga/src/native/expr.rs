@@ -1514,6 +1514,27 @@ impl NativeProgram {
                         "unresolved conditional jump".into(),
                     ));
                 }
+                Instruction::ArrayIndex { lower, len } => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        1,
+                    )?;
+                    if *len == 0 || *len > 65536 || lower.checked_add(i64::from(*len) - 1).is_none()
+                    {
+                        return Err(stack_error(
+                            model.clone(),
+                            entry_kind,
+                            "invalid array coordinate bounds".into(),
+                        ));
+                    }
+                    ops.push(NativeOp::CheckedArrayIndex {
+                        lower: *lower,
+                        len: *len as usize,
+                    });
+                }
                 Instruction::PushConst(value) => {
                     ops.push(NativeOp::Const(*value));
                     push_stack(&mut depth, &mut max_stack_depth);
@@ -2956,6 +2977,17 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             HirExprKind::NamedBranchAccess {
                 kind: access, name, ..
             } => self.lower_named_branch_access(access, name.as_str()),
+            HirExprKind::ArrayIndex {
+                operand,
+                lower,
+                len,
+            } => {
+                self.lower(*operand)?;
+                self.append_unary(NativeOp::CheckedArrayIndex {
+                    lower: *lower,
+                    len: *len as usize,
+                })
+            }
             HirExprKind::Unary { op, operand } => self.lower_unary(op.as_str(), *operand),
             HirExprKind::Binary { op, left, right } => {
                 self.lower_binary(op.as_str(), *left, *right)
@@ -3208,6 +3240,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return self.push(NativeOp::Const(0.0));
         }
         match &expression.kind {
+            HirExprKind::ArrayIndex { .. } => {
+                self.lower(expr_id)?;
+                self.push(NativeOp::Const(0.0))?;
+                self.append_checked_value()
+            }
             HirExprKind::NullArgument
             | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
@@ -3278,6 +3315,11 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             return self.push(NativeOp::Const(0.0));
         }
         match &expression.kind {
+            HirExprKind::ArrayIndex { .. } => {
+                self.lower(expr_id)?;
+                self.push(NativeOp::Const(0.0))?;
+                self.append_checked_value()
+            }
             HirExprKind::NullArgument
             | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
@@ -3338,6 +3380,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<bool> {
         let expression = self.expression(expr_id)?;
         match &expression.kind {
+            HirExprKind::ArrayIndex { .. } => Ok(false),
             HirExprKind::NullArgument
             | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
@@ -3405,6 +3448,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     ) -> JitResult<bool> {
         let expression = self.expression(expr_id)?;
         match &expression.kind {
+            HirExprKind::ArrayIndex { .. } => Ok(false),
             HirExprKind::NullArgument
             | HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
@@ -7588,6 +7632,39 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         prefix: &str,
         suffix: &str,
     ) -> JitResult<Option<(usize, usize, i64)>> {
+        if let Some(declaration) = self.mir.arrays.iter().find(|item| item.name == array) {
+            let layout = declaration
+                .layout()
+                .ok_or_else(|| self.unsupported("invalid array coordinate layout"))?;
+            let suffix = suffix.strip_prefix(']').expect("array name suffix");
+            let name = |offset| {
+                format!(
+                    "{}{}",
+                    crate::array_index::element_name(array, &layout, offset),
+                    suffix
+                )
+            };
+            let first = name(0);
+            let Some(base) = self
+                .limits
+                .variable_names
+                .iter()
+                .position(|item| item == &first)
+            else {
+                return Ok(None);
+            };
+            let Some(cells) = self.limits.variable_names.get(base..base + layout.len()) else {
+                return Err(self.unsupported("array exceeds runtime variable storage"));
+            };
+            if cells
+                .iter()
+                .enumerate()
+                .any(|(offset, cell)| cell != &name(offset))
+            {
+                return Err(self.unsupported("array has non-contiguous runtime variable storage"));
+            }
+            return Ok(Some((base, layout.len(), declaration.lower)));
+        }
         let mut slots = self
             .limits
             .variable_names
@@ -8282,6 +8359,7 @@ fn expression_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } => "branch access",
@@ -9655,6 +9733,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::BitOr => "BitOr",
         Instruction::BitXor => "BitXor",
         Instruction::CheckedValue => "CheckedValue",
+        Instruction::ArrayIndex { .. } => "ArrayIndex",
         Instruction::DiscreteValue => "DiscreteValue",
         Instruction::IntegerArithmetic(_) => "IntegerArithmetic",
         Instruction::Neg => "Neg",

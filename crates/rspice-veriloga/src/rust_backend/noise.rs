@@ -1645,7 +1645,9 @@ fn collect_expr_variable_ids(
                 }
             }
             HirExprKind::Binary { left, right, .. } => stack.extend([*left, *right]),
-            HirExprKind::Unary { operand, .. } => stack.push(*operand),
+            HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+                stack.push(*operand)
+            }
             HirExprKind::Conditional {
                 condition,
                 then_expr,
@@ -1768,7 +1770,9 @@ fn expr_is_instance_static(
                 }
             }
             HirExprKind::Binary { left, right, .. } => stack.extend([*left, *right]),
-            HirExprKind::Unary { operand, .. } => stack.push(*operand),
+            HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+                stack.push(*operand)
+            }
             HirExprKind::Conditional {
                 condition,
                 then_expr,

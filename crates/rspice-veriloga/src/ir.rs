@@ -2396,7 +2396,10 @@ pub mod autodiff {
                 | BinaryOp::Shr => 0,
             },
             Node::Unary(UnaryOp::Neg | UnaryOp::Pos | UnaryOp::ToReal, inner) => recurse(inner),
-            Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => 0,
+            Node::Unary(
+                UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger | UnaryOp::ArrayIndex { .. },
+                _,
+            ) => 0,
             Node::Limexp(inner) | Node::Ddt(inner) => recurse(inner),
             Node::Idt(inner, ic) => recurse(inner) | optional(ic),
             Node::IdtMod {
@@ -2570,8 +2573,8 @@ pub mod autodiff {
                         if current | mask != current {
                             let merged = current | mask;
                             deps.insert(array.name.clone(), merged);
-                            for k in (0..array.len).map(|offset| array.lower + offset as i64) {
-                                deps.insert(format!("{}[{k}]", array.name).into(), merged);
+                            for variable in &variables[array.base..array.base + array.len] {
+                                deps.insert(variable.name.clone(), merged);
                             }
                             *changed = true;
                         }
@@ -2646,9 +2649,11 @@ pub mod autodiff {
                 let index = families.len();
                 let mut members = Vec::with_capacity(array.len + 1);
                 members.push(array.name.clone());
-                for k in (0..array.len).map(|offset| array.lower + offset as i64) {
-                    members.push(format!("{}[{k}]", array.name).into());
-                }
+                members.extend(
+                    variables[array.base..array.base + array.len]
+                        .iter()
+                        .map(|variable| variable.name.clone()),
+                );
                 for member in &members {
                     family_of.insert(member.clone(), index);
                 }
@@ -3460,7 +3465,10 @@ pub mod autodiff {
                 | BinaryOp::Shr => {}
             },
             Node::Unary(UnaryOp::Neg | UnaryOp::Pos | UnaryOp::ToReal, inner) => collect!(inner),
-            Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => {}
+            Node::Unary(
+                UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger | UnaryOp::ArrayIndex { .. },
+                _,
+            ) => {}
             Node::Conditional(condition, then_expr, else_expr) => {
                 // The predicate selects a derivative branch but is not itself
                 // differentiated. Match `simplify`'s constant-branch fold.
@@ -3727,11 +3735,8 @@ pub mod autodiff {
                         merged.extend(axes.iter().copied());
                         if merged != current {
                             deps.insert(array.name.clone(), merged.clone());
-                            for index in (0..array.len).map(|offset| array.lower + offset as i64) {
-                                deps.insert(
-                                    format!("{}[{index}]", array.name).into(),
-                                    merged.clone(),
-                                );
+                            for variable in &variables[array.base..array.base + array.len] {
+                                deps.insert(variable.name.clone(), merged.clone());
                             }
                             *changed = true;
                         }
@@ -3956,8 +3961,8 @@ pub mod autodiff {
                 let run_name = ShadowContext::shadow_name(&array.name, &axis);
                 let run_base = variables.len();
                 ctx.array_shadow_base.insert(run_name, run_base);
-                for index in (0..array.len).map(|offset| array.lower + offset as i64) {
-                    let element = format!("{}[{index}]", array.name);
+                for offset in 0..array.len {
+                    let element = variables[array.base + offset].name.clone();
                     let shadow = ShadowContext::shadow_name(&element, &axis);
                     shadow_index.insert(shadow.clone(), variables.len());
                     variables.push(VarDef {
@@ -4642,6 +4647,10 @@ pub mod autodiff {
             // Unary plus is the identity
             Node::Unary(UnaryOp::Pos | UnaryOp::ToReal, inner) => differentiate!(inner),
             // Logical/bitwise negation is piecewise constant
+            Node::Unary(UnaryOp::ArrayIndex { .. }, _) => {
+                let zero = constant!(0.0);
+                binary!(BinaryOp::CheckedValue, expr, zero)
+            }
             Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => constant!(0.0),
 
             // d(c ? a : b) = c ? da : db

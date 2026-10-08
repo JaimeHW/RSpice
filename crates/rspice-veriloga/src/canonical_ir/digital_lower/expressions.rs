@@ -220,7 +220,7 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
             Expression::Unary(value) => {
                 let input: Shape = get(&value.operand);
                 match value.op {
-                    UnaryOp::ToReal => Shape {
+                    UnaryOp::ToReal | UnaryOp::ArrayIndex { .. } => Shape {
                         width: 0,
                         signed: true,
                         real: true,
@@ -292,13 +292,22 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
             },
             Expression::Digital(DigitalExpr::ArraySelect(value)) => {
                 if lowerer.selects_array_element(value) {
-                    let array = lowerer
-                        .digital_array(&value.name)
-                        .expect("resolved array element");
-                    Shape {
-                        width: lowerer.width_of(array.base),
-                        signed: lowerer.signed_signal(array.base),
-                        real: lowerer.real_signal(array.base),
+                    if let Some(array) = lowerer.digital_array(&value.name) {
+                        Shape {
+                            width: lowerer.width_of(array.base),
+                            signed: lowerer.signed_signal(array.base),
+                            real: lowerer.real_signal(array.base),
+                        }
+                    } else {
+                        let (quantity, _, _) = lowerer
+                            .analog_array(&value.name)
+                            .expect("resolved analog array element");
+                        Shape {
+                            width: 32,
+                            signed: true,
+                            real: quantity
+                                == super::super::digital::DigitalAnalogQuantity::RealVariable,
+                        }
                     }
                 } else {
                     Shape {
@@ -707,7 +716,9 @@ pub(super) fn lower_prepared(
                 } else if lowerer
                     .analog_array(&access.name)
                     .is_some_and(|(quantity, _, _)| {
-                        quantity == super::super::digital::DigitalAnalogQuantity::IntegerVariable
+                        packed.is_none()
+                            || quantity
+                                == super::super::digital::DigitalAnalogQuantity::IntegerVariable
                     })
                 {
                     INTEGER_BOUNDS
@@ -727,10 +738,9 @@ pub(super) fn lower_prepared(
                 ));
                 if rank > 1 {
                     let dimensions = lowerer
-                        .array_declaration(&access.name)
-                        .expect("discrete array")
-                        .dimensions
-                        .clone();
+                        .array_dimensions(&access.name)
+                        .expect("resolved array")
+                        .to_vec();
                     let signed = indices
                         .iter()
                         .map(|index| shapes.get(index).signed)
@@ -1045,6 +1055,34 @@ fn apply(
             )
         }
         Operation::Unary(op, context, real) => match op {
+            UnaryOp::ArrayIndex { lower, len } => {
+                let Some(upper) = lower
+                    .checked_add(i64::from(len) - 1)
+                    .filter(|_| len > 0 && len <= 65_536)
+                else {
+                    lowerer.error(
+                        "invalid internal array coordinate bounds",
+                        crate::source::Span::dummy(),
+                    );
+                    return lowerer.real_constant(f64::NAN);
+                };
+                let input = lowerer.builder.push(
+                    block,
+                    bits(64),
+                    CfgValueKind::DigitalArrayOffset {
+                        dimensions: vec![(lower, upper)],
+                        indices: vec![(right, context.signed)],
+                    },
+                );
+                (
+                    CfgValueType::Real,
+                    CfgValueKind::DigitalIntegerToReal {
+                        input,
+                        signed: false,
+                    },
+                )
+            }
+
             UnaryOp::Pos | UnaryOp::ToReal => return right,
             UnaryOp::Not => (bits(1), CfgValueKind::DigitalLogicalNot { input: right }),
             UnaryOp::BitNot => (

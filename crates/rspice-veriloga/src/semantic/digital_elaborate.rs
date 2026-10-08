@@ -905,6 +905,7 @@ impl SelectBounds<'_> {
     fn expression(&self, elaborated: &str, span: Span) -> Expression {
         match self {
             Self::Bit(index) => Expression::ArrayAccess(ArrayAccessExpr {
+                normalized: false,
                 packed: None,
                 discrete_validity: None,
                 array: SmolStr::from(elaborated),

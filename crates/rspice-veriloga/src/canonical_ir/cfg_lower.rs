@@ -861,7 +861,9 @@ fn hir_expr_is_instance_static(
             }
         }
         HirExprKind::Binary { left, right, .. } => recurse(*left) && recurse(*right),
-        HirExprKind::Unary { operand, .. } => recurse(*operand),
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+            recurse(*operand)
+        }
         HirExprKind::Conditional {
             condition,
             then_expr,
@@ -1848,7 +1850,9 @@ impl<'a> CfgLowerer<'a> {
                 self.metadata_noise_expr(left);
                 self.metadata_noise_expr(right);
             }
-            HirExprKind::Unary { operand, .. } => self.metadata_noise_expr(operand),
+            HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+                self.metadata_noise_expr(operand)
+            }
             HirExprKind::Call { args, .. } | HirExprKind::SystemFunction { args, .. } => {
                 for argument in args {
                     self.metadata_noise_expr(argument);
@@ -2553,6 +2557,22 @@ impl<'a> CfgLowerer<'a> {
                 }
             }
             HirExprKind::Binary { op, left, right } => self.binary_expr(op, *left, *right, span),
+            HirExprKind::ArrayIndex {
+                operand,
+                lower,
+                len,
+            } => {
+                let input = self.expr(*operand);
+                self.builder.push(
+                    self.block,
+                    CfgValueType::Real,
+                    CfgValueKind::ArrayIndex {
+                        input,
+                        lower: *lower,
+                        len: *len,
+                    },
+                )
+            }
             HirExprKind::Unary { op, operand } => self.unary_expr(op, *operand, span),
             HirExprKind::Conditional {
                 condition,
@@ -4428,6 +4448,7 @@ fn kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } => "branch access",

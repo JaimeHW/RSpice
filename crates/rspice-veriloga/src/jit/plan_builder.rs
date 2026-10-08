@@ -959,7 +959,9 @@ fn canonical_expr_contains_ddt(
         | HirExprKind::NoiseSource { operands: args, .. } => {
             canonical_expr_list_contains_ddt(model, mir, args)
         }
-        HirExprKind::Unary { operand, .. } => canonical_expr_contains_ddt(model, mir, *operand),
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+            canonical_expr_contains_ddt(model, mir, *operand)
+        }
         HirExprKind::ArrayAccess { index, packed, .. } => {
             Ok(canonical_expr_contains_ddt(model, mir, *index)?
                 || match packed {
@@ -1048,6 +1050,7 @@ fn canonical_expr_ref_kind(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system_function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
@@ -1684,7 +1687,9 @@ fn canonical_expr_contains_noise(
         | HirExprKind::ArrayLiteral { elements: args, .. } => {
             canonical_expr_list_contains_noise(model, mir, args)
         }
-        HirExprKind::Unary { operand, .. } => canonical_expr_contains_noise(model, mir, *operand),
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+            canonical_expr_contains_noise(model, mir, *operand)
+        }
         HirExprKind::ArrayAccess { index, packed, .. } => {
             Ok(canonical_expr_contains_noise(model, mir, *index)?
                 || match packed {
@@ -2179,6 +2184,7 @@ fn canonical_expr_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system_function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
@@ -4335,10 +4341,13 @@ fn canonical_assignment_array_range(
     let lower = array.lower;
     let _upper = checked_logical_upper_bound(model, array.name.as_str(), lower, len)?;
     super::coverage::validate_assignment_range(model, base, len)?;
+    let layout = array.layout().ok_or_else(|| JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: "invalid canonical array coordinate layout".into(),
+    })?;
     for offset in 0..len {
         let slot = base + offset;
-        let logical_index = checked_logical_index(model, array.name.as_str(), lower, offset)?;
-        let expected = format!("{}[{logical_index}]", array.name);
+        let expected = crate::array_index::element_name(&array.name, &layout, offset);
         let Some(actual) = model.variable_names.get(slot) else {
             return Err(JitError::InvalidCanonicalIr {
                 model: model.name.clone(),

@@ -91,6 +91,7 @@
 mod constants;
 mod expressions;
 mod local_arrays;
+pub(crate) use local_arrays::initializer_elements as array_initializer_elements;
 mod local_storage;
 use constants::ResolvedConstants;
 
@@ -289,6 +290,7 @@ struct AnalogVariable {
     immutable: bool,
     quantity: super::digital::DigitalAnalogQuantity,
     array: Option<(i64, u32)>,
+    dimensions: Vec<(i64, i64)>,
 }
 
 pub(crate) fn lower_module(
@@ -327,6 +329,7 @@ pub(crate) fn lower_module(
                         .contains(&variable.name),
                     quantity,
                     array: None,
+                    dimensions: Vec::new(),
                 },
             ))
         })
@@ -344,6 +347,7 @@ pub(crate) fn lower_module(
                     immutable: false,
                     quantity: variable.quantity,
                     array: Some((array.lower, array.len as u32)),
+                    dimensions: array.dimensions.clone(),
                 },
             );
         }
@@ -3334,11 +3338,17 @@ impl ProcessLowerer<'_> {
         self.array_declaration(name).map(|array| array.storage)
     }
 
+    fn array_dimensions(&self, name: &str) -> Option<&[(i64, i64)]> {
+        if let Some(array) = self.array_declaration(name) {
+            return Some(&array.dimensions);
+        }
+        self.analog_array(name)?;
+        Some(&self.analog_variables[name].dimensions)
+    }
+
     fn array_rank(&self, name: &str) -> usize {
-        self.array_declaration(name).map_or_else(
-            || usize::from(self.analog_array(name).is_some()),
-            |array| array.dimensions.len().max(1),
-        )
+        self.array_dimensions(name)
+            .map_or(0, |dimensions| dimensions.len().max(1))
     }
 
     fn selects_array_element(&self, access: &crate::ast::ArraySelectExpr) -> bool {
@@ -3713,25 +3723,40 @@ impl ProcessLowerer<'_> {
     ) -> ValueId {
         use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
         let (quantity, lower, len) = self.analog_array(name).expect("array classified");
-        let name_for_cells = name;
-        let target_name = &self.analog_variables[name].target;
-        let first = format!("{target_name}[{lower}]");
-        let target = DigitalAnalogProbeTarget::Variable { name: first.into() };
+        let variable = &self.analog_variables[name];
+        let dimensions = if variable.dimensions.is_empty() {
+            vec![(
+                lower,
+                lower
+                    .checked_add(i64::from(len) - 1)
+                    .expect("validated array bounds"),
+            )]
+        } else {
+            variable.dimensions.clone()
+        };
+        let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65_536)
+            .expect("validated analog array shape");
+        let element_name = |name: &str, offset: usize| -> SmolStr {
+            crate::array_index::element_name(name, &layout, offset).into()
+        };
+        let target_name = &variable.target;
         // Reserve one contiguous binding group, shared by every read of this
         // array. Selection is O(1); no conditional chain or analog re-evaluation.
-        let base = if let Some(base) = self
-            .probes
-            .iter()
-            .position(|p| p.target == target && p.quantity == quantity)
-        {
+        let base = if let Some(base) = self.probes.windows(len as usize).position(|group| {
+            group.iter().enumerate().all(|(offset, probe)| {
+                probe.quantity == quantity
+                    && probe.target
+                        == DigitalAnalogProbeTarget::Variable {
+                            name: element_name(target_name, offset),
+                        }
+            })
+        }) {
             base
         } else {
             let base = self.probes.len();
-            for offset in 0..len {
-                let name: SmolStr =
-                    format!("{}[{}]", target_name, lower + i64::from(offset)).into();
-                let local: SmolStr =
-                    format!("{}[{}]", name_for_cells, lower + i64::from(offset)).into();
+            for offset in 0..len as usize {
+                let local = element_name(name, offset);
+                let name = element_name(target_name, offset);
                 let retained = self
                     .analog_variables
                     .get(&local)
@@ -3763,6 +3788,7 @@ impl ProcessLowerer<'_> {
                     signed,
                     lower,
                     len,
+                    dimensions: self.analog_variables[name].dimensions.clone(),
                 }),
             },
         )

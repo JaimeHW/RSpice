@@ -103,8 +103,15 @@ impl SemanticAnalyzer {
                 self.resolve_substituted_name(assignment.target_name()) != *counter
                     && self.bounded_ddx_expression(&assignment.value, has_ddx)
                     && match &assignment.target {
-                        LValue::ArrayAccess { index, .. } => {
+                        LValue::ArrayAccess {
+                            index,
+                            additional_indices,
+                            ..
+                        } => {
                             self.bounded_ddx_expression(index, has_ddx)
+                                && additional_indices
+                                    .iter()
+                                    .all(|index| self.bounded_ddx_expression(index, has_ddx))
                         }
                         LValue::Variable { .. } => true,
                     }

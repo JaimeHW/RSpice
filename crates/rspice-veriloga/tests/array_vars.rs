@@ -399,7 +399,7 @@ endmodule
 }
 
 #[test]
-fn multidimensional_arrays_are_rejected() {
+fn multidimensional_partial_reads_are_rejected() {
     let err = compile_err(
         r#"
 `include "disciplines.vams"
@@ -407,11 +407,11 @@ module mdim(p, n);
     inout p, n;
     electrical p, n;
     real m[0:1][0:2];
-    analog I(p, n) <+ 1.0e-3 * V(p, n);
+    analog I(p, n) <+ m[0] * V(p, n);
 endmodule
 "#,
     );
-    assert!(err.contains("multi-dimensional"), "got: {err}");
+    assert!(err.contains("requires all unpacked indices"), "got: {err}");
 }
 
 #[test]
@@ -453,4 +453,72 @@ endmodule
     let mut device = model.device("A1", &[1, 0]);
     let (matrix, _) = collect_stamps(&mut device, &[1.0]);
     assert!((matrix[&(0, 0)] - 4.0e-3).abs() < 1e-15);
+}
+
+#[test]
+fn multidimensional_analog_arrays_preserve_initializers_and_nonlinear_jacobians() {
+    let model = compile(
+        r#"
+module matrix(p,n,sel); inout p,n,sel; electrical p,n,sel;
+ real m[1:0][-1:0]='{'{2e-3,3e-3},'{4e-3,5e-3}};
+ integer row,col;
+ analog begin
+   real local[1:0][4:3][7:7]='{'{'{1.0},'{2.0}},'{'{3.0},'{4.0}}};
+   row=V(sel)>0.5; col=-1;
+   m[row][col]=0.001*V(p,n)*V(p,n);
+   local[0][3][7]=2*m[row][col];
+   I(p,n)<+local[0][3][7]+m[1][0]*V(p,n);
+ end
+endmodule
+"#,
+    );
+    let mut device = model.device("X", &[1, 0, 2]);
+    let (matrix, rhs) = collect_stamps(&mut device, &[0.5, 1.0]);
+    assert!((matrix[&(0, 0)] - 0.005).abs() < 1e-12, "{matrix:?}");
+    assert!(
+        (0.5 * matrix[&(0, 0)] - rhs[&0] - 0.002).abs() < 1e-12,
+        "{rhs:?}"
+    );
+    model.observe(&mut device);
+    assert_eq!(device.variable("m[1][-1]"), Some(0.00025));
+    assert_eq!(device.variable("m[1][0]"), Some(0.003));
+    assert_eq!(device.variable("m[0][-1]"), Some(0.004));
+}
+
+#[test]
+fn multidimensional_analog_coordinates_preserve_exact_constants_and_reject_row_aliases() {
+    // Adjacent integer coordinates above binary64 precision must remain distinct.
+    let source = r#"
+module exact(p,n,sel); inout p,n,sel; electrical p,n,sel;
+ real m[64'sh0020000000000001:64'sh0020000000000002][0:1]='{'{0.001,0.002},'{0.003,0.004}};
+ integer col;
+ analog begin
+   col=V(sel);
+   m[64'sh0020000000000001][col]=0.001*V(p,n)*V(p,n);
+   I(p,n)<+m[64'sh0020000000000001][col]+m[64'sh0020000000000002][0]*V(p,n);
+ end
+endmodule
+"#;
+    let model = compile(source);
+    let mut device = model.device("X", &[1, 0, 2]);
+    let (matrix, rhs) = collect_stamps(&mut device, &[0.5, 1.0]);
+    assert!((matrix[&(0, 0)] - 0.004).abs() < 1e-12, "{matrix:?}");
+    assert!(
+        (0.5 * matrix[&(0, 0)] - rhs[&0] - 0.00175).abs() < 1e-12,
+        "{rhs:?}"
+    );
+    model.observe(&mut device);
+    assert_eq!(device.variable("m[9007199254740993][1]"), Some(0.00025));
+    assert_eq!(device.variable("m[9007199254740994][0]"), Some(0.003));
+    for source in [
+        source.to_owned(),
+        source.replace("m[64'sh0020000000000001][col]=0.001*V(p,n)*V(p,n);", ""),
+    ] {
+        let model = compile(&source);
+        let mut device = model.device("bad", &[1, 0, 2]);
+        let error = device
+            .try_stamp(&[0.5, 2.0], |_, _, _| {}, |_, _| {})
+            .expect_err("column 2 must not address the next row");
+        assert!(error.to_string().contains("index"), "{error}");
+    }
 }

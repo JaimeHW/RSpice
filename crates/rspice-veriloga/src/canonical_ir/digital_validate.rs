@@ -935,7 +935,30 @@ impl CanonicalDigitalPlan {
                                         "digital analog array read requires variable probes",
                                     ));
                                 };
-                                let suffix = format!("[{}]", selection.lower);
+                                let dimensions = if selection.dimensions.is_empty() {
+                                    vec![(
+                                        selection.lower,
+                                        selection
+                                            .lower
+                                            .checked_add(i64::from(selection.len) - 1)
+                                            .expect("bounds checked above"),
+                                    )]
+                                } else {
+                                    if selection.dimensions.len() < 2 || selection.lower != 0 {
+                                        return Err(error(
+                                            "digital analog array read has an invalid coordinate layout",
+                                        ));
+                                    }
+                                    selection.dimensions.clone()
+                                };
+                                let layout = crate::array_index::UnpackedArrayLayout::new(&dimensions, 65_536)
+                                    .map_err(|_| error("digital analog array read has an invalid coordinate layout"))?;
+                                if layout.len() != selection.len as usize {
+                                    return Err(error(
+                                        "digital analog array read shape disagrees with its extent",
+                                    ));
+                                }
+                                let suffix = crate::array_index::element_name("", &layout, 0);
                                 let Some(name) = name.strip_suffix(&suffix) else {
                                     return Err(error(
                                         "digital analog array read has an inconsistent lower bound",
@@ -954,7 +977,7 @@ impl CanonicalDigitalPlan {
                                 };
                                 for (offset, element) in probes.iter().enumerate() {
                                     let expected_name =
-                                        format!("{name}[{}]", selection.lower + offset as i64);
+                                        crate::array_index::element_name(name, &layout, offset);
                                     if element.quantity != declaration.quantity
                                         || !matches!(&element.target, DigitalAnalogProbeTarget::Variable { name } if name == &expected_name)
                                     {

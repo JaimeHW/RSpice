@@ -167,6 +167,12 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
             .and_then(|name| lower.arrays.get(name))
             .cloned()
             .unwrap_or_default();
+        if dimensions.len() > 1 {
+            return invalid(
+                "multidimensional analog array event dependencies require coordinate-aware occurrence bindings",
+                span,
+            );
+        }
         let init = dimensions.is_empty().then(|| number(0, span));
         if binding.observation.is_none() {
             module.variables.push(VariableDecl {
@@ -271,6 +277,7 @@ impl Lower {
             let name = match expression {
                 Expression::Identifier(id) => &id.name,
                 Expression::ArrayAccess(access) => &access.array,
+                Expression::Digital(DigitalExpr::ArraySelect(access)) => &access.name,
                 _ => return,
             };
             if self.candidates.contains(name) {
@@ -287,6 +294,7 @@ impl Lower {
                     let name = match expression {
                         Expression::Identifier(id) => &id.name,
                         Expression::ArrayAccess(access) => &access.array,
+                        Expression::Digital(DigitalExpr::ArraySelect(access)) => &access.name,
                         _ => return,
                     };
                     if self.candidates.contains(name) && !locals.contains(name) {
@@ -423,6 +431,19 @@ impl Lower {
                 self.observers.push((operands, binding.clone()));
                 term.signal = identifier(&binding.signal, term.span);
                 continue;
+            }
+            if let Expression::Digital(DigitalExpr::ArraySelect(access)) = &term.signal
+                && self.candidates.contains(&access.name)
+                && !locals.contains(&access.name)
+                && self
+                    .arrays
+                    .get(&access.name)
+                    .is_some_and(|axes| axes.len() > 1)
+            {
+                return invalid(
+                    "multidimensional analog array assignment events require coordinate-aware occurrence bindings",
+                    term.span,
+                );
             }
             if let Expression::ArrayAccess(access) = &mut term.signal {
                 if self.candidates.contains(&access.array) && !locals.contains(&access.array) {
@@ -869,11 +890,13 @@ fn increment_at(name: &str, index: Option<Expression>, span: Span) -> AnalogStat
     let (target, value) = if let Some(index) = index {
         (
             LValue::ArrayAccess {
+                additional_indices: Vec::new(),
                 name: name.into(),
                 index: Box::new(index.clone()),
                 span,
             },
             Expression::ArrayAccess(ArrayAccessExpr {
+                normalized: false,
                 array: name.into(),
                 index: Box::new(index),
                 packed: None,

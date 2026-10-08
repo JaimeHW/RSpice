@@ -185,6 +185,11 @@ pub enum HirExprKind {
         op: SmolStr,
         operand: ExprId,
     },
+    ArrayIndex {
+        operand: ExprId,
+        lower: i64,
+        len: u32,
+    },
     Conditional {
         condition: ExprId,
         then_expr: ExprId,
@@ -297,6 +302,34 @@ pub struct HirArray {
     pub base: VariableId,
     pub lower: i64,
     pub len: u32,
+    /// Authored axes for multidimensional storage; empty retains the 1D layout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<(i64, i64)>,
+}
+
+impl HirArray {
+    pub(crate) fn layout(&self) -> Option<crate::array_index::UnpackedArrayLayout> {
+        let bounds = if self.dimensions.is_empty() {
+            vec![(
+                self.lower,
+                self.lower
+                    .checked_add(i64::from(self.len).checked_sub(1)?)?,
+            )]
+        } else {
+            if self.dimensions.len() < 2 || self.lower != 0 {
+                return None;
+            }
+            self.dimensions.clone()
+        };
+        // Packed projection banks contain multiple chunks per source element.
+        let limit = if self.dimensions.is_empty() {
+            crate::semantic::MAX_PARAMETER_ARRAY_ELEMENTS as usize
+        } else {
+            65_536
+        };
+        let layout = crate::array_index::UnpackedArrayLayout::new(&bounds, limit).ok()?;
+        (layout.len() == self.len as usize).then_some(layout)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -675,6 +708,14 @@ fn same_expression_kind(left: &HirExprKind, right: &HirExprKind) -> bool {
                 ..
             },
         ) => left_source == right_source && left_operands.len() == right_operands.len(),
+        (
+            HirExprKind::ArrayIndex {
+                lower: a, len: al, ..
+            },
+            HirExprKind::ArrayIndex {
+                lower: b, len: bl, ..
+            },
+        ) => a == b && al == bl,
         (HirExprKind::Unary { op: left, .. }, HirExprKind::Unary { op: right, .. }) => {
             left == right
         }
@@ -921,6 +962,7 @@ impl HirModel {
                 base: VariableId::from(array.base),
                 lower: array.lower,
                 len: u32::try_from(array.len).expect("array length exceeds u32::MAX"),
+                dimensions: array.dimensions.clone(),
             })
             .collect();
 
@@ -1349,6 +1391,20 @@ impl HirModel {
             HirExprKind::Binary { left, right, .. } => {
                 self.validate_expression_child(diagnostics, expression, "left", *left);
                 self.validate_expression_child(diagnostics, expression, "right", *right);
+            }
+            HirExprKind::ArrayIndex {
+                operand,
+                lower,
+                len,
+            } => {
+                self.validate_expression_child(diagnostics, expression, "operand", *operand);
+                if *len == 0 || *len > 65536 || lower.checked_add(i64::from(*len) - 1).is_none() {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::HirValidation,
+                        "invalid checked array coordinate bounds",
+                        expression.span,
+                    ));
+                }
             }
             HirExprKind::Unary { operand, .. } => {
                 self.validate_expression_child(diagnostics, expression, "operand", *operand);
@@ -1806,6 +1862,27 @@ impl HirModel {
                 continue;
             }
 
+            if let Some(layout) = array.layout() {
+                for (offset, variable) in self.variables[base..end].iter().enumerate() {
+                    if variable.name.as_str()
+                        != crate::array_index::element_name(&array.name, &layout, offset)
+                    {
+                        diagnostics.push(IrDiagnostic::global_error(
+                            CompilerPhase::HirValidation,
+                            format!("HIR array '{}' has inconsistent element names", array.name),
+                        ));
+                        break;
+                    }
+                }
+            } else {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::HirValidation,
+                    format!(
+                        "HIR array '{}' has an invalid coordinate layout",
+                        array.name
+                    ),
+                ));
+            }
             if len != 0 {
                 let element_type = self.variables[base].value_type;
                 if let Some(variable) = self.variables[base..end]
@@ -3069,6 +3146,15 @@ impl HirLowerer {
                 left: self.lower_expr(&binary.left).id,
                 right: self.lower_expr(&binary.right).id,
             },
+            Expression::Unary(crate::ast::UnaryExpr {
+                op: UnaryOp::ArrayIndex { lower, len },
+                operand,
+                ..
+            }) => HirExprKind::ArrayIndex {
+                operand: self.lower_expr(operand).id,
+                lower: *lower,
+                len: *len,
+            },
             Expression::Unary(unary) => HirExprKind::Unary {
                 // Scalar runtime lanes already use binary64. Preserve the
                 // semantic conversion's identity without adding a runtime op.
@@ -3370,6 +3456,11 @@ fn exact_retained_replication_count(expression: &Expression) -> Option<i64> {
             match unary.op {
                 UnaryOp::ToInteger => i32::try_from(value).ok().map(i64::from),
                 UnaryOp::ToReal => None,
+                UnaryOp::ArrayIndex { lower, len } => {
+                    crate::array_index::checked_integer_array_slot(value, 0, len as usize, lower)
+                        .ok()
+                        .map(|value| value as i64)
+                }
                 UnaryOp::Pos => Some(value),
                 UnaryOp::Neg => value.checked_neg(),
                 UnaryOp::Not => Some(i64::from(value == 0)),
@@ -3454,7 +3545,9 @@ pub(super) fn is_parameter_expression(
         match &expression.kind {
             HirExprKind::Number { value, .. } if value.is_finite() => {}
             HirExprKind::Identifier { name } if parameters.contains(name.as_str()) => {}
-            HirExprKind::Unary { operand, .. } => pending.push(*operand),
+            HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+                pending.push(*operand)
+            }
             HirExprKind::Binary { left, right, .. } => pending.extend([*left, *right]),
             HirExprKind::Conditional {
                 condition,
@@ -3508,6 +3601,7 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system_function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",

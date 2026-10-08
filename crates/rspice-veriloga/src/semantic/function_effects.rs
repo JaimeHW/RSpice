@@ -57,8 +57,16 @@ impl Effects {
 
     fn assignment(&mut self, assignment: &AssignmentStmt) {
         self.expression(&assignment.value);
-        if let LValue::ArrayAccess { index, .. } = &assignment.target {
+        if let LValue::ArrayAccess {
+            index,
+            additional_indices,
+            ..
+        } = &assignment.target
+        {
             self.expression(index);
+            for index in additional_indices {
+                self.expression(index);
+            }
         }
     }
 
@@ -387,7 +395,7 @@ pub(super) fn may_write_variable(
     let assignment = |assignment: &AssignmentStmt| {
         assignment.target_name() == name
             || expression(&assignment.value)
-            || matches!(&assignment.target, LValue::ArrayAccess { index, .. } if expression(index))
+            || matches!(&assignment.target, LValue::ArrayAccess { index, additional_indices, .. } if expression(index) || additional_indices.iter().any(expression))
     };
     let body = |statement: &AnalogStatement| may_write_variable(statement, name, functions);
     match statement {

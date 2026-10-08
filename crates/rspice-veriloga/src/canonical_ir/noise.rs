@@ -672,6 +672,7 @@ fn expression_kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system_function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } => "branch_access",
@@ -713,7 +714,9 @@ pub(super) fn contains_noise(hir: &HirModel, root: ExprId) -> bool {
 pub(super) fn push_expression_children(kind: &HirExprKind, stack: &mut Vec<ExprId>) {
     match kind {
         HirExprKind::Binary { left, right, .. } => stack.extend([*left, *right]),
-        HirExprKind::Unary { operand, .. } => stack.push(*operand),
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+            stack.push(*operand)
+        }
         HirExprKind::Conditional {
             condition,
             then_expr,

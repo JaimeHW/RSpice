@@ -562,6 +562,11 @@ impl<'a> Vm<'a> {
                     .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
                 self.stack.push(value);
             }
+            Instruction::ArrayIndex { lower, len } => {
+                let raw = self.pop()?;
+                let offset = Self::array_slot(raw, 0, *len as usize, *lower)?;
+                self.stack.push(offset as f64);
+            }
             Instruction::CheckedValue => {
                 let derivative = self.pop()?;
                 let primal = self.pop()?;

@@ -1844,6 +1844,7 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
             }
         }
         Expression::ArrayAccess(access) => Expression::ArrayAccess(ArrayAccessExpr {
+            normalized: access.normalized,
             packed: access
                 .packed
                 .as_ref()

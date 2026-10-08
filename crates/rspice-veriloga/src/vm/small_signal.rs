@@ -1045,6 +1045,11 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                 .map_err(|reason| VmError::InvalidRuntimeOperation(reason.into()))?;
                 self.stack.push(value);
             }
+            Instruction::ArrayIndex { lower, len } => {
+                let raw = self.pop_real("array coordinate")?;
+                let offset = Self::array_slot(raw, 0, *len as usize, *lower)?;
+                self.stack.push(V::new(offset as f64, 0.0));
+            }
             Instruction::CheckedValue => {
                 let derivative = self.pop("ddx")?;
                 let primal = self.pop("ddx")?;

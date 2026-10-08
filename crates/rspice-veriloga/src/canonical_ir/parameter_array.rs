@@ -836,6 +836,7 @@ fn expression_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system_function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } => "branch_access",

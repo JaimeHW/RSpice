@@ -373,7 +373,9 @@ pub fn visit_state_sites(
         | HirExprKind::NoiseSource { operands: args, .. } => {
             visit_list(expressions, args, visit)?;
         }
-        HirExprKind::Unary { operand, .. } => visit_state_sites(expressions, *operand, visit)?,
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+            visit_state_sites(expressions, *operand, visit)?
+        }
         HirExprKind::ArrayAccess { index, packed, .. } => {
             visit_state_sites(expressions, *index, visit)?;
             if let Some(packed) = packed {

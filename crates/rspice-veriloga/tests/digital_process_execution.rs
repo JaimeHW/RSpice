@@ -8641,12 +8641,20 @@ fn multidimensional_arrays_diagnose_rank_shape_and_storage_errors() {
         ),
         ("reg m[0:256][0:256];", "65536 elements"),
         (
-            "electrical p; reg [7:0] m[0:1][0:1]; initial m[0][0]=1; analog I(p)<+m[0][0];",
-            "continuous coordinate lowering",
+            "real m[0:1][0:1]; reg q; analog @(initial_step) m[0][0]=1; initial @(m[0][0]) q=1;",
+            "coordinate-aware occurrence bindings",
         ),
         (
-            "electrical p; reg [7:0] m[0:1][0:1]; initial m[0][0]=1; analog I(p)<+m[0][0][7:4];",
-            "continuous coordinate lowering",
+            "real m[0:1][0:1]; wire q; analog @(initial_step) m[0][0]=1; assign q=m[0][0];",
+            "coordinate-aware occurrence bindings",
+        ),
+        (
+            "electrical p; reg [7:0] m[0:1][0:1]; initial m[0][0]=1; analog I(p)<+m[0];",
+            "requires all unpacked indices",
+        ),
+        (
+            "electrical p; real m[0:1][0:1]; initial m[0][0]=1; analog I(p)<+m[0][0][7:4];",
+            "four-state",
         ),
         (
             "parameter N=2; initial begin : b integer N; reg m[0:N][0:1]; end",

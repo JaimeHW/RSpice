@@ -4387,3 +4387,104 @@ endmodule
         }
     }
 }
+
+#[test]
+fn multidimensional_mixed_direct_discrete_reads_drive_loaded_hierarchy() {
+    let model = ModelFile::new(
+        "direct_matrix",
+        r#"
+`timescale 1ns/1ps
+module matrix(p); inout p; electrical p;
+ parameter integer ROW=1;
+ real values[1:0][-1:0]='{'{2.0,3.0},'{4.0,5.0}};
+ integer offsets[1:0][-1:0]='{'{-1,0},'{-2,0}};
+ reg [63:0] tags[1:0][-1:0]='{'{64'hxxxxxxxxxxxxxxx3,64'hz},'{64'hzzzzzzzzzzzzzzz5,64'hx}};
+ integer row;
+ initial begin
+   row=ROW;
+   values[row][-1]=values[row][-1];
+   offsets[row][-1]=offsets[row][-1];
+   #1; values[row][-1]<=values[row][-1]+2.0;
+ end
+ analog I(p)<+(V(p)-(values[row][-1]+offsets[row][-1]+tags[row][-1][3:0]))/1000;
+endmodule
+module top(p); inout p; electrical p;
+ parameter integer ROW=1;
+ matrix #(.ROW(ROW)) u(p);
+endmodule
+"#,
+    );
+    let result = run(
+        &format!(
+            "* direct mixed matrix reads\nXa a top ROW=1\nXb b top ROW=0\nRa a 0 1k\nRb b 0 1k\n.va \"{}\" top module=top\n.end\n",
+            model.deck_path()
+        ),
+        2e-9,
+        0.1e-9,
+    );
+    for (node, initial) in [("a", 2.0), ("b", 3.5)] {
+        for (&time, value) in result.time.iter().zip(waveform(&result, node)) {
+            let expected = if time < 0.9e-9 {
+                initial
+            } else if time > 1.1e-9 {
+                initial + 1.0
+            } else {
+                continue;
+            };
+            assert!(
+                (value - expected).abs() < 1e-8,
+                "{node} at {time}: {value} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn multidimensional_mixed_analog_samples_feed_digital_control() {
+    let model = ModelFile::new(
+        "sample_matrix",
+        r#"
+`timescale 1ns/1ps
+module matrix(inp,p); inout inp,p; electrical inp,p;
+ real values[1:0][-1:0]; integer words[1:0][-1:0];
+ integer row; real command;
+ analog begin
+   values[1][-1]=3*V(inp); values[1][0]=0;
+   values[0][-1]=5*V(inp); values[0][0]=0;
+   words[1][-1]=-3; words[1][0]=0;
+   words[0][-1]=-5; words[0][0]=0;
+   I(p)<+(V(p)-command)/1000;
+ end
+ initial begin
+   command=0; row=1;
+   #1; command=values[1][-1]; command=values[row][-1]+words[row][-1];
+   #1; row=0; command=values[row][-1]+words[row][-1];
+ end
+endmodule
+module top(inp,p); inout inp,p; electrical inp,p; matrix u(inp,p); endmodule
+"#,
+    );
+    let result = run(
+        &format!(
+            "* analog matrix sample feedback\nVin inp 0 2\nX1 inp out top\nRload out 0 1k\n.va \"{}\" top module=top\n.end\n",
+            model.deck_path()
+        ),
+        3e-9,
+        0.1e-9,
+    );
+    for (&time, value) in result.time.iter().zip(waveform(&result, "out")) {
+        let expected = if time < 0.9e-9 {
+            0.0
+        } else if time > 1.1e-9 && time < 1.9e-9 {
+            1.5
+        } else if time > 2.1e-9 {
+            2.5
+        } else {
+            continue;
+        };
+        assert!(
+            (value - expected).abs() < 1e-8,
+            "at {time}: {value} != {expected}"
+        );
+    }
+}

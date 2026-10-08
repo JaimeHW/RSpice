@@ -135,6 +135,7 @@ pub struct MirModel {
     #[serde(default = "canonical_default_transition")]
     pub default_transition: f64,
     pub value_symbols: Vec<SmolStr>,
+    pub arrays: Vec<super::hir::HirArray>,
     pub ground_nodes: Vec<SmolStr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub digital_observations: Vec<SmolStr>,
@@ -252,6 +253,7 @@ impl MirModel {
             expressions,
             default_transition: hir.default_transition,
             value_symbols: sorted_value_symbols(hir),
+            arrays: hir.arrays.clone(),
             ground_nodes: hir.ground_nodes.clone(),
             digital_observations: hir.digital_observations.clone(),
         };
@@ -306,6 +308,36 @@ impl MirModel {
             &self.ground_nodes,
         );
         validate_value_symbols(&mut diagnostics, &self.value_symbols);
+        let mut arrays = HashSet::new();
+        let symbols: HashSet<_> = self.value_symbols.iter().map(SmolStr::as_str).collect();
+        for (index, array) in self.arrays.iter().enumerate() {
+            if usize::from(array.id) != index
+                || !arrays.insert(&array.name)
+                || array.name.is_empty()
+            {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::MirValidation,
+                    "MIR invalid array identity",
+                ));
+            }
+            if let Some(layout) = array.layout() {
+                if (0..layout.len()).any(|offset| {
+                    !symbols.contains(
+                        crate::array_index::element_name(&array.name, &layout, offset).as_str(),
+                    )
+                }) {
+                    diagnostics.push(IrDiagnostic::global_error(
+                        CompilerPhase::MirValidation,
+                        "MIR array element is absent from value symbols",
+                    ));
+                }
+            } else {
+                diagnostics.push(IrDiagnostic::global_error(
+                    CompilerPhase::MirValidation,
+                    "MIR invalid array coordinate layout",
+                ));
+            }
+        }
         validate_parameter_names_and_aliases(&mut diagnostics, &self.parameters);
         validate_parameter_default_exprs(&mut diagnostics, &self.parameters, &self.expressions);
         diagnostics.extend(super::parameter_array::validate_parameter_array_contract(
@@ -964,6 +996,7 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> &'static str {
         HirExprKind::SystemFunction { .. } => "system_function",
         HirExprKind::Binary { .. } => "binary",
         HirExprKind::Unary { .. } => "unary",
+        HirExprKind::ArrayIndex { .. } => "array-index",
         HirExprKind::Conditional { .. } => "conditional",
         HirExprKind::Call { .. } => "call",
         HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
@@ -1031,6 +1064,26 @@ fn validate_expressions(
             HirExprKind::Binary { left, right, .. } => {
                 validate_expression_child(diagnostics, expressions, expression, "left", *left);
                 validate_expression_child(diagnostics, expressions, expression, "right", *right);
+            }
+            HirExprKind::ArrayIndex {
+                operand,
+                lower,
+                len,
+            } => {
+                validate_expression_child(
+                    diagnostics,
+                    expressions,
+                    expression,
+                    "operand",
+                    *operand,
+                );
+                if *len == 0 || *len > 65_536 || lower.checked_add(i64::from(*len) - 1).is_none() {
+                    diagnostics.push(IrDiagnostic::error(
+                        CompilerPhase::MirValidation,
+                        "MIR invalid array coordinate bounds",
+                        expression.span,
+                    ));
+                }
             }
             HirExprKind::Unary { operand, .. } => {
                 validate_expression_child(

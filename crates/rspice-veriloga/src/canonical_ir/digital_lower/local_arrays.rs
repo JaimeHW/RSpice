@@ -243,7 +243,7 @@ impl ProcessLowerer<'_> {
 
 /// Read nested patterns in authored dimension order. Leaf expressions may themselves
 /// be packed concatenations; only the unpacked rank determines the pattern depth.
-pub(super) fn initializer_elements<'a>(
+pub(crate) fn initializer_elements<'a>(
     expression: &'a Expression,
     layout: &crate::array_index::UnpackedArrayLayout,
 ) -> Result<Vec<&'a Expression>, String> {

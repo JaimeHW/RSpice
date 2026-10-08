@@ -781,6 +781,12 @@ impl SemanticAnalyzer {
             .filter(|signal| signal.unpacked.is_none())
             .map(|signal| signal.name.clone())
             .collect();
+        let unpacked_ranks = analyzed
+            .digital
+            .signals
+            .iter()
+            .map(|signal| (signal.name.clone(), signal.dimensions.len()))
+            .collect();
         for block in [
             module.analog_block.as_ref(),
             module.analog_initial.as_ref(),
@@ -795,6 +801,7 @@ impl SemanticAnalyzer {
                     &mut writes,
                     &mut reads,
                     Some(&packed_scalars),
+                    Some(&unpacked_ranks),
                 );
             }
         }
@@ -3080,7 +3087,7 @@ fn collect_analog_names(
     written: &mut std::collections::HashSet<SmolStr>,
     read: &mut std::collections::HashSet<SmolStr>,
 ) {
-    collect_analog_names_impl(statement, written, read, None);
+    collect_analog_names_impl(statement, written, read, None, None);
 }
 
 fn collect_analog_names_impl(
@@ -3088,6 +3095,7 @@ fn collect_analog_names_impl(
     written: &mut std::collections::HashSet<SmolStr>,
     read: &mut std::collections::HashSet<SmolStr>,
     packed_scalars: Option<&std::collections::HashSet<SmolStr>>,
+    unpacked_ranks: Option<&HashMap<SmolStr, usize>>,
 ) {
     enum Work<'a> {
         Statement(&'a AnalogStatement),
@@ -3131,8 +3139,14 @@ fn collect_analog_names_impl(
             }
             Work::Assignment(assignment) => {
                 pending.push(Work::Write(assignment.target_name()));
-                if let LValue::ArrayAccess { index, .. } = &assignment.target {
+                if let LValue::ArrayAccess {
+                    index,
+                    additional_indices,
+                    ..
+                } = &assignment.target
+                {
                     pending.push(Work::Expression(index));
+                    pending.extend(additional_indices.iter().map(Work::Expression));
                 }
                 pending.push(Work::Expression(&assignment.value));
             }
@@ -3310,6 +3324,8 @@ fn collect_analog_names_impl(
                 Expression::Digital(digital) => {
                     if let Some(name) = digital.base_name()
                         && (packed_scalars.is_none()
+                            || matches!(digital, DigitalExpr::ArraySelect(access)
+                                if unpacked_ranks.and_then(|ranks| ranks.get(name)).and_then(|rank| access.split(*rank)).is_some_and(|(_, packed)| packed.is_none()))
                             || !matches!(
                                 digital,
                                 DigitalExpr::PartSelect(_) | DigitalExpr::ArraySelect(_)

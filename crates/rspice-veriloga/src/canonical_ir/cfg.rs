@@ -73,12 +73,14 @@ use super::{
 
 /// Runtime selection within a contiguous group of analog variable probes.
 /// The index remains an SSA operand so sample suspension captures it exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DigitalAnalogArrayIndex {
     pub index: ValueId,
     pub signed: bool,
     pub lower: i64,
     pub len: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<(i64, i64)>,
 }
 
 /// What SSA tracks a definition for.

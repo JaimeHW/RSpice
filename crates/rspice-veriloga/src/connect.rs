@@ -210,7 +210,10 @@ fn fold_literal(expression: &crate::ast::Expression) -> Option<f64> {
             match unary.op {
                 UnaryOp::Neg => Some(-operand),
                 UnaryOp::Pos | UnaryOp::ToReal => Some(operand),
-                UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger => None,
+                UnaryOp::Not
+                | UnaryOp::BitNot
+                | UnaryOp::ToInteger
+                | UnaryOp::ArrayIndex { .. } => None,
             }
         }
         _ => None,

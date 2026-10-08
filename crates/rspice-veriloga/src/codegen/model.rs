@@ -971,6 +971,11 @@ pub enum Instruction {
     /// Stack: `[input, input_derivative] -> [table_slope * input_derivative]`.
     /// Applies the payload before dividing so a local slope need not fit f64.
     TableDerivativeApply(usize),
+    /// Checked relative array coordinate; appended to preserve serialized discriminants.
+    ArrayIndex {
+        lower: i64,
+        len: u32,
+    },
 }
 
 impl CompiledModel {

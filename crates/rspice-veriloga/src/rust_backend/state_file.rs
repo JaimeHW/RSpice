@@ -1531,7 +1531,9 @@ fn collect_canonical_parameter_default_references(
             visit(*left)?;
             visit(*right)?;
         }
-        HirExprKind::Unary { operand, .. } => visit(*operand)?,
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+            visit(*operand)?
+        }
         HirExprKind::Conditional {
             condition,
             then_expr,
@@ -1792,7 +1794,9 @@ fn parameter_simparam_queries(
                 pending.extend(args.iter().copied());
             }
             HirExprKind::Binary { left, right, .. } => pending.extend([*left, *right]),
-            HirExprKind::Unary { operand, .. } => pending.push(*operand),
+            HirExprKind::Unary { operand, .. } | HirExprKind::ArrayIndex { operand, .. } => {
+                pending.push(*operand)
+            }
             HirExprKind::Conditional {
                 condition,
                 then_expr,

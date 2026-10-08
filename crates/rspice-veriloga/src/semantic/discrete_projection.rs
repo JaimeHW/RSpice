@@ -27,6 +27,7 @@ struct Projection {
 #[derive(Default)]
 pub(super) struct ProjectionBuilder {
     signals: HashMap<SmolStr, SignalShape>,
+    dimensions: HashMap<SmolStr, Vec<(i64, i64)>>,
     projections: Vec<Projection>,
     indices: HashMap<(SmolStr, i64, u32, bool), usize>,
     cells: usize,
@@ -34,6 +35,21 @@ pub(super) struct ProjectionBuilder {
 
 impl ProjectionBuilder {
     pub(super) fn register_signals(&mut self, signals: &[AnalyzedDigitalSignal]) {
+        self.dimensions.extend(
+            signals
+                .iter()
+                .filter(|signal| signal.dimensions.len() > 1)
+                .map(|signal| {
+                    (
+                        signal.name.clone(),
+                        signal
+                            .dimensions
+                            .iter()
+                            .map(|axis| (axis.msb, axis.lsb))
+                            .collect(),
+                    )
+                }),
+        );
         self.signals.extend(signals.iter().map(|signal| {
             (
                 signal.name.clone(),
@@ -46,6 +62,10 @@ impl ProjectionBuilder {
                 },
             )
         }));
+    }
+
+    pub(super) fn dimensions(&self, name: &str) -> Option<&[(i64, i64)]> {
+        self.dimensions.get(name).map(Vec::as_slice)
     }
 
     pub(super) fn is_scalar(&self, name: &str) -> bool {
@@ -63,6 +83,27 @@ impl SemanticAnalyzer {
         select: &PackedSelect,
         span: Span,
     ) -> CompileResult<Expression> {
+        self.lower_packed_analog_read_inner(name, word, select, span, false)
+    }
+
+    pub(super) fn lower_normalized_packed_analog_read(
+        &mut self,
+        name: &SmolStr,
+        word: Option<&Expression>,
+        select: &PackedSelect,
+        span: Span,
+    ) -> CompileResult<Expression> {
+        self.lower_packed_analog_read_inner(name, word, select, span, true)
+    }
+
+    fn lower_packed_analog_read_inner(
+        &mut self,
+        name: &SmolStr,
+        word: Option<&Expression>,
+        select: &PackedSelect,
+        span: Span,
+        normalized: bool,
+    ) -> CompileResult<Expression> {
         let name = self.resolve_substituted_name(name);
         let error = |detail: String| {
             CompileError::Semantic(SemanticError::new(
@@ -75,7 +116,7 @@ impl SemanticAnalyzer {
                 "packed analog read of `{name}` requires discrete storage"
             )));
         };
-        if shape.unpacked_rank > 1 {
+        if shape.unpacked_rank > 1 && !normalized {
             return Err(error(format!(
                 "analog read of multidimensional array '{name}' requires continuous coordinate lowering"
             )));
@@ -150,6 +191,7 @@ impl SemanticAnalyzer {
                 // The paired operation carries the selector once all the way
                 // through VM, canonical SSA and native/Wasm lowering.
                 Ok(Expression::ArrayAccess(ArrayAccessExpr {
+                    normalized: false,
                     packed: None,
                     array: projection.value.clone(),
                     discrete_validity: Some(projection.validity.clone()),
@@ -169,7 +211,10 @@ impl SemanticAnalyzer {
     /// Keep exact known based literals until the analog integer folder consumes
     /// them. Only literals change representation: parameter defaults must never
     /// become invariant indices, and analog operators keep analog typing.
-    fn lower_packed_selector(&mut self, expression: &Expression) -> CompileResult<Expression> {
+    pub(super) fn lower_packed_selector(
+        &mut self,
+        expression: &Expression,
+    ) -> CompileResult<Expression> {
         let mut expression = expression.clone();
         let mut pending = vec![&mut expression];
         while let Some(expression) = pending.pop() {
@@ -221,6 +266,7 @@ impl SemanticAnalyzer {
         )?;
         let projection = &self.discrete_projection.projections[ordinal];
         Ok(Expression::ArrayAccess(ArrayAccessExpr {
+            normalized: false,
             packed: Some(PackedArrayIndex {
                 bit: Box::new(bit),
                 layout,
@@ -347,6 +393,13 @@ impl SemanticAnalyzer {
 
     pub(super) fn finish_discrete_projections(&mut self, module: &mut AnalyzedModule) {
         for projection in &self.discrete_projection.projections {
+            let source_shape =
+                self.discrete_projection
+                    .dimensions(&projection.signal)
+                    .map(|axes| {
+                        crate::array_index::UnpackedArrayLayout::new(axes, Self::MAX_ARRAY_ELEMENTS)
+                            .expect("projection source shape")
+                    });
             let is_array = projection.packed.is_some() || projection.shape.unpacked.is_some();
             let (lower, len) = if let Some(layout) = projection.packed {
                 (0, layout.chunk_len().expect("validated packed layout"))
@@ -405,7 +458,16 @@ impl SemanticAnalyzer {
                 module.discrete_selections.push(AnalyzedDiscreteSelection {
                     encoded: projection.packed.is_some(),
                     value,
-                    signal: if projection.shape.unpacked.is_some() {
+                    signal: if let Some(shape) = &source_shape {
+                        let mut name = projection.signal.to_string();
+                        for index in shape
+                            .indices(source_index as usize)
+                            .expect("projection source element")
+                        {
+                            name.push_str(&format!("[{index}]"));
+                        }
+                        name.into()
+                    } else if projection.shape.unpacked.is_some() {
                         format!("{}[{source_index}]", projection.signal).into()
                     } else {
                         projection.signal.clone()

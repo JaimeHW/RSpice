@@ -254,16 +254,23 @@ VAMS-2023 pre-simulation contract (8.2), including when a variable has no proces
 writer. Digitally owned unpacked variable arrays use the same ownership and
 initial-storage contract, including multidimensional declarations.
 
-Digital processes can read elements of one-dimensional analog-owned `real` and
+Digital processes can read elements of analog-owned `real` and
 `integer` arrays using constant or runtime indices. Reads retain the element
 type, signed integer arithmetic, and declared index bounds. They use the normal
 analog evaluation's published storage and sampling barrier; resumption preserves
 the chosen index and does not replay earlier digital writes. Real indices use
 the shared nearest-integer conversion. Unknown, unrepresentable, and out-of-range
 indices produce an explicit diagnostic, consistent with the current analog array
-runtime. Multidimensional analog-owned arrays and direct analog reads of
-multidimensional discrete arrays still require continuous coordinate lowering.
-Canonical schema 67 versions this indexed-read contract.
+runtime. Schema 114 extends the indexed-read contract to multidimensional arrays
+and carries their shapes into HIR, MIR, and digital analog-probe groups. Analog
+reads and writes check every coordinate before flattening the address; constant
+integer coordinates retain their exact values. Module and analog block-local
+nested initializers follow authored axis order. Derivative storage retains full
+source element names. Direct analog numeric and packed reads of discrete matrices
+use the existing value/validity projections, so unknown unselected bits do not
+invalidate a known selection. Multidimensional analog assignment-event subscriptions
+and continuous digital drivers depending on those assignment events remain
+unimplemented and are diagnosed explicitly.
 Schema 68 requires finite integral declaration bounds, preserves integer-valued
 constant indices without floating-point narrowing, and checks extents before
 allocation. Constant real indices use the same checked rounding as runtime
@@ -681,15 +688,17 @@ parameterized hierarchy share the existing scalar-cell runtime. The rightmost
 axis varies fastest. Invalid four-state coordinates preserve the existing
 unknown-read/no-write policy, while real-array invalid access retains its
 explicit diagnostic. Local shadowing and source element names survive linking.
-These digital arrays can control analog equations through scalar discrete state;
-direct multidimensional analog access remains explicitly unsupported. Canonical
-schema 113 carries the shape and checked coordinate operation. This execution
+These digital arrays can control analog equations through scalar discrete state
+or direct numeric/packed element reads. Analog-owned multidimensional arrays also
+support continuous reads/writes and sampling by digital processes, as described
+in the schema-114 contract above. Canonical schema 113 introduced digital shapes
+and checked coordinates; schema 114 extends the analog paths. This execution
 coverage uses the portable digital runtime; native/generated digital execution
 and the remaining platform/restart qualification are separate requirements.
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
-initializer patterns, multidimensional analog access, full parameter-dependent
-shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
+initializer patterns, multidimensional analog assignment-event dependencies,
+full parameter-dependent shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
 are still open.
 
 Delay-controlled nonblocking assignments capture their RHS and converted delay
@@ -845,8 +854,7 @@ exercised by the test suite:
 
 **Known limitations**, every one of them a compile error rather than a
 silent miscompile: `noise_table` file input (inline the `{f, p, ...}` pair
-list); multi-dimensional
-arrays; array locals in analog functions; and `output`/`inout`
+list); array locals in analog functions; and `output`/`inout`
 analog-function arguments used inside conditional expressions or any other
 context that must stay free of side effects.
 

@@ -876,6 +876,10 @@ fn branch_body_cannot_perturb_its_own_guard() {
                     }
                     UnaryOp::Neg => -v,
                     UnaryOp::Pos | UnaryOp::ToReal => v,
+                    UnaryOp::ArrayIndex { lower, len } => {
+                        crate::array_index::checked_array_slot(v, 0, len as usize, lower).unwrap()
+                            as f64
+                    }
                     UnaryOp::Not => f64::from(v == 0.0),
                     UnaryOp::BitNot => !(v as i64) as f64,
                 }

@@ -844,6 +844,7 @@ pub enum LValue {
     ArrayAccess {
         name: SmolStr,
         index: Box<Expression>,
+        additional_indices: Vec<Expression>,
         span: Span,
     },
 }
@@ -1369,6 +1370,11 @@ pub struct UnaryExpr {
 /// Unary operators
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnaryOp {
+    /// Internal checked conversion from an authored array coordinate to its offset.
+    ArrayIndex {
+        lower: i64,
+        len: u32,
+    },
     /// Compiler-inserted assignment conversion; never parsed as an operator.
     ToInteger,
     /// Compiler-inserted numeric assignment conversion to real.
@@ -1399,6 +1405,8 @@ pub struct CallExpr {
 /// Array access expression
 #[derive(Debug, Clone)]
 pub struct ArrayAccessExpr {
+    /// Compiler-normalized multidimensional coordinate; source reads leave this false.
+    pub normalized: bool,
     /// Compiler-generated packed read. Source parsing leaves this empty.
     pub packed: Option<PackedArrayIndex>,
     pub array: SmolStr,

@@ -524,6 +524,9 @@ fn validate_hir_mir_value_symbols(
     hir: &HirModel,
     mir: &MirModel,
 ) {
+    if hir.arrays != mir.arrays {
+        diagnostics.push(artifact_error("HIR/MIR array metadata must match"));
+    }
     let mut expected: Vec<_> = hir.known_value_symbol_names().into_iter().collect();
     expected.sort();
 
@@ -865,6 +868,9 @@ fn mir_summary(mir: &MirModel) -> String {
     for parameter in &mir.parameters {
         write_mir_parameter(&mut out, parameter);
     }
+    for array in &mir.arrays {
+        write_hir_array(&mut out, array);
+    }
     for branch in &mir.branches {
         write_mir_branch(&mut out, branch);
     }
@@ -947,6 +953,9 @@ fn write_hir_array(out: &mut String, array: &HirArray) {
         array.len
     )
     .expect("write to string");
+    if !array.dimensions.is_empty() {
+        writeln!(out, "array_dimensions={:?}", array.dimensions).expect("write to string");
+    }
 }
 
 fn write_hir_branch(out: &mut String, branch: &HirBranch) {
@@ -1209,6 +1218,14 @@ fn hir_expr_kind_label(kind: &HirExprKind) -> String {
                 right.index()
             )
         }
+        HirExprKind::ArrayIndex {
+            operand,
+            lower,
+            len,
+        } => format!(
+            "array-index operand:{} lower:{lower} len:{len}",
+            operand.index()
+        ),
         HirExprKind::Unary { op, operand } => {
             format!("unary op:{} operand:{}", enc_str(op), operand.index())
         }

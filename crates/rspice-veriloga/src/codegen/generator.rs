@@ -1423,6 +1423,11 @@ impl CodeGenerator {
                 }
                 Node::Unary(op, _) => {
                     match op {
+                        crate::ast::UnaryOp::ArrayIndex { lower, len } => {
+                            program
+                                .instructions
+                                .push(Instruction::ArrayIndex { lower, len });
+                        }
                         crate::ast::UnaryOp::ToInteger => {
                             program.instructions.push(Instruction::PushConst(0.0));
                             program.instructions.push(Instruction::BitOr);

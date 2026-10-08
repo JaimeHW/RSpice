@@ -2321,9 +2321,15 @@ impl<'a> Parser<'a> {
         let target = if self.match_token(TokenKind::LBracket) {
             let index = self.parse_expression()?;
             self.expect(TokenKind::RBracket)?;
+            let mut additional_indices = Vec::new();
+            while self.match_token(TokenKind::LBracket) {
+                additional_indices.push(self.parse_expression()?);
+                self.expect(TokenKind::RBracket)?;
+            }
             LValue::ArrayAccess {
                 name: name.into(),
                 index: Box::new(index),
+                additional_indices,
                 span: start,
             }
         } else {
@@ -2944,6 +2950,7 @@ impl<'a> Parser<'a> {
                         )));
                     }
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
+                        normalized: false,
                         packed: None,
                         discrete_validity: None,
                         array: name.into(),

@@ -173,7 +173,7 @@ fn resolve_integer_operator_tree(
                 let (operand_type, wide) = types.pop().expect("unary operand typed");
                 let value_type = match unary.op {
                     UnaryOp::ToInteger | UnaryOp::BitNot => ValueType::Integer,
-                    UnaryOp::ToReal => ValueType::Real,
+                    UnaryOp::ToReal | UnaryOp::ArrayIndex { .. } => ValueType::Real,
                     UnaryOp::Not => ValueType::Boolean,
                     _ => operand_type,
                 };
@@ -380,6 +380,7 @@ pub(crate) const MAX_DIGITAL_VECTOR_WIDTH: u32 = 65_536;
 mod analyzed;
 mod analog_events;
 pub use analog_events::AnalogEventBinding;
+mod array_coordinates;
 mod bounded_loop;
 mod constant_dependencies;
 mod digital;
@@ -1935,19 +1936,6 @@ impl SemanticAnalyzer {
         // declarations do not choose a domain; their procedural writers do.
         self.assignment_events.register_arrays(&analyzed.arrays);
         self.analyze_digital(module, &mut analyzed);
-        for (name, array) in &analyzed.arrays {
-            if !array.dimensions.is_empty()
-                && !analyzed
-                    .digital
-                    .signals
-                    .iter()
-                    .any(|signal| signal.name == *name)
-            {
-                self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
-                    "multi-dimensional analog-owned array '{name}' requires continuous coordinate lowering"
-                )), module.span);
-            }
-        }
         if let Some(lowered) = &event_lowering {
             analyzed.digital.analog_events = lowered.bindings.clone();
             for (process, inputs) in analyzed
@@ -1982,44 +1970,7 @@ impl SemanticAnalyzer {
                 function_effects::validate_initializer_expression(init, &self.user_functions)?;
 
                 if let Some(layout) = self.arrays.get(&item.name).cloned() {
-                    // Array initializer: '{e0, e1, ...} fills the elements
-                    // in declaration order
-                    let Expression::ArrayLiteral(lit) = init else {
-                        self.record_error_at(
-                            SemanticErrorKind::TypeMismatch {
-                                expected: "array literal".to_string(),
-                                found: "scalar expression".to_string(),
-                                context: format!("initializer of array '{}'", item.name),
-                            },
-                            item.span,
-                        );
-                        continue;
-                    };
-                    if lit.elements.len() != layout.len {
-                        self.record_error_at(
-                            SemanticErrorKind::TypeMismatch {
-                                expected: format!("{} elements", layout.len),
-                                found: format!("{} elements", lit.elements.len()),
-                                context: format!("initializer of array '{}'", item.name),
-                            },
-                            item.span,
-                        );
-                        continue;
-                    }
-                    if let Some(replication) = lit.first_replication() {
-                        self.record_error_at(
-                            SemanticErrorKind::UnsupportedFeature(
-                                "replication in executable array initializers is parsed but not yet supported; write the elements explicitly"
-                                    .into(),
-                            ),
-                            replication.span,
-                        );
-                        continue;
-                    }
-                    for (offset, element) in lit.elements.iter().enumerate() {
-                        let ArrayLiteralElement::Value(element) = element else {
-                            unreachable!("replication was rejected before array lowering");
-                        };
+                    for (offset, element) in self.array_initializer_values(item)? {
                         let var_index = layout.base + offset;
                         let expression = self.lower_expression_with_side_effects(
                             element,
@@ -2360,9 +2311,9 @@ impl SemanticAnalyzer {
     /// allocate gigabytes of per-instance state
     const MAX_ARRAY_ELEMENTS: usize = 65_536;
 
-    /// Register a 1-D array variable: its elements become contiguous
-    /// `name[k]` slots in the variable storage (named after `storage_name`,
-    /// which differs from the declared name for hoisted block locals).
+    /// Register an array variable: its elements become contiguous storage
+    /// slots named by their complete source coordinates. `storage_name`
+    /// differs from the declared name for hoisted block locals.
     /// Bounds must fold to instance-invariant constants
     /// (parameter-dependent shapes would make the storage layout vary per
     /// instance).
@@ -3072,7 +3023,7 @@ impl SemanticAnalyzer {
                                 module,
                             ) {
                                 module.arrays.insert(hoisted.clone(), layout.clone());
-                                self.arrays.insert(hoisted.clone(), layout);
+                                self.arrays.insert(hoisted.clone(), layout.clone());
                                 self.define_symbol(Symbol {
                                     name: hoisted.clone(),
                                     kind: SymbolKind::Variable,
@@ -3088,13 +3039,38 @@ impl SemanticAnalyzer {
                                     }),
                                 );
                                 if item.init.is_some() {
-                                    self.record_error_at(
-                                        SemanticErrorKind::UnsupportedFeature(format!(
-                                            "initializer on block-local array '{}'",
-                                            item.name
-                                        )),
-                                        item.span,
-                                    );
+                                    for (offset, expression) in
+                                        self.array_initializer_values(item)?
+                                    {
+                                        let target =
+                                            module.variables[layout.base + offset].name.clone();
+                                        let value = self.lower_expression_with_side_effects(
+                                            expression, module, sink,
+                                        )?;
+                                        let (value, _) =
+                                            self.coerce_assignment_expression(value, value_type)?;
+                                        let expression_guard = self.active_site_guard();
+                                        let guarded = self.apply_guard(
+                                            value.clone(),
+                                            Self::number_expr(0.0, item.span),
+                                        );
+                                        let site = self.next_analog_site();
+                                        let assignment = AnalyzedAssignment {
+                                            target,
+                                            var_index: layout.base + offset,
+                                            index: None,
+                                            expression: guarded,
+                                            site,
+                                            expression_guard,
+                                            expr_type: value_type,
+                                            span: item.span,
+                                            unfiltered_initial_step_guard: None,
+                                        };
+                                        let mut structured = assignment.clone();
+                                        structured.expression = value;
+                                        self.record_region(AnalyzedRegion::Assignment(structured));
+                                        sink.push(AnalyzedStatement::Assignment(assignment));
+                                    }
                                 }
                             }
                             continue;
@@ -5384,7 +5360,12 @@ impl SemanticAnalyzer {
                 self.symbols.mark_used(&resolved);
                 (resolved.clone(), resolved, *span, None)
             }
-            LValue::ArrayAccess { name, index, span } => {
+            LValue::ArrayAccess {
+                name,
+                index,
+                additional_indices,
+                span,
+            } => {
                 let array_name = self.resolve_substituted_name(name);
                 let Some(layout) = self.arrays.get(&array_name).cloned() else {
                     self.record_error_at(
@@ -5396,20 +5377,32 @@ impl SemanticAnalyzer {
                     );
                     return Ok(());
                 };
-                if !layout.dimensions.is_empty() {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::InvalidExpression(format!(
-                            "array '{array_name}' requires all unpacked indices"
-                        )),
-                        *span,
-                    )));
-                }
                 self.symbols.mark_used(&array_name);
-                let index = self.lower_expression_with_side_effects(index, module, sink)?;
+                let index = if !layout.dimensions.is_empty() {
+                    let indices = std::iter::once(index.as_ref())
+                        .chain(additional_indices.iter())
+                        .map(|index| self.materialize_output_function_calls(index, module, sink))
+                        .collect::<CompileResult<Vec<_>>>()?;
+                    self.lower_array_coordinates(
+                        &array_name,
+                        &layout.dimensions,
+                        &indices.iter().collect::<Vec<_>>(),
+                        *span,
+                    )?
+                } else {
+                    if !additional_indices.is_empty() {
+                        return Err(self.array_coordinate_error(
+                            &array_name,
+                            "requires one unpacked index",
+                            *span,
+                        ));
+                    }
+                    self.lower_expression_with_side_effects(index, module, sink)?
+                };
                 if let Some(k) = self.constant_array_index(&index, &array_name)? {
                     // Compile-time index: target the element slot directly
                     self.check_array_bounds(&array_name, &layout, k, *span)?;
-                    let elem = SmolStr::from(format!("{array_name}[{k}]"));
+                    let elem = Self::array_element_name(&array_name, &layout, k);
                     (array_name, elem, *span, None)
                 } else {
                     (array_name.clone(), array_name, *span, Some(index))
@@ -5564,6 +5557,7 @@ impl SemanticAnalyzer {
     ) -> CompileResult<()> {
         let layout = self.arrays.get(&array_name).cloned().expect("checked");
         let fallback = Expression::ArrayAccess(ArrayAccessExpr {
+            normalized: true,
             packed: None,
             discrete_validity: None,
             array: array_name.clone(),
@@ -5917,10 +5911,18 @@ impl SemanticAnalyzer {
             | Expression::StringLit(_)
             | Expression::NullArgument(_)
             | Expression::Identifier(_)
-            // A discrete-domain expression cannot contain an analog function
-            // call, so there is nothing to materialize out of one.
-            | Expression::Digital(_)
             | Expression::BranchAccess(_) => expr.clone(),
+            Expression::Digital(digital) => {
+                // Source bracket expressions are shared by both domains. Their
+                // coordinates can call analog functions with output arguments.
+                let mut expression = Expression::Digital(digital.clone());
+                let mut children = Vec::new();
+                flow_probes::for_child_mut(&mut expression, &mut |child| children.push(child));
+                for child in children {
+                    *child = self.materialize_output_function_calls(child, module, sink)?;
+                }
+                expression
+            }
             Expression::SystemFunction(function) => {
                 if let Some(resolved) = self.lower_module_query_function(function)? {
                     return Ok(resolved);
@@ -6059,6 +6061,7 @@ impl SemanticAnalyzer {
                     })
                 }).transpose()?;
                 Expression::ArrayAccess(ArrayAccessExpr {
+                    normalized: access.normalized,
                     packed,
                     discrete_validity: access.discrete_validity.clone(),
                     array: access.array.clone(),
@@ -6693,10 +6696,11 @@ impl SemanticAnalyzer {
 
     fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
         if let Expression::ArrayAccess(access) = expr {
-            if self
-                .arrays
-                .get(&access.array)
-                .is_some_and(|array| !array.dimensions.is_empty())
+            if !access.normalized
+                && self
+                    .arrays
+                    .get(&access.array)
+                    .is_some_and(|array| !array.dimensions.is_empty())
             {
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::InvalidExpression(format!(
@@ -6718,26 +6722,16 @@ impl SemanticAnalyzer {
                 select.span,
             )?,
             Expression::Digital(DigitalExpr::ArraySelect(select)) => {
-                if !select.additional_indices.is_empty()
-                    || self
-                        .arrays
-                        .get(&select.name)
-                        .is_some_and(|array| !array.dimensions.is_empty())
-                {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "analog read of multidimensional array '{}' requires continuous coordinate lowering",
-                            select.name
-                        )),
+                if let Some(value) = self.lower_shaped_array_read(select)? {
+                    value
+                } else {
+                    self.lower_packed_analog_read(
+                        &select.name,
+                        Some(&select.index),
+                        &select.select,
                         select.span,
-                    )));
+                    )?
                 }
-                self.lower_packed_analog_read(
-                    &select.name,
-                    Some(&select.index),
-                    &select.select,
-                    select.span,
-                )?
             }
             // Other discrete syntax still requires its own continuous-domain contract.
             Expression::Digital(digital) => {
@@ -6954,6 +6948,7 @@ impl SemanticAnalyzer {
             Expression::ArrayAccess(a) => {
                 if let Some(packed) = &a.packed {
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
+                        normalized: a.normalized,
                         packed: Some(PackedArrayIndex {
                             bit: Box::new(self.lower_expression(&packed.bit)?),
                             layout: packed.layout,
@@ -7001,11 +6996,12 @@ impl SemanticAnalyzer {
                 if let Some(k) = self.constant_array_index(&index, &array_name)? {
                     self.check_array_bounds(&array_name, &layout, k, a.span)?;
                     self.checked_discrete_read(Expression::Identifier(Identifier {
-                        name: SmolStr::from(format!("{array_name}[{k}]")),
+                        name: Self::array_element_name(&array_name, &layout, k),
                         span: a.span,
                     }))
                 } else {
                     self.checked_discrete_read(Expression::ArrayAccess(ArrayAccessExpr {
+                        normalized: a.normalized,
                         packed: None,
                         discrete_validity: None,
                         array: array_name,
@@ -7978,6 +7974,7 @@ impl SemanticAnalyzer {
                     "analog function output argument index",
                 )?;
                 Ok(LValue::ArrayAccess {
+                    additional_indices: Vec::new(),
                     name: array,
                     index: Box::new(index),
                     span: access.span,
@@ -8397,7 +8394,7 @@ impl SemanticAnalyzer {
                     let operand_type = types.pop().expect("unary operand type was inferred");
                     match unary.op {
                         UnaryOp::ToInteger => ValueType::Integer,
-                        UnaryOp::ToReal => ValueType::Real,
+                        UnaryOp::ToReal | UnaryOp::ArrayIndex { .. } => ValueType::Real,
                         UnaryOp::Pos | UnaryOp::Neg => operand_type,
                         UnaryOp::Not => ValueType::Boolean,
                         UnaryOp::BitNot => {
@@ -8769,6 +8766,26 @@ impl SemanticAnalyzer {
             Expression::Unary(u) => {
                 let v = eval(&u.operand)?;
                 Some(match u.op {
+                    UnaryOp::ArrayIndex { lower, len } => {
+                        let offset = match v {
+                            ConstantValue::Integer(value) => {
+                                crate::array_index::checked_integer_array_slot(
+                                    value,
+                                    0,
+                                    len as usize,
+                                    lower,
+                                )
+                            }
+                            ConstantValue::Real(value) => crate::array_index::checked_array_slot(
+                                value,
+                                0,
+                                len as usize,
+                                lower,
+                            ),
+                        }
+                        .ok()?;
+                        ConstantValue::Integer(offset as i64)
+                    }
                     UnaryOp::ToReal => ConstantValue::Real(v.as_f64()),
                     UnaryOp::ToInteger => {
                         ConstantValue::Integer(i64::from(real_to_integer(v.as_f64()).ok()?))
