@@ -312,7 +312,7 @@ impl TransferPoint {
     /// Get group delay at this point (requires adjacent points)
     pub fn group_delay(&self, next: &TransferPoint) -> Value {
         let df = next.freq_in - self.freq_in;
-        if df.abs() < 1e-15 {
+        if df == 0.0 {
             return 0.0;
         }
         let dphi = next.phase() - self.phase();
@@ -324,7 +324,13 @@ impl TransferPoint {
         } else {
             dphi
         };
-        -dphi_unwrapped / (2.0 * PI * df)
+        // Preserve every resolvable interval. Multiplying a very large finite
+        // interval by 2π can overflow even when the delay is representable.
+        if df.abs() > f64::MAX / (2.0 * PI) {
+            (-dphi_unwrapped / (2.0 * PI)) / df
+        } else {
+            -dphi_unwrapped / (2.0 * PI * df)
+        }
     }
 }
 
@@ -415,7 +421,7 @@ impl PxfResult {
             .windows(2)
             .map(|w| {
                 let gd = w[0].group_delay(&w[1]);
-                ((w[0].freq_in + w[1].freq_in) / 2.0, gd)
+                (w[0].freq_in.midpoint(w[1].freq_in), gd)
             })
             .collect()
     }
@@ -505,6 +511,44 @@ impl PxfResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_delay_preserves_resolvable_small_and_large_intervals() {
+        for (start, stop) in [(1e-16, 2e-16), (1e307, 1e308)] {
+            let first = TransferPoint {
+                freq_in: start,
+                freq_out: start,
+                transfer: Complex64::new(1.0, 0.0),
+                sideband_in: 0,
+                sideband_out: 0,
+            };
+            let next = TransferPoint {
+                freq_in: stop,
+                freq_out: stop,
+                transfer: Complex64::new(0.0, -1.0),
+                ..first.clone()
+            };
+            // A quarter-cycle phase fall over the interval gives 1/(4 df).
+            let expected = 0.25 / (stop - start);
+            let actual = first.group_delay(&next);
+            assert!((actual / expected - 1.0).abs() < 1e-14, "{start}: {actual}");
+        }
+    }
+
+    #[test]
+    fn group_delay_midpoint_does_not_overflow_a_finite_sweep() {
+        let mut result = PxfResult::new(1.0, 0, 0);
+        for freq_in in [1e308, 1.5e308] {
+            result.add_point(TransferPoint {
+                freq_in,
+                freq_out: freq_in,
+                transfer: Complex64::new(1.0, 0.0),
+                sideband_in: 0,
+                sideband_out: 0,
+            });
+        }
+        assert_eq!(result.group_delay_curve(), vec![(1.25e308, 0.0)]);
+    }
 
     #[test]
     fn validate_rejects_non_finite_sweep_values() {
