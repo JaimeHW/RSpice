@@ -348,6 +348,7 @@ pub struct VmContext {
     /// Lazily allocated task delivery state. Pure numerical models pay only
     /// for the optional pointer and allocate no effect storage.
     analog_effects: Option<Box<rspice_veriloga_runtime::AnalogEffectJournal>>,
+    pub(crate) analog_occurrences: Option<Box<crate::analog_occurrences::AnalogOccurrenceJournal>>,
     /// Numerical replay/probe passes preserve the candidate journal and may
     /// not append calls to it. This is separate from the limiter policy.
     pub(crate) record_task_effects: bool,
@@ -488,6 +489,7 @@ impl Default for VmContext {
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
+            analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
             simulation_parameters: Default::default(),
@@ -535,6 +537,32 @@ impl VmContext {
         )
     }
 
+    pub(crate) fn record_analog_occurrence(
+        &mut self,
+        slot: usize,
+        value: f64,
+    ) -> Result<(), VmError> {
+        if self.record_task_effects
+            && let Some(journal) = &mut self.analog_occurrences
+        {
+            journal.record(slot, value)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "native")]
+    pub(crate) fn analog_occurrences_ptr(
+        &mut self,
+    ) -> *mut crate::analog_occurrences::AnalogOccurrenceJournal {
+        if self.record_task_effects {
+            self.analog_occurrences
+                .as_deref_mut()
+                .map_or(std::ptr::null_mut(), |journal| journal)
+        } else {
+            std::ptr::null_mut()
+        }
+    }
+
     pub(crate) fn analog_effect_journal(
         &mut self,
     ) -> &mut rspice_veriloga_runtime::AnalogEffectJournal {
@@ -542,6 +570,11 @@ impl VmContext {
     }
 
     pub(crate) fn invalidate_task_candidate(&mut self) {
+        if self.record_task_effects
+            && let Some(journal) = &mut self.analog_occurrences
+        {
+            journal.invalidate();
+        }
         if self.record_task_effects {
             self.analog_effect_journal()
                 .invalidate_candidate(rspice_veriloga_runtime::AnalogEffectError::EvaluationFailed);
@@ -553,6 +586,9 @@ impl VmContext {
     /// device restores its captured variables and reporting scalars separately.
     pub(crate) fn discard_trial_candidate(&mut self) {
         self.numerical_evaluation_valid = false;
+        if let Some(journal) = &mut self.analog_occurrences {
+            journal.clear();
+        }
         if let Some(journal) = &mut self.analog_effects {
             journal.discard_candidate();
         }
@@ -687,6 +723,7 @@ impl VmContext {
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
+            analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
             simulation_parameters: Default::default(),
@@ -746,6 +783,7 @@ impl VmContext {
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
+            analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
             simulation_parameters: Default::default(),
@@ -805,6 +843,7 @@ impl VmContext {
             accepted_event_variables: Vec::new(),
             evaluation_state_inputs: Vec::new(),
             analog_effects: None,
+            analog_occurrences: None,
             record_task_effects: false,
             time: 0.0,
             simulation_parameters: Default::default(),
@@ -1007,6 +1046,10 @@ impl VmContext {
     }
 
     fn validate_event_state_candidate(&self) -> Result<(), VmError> {
+        if let Some(journal) = &self.analog_occurrences {
+            journal.records()?;
+        }
+
         self.validate_event_state_layout()?;
         for (&index, &accepted) in self
             .event_state_indices
@@ -1552,6 +1595,9 @@ impl VmContext {
         self.analysis_initialized = true;
         self.numerical_evaluation_valid = false;
         self.record_task_effects = false;
+        if let Some(journal) = &mut self.analog_occurrences {
+            journal.clear();
+        }
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
         }
@@ -1646,6 +1692,9 @@ impl VmContext {
         self.analysis_initialized = false;
         self.numerical_evaluation_valid = false;
         self.record_task_effects = false;
+        if let Some(journal) = &mut self.analog_occurrences {
+            journal.clear();
+        }
         if let Some(journal) = &mut self.analog_effects {
             journal.reset_analysis();
         }
@@ -1777,6 +1826,9 @@ impl VmContext {
             if let Some(variable) = self.variables.get_mut(index) {
                 *variable = accepted;
             }
+        }
+        if record_tasks && let Some(journal) = &mut self.analog_occurrences {
+            journal.reset(&self.variables);
         }
         for (status, older_candidate) in self
             .state_candidate_valid

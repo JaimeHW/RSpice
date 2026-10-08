@@ -3154,6 +3154,14 @@ impl VerilogADevice {
             .collect();
         context.variables.resize(model.num_variables, 0.0);
         context.configure_event_state_variables(&model.event_state_variables)?;
+        if let Some(artifact) = canonical_artifact {
+            let slots = crate::analog_occurrences::counter_slots(&model, artifact)?;
+            if !slots.is_empty() {
+                context.analog_occurrences = Some(Box::new(
+                    crate::analog_occurrences::AnalogOccurrenceJournal::new(&slots),
+                ));
+            }
+        }
         context.configure_evaluation_inputs(
             &model.evaluation_input_variables,
             &model.evaluation_input_derivatives,
@@ -5871,6 +5879,26 @@ impl VerilogADevice {
         self.context.variables.get(idx).copied()
     }
 
+    /// Executed assignment notifications from the latest numerical candidate.
+    /// This is an observation of retained data, not a second model evaluation.
+    pub fn analog_assignment_occurrences(
+        &self,
+    ) -> Result<impl Iterator<Item = (&str, u32)>, VmError> {
+        let records = self
+            .context
+            .analog_occurrences
+            .as_ref()
+            .map(|journal| journal.records())
+            .transpose()?
+            .unwrap_or(&[]);
+        Ok(records.iter().map(|record| {
+            (
+                self.model.variable_names[record.variable].as_str(),
+                record.counter,
+            )
+        }))
+    }
+
     /// Iterate (name, value) over all internal model variables, as the last
     /// observation left them ([`Self::variable`]).
     pub fn variables(&self) -> impl Iterator<Item = (&str, f64)> {
@@ -6743,6 +6771,7 @@ impl VerilogADevice {
             },
             prelude_slots_len: context.prelude_slots.len(),
             analog_effects: context.analog_effects_ptr(),
+            analog_occurrences: context.analog_occurrences_ptr(),
             simulation_parameters: &context.simulation_parameters,
             static_dae_probe: u8::from(!context.evaluation_mode.dynamic_operators_enabled()),
         }
@@ -7575,6 +7604,8 @@ impl VerilogADevice {
                         ));
                     }
                     let value = vm.execute(&assignment.program)?;
+                    vm.context
+                        .record_analog_occurrence(assignment.var_index, value)?;
                     vm.context.variables[assignment.var_index] = value;
                 }
                 crate::codegen::AssignmentStep::AssignIndexed {
@@ -7594,6 +7625,7 @@ impl VerilogADevice {
                         ));
                     }
                     let value = vm.execute(value)?;
+                    vm.context.record_analog_occurrence(slot, value)?;
                     vm.context.variables[slot] = value;
                 }
                 crate::codegen::AssignmentStep::Loop { condition, body } => {

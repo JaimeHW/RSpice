@@ -2084,6 +2084,7 @@ mod tests {
             state_integration: std::ptr::null(),
             evaluation_state_inputs: std::ptr::null(),
             evaluation_state_inputs_len: 0,
+            analog_occurrences: std::ptr::null_mut(),
             prelude_slots: std::ptr::null_mut(),
             prelude_slots_len: 0,
             analog_effects: std::ptr::null_mut(),

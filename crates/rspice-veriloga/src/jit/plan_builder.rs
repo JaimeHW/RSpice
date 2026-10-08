@@ -2750,6 +2750,14 @@ fn lower_assignment_phases(
                 limits,
                 policy,
             )?;
+            let slots =
+                crate::analog_occurrences::counter_slots(model, artifact).map_err(|error| {
+                    JitError::InvalidCanonicalIr {
+                        model: model.name.clone(),
+                        detail: error.to_string().into(),
+                    }
+                })?;
+            track_analog_counter_writes(&mut assignments, &slots)?;
             let post_assignments = split_canonical_assignment_phases(&mut assignments);
             (assignments, post_assignments)
         }
@@ -2773,6 +2781,36 @@ fn lower_assignment_phases(
         assignment_dependencies,
         post_assignment_dependencies,
     ))
+}
+
+fn track_analog_counter_writes(
+    assignments: &mut [NativeAssignment],
+    slots: &[usize],
+) -> JitResult<()> {
+    if slots.is_empty() {
+        return Ok(());
+    }
+    for assignment in assignments {
+        match assignment {
+            NativeAssignment::Direct { var_index, program }
+                if slots.binary_search(var_index).is_ok() =>
+            {
+                program.record_analog_counter(*var_index, None)?;
+            }
+            NativeAssignment::Indexed {
+                base,
+                len,
+                lower,
+                index,
+                value,
+            } if slots.binary_search(base).is_ok() => {
+                value.record_analog_counter(*base, Some((index, *len, *lower)))?;
+            }
+            NativeAssignment::Loop { body, .. } => track_analog_counter_writes(body, slots)?,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn split_canonical_assignment_phases(

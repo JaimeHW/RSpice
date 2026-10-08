@@ -1283,6 +1283,11 @@ pub enum CfgValueKind {
     /// Ordered analog system-task invocation. It has no numerical result and
     /// is never a common subexpression, derivative, or reusable cached value.
     AnalogTask(crate::analog_tasks::AnalogTaskCall<ValueId, super::SourceSpanRef>),
+    /// Executable assignment occurrence; slot is an absolute runtime variable index.
+    AnalogCounter {
+        slot: ValueId,
+        counter: ValueId,
+    },
     /// Runtime dispatch permission; false during numerical observation.
     AnalogTasksEnabled,
     /// Validate the original task guard before evaluating its arguments.
@@ -1302,7 +1307,10 @@ impl CfgValueKind {
     /// all keyed on.
     pub fn is_digital(&self) -> bool {
         match self {
-            Self::AnalogTask(_) | Self::AnalogTasksEnabled | Self::AnalogTaskGuard(_) => false,
+            Self::AnalogCounter { .. }
+            | Self::AnalogTask(_)
+            | Self::AnalogTasksEnabled
+            | Self::AnalogTaskGuard(_) => false,
             Self::RealConstant(_)
             | Self::BooleanConstant(_)
             | Self::BlockParameter
@@ -1480,6 +1488,7 @@ impl CfgValueKind {
                 .iter()
                 .map(|selection| selection.index)
                 .collect(),
+            Self::AnalogCounter { slot, counter } => vec![*counter, *slot],
             Self::AnalogTask(task) => task.expressions().copied().collect(),
             Self::AnalogTaskGuard(value) => vec![*value],
             Self::DigitalRepeatCount { input, .. }
@@ -1768,6 +1777,11 @@ impl CfgValueKind {
                 selection.index = map(selection.index);
             }
             Self::AnalogTaskGuard(value) => *value = map(*value),
+            Self::AnalogCounter { slot, counter } => {
+                // Lane lowering maps positionally, in the order of operands().
+                *counter = map(*counter);
+                *slot = map(*slot);
+            }
             Self::AnalogTask(task) => {
                 for value in task.expressions_mut() {
                     *value = map(*value);

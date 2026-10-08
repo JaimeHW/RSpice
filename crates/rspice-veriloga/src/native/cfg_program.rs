@@ -896,6 +896,10 @@ impl Lowerer<'_> {
         };
         let operand = |value: CfgValueId| self.read(lowered, value);
         match &entry.kind {
+            CfgValueKind::AnalogCounter { slot, counter } => push(
+                NativeOp::RecordAnalogCounter,
+                &[operand(*counter)?, operand(*slot)?],
+            ),
             CfgValueKind::AnalogTasksEnabled => push(NativeOp::AnalogTasksEnabled, &[]),
             CfgValueKind::AnalogTaskGuard(value) => {
                 push(NativeOp::AnalogTaskGuard, &[operand(*value)?])

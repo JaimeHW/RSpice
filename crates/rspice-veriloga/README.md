@@ -275,8 +275,17 @@ analog matrix cells. Ownership checks constrain partially constant selections to
 the possible cells; continuously assigned cells cannot provide assignment events.
 Selected write addresses survive self-indexing, trial rejection, and in-memory
 checkpoint restore. These paths have focused desktop transient evidence.
-Same-instant notifications from different cells currently share a publication
-batch; source-order and process rearming semantics still require qualification.
+Analog evaluation records assignment occurrences in execution order, including
+writes to different cells and repeated equal-value writes. Publication keeps that
+order and lets digital controls rearm between occurrences. Candidate replacement
+and rejection discard speculative records; observation does not generate them.
+Canonical schema 115 retains occurrence effects in the executable CFG, keeping
+intermediate counter writes live through differentiation, scalarization and
+native scheduling. The ordered postfix native plan uses the same journal.
+The journal is bounded to 65,536 occurrences per model evaluation and reports
+exhaustion without accepting a truncated stream.
+Cross-instance race behavior, generated/native digital execution, browser/tablet
+execution, and vendor scheduling equivalence require their separate qualification.
 This evidence does not establish complete mixed scheduling or platform parity.
 Schema 68 requires finite integral declaration bounds, preserves integer-valued
 constant indices without floating-point narrowing, and checks extents before
@@ -704,7 +713,7 @@ coverage uses the portable digital runtime; native/generated digital execution
 and the remaining platform/restart qualification are separate requirements.
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, whole-array values and slices, replicated
-initializer patterns, same-instant analog assignment notification ordering,
+initializer patterns, cross-instance scheduling qualification,
 full parameter-dependent shape/override support beyond the scalar digital path, and remaining mixed-host/platform qualification
 are still open.
 

@@ -991,12 +991,31 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     // `VerilogADevice`, which builds instances from whatever terminal list the
     // netlist supplied.
     let source_evaluation = super::plan_builder::requires_source_evaluation(model);
-    let lower_body = if source_evaluation {
-        CfgModel::from_hir_for_executable_evaluation
+    let mut cfg = if source_evaluation {
+        let slots = crate::analog_occurrences::counter_slots(model, artifact)
+            .map_err(|error| refuse(CfgPlanRefusal::ShippedPlan, error.to_string()))?;
+        let runtime_slots: HashMap<_, _> = model
+            .variable_names
+            .iter()
+            .enumerate()
+            .filter(|(slot, _)| slots.binary_search(slot).is_ok())
+            .map(|(slot, name)| (name.as_str(), slot))
+            .collect();
+        let counters = artifact
+            .hir
+            .variables
+            .iter()
+            .filter_map(|variable| {
+                runtime_slots
+                    .get(variable.name.as_str())
+                    .map(|&slot| (variable.id, slot))
+            })
+            .collect();
+        CfgModel::from_hir_for_executable_evaluation(&artifact.hir, &artifact.mir, counters)
     } else {
-        CfgModel::from_hir_for_executable_backend
-    };
-    let mut cfg = lower_body(&artifact.hir, &artifact.mir).map_err(|diagnostics| {
+        CfgModel::from_hir_for_executable_backend(&artifact.hir, &artifact.mir)
+    }
+    .map_err(|diagnostics| {
         refuse(
             CfgPlanRefusal::CfgLowering,
             diagnostics
@@ -1304,7 +1323,12 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
             .function
             .values
             .iter()
-            .filter(|value| matches!(value.kind, CfgValueKind::AnalogTask(_)))
+            .filter(|value| {
+                matches!(
+                    value.kind,
+                    CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. }
+                )
+            })
             .map(|value| value.id)
             .collect()
     } else {

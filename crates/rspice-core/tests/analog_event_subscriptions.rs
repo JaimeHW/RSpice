@@ -1805,3 +1805,84 @@ endmodule
         );
     }
 }
+
+#[test]
+fn assignment_occurrences_preserve_source_order_across_cells_and_rearmed_controls() {
+    let source_text = r#"
+`timescale 1ps/1ps
+module ordered(p);
+ inout p; electrical p;
+ real sample[0:0][0:1];
+ integer total=0, selected=1, selected_seen=0, done=0;
+ analog @(timer(100p,200p)) begin
+   sample[0][1]=0.25; sample[0][0]=0.5;
+   sample[0][1]=0.25; sample[0][0]=0.5;
+ end
+ always @(sample) total=total+1;
+ always @(sample[0][selected]) begin selected_seen=selected_seen+1; selected=1-selected; end
+ initial begin
+   @(sample[0][1]); @(sample[0][0]);
+   @(sample[0][1]); @(sample[0][0]); done=1;
+ end
+ analog I(p)<+(V(p)-(total+10*done+100*selected_seen))/1000;
+endmodule
+module wrapper(p); inout p; electrical p; ordered child(p); endmodule
+"#;
+    let source = Source::new(source_text);
+    for module in ["ordered", "wrapper"] {
+        let deck = Netlist::parse(&format!("* ordered analog occurrences\nX1 p {module}\nRp p 0 1k\n.va \"{}\" {module} module={module}\n.end\n", source.path())).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.5e-9, 35e-12).unwrap();
+        for (time, expected) in [(0.05e-9, 0.0), (0.15e-9, 207.0), (0.35e-9, 409.0)] {
+            let actual = voltage(&result, "p", time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{module}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+    use rspice_core::xspice::{event_scheduler::SchedulerLimits, verilog::MixedSignalHost};
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let compile = || {
+        MixedSignalHost::compile(
+            source_text,
+            Some("ordered"),
+            "ordered",
+            &[1],
+            SchedulerLimits::default(),
+        )
+        .unwrap()
+    };
+    let evaluate = |host: &mut MixedSignalHost, time, step| {
+        host.begin_trial(
+            time,
+            step,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap();
+        settle_standalone_observer(host, &[0.0]);
+    };
+    let counts = |host: &MixedSignalHost| {
+        ["total", "selected_seen", "done"]
+            .map(|name| u32::from_str_radix(&host.read_digital(name).unwrap(), 2).unwrap())
+    };
+    let mut host = compile();
+    evaluate(&mut host, 0.0, 0.0);
+    host.accept_trial().unwrap();
+    evaluate(&mut host, 100e-12, 100e-12);
+    assert_eq!(counts(&host), [4, 4, 1]);
+    host.reject_trial().unwrap();
+    assert_eq!(counts(&host), [0, 0, 0]);
+    evaluate(&mut host, 100e-12, 100e-12);
+    host.accept_trial().unwrap();
+    assert_eq!(counts(&host), [4, 4, 1]);
+    let checkpoint = host.checkpoint().unwrap();
+    let mut restored = compile();
+    restored.restore(&checkpoint).unwrap();
+    for candidate in [&mut host, &mut restored] {
+        evaluate(candidate, 300e-12, 200e-12);
+        candidate.accept_trial().unwrap();
+        assert_eq!(counts(candidate), [8, 8, 1]);
+    }
+}

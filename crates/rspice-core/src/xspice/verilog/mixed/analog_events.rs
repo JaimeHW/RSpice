@@ -15,32 +15,24 @@ pub(super) struct AnalogEventTrial {
 }
 
 impl AnalogEventTrial {
-    fn observe(&mut self, counter: u32) -> u32 {
-        self.occurrences = self
-            .occurrences
-            .max(counter.wrapping_sub(self.analog_origin) & COUNTER_MASK);
-        self.digital_origin.wrapping_add(self.occurrences) & COUNTER_MASK
+    fn observe(&mut self, counter: u32) -> Option<u32> {
+        let occurrence = counter.wrapping_sub(self.analog_origin) & COUNTER_MASK;
+        if occurrence <= self.occurrences {
+            return None;
+        }
+        self.occurrences = occurrence;
+        Some(occurrence)
+    }
+
+    fn pending(&self, occurrence: u32, held: u32) -> bool {
+        (held.wrapping_sub(self.digital_origin) & COUNTER_MASK) < occurrence
+    }
+
+    fn target(&self, occurrence: u32) -> u32 {
+        self.digital_origin.wrapping_add(occurrence) & COUNTER_MASK
     }
 }
 
-pub(super) fn event_bank(
-    targets: &[(DigitalSignalId, u32)],
-    read: impl Fn(DigitalSignalId) -> Option<u64>,
-) -> Result<Vec<(DigitalSignalId, FourStateValue)>, MixedSignalError> {
-    let mut drives = Vec::new();
-    for &(signal, target) in targets {
-        let held = read(signal)
-            .filter(|value| *value <= i32::MAX as u64)
-            .ok_or_else(|| MixedSignalError::InvalidBridge {
-                detail: "analog event counter lost its initialized signal".into(),
-            })? as u32;
-        if held != target {
-            let next = if held == i32::MAX as u32 { 0 } else { held + 1 };
-            drives.push((signal, FourStateValue::from_u64(32, next as u64)));
-        }
-    }
-    Ok(drives)
-}
 impl MixedSignalHost {
     fn analog_event_counter(&self, name: &str) -> Result<u32, MixedSignalError> {
         let value = self
@@ -63,6 +55,7 @@ impl MixedSignalHost {
 
     pub(super) fn prepare_analog_event_trial(&mut self) -> Result<(), MixedSignalError> {
         self.scratch.trial.analog_events.clear();
+        self.scratch.trial.analog_event_order.clear();
         for probe in &self.state.digital.plan().analog_probes {
             let Some(signal) = probe.event_signal else {
                 continue;
@@ -131,20 +124,81 @@ impl MixedSignalHost {
             solution,
             classify,
         )?;
-        let mut targets = Vec::new();
-        for probe in &self.state.digital.plan().analog_probes {
-            let Some(signal) = probe.event_signal else {
-                continue;
-            };
-            let rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget::Variable { name } =
-                &probe.target
-            else {
-                unreachable!("validated event probe")
-            };
+        let bindings: Vec<_> = self
+            .state
+            .digital
+            .plan()
+            .analog_probes
+            .iter()
+            .filter_map(|probe| {
+                let signal = probe.event_signal?;
+                let rspice_veriloga::canonical_ir::digital::DigitalAnalogProbeTarget::Variable {
+                    name,
+                } = &probe.target
+                else {
+                    unreachable!("validated event probe")
+                };
+                Some((name.clone(), signal))
+            })
+            .collect();
+        let indices: std::collections::BTreeMap<_, _> = bindings
+            .iter()
+            .enumerate()
+            .map(|(index, (name, _))| (name.as_str(), index))
+            .collect();
+        let occurrences = self
+            .analog
+            .analog_assignment_occurrences()
+            .map_err(|error| classify(&error))?;
+        let trial = self.trial.as_mut().expect("active analog event trial");
+        for (name, counter) in occurrences {
+            let index = *indices
+                .get(name)
+                .ok_or_else(|| MixedSignalError::InvalidBridge {
+                    detail: format!("analog occurrence {name} has no digital binding"),
+                })?;
+            if let Some(occurrence) = trial.vectors.analog_events[index].observe(counter) {
+                trial
+                    .vectors
+                    .analog_event_order
+                    .try_reserve(1)
+                    .map_err(|_| MixedSignalError::InvalidBridge {
+                        detail: "could not retain analog occurrence order".into(),
+                    })?;
+                trial.vectors.analog_event_order.push((index, occurrence));
+            }
+        }
+        // A missing backend record must never silently turn ordered events back
+        // into an unordered counter bank.
+        for (index, (name, _)) in bindings.iter().enumerate() {
             let value = self.analog_event_counter(name)?;
-            let trial = self.trial.as_mut().expect("active analog event trial");
-            let target = trial.vectors.analog_events[targets.len()].observe(value);
-            targets.push((signal, target));
+            let trial = self.trial.as_ref().unwrap();
+            let counter = &trial.vectors.analog_events[index];
+            if (value.wrapping_sub(counter.analog_origin) & COUNTER_MASK) > counter.occurrences {
+                return Err(MixedSignalError::InvalidBridge {
+                    detail: format!(
+                        "analog event counter {name} advanced without an occurrence record"
+                    ),
+                });
+            }
+        }
+        let trial = self.trial.as_ref().unwrap();
+        let mut targets = Vec::new();
+        for &(index, occurrence) in &trial.vectors.analog_event_order {
+            let signal = bindings[index].1;
+            let held = self
+                .state
+                .digital
+                .read(signal)
+                .and_then(FourStateValue::to_u64)
+                .filter(|value| *value <= u64::from(COUNTER_MASK))
+                .ok_or_else(|| MixedSignalError::InvalidBridge {
+                    detail: "analog event counter lost its initialized signal".into(),
+                })? as u32;
+            let counter = &trial.vectors.analog_events[index];
+            if counter.pending(occurrence, held) {
+                targets.push((signal, counter.target(occurrence)));
+            }
         }
         // Preserve the cause before its digital handler can change the event
         // operand and erase the model's candidate root on reevaluation.
@@ -188,28 +242,14 @@ impl MixedSignalHost {
         let trial = self.trial.as_mut().unwrap();
         trial.published_tick = trial.published_tick.max(tick);
         let tick = trial.published_tick;
-        let mut published = false;
-        for wave in 0..=self.max_bridge_iterations {
-            let drives = event_bank(&targets, |signal| {
-                self.state
-                    .digital
-                    .read(signal)
-                    .and_then(FourStateValue::to_u64)
-            })?;
-            if drives.is_empty() {
-                return Ok(published);
-            }
-            if wave == self.max_bridge_iterations {
-                return Err(MixedSignalError::BridgeIterationLimit {
-                    tick,
-                    limit: self.max_bridge_iterations,
-                });
-            }
+        // Every source occurrence has its own publication. The digital kernel
+        // may rearm controls between occurrences; cell identity cannot merge them.
+        for (signal, value) in targets {
+            let drives = [(signal, FourStateValue::from_u64(32, u64::from(value)))];
             self.with_analog_participant(solution, |digital, producer| {
                 digital.force_many_from_analog_at(&drives, tick, time, time, producer)
             })?;
-            published = true;
         }
-        unreachable!("the final wave returns without publishing")
+        Ok(true)
     }
 }

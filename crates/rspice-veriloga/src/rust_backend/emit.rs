@@ -1818,6 +1818,12 @@ impl Emitter<'_> {
                     operator: "executable-only analog task dispatch",
                 });
             }
+            CfgValueKind::AnalogCounter { .. } => {
+                return Err(EmitError::UnsupportedStatefulOperator {
+                    value,
+                    operator: "executable analog occurrence binding",
+                });
+            }
             CfgValueKind::AnalogTask(task) => {
                 let operand =
                     task.finish_operand()

@@ -1341,8 +1341,8 @@ impl MixedDigitalCoordinator {
     ) -> Result<bool, MixedSignalError> {
         let mut published_any = false;
         // Prepare occurrences at the candidate solution before publishing them.
-        // Publish one assignment occurrence per wave; repeat-event controls must
-        // retain multiple writes even when the associated data did not change.
+        // Preserve each instance's source occurrence order, including different
+        // cells and equal-value writes. Unrelated instances use elaborated order.
         let mut targets = Vec::new();
         for (host, map) in hosts.iter_mut().zip(&self.maps) {
             targets.extend(
@@ -1354,24 +1354,8 @@ impl MixedDigitalCoordinator {
         if !targets.is_empty() {
             let tick = hdl_tick(cursor.time, |at| at.nearest_tick(self.resolution))?;
             cursor.published_tick = cursor.published_tick.max(tick);
-            let limit = hosts
-                .iter()
-                .map(|host| host.max_bridge_iterations)
-                .min()
-                .unwrap_or(1);
-            for wave in 0..=limit {
-                let drives = super::analog_events::event_bank(&targets, |signal| {
-                    self.digital.read(signal).and_then(FourStateValue::to_u64)
-                })?;
-                if drives.is_empty() {
-                    break;
-                }
-                if wave == limit {
-                    return Err(MixedSignalError::BridgeIterationLimit {
-                        tick: cursor.published_tick,
-                        limit,
-                    });
-                }
+            for (signal, value) in targets {
+                let drives = [(signal, FourStateValue::from_u64(32, u64::from(value)))];
                 let external = participant
                     .as_mut()
                     .map(|external| &mut **external as &mut dyn DigitalActiveParticipant);

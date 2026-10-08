@@ -712,7 +712,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
                     })
                     .collect::<Result<Vec<_>, _>>()?
             }
-            CfgValueKind::AnalogTask(_) => {
+            CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. } => {
                 return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
             }
             CfgValueKind::DdtDerivative {
@@ -916,7 +916,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
     fn compute(&mut self, id: ValueId) -> Result<S, CfgEvalError> {
         let kind = self.function.value(id).kind.clone();
         Ok(match kind {
-            CfgValueKind::AnalogTask(_) => {
+            CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. } => {
                 return Err(CfgEvalError::AnalogEffectInNumericalEvaluation(id));
             }
             CfgValueKind::RealConstant(value) => S::from_f64(value),

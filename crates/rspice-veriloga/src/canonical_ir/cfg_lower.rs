@@ -200,13 +200,14 @@ impl CfgModel {
         Self::from_hir_with_mode(hir, mir, CfgLowerMode::EXECUTABLE)
     }
 
-    /// Execute the complete procedural body from immutable accepted inputs.
+    /// Execute the procedural body and retain source-ordered counter writes.
     #[cfg(any(feature = "native", feature = "wasm-jit"))]
     pub(crate) fn from_hir_for_executable_evaluation(
         hir: &HirModel,
         mir: &MirModel,
+        counters: HashMap<VariableId, usize>,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        let mut cfg = Self::from_hir_with_mode(
+        let mut cfg = Self::from_hir_with_mode_and_occurrences(
             hir,
             mir,
             CfgLowerMode {
@@ -217,6 +218,7 @@ impl CfgModel {
                 frozen_contribution_current: false,
                 ..CfgLowerMode::EXECUTABLE
             },
+            counters,
         )?;
         for value in &mut cfg.function.values {
             if let CfgValueKind::EventState(slot) = value.kind {
@@ -292,7 +294,17 @@ impl CfgModel {
         mir: &MirModel,
         mode: CfgLowerMode,
     ) -> Result<Self, Vec<IrDiagnostic>> {
+        Self::from_hir_with_mode_and_occurrences(hir, mir, mode, HashMap::new())
+    }
+
+    fn from_hir_with_mode_and_occurrences(
+        hir: &HirModel,
+        mir: &MirModel,
+        mode: CfgLowerMode,
+        counters: HashMap<VariableId, usize>,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
         let mut lowerer = CfgLowerer::new(hir, mir, mode);
+        lowerer.counter_variables = counters;
         let (
             function,
             residuals,
@@ -510,6 +522,7 @@ struct CfgLowerer<'a> {
     /// which is why nothing may assume it still equals the block it started in.
     block: BlockId,
     variables_by_name: HashMap<SmolStr, VariableId>,
+    counter_variables: HashMap<VariableId, usize>,
     parameters_by_name: HashMap<SmolStr, ParamId>,
     /// Guard expressions whose reaching local definitions are instance-static
     /// at that exact program point. These may participate in the leading guard
@@ -1196,6 +1209,7 @@ impl<'a> CfgLowerer<'a> {
             mir,
             builder: SsaBuilder::new(),
             block: BlockId::from(0usize),
+            counter_variables: HashMap::new(),
             variables_by_name: hir
                 .variables
                 .iter()
@@ -1683,6 +1697,18 @@ impl<'a> CfgLowerer<'a> {
                 return;
             };
             let offset = self.array_offset(&array, index.id);
+            if let Some(&base) = self.counter_variables.get(&assignment.target) {
+                let base = self.real_constant(base as f64);
+                let slot = self.binary(CfgBinaryOp::Add, offset, base);
+                self.builder.push(
+                    self.block,
+                    CfgValueType::AnalogEffect,
+                    CfgValueKind::AnalogCounter {
+                        slot,
+                        counter: value,
+                    },
+                );
+            }
             for member in 0..array.len {
                 let variable = VariableId::from(usize::from(array.base) + member as usize);
                 let previous = self
@@ -1696,6 +1722,17 @@ impl<'a> CfgLowerer<'a> {
                     .write_variable(CfgVariable::Local(variable), self.block, candidate);
             }
             return;
+        }
+        if let Some(&slot) = self.counter_variables.get(&assignment.target) {
+            let slot = self.real_constant(slot as f64);
+            self.builder.push(
+                self.block,
+                CfgValueType::AnalogEffect,
+                CfgValueKind::AnalogCounter {
+                    slot,
+                    counter: value,
+                },
+            );
         }
         self.builder
             .write_variable(CfgVariable::Local(assignment.target), self.block, value);

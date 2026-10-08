@@ -395,6 +395,7 @@ fn kernel_region_metrics(
             shape_signature(value_id)
         );
         match &value.kind {
+            CfgValueKind::AnalogCounter { .. } => write!(out, "analog-counter-occurrence"),
             CfgValueKind::AnalogTasksEnabled => write!(out, "analog-tasks-enabled"),
             CfgValueKind::AnalogTaskGuard(_) => write!(out, "analog-task-guard"),
             CfgValueKind::AnalogTask(task) => write!(
@@ -5395,7 +5396,7 @@ struct Wants {
 impl Wants {
     fn observe(&mut self, kind: &CfgValueKind) {
         match kind {
-            CfgValueKind::AnalogTask(_) => {
+            CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. } => {
                 self.analog_tasks = true;
                 self.time = true;
             }

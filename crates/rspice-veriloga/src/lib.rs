@@ -85,6 +85,8 @@
 )]
 
 pub mod analog_tasks;
+#[doc(hidden)]
+pub mod analog_occurrences;
 mod array_index;
 pub mod ast;
 mod branch_identity;

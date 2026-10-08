@@ -124,6 +124,8 @@ pub(crate) enum NativeOp {
     AnalogTaskGuard,
     /// Append one source-ordered call to the current candidate journal.
     AnalogFinish(u32),
+    /// Record a counter write: operands are new value and absolute slot.
+    RecordAnalogCounter,
     Const(f64),
     LoadParam(usize),
     LoadParamGiven(usize),
@@ -2737,6 +2739,40 @@ impl NativeProgram {
             prior_current_dependencies: lowerer.prior_current_dependencies,
             branch_unknown_dependencies,
         })
+    }
+
+    pub(crate) fn record_analog_counter(
+        &mut self,
+        slot: usize,
+        indexed: Option<(&NativeProgram, usize, i64)>,
+    ) -> JitResult<()> {
+        if let Some((index, len, lower)) = indexed {
+            // Semantic lowering captures the write address before changing data.
+            // Reading that temporary again cannot replay an index expression.
+            if !index
+                .ops
+                .iter()
+                .all(|op| matches!(op, NativeOp::Const(_) | NativeOp::LoadVariable(_)))
+            {
+                return Err(JitError::InvalidCanonicalIr {
+                    model: "analog occurrence".into(),
+                    detail: "counter write address was not captured before assignment".into(),
+                });
+            }
+            self.ops.extend_from_slice(&index.ops);
+            self.ops.push(NativeOp::CheckedArrayIndex { len, lower });
+            self.ops.push(NativeOp::Const(slot as f64));
+            self.ops.push(NativeOp::Add);
+        } else {
+            self.ops.push(NativeOp::Const(slot as f64));
+        }
+        self.ops.push(NativeOp::RecordAnalogCounter);
+        self.max_stack_depth = compute_native_max_stack_depth(
+            "analog occurrence".into(),
+            EntryKind::Assignment,
+            &self.ops,
+        )?;
+        Ok(())
     }
 
     pub(crate) fn ops(&self) -> &[NativeOp] {
@@ -8501,6 +8537,7 @@ pub(crate) fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::AnalogTasksEnabled => "AnalogTasksEnabled",
         NativeOp::AnalogTaskGuard => "AnalogTaskGuard",
         NativeOp::AnalogFinish(_) => "AnalogFinish",
+        NativeOp::RecordAnalogCounter => "RecordAnalogCounter",
         NativeOp::Const(_) => "Const",
         NativeOp::LoadParam(_) => "LoadParam",
         NativeOp::LoadParamGiven(_) => "LoadParamGiven",
@@ -9484,6 +9521,7 @@ fn compute_native_max_stack_depth(
 
 pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
     match op {
+        NativeOp::RecordAnalogCounter => (2, 1),
         NativeOp::AnalogTasksEnabled => (0, 1),
         NativeOp::AnalogTaskGuard | NativeOp::AnalogFinish(_) => (1, 1),
         NativeOp::Const(_)

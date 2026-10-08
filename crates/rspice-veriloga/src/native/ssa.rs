@@ -228,7 +228,10 @@ impl Effects {
         if op_writes_state(op) {
             bits |= Self::WRITE_STATE;
         }
-        if matches!(op, NativeOp::AnalogFinish(_)) {
+        if matches!(
+            op,
+            NativeOp::AnalogFinish(_) | NativeOp::RecordAnalogCounter
+        ) {
             bits |= Self::WRITE_JOURNAL;
         }
         if op_may_call(op) {
@@ -3848,6 +3851,7 @@ fn op_may_call(op: NativeOp) -> bool {
         op,
         NativeOp::AnalogTasksEnabled
             | NativeOp::AnalogTaskGuard
+            | NativeOp::RecordAnalogCounter
             | NativeOp::AnalogFinish(_)
             | NativeOp::BinaryMath(_)
             | NativeOp::LoadSimParamValue(_)
@@ -4060,6 +4064,7 @@ fn op_may_fail(op: NativeOp) -> bool {
     matches!(
         op,
         NativeOp::AnalogTaskGuard
+            | NativeOp::RecordAnalogCounter
             | NativeOp::AnalogFinish(_)
             | NativeOp::LoadParamGiven(_)
             | NativeOp::LoadSimParamValue(_)

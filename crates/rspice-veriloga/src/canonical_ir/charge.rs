@@ -610,7 +610,11 @@ pub(crate) fn one_step_dae_split_safe(
         // A nested derivative has no first-order Q projection. A derivative
         // fed to another state operator or a task would observe the doubled
         // numerical value rather than merely contributing it to an equation.
-        if (kind.state_site().is_some() || matches!(kind, CfgValueKind::AnalogTask(_)))
+        if (kind.state_site().is_some()
+            || matches!(
+                kind,
+                CfgValueKind::AnalogTask(_) | CfgValueKind::AnalogCounter { .. }
+            ))
             && kind.operands().into_iter().any(reaches_ddt)
         {
             return false;

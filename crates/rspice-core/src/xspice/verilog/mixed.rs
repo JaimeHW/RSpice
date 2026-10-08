@@ -985,6 +985,7 @@ struct TrialScratch {
 #[derive(Clone, Default)]
 struct TrialVectors {
     analog_events: Vec<analog_events::AnalogEventTrial>,
+    analog_event_order: Vec<(usize, u32)>,
     /// Ordinary published variables and reporting scalars need their pre-trial
     /// image for exact readback and checkpoint rollback.
     analog_evaluation: VerilogAEvaluationSnapshot,

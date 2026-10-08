@@ -127,6 +127,22 @@ pub(super) fn evaluate_helper_with_session(
     session: Option<&mut WasmJitRuntimeSession>,
 ) -> Result<f64, HelperError> {
     match opcode {
+        463 => {
+            let session = session.ok_or(HelperError::StatefulRuntimeUnavailable)?;
+            let slot = operands[1];
+            if !slot.is_finite()
+                || slot.fract() != 0.0
+                || slot < 0.0
+                || slot >= variables.len() as f64
+            {
+                return Err(session.fail("analog occurrence slot is invalid"));
+            }
+            session
+                .context
+                .record_analog_occurrence(slot as usize, operands[0])
+                .map_err(|error| session.fail(error.to_string()))?;
+            Ok(operands[0])
+        }
         460..=462 => {
             let session = session.ok_or(HelperError::StatefulRuntimeUnavailable)?;
             if opcode == 460 {
@@ -1003,7 +1019,7 @@ pub fn math2_v1(opcode: i32, left: f64, right: f64) -> f64 {
 fn is_stateful_opcode(opcode: i32) -> bool {
     matches!(
         opcode,
-        400..=429 | 432 | 440..=449 | 460..=462 | 470..=471 | 480..=484
+        400..=429 | 432 | 440..=449 | 460..=463 | 470..=471 | 480..=484
     )
 }
 
@@ -1217,8 +1233,8 @@ mod tests {
     fn emitted_stateful_helpers_require_the_active_runtime_session() {
         for opcode in [
             400, 401, 402, 410, 411, 412, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 432,
-            440, 442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 470, 471, 480, 481, 482,
-            483, 484,
+            440, 442, 443, 444, 445, 446, 447, 448, 449, 460, 461, 462, 463, 470, 471, 480, 481,
+            482, 483, 484,
         ] {
             assert!(
                 is_stateful_opcode(opcode),
@@ -1231,6 +1247,105 @@ mod tests {
         }
     }
     use crate::vm::IntegrationCoefficients;
+
+    #[test]
+    fn analog_occurrences_keep_order_and_ignore_observations() {
+        use crate::analog_occurrences::{AnalogAssignmentOccurrence, AnalogOccurrenceJournal};
+
+        let mut context = VmContext::with_states(0, 0);
+        context.variables.resize(3, 0.0);
+        context.analog_occurrences = Some(Box::new(AnalogOccurrenceJournal::new(&[1, 2])));
+        context.begin_stateful_evaluation();
+        let mut session = WasmJitRuntimeSession::new(context);
+        assert!(is_stateful_opcode(463));
+        assert_eq!(
+            evaluate_helper(463, 0, 0, 0, [0.0; 5], &[0.0; 3]),
+            Err(HelperError::StatefulRuntimeUnavailable)
+        );
+        for slot in [2.0, 1.0] {
+            assert_eq!(
+                evaluate_helper_with_session(
+                    463,
+                    0,
+                    0,
+                    0,
+                    [1.0, slot, 0.0, 0.0, 0.0],
+                    &[0.0; 3],
+                    Some(&mut session)
+                ),
+                Ok(1.0)
+            );
+        }
+        session.context_mut().begin_stateful_observation();
+        assert_eq!(
+            evaluate_helper_with_session(
+                463,
+                0,
+                0,
+                0,
+                [2.0, 2.0, 0.0, 0.0, 0.0],
+                &[0.0; 3],
+                Some(&mut session)
+            ),
+            Ok(2.0)
+        );
+        assert_eq!(
+            session
+                .context()
+                .analog_occurrences
+                .as_ref()
+                .unwrap()
+                .records()
+                .unwrap(),
+            &[
+                AnalogAssignmentOccurrence {
+                    variable: 2,
+                    counter: 1
+                },
+                AnalogAssignmentOccurrence {
+                    variable: 1,
+                    counter: 1
+                },
+            ]
+        );
+        session.context_mut().record_task_effects = true;
+        assert_eq!(
+            evaluate_helper_with_session(
+                463,
+                0,
+                0,
+                0,
+                [3.0, 2.0, 0.0, 0.0, 0.0],
+                &[0.0; 3],
+                Some(&mut session)
+            ),
+            Err(HelperError::StatefulRuntimeFailed)
+        );
+        assert!(
+            session
+                .context()
+                .analog_occurrences
+                .as_ref()
+                .unwrap()
+                .records()
+                .is_err()
+        );
+
+        let compiler = crate::VerilogACompiler::new(crate::CompilerOptions {
+            enable_ams: true,
+            ..crate::CompilerOptions::default()
+        });
+        let report = compiler
+            .compile_runtime_with_qualifications(
+                "module ordered(p); inout p; electrical p; real a[0:1]; integer seen; \
+                 initial seen=0; always @(a) seen=seen+1; analog begin \
+                 @(timer(1n)) begin a[1]=0.5; a[0]=0.25; end V(p)<+seen; end endmodule",
+                None,
+                crate::RuntimeQualificationOptions::NONE,
+            )
+            .unwrap();
+        super::super::compile_model_value_module(&report.model, &report.canonical_ir).unwrap();
+    }
 
     #[test]
     fn pure_helper_matches_shared_constant_semantics() {

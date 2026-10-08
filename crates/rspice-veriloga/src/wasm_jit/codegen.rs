@@ -2274,6 +2274,7 @@ fn helper_descriptor(op: NativeOp) -> WasmJitResult<HelperDescriptor> {
             descriptor.opcode = 320 + integer_code(kind);
             descriptor.aux2 = value;
         }
+        NativeOp::RecordAnalogCounter => descriptor.opcode = 463,
         NativeOp::AnalogTasksEnabled => descriptor.opcode = 460,
         NativeOp::AnalogTaskGuard => descriptor.opcode = 461,
         NativeOp::AnalogFinish(site) => set_index(&mut descriptor, 462, site as usize)?,
