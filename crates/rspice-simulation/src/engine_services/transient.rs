@@ -479,6 +479,7 @@ mod tests {
 
     fn conversion_result() -> TransientResult {
         TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0],
             step_sizes: vec![0.0, 1.0],

@@ -291,7 +291,7 @@ impl ResolvedExecutionDependencies {
                             })
                             .collect();
                         ExecutionArtifactPayloadTransferMetadata::TransientTrajectory(Box::new(
-                            TransientTrajectoryTransferMetadata { time, waveforms, convergence, spectra, current_impulses: trajectory.current_impulses.clone() },
+                            TransientTrajectoryTransferMetadata { time, waveforms, convergence, spectra, voltage_impulses: trajectory.voltage_impulses.clone(), current_impulses: trajectory.current_impulses.clone() },
                         ))
                     }
                     ExecutionArtifactPayload::PeriodicState(periodic) => {
@@ -590,7 +590,7 @@ impl ResolvedExecutionDependencies {
                                 },
                             ));
                         }
-                        let trajectory = TransientTrajectoryArtifact { time, waveforms, convergence, spectra, current_impulses: metadata.current_impulses };
+                        let trajectory = TransientTrajectoryArtifact { time, waveforms, convergence, spectra, voltage_impulses: metadata.voltage_impulses, current_impulses: metadata.current_impulses };
                         trajectory.validate()?;
                         ExecutionArtifactPayload::TransientTrajectory(Arc::new(trajectory))
                     }

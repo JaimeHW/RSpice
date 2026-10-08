@@ -956,8 +956,25 @@ pub(super) fn event_history_payload_bytes(events: &WorkerEventHistory) -> usize 
                     )
             })
     });
+    let voltage_impulses = events.voltage_impulses.as_ref().map_or(0, |history| {
+        history
+            .traces
+            .iter()
+            .fold(2 * size_of::<f64>() + 1, |total, trace| {
+                total
+                    .saturating_add(1)
+                    .saturating_add(f64_payload_bytes(trace.points.len().saturating_mul(2)))
+                    .saturating_add(
+                        trace
+                            .derivatives
+                            .len()
+                            .saturating_mul(2 * size_of::<f64>() + size_of::<u32>()),
+                    )
+            })
+    });
     real.saturating_add(events.buses.len().saturating_mul(2 * size_of::<i64>()))
         .saturating_add(impulses)
+        .saturating_add(voltage_impulses)
 }
 
 #[cfg(test)]

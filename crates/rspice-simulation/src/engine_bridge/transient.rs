@@ -502,6 +502,33 @@ fn evaluate_transient_measurements(
                 })
                 .collect()
         }),
+        voltage_impulses: result.voltage_impulses.as_ref().map(|traces| {
+            let start = filtered_time.first().copied().unwrap_or(start_time);
+            traces
+                .iter()
+                .map(|trace| rspice_core::VoltageImpulseTrace {
+                    derivatives: trace
+                        .derivatives
+                        .iter()
+                        .copied()
+                        .filter(|point| point.time >= start)
+                        .collect(),
+                    node_name: trace.node_name.clone(),
+                    complete: trace.complete,
+                    // An impulse is an action at its original time, not held
+                    // voltage state to be copied to the output boundary.
+                    points: trace
+                        .points
+                        .iter()
+                        .copied()
+                        .filter(|point| point.time >= start)
+                        .collect(),
+                })
+                .filter(|trace| {
+                    trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
+                })
+                .collect()
+        }),
         time: filtered_time.to_vec(),
         step_sizes,
         voltages,
@@ -706,6 +733,61 @@ fn collect_event_history(
                 Ok::<_, SimulationError>(history)
             })
             .transpose()?,
+        voltage_impulses: tran_result
+            .voltage_impulses
+            .as_ref()
+            .map(|source| {
+                let full_start = tran_result.time.first().copied().ok_or_else(|| {
+                    SimulationError::SolverError("voltage impulses require a time extent".into())
+                })?;
+                let stop = tran_result.time.last().copied().unwrap_or(full_start);
+                let mut traces = Vec::with_capacity(source.len());
+                for trace in source {
+                    ensure_not_aborted(abort)?;
+                    trace
+                        .validate(full_start, stop)
+                        .map_err(SimulationError::SolverError)?;
+                    let mut points = Vec::new();
+                    for (index, point) in trace.points.iter().enumerate() {
+                        if index.is_multiple_of(64) {
+                            ensure_not_aborted(abort)?;
+                        }
+                        if retained(point.time) {
+                            points.push(*point);
+                        }
+                    }
+                    let mut derivatives = Vec::new();
+                    for (index, point) in trace.derivatives.iter().enumerate() {
+                        if index.is_multiple_of(64) {
+                            ensure_not_aborted(abort)?;
+                        }
+                        if retained(point.time) {
+                            derivatives.push(*point);
+                        }
+                    }
+                    traces.push(rspice_core::VoltageImpulseTrace {
+                        derivatives,
+                        node_name: trace.node_name.clone(),
+                        complete: trace.complete,
+                        points,
+                    });
+                }
+                // An incomplete trace with no retained points supplies neither
+                // observations nor a coverage claim for this window.
+                traces.retain(|trace| {
+                    trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
+                });
+                traces.sort_by(|left, right| left.node_name.cmp(&right.node_name));
+                let history = rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence {
+                    start_time_s: window_start.max(full_start),
+                    stop_time_s: stop,
+                    delivery_complete: true,
+                    traces,
+                };
+                history.validate().map_err(SimulationError::SolverError)?;
+                Ok::<_, SimulationError>(history)
+            })
+            .transpose()?,
         digital,
         real,
         digital_buses,
@@ -738,6 +820,7 @@ mod tests {
             device_op_traces: vec![],
             store_traces: vec![],
             fft_results: vec![],
+            voltage_impulses: None,
             current_impulses: Some(vec![CurrentImpulseTrace {
                 derivatives: Vec::new(),
                 owner: CurrentImpulseOwner::Branch {
@@ -770,9 +853,40 @@ mod tests {
         zero.points.clear();
         zero.derivatives.clear();
         source.push(zero);
+        result.voltage_impulses = Some(
+            source
+                .iter()
+                .enumerate()
+                .map(|(index, trace)| rspice_core::VoltageImpulseTrace {
+                    node_name: format!("out{index}"),
+                    complete: trace.complete,
+                    points: trace
+                        .points
+                        .iter()
+                        .map(|point| rspice_core::VoltageImpulsePoint {
+                            time: point.time,
+                            volt_seconds: point.charge_coulombs,
+                        })
+                        .collect(),
+                    derivatives: trace.derivatives.clone(),
+                })
+                .collect(),
+        );
         let cropped =
             collect_event_history(&result, 0.5, &rspice_core::abort_signal::NoAbort).unwrap();
         assert!(!cropped.is_empty());
+        let voltage = cropped.voltage_impulses.unwrap();
+        assert_eq!((voltage.start_time_s, voltage.stop_time_s), (0.5, 1.0));
+        assert_eq!(
+            voltage.traces[0].points,
+            [rspice_core::VoltageImpulsePoint {
+                time: 0.7,
+                volt_seconds: 0.004
+            }]
+        );
+        assert_eq!(voltage.traces[0].derivatives.len(), 1);
+        assert_eq!(voltage.traces[0].derivatives[0].time, 0.7);
+        assert!(voltage.traces[1].complete && voltage.traces[1].points.is_empty());
         let retained = cropped.current_impulses.unwrap();
         assert_eq!((retained.start_time_s, retained.stop_time_s), (0.5, 1.0));
         assert_eq!(
@@ -800,6 +914,9 @@ mod tests {
         result.current_impulses.as_mut().unwrap()[0].points[0].charge_coulombs = f64::NAN;
         assert!(collect_event_history(&result, 0.5, &rspice_core::abort_signal::NoAbort).is_err());
         result.current_impulses = None;
+        result.voltage_impulses.as_mut().unwrap()[0].points[0].volt_seconds = f64::NAN;
+        assert!(collect_event_history(&result, 0.5, &rspice_core::NoAbort).is_err());
+        result.voltage_impulses = None;
         assert!(
             collect_event_history(&result, 0.0, &rspice_core::abort_signal::NoAbort)
                 .unwrap()
@@ -1038,6 +1155,7 @@ mod tests {
     fn transient_conversion_preserves_branch_current_waveforms() {
         let netlist = parse_netlist("branch current\nV1 out 0 1\nR1 out 0 1k\n.tran 1n 2n\n.end\n");
         let result = rspice_core::engine::TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0e-9, 2.0e-9],
             step_sizes: vec![0.0, 1.0e-9, 1.0e-9],
@@ -1077,6 +1195,7 @@ mod tests {
              .end\n",
         );
         let result = rspice_core::engine::TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0e-9, 2.0e-9],
             step_sizes: vec![0.0, 1.0e-9, 1.0e-9],
@@ -1111,6 +1230,7 @@ mod tests {
     #[test]
     fn transient_shape_mismatch_is_a_terminal_error() {
         let result = rspice_core::engine::TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 1.0e-9],
             step_sizes: vec![0.0, 1.0e-9],
@@ -1153,6 +1273,7 @@ mod tests {
             .chain(time.windows(2).map(|pair| pair[1] - pair[0]))
             .collect::<Vec<_>>();
         let result = rspice_core::engine::TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: time.clone(),
             step_sizes,
@@ -1234,6 +1355,7 @@ mod tests {
             .chain(std::iter::repeat_n(1.0e-9, time.len() - 1))
             .collect();
         let tran_result = rspice_core::engine::TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: time.clone(),
             step_sizes,

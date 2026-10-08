@@ -22,7 +22,8 @@ pub struct AnalysisExecutionEnvironment {
 /// 40: AC DATA carries authored parameter columns or netlist table ownership.
 /// 41: Envelope can select multirate integration and its carrier/event controls.
 /// 42: remove the unsupported Reliability analysis.
-pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 42;
+/// 43: transient dependencies retain singular voltage histories and coverage.
+pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 43;
 
 /// Browser response protocol revisions.
 /// 18: transient-source convergence evidence survives result transport.
@@ -48,4 +49,5 @@ pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 42;
 /// 34: QPSS results retain typed behavioral integral coordinates.
 /// 35: SOA reporting views retain the complete observation history.
 /// 36: remove Reliability result payloads.
-pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 36;
+/// 37: transient results and live suffixes retain singular voltage histories.
+pub const WORKER_RESPONSE_TRANSPORT_PROTOCOL: u8 = 37;

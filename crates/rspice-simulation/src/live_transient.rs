@@ -6,10 +6,11 @@
 use std::sync::{Arc, Mutex};
 
 mod impulses;
-use impulses::PublishedCurrentImpulses;
 pub use impulses::{
     CurrentImpulseBuffer, CurrentImpulseDelta, CurrentImpulseUpdate, LiveTransientQueue,
+    VoltageImpulseBuffer, VoltageImpulseDelta, VoltageImpulseUpdate,
 };
+use impulses::{PublishedCurrentImpulses, PublishedVoltageImpulses};
 
 /// Maximum UI-only transient deltas waiting for an application frame.
 ///
@@ -52,6 +53,9 @@ pub struct TransientSampleDelta {
     /// Newly accepted charge observations, independently timed and sequenced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_impulses: Option<CurrentImpulseDelta>,
+    /// Newly accepted voltage actions, with independent delivery coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voltage_impulses: Option<VoltageImpulseDelta>,
 }
 
 /// One digital bus a run declared, as it crosses to the live viewer.
@@ -171,6 +175,10 @@ impl LiveTransientPublisher {
             Ok(mut published) => published.currents.publish(&sample),
             Err(poisoned) => poisoned.into_inner().currents.publish(&sample),
         };
+        let voltage_impulses = match self.published_events.lock() {
+            Ok(mut published) => published.voltages.publish(&sample),
+            Err(poisoned) => poisoned.into_inner().voltages.publish(&sample),
+        };
         let delta = TransientSampleDelta {
             time,
             waveforms,
@@ -178,6 +186,7 @@ impl LiveTransientPublisher {
             real_events,
             buses,
             current_impulses,
+            voltage_impulses,
         };
         if let Some(samples) = &self.transient_samples {
             push_live_transient_sample(samples, delta.clone());
@@ -200,6 +209,7 @@ impl LiveTransientPublisher {
 #[derive(Debug, Default)]
 struct PublishedEventValues {
     currents: PublishedCurrentImpulses,
+    voltages: PublishedVoltageImpulses,
     digital: std::collections::HashMap<rspice_core::NodeId, u8>,
     real: std::collections::HashMap<rspice_core::NodeId, u64>,
     /// Whether this run has already published its bus declarations.
@@ -357,6 +367,7 @@ mod tests {
                     node_voltages: &[],
                     branch_names: &[],
                     branch_currents: &[],
+                    voltage_impulses: None,
                     current_impulses: Some(&traces),
                     digital_values: &[],
                     digital_buses: &[],
@@ -391,6 +402,7 @@ mod tests {
         let samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         let signal = LiveTransientPublisher::new(Some(Arc::clone(&samples)), None);
         let result = rspice_core::engine::TransientResult {
+            voltage_impulses: None,
             current_impulses: None,
             time: vec![0.0, 2.5e-9],
             step_sizes: vec![0.0, 2.5e-9],
@@ -415,6 +427,7 @@ mod tests {
                 node_voltages: &result.voltages,
                 branch_names: &result.branch_names,
                 branch_currents: &result.branch_currents,
+                voltage_impulses: result.voltage_impulses.as_deref(),
                 current_impulses: result.current_impulses.as_deref(),
                 digital_values: &[],
                 digital_buses: &[],
@@ -454,6 +467,7 @@ mod tests {
                 node_voltages: &voltages,
                 branch_names: &[],
                 branch_currents: &[],
+                voltage_impulses: None,
                 current_impulses: None,
                 digital_values: digital,
                 digital_buses: &[],
@@ -526,6 +540,7 @@ mod tests {
             push_live_transient_sample(
                 &samples,
                 TransientSampleDelta {
+                    voltage_impulses: None,
                     current_impulses: None,
                     time: index as f64,
                     waveforms: Vec::new(),

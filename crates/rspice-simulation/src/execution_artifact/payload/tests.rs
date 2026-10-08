@@ -1316,103 +1316,135 @@ fn periodic_artifact_rejects_a_returned_state_from_the_wrong_frozen_config() {
 }
 
 #[test]
-fn current_impulses_are_authenticated_and_preserved_in_fourier_dependencies() {
-    let producer = AnalysisInstanceId::new();
-    let create = |result: &SimulationResult| {
-        ExecutionArtifactEnvelope::from_transient_result(
-            digest(1),
+fn singular_histories_are_authenticated_and_preserved_in_fourier_dependencies() {
+    for voltage in [false, true] {
+        let producer = AnalysisInstanceId::new();
+        let create = |result: &SimulationResult| {
+            ExecutionArtifactEnvelope::from_transient_result(
+                digest(1),
+                producer,
+                ObjectRevision::new(3).unwrap(),
+                digest(2),
+                result,
+                &["out".into()],
+                false,
+            )
+            .unwrap()
+            .unwrap()
+        };
+        let mut result = transient();
+        let legacy = create(&result);
+        if let SimulationResult::Transient { events, .. } = &mut result {
+            if voltage {
+                events.voltage_impulses = Some(
+                    rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence {
+                        start_time_s: 0.0,
+                        stop_time_s: 1.0,
+                        delivery_complete: true,
+                        traces: vec![rspice_core::VoltageImpulseTrace {
+                            derivatives: vec![rspice_core::VoltageImpulseDerivative {
+                                time: 0.3,
+                                order: 1,
+                                coefficient: -2.5e-21,
+                            }],
+                            node_name: "out".into(),
+                            complete: true,
+                            points: vec![rspice_core::VoltageImpulsePoint {
+                                time: 0.3,
+                                volt_seconds: -0.002,
+                            }],
+                        }],
+                    },
+                );
+            } else {
+                events.current_impulses = Some(
+                    rspice_results::current_impulses::CurrentImpulseHistoryEvidence {
+                        start_time_s: 0.0,
+                        stop_time_s: 1.0,
+                        delivery_complete: true,
+                        traces: vec![rspice_core::CurrentImpulseTrace {
+                            derivatives: vec![rspice_core::CurrentImpulseDerivative {
+                                time: 0.3,
+                                order: 1,
+                                coefficient: -2.5e-21,
+                            }],
+                            owner: rspice_core::CurrentImpulseOwner::Branch {
+                                branch_name: "V1".into(),
+                            },
+                            complete: true,
+                            points: vec![rspice_core::CurrentImpulsePoint {
+                                time: 0.3,
+                                charge_coulombs: -0.002,
+                            }],
+                        }],
+                    },
+                );
+            }
+        }
+        let artifact = create(&result);
+        assert_ne!(legacy.payload_digest, artifact.payload_digest);
+        let binding = PreparedDependencyBinding::transient_trajectory(
             producer,
             ObjectRevision::new(3).unwrap(),
             digest(2),
-            result,
-            &["out".into()],
-            false,
-        )
-        .unwrap()
-        .unwrap()
-    };
-    let mut result = transient();
-    let legacy = create(&result);
-    if let SimulationResult::Transient { events, .. } = &mut result {
-        events.current_impulses = Some(
-            rspice_results::current_impulses::CurrentImpulseHistoryEvidence {
-                start_time_s: 0.0,
-                stop_time_s: 1.0,
-                delivery_complete: true,
-                traces: vec![rspice_core::CurrentImpulseTrace {
-                    derivatives: vec![rspice_core::CurrentImpulseDerivative {
-                        time: 0.3,
-                        order: 1,
-                        coefficient: -2.5e-21,
-                    }],
-                    owner: rspice_core::CurrentImpulseOwner::Branch {
-                        branch_name: "V1".into(),
-                    },
-                    complete: true,
-                    points: vec![rspice_core::CurrentImpulsePoint {
-                        time: 0.3,
-                        charge_coulombs: -0.002,
-                    }],
-                }],
-            },
         );
-    }
-    let artifact = create(&result);
-    assert_ne!(legacy.payload_digest, artifact.payload_digest);
-    let binding = PreparedDependencyBinding::transient_trajectory(
-        producer,
-        ObjectRevision::new(3).unwrap(),
-        digest(2),
-    );
-    let resolved = ResolvedExecutionDependencies::resolve(
-        digest(1),
-        vec![binding],
-        &HashMap::from([(producer, artifact)]),
-    )
-    .unwrap();
-    let (metadata, buffers) = resolved.encode_transfer().unwrap();
-    let restored =
-        ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap();
-    assert_eq!(restored, resolved);
-    let current = restored
-        .transient_trajectory()
-        .unwrap()
-        .current_impulse_trace("i(v1)")
-        .unwrap()
+        let resolved = ResolvedExecutionDependencies::resolve(
+            digest(1),
+            vec![binding],
+            &HashMap::from([(producer, artifact)]),
+        )
         .unwrap();
-    assert_eq!(current.points[0].charge_coulombs, -0.002);
-    assert_eq!(current.derivatives[0].coefficient, -2.5e-21);
-    let mut tampered: serde_json::Value = serde_json::from_str(&metadata).unwrap();
-    fn change_derivative(value: &mut serde_json::Value) -> bool {
-        match value {
-            serde_json::Value::Object(map) => {
-                if map.contains_key("coefficient") && map.contains_key("order") {
-                    map.insert("coefficient".into(), serde_json::json!(-3.5e-21));
-                    true
-                } else {
-                    map.values_mut().any(change_derivative)
+        let (metadata, buffers) = resolved.encode_transfer().unwrap();
+        let restored =
+            ResolvedExecutionDependencies::decode_transfer(&metadata, buffers.clone()).unwrap();
+        assert_eq!(restored, resolved);
+        let trajectory = restored.transient_trajectory().unwrap();
+        let (coefficient, derivative) = if voltage {
+            let trace = trajectory.voltage_impulse_trace("V(OUT)").unwrap().unwrap();
+            (
+                trace.points[0].volt_seconds,
+                trace.derivatives[0].coefficient,
+            )
+        } else {
+            let trace = trajectory.current_impulse_trace("i(v1)").unwrap().unwrap();
+            (
+                trace.points[0].charge_coulombs,
+                trace.derivatives[0].coefficient,
+            )
+        };
+        assert_eq!(coefficient, -0.002);
+        assert_eq!(derivative, -2.5e-21);
+        let mut tampered: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        fn change_derivative(value: &mut serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Object(map) => {
+                    if map.contains_key("coefficient") && map.contains_key("order") {
+                        map.insert("coefficient".into(), serde_json::json!(-3.5e-21));
+                        true
+                    } else {
+                        map.values_mut().any(change_derivative)
+                    }
                 }
+                serde_json::Value::Array(values) => values.iter_mut().any(change_derivative),
+                _ => false,
             }
-            serde_json::Value::Array(values) => values.iter_mut().any(change_derivative),
-            _ => false,
         }
+        assert!(change_derivative(&mut tampered));
+        assert!(matches!(
+            ResolvedExecutionDependencies::decode_transfer(&tampered.to_string(), buffers.clone()),
+            Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+        ));
+        if voltage {
+            assert!(trajectory.voltage_impulse_trace("V(missing)").is_err());
+            assert!(trajectory.voltage_impulse_trace("V(0)").unwrap().is_none());
+        } else {
+            assert!(trajectory.current_impulse_trace("I(Vmissing)").is_err());
+        }
+        let altered = metadata.replace("-0.002", "-0.003");
+        assert_ne!(metadata, altered);
+        assert!(matches!(
+            ResolvedExecutionDependencies::decode_transfer(&altered, buffers),
+            Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
+        ));
     }
-    assert!(change_derivative(&mut tampered));
-    assert!(matches!(
-        ResolvedExecutionDependencies::decode_transfer(&tampered.to_string(), buffers.clone()),
-        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
-    ));
-    assert!(
-        restored
-            .transient_trajectory()
-            .unwrap()
-            .current_impulse_trace("I(Vmissing)")
-            .is_err()
-    );
-    let altered = metadata.replace("-0.002", "-0.003");
-    assert_ne!(metadata, altered);
-    assert!(matches!(
-        ResolvedExecutionDependencies::decode_transfer(&altered, buffers),
-        Err(ExecutionArtifactError::PayloadDigestMismatch { .. })
-    ));
 }

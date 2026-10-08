@@ -80,6 +80,11 @@ pub(super) fn validate_worker_response_before_transport(
         {
             history.validate()?;
         }
+        if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
+            && let Some(history) = &events.voltage_impulses
+        {
+            history.validate()?;
+        }
         match result.as_ref() {
             WorkerSimulationResult::Transient { spectra, .. } => {
                 validate_worker_spectra(spectra)?;
@@ -1423,6 +1428,14 @@ fn validate_transient_source_payload_size(result: &WorkerSimulationResult) -> Re
     }
     if let WorkerSimulationResult::Transient { events, .. } = result
         && let Some(history) = &events.current_impulses
+    {
+        values = values.saturating_add(2);
+        for trace in &history.traces {
+            values = values.saturating_add(trace.numeric_value_count());
+        }
+    }
+    if let WorkerSimulationResult::Transient { events, .. } = result
+        && let Some(history) = &events.voltage_impulses
     {
         values = values.saturating_add(2);
         for trace in &history.traces {

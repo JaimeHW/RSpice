@@ -1184,6 +1184,7 @@ fn transient_worker_result_round_trips_through_json() {
             units: None,
         }],
         events: WorkerEventHistory {
+            voltage_impulses: None,
             current_impulses: None,
             digital: vec![WorkerDigitalEventTrace {
                 node_name: "clk".to_string(),
@@ -1421,6 +1422,7 @@ fn event_histories_survive_the_worker_edge_in_both_directions() {
         periodic_state: None,
         convergence: Default::default(),
         events: crate::results::TransientEventHistory {
+            voltage_impulses: None,
             current_impulses: None,
             digital: vec![crate::results::EventNodeHistory {
                 node_name: "clk".to_owned(),

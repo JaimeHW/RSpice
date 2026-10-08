@@ -447,6 +447,11 @@ impl WorkerResponse {
                 {
                     history.validate().map_err(SimulationError::InvalidConfig)?;
                 }
+                if let WorkerSimulationResult::Transient { events, .. } = result.as_ref()
+                    && let Some(history) = &events.voltage_impulses
+                {
+                    history.validate().map_err(SimulationError::InvalidConfig)?;
+                }
                 Ok(SimulationResult::from(*result))
             }
             WorkerOutcome::Failure(error) => Err(SimulationError::from(error)),

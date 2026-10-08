@@ -17,6 +17,8 @@ pub struct TransientTrajectoryArtifact {
     time: Vec<f64>,
     #[serde(default)]
     current_impulses: Option<rspice_results::current_impulses::CurrentImpulseHistoryEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    voltage_impulses: Option<rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence>,
     #[serde(with = "f64_bits_map")]
     waveforms: BTreeMap<String, Vec<f64>>,
     #[serde(default)]
@@ -207,6 +209,7 @@ impl TransientTrajectoryArtifact {
         }
         let trajectory = TransientTrajectoryArtifact {
             time: time.clone(),
+            voltage_impulses: events.voltage_impulses.clone(),
             current_impulses: events.current_impulses.clone(),
             waveforms: artifact_waveforms,
             convergence: convergence.clone(),
@@ -260,6 +263,36 @@ impl TransientTrajectoryArtifact {
         Ok(Some(trace))
     }
 
+    pub fn voltage_impulse_trace(
+        &self,
+        requested: &str,
+    ) -> Result<Option<&rspice_core::VoltageImpulseTrace>, String> {
+        let Some(history) = &self.voltage_impulses else {
+            return Ok(None);
+        };
+        if !history.delivery_complete {
+            return Err("Fourier voltage requires complete impulse delivery".into());
+        }
+        let canonical = |name: &str| normalize_waveform_name(name).replace(':', ".");
+        let name = canonical(requested);
+        if name == "0" {
+            return Ok(None);
+        }
+        let mut matches = history
+            .traces
+            .iter()
+            .filter(|trace| canonical(&trace.node_name) == name);
+        let trace = matches.next().ok_or_else(|| {
+            format!("Fourier voltage '{requested}' has no complete impulse history")
+        })?;
+        if matches.next().is_some() {
+            return Err(format!(
+                "Fourier voltage '{requested}' has ambiguous impulse history"
+            ));
+        }
+        Ok(Some(trace))
+    }
+
     /// The spectrum whose request key is `key`, if this solve recorded one.
     pub fn spectrum(&self, key: &str) -> Option<&Arc<crate::results::RecordedFftSpectrum>> {
         self.spectra
@@ -279,6 +312,10 @@ impl TransientTrajectoryArtifact {
                 rspice_results::convergence_quality::TransientConvergenceEvidence::transfer_value_count,
             ))
             .saturating_add(self.current_impulses.as_ref().map_or(0, |history| {
+                history.traces.iter().fold(2usize, |sum, trace| {
+                    sum.saturating_add(trace.numeric_value_count())
+                })
+            }))            .saturating_add(self.voltage_impulses.as_ref().map_or(0, |history| {
                 history.traces.iter().fold(2usize, |sum, trace| {
                     sum.saturating_add(trace.numeric_value_count())
                 })
@@ -329,6 +366,18 @@ impl TransientTrajectoryArtifact {
             {
                 return Err(ExecutionArtifactError::InvalidPayload(
                     "current impulse history does not cover the trajectory".into(),
+                ));
+            }
+        }
+        if let Some(history) = &self.voltage_impulses {
+            history
+                .validate()
+                .map_err(ExecutionArtifactError::InvalidPayload)?;
+            if history.start_time_s > self.time[0]
+                || history.stop_time_s < self.time[self.time.len() - 1]
+            {
+                return Err(ExecutionArtifactError::InvalidPayload(
+                    "voltage impulse history does not cover the trajectory".into(),
                 ));
             }
         }
@@ -441,6 +490,28 @@ impl TransientTrajectoryArtifact {
                         writer.u64(u64::from(point.order));
                         writer.f64(point.coefficient);
                     }
+                }
+            }
+        }
+        if let Some(history) = &self.voltage_impulses {
+            writer.domain("voltage-impulse-history-v1");
+            writer.f64(history.start_time_s);
+            writer.f64(history.stop_time_s);
+            writer.bool(history.delivery_complete);
+            writer.sequence(history.traces.len());
+            for trace in &history.traces {
+                writer.string(&trace.node_name);
+                writer.bool(trace.complete);
+                writer.sequence(trace.points.len());
+                for point in &trace.points {
+                    writer.f64(point.time);
+                    writer.f64(point.volt_seconds);
+                }
+                writer.sequence(trace.derivatives.len());
+                for point in &trace.derivatives {
+                    writer.f64(point.time);
+                    writer.u64(u64::from(point.order));
+                    writer.f64(point.coefficient);
                 }
             }
         }
@@ -1656,6 +1727,8 @@ struct TransferBufferRef {
 struct TransientTrajectoryTransferMetadata {
     #[serde(default)]
     current_impulses: Option<rspice_results::current_impulses::CurrentImpulseHistoryEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    voltage_impulses: Option<rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence>,
     time: TransferBufferRef,
     waveforms: BTreeMap<String, TransferBufferRef>,
     #[serde(default)]

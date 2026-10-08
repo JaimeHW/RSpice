@@ -98,6 +98,7 @@ fn transient_events_payload(
     let mut digital_buses = events.digital_buses;
     digital_buses.sort_by(|left, right| left.name.cmp(&right.name));
     let payload = AnalysisResultPayload::TransientEvents {
+        voltage_impulses: events.voltage_impulses,
         current_impulses: events.current_impulses,
         digital_traces,
         real_traces,

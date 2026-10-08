@@ -19,49 +19,41 @@ const MAX_SEQUENCE: u64 = (1_u64 << 53) - 1;
 /// Extents refer to the entire run segment; point times remain independent
 /// of the analog sample carrying this message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CurrentImpulseDelta {
+#[serde(
+    deny_unknown_fields,
+    bound(
+        serialize = "O: Serialize, O::Point: Serialize",
+        deserialize = "O: Deserialize<'de>, O::Point: Deserialize<'de>"
+    )
+)]
+pub struct ImpulseDelta<O: ImpulseOwner> {
     pub start_time_s: f64,
     pub stop_time_s: f64,
     pub first_sequence: u64,
     pub last_sequence: u64,
     pub delivery_complete: bool,
-    pub traces: Vec<CurrentImpulseUpdate>,
+    pub traces: Vec<ImpulseUpdate<O>>,
 }
 
 /// Unlike a retained trace, an update can revoke coverage without adding a
 /// point. Incomplete empty updates therefore have a distinct wire type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CurrentImpulseUpdate {
-    pub owner: CurrentImpulseOwner,
+#[serde(
+    deny_unknown_fields,
+    bound(
+        serialize = "O: Serialize, O::Point: Serialize",
+        deserialize = "O: Deserialize<'de>, O::Point: Deserialize<'de>"
+    )
+)]
+pub struct ImpulseUpdate<O: ImpulseOwner> {
+    pub owner: O,
     pub complete: bool,
-    pub points: Vec<CurrentImpulsePoint>,
+    pub points: Vec<O::Point>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub derivatives: Vec<CurrentImpulseDerivative>,
 }
 
-fn owner_key(owner: &CurrentImpulseOwner) -> Option<CurrentImpulseOwner> {
-    match owner {
-        CurrentImpulseOwner::Branch { branch_name } if !branch_name.trim().is_empty() => {
-            Some(CurrentImpulseOwner::Branch {
-                branch_name: branch_name.to_ascii_lowercase(),
-            })
-        }
-        CurrentImpulseOwner::DeviceLead {
-            device_name,
-            parameter,
-        } if !device_name.trim().is_empty() && !parameter.trim().is_empty() => {
-            Some(CurrentImpulseOwner::DeviceLead {
-                device_name: device_name.to_ascii_lowercase(),
-                parameter: parameter.to_ascii_lowercase(),
-            })
-        }
-        _ => None,
-    }
-}
-
-impl CurrentImpulseDelta {
+impl<O: ImpulseOwner> ImpulseDelta<O> {
     fn valid(&self) -> bool {
         if !self.start_time_s.is_finite()
             || self.start_time_s < 0.0
@@ -79,7 +71,7 @@ impl CurrentImpulseDelta {
             count = count
                 .saturating_add(trace.points.len())
                 .saturating_add(trace.derivatives.len());
-            let Some(key) = owner_key(&trace.owner) else {
+            let Some(key) = trace.owner.canonical_key() else {
                 return false;
             };
             if count > MAX_CURRENT_POINTS || !owners.insert(key) {
@@ -87,16 +79,16 @@ impl CurrentImpulseDelta {
             }
             let mut previous = None;
             for point in &trace.points {
-                if !point.time.is_finite()
-                    || point.time < self.start_time_s
-                    || point.time > self.stop_time_s
-                    || !point.charge_coulombs.is_finite()
-                    || point.charge_coulombs == 0.0
-                    || previous.is_some_and(|time| point.time <= time)
+                if !point.time().is_finite()
+                    || point.time() < self.start_time_s
+                    || point.time() > self.stop_time_s
+                    || !point.coefficient().is_finite()
+                    || point.coefficient() == 0.0
+                    || previous.is_some_and(|time| point.time() <= time)
                 {
                     return false;
                 }
-                previous = Some(point.time);
+                previous = Some(point.time());
             }
             let mut previous = None;
             for point in &trace.derivatives {
@@ -126,21 +118,21 @@ struct PublishedCursor {
 
 /// The engine reports cumulative accepted history. Only newly appended
 /// points and changed coverage cross the live boundary.
-#[derive(Debug, Default)]
-pub(super) struct PublishedCurrentImpulses {
-    cursors: HashMap<CurrentImpulseOwner, PublishedCursor>,
+#[derive(Debug)]
+pub(super) struct PublishedImpulses<O: ImpulseOwner> {
+    cursors: HashMap<O, PublishedCursor>,
     start: Option<f64>,
     sequence: u64,
     lost: bool,
 }
 
-impl PublishedCurrentImpulses {
+impl<O: ImpulseOwner> PublishedImpulses<O> {
     pub(super) fn publish(
         &mut self,
         sample: &rspice_core::abort_signal::TransientSample<'_>,
-    ) -> Option<CurrentImpulseDelta> {
+    ) -> Option<ImpulseDelta<O>> {
         let stop = *sample.time.last()?;
-        let Some(source) = sample.current_impulses else {
+        let Some(source) = O::source(sample) else {
             self.lost |= self.start.is_some();
             return None;
         };
@@ -154,8 +146,9 @@ impl PublishedCurrentImpulses {
         let mut remaining = MAX_CURRENT_POINTS;
         let mut updates = Vec::new();
         self.lost |= source.len() > MAX_CURRENT_OWNERS || source.len() < self.cursors.len();
-        for trace in source.iter().take(MAX_CURRENT_OWNERS) {
-            let new = !self.cursors.contains_key(&trace.owner);
+        for source_trace in source.iter().take(MAX_CURRENT_OWNERS) {
+            let trace = O::view(source_trace);
+            let new = !self.cursors.contains_key(trace.owner);
             if new {
                 if self.cursors.len() >= MAX_CURRENT_OWNERS {
                     self.lost = true;
@@ -164,7 +157,7 @@ impl PublishedCurrentImpulses {
                 self.cursors
                     .insert(trace.owner.clone(), PublishedCursor::default());
             }
-            let cursor = self.cursors.get_mut(&trace.owner).expect("inserted cursor");
+            let cursor = self.cursors.get_mut(trace.owner).expect("inserted cursor");
             let suffix = match trace.points.get(cursor.count..) {
                 Some(suffix) => suffix,
                 None => {
@@ -187,7 +180,7 @@ impl PublishedCurrentImpulses {
                 let count = suffix.len().min(remaining);
                 let derivative_count = derivatives.len().min(remaining - count);
                 self.lost |= count != suffix.len() || derivative_count != derivatives.len();
-                updates.push(CurrentImpulseUpdate {
+                updates.push(ImpulseUpdate {
                     owner: trace.owner.clone(),
                     complete: trace.complete,
                     points: suffix[..count].to_vec(),
@@ -199,7 +192,7 @@ impl PublishedCurrentImpulses {
             cursor.derivatives = trace.derivatives.len();
             cursor.complete = trace.complete;
         }
-        Some(CurrentImpulseDelta {
+        Some(ImpulseDelta {
             start_time_s: start,
             stop_time_s: stop,
             first_sequence: sequence,
@@ -211,24 +204,24 @@ impl PublishedCurrentImpulses {
 }
 
 #[derive(Debug)]
-struct CurrentBatch {
+struct ImpulseBatch<O: ImpulseOwner> {
     start: f64,
     stop: f64,
     first_sequence: u64,
     last_sequence: u64,
-    traces: BTreeMap<CurrentImpulseOwner, CurrentImpulseUpdate>,
+    traces: BTreeMap<O, ImpulseUpdate<O>>,
     point_count: usize,
 }
 
 /// Used once in the pending queue and once in the displayed preview. Each
 /// buffer has one aggregate point/owner budget, independent of queue length.
-#[derive(Debug, Default)]
-pub struct CurrentImpulseBuffer {
-    batch: Option<CurrentBatch>,
+#[derive(Debug)]
+pub struct ImpulseBuffer<O: ImpulseOwner> {
+    batch: Option<ImpulseBatch<O>>,
     lost: bool,
 }
 
-impl CurrentImpulseBuffer {
+impl<O: ImpulseOwner> ImpulseBuffer<O> {
     pub fn clear(&mut self) {
         *self = Self::default();
     }
@@ -241,7 +234,7 @@ impl CurrentImpulseBuffer {
         self.lost = true;
     }
 
-    pub fn ingest(&mut self, delta: CurrentImpulseDelta) {
+    pub fn ingest(&mut self, delta: ImpulseDelta<O>) {
         if !delta.valid() {
             self.lost = true;
             return;
@@ -258,7 +251,7 @@ impl CurrentImpulseBuffer {
             }
             self.lost |= batch.last_sequence.checked_add(1) != Some(delta.first_sequence);
         }
-        let batch = self.batch.get_or_insert_with(|| CurrentBatch {
+        let batch = self.batch.get_or_insert_with(|| ImpulseBatch {
             start: delta.start_time_s,
             stop: delta.stop_time_s,
             first_sequence: delta.first_sequence,
@@ -269,24 +262,21 @@ impl CurrentImpulseBuffer {
         batch.stop = delta.stop_time_s;
         batch.last_sequence = delta.last_sequence;
         for update in delta.traces {
-            let key = owner_key(&update.owner).expect("validated owner");
+            let key = update.owner.canonical_key().expect("validated owner");
             if !batch.traces.contains_key(&key) && batch.traces.len() >= MAX_CURRENT_OWNERS {
                 self.lost = true;
                 continue;
             }
-            let trace = batch
-                .traces
-                .entry(key)
-                .or_insert_with(|| CurrentImpulseUpdate {
-                    owner: update.owner.clone(),
-                    complete: update.complete,
-                    points: Vec::new(),
-                    derivatives: Vec::new(),
-                });
+            let trace = batch.traces.entry(key).or_insert_with(|| ImpulseUpdate {
+                owner: update.owner.clone(),
+                complete: update.complete,
+                points: Vec::new(),
+                derivatives: Vec::new(),
+            });
             trace.complete &= update.complete;
             for point in update.points {
                 if let Some(last) = trace.points.last()
-                    && point.time <= last.time
+                    && point.time() <= last.time()
                 {
                     self.lost |= point != *last;
                     continue;
@@ -315,31 +305,26 @@ impl CurrentImpulseBuffer {
         }
     }
 
-    pub fn history(&self) -> Option<CurrentImpulseHistoryEvidence> {
+    pub fn history(&self) -> Option<O::History> {
         let batch = self.batch.as_ref()?;
-        Some(CurrentImpulseHistoryEvidence {
-            start_time_s: batch.start,
-            stop_time_s: batch.stop,
-            delivery_complete: !self.lost && batch.first_sequence == 0,
-            traces: batch
+        Some(O::history(
+            batch.start,
+            batch.stop,
+            !self.lost && batch.first_sequence == 0,
+            batch
                 .traces
                 .values()
                 .filter(|trace| {
                     trace.complete || !trace.points.is_empty() || !trace.derivatives.is_empty()
                 })
-                .map(|trace| CurrentImpulseTrace {
-                    derivatives: trace.derivatives.clone(),
-                    owner: trace.owner.clone(),
-                    complete: trace.complete,
-                    points: trace.points.clone(),
-                })
+                .map(O::trace)
                 .collect(),
-        })
+        ))
     }
 
-    fn take_delta(&mut self) -> Option<CurrentImpulseDelta> {
+    fn take_delta(&mut self) -> Option<ImpulseDelta<O>> {
         let batch = self.batch.take()?;
-        Some(CurrentImpulseDelta {
+        Some(ImpulseDelta {
             start_time_s: batch.start,
             stop_time_s: batch.stop,
             first_sequence: batch.first_sequence,
@@ -350,10 +335,169 @@ impl CurrentImpulseBuffer {
     }
 }
 
+/// Physical point traits keep current charge and voltage action units distinct.
+pub trait ImpulsePoint: Copy + std::fmt::Debug + PartialEq {
+    fn time(self) -> f64;
+    fn coefficient(self) -> f64;
+}
+impl ImpulsePoint for CurrentImpulsePoint {
+    fn time(self) -> f64 {
+        self.time
+    }
+    fn coefficient(self) -> f64 {
+        self.charge_coulombs
+    }
+}
+impl ImpulsePoint for rspice_core::VoltageImpulsePoint {
+    fn time(self) -> f64 {
+        self.time
+    }
+    fn coefficient(self) -> f64 {
+        self.volt_seconds
+    }
+}
+pub struct ImpulseView<'a, O: ImpulseOwner> {
+    owner: &'a O,
+    complete: bool,
+    points: &'a [O::Point],
+    derivatives: &'a [CurrentImpulseDerivative],
+}
+pub trait ImpulseOwner: Clone + std::fmt::Debug + Eq + Ord + std::hash::Hash {
+    type Point: ImpulsePoint;
+    type Trace;
+    type History;
+    fn canonical_key(&self) -> Option<Self>;
+    fn source<'a>(
+        sample: &rspice_core::abort_signal::TransientSample<'a>,
+    ) -> Option<&'a [Self::Trace]>;
+    fn view(trace: &Self::Trace) -> ImpulseView<'_, Self>;
+    fn trace(update: &ImpulseUpdate<Self>) -> Self::Trace;
+    fn history(start: f64, stop: f64, complete: bool, traces: Vec<Self::Trace>) -> Self::History;
+}
+impl ImpulseOwner for CurrentImpulseOwner {
+    type Point = CurrentImpulsePoint;
+    type Trace = CurrentImpulseTrace;
+    type History = CurrentImpulseHistoryEvidence;
+    fn canonical_key(&self) -> Option<Self> {
+        owner_key(self)
+    }
+    fn source<'a>(
+        sample: &rspice_core::abort_signal::TransientSample<'a>,
+    ) -> Option<&'a [Self::Trace]> {
+        sample.current_impulses
+    }
+    fn view(trace: &Self::Trace) -> ImpulseView<'_, Self> {
+        ImpulseView {
+            owner: &trace.owner,
+            complete: trace.complete,
+            points: &trace.points,
+            derivatives: &trace.derivatives,
+        }
+    }
+    fn trace(update: &ImpulseUpdate<Self>) -> Self::Trace {
+        CurrentImpulseTrace {
+            owner: update.owner.clone(),
+            complete: update.complete,
+            points: update.points.clone(),
+            derivatives: update.derivatives.clone(),
+        }
+    }
+    fn history(start: f64, stop: f64, complete: bool, traces: Vec<Self::Trace>) -> Self::History {
+        CurrentImpulseHistoryEvidence {
+            start_time_s: start,
+            stop_time_s: stop,
+            delivery_complete: complete,
+            traces,
+        }
+    }
+}
+impl ImpulseOwner for String {
+    type Point = rspice_core::VoltageImpulsePoint;
+    type Trace = rspice_core::VoltageImpulseTrace;
+    type History = rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence;
+    fn canonical_key(&self) -> Option<Self> {
+        (!self.trim().is_empty()).then(|| self.to_ascii_lowercase())
+    }
+    fn source<'a>(
+        sample: &rspice_core::abort_signal::TransientSample<'a>,
+    ) -> Option<&'a [Self::Trace]> {
+        sample.voltage_impulses
+    }
+    fn view(trace: &Self::Trace) -> ImpulseView<'_, Self> {
+        ImpulseView {
+            owner: &trace.node_name,
+            complete: trace.complete,
+            points: &trace.points,
+            derivatives: &trace.derivatives,
+        }
+    }
+    fn trace(update: &ImpulseUpdate<Self>) -> Self::Trace {
+        rspice_core::VoltageImpulseTrace {
+            node_name: update.owner.clone(),
+            complete: update.complete,
+            points: update.points.clone(),
+            derivatives: update.derivatives.clone(),
+        }
+    }
+    fn history(start: f64, stop: f64, complete: bool, traces: Vec<Self::Trace>) -> Self::History {
+        rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence {
+            start_time_s: start,
+            stop_time_s: stop,
+            delivery_complete: complete,
+            traces,
+        }
+    }
+}
+pub type CurrentImpulseDelta = ImpulseDelta<CurrentImpulseOwner>;
+pub type CurrentImpulseUpdate = ImpulseUpdate<CurrentImpulseOwner>;
+pub type CurrentImpulseBuffer = ImpulseBuffer<CurrentImpulseOwner>;
+pub(super) type PublishedCurrentImpulses = PublishedImpulses<CurrentImpulseOwner>;
+pub type VoltageImpulseDelta = ImpulseDelta<String>;
+pub type VoltageImpulseUpdate = ImpulseUpdate<String>;
+pub type VoltageImpulseBuffer = ImpulseBuffer<String>;
+pub(super) type PublishedVoltageImpulses = PublishedImpulses<String>;
+impl<O: ImpulseOwner> Default for ImpulseBuffer<O> {
+    fn default() -> Self {
+        Self {
+            batch: None,
+            lost: false,
+        }
+    }
+}
+impl<O: ImpulseOwner> Default for PublishedImpulses<O> {
+    fn default() -> Self {
+        Self {
+            cursors: HashMap::new(),
+            start: None,
+            sequence: 0,
+            lost: false,
+        }
+    }
+}
+fn owner_key(owner: &CurrentImpulseOwner) -> Option<CurrentImpulseOwner> {
+    match owner {
+        CurrentImpulseOwner::Branch { branch_name } if !branch_name.trim().is_empty() => {
+            Some(CurrentImpulseOwner::Branch {
+                branch_name: branch_name.to_ascii_lowercase(),
+            })
+        }
+        CurrentImpulseOwner::DeviceLead {
+            device_name,
+            parameter,
+        } if !device_name.trim().is_empty() && !parameter.trim().is_empty() => {
+            Some(CurrentImpulseOwner::DeviceLead {
+                device_name: device_name.to_ascii_lowercase(),
+                parameter: parameter.to_ascii_lowercase(),
+            })
+        }
+        _ => None,
+    }
+}
 #[derive(Debug, Default)]
 pub struct LiveTransientQueue {
     pub(super) samples: VecDeque<TransientSampleDelta>,
     impulses: CurrentImpulseBuffer,
+    voltage_impulses: VoltageImpulseBuffer,
 }
 
 impl LiveTransientQueue {
@@ -364,6 +508,7 @@ impl LiveTransientQueue {
     pub fn push(&mut self, mut delta: TransientSampleDelta) {
         if !delta.time.is_finite() {
             self.impulses.mark_lost();
+            self.voltage_impulses.mark_lost();
             return;
         }
         if let Some(impulses) = delta.current_impulses.take() {
@@ -371,6 +516,13 @@ impl LiveTransientQueue {
                 self.impulses.ingest(impulses);
             } else {
                 self.impulses.mark_lost();
+            }
+        }
+        if let Some(impulses) = delta.voltage_impulses.take() {
+            if impulses.stop_time_s == delta.time {
+                self.voltage_impulses.ingest(impulses);
+            } else {
+                self.voltage_impulses.mark_lost();
             }
         }
         if self.samples.len() >= MAX_PENDING_LIVE_TRANSIENT_SAMPLES {
@@ -391,6 +543,18 @@ impl LiveTransientQueue {
                 real_events: vec![],
                 buses: vec![],
                 current_impulses: Some(impulses),
+                voltage_impulses: None,
+            });
+        }
+        if let Some(impulses) = self.voltage_impulses.take_delta() {
+            samples.push(TransientSampleDelta {
+                time: impulses.stop_time_s,
+                waveforms: vec![],
+                events: vec![],
+                real_events: vec![],
+                buses: vec![],
+                current_impulses: None,
+                voltage_impulses: Some(impulses),
             });
         }
         samples
@@ -473,6 +637,7 @@ mod tests {
             node_voltages: &[],
             branch_names: &[],
             branch_currents: &[],
+            voltage_impulses: None,
             current_impulses: Some(&source),
             digital_values: &[],
             digital_buses: &[],
@@ -518,6 +683,7 @@ mod tests {
                 events: vec![],
                 real_events: vec![],
                 buses: vec![],
+                voltage_impulses: None,
                 current_impulses: Some(impulse),
             });
         }
@@ -600,6 +766,7 @@ mod tests {
             node_voltages: &[],
             branch_names: &[],
             branch_currents: &[],
+            voltage_impulses: None,
             current_impulses: Some(&source),
             digital_values: &[],
             digital_buses: &[],

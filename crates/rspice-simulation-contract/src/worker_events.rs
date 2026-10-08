@@ -27,6 +27,8 @@ pub struct WorkerDigitalBus {
 pub struct WorkerEventHistory {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_impulses: Option<CurrentImpulseHistoryEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voltage_impulses: Option<rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence>,
     #[serde(default)]
     pub digital: Vec<WorkerDigitalEventTrace>,
     #[serde(default)]
@@ -41,6 +43,7 @@ impl From<TransientEventHistory> for WorkerEventHistory {
     fn from(value: TransientEventHistory) -> Self {
         Self {
             current_impulses: value.current_impulses,
+            voltage_impulses: value.voltage_impulses,
             digital: value.digital.into_iter().map(Into::into).collect(),
             real: value.real.into_iter().map(Into::into).collect(),
             buses: value
@@ -62,6 +65,7 @@ impl From<WorkerEventHistory> for TransientEventHistory {
     fn from(value: WorkerEventHistory) -> Self {
         Self {
             current_impulses: value.current_impulses,
+            voltage_impulses: value.voltage_impulses,
             digital: value.digital.into_iter().map(Into::into).collect(),
             real: value.real.into_iter().map(Into::into).collect(),
             digital_buses: value
