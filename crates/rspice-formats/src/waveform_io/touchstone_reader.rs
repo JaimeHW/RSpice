@@ -54,7 +54,8 @@ pub fn read_touchstone_bytes(
 
 /// Decode a Touchstone document while bounding numeric input and expanded
 /// matrix storage before allocation. The limit includes independently sampled
-/// noise traces, including their retained coordinate copies.
+/// noise traces, including their retained coordinate copies, and explicit
+/// per-port reference values.
 pub fn read_touchstone_bytes_with_limit(
     source_name: &str,
     bytes: &[u8],
@@ -133,7 +134,13 @@ pub fn read_touchstone_bytes_with_limit(
                 reference_values = pending_reference.take();
             } else {
                 let mut values = pending_reference.take().unwrap_or_default();
-                values.extend(parse_numeric_values(trimmed, line_number)?);
+                values.extend(parse_numeric_values(
+                    trimmed,
+                    line_number,
+                    expected_reference_len - values.len(),
+                    &mut input_values,
+                    max_values,
+                )?);
                 if values.len() >= expected_reference_len {
                     reference_values = Some(values);
                 } else {
@@ -194,11 +201,9 @@ pub fn read_touchstone_bytes_with_limit(
                     version = parsed.floor() as u32;
                 }
                 "number of ports" => {
-                    declared_ports = Some(parse_positive_usize(
-                        value,
-                        line_number,
-                        "[Number of Ports]",
-                    )?);
+                    let ports = parse_positive_usize(value, line_number, "[Number of Ports]")?;
+                    validate_port_count(ports)?;
+                    declared_ports = Some(ports);
                 }
                 "number of frequencies" => {
                     declared_frequencies = Some(parse_positive_usize(
@@ -233,7 +238,7 @@ pub fn read_touchstone_bytes_with_limit(
                 "reference" => {
                     // The specification places [Reference] after [Number of
                     // Ports] precisely so the argument count is known here.
-                    let ports = declared_ports.ok_or_else(|| {
+                    let ports = declared_ports.filter(|_| seen_sections.contains("number of ports")).ok_or_else(|| {
                         format!(
                             "Touchstone line {line_number}: [Reference] requires a declared port count"
                         )
@@ -242,7 +247,13 @@ pub fn read_touchstone_bytes_with_limit(
                     let values = if value.is_empty() {
                         Vec::new()
                     } else {
-                        parse_numeric_values(value, line_number)?
+                        parse_numeric_values(
+                            value,
+                            line_number,
+                            ports,
+                            &mut input_values,
+                            max_values,
+                        )?
                     };
                     if values.len() >= ports {
                         reference_values = Some(values);
@@ -400,11 +411,7 @@ pub fn read_touchstone_bytes_with_limit(
         None => infer_ports(&numeric_tokens, matrix_format)?
             .ok_or_else(|| "Unable to determine Touchstone port count".to_owned())?,
     };
-    if num_ports == 0 || num_ports > MAX_TOUCHSTONE_PORTS {
-        return Err(format!(
-            "Touchstone port count {num_ports} is outside the supported range 1..={MAX_TOUCHSTONE_PORTS}"
-        ).into());
-    }
+    validate_port_count(num_ports)?;
     if declared_noise_frequencies.is_some() && noise_records.is_empty() {
         return Err(
             "Touchstone noise frequency count requires a nonempty [Noise Data] block".into(),
@@ -578,6 +585,15 @@ pub fn read_touchstone_bytes_with_limit(
     Ok(dataset)
 }
 
+fn validate_port_count(ports: usize) -> Result<(), TouchstoneError> {
+    if ports == 0 || ports > MAX_TOUCHSTONE_PORTS {
+        return Err(format!(
+            "Touchstone port count {ports} is outside the supported range 1..={MAX_TOUCHSTONE_PORTS}"
+        ).into());
+    }
+    Ok(())
+}
+
 fn ports_from_extension(source_name: &str) -> Result<Option<usize>, TouchstoneError> {
     let Some(extension) = Path::new(source_name)
         .extension()
@@ -749,10 +765,32 @@ fn parse_section_line(line: &str, line_number: usize) -> Result<(String, &str), 
     Ok((section, line[end + 1..].trim()))
 }
 
-fn parse_numeric_values(value: &str, line_number: usize) -> Result<Vec<f64>, TouchstoneError> {
-    let values = value
+fn parse_numeric_values(
+    value: &str,
+    line_number: usize,
+    remaining_references: usize,
+    input_values: &mut usize,
+    max_values: usize,
+) -> Result<Vec<f64>, TouchstoneError> {
+    let tokens = value
         .split(|character: char| character.is_whitespace() || character == ',')
-        .filter(|token| !token.is_empty())
+        .filter(|token| !token.is_empty());
+    let count = tokens.clone().count();
+    let requested = input_values.saturating_add(count);
+    if requested > max_values {
+        return Err(TouchstoneError::ValueLimit {
+            requested,
+            limit: max_values,
+        });
+    }
+    if count > remaining_references {
+        return Err(format!(
+            "Touchstone line {line_number}: [Reference] count exceeds the declared port count"
+        )
+        .into());
+    }
+    *input_values = requested;
+    let values = tokens
         .map(|token| {
             parse_numeric_token(token, || {
                 format!("Touchstone line {line_number}: invalid numeric value '{token}'")
@@ -840,6 +878,38 @@ fn pair_to_complex(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reference_admission_precedes_decoding_and_allocation() {
+        for references in ["50 invalid", "50\ninvalid"] {
+            let source = format!(
+                "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 2\n[Reference] {references}\n"
+            );
+            let error = super::read_touchstone_bytes_with_limit("network.ts", source.as_bytes(), 1)
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    super::TouchstoneError::ValueLimit {
+                        requested: 2,
+                        limit: 1
+                    }
+                ),
+                "{error}"
+            );
+        }
+        let source =
+            "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 1\n[Reference] 50 75 invalid\n";
+        let error = super::read_touchstone_bytes("network.ts", source.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("[Reference] count"), "{error}");
+    }
+
+    #[test]
+    fn unsupported_port_counts_are_rejected_before_reference_data() {
+        let source = "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 65\n[Reference] invalid\n";
+        let error = super::read_touchstone_bytes("network.ts", source.as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("supported range"), "{error}");
+    }
+
     #[test]
     fn numeric_admission_precedes_token_and_expanded_matrix_allocation() {
         for (source, limit, requested) in [
