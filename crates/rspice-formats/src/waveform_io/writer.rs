@@ -479,6 +479,10 @@ impl WaveformWriter {
         for sig in &dataset.signals {
             headers.push(sig.name.as_str());
         }
+        let metadata = Self::delimited_metadata(dataset, coordinate);
+        let record = metadata
+            .record(&headers)
+            .map_err(WaveformWriteError::InvalidData)?;
         let escaped_headers = headers
             .iter()
             .map(|header| Self::escape_delimited_header(header, delimiter))
@@ -500,8 +504,65 @@ impl WaveformWriter {
             contents.push_str(&values.join(&separator));
             contents.push('\n');
         }
+        contents.push_str(
+            &record
+                .iter()
+                .map(|field| Self::escape_delimited_header(field, delimiter))
+                .collect::<Vec<_>>()
+                .join(&separator),
+        );
+        contents.push('\n');
 
         Ok(contents)
+    }
+
+    fn delimited_metadata(
+        dataset: &WaveformDataset,
+        coordinate: &WaveformSignal,
+    ) -> crate::delimited::metadata::TableMetadata {
+        use crate::delimited::{
+            layout::{ColumnKind, complex_pair_name},
+            metadata::{ColumnMetadata, TableMetadata},
+        };
+        let column = |signal: &WaveformSignal| ColumnMetadata {
+            name: signal.name.clone(),
+            kind: ColumnKind::Real,
+            quantity: match signal.signal_type {
+                SignalType::Time => Some("time"),
+                SignalType::Frequency => Some("frequency"),
+                SignalType::Voltage | SignalType::VoltageReal | SignalType::VoltageImag => {
+                    Some("voltage")
+                }
+                SignalType::Current | SignalType::CurrentReal | SignalType::CurrentImag => {
+                    Some("current")
+                }
+                SignalType::Power => Some("power"),
+                SignalType::SParameter => Some("value"),
+                SignalType::Unknown => None,
+            }
+            .map(str::to_owned),
+            unit: (!signal.unit.is_empty()).then(|| signal.unit.clone()),
+        };
+        let mut columns = std::iter::once(coordinate)
+            .chain(&dataset.signals)
+            .map(column)
+            .collect::<Vec<_>>();
+        for (index, pair) in dataset.signals.windows(2).enumerate() {
+            if matches!(
+                (pair[0].signal_type, pair[1].signal_type),
+                (SignalType::VoltageReal, SignalType::VoltageImag)
+                    | (SignalType::CurrentReal, SignalType::CurrentImag)
+            ) && complex_pair_name(&pair[0].name, &pair[1].name).is_some()
+            {
+                columns[index + 1].kind = ColumnKind::ComplexReal;
+                columns[index + 2].kind = ColumnKind::ComplexImag;
+            }
+        }
+        TableMetadata {
+            analysis: Some(dataset.analysis.clone()),
+            title: Some(dataset.title.clone()),
+            columns,
+        }
     }
 
     fn escape_delimited_header(header: &str, delimiter: char) -> String {
@@ -552,7 +613,13 @@ mod tests {
                 signal.data = vec![f64::NAN];
             }
             let text = writer.write_text(&single_sample).unwrap();
-            assert_eq!(text.lines().count(), 2);
+            assert_eq!(text.lines().count(), 3);
+            assert!(
+                text.lines()
+                    .last()
+                    .unwrap()
+                    .starts_with(crate::delimited::metadata::RECORD_MARKER)
+            );
         }
     }
 
@@ -767,7 +834,57 @@ mod tests {
             .write_text(&sample_dataset())
             .expect("csv text serializes");
 
-        assert_eq!(csv, "time,V(out),I(R1)\n0,0,0.001\n0.000001,1.25,0.002\n");
+        assert!(csv.starts_with("time,V(out),I(R1)\n0,0,0.001\n0.000001,1.25,0.002\n"));
+        let decoded = crate::delimited::decode_delimited_waveforms(
+            &csv,
+            b',',
+            crate::delimited::DelimitedReadLimits {
+                max_columns: 3,
+                max_rows: 2,
+                max_header_bytes: 128,
+                min_rows: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(decoded.columns[0].canonical_unit(), Some("s"));
+        assert_eq!(decoded.columns[1].canonical_unit(), Some("V"));
+        assert_eq!(decoded.columns[2].canonical_unit(), Some("A"));
+        assert_eq!(decoded.signal_values, [vec![0.0, 1.25], vec![0.001, 0.002]]);
+    }
+
+    #[test]
+    fn delimited_writer_retains_literal_units_unstated_units_and_sample_gaps() {
+        for (format, delimiter) in [(WaveformFormat::Csv, b','), (WaveformFormat::Tsv, b'\t')] {
+            let mut dataset = sample_dataset();
+            let axis = dataset.x_signal.as_mut().unwrap();
+            axis.unit = "ns".into();
+            axis.data = vec![0.0, 2.0, 4.0];
+            dataset.signals[0].name = "charge [C]".into();
+            dataset.signals[0].unit = "C".into();
+            dataset.signals[0].signal_type = SignalType::Unknown;
+            dataset.signals[0].data = vec![1.0, f64::NAN, -0.0];
+            dataset.signals[1].unit.clear();
+            dataset.signals[1].data = vec![2.0, 3.0, 4.0];
+            let text = WaveformWriter::new(format).write_text(&dataset).unwrap();
+            let decoded = crate::delimited::decode_delimited_waveforms(
+                &text,
+                delimiter,
+                crate::delimited::DelimitedReadLimits {
+                    max_columns: 3,
+                    max_rows: 3,
+                    max_header_bytes: 128,
+                    min_rows: 1,
+                },
+            )
+            .unwrap();
+            assert_eq!(decoded.coordinate, [0.0, 2e-9, 4e-9]);
+            assert_eq!(decoded.columns[1].name, "charge [C]");
+            assert_eq!(decoded.columns[1].canonical_unit(), Some("C"));
+            assert_eq!(decoded.columns[2].canonical_unit(), None);
+            assert_eq!(decoded.signal_values[0][0], 1.0);
+            assert!(decoded.signal_values[0][1].is_nan());
+            assert_eq!(decoded.signal_values[0][2].to_bits(), (-0.0_f64).to_bits());
+        }
     }
 
     #[test]
@@ -810,7 +927,7 @@ mod tests {
         let csv = WaveformWriter::new(WaveformFormat::Csv)
             .write_text(&dataset)
             .expect("csv text serializes");
-        assert_eq!(csv, "\"time,sec\",\"V(out,\"\"ref\"\")\"\n0,1.25\n");
+        assert!(csv.starts_with("\"time,sec\",\"V(out,\"\"ref\"\")\"\n0,1.25\n"));
 
         let mut tsv_dataset = WaveformDataset::new("quoted-tsv");
         let mut tx = WaveformSignal::new("time\tsec", SignalType::Time);
@@ -823,7 +940,7 @@ mod tests {
         let tsv = WaveformWriter::new(WaveformFormat::Tsv)
             .write_text(&tsv_dataset)
             .expect("tsv text serializes");
-        assert_eq!(tsv, "\"time\tsec\"\t\"I(\"\"R1\"\")\"\n0\t0.002\n");
+        assert!(tsv.starts_with("\"time\tsec\"\t\"I(\"\"R1\"\")\"\n0\t0.002\n"));
     }
 
     /// A 2-port record keeps the format's historical S11 S21 S12 S22 ordering,

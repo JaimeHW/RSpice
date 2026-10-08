@@ -1380,6 +1380,59 @@ mod tests {
     }
 
     #[test]
+    fn delimited_metadata_survives_review_project_reload_and_reexport() {
+        use rspice_formats::{
+            SignalType, WaveformDataset, WaveformFormat, WaveformSignal, WaveformWriter,
+        };
+        let mut dataset = WaveformDataset::new("Exact units");
+        let mut axis = WaveformSignal::new("time", SignalType::Time);
+        axis.unit = "ns".into();
+        axis.data = vec![0.0, 2.0, 4.0];
+        dataset.set_x(axis);
+        for (name, unit, values) in [
+            ("charge [C]", "C", vec![1.0, f64::NAN, -0.0]),
+            ("V(unstated)", "", vec![2.0, 3.0, 4.0]),
+        ] {
+            let mut signal = WaveformSignal::new(name, SignalType::Unknown);
+            signal.unit = unit.into();
+            signal.data = values;
+            dataset.add_signal(signal);
+        }
+        let writer = WaveformWriter::new(WaveformFormat::Csv);
+        let text = writer.write_text(&dataset).unwrap();
+        let mut state = loaded_project_state();
+        apply_imported_result_dataset(&mut state, "units.csv", text.as_bytes()).unwrap();
+        let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
+        let text = crate::io::project_io::serialize_project_file(&project).unwrap();
+        let project = crate::io::project_io::load_project_text(&text, None).unwrap();
+        assert!(project.file.simulation_results_warning.is_none());
+        let simulation =
+            crate::io::simulation_state_from_results(project.file.simulation_results).unwrap();
+        let restored = &simulation.active_run().unwrap().analyses[0];
+        restored.validate_retained_evidence().unwrap();
+        let projected = rspice_formats::waveform_io::result::project_waveforms(
+            restored,
+            &[&restored.waveforms[0], &restored.waveforms[1]],
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            projected.signals[1].unit, "",
+            "an unstated unit cannot be inferred from V(...) in its name"
+        );
+        let text = writer.write_text(&projected).unwrap();
+        let parsed = parse_result_dataset("restored.csv", text.as_bytes()).unwrap();
+        assert_eq!(parsed.coordinate_unit.as_deref(), Some("s"));
+        assert_eq!(parsed.waveforms[0].x.as_ref(), &[0.0, 2e-9, 4e-9]);
+        assert_eq!(parsed.waveforms[0].name, "charge [C]");
+        assert_eq!(parsed.waveforms[0].unit.as_deref(), Some("C"));
+        assert_eq!(parsed.waveforms[0].sample(0), Some(1.0));
+        assert_eq!(parsed.waveforms[0].sample(1), None);
+        assert_eq!(parsed.waveforms[0].y[2].to_bits(), (-0.0_f64).to_bits());
+        assert_eq!(parsed.waveforms[1].unit, None);
+    }
+
+    #[test]
     fn import_review_cannot_reinterpret_a_current_coordinate_as_time() {
         let mut state = loaded_project_state();
         stage_imported_result_dataset(&mut state, "bias.csv", b"bias [mA],V(out) [V]\n0,0\n1,2\n")

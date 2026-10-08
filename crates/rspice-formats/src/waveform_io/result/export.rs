@@ -383,9 +383,7 @@ fn append_signal_values(
     // source identity: CY(1,2) and CY(1 2) must never become the same column.
     let export_name = signal.name.to_owned();
     let mut export_signal = WaveformSignal::new(&export_name, signal.signal_type);
-    if let Some(unit) = signal.unit {
-        export_signal.unit = unit.to_owned();
-    }
+    export_signal.unit = signal.unit.unwrap_or_default().to_owned();
 
     let available_points = signal.x_values.len().min(signal.y_values.len());
     if signal.x_values.len() != signal.y_values.len() {
