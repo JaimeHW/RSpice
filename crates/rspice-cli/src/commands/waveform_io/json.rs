@@ -5,8 +5,8 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visit
 use serde_json::Value;
 
 mod header;
-mod numbers;
 pub(crate) use header::{Kind, kind};
+use rspice_core::io::json::numbers;
 
 pub(super) fn parse(
     path: &std::path::Path,
@@ -77,7 +77,7 @@ impl Admission<'_> {
         if matches!(
             scope,
             Scope::Sample | Scope::NullableSample | Scope::AllNumbers
-        ) && rspice_formats::numeric::decimal_underflowed(spelling, value)
+        ) && numbers::decimal_underflowed(spelling, value)
         {
             return Err(E::custom("JSON number underflows at binary64 precision"));
         }

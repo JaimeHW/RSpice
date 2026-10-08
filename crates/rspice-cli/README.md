@@ -873,6 +873,9 @@ Decimal floating-point samples use correctly rounded binary64 values. Legacy
 table and FFT JSON reject nonzero decimals that underflow to zero, while
 preserving authored signed zero and representable subnormal values. These
 checks precede conversion, comparison, and replacement of a blessed baseline.
+Typed core JSON applies the same precision checks to coordinates, signal
+components, scalars, and retained analysis payloads. Integer metadata retains
+its native integer range.
 For tables, `max_result_values` counts coordinate values and both components
 of complex samples. HDF5 readers admit the combined dataset and measurement
 value count before decoding any section, including sections not selected.

@@ -1154,8 +1154,13 @@ impl AnalysisResultDocument {
             });
         }
         check_abort(abort)?;
-        let mut document: Self = serde_json::from_str(json)
-            .map_err(|error| ResultDocumentError::Json(error.to_string()))?;
+        let mut document: Self =
+            crate::io::json::from_str(json, abort).map_err(|error| match error {
+                crate::io::json::JsonDecodeError::Aborted => ResultDocumentError::Aborted,
+                crate::io::json::JsonDecodeError::Json(error) => {
+                    ResultDocumentError::Json(error.to_string())
+                }
+            })?;
         document.normalize_legacy_sensitivity_units(abort)?;
         stability::normalize_legacy(&mut document, abort)?;
         document.validate_with_limits_and_abort(limits, abort)?;

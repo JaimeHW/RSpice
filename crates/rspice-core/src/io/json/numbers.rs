@@ -3,11 +3,11 @@
 /// JSON integer literals promise an exact value, unlike decimal floating-point
 /// input which is rounded to binary64. serde retains i64/u64 values but already
 /// rounds integers outside that range to f64, so check the original spelling.
-pub(super) fn integer_rounded(spelling: &str, value: f64) -> bool {
+pub fn integer_rounded(spelling: &str, value: f64) -> bool {
     // Include the boundary: 2^53 + 1 rounds down to 2^53. Smaller integers are
     // all exact and need no formatting/allocation. Above it, many integers are
     // still representable; a blanket 2^53 ceiling would reject valid samples.
-    value.abs() >= rspice_formats::numeric::MAX_EXACT_F64_INTEGER as f64
+    value.abs() >= (1_u64 << 53) as f64
         && !spelling.contains(['.', 'e', 'E'])
         && spelling != format!("{value:.0}")
 }
@@ -15,16 +15,21 @@ pub(super) fn integer_rounded(spelling: &str, value: f64) -> bool {
 /// Advances only when serde visits a number, without retaining tokens or
 /// looking ahead through a container. JSON syntax remains serde's concern.
 /// In particular, a sample budget refusal must precede scanning its payload.
-pub(super) struct Numbers<'a> {
+pub struct Numbers<'a> {
     remaining: &'a str,
 }
 
 impl<'a> Numbers<'a> {
-    pub(super) fn new(content: &'a str) -> Self {
+    /// Borrow the source being decoded by serde, without scanning ahead.
+    pub fn new(content: &'a str) -> Self {
         Self { remaining: content }
     }
+}
 
-    pub(super) fn next(&mut self) -> Option<&'a str> {
+impl<'a> Iterator for Numbers<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
         let bytes = self.remaining.as_bytes();
         let mut position = 0;
         while position < bytes.len() {
@@ -63,6 +68,15 @@ impl<'a> Numbers<'a> {
         self.remaining = "";
         None
     }
+}
+
+/// Whether converting a validated decimal erased a nonzero mantissa.
+pub fn decimal_underflowed(spelling: &str, value: f64) -> bool {
+    value == 0.0
+        && spelling
+            .split(['e', 'E'])
+            .next()
+            .is_some_and(|mantissa| mantissa.bytes().any(|digit| matches!(digit, b'1'..=b'9')))
 }
 
 #[cfg(test)]

@@ -133,3 +133,80 @@ fn json_representable_boundary_values_preserve_every_bit() {
         }
     }
 }
+
+#[test]
+fn typed_json_numeric_loss_cannot_publish_or_replace_a_blessed_baseline() {
+    let dir = common::test_dir("typed_json_precision_refusal");
+    let deck = dir.join("source.cir");
+    let golden = dir.join("golden.json");
+    let input = dir.join("input.json");
+    let converted = dir.join("converted.json");
+    std::fs::write(
+        &deck,
+        "* numeric precision\nV1 in 0 ac 1\nR1 in 0 1k\n.ac lin 2 1 2\n.end\n",
+    )
+    .unwrap();
+    let run = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "run"])
+        .arg(&deck)
+        .arg("-o")
+        .arg(&golden)
+        .args(["-f", "json"])
+        .output()
+        .unwrap();
+    assert!(run.status.success(), "{run:?}");
+    let original = std::fs::read(&golden).unwrap();
+    let baseline: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    for pointer in [
+        "/axes/0/values/values/0",
+        "/signals/0/values/samples/0/real",
+        "/signals/0/values/samples/0/imaginary",
+    ] {
+        for (literal, diagnostic) in [
+            ("1e-999", "underflow"),
+            ("9007199254740993", "cannot be represented exactly"),
+        ] {
+            let mut document = baseline.clone();
+            *document.pointer_mut(pointer).unwrap() = serde_json::json!("NUMERIC_TOKEN");
+            let source = serde_json::to_string(&document)
+                .unwrap()
+                .replace("\"NUMERIC_TOKEN\"", literal);
+            std::fs::write(&input, &source).unwrap();
+            std::fs::write(&converted, "existing output").unwrap();
+            for operation in ["convert", "compare", "bless"] {
+                let mut command = Command::new(env!("CARGO_BIN_EXE_rspice"));
+                command.args([
+                    "--quiet",
+                    if operation == "bless" {
+                        "compare"
+                    } else {
+                        operation
+                    },
+                ]);
+                command.arg(&input);
+                if operation == "convert" {
+                    command.arg(&converted).args(["--to", "json"]);
+                } else {
+                    command.arg(&golden);
+                }
+                if operation == "bless" {
+                    command.arg("--bless");
+                }
+                let output = command.output().unwrap();
+                assert_eq!(
+                    output.status.code(),
+                    Some(1),
+                    "{literal}/{operation}: {output:?}"
+                );
+                let error = String::from_utf8_lossy(&output.stderr);
+                assert!(error.contains(diagnostic), "{error}");
+                assert_eq!(std::fs::read(&golden).unwrap(), original);
+                assert_eq!(
+                    std::fs::read_to_string(&converted).unwrap(),
+                    "existing output"
+                );
+                assert_eq!(std::fs::read_to_string(&input).unwrap(), source);
+            }
+        }
+    }
+}

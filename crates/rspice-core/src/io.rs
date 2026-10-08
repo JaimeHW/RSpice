@@ -24,6 +24,7 @@
 //! uncompressed one in [`crate::engine`].
 
 pub mod hdf5;
+pub mod json;
 pub mod ltspice_raw;
 pub mod raw_export;
 pub mod vcd;

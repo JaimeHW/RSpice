@@ -2,6 +2,8 @@
 
 use num_complex::Complex64;
 
+mod json_precision;
+
 use super::payload::{DigitalBusSourceTag, DigitalEventBus};
 use super::*;
 use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
