@@ -169,6 +169,8 @@ jobs:
         run: >-
           cargo test --locked -p rspice-core --features veriloga --no-fail-fast
           --lib
+          --test analog_event_subscriptions
+          --test authored_connect_modules
           --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion
@@ -191,6 +193,7 @@ jobs:
           --test veriloga_noise_process
           --test veriloga_project_runtime_batch
           --test veriloga_project_virtual_identity
+          --test veriloga_source_dependencies
           --test veriloga_source_directive_spellings
           --test veriloga_timestep
           --test veriloga_transient
@@ -340,6 +343,8 @@ jobs:
         run: >-
           cargo test --locked -p rspice-core --features veriloga-native --no-fail-fast
           --lib
+          --test analog_event_subscriptions
+          --test authored_connect_modules
           --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion
@@ -362,6 +367,7 @@ jobs:
           --test veriloga_noise_process
           --test veriloga_project_runtime_batch
           --test veriloga_project_virtual_identity
+          --test veriloga_source_dependencies
           --test veriloga_source_directive_spellings
           --test veriloga_timestep
           --test veriloga_transient
