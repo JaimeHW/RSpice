@@ -113,9 +113,11 @@ pub fn decimal_underflowed(decimal: &str, value: f64) -> bool {
             .is_some_and(|mantissa| mantissa.bytes().any(|digit| matches!(digit, b'1'..=b'9')))
 }
 
+/// Every integer up to this magnitude is exact; larger values can still be
+/// exact when they are multiples of the binary64 spacing at that magnitude.
 pub const MAX_EXACT_F64_INTEGER: u64 = 1_u64 << 53;
 
-/// An integer refused by the existing exact-sample conversion policy.
+/// An integer refused because conversion to binary64 would round its value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExactIntegerError {
     Signed { identity: String, value: i64 },
@@ -140,24 +142,29 @@ impl std::fmt::Display for ExactIntegerError {
 impl std::error::Error for ExactIntegerError {}
 
 pub fn exact_signed_integer(identity: &str, value: i64) -> Result<f64, ExactIntegerError> {
-    if value.unsigned_abs() > MAX_EXACT_F64_INTEGER {
+    let converted = value as f64;
+    // Use a wider integer for the check: casting a rounded 2^63 back to i64
+    // saturates to i64::MAX and would falsely certify that input as exact.
+    if converted as i128 != i128::from(value) {
         Err(ExactIntegerError::Signed {
             identity: identity.to_owned(),
             value,
         })
     } else {
-        Ok(value as f64)
+        Ok(converted)
     }
 }
 
 pub fn exact_unsigned_integer(identity: &str, value: u64) -> Result<f64, ExactIntegerError> {
-    if value > MAX_EXACT_F64_INTEGER {
+    let converted = value as f64;
+    // Likewise, u128 can distinguish a rounded 2^64 from u64::MAX.
+    if converted as u128 != u128::from(value) {
         Err(ExactIntegerError::Unsigned {
             identity: identity.to_owned(),
             value,
         })
     } else {
-        Ok(value as f64)
+        Ok(converted)
     }
 }
 
@@ -233,6 +240,54 @@ pub fn stated_coordinate_names(names: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn integer_conversion_accepts_representable_large_values_and_rejects_rounding() {
+        for value in [
+            i64::MIN,
+            i64::MIN + 1024,
+            -9007199254740994,
+            -9007199254740992,
+            -1,
+            0,
+            1,
+            9007199254740992,
+            9007199254740994,
+            i64::MAX - 1023,
+        ] {
+            let actual = exact_signed_integer("signed", value).unwrap();
+            assert_eq!(actual as i128, i128::from(value));
+        }
+        for value in [
+            0,
+            1,
+            1u64 << 53,
+            (1u64 << 53) + 2,
+            1u64 << 63,
+            u64::MAX - 2047,
+        ] {
+            let actual = exact_unsigned_integer("unsigned", value).unwrap();
+            assert_eq!(actual as u128, u128::from(value));
+        }
+        for value in [i64::MIN + 1, -9007199254740993, 9007199254740993, i64::MAX] {
+            assert_eq!(
+                exact_signed_integer("signed", value).unwrap_err(),
+                ExactIntegerError::Signed {
+                    identity: "signed".into(),
+                    value
+                }
+            );
+        }
+        for value in [(1u64 << 53) + 1, (1u64 << 63) + 1, u64::MAX] {
+            assert_eq!(
+                exact_unsigned_integer("unsigned", value).unwrap_err(),
+                ExactIntegerError::Unsigned {
+                    identity: "unsigned".into(),
+                    value
+                }
+            );
+        }
+    }
 
     fn dataset(
         domain: crate::WaveformDomain,

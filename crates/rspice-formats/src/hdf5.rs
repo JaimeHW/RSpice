@@ -880,6 +880,45 @@ mod tests {
     use super::{Hdf5Limits, Hdf5ReadFailure, decode_hdf5};
 
     #[test]
+    fn integer_datasets_preserve_exact_large_values_without_accepting_saturation() {
+        let values = [
+            i64::MIN,
+            -9007199254740994,
+            9007199254740994,
+            i64::MAX - 1023,
+        ];
+        let mut builder = rustyhdf5::FileBuilder::new();
+        builder
+            .create_dataset("time")
+            .with_f64_data(&[0.0, 1.0, 2.0, 3.0]);
+        builder.create_dataset("count").with_i64_data(&values);
+        let limits = Hdf5Limits {
+            max_columns: 2,
+            max_values: 8,
+            coordinate_names: &["time"],
+        };
+        let decoded = decode_hdf5(&builder.finish().unwrap(), limits, "hdf5").unwrap();
+        assert_eq!(
+            decoded.signals[0]
+                .real
+                .iter()
+                .map(|&value| value as i128)
+                .collect::<Vec<_>>(),
+            values.map(i128::from)
+        );
+        for value in [i64::MIN + 1, 9007199254740993, i64::MAX] {
+            let mut builder = rustyhdf5::FileBuilder::new();
+            builder.create_dataset("time").with_f64_data(&[0.0, 1.0]);
+            builder.create_dataset("count").with_i64_data(&[0, value]);
+            let error = decode_hdf5(&builder.finish().unwrap(), limits, "hdf5").unwrap_err();
+            assert!(
+                matches!(error.reason, Hdf5ReadFailure::InexactInteger(crate::numeric::ExactIntegerError::Signed { value: actual, .. }) if actual == value),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn typed_tables_preserve_waveform_domains_and_complex_columns() {
         use rustyhdf5::{AttrValue, FileBuilder};
         for (coordinate, domain) in [
