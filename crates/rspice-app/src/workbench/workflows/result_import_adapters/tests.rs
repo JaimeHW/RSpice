@@ -73,6 +73,45 @@ fn generic_hdf5() -> Vec<u8> {
 }
 
 #[test]
+fn hdf5_signed_zero_coordinates_must_be_numerically_distinct() {
+    for coordinate in [
+        vec![-0.0, 0.0],
+        vec![0.0, -0.0],
+        vec![-1.0, -0.0, 1.0],
+        vec![1.0, -0.0, -1.0],
+    ] {
+        let mut builder = rustyhdf5::FileBuilder::new();
+        builder.create_dataset("time").with_f64_data(&coordinate);
+        builder
+            .create_dataset("out")
+            .with_f64_data(&vec![-0.0; coordinate.len()]);
+        let bytes = builder.finish().unwrap();
+        for (name, format) in [
+            ("signed-zero.h5", ResultImportFormat::Hdf5),
+            ("signed-zero.mat", ResultImportFormat::MatlabV73),
+        ] {
+            let parsed = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+                name, &bytes,
+            );
+            if coordinate.len() == 2 {
+                let error = parsed.unwrap_err();
+                assert!(error.contains("coordinate repeats"), "{error}");
+            } else {
+                let parsed = parsed.unwrap();
+                assert_eq!(parsed.source_format, format);
+                assert_eq!(parsed.waveforms[0].x[1].to_bits(), (-0.0_f64).to_bits());
+                assert!(
+                    parsed.waveforms[0]
+                        .y
+                        .iter()
+                        .all(|v| v.to_bits() == (-0.0_f64).to_bits())
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn hdf5_and_matlab_v73_import_real_root_vectors() {
     let bytes = generic_hdf5();
     assert_basic(

@@ -305,7 +305,8 @@ fn validate_coordinate(analysis: WaveformDomain, coordinate: &[f64]) -> Result<(
     let mut direction = None;
     for (index, pair) in coordinate.windows(2).enumerate() {
         let step = pair[1].total_cmp(&pair[0]);
-        if step.is_eq() {
+        // Signed zeros have different total ordering but the same coordinate.
+        if pair[1] == pair[0] {
             return Err(format!(
                 "native bundle coordinate repeats at sample {}",
                 index + 1

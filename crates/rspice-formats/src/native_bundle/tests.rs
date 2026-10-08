@@ -15,6 +15,52 @@ fn limits() -> NativeBundleReadLimits {
 }
 
 #[test]
+fn native_coordinates_reject_both_orders_of_duplicate_signed_zero() {
+    for analysis in [
+        crate::WaveformDomain::Transient,
+        crate::WaveformDomain::DcSweep,
+    ] {
+        for coordinate in [
+            vec![-0.0, 0.0],
+            vec![0.0, -0.0],
+            vec![-1.0, -0.0, 1.0],
+            vec![1.0, -0.0, -1.0],
+        ] {
+            let values = vec![-0.0; coordinate.len()];
+            let dataset = NativeBundleDataset {
+                analysis,
+                coordinate_name: "axis",
+                coordinate_unit: None,
+                coordinate: &coordinate,
+                signals: vec![NativeBundleSignal {
+                    name: "out",
+                    unit: None,
+                    values: NativeBundleSignalValues::Real(&values),
+                }],
+            };
+            for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
+                let result = encode_native_bundle(kind, &dataset, MAX_RESULT_DATASET_BYTES);
+                if coordinate.len() == 2 {
+                    let error = result
+                        .map(|bytes| bytes.len())
+                        .expect_err("signed zero is one coordinate");
+                    assert!(error.to_string().contains("coordinate repeats"), "{error}");
+                } else {
+                    let decoded = decode_native_bundle(&result.unwrap(), kind, limits()).unwrap();
+                    assert_eq!(decoded.coordinate[1].to_bits(), (-0.0_f64).to_bits());
+                    assert!(
+                        decoded.signals[0]
+                            .real
+                            .iter()
+                            .all(|v| v.to_bits() == (-0.0_f64).to_bits())
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn native_export_counts_the_magnitude_retained_by_complex_imports() {
     let coordinate = (0..256).map(f64::from).collect::<Vec<_>>();
     let component = vec![0.0; coordinate.len()];

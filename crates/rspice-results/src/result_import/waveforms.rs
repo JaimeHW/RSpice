@@ -262,7 +262,8 @@ fn validate_coordinate(
     let mut direction = None;
     for (index, pair) in coordinate.windows(2).enumerate() {
         let step = pair[1].total_cmp(&pair[0]);
-        if step.is_eq() {
+        // Signed zeros have different total ordering but the same coordinate.
+        if pair[1] == pair[0] {
             return Err(adapter_error(
                 format,
                 format_args!(
@@ -296,6 +297,48 @@ fn validate_coordinate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_zero_is_one_coordinate_but_keeps_its_sample_bits() {
+        let import = |kind, coordinate: Vec<f64>| {
+            let rows = coordinate.len();
+            assemble_imported_waveforms(
+                ResultImportFormat::Hdf5,
+                kind,
+                "axis",
+                coordinate,
+                vec![ImportedSignal {
+                    name: "out".into(),
+                    real: vec![-0.0; rows],
+                    imag: None,
+                    unit: None,
+                }],
+                WaveformImportLimits {
+                    min_rows: 1,
+                    max_rows: 3,
+                    max_columns: 2,
+                    max_values: 6,
+                    max_signal_name_bytes: 32,
+                },
+            )
+        };
+        for kind in [AnalysisType::Transient, AnalysisType::DcSweep] {
+            for coordinate in [vec![-0.0, 0.0], vec![0.0, -0.0]] {
+                let error = import(kind, coordinate).unwrap_err();
+                assert!(error.contains("coordinate repeats"), "{error}");
+            }
+            for coordinate in [vec![-1.0, -0.0, 1.0], vec![1.0, -0.0, -1.0]] {
+                let restored = import(kind, coordinate).unwrap();
+                assert_eq!(restored.waveforms[0].x[1].to_bits(), (-0.0_f64).to_bits());
+                assert!(
+                    restored.waveforms[0]
+                        .y
+                        .iter()
+                        .all(|v| v.to_bits() == (-0.0_f64).to_bits())
+                );
+            }
+        }
+    }
 
     #[test]
     fn retained_value_limits_count_shared_coordinates_and_each_owned_sample_array() {
