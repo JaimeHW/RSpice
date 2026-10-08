@@ -105,6 +105,48 @@ fn delimited_round_trips_preserve_opaque_quantity_labels() {
 }
 
 #[test]
+fn literal_labels_and_coordinate_aliases_do_not_acquire_inferred_units() {
+    let directory = common::test_dir("delimited_literal_labels");
+    let input = directory.join("source.json");
+    for (coordinate, signal) in [
+        ("time", "charge [C]"),
+        ("time", "voltage [mV]"),
+        ("time", " padded "),
+        ("time_s", "plain"),
+    ] {
+        std::fs::write(
+            &input,
+            json!({
+                "scale":{"name":coordinate, "type":"time", "values":[0.0,1.0]},
+                "signals":[{"name":signal, "type":"value", "values":[1.0,2.0]}]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        for (format, delimiter) in [("csv", b','), ("tsv", b'\t')] {
+            let encoded = directory.join(format!("encoded.{format}"));
+            convert(&input, &encoded, format);
+            let decoded = decode_delimited_waveforms(
+                &std::fs::read_to_string(encoded).unwrap(),
+                delimiter,
+                DelimitedReadLimits {
+                    max_columns: 2,
+                    max_rows: 2,
+                    max_header_bytes: 128,
+                    min_rows: 1,
+                },
+            )
+            .unwrap();
+            assert_eq!(decoded.domain, rspice_formats::WaveformDomain::Transient);
+            assert_eq!(decoded.columns[0].name, coordinate);
+            assert_eq!(decoded.columns[1].name, signal);
+            assert_eq!(decoded.columns[1].canonical_unit(), None);
+            assert_eq!(decoded.signal_values[0], [1.0, 2.0]);
+        }
+    }
+}
+
+#[test]
 fn invalid_metadata_cannot_replace_converted_results_or_golden_files() {
     let directory = common::test_dir("delimited_metadata_integrity");
     let metadata = json!({

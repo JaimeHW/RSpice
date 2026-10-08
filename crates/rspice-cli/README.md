@@ -730,8 +730,10 @@ declares its exact `name`, `kind`, `quantity` and `unit`, coordinate first.
 Remaining cells are empty. This metadata preserves literal unit symbols and
 sample values, including absent units, without interpreting unit-like signal names.
 RSpice validates the metadata against the headers and requires a unique final
-record. Other numeric-table readers should skip these metadata records. Exports
-whose metadata is fully inferable retain their plain header-and-samples layout.
+record. Other numeric-table readers should skip these metadata records. Simple
+time/frequency exports whose metadata is fully inferable retain their plain
+header-and-samples layout. Labels containing unit-like brackets or surrounding
+whitespace, and other coordinate names, always receive explicit metadata.
 Application imports normalize declared coordinate units to their canonical units;
 explicit signal units and values retain their original numeric representation.
 RAW tables preserve exact plot titles, scale names, signal names and variable

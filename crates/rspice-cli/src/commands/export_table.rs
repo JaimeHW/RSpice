@@ -694,7 +694,15 @@ impl ExportTable {
         let record = metadata
             .record(&headers)
             .map_err(|error| io_err(std::io::Error::new(std::io::ErrorKind::InvalidData, error)))?;
-        let quantities_need_metadata = self.scale_unit.is_some()
+        // Legacy application readers interpret brackets as units and trim
+        // labels. Declare literal names and noncanonical coordinate identities
+        // explicitly so a conversion cannot change their meaning.
+        let needs_metadata = headers.iter().any(|header| {
+            header.contains(['[', ']'])
+                || header.trim() != *header
+                || header.starts_with('\u{feff}')
+        }) || !matches!(self.scale_name.as_str(), "time" | "frequency")
+            || self.scale_unit.is_some()
             || self.analysis != "converted"
             || self.plot_name != "Converted Data"
             || self.scale_type != super::waveform_io::scale_var_type(&self.scale_name)
@@ -706,7 +714,7 @@ impl ExportTable {
             .iter()
             .map(|column| column.kind)
             .collect::<Vec<_>>();
-        let record = if quantities_need_metadata {
+        let record = if needs_metadata {
             Some(record)
         } else if kinds != infer_layout(&headers[1..]) {
             Some(
