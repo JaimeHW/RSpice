@@ -154,7 +154,7 @@ impl SchematicState {
 
     /// Emitted loop-probe names in the current sheet.
     pub fn placed_loop_probe_names(&self) -> Vec<String> {
-        component_edit::placed_loop_probe_names(&self.design.document())
+        component_edit::placed_loop_probe_names(self.design.document())
     }
 }
 

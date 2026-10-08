@@ -28,7 +28,7 @@ impl SchematicEditAuthority {
             view_path: state.workspace.content.active_view.display_path(),
             grid_size: state.schematic.document().grid_size,
             document_policy: state.schematic.document().document_policy,
-            snapshot: SchematicSnapshot::capture(&state.schematic.document()),
+            snapshot: SchematicSnapshot::capture(state.schematic.document()),
             selection: state.schematic.session.editor.selection.clone(),
         }
     }
@@ -87,7 +87,7 @@ impl SchematicEditAuthority {
         if self.selection != state.schematic.session.editor.selection {
             return Err(reopen("The selected-object set changed"));
         }
-        if !self.snapshot.is_equal_document(&state.schematic.document()) {
+        if !self.snapshot.is_equal_document(state.schematic.document()) {
             return Err(reopen("The schematic geometry changed"));
         }
         Ok(())

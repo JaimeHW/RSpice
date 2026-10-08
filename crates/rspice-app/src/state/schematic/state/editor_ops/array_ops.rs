@@ -54,7 +54,7 @@ fn array_result_selection(objects: ArrayObjectIds) -> Selection {
 impl SchematicState {
     fn array_source(&self) -> ArraySource<'_, impl Iterator<Item = Point> + Clone> {
         ArraySource {
-            document: &self.design.document(),
+            document: self.design.document(),
             identity_cursor: self.identity_cursor(),
             selection: array_selection_input(&self.session.editor.selection),
         }

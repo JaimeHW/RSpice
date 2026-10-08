@@ -181,12 +181,12 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                     .editor
                     .begin_operation("Pending inactive gesture");
             }
-            let before = SchematicSnapshot::capture(&fixture.state.schematic.document());
+            let before = SchematicSnapshot::capture(fixture.state.schematic.document());
             let root_before = SchematicSnapshot::capture(
-                &fixture.state.workspace.content.schematic_buffers[&root.key()].document(),
+                fixture.state.workspace.content.schematic_buffers[&root.key()].document(),
             );
             let other_before = SchematicSnapshot::capture(
-                &fixture.state.workspace.content.schematic_buffers[&other.key()].document(),
+                fixture.state.workspace.content.schematic_buffers[&other.key()].document(),
             );
             let outputs = fixture
                 .state
@@ -209,12 +209,12 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                     "{failure}"
                 );
             }
-            assert!(before.is_equal_document(&fixture.state.schematic.document()));
+            assert!(before.is_equal_document(fixture.state.schematic.document()));
             assert!(root_before.is_equal_document(
-                &fixture.state.workspace.content.schematic_buffers[&root.key()].document()
+                fixture.state.workspace.content.schematic_buffers[&root.key()].document()
             ));
             assert!(other_before.is_equal_document(
-                &fixture.state.workspace.content.schematic_buffers[&other.key()].document()
+                fixture.state.workspace.content.schematic_buffers[&other.key()].document()
             ));
             assert_eq!(
                 fixture

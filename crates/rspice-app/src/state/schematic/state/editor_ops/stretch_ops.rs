@@ -11,20 +11,20 @@ use rspice_schematic_editor::session::stretch as editor_stretch;
 impl SchematicState {
     /// Whether the current selection contains at least one live stretch handle.
     pub fn has_live_stretch_selection(&self) -> bool {
-        editor_stretch::has_live_selection(&self.design.document(), &self.session.editor.selection)
+        editor_stretch::has_live_selection(self.design.document(), &self.session.editor.selection)
     }
 
     /// Resolve an unambiguous default handle from the current frozen selection.
     /// Pointer-driven callers may instead construct an exact target and validate
     /// it with [`Self::is_stretch_target_eligible`].
     pub fn default_stretch_target(&self) -> Option<StretchTarget> {
-        editor_stretch::default_target(&self.design.document(), &self.session.editor.selection)
+        editor_stretch::default_target(self.design.document(), &self.session.editor.selection)
     }
 
     /// Prove that an exact live handle belongs to the current frozen selection.
     pub fn is_stretch_target_eligible(&self, target: StretchTarget) -> bool {
         editor_stretch::target_is_eligible(
-            &self.design.document(),
+            self.design.document(),
             &self.session.editor.selection,
             target,
         )
@@ -91,7 +91,7 @@ impl SchematicState {
         if !self.session.editor.selection.probes.is_empty() {
             return Err(StretchSelectionError::ProbeSelectionUnsupported);
         }
-        if !stretch::target_is_live(&self.design.document(), target) {
+        if !stretch::target_is_live(self.design.document(), target) {
             return Err(StretchSelectionError::StaleTarget);
         }
         Ok(editor_stretch::selection_authorizes_target(
@@ -138,7 +138,7 @@ impl SchematicState {
             return Ok(None);
         }
         stretch::preview_stretch_target_resolved(
-            &self.design.document(),
+            self.design.document(),
             delta,
             target,
             policy,
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn preview_is_nonmutating_and_is_the_exact_commit_candidate() {
         let mut state = selected_u_wire();
-        let before = SchematicSnapshot::capture(&state.design.document());
+        let before = SchematicSnapshot::capture(state.design.document());
         let preview = state
             .preview_stretch_target(
                 Point::new(0, 5),
@@ -407,7 +407,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
+        assert!(before.is_equal(&SchematicSnapshot::capture(state.design.document())));
         state
             .stretch_target(
                 Point::new(0, 5),
@@ -527,7 +527,7 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(70, Point::new(10, 10), "SENSE"));
-        let before = SchematicSnapshot::capture(&existing.design.document());
+        let before = SchematicSnapshot::capture(existing.design.document());
         assert_eq!(
             existing.stretch_target(
                 Point::new(0, 5),
@@ -539,7 +539,7 @@ mod tests {
                 point: Point::new(10, 10),
             })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&existing.design.document())));
+        assert!(before.is_equal(&SchematicSnapshot::capture(existing.design.document())));
 
         let mut new_contact = selected_u_wire();
         new_contact
@@ -547,7 +547,7 @@ mod tests {
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(71, Point::new(10, 15), "OTHER"));
-        let before = SchematicSnapshot::capture(&new_contact.design.document());
+        let before = SchematicSnapshot::capture(new_contact.design.document());
         assert_eq!(
             new_contact.stretch_target(
                 Point::new(0, 5),
@@ -559,7 +559,7 @@ mod tests {
                 point: Point::new(10, 15),
             })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&new_contact.design.document())));
+        assert!(before.is_equal(&SchematicSnapshot::capture(new_contact.design.document())));
     }
 
     fn declared_bus(id: u64, points: Vec<Point>) -> Bus {
@@ -778,7 +778,7 @@ mod tests {
                 .unwrap(),
             );
         state.session.editor.selection.select_documentation_shape(7);
-        let before = SchematicSnapshot::capture(&state.design.document());
+        let before = SchematicSnapshot::capture(state.design.document());
         assert_eq!(
             state.stretch_target(
                 Point::new(10, 0),
@@ -790,13 +790,13 @@ mod tests {
             ),
             Err(StretchSelectionError::InvalidDocumentationGeometry { shape_id: 7 })
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
+        assert!(before.is_equal(&SchematicSnapshot::capture(state.design.document())));
     }
 
     #[test]
     fn stale_target_and_coordinate_overflow_are_rejected_atomically() {
         let mut state = selected_u_wire();
-        let before = SchematicSnapshot::capture(&state.design.document());
+        let before = SchematicSnapshot::capture(state.design.document());
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 5),
@@ -805,11 +805,11 @@ mod tests {
             ),
             Err(StretchSelectionError::StaleTarget)
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
+        assert!(before.is_equal(&SchematicSnapshot::capture(state.design.document())));
 
         state.design.document_mut_for_test().wires[0].points[1].y = i32::MAX;
         state.design.document_mut_for_test().wires[0].points[2].y = i32::MAX;
-        let before = SchematicSnapshot::capture(&state.design.document());
+        let before = SchematicSnapshot::capture(state.design.document());
         assert_eq!(
             state.stretch_target(
                 Point::new(0, 1),
@@ -818,13 +818,13 @@ mod tests {
             ),
             Err(StretchSelectionError::CoordinateOverflow)
         );
-        assert!(before.is_equal(&SchematicSnapshot::capture(&state.design.document())));
+        assert!(before.is_equal(&SchematicSnapshot::capture(state.design.document())));
     }
 
     #[test]
     fn read_only_zero_delta_and_unselected_target_are_clean_noops() {
         let mut state = selected_u_wire();
-        let baseline = SchematicSnapshot::capture(&state.design.document());
+        let baseline = SchematicSnapshot::capture(state.design.document());
         state.session.read_only = true;
         assert_eq!(
             state.stretch_target(
@@ -852,7 +852,7 @@ mod tests {
             ),
             Ok(false)
         );
-        assert!(baseline.is_equal(&SchematicSnapshot::capture(&state.design.document())));
+        assert!(baseline.is_equal(&SchematicSnapshot::capture(state.design.document())));
     }
 
     #[test]

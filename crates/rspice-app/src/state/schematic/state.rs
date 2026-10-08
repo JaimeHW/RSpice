@@ -154,7 +154,7 @@ impl SchematicState {
 }
 
 /// App bookkeeping around the per-document editor session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SchematicSession {
     pub editor: EditorSession,
 
@@ -175,19 +175,6 @@ pub struct SchematicSession {
     /// Editor selection and dirty baseline for the current document transaction.
     pub(in crate::state::schematic) operation_cancel:
         Option<super::undo_history::OperationCancelState>,
-}
-
-impl Default for SchematicSession {
-    fn default() -> Self {
-        Self {
-            editor: EditorSession::default(),
-            current_file: Default::default(),
-            is_dirty: Default::default(),
-            read_only: Default::default(),
-            needs_history_reset: Default::default(),
-            operation_cancel: None,
-        }
-    }
 }
 
 impl Default for SchematicState {

@@ -20,7 +20,7 @@ impl SchematicState {
     /// supported by selection movement.
     pub fn has_live_movable_selection(&self) -> bool {
         movement::has_live_movable_selection(
-            &self.design.document(),
+            self.design.document(),
             movement_selection(&self.session.editor.selection),
         )
     }
@@ -28,7 +28,7 @@ impl SchematicState {
     /// Number of selected movable objects that still exist in this document.
     pub fn live_movable_selection_count(&self) -> usize {
         movement::live_movable_selection_count(
-            &self.design.document(),
+            self.design.document(),
             movement_selection(&self.session.editor.selection),
         )
     }

@@ -74,7 +74,7 @@ fn manual(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     assert_eq!(queue.len(), 1);
     assert_eq!(
         serde_json::to_value(&queue[0].spec).unwrap(),
-        serde_json::to_value(&spec).unwrap(),
+        serde_json::to_value(spec).unwrap(),
         "fixture authoring must preserve every typed analysis control"
     );
     state.simulation.execution.run_intent = super::SimulationRunIntent::ManualDeck;

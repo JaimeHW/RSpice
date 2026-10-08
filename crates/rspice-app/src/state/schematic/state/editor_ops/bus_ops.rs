@@ -153,7 +153,7 @@ impl SchematicState {
         if self.session.read_only {
             return Err(BusParseError::ReadOnly);
         }
-        bus_edit::validate_bus_properties(&self.design.document(), expected, declaration)
+        bus_edit::validate_bus_properties(self.design.document(), expected, declaration)
     }
 
     /// Apply a complete bus-tap property contract atomically. The guarded
@@ -202,7 +202,7 @@ impl SchematicState {
             return Err(BusParseError::ReadOnly);
         }
         bus_edit::validate_bus_tap_properties(
-            &self.design.document(),
+            self.design.document(),
             expected,
             BusTapGeometry {
                 bus_id,

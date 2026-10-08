@@ -1686,7 +1686,7 @@ fn every_production_dialog_callsite_supplies_a_description() {
     let mut missing = Vec::new();
     for path in sources {
         let relative = path
-            .strip_prefix(&source_root)
+            .strip_prefix(source_root)
             .expect("source beneath crate root")
             .to_string_lossy()
             .replace('\\', "/");

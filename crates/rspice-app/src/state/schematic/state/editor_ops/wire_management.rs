@@ -155,7 +155,7 @@ impl SchematicState {
     /// share the same endpoint vertex, moving any attached wire keeps the
     /// junction topology intact.
     pub fn split_wires_at_t_junction(&mut self, point: Point) {
-        for wire_id in wire_edit::wires_to_split_at(&self.design.document(), point) {
+        for wire_id in wire_edit::wires_to_split_at(self.design.document(), point) {
             let _ = self.split_wire(wire_id, point);
         }
     }

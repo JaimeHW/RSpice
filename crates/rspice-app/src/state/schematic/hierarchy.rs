@@ -31,8 +31,8 @@ impl HierarchyExtractionCandidate {
         child_point_to_net: &HashMap<Point, String>,
     ) -> Result<(), HierarchyExtractionError> {
         hierarchy_edit::validate_candidate_connectivity(
-            &self.parent.design.document(),
-            &self.child.design.document(),
+            self.parent.design.document(),
+            self.child.design.document(),
             self.instance_id,
             plan,
             parent_point_to_net,
@@ -157,7 +157,7 @@ mod tests {
         let r1 = schematic.add_component(ComponentType::Resistor, Point::origin());
         let p1 = schematic.add_component(ComponentType::Port, Point::new(40, 0));
         let before =
-            super::super::undo_history::SchematicSnapshot::capture(&schematic.design.document());
+            super::super::undo_history::SchematicSnapshot::capture(schematic.design.document());
         schematic.session.editor.selection.select_component(r1);
         schematic.session.editor.selection.select_component(p1);
         let error = schematic
@@ -171,7 +171,7 @@ mod tests {
             error,
             HierarchyExtractionError::InterfacePortSelected(_)
         ));
-        assert!(before.is_equal_document(&schematic.design.document()));
+        assert!(before.is_equal_document(schematic.design.document()));
     }
 
     #[test]
@@ -612,7 +612,7 @@ mod tests {
             )
             .expect("hierarchy connectivity plan");
         let sheet_move = plan
-            .sheet_move_connectivity(&schematic.design.document(), schematic.topology_version())
+            .sheet_move_connectivity(schematic.design.document(), schematic.topology_version())
             .expect("typed sheet move");
 
         assert_eq!(sheet_move.source_component_ids, [selected]);
@@ -677,7 +677,7 @@ mod tests {
             )
             .expect("hierarchy connectivity plan");
         let sheet_move = plan
-            .sheet_move_connectivity(&schematic.design.document(), schematic.topology_version())
+            .sheet_move_connectivity(schematic.design.document(), schematic.topology_version())
             .expect("verified internal sheet move");
 
         assert!(sheet_move.boundaries.is_empty());
@@ -760,7 +760,7 @@ mod tests {
         invalid_wire.points.clear();
         schematic.session.editor.clipboard.wires.push(invalid_wire);
         schematic.session.is_dirty = false;
-        let before = SchematicSnapshot::capture(&schematic.design.document());
+        let before = SchematicSnapshot::capture(schematic.design.document());
         let selection = schematic.session.editor.selection.clone();
         let cursor = schematic.identity_cursor();
         let topology = schematic.topology_version();
@@ -774,7 +774,7 @@ mod tests {
         let candidate = schematic
             .materialize_hierarchy_extraction(&plan, "work", "child", "schematic")
             .unwrap();
-        assert!(before.is_equal_document(&schematic.design.document()));
+        assert!(before.is_equal_document(schematic.design.document()));
         assert_eq!(schematic.session.editor.selection, selection);
         assert_eq!(schematic.identity_cursor(), cursor);
         assert_eq!(schematic.session.editor.clipboard.wires.len(), 1);

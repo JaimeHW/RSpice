@@ -1485,7 +1485,7 @@ mod tests {
                     "{change}"
                 );
             }
-            let before = crate::state::SchematicSnapshot::capture(&app.state.schematic.document());
+            let before = crate::state::SchematicSnapshot::capture(app.state.schematic.document());
             let content = app.state.schematic.content_version();
             let topology = app.state.schematic.topology_version();
             let undo = app.state.schematic.undo_description().map(str::to_owned);
@@ -1494,7 +1494,7 @@ mod tests {
             });
             assert!(app.state.dialogs.object_properties.open, "{change}");
             assert!(
-                before.is_equal_document(&app.state.schematic.document()),
+                before.is_equal_document(app.state.schematic.document()),
                 "{change}"
             );
             assert_eq!(app.state.schematic.content_version(), content, "{change}");

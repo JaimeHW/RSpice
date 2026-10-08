@@ -148,7 +148,7 @@ fn dc_mismatch_moment_controls_survive_authoring_storage_decks_and_workers() {
         rspice_simulation::analysis_preparation::build_dc_mismatch_command(&spec).unwrap();
     let deck = format!("controls\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n{command}\n.end\n");
     assert_eq!(specs_for(&deck), vec![spec.clone()]);
-    let worker = WorkerAnalysisSpec::try_from(&spec).unwrap();
+    let worker = WorkerAnalysisSpec::from(&spec);
     let carried: WorkerAnalysisSpec =
         serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();
     assert_eq!(AnalysisSpec::from(carried), spec);

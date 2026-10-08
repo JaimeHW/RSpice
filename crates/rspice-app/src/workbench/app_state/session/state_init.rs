@@ -64,7 +64,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     let schematic = workspace
         .active_schematic()
         .map(|source| source.clone_editor())
-        .unwrap_or_else(crate::state::SchematicState::default);
+        .unwrap_or_default();
     workspace.save_active_schematic(&schematic);
     let sim_setup = crate::workbench::app_state::SimSetupState::new();
     if let Ok(plan) = sim_setup.stable_analysis_plan() {

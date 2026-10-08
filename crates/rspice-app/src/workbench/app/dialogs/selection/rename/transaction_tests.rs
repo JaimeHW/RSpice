@@ -208,7 +208,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             }
             _ => unreachable!(),
         }
-        let before = SchematicSnapshot::capture(&app.state.schematic.document());
+        let before = SchematicSnapshot::capture(app.state.schematic.document());
         let catalog = app.state.workspace.content.configuration_sets.clone();
         let payloads = app.state.workspace.content.simulation_plan_payloads.clone();
         let dirty = app.state.schematic.session.is_dirty;
@@ -224,7 +224,7 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             "{refusal}"
         );
         assert!(
-            before.is_equal_document(&app.state.schematic.document()),
+            before.is_equal_document(app.state.schematic.document()),
             "{refusal}"
         );
         assert_eq!(catalog, app.state.workspace.content.configuration_sets);
@@ -328,10 +328,10 @@ fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
         .unwrap()
         .saved_outputs[0]
         .source_expression = "I(V_other)".to_owned();
-    let snapshot = SchematicSnapshot::capture(&app.state.schematic.document());
+    let snapshot = SchematicSnapshot::capture(app.state.schematic.document());
     let sequence = app.state.project_undo_sequence();
     app.action_edit_undo();
-    assert!(snapshot.is_equal_document(&app.state.schematic.document()));
+    assert!(snapshot.is_equal_document(app.state.schematic.document()));
     assert_eq!(sequence, app.state.project_undo_sequence());
     assert!(
         app.state.schematic.can_undo(),
@@ -398,21 +398,25 @@ fn switching_documents_does_not_redirect_rename_history() {
     app.state
         .schematic
         .add_component(ComponentType::Resistor, Point::new(50, 50));
-    let other_snapshot = SchematicSnapshot::capture(&app.state.schematic.document());
+    let other_snapshot = SchematicSnapshot::capture(app.state.schematic.document());
     app.action_edit_undo();
     assert_eq!(
         app.state.workspace.content.active_schematic_reference(),
         owner
     );
     assert_reference(&app, configuration, plan, "V1");
-    assert!(other_snapshot.is_equal_document(
-        &app.state.workspace.content.schematic_buffers[&other.key()].document()
-    ));
+    assert!(
+        other_snapshot.is_equal_document(
+            app.state.workspace.content.schematic_buffers[&other.key()].document()
+        )
+    );
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
-    assert!(other_snapshot.is_equal_document(
-        &app.state.workspace.content.schematic_buffers[&other.key()].document()
-    ));
+    assert!(
+        other_snapshot.is_equal_document(
+            app.state.workspace.content.schematic_buffers[&other.key()].document()
+        )
+    );
 }
 
 #[test]
@@ -601,14 +605,14 @@ fn an_unchanged_name_preserves_authored_reference_spelling_and_history() {
         .find(|component| component.id == id)
         .unwrap()
         .params = "vref=v1".to_owned();
-    let before = SchematicSnapshot::capture(&app.state.schematic.document());
+    let before = SchematicSnapshot::capture(app.state.schematic.document());
     let epoch = app.state.design_execution_epoch;
     assert!(
         !app.state
             .rename_component_transaction(&expected, expected.name.clone())
             .unwrap()
     );
-    assert!(before.is_equal_document(&app.state.schematic.document()));
+    assert!(before.is_equal_document(app.state.schematic.document()));
     assert_eq!(app.state.design_execution_epoch, epoch);
     assert!(app.state.project_undo_sequence().is_none());
     assert!(!app.state.workspace.content.project_metadata_dirty);

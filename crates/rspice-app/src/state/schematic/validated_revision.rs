@@ -65,6 +65,60 @@ impl SchematicState {
     }
 }
 
+impl super::SchematicEditorRef<'_> {
+    pub(crate) fn copy_without_validated_revisions(&self) -> SchematicState {
+        self.with_design(self.design.copy_without_validated_revisions())
+    }
+}
+
+impl SchematicState {
+    pub(crate) fn record_validated_save_revision(
+        &mut self,
+        request: ValidatedRevisionRequest,
+        original_journal: ValidatedRevisionJournal,
+        original_dirty: bool,
+    ) -> Result<
+        (
+            ValidatedSchematicRevisionId,
+            ValidatedRevisionJournal,
+            ValidatedRevisionJournal,
+            ContentDigest,
+        ),
+        String,
+    > {
+        match self.design.record_validated_save_revision(
+            request,
+            original_journal,
+            checked_unix_time_ms,
+        ) {
+            Ok(record) => {
+                self.session.is_dirty = true;
+                Ok(record)
+            }
+            Err(error) => {
+                self.session.is_dirty = original_dirty;
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn rollback_validated_save_journal(
+        &mut self,
+        original_journal: &ValidatedRevisionJournal,
+        expected_journal: &ValidatedRevisionJournal,
+        expected_design_digest: crate::product::ContentDigest,
+        original_dirty: bool,
+    ) -> Result<(), String> {
+        let changed = self.design.rollback_validated_save_journal(
+            original_journal,
+            expected_journal,
+            expected_design_digest,
+        )?;
+        self.session.is_dirty = original_dirty || changed;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,59 +227,5 @@ mod tests {
             Err(ValidatedRevisionError::ReadOnly)
         );
         assert_eq!(state.design.document().components, changed);
-    }
-}
-
-impl super::SchematicEditorRef<'_> {
-    pub(crate) fn copy_without_validated_revisions(&self) -> SchematicState {
-        self.with_design(self.design.copy_without_validated_revisions())
-    }
-}
-
-impl SchematicState {
-    pub(crate) fn record_validated_save_revision(
-        &mut self,
-        request: ValidatedRevisionRequest,
-        original_journal: ValidatedRevisionJournal,
-        original_dirty: bool,
-    ) -> Result<
-        (
-            ValidatedSchematicRevisionId,
-            ValidatedRevisionJournal,
-            ValidatedRevisionJournal,
-            ContentDigest,
-        ),
-        String,
-    > {
-        match self.design.record_validated_save_revision(
-            request,
-            original_journal,
-            checked_unix_time_ms,
-        ) {
-            Ok(record) => {
-                self.session.is_dirty = true;
-                Ok(record)
-            }
-            Err(error) => {
-                self.session.is_dirty = original_dirty;
-                Err(error)
-            }
-        }
-    }
-
-    pub(crate) fn rollback_validated_save_journal(
-        &mut self,
-        original_journal: &ValidatedRevisionJournal,
-        expected_journal: &ValidatedRevisionJournal,
-        expected_design_digest: crate::product::ContentDigest,
-        original_dirty: bool,
-    ) -> Result<(), String> {
-        let changed = self.design.rollback_validated_save_journal(
-            original_journal,
-            expected_journal,
-            expected_design_digest,
-        )?;
-        self.session.is_dirty = original_dirty || changed;
-        Ok(())
     }
 }

@@ -49,7 +49,7 @@ impl SchematicState {
             return Err(SchematicReplacementError::ReadOnly);
         }
         replacement_edit::replacement_authority_with_spec(
-            &self.design.document(),
+            self.design.document(),
             self.replacement_context(),
             source_spec,
         )
@@ -65,7 +65,7 @@ impl SchematicState {
             return Err(SchematicReplacementError::ReadOnly);
         }
         replacement_edit::preview_instance_replacement(
-            &self.design.document(),
+            self.design.document(),
             self.replacement_context(),
             authority,
             target,
@@ -381,7 +381,7 @@ mod tests {
         let id = state.add_component(ComponentType::Resistor, Point::new(100, 100));
         state.session.editor.selection.select_only_component(id);
         let authority = state.replacement_authority().unwrap();
-        let before = SchematicSnapshot::capture(&state.design.document());
+        let before = SchematicSnapshot::capture(state.design.document());
         state.design.document_mut_for_test().components[0].value = "2k".to_owned();
         assert_eq!(
             state.preview_instance_replacement(
@@ -391,7 +391,7 @@ mod tests {
             Err(SchematicReplacementError::StaleAuthority)
         );
         state.design.document_mut_for_test().components[0] = authority.source_component().clone();
-        assert!(before.is_equal_document(&state.design.document()));
+        assert!(before.is_equal_document(state.design.document()));
 
         let terminal = state.design.document().components[0].terminal_positions()[0].1;
         let wire_id = state.next_id();
@@ -415,14 +415,14 @@ mod tests {
         let target = SchematicReplacementTargetSpec::library_cell(binding).with_terminals(vec![
             SchematicReplacementTerminal::new("only", Point::new(20, 0)),
         ]);
-        let snapshot = SchematicSnapshot::capture(&state.design.document());
+        let snapshot = SchematicSnapshot::capture(state.design.document());
         assert_eq!(
             state.preview_instance_replacement(&authority, &target),
             Err(SchematicReplacementError::UnmappedConnectedTerminal {
                 terminal: "+".to_owned()
             })
         );
-        assert!(snapshot.is_equal_document(&state.design.document()));
+        assert!(snapshot.is_equal_document(state.design.document()));
         assert!(!state.can_undo());
     }
 

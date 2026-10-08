@@ -572,7 +572,7 @@ pub(in crate::workbench) fn selected_component_sheet_move_plan(
     }
     source_plan(state)?
         .sheet_move_connectivity(
-            &state.schematic.document(),
+            state.schematic.document(),
             state.schematic.topology_version(),
         )
         .map_err(|error| error.to_string())
@@ -1152,13 +1152,13 @@ mod tests {
                 )
                 .expect("saved output"),
             );
-        let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
+        let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
 
         open_create_hierarchy_dialog(&mut state);
         assert!(state.dialogs.create_hierarchy.open);
         let error = commit_create_hierarchy(&mut state).expect_err("reference must block");
         assert!(error.contains("saved output 'branch_current'"), "{error}");
-        assert!(before.is_equal_document(&state.schematic.document()));
+        assert!(before.is_equal_document(state.schematic.document()));
         assert!(
             state
                 .library_manager

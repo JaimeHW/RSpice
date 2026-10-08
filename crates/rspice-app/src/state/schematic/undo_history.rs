@@ -45,7 +45,7 @@ mod tests {
     use rspice_design_model::Point;
 
     fn capture(state: &SchematicState) -> SchematicSnapshot {
-        SchematicSnapshot::capture(&state.design.document())
+        SchematicSnapshot::capture(state.design.document())
     }
 
     // -------------------------------------------------------------------------
@@ -307,7 +307,7 @@ mod tests {
                 .selection
                 .select_only_component(resistor);
             state.session.is_dirty = was_dirty;
-            let before = SchematicSnapshot::capture(&state.design.document());
+            let before = SchematicSnapshot::capture(state.design.document());
             let selection = state.session.editor.selection.clone();
             let content_version = state.content_version();
             state.begin_operation("drag selection");
@@ -318,7 +318,7 @@ mod tests {
             state.session.editor.pan = (123.0, 0.0);
 
             assert!(state.cancel_operation());
-            assert!(before.is_equal_document(&state.design.document()));
+            assert!(before.is_equal_document(state.design.document()));
             assert_eq!(state.session.editor.selection, selection);
             assert_eq!(state.session.is_dirty, was_dirty);
             assert_eq!(state.session.editor.pan, (123.0, 0.0));

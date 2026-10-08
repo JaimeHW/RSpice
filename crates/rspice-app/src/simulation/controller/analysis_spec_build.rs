@@ -79,7 +79,7 @@ mod manifest_tests {
             ];
             for spec in specs {
                 spec.validate().unwrap();
-                let packet = WorkerAnalysisSpec::try_from(&spec).unwrap();
+                let packet = WorkerAnalysisSpec::from(&spec);
                 let encoded = serde_json::to_string(&packet).unwrap();
                 let restored = AnalysisSpec::from(
                     serde_json::from_str::<WorkerAnalysisSpec>(&encoded).unwrap(),

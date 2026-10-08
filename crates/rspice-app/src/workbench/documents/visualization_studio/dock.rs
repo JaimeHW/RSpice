@@ -265,7 +265,7 @@ fn comparison_source_projection_edits(
     receipt: &ComparisonReceipt,
 ) -> Result<Vec<DocumentEdit>, String> {
     let state = &app.state;
-    let document_id = active_project_visualization_document_id(&state).ok_or_else(|| {
+    let document_id = active_project_visualization_document_id(state).ok_or_else(|| {
         "Open a project-owned result document before recording a comparison.".to_owned()
     })?;
     let document = state

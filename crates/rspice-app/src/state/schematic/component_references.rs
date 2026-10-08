@@ -23,7 +23,7 @@ impl SchematicState {
         &self,
         names: &std::collections::BTreeMap<u64, String>,
     ) -> Result<Vec<Component>, String> {
-        reference_edit::prepare_component_renames(&self.design.document(), names)
+        reference_edit::prepare_component_renames(self.design.document(), names)
     }
 }
 

@@ -1354,7 +1354,7 @@ mod tests {
                 "{change}"
             );
             let source = state.tabbed_property_dialog.source.clone();
-            let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
+            let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
             let versions = (
                 state.schematic.content_version(),
                 state.schematic.topology_version(),
@@ -1380,7 +1380,7 @@ mod tests {
                 "{change}"
             );
             assert!(
-                before.is_equal_document(&state.schematic.document()),
+                before.is_equal_document(state.schematic.document()),
                 "{change}"
             );
             assert_eq!(
@@ -1483,7 +1483,7 @@ mod tests {
             .unwrap()
             .saved_outputs[0]
             .revision = crate::product::ObjectRevision::new(u64::MAX).unwrap();
-        let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
+        let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
         let payloads = state.workspace.content.simulation_plan_payloads.clone();
         open_property_editor(&mut state, 44);
         let opened_source = state.tabbed_property_dialog.source.clone();
@@ -1501,7 +1501,7 @@ mod tests {
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        assert!(before.is_equal_document(&state.schematic.document()));
+        assert!(before.is_equal_document(state.schematic.document()));
         assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
         assert!(state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.draft.commit_error.is_some());
@@ -1524,7 +1524,7 @@ mod tests {
             let mut state = state_with_resistor();
             state.schematic.document_mut_for_test().components[0].params = source.to_owned();
             add_current_output(&mut state);
-            let before = crate::state::SchematicSnapshot::capture(&state.schematic.document());
+            let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
             let payloads = state.workspace.content.simulation_plan_payloads.clone();
             open_property_editor(&mut state, 44);
             state
@@ -1541,7 +1541,7 @@ mod tests {
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 render_property_dialog(ctx, &mut state);
             });
-            assert!(before.is_equal_document(&state.schematic.document()));
+            assert!(before.is_equal_document(state.schematic.document()));
             assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
             assert!(state.tabbed_property_dialog.open);
             assert!(

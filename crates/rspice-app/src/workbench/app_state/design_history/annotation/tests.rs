@@ -306,7 +306,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
             "read only" => fixture.state.workspace.content.open_views[0].read_only_reference = true,
             _ => unreachable!(),
         }
-        let before = SchematicSnapshot::capture(&fixture.state.schematic.document());
+        let before = SchematicSnapshot::capture(fixture.state.schematic.document());
         let configurations = fixture.state.workspace.content.configuration_sets.clone();
         let outputs = fixture
             .state
@@ -324,7 +324,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
                 .is_err(),
             "{failure}"
         );
-        assert!(before.is_equal_document(&fixture.state.schematic.document()));
+        assert!(before.is_equal_document(fixture.state.schematic.document()));
         assert_eq!(
             fixture.state.workspace.content.configuration_sets,
             configurations

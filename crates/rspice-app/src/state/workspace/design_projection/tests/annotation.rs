@@ -63,7 +63,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
         .unwrap()
         .params = "vref=V42 gain=2".to_owned();
     retain_annotation(&mut workspace, &reference, &active, &[voltage]);
-    let original = crate::state::SchematicSnapshot::capture(&active.document());
+    let original = crate::state::SchematicSnapshot::capture(active.document());
     let catalog = workspace.content.design_management.clone();
     let projection = projection_of(&workspace, &libraries, &reference, &active);
     let projected = projection.root_schematic().unwrap();
@@ -86,7 +86,7 @@ fn unapplied_annotation_projects_controlled_source_references_with_names() {
     let parameters = crate::state::parse_replacement_parameters_strict(&controlled.params).unwrap();
     assert_eq!(parameters["vref"], "V1");
     assert_eq!(parameters["gain"], "2");
-    assert!(original.is_equal_document(&active.document()));
+    assert!(original.is_equal_document(active.document()));
     assert_eq!(workspace.content.design_management, catalog);
     assert!(Arc::ptr_eq(
         &projection,
@@ -123,7 +123,7 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
         .unwrap()
         .params = "inductors='l1, L2'".to_owned();
     retain_annotation(&mut workspace, &reference, &active, &[first, second]);
-    let original = crate::state::SchematicSnapshot::capture(&active.document());
+    let original = crate::state::SchematicSnapshot::capture(active.document());
     let projection = projection_of(&workspace, &libraries, &reference, &active);
     let components = &projection.root_schematic().unwrap().document().components;
     let first = components
@@ -150,7 +150,7 @@ fn projection_resolves_swapped_windings_from_the_original_names() {
         crate::state::parse_params_string(&coupling.params)["inductors"],
         "L2, L1"
     );
-    assert!(original.is_equal_document(&active.document()));
+    assert!(original.is_equal_document(active.document()));
 }
 
 #[test]
@@ -175,14 +175,14 @@ fn a_failed_annotation_projection_leaves_the_source_and_cached_projection_intact
             let collision = active.add_component(ComponentType::VoltageSource, Point::new(500, 0));
             set_name(&mut active, collision, "V1");
         }
-        let original = crate::state::SchematicSnapshot::capture(&active.document());
+        let original = crate::state::SchematicSnapshot::capture(active.document());
         let catalog = workspace.content.design_management.clone();
         let error = workspace
             .design_projection(&libraries, &reference, &active)
             .unwrap_err();
         assert!(error.to_string().contains("reference annotation"));
         assert!(error.to_string().contains(&reference.key()));
-        assert!(original.is_equal_document(&active.document()));
+        assert!(original.is_equal_document(active.document()));
         assert_eq!(workspace.content.design_management, catalog);
         assert!(Arc::ptr_eq(
             &cached,

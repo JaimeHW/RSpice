@@ -125,7 +125,7 @@ impl SelectionBulkEditAuthority {
             .map(|(key, schematic)| {
                 (
                     key.clone(),
-                    SchematicSnapshot::capture(&schematic.document()),
+                    SchematicSnapshot::capture(schematic.document()),
                 )
             })
             .collect::<Vec<_>>();
@@ -153,7 +153,7 @@ impl SelectionBulkEditAuthority {
             || !self
                 .active
                 .snapshot
-                .is_equal_document(&state.schematic.document())
+                .is_equal_document(state.schematic.document())
         {
             return Some(reopen("The active schematic changed"));
         }
@@ -190,7 +190,7 @@ impl SelectionBulkEditAuthority {
             let Some(live) = state.workspace.content.schematic_buffers.get(key) else {
                 return Some(reopen("A project schematic was closed"));
             };
-            if !expected.is_equal_document(&live.document()) {
+            if !expected.is_equal_document(live.document()) {
                 return Some(reopen("A project schematic changed"));
             }
         }

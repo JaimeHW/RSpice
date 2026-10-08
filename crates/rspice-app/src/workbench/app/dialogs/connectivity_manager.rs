@@ -346,7 +346,7 @@ fn build_report(
     // the document the canvas paints: a materialized page carries namespaced
     // coordinates that would scroll the editor off the design.
     let bus_analysis =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document());
+        rspice_design::connectivity::bus::analyze_bus_connectivity(state.schematic.document());
     let nets = design_nets
         .iter()
         .map(|net| build_net_row(net, subject, &drc))
@@ -1233,7 +1233,7 @@ impl RSpiceApp {
         if !selected.is_empty() {
             candidate.recalculate_runtime_state();
             validate_repair_candidate(&self.state, &candidate, &dialog.report.drc)?;
-            let after = SchematicSnapshot::capture(&candidate.document());
+            let after = SchematicSnapshot::capture(candidate.document());
             let changed = self.state.schematic.with_undo(
                 "apply reviewed connectivity repairs",
                 move |schematic| {
@@ -1360,7 +1360,7 @@ fn connectivity_authority_error(state: &AppState) -> Option<String> {
         || authority.document_policy != state.schematic.document().document_policy
         || !authority
             .snapshot
-            .is_equal_document(&state.schematic.document())
+            .is_equal_document(state.schematic.document())
         || state.dialogs.connectivity_manager.contract_at_open
             != state.workspace.content.connectivity;
     stale.then(|| {
@@ -1430,11 +1430,11 @@ fn validate_repair_candidate(
         }
     }
     let before_bus =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(&state.schematic.document())
+        rspice_design::connectivity::bus::analyze_bus_connectivity(state.schematic.document())
             .diagnostics
             .len();
     let after_bus =
-        rspice_design::connectivity::bus::analyze_bus_connectivity(&candidate.document())
+        rspice_design::connectivity::bus::analyze_bus_connectivity(candidate.document())
             .diagnostics
             .len();
     if after_bus > before_bus {

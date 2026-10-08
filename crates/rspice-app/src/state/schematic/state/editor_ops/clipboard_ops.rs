@@ -51,7 +51,7 @@ impl SchematicState {
         terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
     ) -> ClipboardData {
         clipboard_edit::capture_complete_selection(
-            &self.design.document(),
+            self.design.document(),
             clipboard_edit::CopySelection {
                 components: &self.session.editor.selection.components,
                 wires: &self.session.editor.selection.wires,

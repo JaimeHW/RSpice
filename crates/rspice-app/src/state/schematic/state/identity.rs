@@ -482,9 +482,8 @@ mod tests {
             });
 
         schematic.recalculate_runtime_state();
-        let analysis = rspice_design::connectivity::bus::analyze_bus_connectivity(
-            &schematic.design.document(),
-        );
+        let analysis =
+            rspice_design::connectivity::bus::analyze_bus_connectivity(schematic.design.document());
 
         assert_eq!(schematic.design.document().buses.len(), 1);
         assert_eq!(schematic.design.document().bus_taps.len(), 1);
