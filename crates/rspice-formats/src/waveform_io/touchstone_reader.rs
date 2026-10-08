@@ -77,7 +77,12 @@ pub fn read_touchstone_bytes_with_limit(
     let mut version = 1_u32;
     let mut matrix_format = MatrixFormat::Full;
     let mut declared_two_port_order = None;
-    let mut declared_ports = ports_from_extension(source_name)?;
+    // A v2 [Number of Ports] declaration supersedes the filename, which the
+    // specification permits to have any extension. Validate the hint only if
+    // the source actually uses v1, where it supplies the matrix dimensions.
+    let extension_ports = ports_from_extension(source_name);
+    let mut declared_ports = extension_ports.as_ref().ok().copied().flatten();
+    let mut seen_sections = std::collections::BTreeSet::new();
     let mut declared_frequencies = None;
     let mut declared_noise_frequencies = None;
     let mut noise_records = Vec::new();
@@ -150,14 +155,27 @@ pub fn read_touchstone_bytes_with_limit(
         }
         if trimmed.starts_with('[') {
             let (section, value) = parse_section_line(trimmed, line_number)?;
-            if saw_network_data && !matches!(section.as_str(), "noise data" | "end") {
+            if (saw_network_data || !numeric_tokens.is_empty())
+                && !(version >= 2 && matches!(section.as_str(), "noise data" | "end"))
+            {
                 return Err(format!(
                     "Touchstone line {line_number}: [{section}] must precede network data"
                 )
                 .into());
             }
+            if !seen_sections.insert(section.clone()) {
+                return Err(format!(
+                    "Touchstone line {line_number}: [{section}] may appear only once"
+                )
+                .into());
+            }
             match section.as_str() {
                 "version" => {
+                    if saw_option_line || seen_sections.len() != 1 {
+                        return Err(format!(
+                            "Touchstone line {line_number}: [Version] must precede all other declarations"
+                        ).into());
+                    }
                     let parsed =
                         value
                             .parse::<f64>()
@@ -167,7 +185,7 @@ pub fn read_touchstone_bytes_with_limit(
                                 ),
                                 source,
                             })?;
-                    if !matches!(parsed, 1.0 | 2.0 | 2.1) {
+                    if !matches!(parsed, 2.0 | 2.1) {
                         return Err(format!(
                             "Touchstone line {line_number}: unsupported [Version] '{value}'"
                         )
@@ -202,11 +220,6 @@ pub fn read_touchstone_bytes_with_limit(
                     };
                 }
                 "two-port data order" => {
-                    if declared_two_port_order.is_some() {
-                        return Err(format!(
-                            "Touchstone line {line_number}: [Two-Port Data Order] may appear only once"
-                        ).into());
-                    }
                     declared_two_port_order = Some(match value.to_ascii_lowercase().as_str() {
                         "21_12" => TwoPortOrder::TwentyOneTwelve,
                         "12_21" => TwoPortOrder::TwelveTwentyOne,
@@ -218,12 +231,6 @@ pub fn read_touchstone_bytes_with_limit(
                     });
                 }
                 "reference" => {
-                    if reference_values.is_some() {
-                        return Err(format!(
-                            "Touchstone line {line_number}: [Reference] may appear only once"
-                        )
-                        .into());
-                    }
                     // The specification places [Reference] after [Number of
                     // Ports] precisely so the argument count is known here.
                     let ports = declared_ports.ok_or_else(|| {
@@ -243,8 +250,18 @@ pub fn read_touchstone_bytes_with_limit(
                         pending_reference = Some(values);
                     }
                 }
-                "network data" => saw_network_data = true,
-                "begin information" => in_information = true,
+                "network data" | "begin information" => {
+                    if !value.is_empty() {
+                        return Err(format!(
+                            "Touchstone line {line_number}: [{section}] must not have trailing content"
+                        ).into());
+                    }
+                    if section == "network data" {
+                        saw_network_data = true;
+                    } else {
+                        in_information = true;
+                    }
+                }
                 "end information" => {
                     return Err(format!(
                         "Touchstone line {line_number}: [End Information] has no matching [Begin Information]"
@@ -256,9 +273,9 @@ pub fn read_touchstone_bytes_with_limit(
                     ).into());
                 }
                 "number of noise frequencies" => {
-                    if version < 2 || declared_noise_frequencies.is_some() {
+                    if version < 2 {
                         return Err(format!(
-                            "Touchstone line {line_number}: [Number of Noise Frequencies] requires v2 and may appear only once"
+                            "Touchstone line {line_number}: [Number of Noise Frequencies] requires v2"
                         ).into());
                     }
                     declared_noise_frequencies = Some(parse_positive_usize(
@@ -349,8 +366,33 @@ pub fn read_touchstone_bytes_with_limit(
     if in_information {
         return Err("Touchstone [Begin Information] block is not terminated".into());
     }
-    if version >= 2 && !saw_end {
-        return Err("Touchstone v2 source is missing the required [End] section".into());
+    if !saw_option_line {
+        return Err("Touchstone source is missing the required option line".into());
+    }
+    if version >= 2 {
+        for required in [
+            "Number of Ports",
+            "Number of Frequencies",
+            "Network Data",
+            "End",
+        ] {
+            if !seen_sections.contains(&required.to_ascii_lowercase()) {
+                return Err(format!(
+                    "Touchstone v2 source is missing the required [{required}] section"
+                )
+                .into());
+            }
+        }
+    } else {
+        if !seen_sections.is_empty() {
+            return Err(
+                "Touchstone section keywords require a leading [Version] 2.0 or 2.1 declaration"
+                    .into(),
+            );
+        }
+        // Do not infer another network if a v1 filename declared an invalid
+        // count. Unlike v2, it has no authoritative in-file dimensions.
+        extension_ports?;
     }
 
     let num_ports = match declared_ports {
@@ -386,6 +428,9 @@ pub fn read_touchstone_bytes_with_limit(
         return Err(format!(
             "[Two-Port Data Order] is permitted only where the file declares two ports, not {num_ports}"
         ).into());
+    }
+    if version >= 2 && num_ports == 2 && declared_two_port_order.is_none() {
+        return Err("Touchstone v2 two-port data requires [Two-Port Data Order]; coefficient ordering cannot be inferred".into());
     }
     let two_port_order = declared_two_port_order.unwrap_or(TwoPortOrder::TwentyOneTwelve);
     if !matches!(two_port_order, TwoPortOrder::TwentyOneTwelve)
@@ -744,7 +789,6 @@ fn resolve_reference_values(
     declared: Option<&[f64]>,
 ) -> Result<Vec<f64>, TouchstoneError> {
     let values = match declared {
-        Some([one]) => vec![*one; ports],
         Some(values) if values.len() == ports => values.to_vec(),
         Some(values) => {
             return Err(format!(

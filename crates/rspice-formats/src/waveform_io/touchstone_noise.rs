@@ -411,6 +411,33 @@ mod tests {
     }
 
     #[test]
+    fn later_option_lines_do_not_change_noise_units_or_normalization() {
+        for version in [1, 2] {
+            let resistance = if version == 1 { "0.2" } else { "15" };
+            let source = fixture(
+                version,
+                "",
+                &format!(
+                    "1.5 3 0.5 -90 {resistance}\n2 0 1 0 {resistance}\n4 6 0 0 {resistance}\n"
+                ),
+            );
+            let baseline = read_touchstone_bytes("noise.s2p", source.as_bytes()).unwrap();
+            let repeated = source.replace("1.5 3", "# Hz S RI R 50\n1.5 3");
+            let actual = read_touchstone_bytes("noise.s2p", repeated.as_bytes()).unwrap();
+            assert_eq!(actual.get_signal("Rn").unwrap().data, [15.0; 3]);
+            assert_eq!(
+                actual.get_signal("Rn").unwrap().x_values.as_deref(),
+                Some([1.5e6, 2e6, 4e6].as_slice())
+            );
+            let writer = WaveformWriter::new(WaveformFormat::Touchstone);
+            assert_eq!(
+                writer.write_text(&actual).unwrap(),
+                writer.write_text(&baseline).unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn touchstone_noise_rejects_incomplete_nonphysical_or_misaligned_data() {
         let underflow = fixture(1, "", "1 0 0 0 5e-324\n").replace("R 75", "R 1e-308");
         assert!(
@@ -431,7 +458,6 @@ mod tests {
             valid.replace("1.5 3 0.5 -90 15", "1.5 3 NaN -90 15"),
             valid.replace("1.5 3 0.5 -90 15", "5 3 0.5 -90 15"),
             valid.replace("2 0 1 0 15", "1.5 0 1 0 15"),
-            valid.replace("[Noise Data]", "# Hz S RI R 50\n[Noise Data]"),
             valid.replace("[Noise Data]", "[Network Data]\n[Noise Data]"),
         ] {
             assert!(

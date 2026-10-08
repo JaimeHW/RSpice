@@ -789,7 +789,11 @@ Touchstone import and export preserve valid DC (0 Hz) samples. Frequency grids
 must be finite, non-negative, and strictly increasing; references must be finite
 and positive. Export rejects nonfinite coefficients or an encoding that would
 overflow or collapse distinct frequency coordinates. Invalid numbered port-count
-extensions are rejected before an existing destination is replaced.
+extensions in v1 inputs or simulation outputs are rejected before an existing
+destination is replaced. V2 imports use the required `[Number of Ports]`
+declaration, which overrides the filename. V2 files must also declare their
+frequency count and two-port ordering; duplicate declarations and incomplete
+per-port reference lists are rejected instead of guessing their meaning.
 If a Touchstone file carries noise,
 select `--section network` or `--section noise`: the latter keeps its own
 frequency grid, noise resistance in ohms, optimum complex reflection, and

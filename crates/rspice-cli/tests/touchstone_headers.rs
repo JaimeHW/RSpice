@@ -110,3 +110,118 @@ fn conflicting_or_unknown_option_fields_preserve_the_destination() {
         assert_eq!(std::fs::read_to_string(&output).unwrap(), "previous result");
     }
 }
+
+const TWO_PORT: &str = "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 2\n[Number of Frequencies] 1\n[Two-Port Data Order] 21_12\n[Reference] 50 75\n[Network Data]\n1 0.1 0 0.2 0 0.3 0 0.4 0\n[End]\n";
+
+fn assert_refused(sources: &[String], tag: &str) {
+    let dir = test_dir(tag);
+    let input = dir.join("source.s2p");
+    let output = dir.join("decoded.json");
+    for source in sources {
+        std::fs::write(&input, source).unwrap();
+        std::fs::write(&output, "previous result").unwrap();
+        let result = convert(&input, &output);
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "previous result");
+    }
+}
+
+#[test]
+fn a_partial_reference_list_cannot_invent_another_ports_impedance() {
+    assert_refused(
+        &[TWO_PORT.replace("[Reference] 50 75", "[Reference] 75")],
+        "touchstone_incomplete_reference",
+    );
+}
+
+#[test]
+fn version_two_requires_declared_dimensions_and_ordering() {
+    let sources = [
+        "[Version] 2.0\n",
+        "# Hz S RI R 50\n",
+        "[Number of Ports] 2\n",
+        "[Number of Frequencies] 1\n",
+        "[Two-Port Data Order] 21_12\n",
+    ]
+    .map(|declaration| TWO_PORT.replace(declaration, ""));
+    assert_refused(&sources, "touchstone_missing_declarations");
+}
+
+#[test]
+fn conflicting_metadata_cannot_override_the_first_declaration() {
+    let sources = [
+        TWO_PORT.replace("[Version] 2.0", "[Version] 2.1\n[Version] 2.0"),
+        TWO_PORT.replace(
+            "[Number of Ports] 2",
+            "[Number of Ports] 1\n[Number of Ports] 2",
+        ),
+        TWO_PORT.replace(
+            "[Number of Frequencies] 1",
+            "[Number of Frequencies] 2\n[Number of Frequencies] 1",
+        ),
+        TWO_PORT.replace(
+            "[Network Data]",
+            "[Matrix Format] Lower\n[Matrix Format] Full\n[Network Data]",
+        ),
+    ];
+    assert_refused(&sources, "touchstone_conflicting_declarations");
+}
+
+#[test]
+fn metadata_after_version_one_samples_cannot_transpose_the_network() {
+    assert_refused(
+        &["# Hz S RI R 50\n1 0.1 0 0.2 0 0.3 0 0.4 0\n[Two-Port Data Order] 12_21\n".to_string()],
+        "touchstone_late_declarations",
+    );
+}
+
+#[test]
+fn section_markers_cannot_hide_trailing_data() {
+    assert_refused(
+        &[
+            TWO_PORT.replace("[Network Data]", "[Network Data] 1 0.1 0"),
+            TWO_PORT.replace(
+                "[Network Data]",
+                "[Begin Information] ignored\n[End Information]\n[Network Data]",
+            ),
+        ],
+        "touchstone_section_arguments",
+    );
+}
+
+#[test]
+fn continued_port_references_keep_their_individual_values() {
+    let dir = test_dir("touchstone_continued_reference");
+    let input = dir.join("source.ts");
+    let output = dir.join("decoded.json");
+    for version in ["2.0", "2.1"] {
+        let source = TWO_PORT
+            .replace("[Version] 2.0", &format!("[Version] {version}"))
+            .replace(
+                "[Reference] 50 75",
+                "[Reference]\n50\n# ignored additional option line\n75",
+            );
+        std::fs::write(&input, source).unwrap();
+        let result = convert(&input, &output);
+        assert!(result.status.success(), "{result:?}");
+        let table = read_json(&output);
+        assert_eq!(signal(&table, "Z0(1)")["values"], serde_json::json!([50.0]));
+        assert_eq!(signal(&table, "Z0(2)")["values"], serde_json::json!([75.0]));
+    }
+}
+
+#[test]
+fn version_two_port_declarations_override_filename_hints() {
+    let dir = test_dir("touchstone_explicit_dimensions");
+    let output = dir.join("decoded.json");
+    for extension in ["s1p", "s0p", "s99999999999999999999999999999999999p", "ts"] {
+        let input = dir.join(format!("source.{extension}"));
+        std::fs::write(&input, TWO_PORT).unwrap();
+        let result = convert(&input, &output);
+        assert!(result.status.success(), "{extension}: {result:?}");
+        let table = read_json(&output);
+        assert_eq!(signal(&table, "S21")["real"], serde_json::json!([0.2]));
+        assert_eq!(signal(&table, "S12")["real"], serde_json::json!([0.3]));
+        assert_eq!(signal(&table, "Z0(2)")["values"], serde_json::json!([75.0]));
+    }
+}

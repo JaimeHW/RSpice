@@ -73,7 +73,7 @@ fn compatible_touchstone_names_bless_and_replay_without_data_loss() {
         ("inferred", "# Hz S RI R 50\n1 0 0 -2 0 0 -3 0 0\n", "ts"),
         (
             "explicit",
-            "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 2\n[Number of Frequencies] 1\n[Network Data]\n1 0 0 2 0 0 3 0 0\n[End]\n",
+            "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 2\n[Number of Frequencies] 1\n[Two-Port Data Order] 21_12\n[Network Data]\n1 0 0 2 0 0 3 0 0\n[End]\n",
             "ts",
         ),
     ] {
