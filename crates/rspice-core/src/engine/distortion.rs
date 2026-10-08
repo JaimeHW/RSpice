@@ -11,6 +11,7 @@ use refinement::{DerivativeEstimate, OperatorSample, refine};
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::analysis::distortion::{checked_second_frequency, validate_frequency};
 use crate::analysis::{
     AcResult, DistortionAnalysisResult, DistortionPointResult, DistortionProduct,
     DistortionProductResult,
@@ -43,7 +44,7 @@ impl Engine {
         f2_over_f1: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<DistortionAnalysisResult, SimulationError> {
-        validate_distortion_request(frequencies, f2_over_f1)?;
+        let f2 = validate_distortion_request(frequencies, f2_over_f1, abort)?;
         check_abort(abort)?;
 
         let engine = self.resolved_for_netlist(netlist);
@@ -91,7 +92,6 @@ impl Engine {
             None
         };
 
-        let f2 = f2_over_f1.map(|ratio| ratio * frequencies[0]);
         let num_nodes = circuit.num_nodes();
         let response_count =
             DistortionProduct::for_mode(two_tone).len() + 1 + usize::from(two_tone);
@@ -651,55 +651,27 @@ impl VolterraContext<'_> {
 fn validate_distortion_request(
     frequencies: &[Value],
     f2_over_f1: Option<Value>,
-) -> Result<(), SimulationError> {
-    if frequencies.is_empty() {
-        return Err(SimulationError::Circuit(
-            "Distortion analysis requires at least one F1 frequency".to_string(),
-        ));
-    }
-    if let Some((index, frequency)) = frequencies
-        .iter()
-        .enumerate()
-        .find(|(_, frequency)| !frequency.is_finite() || **frequency <= 0.0)
-    {
-        return Err(SimulationError::Circuit(format!(
-            "Distortion F1 frequency at index {index} must be finite and positive, got {frequency}"
-        )));
-    }
-    if let Some(ratio) = f2_over_f1
-        && (!ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0)
-    {
-        return Err(SimulationError::Circuit(format!(
-            "f2_over_f1 must be finite and strictly between 0 and 1, got {ratio}"
-        )));
-    }
-    if let Some(ratio) = f2_over_f1 {
-        let f2 = ratio * frequencies[0];
-        if !f2.is_finite() || f2 <= 0.0 {
-            return Err(SimulationError::Circuit(
-                "Distortion F2 frequency must be representable and positive".to_string(),
-            ));
+    abort: &dyn AbortSignal,
+) -> Result<Option<Value>, SimulationError> {
+    check_abort(abort)?;
+    let first = *frequencies.first().ok_or_else(|| {
+        SimulationError::Circuit(
+            "Distortion analysis requires at least one F1 frequency".to_owned(),
+        )
+    })?;
+    let f2 = f2_over_f1
+        .map(|ratio| checked_second_frequency(first, ratio))
+        .transpose()
+        .map_err(SimulationError::Circuit)?;
+    for (index, &f1) in frequencies.iter().enumerate() {
+        if index % 256 == 0 {
+            check_abort(abort)?;
         }
-        if let Some((index, frequency)) = frequencies
-            .iter()
-            .enumerate()
-            .find(|(_, frequency)| **frequency <= f2)
-        {
-            return Err(SimulationError::Circuit(format!(
-                "Distortion F1 frequency at index {index} ({frequency}) must be greater than the fixed F2 frequency ({f2})"
-            )));
-        }
+        validate_frequency(f1, f2).map_err(|detail| {
+            SimulationError::Circuit(format!("{detail} at F1 index {index} ({f1})"))
+        })?;
     }
-    let f2 = f2_over_f1.map(|ratio| ratio * frequencies[0]);
-    for &f1 in frequencies {
-        let highest = f2.map_or(3.0 * f1, |f2| (2.0 * f1).max(2.0 * f2).max(f1 + f2));
-        if !highest.is_finite() {
-            return Err(SimulationError::Circuit(
-                "Distortion product frequency exceeds the finite range".to_string(),
-            ));
-        }
-    }
-    Ok(())
+    Ok(f2)
 }
 
 fn normalize_real_direction(
@@ -917,15 +889,27 @@ mod tests {
 
     #[test]
     fn request_validation_rejects_invalid_frequencies_and_ratio() {
-        assert!(validate_distortion_request(&[], None).is_err());
-        assert!(validate_distortion_request(&[0.0], None).is_err());
-        assert!(validate_distortion_request(&[1.0], Some(0.0)).is_err());
-        assert!(validate_distortion_request(&[1.0], Some(1.0)).is_err());
-        assert!(validate_distortion_request(&[1.0], Some(0.9)).is_ok());
-        assert!(validate_distortion_request(&[1.0, 0.5], Some(0.9)).is_err());
-        assert!(validate_distortion_request(&[Value::MAX], None).is_err());
-        assert!(validate_distortion_request(&[Value::MAX], Some(0.9)).is_err());
-        assert!(validate_distortion_request(&[Value::from_bits(1)], Some(0.5)).is_err());
+        assert!(validate_distortion_request(&[], None, &NoAbort).is_err());
+        assert!(validate_distortion_request(&[0.0], None, &NoAbort).is_err());
+        assert!(validate_distortion_request(&[1.0], Some(0.0), &NoAbort).is_err());
+        assert!(validate_distortion_request(&[1.0], Some(1.0), &NoAbort).is_err());
+        assert!(validate_distortion_request(&[1.0], Some(0.9), &NoAbort).is_ok());
+        assert!(validate_distortion_request(&[1.0, 0.5], Some(0.9), &NoAbort).is_err());
+        assert!(validate_distortion_request(&[Value::MAX], None, &NoAbort).is_err());
+        assert!(validate_distortion_request(&[Value::MAX], Some(0.9), &NoAbort).is_err());
+        assert!(validate_distortion_request(&[Value::from_bits(1)], Some(0.5), &NoAbort).is_err());
+    }
+
+    #[test]
+    fn request_validation_cancels_during_frequency_scan() {
+        let abort = crate::abort_signal::CountingAbort::new(2);
+        let frequencies = vec![1000.0; 1024];
+        assert!(matches!(
+            validate_distortion_request(&frequencies, Some(0.9), &abort),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(abort.observed_at(), Some(3));
+        assert_eq!(abort.polls_after_abort(), 0);
     }
 
     #[test]

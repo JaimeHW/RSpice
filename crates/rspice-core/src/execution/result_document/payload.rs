@@ -236,7 +236,8 @@ impl ResultPayload {
             Self::Tran(payload) => payload.validate(),
             Self::Noise(payload) => payload.validate(),
             Self::Sp(payload) => payload.validate(),
-            Self::Distortion(payload) => payload.validate(),
+            // Distortion metadata is validated with the document's F1 axis.
+            Self::Distortion(_) => Ok(()),
             Self::Tf(payload) => payload.validate(),
             Self::Stb(payload) => payload.validate(limits, abort),
             Self::Sensitivity(payload) => payload.validate(),
@@ -1359,30 +1360,10 @@ impl PortNoisePayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DistortionPayload {
-    /// `None` for harmonic mode; otherwise the fixed `F2/F1` ratio.
+    /// `None` for harmonic mode; otherwise the fixed `F2/F1_start` ratio.
     pub f2_over_f1: Option<f64>,
     /// One entry per computed Volterra product, in authored order.
     pub products: Vec<DistortionProductSeries>,
-}
-
-impl DistortionPayload {
-    fn validate(&self) -> Result<(), ResultDocumentError> {
-        finite_optional("distortion F2/F1 ratio", self.f2_over_f1)?;
-        for product in &self.products {
-            finite_slice("distortion product frequency", &product.frequencies)?;
-            if product.order != product.product.order() {
-                return Err(ResultDocumentError::Malformed {
-                    location: "distortion product",
-                    detail: format!(
-                        "product {} has Volterra order {}",
-                        product.product.label(),
-                        product.product.order()
-                    ),
-                });
-            }
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -173,6 +173,7 @@
 //! a placeholder meaning.
 
 mod builders;
+mod distortion;
 mod frequency_table;
 mod json_admission;
 mod numeric_count;
@@ -746,6 +747,7 @@ impl AnalysisResultDocument {
         }
         check_abort(abort)?;
         self.payload.validate(limits, abort)?;
+        distortion::validate(self, abort)?;
         quasi_periodic::validate_primary(self, limits, abort)?;
         self.validate_impulses()?;
         frequency_table::validate(self, abort)?;

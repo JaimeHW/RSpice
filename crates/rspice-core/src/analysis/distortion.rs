@@ -3,6 +3,42 @@
 use crate::Value;
 use crate::analysis::AcResult;
 
+/// Recover the fixed second tone without silently rounding it to DC.
+pub(crate) fn checked_second_frequency(first: Value, ratio: Value) -> Result<Value, String> {
+    if !first.is_finite() || first <= 0.0 {
+        return Err(format!(
+            "Distortion F1 frequency must be finite and positive, got {first}"
+        ));
+    }
+    if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+        return Err(format!(
+            "f2_over_f1 must be finite and strictly between 0 and 1, got {ratio}"
+        ));
+    }
+    let second = first * ratio;
+    if !second.is_finite() || second <= 0.0 {
+        return Err("Distortion F2 frequency must be representable and positive".to_owned());
+    }
+    Ok(second)
+}
+
+/// Validate one swept F1 against the fixed F2 and all products of this mode.
+pub(crate) fn validate_frequency(f1: Value, f2: Option<Value>) -> Result<(), &'static str> {
+    if !f1.is_finite() || f1 <= 0.0 {
+        return Err("Distortion F1 frequency must be finite and positive");
+    }
+    if let Some(f2) = f2
+        && (!f2.is_finite() || f2 <= 0.0 || f1 <= f2)
+    {
+        return Err("Distortion F1 frequency must be greater than the positive fixed F2 frequency");
+    }
+    let highest = f2.map_or(3.0 * f1, |f2| (2.0 * f1).max(2.0 * f2).max(f1 + f2));
+    if !highest.is_finite() {
+        return Err("Distortion product frequency exceeds the finite range");
+    }
+    Ok(())
+}
+
 /// Spectral product calculated by a `.DISTO` analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DistortionProduct {
@@ -23,6 +59,21 @@ pub enum DistortionProduct {
 }
 
 impl DistortionProduct {
+    /// Physical frequency of this product after validating the tone geometry.
+    /// The second intermodulation product is conjugated to a nonnegative
+    /// frequency by the solver; its signed forcing frequency remains internal.
+    pub(crate) fn physical_frequency(self, f1: Value, f2: Option<Value>) -> Option<Value> {
+        Some(match self {
+            Self::SecondHarmonic => 2.0 * f1,
+            Self::ThirdHarmonic => 3.0 * f1,
+            Self::Sum => f1 + f2?,
+            Self::Difference => f1 - f2?,
+            Self::ThirdOrderDifference => 2.0 * f1 - f2?,
+            Self::SecondHarmonicF2 => 2.0 * f2?,
+            Self::ThirdOrderDifferenceF2 => (2.0 * f2? - f1).abs(),
+        })
+    }
+
     /// Stable, SPICE-oriented product label.
     pub const fn label(self) -> &'static str {
         match self {

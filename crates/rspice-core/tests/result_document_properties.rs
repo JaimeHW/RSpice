@@ -448,7 +448,11 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                 products: vec![DistortionProductSeries {
                     product: DistortionProductTag::ThirdOrderDifference,
                     order: DistortionProductTag::ThirdOrderDifference.order(),
-                    frequencies: shape.finite_reals(),
+                    frequencies: shape
+                        .axis_values()
+                        .iter()
+                        .map(|f1| 2.0 * f1 - 0.9)
+                        .collect(),
                 }],
             }),
         ),
@@ -795,10 +799,15 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             .unwrap(),
         );
     }
+    let axis_unit = if analysis == AnalysisKind::Distortion {
+        SignalUnit::Hertz
+    } else {
+        SignalUnit::Dimensionless
+    };
     let mut builder =
         AnalysisResultDocument::builder(analysis_id(analysis), payload, shape.point_count)
             .axis(
-                ResultAxis::new("x", "X", axis_kind, SignalUnit::Dimensionless, axis)
+                ResultAxis::new("x", "X", axis_kind, axis_unit, axis)
                     .expect("a generated axis is valid"),
             )
             .signals(signals(shape))

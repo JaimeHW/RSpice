@@ -1686,6 +1686,16 @@ impl AnalysisResultDocument {
             .iter()
             .map(|product| product.product)
             .collect::<Vec<_>>();
+        let fixed_f2 = result
+            .f2_over_f1
+            .map(|ratio| {
+                crate::analysis::distortion::checked_second_frequency(
+                    first.fundamental_f1.frequency,
+                    ratio,
+                )
+            })
+            .transpose()
+            .map_err(|detail| source_error(LOCATION, detail))?;
         for point in &result.points {
             let observed = point
                 .products
@@ -1698,10 +1708,15 @@ impl AnalysisResultDocument {
                     "distortion points do not share one product set",
                 ));
             }
-            if point.fundamental_f2.is_some() != first.fundamental_f2.is_some() {
+            if point
+                .fundamental_f2
+                .as_ref()
+                .map(|response| response.frequency)
+                != fixed_f2
+            {
                 return Err(source_error(
                     LOCATION,
-                    "distortion points disagree about two-tone mode",
+                    "distortion F2 response disagrees with the fixed tone frequency or mode",
                 ));
             }
         }
