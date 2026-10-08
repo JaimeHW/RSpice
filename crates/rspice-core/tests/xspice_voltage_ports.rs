@@ -17,8 +17,8 @@ fn explicit_voltage_cannot_silently_become_a_digital_connection() {
             let netlist = Netlist::parse(&deck).unwrap();
             let error = Engine::default()
                 .build_circuit(&netlist)
-                .err()
-                .expect(&deck);
+                .map(|_| ())
+                .expect_err(&deck);
             assert!(error.to_string().contains("explicit Voltage"), "{error}");
         }
     }
@@ -34,8 +34,8 @@ fn explicit_voltage_is_rejected_on_current_only_vector_outputs() {
         .unwrap();
         let error = Engine::default()
             .build_circuit(&netlist)
-            .err()
-            .expect(ports);
+            .map(|_| ())
+            .expect_err(ports);
         assert!(error.to_string().contains("explicit Voltage"), "{error}");
     }
 }
