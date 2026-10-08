@@ -416,10 +416,6 @@ const PLOT_HEADER_KEYS: [&str; 9] = [
     "variables:",
 ];
 
-/// Longest [`PLOT_HEADER_KEYS`] entry, so the probe never decodes a plot's
-/// worth of trailing binary to answer a yes/no question.
-const PLOT_HEADER_PROBE_BYTES: usize = 16;
-
 fn is_blank(bytes: &[u8]) -> bool {
     bytes.iter().all(u8::is_ascii_whitespace)
 }
@@ -430,11 +426,13 @@ fn starts_plot_header(bytes: &[u8]) -> bool {
         return false;
     };
     let rest = bytes.get(start..).unwrap_or_default();
-    let probe = rest
-        .get(..rest.len().min(PLOT_HEADER_PROBE_BYTES))
-        .unwrap_or(rest);
-    let text = String::from_utf8_lossy(probe).to_ascii_lowercase();
-    PLOT_HEADER_KEYS.iter().any(|key| text.starts_with(key))
+    if !rest.first().is_some_and(u8::is_ascii_alphabetic) {
+        return false;
+    }
+    PLOT_HEADER_KEYS.iter().any(|key| {
+        rest.get(..key.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key.as_bytes()))
+    })
 }
 
 /// Whether nothing but blank space or another plot follows a plot's data.
@@ -922,7 +920,7 @@ fn collect_ascii_lines(
         let Some(rest) = payload.get(*offset..) else {
             break;
         };
-        if rest.is_empty() || starts_plot_header(rest) {
+        if rest.is_empty() {
             break;
         }
         let end = rest
@@ -930,6 +928,11 @@ fn collect_ascii_lines(
             .position(|byte| *byte == b'\n')
             .map_or(rest.len(), |index| index.saturating_add(1));
         let raw = rest.get(..end).unwrap_or(rest);
+        // Probe only this line: scanning the remaining payload for each blank
+        // line would make long whitespace tails quadratic.
+        if starts_plot_header(raw) {
+            break;
+        }
         *offset = offset.saturating_add(end);
         let text = std::str::from_utf8(raw).map_err(|error| {
             RawParseError::DataError(format!("ASCII raw data is not valid UTF-8: {error}"))

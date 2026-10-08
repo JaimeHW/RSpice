@@ -73,6 +73,36 @@ fn ascii_size_inference_stops_at_the_next_plot_header() {
 }
 
 #[test]
+fn inferred_ascii_plots_accept_long_blank_tails_and_preserve_following_headers() {
+    let blanks = " \t\r\n".repeat(32_768);
+    for values in ["", "0 0 1\n1 1 2\n", "0 0\n1\n1 1\n2\n"] {
+        for following_plot in [false, true] {
+            let mut source = header("real", 0, false);
+            source.extend(values.as_bytes());
+            source.extend(blanks.as_bytes());
+            if following_plot {
+                let next = String::from_utf8(header("real", 1, false)).unwrap();
+                source.extend(next.replacen("Title:", "tItLe:", 1).as_bytes());
+                source.extend(b"0 2 3\n");
+            }
+            let file = parse_raw_plots_bytes_with_limits(&source, Default::default()).unwrap();
+            assert_eq!(file.plots.len(), if following_plot { 2 } else { 1 });
+            assert_eq!(
+                file.plots[0].waveforms[1].y,
+                if values.is_empty() {
+                    &[][..]
+                } else {
+                    &[1.0, 2.0][..]
+                }
+            );
+            if following_plot {
+                assert_eq!(file.plots[1].waveforms[1].y, [3.0]);
+            }
+        }
+    }
+}
+
+#[test]
 fn value_budget_counts_include_complex_columns_removed_by_table_metadata() {
     let source = b"Title: mixed table\nPlotname: AC Analysis\nFlags: complex\nCommand: RSpiceTableV4 {\"real_variables\":[0],\"units\":[null,null],\"layout\":\"coordinate-first\"}\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 frequency frequency\n1 V(out) voltage\nValues:\n0 1,0 2,3\n";
     let file = parse_raw_plots_bytes_with_limits(source, Default::default()).unwrap();
