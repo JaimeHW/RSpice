@@ -12,20 +12,27 @@ fn compiler() -> VerilogACompiler {
 
 #[test]
 fn packed_parameter_given_preserves_explicit_defaults_and_aliases() {
+    assert_packed_parameter_given("[128:0] CODE", "129'h1_00000000_00000000_00000000_000000xz");
+    assert_packed_parameter_given("CODE", "64'h20000000000001");
+}
+
+fn assert_packed_parameter_given(declaration: &str, literal: &str) {
     let compiler = compiler();
     let original = compiler
         .compile_runtime(
-            r#"
+            &format!(
+                r#"
 module packed_given(p);
  inout p; electrical p;
- parameter [128:0] CODE=129'h1_00000000_00000000_00000000_000000xz;
+ parameter {declaration}={literal};
  aliasparam PATTERN=CODE;
  parameter real GAIN=1;
  parameter real LEVEL=$param_given(PATTERN)?10.0:1.0;
  localparam real EXTRA=$param_given(CODE)?2.0:0.0;
  analog I(p)<+LEVEL+EXTRA+3*$param_given(PATTERN)+$param_given(GAIN);
 endmodule
-"#,
+"#
+            ),
             None,
         )
         .unwrap();
@@ -37,7 +44,7 @@ endmodule
                     &[(
                         name,
                         ScalarParameterValue::Bits {
-                            value: bits("129'h1_00000000_00000000_00000000_000000xz"),
+                            value: bits(literal),
                             signed: false,
                         },
                     )],
@@ -308,7 +315,6 @@ fn packed_values_never_fall_through_to_numeric_slots_or_builtins() {
     let compiler = compiler();
     for body in [
         "analog I(p)<+P;",
-        "analog I(p)<+$param_given(P);",
         "parameter real OTHER=1 from [P:inf]; analog I(p)<+OTHER;",
     ] {
         let source = format!(
@@ -1360,7 +1366,10 @@ endmodule
     let restored: rspice_veriloga::RuntimeCompileReport = serde_json::from_slice(&encoded).unwrap();
     restored.validate_integrity().unwrap();
     assert_eq!(current(&restored, &mut make_device(&restored)), 3359.0);
-    assert_eq!(restored.canonical_ir.digital.elaboration_parameters.len(), 2);
+    assert_eq!(
+        restored.canonical_ir.digital.elaboration_parameters.len(),
+        2
+    );
     assert!(
         restored
             .canonical_ir
