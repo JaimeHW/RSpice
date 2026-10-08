@@ -260,6 +260,7 @@ pub(crate) struct XspiceDigitalParticipant<'a> {
     wave: Option<XspiceActiveWave>,
     pending: VecDeque<ExternalNetChange>,
     initialized: bool,
+    analog_boundaries_ready: bool,
     /// Node rows an earlier pass of this same candidate moved, and with them
     /// the fact that there *was* an earlier pass. Empty and `None` for the
     /// opening pass, which is the ordinary case.
@@ -294,6 +295,7 @@ impl<'a> XspiceDigitalParticipant<'a> {
             wave: None,
             pending: VecDeque::new(),
             initialized: false,
+            analog_boundaries_ready: false,
             projected: &[],
             resettling: false,
         }
@@ -381,6 +383,21 @@ impl<'a> XspiceDigitalParticipant<'a> {
 }
 
 impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
+    fn analog_boundaries_ready(&mut self) -> bool {
+        if self.analog_boundaries_ready {
+            return false;
+        }
+        self.analog_boundaries_ready = true;
+        let mut released = false;
+        for (index, instance) in self.circuit.xspice_instances.iter().enumerate() {
+            if instance.model_name() == "__rspice_mixed_adc" {
+                self.circuit.xspice_dispatch_pending[index] = true;
+                released = true;
+            }
+        }
+        released
+    }
+
     fn settle_active(
         &mut self,
         exchange: &mut DigitalActiveExchange<'_>,
@@ -441,6 +458,7 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
         }
         self.pending.extend(exchange.take_event_changes());
         let wave = self.wave.as_mut().expect("prepared physical Active wave");
+        wave.defer_mixed_adc = !self.analog_boundaries_ready;
         if !self.initialized {
             // An undriven shared bit starts at Z. Seed missing observation
             // entries from the state preceding the first journaled publication,

@@ -4890,6 +4890,10 @@ fn add_planned_xspice_auto_bridge(
     #[cfg(feature = "veriloga")]
     let (code_model, output_branch): (std::sync::Arc<dyn crate::xspice::CodeModel>, _) =
         match (bridge.event_node, bridge.kind) {
+            (Some(_), XspiceAutoBridgeKind::Adc) => (
+                std::sync::Arc::new(crate::xspice::models::MixedAdcBridge),
+                None,
+            ),
             (Some(_), XspiceAutoBridgeKind::Dac) => (
                 std::sync::Arc::new(crate::xspice::models::MixedDacBridge),
                 None,
@@ -8429,8 +8433,6 @@ impl Engine {
                                 &mut circuit,
                                 element,
                                 &prepared,
-                                &design_connect_rules,
-                                &boundary_supplies,
                                 authored_net_names
                                     .get_or_init(|| authored_net_name_set(&flat_elements)),
                                 abort,
@@ -12699,7 +12701,7 @@ apull [mix] pull
                 .filter(|candidate| !classified && *candidate == node)
                 .count();
             let converted = circuit.xspice_instances.iter().filter(|instance| {
-                instance.model_name() == "__rspice_mixed_dac"
+                matches!(instance.model_name(), "__rspice_mixed_dac" | "__rspice_mixed_adc")
                     && instance.connections().iter().any(|connection| {
                         matches!(connection, crate::xspice::PortConnection::AnalogVector(nodes) if nodes.contains(&node))
                     })

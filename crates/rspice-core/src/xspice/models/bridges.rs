@@ -180,6 +180,105 @@ impl CodeModel for AdcBridge {
     }
 }
 
+/// Shared threshold law for mixed-port publication and analog root detection.
+#[cfg(feature = "veriloga")]
+pub(crate) fn mixed_adc_decision(
+    voltage: Value,
+    previous: Option<Value>,
+    held_high: bool,
+    low: Value,
+    high: Value,
+) -> Option<(bool, Value)> {
+    if low == high && voltage == low {
+        let high = if previous.is_some_and(|previous| previous < voltage) {
+            true
+        } else if previous.is_some_and(|previous| previous > voltage) {
+            false
+        } else {
+            held_high
+        };
+        Some((high, low))
+    } else if voltage <= low {
+        Some((false, low))
+    } else if voltage >= high {
+        Some((true, high))
+    } else {
+        None
+    }
+}
+
+/// Mixed logic input publication. Physical root detection belongs to the
+/// coupled analog trial; delays and cancellation use the common event queue.
+#[cfg(feature = "veriloga")]
+pub(crate) struct MixedAdcBridge;
+
+#[cfg(feature = "veriloga")]
+impl CodeModel for MixedAdcBridge {
+    fn name(&self) -> &str {
+        "__rspice_mixed_adc"
+    }
+    fn ports(&self) -> &[PortSpec] {
+        AdcBridge.ports()
+    }
+    fn parameters(&self) -> &[ParamSpec] {
+        static PARAMS: std::sync::OnceLock<Vec<ParamSpec>> = std::sync::OnceLock::new();
+        PARAMS.get_or_init(|| {
+            let mut params = AdcBridge.parameters().to_vec();
+            for param in &mut params {
+                if matches!(param.name.as_str(), "rise_delay" | "fall_delay") {
+                    param.default = 0.0;
+                    param.description = "Nonnegative propagation delay; zero is immediate".into();
+                }
+            }
+            params
+        })
+    }
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        AdcBridge.init(ctx)
+    }
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let width = bridge_vector_width(ctx, self.name())?;
+        let low = finite_bridge_param(ctx, self.name(), "in_low")?;
+        let high = finite_bridge_param(ctx, self.name(), "in_high")?;
+        let rise = mixed_bridge_timing(ctx, "rise_delay")?;
+        let fall = mixed_bridge_timing(ctx, "fall_delay")?;
+        let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
+        for index in 0..width {
+            let voltage = analog_vector_input_value(ctx, "in", index);
+            let previous = ctx.int_state(index);
+            let decision = mixed_adc_decision(
+                voltage,
+                (ctx.time > 0.0).then(|| ctx.state_prev(index)),
+                previous == 1,
+                low,
+                high,
+            );
+            let state = decision.map_or(
+                if previous == ADC_UNINITIALIZED_STATE {
+                    -1
+                } else {
+                    previous
+                },
+                |(high, _)| i64::from(high),
+            );
+            if commit && state != previous {
+                let value = match state {
+                    0 => DigitalValue::zero(),
+                    1 => DigitalValue::one(),
+                    _ => DigitalValue::unknown(),
+                };
+                let delay = adc_bridge_delay_for_transition(ctx.time, previous, state, rise, fall);
+                ctx.set_output_digital_vector_element("out", index, value, delay);
+            }
+            if commit {
+                ctx.set_int_state(index, state);
+                ctx.set_state(index, voltage);
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Digital to analog converter bridge
 #[derive(Debug, Default)]
 pub struct DacBridge;

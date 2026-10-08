@@ -825,6 +825,16 @@ fn settle_lanes(
             let settled = host.settle_analog_bridges(solution);
             moved |= named(host, settled)?;
         }
+        // Root detection must precede converter publication: otherwise an
+        // immediate HDL response could misclassify its own initiating crossing
+        // as a digital-caused endpoint jump and suppress root refinement.
+        if let Some(participant) = &mut participant
+            && participant.analog_boundaries_ready()
+        {
+            coordinator
+                .publish_converter_inputs_with(cursor, hosts, solution, &mut **participant)
+                .map_err(shared_error)?;
+        }
         // All A/D decisions are published before any dependent HDL process
         // runs. Analog equations read the resulting bank only after quiet.
         moved |= match &mut participant {

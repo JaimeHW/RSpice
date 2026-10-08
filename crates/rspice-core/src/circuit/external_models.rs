@@ -132,6 +132,8 @@ pub(crate) struct XspiceActiveWave {
     current_source_values: Vec<Value>,
     analog_transitions: HashMap<(NodeId, NodeId), crate::xspice::AnalogTransition>,
     pass: usize,
+    /// Mixed input converters wait until the trial records physical roots.
+    defer_mixed_adc: bool,
 }
 
 impl XspiceActiveWave {
@@ -1237,6 +1239,7 @@ impl CircuitData {
             current_source_values: self.current_sources.values_at_time(time),
             analog_transitions: HashMap::new(),
             pass: 0,
+            defer_mixed_adc: false,
         })
     }
 
@@ -1485,6 +1488,7 @@ impl CircuitData {
             pending.fill(true);
         }
 
+        let mut converter_outputs = Vec::new();
         for index in 0..instances.len() {
             if !pending[index] {
                 continue;
@@ -1495,6 +1499,9 @@ impl CircuitData {
             // snapshot, or the copy this whole arrangement defers happens
             // anyway.
             let instance = &instances[index];
+            if wave.defer_mixed_adc && instance.model_name() == "__rspice_mixed_adc" {
+                continue;
+            }
             if dirty_dispatch_applies
                 && dispatch.is_dirty_dispatched(index)
                 && !instance.event_inputs_dirty()
@@ -1563,6 +1570,15 @@ impl CircuitData {
                 analog_transitions.insert(key, transition);
             }
 
+            // Sample all mixed input converters before publishing any bit.
+            // A vector comparison must never see an intermediate bus word.
+            if instance.model_name() == "__rspice_mixed_adc" {
+                if instance.has_pending_events() {
+                    converter_outputs.push(index);
+                }
+                continue;
+            }
+
             // Asking first keeps the sweep off the copy-on-write path for
             // every instance whose evaluation queued no output, which on a
             // settling gate-level design is nearly all of them. The drain
@@ -1623,6 +1639,35 @@ impl CircuitData {
                     touched_real_nodes,
                 );
             }
+        }
+
+        if !converter_outputs.is_empty() {
+            for index in converter_outputs {
+                instances[index]
+                    .make_mut()
+                    .schedule_events(event_queue.make_mut(), time);
+            }
+            let drained = apply_xspice_events_with_resolver(
+                event_values,
+                event_queue,
+                touched_digital_nodes,
+                touched_real_nodes,
+                time,
+                resolver,
+            );
+            mark_drained_fanout_dirty(
+                dispatch,
+                instances,
+                touched_digital_nodes,
+                touched_real_nodes,
+            );
+            changed |= drained?;
+            dispatch.record_fanout_pending(
+                next_pending,
+                EventInputKind::Digital,
+                touched_digital_nodes,
+            );
+            dispatch.record_fanout_pending(next_pending, EventInputKind::Real, touched_real_nodes);
         }
 
         wave.pass += 1;

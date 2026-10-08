@@ -693,6 +693,8 @@ struct AdcBridge {
     negative: usize,
     low: f64,
     high: f64,
+    /// Detect analog roots only; a shared converter owns the output driver.
+    root_only: bool,
 }
 
 impl AdcBridge {
@@ -705,24 +707,23 @@ impl AdcBridge {
         previous: Option<f64>,
         held: Option<FourStateBit>,
     ) -> Option<(FourStateBit, f64)> {
-        if self.low == self.high && voltage == self.low {
-            let bit = if previous.is_some_and(|previous| previous < voltage) {
-                FourStateBit::One
-            } else if previous.is_some_and(|previous| previous > voltage) {
-                FourStateBit::Zero
-            } else if held == Some(FourStateBit::One) {
-                FourStateBit::One
-            } else {
-                FourStateBit::Zero
-            };
-            Some((bit, self.low))
-        } else if voltage <= self.low {
-            Some((FourStateBit::Zero, self.low))
-        } else if voltage >= self.high {
-            Some((FourStateBit::One, self.high))
-        } else {
-            None
-        }
+        crate::xspice::models::mixed_adc_decision(
+            voltage,
+            previous,
+            held == Some(FourStateBit::One),
+            self.low,
+            self.high,
+        )
+        .map(|(high, threshold)| {
+            (
+                if high {
+                    FourStateBit::One
+                } else {
+                    FourStateBit::Zero
+                },
+                threshold,
+            )
+        })
     }
 }
 
@@ -966,6 +967,7 @@ struct TrialVectors {
     discrete_inputs: Vec<[f64; 2]>,
     transition_times: Vec<Option<f64>>,
     sampled_adc_voltages: Vec<f64>,
+    adc_decisions: Vec<Option<FourStateBit>>,
     probe_values: Vec<Option<f64>>,
     adc_moved: Vec<bool>,
     dac_moved: Vec<bool>,
@@ -1005,6 +1007,9 @@ struct MixedState {
     /// which is the far end of the interval a threshold crossing is
     /// interpolated in. Parallel to `bridges.adc`.
     accepted_adc_voltages: Vec<f64>,
+    /// Root detectors retain their comparator decision independently of the
+    /// delayed value visible to HDL. Parallel to `bridges.adc`.
+    accepted_adc_decisions: Vec<Option<FourStateBit>>,
     /// Interpolated analog time of each A/D bridge's most recent accepted
     /// transition, unquantized. Parallel to `bridges.adc`.
     accepted_adc_transition_times: Vec<Option<f64>>,
@@ -1588,6 +1593,7 @@ impl MixedSignalHost {
                 initial_digital: None,
                 bridges: MixedCell::new(Bridges::default()),
                 accepted_adc_voltages: Vec::new(),
+                accepted_adc_decisions: Vec::new(),
                 accepted_adc_transition_times: Vec::new(),
                 accepted_probe_values: initial_probe_values,
                 adc_history: Vec::new(),
@@ -1635,6 +1641,7 @@ impl MixedSignalHost {
         self.state.digital = MixedCell::new(self.state.digital.fresh());
         self.state.initial_digital = None;
         self.state.accepted_adc_voltages.fill(0.0);
+        self.state.accepted_adc_decisions.fill(None);
         self.state.accepted_adc_transition_times.fill(None);
         for (slot, probe) in self
             .state
@@ -1968,6 +1975,7 @@ impl MixedSignalHost {
             .dac
             .retain(|bridge| !nodes.contains(&bridge.positive));
         self.state.accepted_adc_voltages = vec![0.0; bridges.adc.len()];
+        self.state.accepted_adc_decisions = vec![None; bridges.adc.len()];
         self.state.accepted_adc_transition_times = vec![None; bridges.adc.len()];
         self.state.adc_history = vec![BoundaryNetHistory::default(); bridges.adc.len()];
         self.state.dac_history = vec![BoundaryNetHistory::default(); bridges.dac.len()];
@@ -2029,19 +2037,15 @@ impl MixedSignalHost {
             .filter(|node| *node > 0)
     }
 
-    /// The deck node each built-in boundary carries its bit on, ground aside.
-    ///
-    /// One entry per discrete port: `mixed_modules` gives a port exactly one
-    /// bridge, A/D or D/A, so this is what "how many discrete endpoints meet on
-    /// this net" has to count. [`Self::boundary_connections`] cannot serve that
-    /// question — it reports each bridge's reference endpoint as well, and a
-    /// deck that references a bridge to a named supply would count that port
-    /// twice.
+    /// One endpoint per discrete port, excluding ground. Root-only detectors
+    /// are observations of a physical node, not additional event endpoints.
+    /// Count the linked port once, independently of its conversion machinery.
     pub(crate) fn boundary_port_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.state
             .bridges
             .adc
             .iter()
+            .filter(|bridge| !bridge.root_only)
             .map(|bridge| bridge.positive)
             .chain(self.state.bridges.dac.iter().map(|bridge| bridge.positive))
             .chain(self.event_ports.iter().map(|port| port.node))
@@ -2103,13 +2107,29 @@ impl MixedSignalHost {
         node: usize,
     ) -> Result<(), MixedSignalError> {
         self.require_idle("rebind an event port")?;
+        // Tied physical members need distinct port identities in a waveform
+        // bus. Inspect the original aliases, which survive earlier rebindings.
+        let tied_member = self.event_ports.get(index).is_some_and(|port| {
+            port.trace_node.is_some()
+                && self
+                    .event_ports
+                    .iter()
+                    .filter(|other| {
+                        other.signal == port.signal && other.trace_node == port.trace_node
+                    })
+                    .count()
+                    > 1
+        });
         let port =
             self.event_ports
                 .get_mut(index)
                 .ok_or_else(|| MixedSignalError::InvalidBridge {
                     detail: format!("event port index {index} is not declared"),
                 })?;
-        if let Some(bit) = port.bit.filter(|_| port.trace_node.is_none()) {
+        if let Some(bit) = port
+            .bit
+            .filter(|_| port.trace_node.is_none() || tied_member)
+        {
             let signal = self.state.digital.plan().signal(port.signal).unwrap();
             let bus_name = format!("{}.{}", self.instance, signal.name);
             for bus in &mut self.boundary_buses {
@@ -2162,6 +2182,7 @@ impl MixedSignalHost {
             .bridges
             .adc
             .iter()
+            .filter(|bridge| !bridge.root_only)
             .flat_map(|bridge| {
                 [
                     (bridge.signal_name.as_str(), bridge.positive),
@@ -2219,7 +2240,13 @@ impl MixedSignalHost {
                 sink(node, value.bit(bit), source);
             }
         }
-        for bridge in &self.state.bridges.adc {
+        for bridge in self
+            .state
+            .bridges
+            .adc
+            .iter()
+            .filter(|bridge| !bridge.root_only)
+        {
             if let Some(value) = self.state.digital.read(bridge.signal) {
                 sink(
                     bridge.positive,
@@ -2298,10 +2325,32 @@ impl MixedSignalHost {
             negative,
             low: low_threshold,
             high: high_threshold,
+            root_only: false,
         });
         self.state.accepted_adc_voltages.push(0.0);
+        self.state.accepted_adc_decisions.push(None);
         self.state.accepted_adc_transition_times.push(None);
         self.state.adc_history.push(BoundaryNetHistory::default());
+        Ok(())
+    }
+
+    /// Register the analog root detector for a shared input converter.
+    pub(crate) fn add_adc_root(
+        &mut self,
+        signal: &str,
+        bit: u32,
+        nodes: (usize, usize),
+        low: f64,
+        high: f64,
+    ) -> Result<(), MixedSignalError> {
+        self.add_adc_bridge(signal, bit, nodes, low, high)?;
+        self.state
+            .bridges
+            .make_mut()
+            .adc
+            .last_mut()
+            .expect("added detector")
+            .root_only = true;
         Ok(())
     }
 
@@ -2637,6 +2686,9 @@ impl MixedSignalHost {
         vectors
             .sampled_adc_voltages
             .clone_from(&self.state.accepted_adc_voltages);
+        vectors
+            .adc_decisions
+            .clone_from(&self.state.accepted_adc_decisions);
         vectors
             .probe_values
             .clone_from(&self.state.accepted_probe_values);
@@ -3199,11 +3251,16 @@ impl MixedSignalHost {
             let voltage = node_voltage(circuit_voltages, bridge.positive)
                 - node_voltage(circuit_voltages, bridge.negative);
             scratch.sampled.push(voltage);
-            let held = self
-                .state
-                .digital
-                .read(bridge.signal)
-                .map(|value| value.bit(bridge.bit));
+            let held = if bridge.root_only {
+                self.trial
+                    .as_ref()
+                    .and_then(|trial| trial.vectors.adc_decisions[index])
+            } else {
+                self.state
+                    .digital
+                    .read(bridge.signal)
+                    .map(|value| value.bit(bridge.bit))
+            };
             let Some((bit, threshold)) = bridge.decision(
                 voltage,
                 self.state
@@ -3217,13 +3274,7 @@ impl MixedSignalHost {
             // would publish: a bridge carries one bit, and a `FourStateValue`
             // is two heap planes, so building one to discover the boundary has
             // not moved was an allocation for the common answer.
-            if self
-                .state
-                .digital
-                .read(bridge.signal)
-                .map(|value| value.bit(bridge.bit))
-                == Some(bit)
-            {
+            if held == Some(bit) {
                 continue;
             }
             // A step the digital half moved the analog equations in stepped
@@ -3248,6 +3299,14 @@ impl MixedSignalHost {
                     threshold,
                 )
             };
+            if bridge.root_only {
+                if let Some(trial) = self.trial.as_mut() {
+                    trial.vectors.adc_decisions[index] = Some(bit);
+                    trial.vectors.transition_times[index] = Some(crossing);
+                    trial.vectors.adc_moved[index] = true;
+                }
+                continue;
+            }
             scratch.bit_drives.push((index, bit));
             scratch.crossings.push((index, crossing));
             scratch.endpoint_dated.push(carried);
@@ -3500,6 +3559,10 @@ impl MixedSignalHost {
         std::mem::swap(
             &mut self.state.accepted_adc_voltages,
             &mut trial.vectors.sampled_adc_voltages,
+        );
+        std::mem::swap(
+            &mut self.state.accepted_adc_decisions,
+            &mut trial.vectors.adc_decisions,
         );
         // And the probe bank the same settle sampled becomes what a process
         // waking on its own schedule at a later tick reads, for the same
@@ -3874,7 +3937,11 @@ impl MixedSignalHost {
                 .copied()
                 .unwrap_or_default();
             entry.push(
-                read_bit(bridge.signal, bridge.bit),
+                if bridge.root_only {
+                    trial.vectors.adc_decisions[index].unwrap_or(FourStateBit::Unknown)
+                } else {
+                    read_bit(bridge.signal, bridge.bit)
+                },
                 classify(trial.vectors.adc_moved.get(index).copied().unwrap_or(false)),
             );
             adc.push(entry);

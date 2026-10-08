@@ -15,6 +15,12 @@ pub(crate) trait DigitalActiveParticipant {
         exchange: &mut DigitalActiveExchange<'_>,
     ) -> Result<bool, DigitalRunError>;
 
+    /// The analog trial has recorded converter roots and their causes. Release
+    /// deferred input publication, returning whether another Active wave is due.
+    fn analog_boundaries_ready(&mut self) -> bool {
+        false
+    }
+
     /// All Active prefixes have drained. Evaluate the requested analog
     /// producers at this physical time and publish their common sample bank.
     fn sample_analog(

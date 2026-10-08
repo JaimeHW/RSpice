@@ -39,6 +39,7 @@ pub(super) fn plan_conversions(
             }
             let node_label = xspice_auto_bridge_node_label(Some(&names), port.node);
             let kind = match (port.bit, port.direction) {
+                (Some(_), DigitalLinkDirection::Input) => XspiceAutoBridgeKind::Adc,
                 (Some(_), DigitalLinkDirection::Output) => XspiceAutoBridgeKind::Dac,
                 (Some(_), DigitalLinkDirection::Inout) => XspiceAutoBridgeKind::Bidi,
                 (None, DigitalLinkDirection::Input) => XspiceAutoBridgeKind::VToReal,
@@ -78,6 +79,7 @@ pub(super) fn plan_conversions(
                 host_index,
                 port_index,
                 event_name,
+                (signal.to_string(), port.bit),
                 PlannedXspiceAutoBridge {
                     node: port.node,
                     event_node: None,
@@ -92,11 +94,25 @@ pub(super) fn plan_conversions(
     }
 
     let mut bridges = Vec::with_capacity(pending.len());
-    for (host_index, port_index, name, mut bridge) in pending {
+    for (host_index, port_index, name, (signal, bit), mut bridge) in pending {
         if circuit.get_node_by_name(&name).is_some() {
             return Err(SimulationError::Circuit(format!(
                 "generated mixed event endpoint '{name}' conflicts with an existing circuit node"
             )));
+        }
+        if bridge.kind == XspiceAutoBridgeKind::Adc {
+            // This detector never drives HDL. The common converter publishes
+            // its decision (and any delayed edge); the host only localizes the
+            // physical threshold before accepting the analog step.
+            circuit.mixed_signal_hosts[host_index]
+                .add_adc_root(
+                    &signal,
+                    bit.expect("logic input"),
+                    (bridge.node, 0),
+                    bridge.vcc / 2.0,
+                    bridge.vcc / 2.0,
+                )
+                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
         }
         let event_node = circuit.get_or_create_node(&name);
         circuit.mixed_signal_hosts[host_index]

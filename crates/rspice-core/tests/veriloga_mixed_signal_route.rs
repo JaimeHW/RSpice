@@ -4109,3 +4109,101 @@ endmodule
     assert!(bus.members[0].eq_ignore_ascii_case("q5"));
     assert!(bus.members[1].eq_ignore_ascii_case("q4"));
 }
+
+
+#[test]
+fn timed_logic_inputs_deliver_localized_roots_and_replay_loaded_feedback() {
+    for (rise, fall) in [(0.0, 0.0), (37e-12, 61e-12)] {
+        let mut source = String::from(
+            r#"
+`timescale 1ps/1ps
+module timed_input(clk,q,future);
+ input clk; wire clk;
+ output q,future; reg q,future;
+ initial begin q=0; future=0; #500 future=1; end
+ always @(clk) q=clk;
+endmodule
+"#,
+        );
+        for (_, module) in rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES {
+            source.push_str(module);
+        }
+        source.push_str(&format!("\nconnectrules timed_rules;\nconnect a2d #(.vsup(1.0), .tdrise({rise:e}), .tdfall({fall:e}));\nconnect d2a #(.vsup(1.0));\nendconnectrules\n"));
+        let model = ModelFile::new("timed_input", &source);
+        let deck = Netlist::parse(&format!(
+            "* root-localized delayed ADC with loaded immediate HDL response\n.param vcc=1\nVclk clk 0 sin(0 1 1g 0 0 -90)\nX1 clk q future timed_input\nRload q load 100\nCload load 0 0.5p\n.va \"{}\" timed_input\n.end\n", model.deck_path()
+        )).unwrap();
+        let mut results = Vec::new();
+        for max_step in [75e-12, 5e-12] {
+            let engine = Engine::default();
+            let result = engine.run_tran(&deck, 1e-9, max_step).unwrap();
+            if max_step == 75e-12 {
+                assert!(
+                    engine.convergence_quality().timestep_reductions > 0,
+                    "exercise actual rejected analog trials"
+                );
+            }
+            for net in ["clk", "q"] {
+                let trace = result.digital_trace_named(net).unwrap();
+                assert_eq!(trace.len(), 3, "{net}: rise={rise}, {trace:?}");
+                for (point, expected) in trace
+                    .iter()
+                    .skip(1)
+                    .zip([1e-9 / 3.0 + rise, 2e-9 / 3.0 + fall])
+                {
+                    assert!(
+                        (point.time - expected).abs() < 2e-20,
+                        "{net}: expected {expected:e}, got {:e}, rise={rise:e}, max_step={max_step:e}",
+                        point.time
+                    );
+                }
+            }
+            let future = result.digital_trace_named("future").unwrap();
+            assert_eq!(future.len(), 2);
+            assert!((future[1].time - 500e-12).abs() < 1e-22);
+            let loaded = waveform(&result, "load");
+            assert!(loaded.iter().any(|value| *value > 0.8));
+            results.push(result);
+        }
+        for net in ["clk", "q", "future"] {
+            let coarse = results[0].digital_trace_named(net).unwrap();
+            let fine = results[1].digital_trace_named(net).unwrap();
+            for (a, b) in coarse.iter().zip(fine) {
+                assert_eq!(a.value, b.value);
+                assert!((a.time - b.time).abs() < 2e-20);
+            }
+        }
+    }
+}
+
+
+#[test]
+fn simultaneous_logic_inputs_publish_one_vector_decision() {
+    let model = ModelFile::new(
+        "atomic_adc",
+        r#"
+`timescale 1ps/1ps
+module atomic_adc(d,bad);
+ input [1:0] d; wire [1:0] d;
+ output bad; reg bad;
+ initial bad=0;
+ always @(posedge (d==2'b01)) bad=1;
+endmodule
+"#,
+    );
+    let result = run(
+        &format!(
+            "* simultaneous analog inputs\n.param vcc=1\nV1 vin 0 pwl(0 0 1n 1)\nX1 vin vin bad atomic_adc\nRbad bad 0 1k\n.va \"{}\" atomic_adc\n.end\n",
+            model.deck_path()
+        ),
+        1e-9,
+        75e-12,
+    );
+    let bad = result.digital_trace_named("bad").unwrap();
+    assert_eq!(
+        bad.len(),
+        1,
+        "a simultaneous 00 -> 11 must not trigger 01: {bad:?}"
+    );
+    assert_eq!(bad[0].value.state, rspice_core::xspice::DigitalState::Zero);
+}

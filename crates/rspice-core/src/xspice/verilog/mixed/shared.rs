@@ -298,6 +298,7 @@ impl MixedDigitalCoordinator {
                 .bridges
                 .adc
                 .iter()
+                .filter(|bridge| !bridge.root_only)
                 .map(|bridge| {
                     (
                         bridge.signal,
@@ -457,6 +458,7 @@ impl MixedDigitalCoordinator {
                 .bridges
                 .adc
                 .iter()
+                .filter(|bridge| !bridge.root_only)
                 .map(|bridge| (bridge.signal, bridge.bit, bridge.positive))
                 .chain(
                     host.state
@@ -992,6 +994,35 @@ impl MixedDigitalCoordinator {
             advanced.map_err(|error| coordinator.execution_error(error))?;
         }
         Ok(())
+    }
+
+    /// Publish newly detected converter inputs through the analog causal lane.
+    /// Immediate threshold consequences use nearest-tick reporting, as the
+    /// direct A/D path does. Delayed converter outputs remain queued events.
+    pub(crate) fn publish_converter_inputs_with(
+        &mut self,
+        cursor: &mut SharedTrialCursor,
+        hosts: &mut [MixedSignalHost],
+        solution: &[f64],
+        external: &mut dyn DigitalActiveParticipant,
+    ) -> Result<(), MixedSignalError> {
+        let tick = hdl_tick(cursor.time, |at| at.nearest_tick(self.resolution))?;
+        cursor.published_tick = cursor.published_tick.max(tick);
+        let mut participant = CircuitAnalogParticipant {
+            hosts,
+            maps: &self.maps,
+            solution,
+            external: Some(external),
+        };
+        let digital = self.digital.make_mut();
+        digital.sample_analog_probes(&self.probes);
+        let result = digital.force_many_from_analog_with(
+            &[],
+            cursor.published_tick,
+            cursor.time,
+            &mut participant,
+        );
+        result.map_err(|error| self.execution_error(error))
     }
 
     /// Apply all A/D decisions together, preserving analog activation provenance.

@@ -1,18 +1,16 @@
 //! Elaborate mixed Verilog-AMS X-cards into one analog device and typed ports.
 //!
-//! Discrete outputs, bidirectional ports, and real ports select electrical
-//! conversion after the entire deck is wired, using `mixed_boundaries` and the
-//! common converter materializer. Pure event connections join the shared resolver.
-//! A/D inputs currently retain the host's threshold-root and feedback-causality
-//! contract; moving that contract to shared converters is the remaining input
-//! integration work. Packed port order and the deck's trace/bus labels survive
-//! allocation of private converter endpoints.
+//! Typed ports select electrical conversion after the entire deck is wired,
+//! using `mixed_boundaries` and the common converter materializer. Pure event
+//! connections join the shared resolver. Input threshold detectors retain the
+//! host's root-localization and feedback-causality contract while the common
+//! converter scheduler owns digital publication and propagation delay.
+//! Packed port order and deck trace/bus labels survive private event endpoints.
 
 use crate::xspice::event_scheduler::SchedulerLimits;
 use crate::xspice::verilog::{BoundaryBus, MixedSignalHost};
 use crate::{CircuitData, ElaborationError, ElaborationErrorKind, SimulationError};
 
-use super::connect_modules::{self, DesignConnectRules};
 use super::veriloga_instances::PreparedInstance;
 
 /// Every refusal this module raises is about one X-card bound to one master,
@@ -57,14 +55,6 @@ enum BoundaryDirection {
 }
 
 impl BoundaryDirection {
-    fn auto_bridge_kind(self) -> super::XspiceAutoBridgeKind {
-        match self {
-            Self::AnalogToDiscrete => super::XspiceAutoBridgeKind::Adc,
-            Self::DiscreteToAnalog => super::XspiceAutoBridgeKind::Dac,
-            Self::Bidirectional => super::XspiceAutoBridgeKind::Bidi,
-        }
-    }
-
     fn link_direction(self) -> rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection {
         use rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection as Direction;
         match self {
@@ -110,8 +100,6 @@ pub(super) fn try_build_mixed_signal_instance(
     circuit: &mut CircuitData,
     element: &crate::netlist::Element,
     prepared: &PreparedInstance<'_>,
-    connect_rules: &DesignConnectRules,
-    supplies: &super::boundary_supply::BoundarySupplies,
     // Every net the flattened deck authors, for the one check that this
     // instance's own unknowns are not about to take a name already in use.
     authored_nets: &std::collections::HashSet<String>,
@@ -244,85 +232,21 @@ pub(super) fn try_build_mixed_signal_instance(
             )
         })?;
 
-    let node_names = circuit.node_names_sorted();
     for port in boundary {
-        if port.real || port.direction != BoundaryDirection::AnalogToDiscrete {
-            host.declare_event_port(
-                &port.signal,
-                (!port.real).then_some(port.bit),
-                port.node,
-                port.direction.link_direction(),
-            )
-            .map_err(|error| {
-                refuse(
-                    &element.name,
-                    subckt_name,
-                    host_failure_kind(&error),
-                    error.to_string(),
-                )
-            })?;
-            continue;
-        }
-        let node_label = super::xspice_auto_bridge_node_label(Some(&node_names), port.node);
-        let kind = port.direction.auto_bridge_kind();
-        let selected = connect_rules.select_for_boundary_node(
-            kind,
-            &node_label,
-            &element.name,
+        host.declare_event_port(
             &port.signal,
-        )?;
-        // The same resolution the XSPICE auto-bridge planner makes, for the
-        // same net, from the same resolver: a deck carrying both routes gets
-        // one supply per boundary net rather than one per route. A connect
-        // statement's own `vsup` answers first, and then nothing is derived --
-        // the delegation below would override the derived number anyway, and a
-        // warning about a rail nothing consulted is noise.
-        let vcc = match selected
-            .as_ref()
-            .and_then(connect_modules::PlannedConnectModule::stated_supply)
-        {
-            Some(supply) => supply,
-            None => {
-                let resolved = supplies.resolve(&node_label, None);
-                supplies.report(&node_label, &resolved.derivation)?;
-                resolved.level
-            }
-        };
-        let parameters = match selected.as_ref() {
-            Some(selected) => {
-                connect_modules::check_delegable(selected, kind, &node_label)?;
-                let folded = connect_modules::delegated_parameters(selected, kind, vcc)?;
-                refuse_timed_connect_parameters(
-                    &element.name,
-                    subckt_name,
-                    &port.signal,
-                    selected,
-                    &folded,
-                )?;
-                log::info!(
-                    "Mixed module port '{}' on node '{}' bridges through connect module '{}' as \
-                     instance '{}'",
-                    port.signal,
-                    node_label,
-                    selected.name,
-                    selected.instance
-                );
-                folded
-            }
-            None => Vec::new(),
-        };
-
-        let low = parameter_or(&parameters, "in_low", vcc / 2.0);
-        let high = parameter_or(&parameters, "in_high", vcc / 2.0);
-        host.add_adc_bridge(&port.signal, port.bit, (port.node, 0), low, high)
-            .map_err(|error| {
-                refuse(
-                    &element.name,
-                    subckt_name,
-                    host_failure_kind(&error),
-                    format!("could not bridge port '{}': {error}", port.signal),
-                )
-            })?;
+            (!port.real).then_some(port.bit),
+            port.node,
+            port.direction.link_direction(),
+        )
+        .map_err(|error| {
+            refuse(
+                &element.name,
+                subckt_name,
+                host_failure_kind(&error),
+                error.to_string(),
+            )
+        })?;
     }
 
     for bus in layout.buses {
@@ -525,44 +449,4 @@ fn boundary_bit_order(signal: &rspice_veriloga::canonical_ir::DigitalSignal) -> 
         .indices_msb_first()
         .map(|index| u32::try_from(range.position_of(index)).ok())
         .collect()
-}
-
-fn parameter_or(
-    parameters: &[(String, crate::Value)],
-    name: &str,
-    fallback: crate::Value,
-) -> crate::Value {
-    parameters
-        .iter()
-        .find(|(parameter, _)| parameter.eq_ignore_ascii_case(name))
-        .map_or(fallback, |(_, value)| *value)
-}
-
-/// Input delays need to share the host's threshold-root/cause contract with
-/// the common event converter. Until that integration is complete, retain the
-/// explicit refusal rather than accept a delay without scheduling it.
-fn refuse_timed_connect_parameters(
-    instance: &str,
-    module: &str,
-    signal: &str,
-    selected: &connect_modules::PlannedConnectModule,
-    folded: &[(String, crate::Value)],
-) -> Result<(), SimulationError> {
-    const TIMED: &[&str] = &["rise_delay", "fall_delay", "t_rise", "t_fall"];
-    for (name, _) in folded {
-        if TIMED.iter().any(|timed| name.eq_ignore_ascii_case(timed)) {
-            return Err(refuse(
-                instance,
-                module,
-                ElaborationErrorKind::ConnectRule,
-                format!(
-                    "port '{signal}' selects connect module '{}', whose connect statement sets a \
-                     transition time. The mixed input boundary does not yet have a delay stage integrated \
-                     with threshold-root localization",
-                    selected.name
-                ),
-            ));
-        }
-    }
-    Ok(())
 }
