@@ -385,8 +385,8 @@ impl SimulationController {
         self.runner.set_engine_wakeup(wakeup);
     }
 
-    pub(crate) fn retry_engine_startup(&mut self) -> Result<(), SimulationError> {
-        self.runner.retry_engine_startup()
+    pub(crate) fn retry_engine_startup(&mut self) -> Result<(), Box<SimulationError>> {
+        self.runner.retry_engine_startup().map_err(Box::new)
     }
 
     /// Start a new simulation batch
@@ -908,7 +908,7 @@ impl SimulationController {
         // Start the simulation
         let start_result = next_analysis
             .resolve_dependency_artifacts(&self.execution_artifacts)
-            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))
+            .map_err(|error| Box::new(SimulationError::InvalidConfig(error.to_string())))
             .and_then(|dispatch| {
                 if matches!(
                     self.current_spec,
@@ -947,6 +947,7 @@ impl SimulationController {
                     });
                 self.runner
                     .start_prepared(dispatch, stream_transient_samples)
+                    .map_err(Box::new)
             });
         match start_result {
             Ok(()) => {

@@ -126,11 +126,12 @@ fn run_batch(
 
 pub(crate) fn run_resolved_task(
     task: rspice_simulation::execution::ResolvedTaskDispatch,
-) -> Result<SimulationResult, rspice_simulation::error::SimulationError> {
+) -> Result<SimulationResult, Box<rspice_simulation::error::SimulationError>> {
     let mut runner = SimulationRunner::new();
     runner.start_prepared(task, false)?;
     wait_until_finished_unpolled(&runner);
     runner
         .poll_result()
         .expect("finished task publishes a terminal result")
+        .map_err(Box::new)
 }
