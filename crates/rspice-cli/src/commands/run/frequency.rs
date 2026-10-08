@@ -115,19 +115,19 @@ pub(super) fn finish_tf_result(
             columns: vec![
                 scalar(
                     "transfer_function",
-                    "gain",
+                    crate::commands::export_table::unit_type(&result.gain_unit, "gain"),
                     result.gain_unit.symbol(),
                     result.gain,
                 ),
                 scalar(
                     &format!("{source}#input_impedance"),
-                    "impedance",
+                    "resistance",
                     rspice_core::execution::SignalUnit::Ohm.symbol(),
                     result.input_impedance,
                 ),
                 scalar(
                     &format!("output_impedance_at_{probe}"),
-                    "impedance",
+                    "resistance",
                     rspice_core::execution::SignalUnit::Ohm.symbol(),
                     result.output_impedance,
                 ),
