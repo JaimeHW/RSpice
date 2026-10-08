@@ -158,7 +158,7 @@ fn rational_denormalization_preserves_finite_canonical_coefficients_and_initial_
                 relative_component(context.state(index), expected);
             }
             relative_component(context.output("out"), 0.6);
-            relative_component(context.partial("out"), 0.4);
+            relative_component(context.partial("out"), 0.25);
 
             let netlist = Netlist::parse(&format!(
                 "Normalized rational states\nV1 in 0 dc 0 ac 1\nA1 in out filt\n.model filt s_xfer(gain={gain:e} denormalized_freq={:e} num_coeff=[1] den_coeff=[{}])\nRload out 0 1\n.end\n",
@@ -264,6 +264,161 @@ fn rational_denormalization_reports_coefficients_lost_by_the_realization() {
         if let Some(index) = element {
             assert!(error.contains(&format!("element {index}")), "{error}");
         }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_transient_partials_match_analytic_and_finite_difference_derivatives() {
+    use rspice_core::xspice::AnalysisType;
+    for dt in [0.0, 0.125, 0.5, -0.5, f64::NAN, f64::INFINITY] {
+        let h = if dt.is_finite() && dt > 0.0 { dt } else { 0.0 };
+        for (numerator, denominator, initial, derivative) in [
+            (vec![2.0], vec![1.0, 3.0], vec![0.25], 2.0 * h),
+            (vec![2.0, -3.0], vec![1.0, 3.0], vec![0.25], 2.0 - 3.0 * h),
+            (
+                vec![4.0, -3.0, 2.0],
+                vec![1.0, 3.0, 2.0],
+                vec![0.25, -0.5],
+                4.0 - 3.0 * h + 2.0 * h * h,
+            ),
+            (
+                vec![2.0, -1.0],
+                vec![1.0, 6.0, 11.0, 6.0],
+                vec![0.25, -0.5, 0.75],
+                2.0 * h * h - h * h * h,
+            ),
+        ] {
+            for gain in [-2.0, 0.0, 0.5] {
+                let mut context = rational_context(gain, &numerator, &denominator);
+                context.set_real_vector_param("int_ic", initial.clone());
+                SXfer.init(&mut context).unwrap();
+                context.analysis = AnalysisType::Transient;
+                context.timestep = dt;
+                let states: Vec<_> = (0..denominator.len())
+                    .map(|index| context.state(index))
+                    .collect();
+                for input in [-1.5, 0.0, 2.25] {
+                    for offset in [0.0, 0.75] {
+                        context.set_param("in_offset", offset);
+                        context.set_input_analog("in", input);
+                        let expected = gain * derivative;
+                        let before: Vec<_> = (0..denominator.len())
+                            .map(|index| context.state(index))
+                            .collect();
+                        let previous_output = context.output("out");
+                        relative_component(
+                            SXfer.output_input_partials(&context, "out")[0].1,
+                            expected,
+                        );
+                        assert_eq!(context.output("out"), previous_output);
+                        for (index, &value) in before.iter().enumerate() {
+                            assert_eq!(context.state(index), value);
+                        }
+                        SXfer.evaluate(&mut context).unwrap();
+                        relative_component(context.partial("out"), expected);
+                        let step = 2.0f64.powi(-18);
+                        context.set_input_analog("in", input + step);
+                        SXfer.evaluate(&mut context).unwrap();
+                        let plus = context.output("out");
+                        context.set_input_analog("in", input - step);
+                        SXfer.evaluate(&mut context).unwrap();
+                        let minus = context.output("out");
+                        let difference = (plus - minus) / (2.0 * step);
+                        assert!(
+                            (difference - expected).abs() < 1e-10,
+                            "dt={dt}, gain={gain}, input={input}, offset={offset}, finite difference={difference}, expected={expected}"
+                        );
+                        for (index, &state) in states.iter().enumerate() {
+                            assert_eq!(context.state_prev(index), state);
+                        }
+                    }
+                }
+                SXfer.evaluate(&mut context).unwrap();
+                let output = context.output("out");
+                SXfer.evaluate(&mut context).unwrap();
+                assert_eq!(context.output("out"), output);
+                context.advance_state();
+                SXfer.evaluate(&mut context).unwrap();
+                relative_component(context.partial("out"), gain * derivative);
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_transient_partials_retain_compensating_gain_and_timestep_factors() {
+    use rspice_core::xspice::AnalysisType;
+    let huge = 2.0f64.powi(600);
+    for (gain, numerator, order, dt, expected) in [
+        (1e-300, vec![1.0], 2, 1e200, 1e100),
+        (1e300, vec![1.0], 2, 1e-200, 1e-100),
+        (1e-300, vec![1e-300], 1, 1e300, 1e-300),
+        (1e300, vec![1e300], 1, 1e-300, 1e300),
+        (1.0, vec![1.0, -huge, 1.0], 2, huge, 1.0),
+        (1.0, vec![f64::from_bits(1)], 1, 1.0, f64::from_bits(1)),
+        (1e-300, vec![1e-300], 1, 1.0, 0.0),
+    ] {
+        let mut denominator = vec![0.0; order + 1];
+        denominator[0] = 1.0;
+        for sign in [-1.0, 1.0] {
+            let mut context = rational_context(sign * gain, &numerator, &denominator);
+            context.analysis = AnalysisType::Transient;
+            context.timestep = dt;
+            context.set_input_analog("in", 0.0);
+            SXfer.evaluate(&mut context).unwrap();
+            assert_eq!(context.output("out"), 0.0);
+            relative_component(context.partial("out"), sign * expected);
+            relative_component(
+                SXfer.output_input_partials(&context, "out")[0].1,
+                sign * expected,
+            );
+        }
+    }
+    let mut context = rational_context(1e308, &[10.0], &[1.0, 0.0]);
+    context.analysis = AnalysisType::Transient;
+    context.timestep = 1.0;
+    SXfer.evaluate(&mut context).unwrap();
+    assert_eq!(context.output("out"), 0.0);
+    assert_eq!(context.partial("out"), f64::INFINITY);
+    assert_eq!(
+        SXfer.output_input_partials(&context, "out")[0].1,
+        f64::INFINITY
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_transient_feedback_has_no_spurious_dc_algebraic_loop() {
+    use rspice_core::{Engine, Netlist};
+    let netlist = Netlist::parse(
+        "Rational feedback derivative\nVdrive drive 0 pulse(-1 1 0.01 1n 1n 1 2)\nEfeedback in drive out 0 0.5\nA1 in out filt\n.model filt s_xfer(num_coeff=[1] den_coeff=[1 1] int_ic=[-2])\nRload out 0 1\n.end\n"
+    ).unwrap();
+    let engine = Engine::default();
+    let op = engine.run_dc_op(&netlist).unwrap();
+    for name in ["in", "out"] {
+        let node = op
+            .node_names
+            .iter()
+            .position(|node| node.eq_ignore_ascii_case(name))
+            .unwrap();
+        assert!((op.node_voltages[node] + 2.0).abs() < 1e-10);
+    }
+    // dx/dt = drive - 0.5*x. Start at equilibrium x=-2, then drive steps
+    // from -1 to +1 at 10 ms. The 1 ns rise is negligible at this tolerance.
+    let result = engine.run_tran(&netlist, 0.2, 0.001).unwrap();
+    let output = result
+        .node_names
+        .iter()
+        .position(|node| node.eq_ignore_ascii_case("out"))
+        .unwrap();
+    for (&time, &value) in result.time.iter().zip(&result.voltages[output]) {
+        let expected = 2.0 - 4.0 * (-0.5 * (time - 0.01).max(0.0)).exp();
+        assert!(
+            (value - expected).abs() < 0.002,
+            "time={time}, output={value}, expected={expected}"
+        );
     }
 }
 
@@ -699,7 +854,7 @@ fn polynomial_keeps_cancellation_between_out_of_range_terms() {
 fn small_signal_analyses_reject_unrepresentable_transfer_gain_instead_of_zero() {
     for output in ["out", "%id[out 0]"] {
         let netlist = rspice_core::Netlist::parse(&format!(
-            "Unrepresentable AC gain\nV1 in 0 dc 0 ac 1\nA1 in {output} filt\n.model filt s_xfer(gain=10 num_coeff=[1e308 0] den_coeff=[1 1])\nR1 out 0 1\nP1 rf 0 portnum=1 z0=50\nRport rf 0 50\n.end\n"
+            "Unrepresentable AC gain\nV1 in 0 dc 0 ac 1\nA1 in {output} filt\n.model filt s_xfer(gain=100 num_coeff=[1e308] den_coeff=[1 1])\nR1 out 0 1\nP1 rf 0 portnum=1 z0=50\nRport rf 0 50\n.end\n"
         )).unwrap();
         // The zero operating point is finite; only the AC derivative overflows.
         let engine = rspice_core::Engine::default();
@@ -726,6 +881,25 @@ fn small_signal_analyses_reject_unrepresentable_transfer_gain_instead_of_zero() 
                     message.contains(expected),
                     "{analysis}, {output}: {message}"
                 );
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_dc_rejects_unrepresentable_feedthrough_even_at_zero_input() {
+    for output in ["out", "%id[out 0]"] {
+        for gain in [-10.0, 10.0] {
+            let netlist = rspice_core::Netlist::parse(&format!(
+                "Unrepresentable feedthrough\nV1 in 0 dc 0\nA1 in {output} filt\n.model filt s_xfer(gain={gain} num_coeff=[1e308 0] den_coeff=[1 1])\nRload out 0 1\n.end\n"
+            )).unwrap();
+            let error = rspice_core::Engine::default()
+                .run_dc_op(&netlist)
+                .expect_err("zero output does not make an infinite derivative valid")
+                .to_string();
+            for expected in ["XSPICE", "A1", "out", "conductance", "inf"] {
+                assert!(error.contains(expected), "{output}, gain={gain}: {error}");
             }
         }
     }

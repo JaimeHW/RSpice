@@ -1082,12 +1082,37 @@ fn s_xfer_input_partial_for_context(ctx: &CmContext) -> CmResult<Value> {
         return Ok(0.0);
     };
 
-    let mut scratch = Vec::new();
-    let (_, partial) = s_xfer_ngspice_transient_eval(ctx, coefficients.as_ref(), &mut scratch)?;
-    Ok(partial)
+    Ok(s_xfer_transient_partial(&coefficients, ctx.timestep).value())
 }
 
-fn s_xfer_ngspice_transient_eval(
+fn s_xfer_transient_partial(coefficients: &SXferCoefficients, timestep: Value) -> ScaledProduct {
+    let order = coefficients.denominator.len() - 1;
+    if order == 0 {
+        return ScaledProduct::ONE
+            .multiply(coefficients.gain)
+            .multiply(coefficients.numerator[0])
+            .without_factor(coefficients.denominator[0]);
+    }
+
+    let dt = if timestep.is_finite() && timestep > 0.0 {
+        timestep
+    } else {
+        0.0
+    };
+    // Previous states are fixed throughout a Newton trial. Thus dx[i]/d(input) is
+    // gain*dt^(order-i), including the algebraic highest-order state. The
+    // zero-step fallback leaves only direct feedthrough. A state value is
+    // not this derivative, even though the legacy ngspice callback used one.
+    let mut partial = ScaledProduct::ZERO;
+    for index in 0..=order {
+        partial = partial.multiply(dt).add(
+            ScaledProduct::ONE.multiply(coefficients.numerator.get(index).copied().unwrap_or(0.0)),
+        );
+    }
+    partial.multiply(coefficients.gain)
+}
+
+fn s_xfer_canonical_transient_eval(
     ctx: &CmContext,
     coefficients: &SXferCoefficients,
     state: &mut Vec<Value>,
@@ -1096,10 +1121,7 @@ fn s_xfer_ngspice_transient_eval(
     let offset = finite_s_xfer_param(ctx, "in_offset")?;
 
     if order == 0 {
-        let gain = ScaledProduct::ONE
-            .multiply(coefficients.gain)
-            .multiply(coefficients.numerator[0])
-            .without_factor(coefficients.denominator[0]);
+        let gain = s_xfer_transient_partial(coefficients, ctx.timestep);
         let input = ScaledProduct::ONE
             .multiply(ctx.input("in"))
             .add(ScaledProduct::ONE.multiply(offset));
@@ -1132,7 +1154,7 @@ fn s_xfer_ngspice_transient_eval(
         .enumerate()
         .map(|(index, coefficient)| coefficient * state.get(index).copied().unwrap_or(0.0))
         .sum();
-    let partial = state.get(1).copied().unwrap_or(0.0);
+    let partial = s_xfer_transient_partial(coefficients, ctx.timestep).value();
     Ok((output, partial))
 }
 
@@ -1141,7 +1163,7 @@ fn s_xfer_transient_eval(
     coefficients: &Arc<SXferCoefficients>,
 ) -> CmResult<(Value, Value)> {
     with_s_xfer_transient_scratch(ctx, |ctx, state| {
-        let (output, partial) = s_xfer_ngspice_transient_eval(ctx, coefficients.as_ref(), state)?;
+        let (output, partial) = s_xfer_canonical_transient_eval(ctx, coefficients.as_ref(), state)?;
         if transfer_commits_state(ctx) {
             for (index, value) in state.iter().copied().enumerate() {
                 ctx.set_state(index, value);
@@ -1723,6 +1745,8 @@ mod tests {
             ctx.output("out") > 0.0,
             "rollbackable s_xfer probe should still compute trial output"
         );
+        assert_eq!(ctx.partial("out"), 0.25);
+        assert_eq!(SXfer.output_input_partials(&ctx, "out")[0].1, 0.25);
         assert_eq!(
             ctx.state(0),
             0.0,
@@ -1812,21 +1836,21 @@ mod tests {
         assert_eq!(partials.len(), 1);
         assert_eq!(partials[0].0, "in");
         assert!(
-            (partials[0].1 - 1.0).abs() < 1.0e-12,
-            "s_xfer should compute ngspice's pseudo-integrator partial, got {partials:?}"
+            (partials[0].1 - 0.25).abs() < 1.0e-12,
+            "s_xfer should differentiate the current integrator step, got {partials:?}"
         );
     }
 
     #[test]
-    fn s_xfer_partials_recompute_ngspice_pseudo_integrator_without_mutating_output() {
+    fn s_xfer_partials_recompute_for_timestep_without_mutating_output() {
         let mut ctx = first_order_lowpass_context();
         SXfer.init(&mut ctx).expect("s_xfer initializes");
         SXfer
             .evaluate(&mut ctx)
             .expect("s_xfer evaluates at original step");
         assert!(
-            (ctx.partial("out") - 1.0).abs() < 1.0e-12,
-            "baseline partial should match ngspice's pseudo-integrator partial"
+            (ctx.partial("out") - 0.25).abs() < 1.0e-12,
+            "baseline partial should differentiate the quarter-second step"
         );
 
         ctx.timestep = 0.5;
@@ -1835,11 +1859,11 @@ mod tests {
         assert_eq!(partials.len(), 1);
         assert_eq!(partials[0].0, "in");
         assert!(
-            (partials[0].1 - 1.0).abs() < 1.0e-12,
-            "s_xfer should recompute the pseudo-integrator partial instead of reusing stale output storage, got {partials:?}"
+            (partials[0].1 - 0.5).abs() < 1.0e-12,
+            "s_xfer should differentiate the half-second step instead of reusing stale output storage, got {partials:?}"
         );
         assert!(
-            (ctx.partial("out") - 1.0).abs() < 1.0e-12,
+            (ctx.partial("out") - 0.25).abs() < 1.0e-12,
             "partial lookup should not mutate the stored output partial"
         );
     }
@@ -1867,7 +1891,7 @@ mod tests {
         assert!((ctx.state(1) - 0.4).abs() < 1.0e-12);
         assert!((ctx.state(0) - 0.6).abs() < 1.0e-12);
         assert!((ctx.output("out") - 0.4).abs() < 1.0e-12);
-        assert!((ctx.partial("out") - 0.4).abs() < 1.0e-12);
+        assert!((ctx.partial("out") - 0.5).abs() < 1.0e-12);
     }
 
     #[test]
