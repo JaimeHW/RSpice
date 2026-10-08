@@ -34,7 +34,7 @@ impl AnalogOccurrenceSource {
                 "analog occurrence group is invalid".into(),
             ));
         }
-        Ok((group != 0.0).then(|| Self {
+        Ok((group != 0.0).then_some(Self {
             group: (group - 1.0) as u32,
             member: member as u32,
         }))
