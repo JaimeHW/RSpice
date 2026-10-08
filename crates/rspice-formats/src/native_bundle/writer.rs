@@ -248,6 +248,9 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Res
                 value_count = value_count
                     .checked_add(real.len())
                     .and_then(|count| count.checked_add(imag.len()))
+                    // Import retains a magnitude in addition to both exact
+                    // rectangular components. Match its retained-value limit.
+                    .and_then(|count| count.checked_add(real.len()))
                     .ok_or_else(|| {
                         "native bundle numeric-value accounting overflowed".to_owned()
                     })?;

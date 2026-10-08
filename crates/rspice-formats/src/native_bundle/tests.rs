@@ -14,6 +14,55 @@ fn limits() -> NativeBundleReadLimits {
     }
 }
 
+#[test]
+fn native_export_counts_the_magnitude_retained_by_complex_imports() {
+    let coordinate = (0..256).map(f64::from).collect::<Vec<_>>();
+    let component = vec![0.0; coordinate.len()];
+    let dataset = NativeBundleDataset {
+        analysis: crate::WaveformDomain::Transient,
+        coordinate_name: "time",
+        coordinate_unit: None,
+        coordinate: &coordinate,
+        signals: vec![NativeBundleSignal {
+            name: "out",
+            unit: None,
+            values: NativeBundleSignalValues::Complex {
+                real: &component,
+                imag: &component,
+            },
+        }],
+    };
+    for kind in [NativeBundleKind::Result, NativeBundleKind::Dataset] {
+        // The encoded JSON and ZIP fit even at the smaller limit, but opening
+        // the file also retains a magnitude beside the two original components.
+        let wire_only_budget = (coordinate.len() * 3 * size_of::<f64>()) as u64;
+        let error = encode_native_bundle(kind, &dataset, wire_only_budget)
+            .err()
+            .expect("publication must budget the retained magnitude array");
+        assert!(
+            error
+                .to_string()
+                .contains("retains 1024 numeric values; the limit is 768"),
+            "{error}"
+        );
+        let retained_budget = (coordinate.len() * 4 * size_of::<f64>()) as u64;
+        let bytes = encode_native_bundle(kind, &dataset, retained_budget).unwrap();
+        let decoded = decode_native_bundle(
+            &bytes,
+            kind,
+            NativeBundleReadLimits {
+                max_members: 10,
+                max_expanded_bytes: retained_budget,
+                max_member_bytes: retained_budget,
+            },
+        )
+        .unwrap();
+        assert_eq!(decoded.coordinate, coordinate);
+        assert_eq!(decoded.signals[0].real, component);
+        assert_eq!(decoded.signals[0].imag.as_ref().unwrap(), &component);
+    }
+}
+
 fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut writer = zip::ZipWriter::new(cursor);
