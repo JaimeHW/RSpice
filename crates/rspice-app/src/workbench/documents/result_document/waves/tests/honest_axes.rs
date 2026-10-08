@@ -178,6 +178,66 @@ fn imported_overlays_require_compatible_coordinate_units() {
     }
 }
 
+#[test]
+fn overlays_require_matching_source_signal_units_before_display_projection() {
+    for analysis_type in [AnalysisType::Transient, AnalysisType::Ac] {
+        for (active_unit, overlay_unit, expected_overlay) in [
+            (Some("V"), Some("V"), true),
+            (Some("mV"), Some("mV"), true),
+            (Some("V"), Some("mV"), false),
+            (Some("V"), Some("A"), false),
+            (Some("V"), Some("1"), false),
+            (Some("V"), None, false),
+            (None, Some("V"), false),
+            (None, None, true),
+        ] {
+            let mut runs = Vec::new();
+            for (id, unit) in [(2, active_unit), (1, overlay_unit)] {
+                let mut run = SimulationRun::new(id);
+                let mut waveform =
+                    WaveformData::new("V(out)", vec![1.0, 2.0], vec![1.0, 2.0], "#fff");
+                waveform.unit = unit.map(str::to_owned);
+                run.add_analysis(
+                    AnalysisResult::new(1, analysis_type, "source").with_waveforms(vec![waveform]),
+                );
+                runs.push(run);
+            }
+            let overlay_dataset = runs[1].dataset_id;
+            let simulation = SimulationState {
+                retained: crate::state::RetainedSimulationState {
+                    runs: runs.into(),
+                    ..Default::default()
+                },
+                view: crate::state::SimulationViewState {
+                    active_run_idx: Some(0),
+                    overlay_dataset_ids: vec![overlay_dataset],
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let models = build_models(
+                &simulation,
+                &mut DerivedSeries::default(),
+                &Tokens::default(),
+                false,
+                ComplexNumberDisplay::MagnitudePhaseDegrees,
+                None,
+                &HashSet::new(),
+            );
+            assert_eq!(models.len(), 1);
+            assert_eq!(
+                models[0].traces.iter().any(|trace| trace.overlay),
+                expected_overlay,
+                "{analysis_type:?}: {active_unit:?} vs {overlay_unit:?}"
+            );
+            assert_eq!(
+                models[0].subtitle.contains("incompatible overlay"),
+                !expected_overlay
+            );
+        }
+    }
+}
+
 /// The retained result keeps the sweep's values and not the source they came
 /// from, so the abscissa called every DC sweep volts — a swept current source
 /// read as a voltage, which is not a unit error but a quantity error. The deck

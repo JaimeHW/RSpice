@@ -635,7 +635,7 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
 
             let mut contributed = false;
             let mut projected_overlay_traces = Vec::new();
-            let mut incompatible_x = false;
+            let mut incompatible_source = false;
             for (
                 source_name,
                 base_name,
@@ -658,6 +658,13 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
                 else {
                     continue;
                 };
+
+                // Display projections can share a unit (for example dB) even
+                // when their source samples use different physical scales.
+                if overlay_waveform.unit != *signal_unit {
+                    incompatible_source = true;
+                    break;
+                }
 
                 let base_key = (analysis_index as u64) << 32 | overlay_index as u64;
                 let derived_key = run_mixed_key(base_key, overlay_run.id, true);
@@ -692,7 +699,7 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
                         .and_then(|ordinal| plan.groups().get(ordinal))
                         .filter(|group| group.stable_key == *presentation_key)
                     else {
-                        incompatible_x = true;
+                        incompatible_source = true;
                         break;
                     };
                     let Some((_, y)) = selected_series_pair_indices(
@@ -700,11 +707,11 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
                         &source_y,
                         &group.source_indices,
                     ) else {
-                        incompatible_x = true;
+                        incompatible_source = true;
                         break;
                     };
                     if y.len() != group.x_values.len() {
-                        incompatible_x = true;
+                        incompatible_source = true;
                         break;
                     }
                     (Arc::new(group.x_values.clone()), y)
@@ -712,7 +719,7 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
                     let Some(series) =
                         selected_series_pair(&overlay_waveform.x, &source_y, Some(selection))
                     else {
-                        incompatible_x = true;
+                        incompatible_source = true;
                         break;
                     };
                     series
@@ -752,7 +759,7 @@ pub fn build_models<A: AsRef<AnalysisResult<WaveformData>>, R: AsRef<SimulationR
                 });
                 contributed = true;
             }
-            if incompatible_x {
+            if incompatible_source {
                 rejected_overlay_count += 1;
                 continue;
             }
