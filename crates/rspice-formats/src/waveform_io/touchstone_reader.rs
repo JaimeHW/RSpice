@@ -71,7 +71,7 @@ pub fn read_touchstone_bytes_with_limit(
     let mut version = 1_u32;
     let mut matrix_format = MatrixFormat::Full;
     let mut declared_two_port_order = None;
-    let mut declared_ports = ports_from_extension(source_name);
+    let mut declared_ports = ports_from_extension(source_name)?;
     let mut declared_frequencies = None;
     let mut declared_noise_frequencies = None;
     let mut noise_records = Vec::new();
@@ -419,9 +419,9 @@ pub fn read_touchstone_bytes_with_limit(
     for frequency_index in 0..frequency_count {
         let frequency_hz = numeric_tokens[offset] * options.frequency_scale_hz;
         offset += 1;
-        if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+        if !frequency_hz.is_finite() || frequency_hz < 0.0 {
             return Err(format!(
-                "Touchstone frequency point {frequency_index} must be finite and positive"
+                "Touchstone frequency point {frequency_index} must be finite and non-negative"
             )
             .into());
         }
@@ -520,19 +520,27 @@ pub fn read_touchstone_bytes_with_limit(
     Ok(dataset)
 }
 
-fn ports_from_extension(source_name: &str) -> Option<usize> {
-    let extension = Path::new(source_name)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase();
-    (extension.starts_with('s')
-        && extension.ends_with('p')
-        && extension.len() > 2
-        && extension[1..extension.len() - 1]
-            .bytes()
-            .all(|byte| byte.is_ascii_digit()))
-    .then(|| extension[1..extension.len() - 1].parse().ok())
-    .flatten()
+fn ports_from_extension(source_name: &str) -> Result<Option<usize>, TouchstoneError> {
+    let Some(extension) = Path::new(source_name)
+        .extension()
+        .and_then(|value| value.to_str())
+    else {
+        return Ok(None);
+    };
+    let Some(ports) = extension
+        .strip_prefix(['s', 'S'])
+        .and_then(|value| value.strip_suffix(['p', 'P']))
+        .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+    else {
+        return Ok(None);
+    };
+    ports
+        .parse()
+        .map(Some)
+        .map_err(|source| TouchstoneError::InvalidInteger {
+            detail: format!("Invalid Touchstone port count in extension '.{extension}'"),
+            source,
+        })
 }
 
 fn parse_positive_usize(value: &str, line: usize, field: &str) -> Result<usize, TouchstoneError> {
@@ -565,7 +573,7 @@ fn infer_ports(tokens: &[f64], matrix: MatrixFormat) -> Result<Option<usize>, To
             values_per_frequency(*ports, matrix).is_some_and(|width| {
                 tokens.len() >= width
                     && tokens.len().is_multiple_of(width)
-                    && (0..tokens.len() / width).all(|index| tokens[index * width] > 0.0)
+                    && (0..tokens.len() / width).all(|index| tokens[index * width] >= 0.0)
             })
         })
         .collect::<Vec<_>>();

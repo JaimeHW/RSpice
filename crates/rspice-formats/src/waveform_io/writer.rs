@@ -788,14 +788,14 @@ mod tests {
     #[test]
     fn touchstone_text_export_rejects_invalid_frequency_values() {
         let mut dataset = sample_touchstone_dataset();
-        dataset.x_signal.as_mut().expect("frequency axis").data[0] = 0.0;
+        dataset.x_signal.as_mut().expect("frequency axis").data[0] = -1.0;
 
         let err = WaveformWriter::new(WaveformFormat::Touchstone)
             .write_text(&dataset)
-            .expect_err("Touchstone export must reject non-positive frequencies");
+            .expect_err("Touchstone export must reject negative frequencies");
 
         assert!(
-            err.to_string().contains("frequency") && err.to_string().contains("positive"),
+            err.to_string().contains("frequency") && err.to_string().contains("non-negative"),
             "unexpected error: {err}"
         );
     }

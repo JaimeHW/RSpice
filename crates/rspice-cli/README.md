@@ -488,8 +488,8 @@ shapes:
 | `.TF` | Gain, input impedance, output impedance |
 | Pole-zero | `pole(i)`/`zero(i)` complex columns |
 | `.SENS` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
-| `.SP` | Dimensionless `S_i_j` complex columns and `Z0(port)` reference impedances in ohms for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`) |
-| `--sparam` | Dimensionless `S11`/`S21`/`S12`/`S22` complex columns over frequency and `Z0(1)`/`Z0(2)` in ohms (Touchstone instead when `-o` ends in `.s2p`) |
+| `.SP` | Dimensionless `S_i_j` complex columns and `Z0(port)` reference impedances in ohms for the deck's N ports (Touchstone instead when `-o` ends in a matching `.sNp`, `.snp`, or `.ts`) |
+| `--sparam` | Dimensionless `S11`/`S21`/`S12`/`S22` complex columns over frequency and `Z0(1)`/`Z0(2)` in ohms (Touchstone instead when `-o` ends in `.s2p`, `.snp`, or `.ts`) |
 
 TF, pole-zero, sensitivity, DCMATCH and periodic stability support HDF5
 through a general `table` section. The group retains its analysis identity,
@@ -782,6 +782,11 @@ match the network's port count. Generic `.snp` and `.ts` outputs write
 [Touchstone 2.0](https://www.ibis.org/touchstone_ver2.0/touchstone_ver2_0.pdf),
 including explicit matrix dimensions, frequency count, and per-port references.
 These generic names therefore also support unequal port reference impedances.
+Touchstone import and export preserve valid DC (0 Hz) samples. Frequency grids
+must be finite, non-negative, and strictly increasing; references must be finite
+and positive. Export rejects nonfinite coefficients or an encoding that would
+overflow or collapse distinct frequency coordinates. Invalid numbered port-count
+extensions are rejected before an existing destination is replaced.
 If a Touchstone file carries noise,
 select `--section network` or `--section noise`: the latter keeps its own
 frequency grid, noise resistance in ohms, optimum complex reflection, and

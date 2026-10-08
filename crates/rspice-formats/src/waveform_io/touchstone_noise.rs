@@ -8,11 +8,12 @@ pub(super) const REFERENCE_TEMPERATURE: f64 = 290.0;
 
 pub(super) fn validate_frequencies(frequencies: &[f64]) -> Result<(), TouchstoneError> {
     if frequencies.is_empty()
-        || frequencies.iter().any(|f| !f.is_finite() || *f <= 0.0)
+        || frequencies.iter().any(|f| !f.is_finite() || *f < 0.0)
         || frequencies.windows(2).any(|pair| pair[0] >= pair[1])
     {
         return Err(
-            "Touchstone frequency samples must be finite, positive and strictly increasing".into(),
+            "Touchstone frequency samples must be finite, non-negative and strictly increasing"
+                .into(),
         );
     }
     Ok(())

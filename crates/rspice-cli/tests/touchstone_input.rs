@@ -134,3 +134,46 @@ fn a_touchstone_file_written_by_run_can_be_compared_and_converted() {
     let result = convert(&output, &json, &[]);
     assert!(result.status.success(), "{result:?}");
 }
+
+#[test]
+fn dc_network_points_survive_touchstone_import_and_reexport() {
+    let dir = test_dir("touchstone_dc");
+    for (extension, text) in [
+        ("s1p", "# Hz S RI R 50\n0 0.25 0\n1 0.5 0\n"),
+        (
+            "ts",
+            "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 1\n[Number of Frequencies] 2\n[Network Data]\n0 0.25 0\n1 0.5 0\n[End]\n",
+        ),
+    ] {
+        let input = dir.join(format!("source.{extension}"));
+        let output = dir.join("decoded.json");
+        std::fs::write(&input, text).unwrap();
+        let result = convert(&input, &output, &[]);
+        assert!(result.status.success(), "{extension}: {result:?}");
+        let table = common::read_json(&output);
+        assert_eq!(table["scale"]["values"], serde_json::json!([0.0, 1.0]));
+        assert_eq!(table["signals"][0]["real"], serde_json::json!([0.25, 0.5]));
+        let dataset =
+            rspice_formats::read_touchstone_bytes(&format!("source.{extension}"), text.as_bytes())
+                .unwrap();
+        let encoded =
+            rspice_formats::WaveformWriter::new(rspice_formats::WaveformFormat::Touchstone)
+                .write_text(&dataset)
+                .unwrap();
+        let decoded =
+            rspice_formats::read_touchstone_bytes("roundtrip.s1p", encoded.as_bytes()).unwrap();
+        assert_eq!(decoded.x_signal.unwrap().data, [0.0, 1.0]);
+    }
+}
+
+#[test]
+fn overflowing_port_count_extensions_are_not_inferred_as_another_network() {
+    let dir = test_dir("touchstone_overflow_count");
+    let input = dir.join("source.s99999999999999999999999999999999999p");
+    let output = dir.join("decoded.json");
+    std::fs::write(&input, "# Hz S RI R 50\n1 0.25 0\n2 0.5 0\n").unwrap();
+    std::fs::write(&output, "previous result").unwrap();
+    let result = convert(&input, &output, &[]);
+    assert!(!result.status.success(), "{result:?}");
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "previous result");
+}
