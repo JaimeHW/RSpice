@@ -60,9 +60,10 @@ pub enum TypedCsvSummary {
         node_count: usize,
         event_count: usize,
     },
-    CurrentEvents {
+    ImpulseEvents {
         node_count: usize,
         current_history_count: usize,
+        voltage_history_count: usize,
         impulse_count: usize,
     },
     Qpac {
@@ -1078,10 +1079,16 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
             digital_traces,
             real_traces,
             current_impulses,
+            voltage_impulses,
             ..
         } => {
-            if let Some(history) = current_impulses {
-                return Some(current_event_csv(digital_traces, real_traces, history));
+            if current_impulses.is_some() || voltage_impulses.is_some() {
+                return Some(impulse_event_csv(
+                    digital_traces,
+                    real_traces,
+                    current_impulses.as_ref(),
+                    voltage_impulses.as_ref(),
+                ));
             }
             let mut contents = String::from("node,domain,time_s,value_code,value\n");
             for trace in digital_traces {
@@ -1120,15 +1127,16 @@ pub fn encode_typed_result_csv<W: AsRef<rspice_results::waveform::RetainedWavefo
     }
 }
 
-fn current_event_csv(
+fn impulse_event_csv(
     digital: &[rspice_results::events::DigitalEventTraceEvidence],
     real: &[rspice_results::events::RealEventTraceEvidence],
-    history: &rspice_results::current_impulses::CurrentImpulseHistoryEvidence,
+    current: Option<&rspice_results::current_impulses::CurrentImpulseHistoryEvidence>,
+    voltage: Option<&rspice_results::voltage_impulses::VoltageImpulseHistoryEvidence>,
 ) -> EncodedTypedCsv {
     let mut contents = String::from(
-        "node,domain,time_s,value_code,value,record,owner_kind,parameter,charge_coulombs,start_time_s,stop_time_s,coverage_complete,delivery_complete\n",
+        "node,domain,time_s,value_code,value,record,owner_kind,parameter,charge_coulombs,start_time_s,stop_time_s,coverage_complete,delivery_complete,volt_seconds,derivative_order,derivative_coefficient_si\n",
     );
-    let mut append = |fields: [String; 13]| {
+    let mut append = |fields: [String; 16]| {
         contents.push_str(
             &fields
                 .iter()
@@ -1160,48 +1168,93 @@ fn current_event_csv(
             append(row);
         }
     }
-    // The section row preserves recorded-but-empty histories without claiming
-    // coverage for an omitted current. Coverage rows also survive zero events.
-    let mut section = std::array::from_fn(|_| String::new());
-    section[1] = "current_impulse".into();
-    section[5] = "section".into();
-    section[9] = format!("{:.17e}", history.start_time_s);
-    section[10] = format!("{:.17e}", history.stop_time_s);
-    section[12] = history.delivery_complete.to_string();
-    append(section.clone());
     let mut impulses = 0usize;
-    for trace in &history.traces {
-        let mut row = section.clone();
-        row[5] = "coverage".into();
-        match &trace.owner {
-            rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
-                row[0] = branch_name.clone();
-                row[6] = "branch".into();
+    if let Some(history) = current {
+        // The section row preserves recorded-but-empty histories without claiming
+        // coverage for an omitted current. Coverage rows also survive zero events.
+        let mut section = std::array::from_fn(|_| String::new());
+        section[1] = "current_impulse".into();
+        section[5] = "section".into();
+        section[9] = format!("{:.17e}", history.start_time_s);
+        section[10] = format!("{:.17e}", history.stop_time_s);
+        section[12] = history.delivery_complete.to_string();
+        append(section.clone());
+        for trace in &history.traces {
+            let mut row = section.clone();
+            row[5] = "coverage".into();
+            match &trace.owner {
+                rspice_core::CurrentImpulseOwner::Branch { branch_name } => {
+                    row[0] = branch_name.clone();
+                    row[6] = "branch".into();
+                }
+                rspice_core::CurrentImpulseOwner::DeviceLead {
+                    device_name,
+                    parameter,
+                } => {
+                    row[0] = device_name.clone();
+                    row[6] = "device_lead".into();
+                    row[7] = parameter.clone();
+                }
             }
-            rspice_core::CurrentImpulseOwner::DeviceLead {
-                device_name,
-                parameter,
-            } => {
-                row[0] = device_name.clone();
-                row[6] = "device_lead".into();
-                row[7] = parameter.clone();
+            row[11] = trace.complete.to_string();
+            append(row.clone());
+            for point in &trace.points {
+                row[5] = "event".into();
+                row[2] = format!("{:.17e}", point.time);
+                row[8] = format!("{:.17e}", point.charge_coulombs);
+                append(row.clone());
+                impulses += 1;
+            }
+            for point in &trace.derivatives {
+                row[5] = "derivative".into();
+                row[2] = format!("{:.17e}", point.time);
+                row[8].clear();
+                row[14] = point.order.to_string();
+                row[15] = format!("{:.17e}", point.coefficient);
+                append(row.clone());
+                impulses += 1;
             }
         }
-        row[11] = trace.complete.to_string();
-        append(row.clone());
-        for point in &trace.points {
-            row[5] = "event".into();
-            row[2] = format!("{:.17e}", point.time);
-            row[8] = format!("{:.17e}", point.charge_coulombs);
+    }
+    if let Some(history) = voltage {
+        let mut section: [String; 16] = std::array::from_fn(|_| String::new());
+        section[1] = "voltage_impulse".into();
+        section[5] = "section".into();
+        section[9] = format!("{:.17e}", history.start_time_s);
+        section[10] = format!("{:.17e}", history.stop_time_s);
+        section[12] = history.delivery_complete.to_string();
+        append(section.clone());
+        for trace in &history.traces {
+            let mut row = section.clone();
+            row[0] = trace.node_name.clone();
+            row[5] = "coverage".into();
+            row[6] = "node".into();
+            row[11] = trace.complete.to_string();
             append(row.clone());
-            impulses += 1;
+            for point in &trace.points {
+                row[5] = "event".into();
+                row[2] = format!("{:.17e}", point.time);
+                row[13] = format!("{:.17e}", point.volt_seconds);
+                append(row.clone());
+                impulses += 1;
+            }
+            for point in &trace.derivatives {
+                row[5] = "derivative".into();
+                row[2] = format!("{:.17e}", point.time);
+                row[13].clear();
+                row[14] = point.order.to_string();
+                row[15] = format!("{:.17e}", point.coefficient);
+                append(row.clone());
+                impulses += 1;
+            }
         }
     }
     EncodedTypedCsv {
         contents,
-        summary: TypedCsvSummary::CurrentEvents {
+        summary: TypedCsvSummary::ImpulseEvents {
             node_count: digital.len() + real.len(),
-            current_history_count: history.traces.len(),
+            current_history_count: current.map_or(0, |history| history.traces.len()),
+            voltage_history_count: voltage.map_or(0, |history| history.traces.len()),
             impulse_count: impulses,
         },
     }
