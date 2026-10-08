@@ -246,7 +246,8 @@ impl ResultPayload {
             Self::Fft(payload) => payload.validate(),
             Self::MonteCarlo(payload) => payload.validate(),
             Self::Pss(payload) => payload.validate(),
-            Self::Pac(payload) => payload.validate(),
+            // PAC metadata is validated with the primary coordinates and qualifiers.
+            Self::Pac(_) => Ok(()),
             Self::Pxf(payload) => payload.validate(),
             Self::Pstb(payload) => payload.validate(),
             Self::PNoise(payload) => payload.validate(),
@@ -2611,49 +2612,6 @@ impl PacPayload {
             .as_ref()
             .map_or(0, |matrix| matrix.entries.len().saturating_mul(2));
         sidebands.saturating_add(conversion)
-    }
-
-    fn validate(&self) -> Result<(), ResultDocumentError> {
-        finite("PAC fundamental frequency", self.fundamental_frequency)?;
-        finite("PAC residual", self.residual)?;
-        if self.sideband_minimum > self.sideband_maximum {
-            return Err(ResultDocumentError::Malformed {
-                location: "PAC sideband range",
-                detail: "the lowest sideband cannot exceed the highest".to_owned(),
-            });
-        }
-        for sideband in &self.sidebands {
-            finite_slice("PAC absolute frequency", &sideband.absolute_frequencies)?;
-            finite_slice("PAC frequency offset", &sideband.frequency_offsets)?;
-            if sideband.absolute_frequencies.len() != sideband.frequency_offsets.len() {
-                return Err(ResultDocumentError::SeriesLength {
-                    location: "PAC sideband frequency columns".to_owned(),
-                    expected: sideband.absolute_frequencies.len(),
-                    actual: sideband.frequency_offsets.len(),
-                });
-            }
-            if sideband.sideband < self.sideband_minimum
-                || sideband.sideband > self.sideband_maximum
-            {
-                return Err(ResultDocumentError::Malformed {
-                    location: "PAC sideband range",
-                    detail: format!(
-                        "sideband {} is outside the declared range",
-                        sideband.sideband
-                    ),
-                });
-            }
-        }
-        if let Some(matrix) = &self.conversion_matrix {
-            for entry in &matrix.entries {
-                finite("PAC conversion element real part", entry.value.real)?;
-                finite(
-                    "PAC conversion element imaginary part",
-                    entry.value.imaginary,
-                )?;
-            }
-        }
-        Ok(())
     }
 }
 

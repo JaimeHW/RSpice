@@ -3059,6 +3059,16 @@ impl AnalysisResultDocument {
         result: &PacResult,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "PAC result";
+        let sideband_range = result.conversion_matrix.sideband_range();
+        if result.conversion_matrix.fundamental() != result.fundamental_frequency
+            || result.conversion_matrix.frequencies() != result.frequencies
+            || sideband_range != (result.sideband_min..=result.sideband_max)
+        {
+            return Err(source_error(
+                LOCATION,
+                "PAC conversion matrix coordinates disagree with the result",
+            ));
+        }
         let point_count = result.frequencies.len();
         if point_count == 0 {
             return Err(source_error(
@@ -3085,7 +3095,7 @@ impl AnalysisResultDocument {
 
         let mut signals = Vec::new();
         let mut sidebands = Vec::new();
-        for sideband in result.sideband_indices() {
+        for sideband in sideband_range.clone() {
             if sideband == 0 && !result.include_dc {
                 continue;
             }
@@ -3102,6 +3112,12 @@ impl AnalysisResultDocument {
                         format!("sideband {sideband} is missing at frequency index {index}"),
                     )
                 })?;
+                if data.sideband != sideband {
+                    return Err(source_error(
+                        LOCATION,
+                        "PAC sideband record identity disagrees with its position",
+                    ));
+                }
                 offsets.push(data.frequency_offset);
                 absolutes.push(data.absolute_frequency);
                 if data.node_voltages.len() != result.node_names.len()
@@ -3154,13 +3170,12 @@ impl AnalysisResultDocument {
 
         let conversion_matrix = if result.conversion_matrix.is_materialized() {
             let mut entries = Vec::new();
-            let sideband_indices = result.conversion_matrix.sideband_indices();
             for frequency_index in 0..result.conversion_matrix.num_frequencies() {
-                for output_sideband in &sideband_indices {
-                    for input_sideband in &sideband_indices {
+                for output_sideband in sideband_range.clone() {
+                    for input_sideband in sideband_range.clone() {
                         let value = result
                             .conversion_matrix
-                            .get(frequency_index, *output_sideband, *input_sideband)
+                            .get(frequency_index, output_sideband, input_sideband)
                             .map_err(|error| source_error(LOCATION, error.to_string()))?;
                         if !value.re.is_finite() || !value.im.is_finite() {
                             return Err(source_error(
@@ -3170,8 +3185,8 @@ impl AnalysisResultDocument {
                         }
                         entries.push(PacConversionEntry {
                             frequency_index,
-                            output_sideband: *output_sideband,
-                            input_sideband: *input_sideband,
+                            output_sideband,
+                            input_sideband,
                             value: ComplexSample::new(value.re, value.im),
                         });
                     }

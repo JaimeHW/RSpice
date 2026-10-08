@@ -82,7 +82,7 @@ impl PacSidebandData {
                 "fundamental frequency must be finite and positive, got {fundamental}"
             )));
         }
-        let absolute_frequency = (sideband as Value).mul_add(fundamental, frequency_offset);
+        let absolute_frequency = super::sideband_frequency(sideband, fundamental, frequency_offset);
         if !absolute_frequency.is_finite() {
             return Err(PacError::InvalidResult(format!(
                 "sideband {sideband} and offset {frequency_offset} Hz produce a non-representable absolute frequency"

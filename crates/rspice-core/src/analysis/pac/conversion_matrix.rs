@@ -126,7 +126,8 @@ impl SidebandTransfer {
                 "fundamental frequency must be finite and positive, got {fundamental}"
             )));
         }
-        let frequency = (self.output_sideband as Value).mul_add(fundamental, self.frequency_offset);
+        let frequency =
+            super::sideband_frequency(self.output_sideband, fundamental, self.frequency_offset);
         if !frequency.is_finite() {
             return Err(PacError::InvalidResult(format!(
                 "sideband {} and offset {} Hz produce a non-representable output frequency",
@@ -229,7 +230,7 @@ impl ConversionMatrix {
         })?;
         for &sideband in &[sideband_min, sideband_max] {
             for (index, &offset) in frequencies.iter().enumerate() {
-                let absolute = (sideband as Value).mul_add(fundamental, offset);
+                let absolute = super::sideband_frequency(sideband, fundamental, offset);
                 if !absolute.is_finite() {
                     return Err(PacError::InvalidResult(format!(
                         "frequency offset {index} ({offset} Hz) and sideband {sideband} produce a non-representable absolute frequency"
@@ -457,7 +458,12 @@ impl ConversionMatrix {
 
     /// Get all sidebands as a vector
     pub fn sideband_indices(&self) -> Vec<i32> {
-        (self.sideband_min..=self.sideband_max).collect()
+        self.sideband_range().collect()
+    }
+
+    /// Coordinate bounds without allocating their complete population.
+    pub(crate) fn sideband_range(&self) -> std::ops::RangeInclusive<i32> {
+        self.sideband_min..=self.sideband_max
     }
 }
 

@@ -62,3 +62,14 @@ pub use config::{PacConfig, PacSweepType};
 pub use conversion_matrix::{ConversionMatrix, SidebandTransfer};
 pub use result::{PacResult, PacSidebandData};
 pub use solver::PacError;
+
+/// Signed sideband coordinate, evaluated with the solver's single rounding.
+/// Callers validate finiteness; taking an absolute value or splitting the
+/// multiply-add would change the retained spectral coordinate.
+pub(crate) fn sideband_frequency(
+    sideband: i32,
+    fundamental: crate::Value,
+    offset: crate::Value,
+) -> crate::Value {
+    f64::from(sideband).mul_add(fundamental, offset)
+}

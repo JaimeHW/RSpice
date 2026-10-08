@@ -617,8 +617,8 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
         16 => (
             AnalysisKind::Pac,
             Some(analysis_id(AnalysisKind::Pss)),
-            ResultAxisKind::Sideband,
-            integer_axis.clone(),
+            ResultAxisKind::OffsetFrequency,
+            axis_values.clone(),
             ResultPayload::Pac(PacPayload {
                 fundamental_frequency: 1e9,
                 sideband_minimum: -1,
@@ -629,8 +629,12 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                 residual: 1e-12,
                 sidebands: vec![PacSidebandDescriptor {
                     sideband: 1,
-                    frequency_offsets: shape.finite_reals(),
-                    absolute_frequencies: shape.finite_reals(),
+                    frequency_offsets: shape.axis_values(),
+                    absolute_frequencies: shape
+                        .axis_values()
+                        .iter()
+                        .map(|offset| 1e9 + offset)
+                        .collect(),
                 }],
                 conversion_matrix: None,
             }),
@@ -799,7 +803,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
             .unwrap(),
         );
     }
-    let axis_unit = if analysis == AnalysisKind::Distortion {
+    let axis_unit = if matches!(analysis, AnalysisKind::Distortion | AnalysisKind::Pac) {
         SignalUnit::Hertz
     } else {
         SignalUnit::Dimensionless
