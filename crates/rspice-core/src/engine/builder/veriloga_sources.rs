@@ -244,11 +244,11 @@ pub(super) fn resolve_includes(
                         && artifact.connections.configuration() != Some(configuration)
                 })
             });
-            if original.is_some() && !needs_configuration {
-                compiled_selections.insert(
-                    includes[index].selected_module.clone(),
-                    original.unwrap().clone(),
-                );
+            if let Some(original) = original
+                && !needs_configuration
+            {
+                compiled_selections
+                    .insert(includes[index].selected_module.clone(), original.clone());
                 continue;
             }
             // Contextual hits use the authenticated source and root assignments,

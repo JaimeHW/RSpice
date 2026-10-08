@@ -1955,7 +1955,7 @@ fn lookup_veriloga_key_with_limits_and_abort(
     }
     let memory_entry = if let Ok(mut cache) = veriloga_source_cache().write() {
         cache.enforce_limit(limits.max_shared_cache_bytes);
-        cache.get_cloned(&canonical)
+        cache.get_cloned(canonical)
     } else {
         None
     };
@@ -1978,11 +1978,11 @@ fn lookup_veriloga_key_with_limits_and_abort(
             .fetch_add(1, Relaxed);
         if let Ok(mut cache) = veriloga_source_cache().write()
             && cache
-                .get(&canonical)
+                .get(canonical)
                 .and_then(CachedVerilogASource::runtime)
                 .is_some_and(|current| current.dependencies == entry.dependencies)
         {
-            cache.remove(&canonical);
+            cache.remove(canonical);
         }
     }
 
@@ -2002,7 +2002,7 @@ fn lookup_veriloga_key_with_limits_and_abort(
     }
 
     check_build_abort(abort)?;
-    if let Some(entry) = load_model_from_disk_with_limits_and_abort(&canonical, limits, abort)? {
+    if let Some(entry) = load_model_from_disk_with_limits_and_abort(canonical, limits, abort)? {
         VERILOGA_CACHE_TELEMETRY.disk_hits.fetch_add(1, Relaxed);
         if let Err(error) = retain_veriloga_model(
             canonical.clone(),
