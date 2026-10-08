@@ -1294,8 +1294,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v104 adds CCCS event conservation and finite/impulsive F-current output.
     // v105 corrects source and free-coordinate signs in the event voltage seed.
     // v106 preserves accepted diode displacement current through normalized restart.
-    // v112 corrects the processed Xyce diode NBV default to N.
-    hasher.update(b"rspice-transient-resolved-config-v112\0");
+    // v113 applies Xyce diode model EG/M bounds consistently to current and charge.
+    hasher.update(b"rspice-transient-resolved-config-v113\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

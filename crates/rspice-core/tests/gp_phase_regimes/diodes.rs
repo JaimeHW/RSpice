@@ -396,3 +396,102 @@ fn gp_xyce_diode_injection_preserves_charge_impulses_and_finite_currents() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_xyce_diode_model_processing_preserves_current_charge_and_restart() {
+    // Independent Xyce processParams/updateTemperature equations: omitted
+    // NBV=N, EG>=.1 and bottom M<=.9, before evaluating the physical F/Q law.
+    for temperature in [27.0, 127.0] {
+        let temp: f64 = temperature + 273.15;
+        let k_over_q = 1.380_622_6e-23 / 1.602_191_8e-19;
+        let vt = k_over_q * temp;
+        let ratio = temp / 300.15;
+        let isat = 1e-14 * ((ratio - 1.0) * 0.1 / (2.0 * vt) + 1.5 * ratio.ln()).exp();
+        let m = 0.9;
+        let shift = |t: f64| {
+            1.16 - 7.02e-4 * t * t / (t + 1108.0)
+                - 1.1150877 * t / 300.15
+                - 3.0 * k_over_q * t * (t / 300.15).ln()
+        };
+        let pbo = 1.0 - shift(300.15);
+        let phi = shift(temp) + ratio * pbo;
+        let cj = 2e-12 / (1.0 - m * (1.0 - pbo) / pbo)
+            * (1.0 + m * (4e-4 * (temp - 300.15) - (phi - pbo) / pbo));
+        let mut xbv = 5.0 - 2.0 * vt * (1.0 + 1e-3 / isat).ln();
+        for _ in 0..25 {
+            xbv = 5.0 - 2.0 * vt * (1e-3 / isat + 1.0 - xbv / vt).ln();
+            if (isat * (((5.0 - xbv) / (2.0 * vt)).exp_m1() + xbv / vt) - 1e-3).abs() <= 1e-6 {
+                break;
+            }
+        }
+        for (v0, v1, breakdown) in [(-5.02, -5.06, true), (0.2, 0.6, false)] {
+            let bv = if breakdown { "BV=5 IBV=1m" } else { "" };
+            let current = |v: f64| {
+                if breakdown {
+                    -isat * (-(v + xbv) / (2.0 * vt)).exp()
+                } else {
+                    isat * (v / (2.0 * vt)).exp_m1()
+                }
+            };
+            for authored_fc in [0.5_f64, 1.2] {
+                let fc = authored_fc.min(0.95);
+                let charge = |v: f64| {
+                    let boundary = fc * phi;
+                    let depletion = if v < boundary {
+                        cj * phi * (1.0 - (1.0 - v / phi).powf(1.0 - m)) / (1.0 - m)
+                    } else {
+                        let q_boundary = cj * phi * (1.0 - (1.0 - fc).powf(1.0 - m)) / (1.0 - m);
+                        let c_boundary = cj * (1.0 - fc).powf(-m);
+                        let delta = v - boundary;
+                        q_boundary
+                            + c_boundary * delta
+                            + 0.5 * c_boundary * m / (phi * (1.0 - fc)) * delta * delta
+                    };
+                    depletion + 2e-9 * current(v)
+                };
+                for method in [
+                    IntegrationMethod::BackwardEuler,
+                    IntegrationMethod::Trapezoidal,
+                    IntegrationMethod::Gear2,
+                ] {
+                    let engine = engine(SpiceDialect::Xyce, method);
+                    let deck = Netlist::parse(&format!("Processed diode model event\nVD d 0 DC {v0} PWL(0 {v0} 1n {v0} 1n {v1} 3n {v1})\nD1 d 0 dm TEMP={temperature}\n.model dm D(IS=1e-14 N=2 {bv} EG=.02 XTI=3 TNOM=27 CJO=2p VJ=1 M=1.2 FC={authored_fc} TT=2n)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(d) i(d1) i(vd)\n.end\n")).unwrap();
+                    let (result, checkpoints) = engine.run_tran_checkpoint_schedule_with_startup_mode(&deck, 3e-9, 5e-12, TransientStartupMode::OperatingPoint, &[1e-9,1.7e-9]).unwrap_or_else(|error| panic!("TEMP={temperature} FC={authored_fc} BV={breakdown} {method:?}: {error}"));
+                    let diode = result.try_branch_current_waveform_named("d1").unwrap();
+                    let source = result.try_branch_current_waveform_named("vd").unwrap();
+                    for (index, &time) in result.time.iter().enumerate() {
+                        let expected = current(if time >= 1e-9 { v1 } else { v0 });
+                        assert!(
+                            (diode[index] - expected).abs() < 1e-15 + 1e-9 * expected.abs(),
+                            "TEMP={temperature} FC={authored_fc} BV={breakdown} {method:?} at {time:e}: {} vs {expected:e}",
+                            diode[index]
+                        );
+                        if time == 0.0 || time == 1e-9 {
+                            assert!(
+                                (diode[index] + source[index]).abs()
+                                    < 1e-15 + 1e-9 * expected.abs()
+                            );
+                        }
+                    }
+                    let expected = charge(v1) - charge(v0);
+                    for (name, sign) in [("d1", 1.0), ("vd", -1.0)] {
+                        let trace = branch_impulses(&result, name);
+                        assert!(trace.complete);
+                        let jump = trace.points.iter().find(|p| p.time == 1e-9).unwrap();
+                        assert!(
+                            (jump.charge_coulombs - sign * expected).abs()
+                                < 1e-25 + 1e-10 * expected.abs(),
+                            "TEMP={temperature} FC={authored_fc} BV={breakdown} {method:?} {name} charge: {} vs {}",
+                            jump.charge_coulombs,
+                            sign * expected
+                        );
+                    }
+                    for checkpoint in checkpoints {
+                        exact_restart(&engine, &deck, &result, &checkpoint.checkpoint, 3e-9, 5e-12);
+                    }
+                }
+            }
+        }
+    }
+}

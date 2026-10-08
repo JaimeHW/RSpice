@@ -40,6 +40,7 @@ impl Diode {
                 return false;
             }
         }
+        let bottom_grading = self.bottom_grading_coefficient();
         if self.recombination_saturation_current != 0.0 {
             // Each generation factor is a power of (1-V/VJ)^2 + .005,
             // strictly positive. Only dialect cutoffs and the exponential
@@ -50,7 +51,7 @@ impl Diode {
                 || !self.recombination_saturation_current.is_finite()
                 || self.recombination_saturation_current < 0.0
                 || !positive_normal(self.vj)
-                || !self.m.is_finite()
+                || !bottom_grading.is_finite()
                 || ((self.ngspice_dialect || self.xyce_dialect) && vd == boundary)
             {
                 return false;
@@ -63,8 +64,9 @@ impl Diode {
             if !(self.xyce_dialect && vd < boundary) {
                 let normalized = 1.0 - evaluation / self.vj;
                 let base = normalized * normalized + 0.005;
-                let factor = base.powf(0.5 * self.m);
-                let derivative = -self.m * normalized / self.vj * base.powf(0.5 * self.m - 1.0);
+                let factor = base.powf(0.5 * bottom_grading);
+                let derivative =
+                    -bottom_grading * normalized / self.vj * base.powf(0.5 * bottom_grading - 1.0);
                 if evaluation / thermal == MAX_EXP_ARG
                     || !base.is_finite()
                     || !factor.is_finite()
@@ -109,7 +111,7 @@ impl Diode {
             return false;
         }
         for (c, phi, grading, fc) in [
-            (self.cj0, self.vj, self.m, self.fc),
+            (self.cj0, self.vj, bottom_grading, self.fc),
             (
                 self.sidewall_cj0 * self.sidewall_perimeter,
                 self.sidewall_vj,

@@ -1369,6 +1369,13 @@ impl Diode {
         let delta_t = temp - tnom;
         let log_t_ratio = (temp / tnom).ln();
         let temperature = self.temperature_model;
+        // Xyce Model::processParams limits EG before any temperature scaling,
+        // including the bottom, sidewall and recombination current densities.
+        let activation_energy = if self.xyce_dialect && self.eg < 0.1 {
+            0.1
+        } else {
+            self.eg
+        };
         self.candidate_eval_valid = false;
 
         // Xyce N_DEV_Diode.C: tIKF = IKF * (1 + TIKF * (Temp - TNOM)).
@@ -1385,8 +1392,8 @@ impl Diode {
         // and GAP2.
         let (egfet, egfet1) = if temperature.tlev == 2 {
             (
-                self.eg - (temperature.gap1 * temp * temp) / (temp + temperature.gap2),
-                self.eg - (temperature.gap1 * tnom * tnom) / (tnom + temperature.gap2),
+                activation_energy - (temperature.gap1 * temp * temp) / (temp + temperature.gap2),
+                activation_energy - (temperature.gap1 * tnom * tnom) / (tnom + temperature.gap2),
             )
         } else {
             (
@@ -1419,7 +1426,8 @@ impl Diode {
                     + (exponent / emission) * log_t_ratio)
                     .exp()
             } else {
-                (((temp / tnom) - 1.0) * self.eg / thermal + (exponent / emission) * log_t_ratio)
+                (((temp / tnom) - 1.0) * activation_energy / thermal
+                    + (exponent / emission) * log_t_ratio)
                     .exp()
             };
             if factor.is_finite() && factor > 0.0 {
@@ -1449,7 +1457,7 @@ impl Diode {
                     + (self.tunneling.exponent / emission) * log_t_ratio)
                     .exp()
             } else {
-                (((temp / tnom) - 1.0) * keg * self.eg / thermal
+                (((temp / tnom) - 1.0) * keg * activation_energy / thermal
                     + (self.tunneling.exponent / emission) * log_t_ratio)
                     .exp()
             };
@@ -1466,6 +1474,7 @@ impl Diode {
         // the same `1 + c1·dt + c2·dt²` polynomial.
         self.m *=
             DiodeTemperatureModel::quadratic_factor(temperature.tm1, temperature.tm2, delta_t);
+        let grading = self.bottom_grading_coefficient();
         self.tt *=
             DiodeTemperatureModel::quadratic_factor(temperature.ttt1, temperature.ttt2, delta_t);
         if self.rs > 0.0 {
@@ -1510,7 +1519,7 @@ impl Diode {
             let nominal_vj = self.vj;
             let t_jct_pot = (nominal_vj - egfet1) * fact2 - 3.0 * vt * fact2.ln() + egfet;
             let denominator =
-                1.0 + self.m * (400e-6 * (temp - tnom) + (1.0 - t_jct_pot / nominal_vj));
+                1.0 + grading * (400e-6 * (temp - tnom) + (1.0 - t_jct_pot / nominal_vj));
             if t_jct_pot.is_finite()
                 && t_jct_pot > 0.0
                 && denominator.is_finite()
@@ -1526,12 +1535,12 @@ impl Diode {
             let pbo = (self.vj - pbfact1) / fact1;
             if pbo > 0.0 {
                 let gmaold = (self.vj - pbo) / pbo;
-                let denom = 1.0 + self.m * (400e-6 * (tnom - REFTEMP) - gmaold);
+                let denom = 1.0 + grading * (400e-6 * (tnom - REFTEMP) - gmaold);
                 let t_jct_pot = pbfact + fact2 * pbo;
                 if denom != 0.0 && t_jct_pot > 0.0 {
                     let mut cj = self.cj0 / denom;
                     let gmanew = (t_jct_pot - pbo) / pbo;
-                    cj *= 1.0 + self.m * (400e-6 * (temp - REFTEMP) - gmanew);
+                    cj *= 1.0 + grading * (400e-6 * (temp - REFTEMP) - gmanew);
                     if cj.is_finite() && cj >= 0.0 {
                         self.vj = t_jct_pot;
                         self.cj0 = cj;
@@ -1666,6 +1675,17 @@ impl Diode {
             || self.overlap_capacitance != 0.0
     }
 
+    // Xyce Model::processParams caps bottom M at .9. Preserve the authored
+    // value for the other dialects and use this same coefficient for charge,
+    // recombination, temperature mapping and physical-event regularity.
+    fn bottom_grading_coefficient(&self) -> Value {
+        if self.xyce_dialect && self.m > 0.9 {
+            0.9
+        } else {
+            self.m
+        }
+    }
+
     /// Junction charge and capacitance at `vd` for transient integration
     /// (dioload.c): depletion charge with the F1/F2/F3 polynomial
     /// continuation above `FC·VJ`, plus diffusion charge `TT·id` riding the
@@ -1678,8 +1698,13 @@ impl Diode {
     pub fn junction_charge_and_capacitance(&self, vd: Value) -> (Value, Value) {
         let mut qd = 0.0;
         let mut capd = 0.0;
-        let (bottom_q, bottom_c) =
-            Self::depletion_charge_and_capacitance(vd, self.cj0, self.vj, self.m, self.fc);
+        let (bottom_q, bottom_c) = Self::depletion_charge_and_capacitance(
+            vd,
+            self.cj0,
+            self.vj,
+            self.bottom_grading_coefficient(),
+            self.fc,
+        );
         qd += bottom_q;
         capd += bottom_c;
 
@@ -2253,9 +2278,10 @@ impl Diode {
 
         let normalized_depletion = 1.0 - evaluation_vd / self.vj;
         let generation_base = normalized_depletion * normalized_depletion + 0.005;
-        let generation_exponent = 0.5 * self.m;
+        let grading = self.bottom_grading_coefficient();
+        let generation_exponent = 0.5 * grading;
         let generation_factor = generation_base.powf(generation_exponent);
-        let generation_derivative = -self.m * normalized_depletion / self.vj
+        let generation_derivative = -grading * normalized_depletion / self.vj
             * generation_base.powf(generation_exponent - 1.0);
         if !(generation_factor.is_finite() && generation_derivative.is_finite()) {
             return (0.0, 0.0);
@@ -3018,6 +3044,26 @@ mod tests {
         assert_eq!(d.temperature_model.cta, 1.5e-3);
         assert_eq!(d.temperature_model.tpb, 2.5e-3);
         assert_eq!(d.temperature_model.trs1, 4e-5);
+    }
+
+    #[test]
+    fn xyce_grading_selection_preserves_authored_non_xyce_equations() {
+        let params = [("M", 1.2), ("ISR", 1e-12), ("CJO", 1e-9)]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        let mut diode = Diode::spice_defaults("d".into(), 1, 0).with_model_params(&params);
+        diode.update(&[0.4]);
+        let current = diode.candidate_current_and_conductance(0.4);
+        let charge = diode.junction_charge_and_capacitance(0.4);
+        diode.set_xyce_compatibility(true);
+        assert_eq!(diode.m, 1.2);
+        assert_ne!(diode.candidate_current_and_conductance(0.4), current);
+        assert_ne!(diode.junction_charge_and_capacitance(0.4), charge);
+        assert!(diode.physical_event_locally_c2(0.4));
+        diode.set_xyce_compatibility(false);
+        assert_eq!(diode.candidate_current_and_conductance(0.4), current);
+        assert_eq!(diode.junction_charge_and_capacitance(0.4), charge);
     }
 
     #[test]

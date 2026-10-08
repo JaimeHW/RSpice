@@ -708,3 +708,199 @@ fn diode_xyce_model_default_nbv_follows_processed_emission_coefficient() {
         }
     }
 }
+
+#[test]
+fn diode_xyce_model_activation_energy_uses_the_reference_lower_bound() {
+    for dialect in [SpiceDialect::Xyce, SpiceDialect::Ngspice] {
+        for energy in [-0.2_f64, 0.02, 0.1, 1.11] {
+            for temperature in [-23.0, 27.0, 127.0] {
+                let temp: f64 = temperature + 273.15;
+                let k_over_q = if dialect == SpiceDialect::Xyce {
+                    1.380_622_6e-23 / 1.602_191_8e-19
+                } else {
+                    1.380_648_52e-23 / 1.602_176_620_8e-19
+                };
+                let vt = temp * k_over_q;
+                let ratio = temp / 300.15;
+                let resolved = if dialect == SpiceDialect::Xyce {
+                    energy.max(0.1)
+                } else {
+                    energy
+                };
+                // Each density uses its own emission coefficient. M=0 leaves
+                // the recombination generation factor equal to one.
+                let (mut expected_i, mut expected_g) = (0.0, 0.0);
+                for (density, emission) in [(1e-14, 1.0), (1e-12, 2.0), (2e-15, 1.5)] {
+                    let isat = density
+                        * ((ratio - 1.0) * resolved / (emission * vt)
+                            + 3.0 / emission * ratio.ln())
+                        .exp();
+                    expected_i += isat * (0.5 / (emission * vt)).exp_m1();
+                    expected_g += isat * (0.5 / (emission * vt)).exp() / (emission * vt);
+                }
+                let deck = Netlist::parse(&format!("Processed diode EG\nV1 a 0 DC .5 AC 1\nD1 a 0 dm TEMP={temperature} PJ=1\n.model dm D(IS=1e-14 N=1 ISR=1e-12 NR=2 JSW=2e-15 NS=1.5 M=0 EG={energy} XTI=3 TNOM=27 CJO=0 CJSW=0 TT=2n)\n.options GMIN=0\n.end\n")).unwrap();
+                let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+                config.convergence_config.gmin_target = 0.0;
+                let engine = Engine::new(config);
+                let point = engine.run_dc_op(&deck).unwrap();
+                for actual in [
+                    -branch_current(&point, "V1"),
+                    point.try_dc_observable_named("I(D1)").unwrap(),
+                ] {
+                    assert!(
+                        (actual - expected_i).abs() < 1e-15 + 1e-8 * expected_i.abs(),
+                        "{dialect:?} EG={energy} TEMP={temperature}: {actual:e} vs {expected_i:e}"
+                    );
+                }
+                let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                let index = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("v1"))
+                    .unwrap();
+                let expected = rspice_core::Complex64::new(
+                    expected_g,
+                    std::f64::consts::TAU * 1e6 * 2e-9 * expected_g,
+                );
+                assert!(
+                    (-ac[0].currents[index] - expected).norm() < 1e-14 + 1e-8 * expected.norm(),
+                    "AC {dialect:?} EG={energy} TEMP={temperature}"
+                );
+            }
+        }
+    }
+}
+
+// Xyce updateTemperature's junction mapping, evaluated independently of the
+// core model. LEVEL=2 uses the PSpice bottom-junction law; sidewalls use LEVEL=1.
+fn reference_diode_junction(
+    temp: f64,
+    k_over_q: f64,
+    cj: f64,
+    vj: f64,
+    m: f64,
+    level: u8,
+) -> (f64, f64) {
+    let bandgap = |t: f64| 1.16 - 7.02e-4 * t * t / (t + 1108.0);
+    let ratio = temp / 300.15;
+    let vt = k_over_q * temp;
+    if level == 2 {
+        let potential = (vj - bandgap(300.15)) * ratio - 3.0 * vt * ratio.ln() + bandgap(temp);
+        let capacitance = cj / (1.0 + m * (4e-4 * (temp - 300.15) + 1.0 - potential / vj));
+        return (capacitance, potential);
+    }
+    let shift =
+        |t: f64| bandgap(t) - 1.1150877 * (t / 300.15) - 3.0 * k_over_q * t * (t / 300.15).ln();
+    let pbo = vj - shift(300.15);
+    let potential = shift(temp) + ratio * pbo;
+    let capacitance = cj / (1.0 - m * (vj - pbo) / pbo)
+        * (1.0 + m * (4e-4 * (temp - 300.15) - (potential - pbo) / pbo));
+    (capacitance, potential)
+}
+
+#[test]
+fn diode_xyce_model_grading_uses_the_reference_upper_bound() {
+    for (dialect, level) in [
+        (SpiceDialect::Xyce, 1),
+        (SpiceDialect::Xyce, 2),
+        (SpiceDialect::Ngspice, 1),
+    ] {
+        let k_over_q = if dialect == SpiceDialect::Xyce {
+            1.380_622_6e-23 / 1.602_191_8e-19
+        } else {
+            1.380_648_52e-23 / 1.602_176_620_8e-19
+        };
+        for temperature in [27.0, 127.0] {
+            let temp: f64 = temperature + 273.15;
+            let vt = k_over_q * temp;
+            let ratio = temp / 300.15;
+            let saturation = |density: f64, emission: f64| {
+                density
+                    * ((ratio - 1.0) * 1.11 / (emission * vt) + 3.0 / emission * ratio.ln()).exp()
+            };
+            for authored in [0.5_f64, 0.9, 1.2] {
+                let m = if dialect == SpiceDialect::Xyce {
+                    authored.min(0.9)
+                } else {
+                    authored
+                };
+                let (cj, phi) = reference_diode_junction(temp, k_over_q, 1e-9, 1.0, m, level);
+                // The Xyce clamp applies only to bottom M, not MJSW.
+                let (sw_cj, sw_phi) = reference_diode_junction(temp, k_over_q, 2e-10, 1.0, 1.2, 1);
+                for fc in [0.5_f64, 1.2] {
+                    for voltage in [-1.0, 0.3, 0.8] {
+                        let capacitance = |zero: f64, potential: f64, grading: f64, cutoff: f64| {
+                            if voltage < cutoff * potential {
+                                zero * (1.0 - voltage / potential).powf(-grading)
+                            } else {
+                                zero * (1.0 - cutoff).powf(-1.0 - grading)
+                                    * (1.0 - cutoff * (1.0 + grading)
+                                        + grading * voltage / potential)
+                            }
+                        };
+                        let expected_c = capacitance(cj, phi, m, fc.min(0.95))
+                            + capacitance(sw_cj, sw_phi, 1.2, 0.5);
+                        let isat = saturation(1e-16, 1.0);
+                        let boundary = -3.0 * vt;
+                        let (mut expected_i, mut expected_g) = if voltage >= boundary {
+                            (
+                                isat * (voltage / vt).exp_m1(),
+                                isat * (voltage / vt).exp() / vt,
+                            )
+                        } else {
+                            let a = (3.0 * vt / (voltage * std::f64::consts::E)).powi(3);
+                            (-isat * (1.0 + a), 3.0 * isat * a / voltage)
+                        };
+                        if voltage >= boundary || dialect == SpiceDialect::Ngspice {
+                            let evaluation = voltage.max(boundary);
+                            let isr = saturation(1e-12, 2.0);
+                            let base_i = isr * (evaluation / (2.0 * vt)).exp_m1();
+                            let base_g = isr * (evaluation / (2.0 * vt)).exp() / (2.0 * vt);
+                            let normalized = 1.0 - evaluation / phi;
+                            let base = normalized * normalized + 0.005;
+                            let factor = base.powf(0.5 * m);
+                            expected_i += base_i * factor;
+                            if voltage >= boundary {
+                                expected_g += base_g * factor
+                                    - base_i * m * normalized / phi * base.powf(0.5 * m - 1.0);
+                            }
+                        }
+                        let deck=Netlist::parse(&format!("Processed diode grading\nV1 a 0 DC {voltage} AC 1\nD1 a 0 dm TEMP={temperature} PJ=1\n.model dm D(LEVEL={level} IS=1e-16 N=1 ISR=1e-12 NR=2 CJO=1n VJ=1 M={authored} FC={fc} CJSW=.2n VJSW=1 MJSW=1.2 FCS=.5 EG=1.11 XTI=3 TNOM=27 TT=0)\n.options GMIN=0\n.end\n")).unwrap();
+                        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+                        config.convergence_config.gmin_target = 0.0;
+                        let engine = Engine::new(config);
+                        let point = engine.run_dc_op(&deck).unwrap();
+                        for actual in [
+                            -branch_current(&point, "v1"),
+                            point.try_dc_observable_named("I(D1)").unwrap(),
+                        ] {
+                            assert!(
+                                (actual - expected_i).abs() < 1e-15 + 1e-8 * expected_i.abs(),
+                                "{dialect:?} LEVEL={level} TEMP={temperature} M={authored} FC={fc} V={voltage}: {actual:e} vs {expected_i:e}"
+                            );
+                        }
+                        let ac = engine.run_ac(&deck, &[1e6]).unwrap();
+                        let index = ac[0]
+                            .branch_names
+                            .iter()
+                            .position(|n| n.eq_ignore_ascii_case("v1"))
+                            .unwrap();
+                        let actual = -ac[0].currents[index];
+                        let expected = rspice_core::Complex64::new(
+                            expected_g,
+                            std::f64::consts::TAU * 1e6 * expected_c,
+                        );
+                        assert!(
+                            (actual.re - expected.re).abs() < 1e-14 + 1e-8 * expected.re.abs(),
+                            "AC tangent {dialect:?} LEVEL={level} TEMP={temperature} M={authored} FC={fc} V={voltage}: {actual:?} vs {expected:?}"
+                        );
+                        assert!(
+                            (actual.im - expected.im).abs() < 1e-14 + 1e-8 * expected.im.abs(),
+                            "AC charge {dialect:?} LEVEL={level} TEMP={temperature} M={authored} FC={fc} V={voltage}: {actual:?} vs {expected:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
