@@ -1067,6 +1067,31 @@ fn exact_integer_sample(value: impl Into<i128>) -> Option<f64> {
     (sample as i128 == integer).then_some(sample)
 }
 
+/// A descriptor alone does not identify a response: several sidebands or
+/// distortion products deliberately share it. Preserve the qualifier using
+/// the direct PAC/DISTO export spellings where applicable.
+fn result_signal_name(signal: &rspice_core::execution::result_document::ResultSignal) -> String {
+    use rspice_core::execution::result_document::{DistortionTone, SeriesQualifier};
+    let name = signal.descriptor().display_name();
+    match signal.qualifier() {
+        None => name.to_string(),
+        Some(SeriesQualifier::PacSideband { sideband }) => format!("{name}:sb{sideband}"),
+        Some(SeriesQualifier::DistortionFundamental { tone }) => {
+            let tone = match tone {
+                DistortionTone::F1 => "f1",
+                DistortionTone::F2 => "f2",
+            };
+            format!("peak({tone}:{name})")
+        }
+        Some(SeriesQualifier::DistortionProduct { product }) => {
+            format!("peak({}:{name})", product.label())
+        }
+        Some(SeriesQualifier::PxfConversion { input, output }) => {
+            format!("{name}:sb{input}->sb{output}")
+        }
+    }
+}
+
 /// Flatten one typed result document into the shared tabular model.
 ///
 /// A document whose family carries no coordinate axis — the operating point,
@@ -1149,7 +1174,7 @@ pub(super) fn result_document_table(
         }
     }
     for signal in document.signals() {
-        let name = signal.descriptor().display_name().to_string();
+        let name = result_signal_name(signal);
         let data = match signal.values() {
             SeriesValues::Real { samples } => ColumnData::optional_real(samples.clone()),
             SeriesValues::Complex { samples } => ColumnData::optional_complex(
@@ -1262,6 +1287,22 @@ pub(super) fn result_document_table(
             path,
             "result contains no retained numeric quantities that a flat table can represent",
         ));
+    }
+
+    // Literal names can collide with qualified responses or scalars. Refuse
+    // an ambiguous projection before replacing a destination artifact.
+    let mut names = std::collections::HashSet::new();
+    names.insert(scale_name.to_ascii_lowercase());
+    for column in &columns {
+        if !names.insert(column.name.to_ascii_lowercase()) {
+            return Err(conversion_error(
+                path,
+                format!(
+                    "typed quantities project to duplicate column '{}'",
+                    column.name
+                ),
+            ));
+        }
     }
 
     Ok(ExportTable {

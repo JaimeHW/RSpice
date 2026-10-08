@@ -761,6 +761,13 @@ select `--section network` or `--section noise`: the latter keeps its own
 frequency grid, noise resistance in ohms, optimum complex reflection, and
 reference temperature. All sections are parsed and bounded before selection.
 
+Typed periodic and distortion JSON keeps response identities when converted
+or compared: PAC columns use `<signal>:sb<index>`, distortion phasors use
+`peak(<tone-or-product>:<signal>)`, and PXF transfers use
+`<signal>:sb<input>->sb<output>`. Each response remains separately selectable
+with `--variables`. Ambiguous names that would collide after projection are
+rejected before an output file is replaced.
+
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
 real/imag arrays in JSON and HDF5). One sample is a result: an operating point
