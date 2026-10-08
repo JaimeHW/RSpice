@@ -509,7 +509,14 @@ fn relocate_terms(terms: &mut [DigitalSensitivityTerm], map: &DigitalLinkedInsta
 fn relocate_wait(wait: &mut DigitalWait, map: &DigitalLinkedInstance) {
     match wait {
         DigitalWait::Event(terms) => relocate_terms(terms, map),
-        DigitalWait::Expressions(_) | DigitalWait::Delay(_) => {}
+        DigitalWait::Expressions(terms) => {
+            for term in terms {
+                if let Some(selection) = &mut term.assignment {
+                    selection.array.base = map.signals[usize::from(selection.array.base)];
+                }
+            }
+        }
+        DigitalWait::Delay(_) => {}
         DigitalWait::Repeat { event, .. } => relocate_wait(event, map),
     }
 }

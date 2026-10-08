@@ -403,6 +403,7 @@ struct DigitalExpressionState {
     program: Arc<DigitalEventProgram>,
     edge: Option<DigitalEdge>,
     previous: DigitalScalar,
+    assignment: Option<super::digital::DigitalAssignmentEventSelection>,
 }
 
 /// An event expression's live baselines. Prepared instruction graphs are shared
@@ -442,13 +443,26 @@ impl DigitalExpressionWait {
             .ok_or(DigitalEvalError::ProcessNotInPlan(self.process))?;
         let mut occurred = false;
         for state in &mut self.states {
-            if state.program.dependencies.binary_search(&changed).is_err() {
+            let assignment_change = state.assignment.is_some_and(|selection| {
+                selection
+                    .array
+                    .cell_range()
+                    .is_some_and(|range| range.contains(&changed.index()))
+            });
+            if !assignment_change && state.program.dependencies.binary_search(&changed).is_err() {
                 continue;
             }
             let mut interpreter = Interpreter::new(plan, process, environment, scratch);
             for id in &state.program.instructions {
                 let value = interpreter.compute(*id)?;
                 interpreter.scratch.table.define(*id, value);
+            }
+            if let Some(selection) = state.assignment {
+                occurred |= interpreter
+                    .selection_index(state.program.root, selection.signed)?
+                    .and_then(|index| selection.array.element(index))
+                    == Some(changed);
+                continue;
             }
             let next = interpreter.scalar(state.program.root)?.into_owned();
             let satisfied = match (&state.previous, &next, state.edge) {
@@ -1995,7 +2009,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 }
             };
             dependencies.extend(program.dependencies.iter().copied());
+            if let Some(selection) = term.assignment {
+                let range = selection.array.cell_range().ok_or_else(|| {
+                    DigitalEvalError::InvalidEventExpression {
+                        value: term.value,
+                        detail: "invalid analog assignment-event array extent".into(),
+                    }
+                })?;
+                dependencies.extend(range.map(DigitalSignalId::new));
+            }
             states.push(DigitalExpressionState {
+                assignment: term.assignment,
                 previous: self.scalar(term.value)?.into_owned(),
                 program,
                 edge: term.edge,

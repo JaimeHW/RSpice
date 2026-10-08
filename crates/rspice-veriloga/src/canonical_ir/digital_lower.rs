@@ -696,17 +696,27 @@ fn lower_with_analog_variables(
                 ));
                 continue;
             };
-            probes.push(DigitalAnalogProbe {
-                retained: true,
-                event_signal: Some(signal),
-                id: DigitalAnalogProbeId::from(probes.len()),
-                access: "$analog_event".into(),
-                quantity: super::digital::DigitalAnalogQuantity::IntegerVariable,
-                target: super::digital::DigitalAnalogProbeTarget::Variable {
-                    name: variable.target.clone(),
-                },
-                span: binding.span.into(),
-            });
+            let (lower, len) = variable.array.unwrap_or((0, 1));
+            for offset in 0..len {
+                let signal = DigitalSignalId::new(signal.index() + offset);
+                signals[usize::from(signal)].initial_value = Some(
+                    super::digital::DigitalInitialValue::FourState(FourStateValue::from_u64(32, 0)),
+                );
+                let target = if binding.array {
+                    format!("{}[{}]", variable.target, lower + i64::from(offset)).into()
+                } else {
+                    variable.target.clone()
+                };
+                probes.push(DigitalAnalogProbe {
+                    retained: true,
+                    event_signal: Some(signal),
+                    id: DigitalAnalogProbeId::from(probes.len()),
+                    access: "$analog_event".into(),
+                    quantity: super::digital::DigitalAnalogQuantity::IntegerVariable,
+                    target: super::digital::DigitalAnalogProbeTarget::Variable { name: target },
+                    span: binding.span.into(),
+                });
+            }
         }
     };
     add_events(&digital.analog_events, &module_scope, analog_variables);
@@ -910,20 +920,7 @@ fn lower_continuous_assign(
 
     let mut reads = BTreeSet::new();
     collect_expression_reads(&assignment.assignment.value, &mut reads);
-    for name in &reads {
-        if let Some(variable) = lowerer.analog_variables.get(name.as_str()) {
-            if variable.event_signal.is_none() && !variable.immutable {
-                lowerer.error(
-                    if variable.array.is_some() {
-                        format!("continuous assignment reads analog array `{name}`, whose event dependency requires per-element occurrence binding")
-                    } else {
-                        format!("continuous assignment reads analog variable `{name}` which is not assigned exclusively in analog event statements")
-                    },
-                    assignment.assignment.value.span(),
-                );
-            }
-        }
-    }
+    lowerer.validate_analog_event_reads(&assignment.assignment.value);
     let terms: Vec<DigitalSensitivityTerm> = reads
         .into_iter()
         .flat_map(|name| lowerer.read_dependencies(&name))
@@ -2973,7 +2970,9 @@ impl ProcessLowerer<'_> {
         };
         if terms.iter().all(|term| {
             signal_name(&term.signal).is_some_and(|name| {
-                self.resolved_signal(name).is_some() && self.digital_array(name).is_none()
+                self.resolved_signal(name).is_some()
+                    && (self.digital_array(name).is_none()
+                        || self.assignment_array_source(name).is_some())
             })
         }) {
             return DigitalWait::Event(self.sensitivity_terms(
@@ -2991,7 +2990,18 @@ impl ProcessLowerer<'_> {
                     term.span,
                 );
             }
-            let real = self.is_real_expression(&term.signal);
+            let assignment = if let Expression::ArrayAccess(access) = &term.signal {
+                let source = self.analog_variables.iter().find(|(_,variable)| {
+                    variable.array.is_some() && variable.event_signal.as_ref() == Some(&access.array)
+                }).map(|(name,_)| name.clone());
+                source.and_then(|source| {
+                    if !self.retained_analog_read(&source, Some(&access.index)) {
+                        self.error(format!("analog array `{source}` selection is not assigned exclusively in analog event statements"), term.span);
+                    }
+                    self.digital_array(&access.array).map(|array| (array, &*access.index, self.self_signed(&access.index)))
+                })
+            } else { None };
+            let real = assignment.as_ref().map_or_else(|| self.is_real_expression(&term.signal), |(_,index,_)| self.is_real_expression(index));
             if real && term.edge.is_some() {
                 self.error(
                     "posedge/negedge require a bit-valued event expression; use value-change control for a real expression",
@@ -3002,8 +3012,9 @@ impl ProcessLowerer<'_> {
             // control flow, never the surrounding process or its writes.
             let outer = std::mem::replace(&mut self.builder, ProcessBuilder::new());
             let entry = self.builder.create_block();
-            let value = if real { self.real_expression(entry, &term.signal) }
-                else { self.expression(entry, &term.signal) };
+            let operand = assignment.as_ref().map_or(&term.signal, |(_,index,_)| *index);
+            let value = if real { self.real_expression(entry, operand) }
+                else { self.expression(entry, operand) };
             let ty = self.builder.value_type_of(value).expect("expression type");
             self.builder.set_terminator(entry, CfgTerminator::Return);
             self.builder.seal_all_blocks();
@@ -3017,6 +3028,7 @@ impl ProcessLowerer<'_> {
                 }
             };
             super::digital::DigitalEventExpression {
+                assignment: assignment.map(|(array,_,signed)| super::digital::DigitalAssignmentEventSelection { array, signed }),
                 value, edge: term.edge.map(|edge| match edge {
                     EdgeKind::Posedge => DigitalEdge::Posedge,
                     EdgeKind::Negedge => DigitalEdge::Negedge,
@@ -3039,26 +3051,23 @@ impl ProcessLowerer<'_> {
         span: Span,
     ) -> Vec<DigitalSensitivityTerm> {
         match sensitivity {
-            crate::ast::Sensitivity::Explicit(terms) => terms
-                .iter()
-                .filter_map(|term| {
-                    let Some(signal) = signal_name(&term.signal)
-                        .and_then(|name| self.resolved_signal(name)) else {
-                        self.error(
-                            "event expression has no executable signal dependency: computed and selected event expressions require lowering",
-                            term.signal.span(),
-                        );
-                        return None;
-                    };
-                    Some(DigitalSensitivityTerm {
-                        signal,
-                        edge: term.edge.map(|edge| match edge {
-                            EdgeKind::Posedge => DigitalEdge::Posedge,
-                            EdgeKind::Negedge => DigitalEdge::Negedge,
-                        }),
-                    })
-                })
-                .collect(),
+            crate::ast::Sensitivity::Explicit(terms) => terms.iter().flat_map(|term| {
+                let name = signal_name(&term.signal);
+                let Some(signal) = name.and_then(|name| self.resolved_signal(name)) else {
+                    self.error("event expression has no executable signal dependency: computed and selected event expressions require lowering",term.signal.span());
+                    return Vec::new();
+                };
+                if let Some(source) = name.and_then(|name| self.assignment_array_source(name)).cloned() {
+                    if !self.retained_analog_read(&source,None) {
+                        self.error(format!("analog array `{source}` is not assigned exclusively in analog event statements"),term.span);
+                    }
+                    return self.arrays[&signal].cell_range().expect("validated occurrence array")
+                        .map(|signal| DigitalSensitivityTerm { signal: DigitalSignalId::new(signal), edge: None }).collect();
+                }
+                vec![DigitalSensitivityTerm { signal, edge: term.edge.map(|edge| match edge {
+                    EdgeKind::Posedge => DigitalEdge::Posedge, EdgeKind::Negedge => DigitalEdge::Negedge,
+                }) }]
+            }).collect(),
             crate::ast::Sensitivity::Implicit => {
                 let terms = guarded.map(|statement| self.scoped_read_dependencies(statement))
                     .unwrap_or_default();
@@ -3206,29 +3215,87 @@ impl ProcessLowerer<'_> {
     }
 
     fn module_read_dependencies(&self, name: &str) -> Vec<DigitalSignalId> {
-        if let Some(array) = self
+        let Some(signal) = self
             .index
             .get(name)
-            .and_then(|signal| self.arrays.get(signal))
-        {
-            array
-                .cell_range()
-                .expect("validated array shape")
-                .map(DigitalSignalId::new)
-                .collect()
-        } else {
-            self.index
-                .get(name)
-                .or_else(|| {
-                    self.analog_variables
-                        .get(name)
-                        .and_then(|variable| variable.event_signal.as_ref())
-                        .and_then(|signal| self.index.get(signal.as_str()))
-                })
-                .copied()
-                .into_iter()
-                .collect()
+            .or_else(|| {
+                self.analog_variables
+                    .get(name)
+                    .and_then(|variable| variable.event_signal.as_ref())
+                    .and_then(|signal| self.index.get(signal.as_str()))
+            })
+            .copied()
+        else {
+            return Vec::new();
+        };
+        self.arrays.get(&signal).map_or_else(
+            || vec![signal],
+            |array| {
+                array
+                    .cell_range()
+                    .expect("validated array shape")
+                    .map(DigitalSignalId::new)
+                    .collect()
+            },
+        )
+    }
+
+    fn validate_analog_event_reads(&mut self, expression: &Expression) {
+        crate::semantic::visit_expression(expression, &mut |expression| {
+            let (name, index) = match expression {
+                Expression::Identifier(id) => (&id.name, None),
+                Expression::ArrayAccess(access) => (&access.array, Some(&*access.index)),
+                _ => return,
+            };
+            if self.lookup_local(name).is_none()
+                && !self.index.contains_key(name.as_str())
+                && self.analog_variables.contains_key(name)
+                && !self.retained_analog_read(name, index)
+            {
+                self.error(format!("analog variable `{name}` is not assigned exclusively in analog event statements and cannot provide an event dependency"),expression.span());
+            }
+        });
+    }
+
+    fn assignment_array_source(&self, name: &str) -> Option<&SmolStr> {
+        self.analog_variables
+            .iter()
+            .find(|(_, variable)| {
+                variable.array.is_some() && variable.event_signal.as_deref() == Some(name)
+            })
+            .map(|(name, _)| name)
+    }
+
+    fn retained_analog_read(&self, name: &str, index: Option<&Expression>) -> bool {
+        let Some(variable) = self.analog_variables.get(name) else {
+            return false;
+        };
+        if let Some(index) = index {
+            let mut reads = BTreeSet::new();
+            collect_expression_reads(index, &mut reads);
+            if !reads.iter().any(|name| {
+                self.lookup_local(name).is_some() || self.index.contains_key(name.as_str())
+            }) {
+                let index =
+                    constants::scalar(index, self.constants, self.time_scale).and_then(|value| {
+                        match value {
+                            crate::numeric_literal::NumericLiteralValue::Integer(value) => {
+                                Some(value)
+                            }
+                            crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                                crate::array_index::checked_rounded_i64(value).ok()
+                            }
+                        }
+                    });
+                if let Some(index) = index {
+                    return self
+                        .analog_variables
+                        .get(&SmolStr::from(format!("{name}[{index}]")))
+                        .is_some_and(|cell| cell.event_assigned || cell.immutable);
+                }
+            }
         }
+        variable.event_assigned || variable.immutable
     }
 
     fn bounded_part_width(msb: i64, lsb: i64) -> Option<u32> {
@@ -3499,6 +3566,7 @@ impl ProcessLowerer<'_> {
     ) -> ValueId {
         use super::digital::{DigitalAnalogProbeTarget, DigitalAnalogQuantity};
         let (quantity, lower, len) = self.analog_array(name).expect("array classified");
+        let name_for_cells = name;
         let target_name = &self.analog_variables[name].target;
         let first = format!("{target_name}[{lower}]");
         let target = DigitalAnalogProbeTarget::Variable { name: first.into() };
@@ -3515,8 +3583,14 @@ impl ProcessLowerer<'_> {
             for offset in 0..len {
                 let name: SmolStr =
                     format!("{}[{}]", target_name, lower + i64::from(offset)).into();
+                let local: SmolStr =
+                    format!("{}[{}]", name_for_cells, lower + i64::from(offset)).into();
+                let retained = self
+                    .analog_variables
+                    .get(&local)
+                    .is_some_and(|variable| variable.event_assigned || variable.immutable);
                 self.probes.push(DigitalAnalogProbe {
-                    retained: false,
+                    retained,
                     event_signal: None,
                     id: DigitalAnalogProbeId::from(self.probes.len()),
                     access: name.clone(),

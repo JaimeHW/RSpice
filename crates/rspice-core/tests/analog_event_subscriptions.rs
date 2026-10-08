@@ -133,38 +133,44 @@ module counter(a);
  analog I(a)<+V(a)/1000;
 endmodule
 "#;
-    let mut host =
-        MixedSignalHost::compile(source, None, "counter", &[1], SchedulerLimits::default())
+    let array_source=source.replace("always @(timer(100p,100p)) count=count+1;", "integer data[-1:1]; integer selected=-1; initial #150 selected=0; analog @(timer(100p,100p)) data[selected]=0; always @(data[selected]) count=count+1;");
+    for source in [source, array_source.as_str()] {
+        let mut host =
+            MixedSignalHost::compile(source, None, "counter", &[1], SchedulerLimits::default())
+                .unwrap();
+        let evaluate = |host: &mut MixedSignalHost, time: f64, step: f64| {
+            host.begin_trial(
+                time,
+                step,
+                IntegrationCoefficients::inactive(),
+                time == 0.0,
+                false,
+            )
             .unwrap();
-    let evaluate = |host: &mut MixedSignalHost, time: f64, step: f64| {
-        host.begin_trial(
-            time,
-            step,
-            IntegrationCoefficients::inactive(),
-            time == 0.0,
-            false,
-        )
-        .unwrap();
-        for _ in 0..8 {
-            host.stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {}).unwrap();
-            if !host.settle_analog_bridges(&[0.0, 0.0]).unwrap() {
-                return;
+            for _ in 0..8 {
+                host.stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {}).unwrap();
+                if !host.settle_analog_bridges(&[0.0, 0.0]).unwrap() {
+                    return;
+                }
             }
-        }
-        panic!("analog occurrence did not settle");
-    };
-    evaluate(&mut host, 0.0, 0.0);
-    host.accept_trial().unwrap();
-    evaluate(&mut host, 100e-12, 100e-12);
-    assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 1));
-    host.reject_trial().unwrap();
-    assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 0));
-    evaluate(&mut host, 100e-12, 100e-12);
-    host.accept_trial().unwrap();
-    assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 1));
-    evaluate(&mut host, 200e-12, 100e-12);
-    host.accept_trial().unwrap();
-    assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 2));
+            panic!("analog occurrence did not settle");
+        };
+        evaluate(&mut host, 0.0, 0.0);
+        host.accept_trial().unwrap();
+        evaluate(&mut host, 100e-12, 100e-12);
+        assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 1));
+        host.reject_trial().unwrap();
+        assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 0));
+        evaluate(&mut host, 100e-12, 100e-12);
+        host.accept_trial().unwrap();
+        assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 1));
+        evaluate(&mut host, 150e-12, 50e-12);
+        host.accept_trial().unwrap();
+        assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 1));
+        evaluate(&mut host, 200e-12, 50e-12);
+        host.accept_trial().unwrap();
+        assert_eq!(host.read_digital("count").unwrap(), format!("{:032b}", 2));
+    }
 }
 
 #[test]
@@ -588,6 +594,148 @@ endmodule
         assert!(
             (actual - expected).abs() < 1e-7,
             "p@{time}: {actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn array_assignment_events_select_cells_and_retain_continuous_driver_values() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module array_events(p,q,r,s);
+ inout p,q,r,s; electrical p,q,r,s;
+ real samples[1:-1]='{0.0,0.0,0.0};
+ integer writer=-1, selected=-1, negative_seen=0, selected_seen=0, all_seen=0;
+ real implicit_value=0;
+ wreal held_value;
+ initial begin #160 selected=0; #50 selected=-1; #100 selected=1; #200 selected=0; #100 selected=1; end
+ analog @(timer(125p,250p)) begin
+   samples[writer]=0.75;
+   samples[writer]=0.75;
+   writer=writer+1;
+   if (writer>1) writer=-1;
+ end
+ always @(samples[-1]) negative_seen=negative_seen+1;
+ always @(samples[selected]) selected_seen=selected_seen+1;
+ always @(samples) all_seen=all_seen+1;
+ always @* implicit_value=samples[selected];
+ assign held_value=samples[selected];
+ analog I(p)<+(V(p)-held_value)/1000;
+ analog I(q)<+(V(q)-(negative_seen+10*selected_seen))/1000;
+ analog I(r)<+(V(r)-all_seen)/1000;
+ analog I(s)<+(V(s)-implicit_value)/1000;
+endmodule
+module wrapper(p,q,r,s);
+ inout p,q,r,s; electrical p,q,r,s;
+ array_events child(p,q,r,s);
+endmodule
+"#,
+    );
+    for module in ["array_events", "wrapper"] {
+        let deck=Netlist::parse(&format!(
+            "* array occurrences and held values\nX1 p q r s {module}\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\n.va \"{}\" {module} module={module}\n.end\n",source.path()
+        )).unwrap();
+        let result = Engine::default().run_tran(&deck, 0.8e-9, 23e-12).unwrap();
+        for (time, held, q, r) in [
+            (0.14e-9, 0.375, 11.0, 1.0),
+            (0.18e-9, 0.0, 11.0, 1.0),
+            (0.25e-9, 0.375, 11.0, 1.0),
+            (0.4e-9, 0.0, 11.0, 2.0),
+            (0.55e-9, 0.375, 11.0, 2.0),
+            (0.7e-9, 0.375, 21.0, 3.0),
+        ] {
+            for (node, expected) in [("p", held), ("q", q), ("r", r), ("s", held)] {
+                let index = result
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(node))
+                    .unwrap();
+                let point = result
+                    .time
+                    .iter()
+                    .rposition(|value| *value <= time)
+                    .unwrap();
+                let actual = result.voltage_waveform(index + 1)[point];
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{module} {node}@{time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn array_write_occurrence_uses_the_address_before_the_write_changes_it() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module indexed_write(p,q);
+ inout p,q; electrical p,q;
+ integer address[0:1]='{0,0}; integer first=0,second=0;
+ analog @(timer(125p,250p)) address[address[0]]=1;
+ always @(address[0]) first=first+1;
+ always @(address[1]) second=second+1;
+ analog I(p)<+(V(p)-first)/1000;
+ analog I(q)<+(V(q)-second)/1000;
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!(
+        "* stable assignment address\nX1 p q indexed_write\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" indexed_write\n.end\n",source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 0.8e-9, 50e-12).unwrap();
+    for (time, q) in [(0.2e-9, 0.0), (0.45e-9, 0.5), (0.7e-9, 1.0)] {
+        assert!((voltage(&result, "p", time) - 0.5).abs() < 1e-7);
+        assert!((voltage(&result, "q", time) - q).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn analog_array_event_ownership_is_checked_per_selected_element() {
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    let source = r#"
+`timescale 1ps/1ps
+module cells(a,p);
+ input a; electrical a;
+ inout p; electrical p;
+ real data[0:1]='{0.0,0.0}; integer seen=0;
+ wreal held;
+ analog begin data[1]=V(a); @(timer(125p)) data[0]=0.75; I(p)<+(V(p)-(held+seen))/1000; end
+ always @(data[0]) seen=seen+1;
+ assign held=data[0];
+endmodule
+"#;
+    let input = Source::new(source);
+    let deck = Netlist::parse(&format!(
+        "* independent cell ownership\nV1 a 0 1\nX1 a p cells\nRp p 0 1k\n.va \"{}\" cells\n.end\n",
+        input.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 0.3e-9, 40e-12).unwrap();
+    assert!((voltage(&result, "p", 0.2e-9) - 0.875).abs() < 1e-7);
+    for invalid in [
+        source.replace("@(data[0])", "@(data[1])"),
+        source.replace("assign held=data[0]", "assign held=data[1]"),
+        source.replace(
+            "always @(data[0]) seen=seen+1;",
+            "real observed; reg tick=0; always @* observed=data[1]+(tick?1:0);",
+        ),
+    ] {
+        let error = MixedSignalHost::compile(
+            &invalid,
+            None,
+            "invalid",
+            &[1, 2],
+            SchedulerLimits::default(),
+        )
+        .err()
+        .expect("continuous cell must not acquire an assignment-event dependency");
+        assert!(
+            error.to_string().contains("not assigned exclusively"),
+            "{error}"
         );
     }
 }

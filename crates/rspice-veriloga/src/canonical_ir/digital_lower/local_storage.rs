@@ -211,41 +211,41 @@ impl ProcessLowerer<'_> {
         match statement {
             DigitalStatement::BlockingAssign(assign)
             | DigitalStatement::NonblockingAssign(assign) => {
-                assignment_reads(assign, &mut names);
+                self.assignment_event_reads(assign, &mut names);
             }
             DigitalStatement::Conditional(conditional) => {
-                collect_expression_reads(&conditional.condition, &mut names);
+                self.event_expression_reads(&conditional.condition, &mut names);
                 children.push(conditional.then_branch.as_ref());
                 children.extend(conditional.else_branch.as_deref());
             }
             DigitalStatement::Case(case) => {
-                collect_expression_reads(&case.selector, &mut names);
+                self.event_expression_reads(&case.selector, &mut names);
                 for item in &case.items {
                     for label in &item.labels {
-                        collect_expression_reads(label, &mut names);
+                        self.event_expression_reads(label, &mut names);
                     }
                     children.push(&item.statement);
                 }
                 children.extend(case.default.as_deref());
             }
             DigitalStatement::For(statement) => {
-                assignment_reads(&statement.init, &mut names);
-                assignment_reads(&statement.update, &mut names);
-                collect_expression_reads(&statement.condition, &mut names);
+                self.assignment_event_reads(&statement.init, &mut names);
+                self.assignment_event_reads(&statement.update, &mut names);
+                self.event_expression_reads(&statement.condition, &mut names);
                 children.push(statement.body.as_ref());
             }
             DigitalStatement::While(statement) => {
-                collect_expression_reads(&statement.condition, &mut names);
+                self.event_expression_reads(&statement.condition, &mut names);
                 children.push(statement.body.as_ref());
             }
             DigitalStatement::Repeat(statement) => {
-                collect_expression_reads(&statement.count, &mut names);
+                self.event_expression_reads(&statement.count, &mut names);
                 children.push(statement.body.as_ref());
             }
             DigitalStatement::Forever(statement) => children.push(statement.body.as_ref()),
             DigitalStatement::Timing(timing) => {
                 if let TimingControl::Delay(delay) = &timing.control {
-                    collect_expression_reads(&delay.value, &mut names);
+                    self.event_expression_reads(&delay.value, &mut names);
                 }
                 children.extend(timing.statement.as_deref());
             }
@@ -282,6 +282,23 @@ impl ProcessLowerer<'_> {
                     .flat_map(|name| self.module_read_dependencies(&name)),
             )
             .collect()
+    }
+    fn event_expression_reads(&mut self, expression: &Expression, reads: &mut BTreeSet<String>) {
+        self.validate_analog_event_reads(expression);
+        collect_expression_reads(expression, reads);
+    }
+    fn assignment_event_reads(&mut self, assign: &DigitalAssign, reads: &mut BTreeSet<String>) {
+        self.event_expression_reads(&assign.value, reads);
+        match &assign.timing {
+            Some(TimingControl::Delay(delay)) => self.event_expression_reads(&delay.value, reads),
+            Some(TimingControl::Event(event)) => {
+                if let Some(count) = &event.repeat {
+                    self.event_expression_reads(count, reads);
+                }
+            }
+            None => {}
+        }
+        collect_lvalue_index_reads(&assign.target, reads);
     }
 }
 

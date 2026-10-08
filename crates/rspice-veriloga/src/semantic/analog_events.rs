@@ -11,6 +11,7 @@ use smol_str::SmolStr;
 pub struct AnalogEventBinding {
     /// Authored event-assigned variable, absent for an event-function site.
     pub source_variable: Option<SmolStr>,
+    pub array: bool,
     pub variable: SmolStr,
     pub signal: SmolStr,
     pub span: Span,
@@ -35,7 +36,7 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
         .variables
         .iter()
         .flat_map(|decl| &decl.items)
-        .filter(|item| item.dimensions.is_empty() && !digital_writes.contains(&item.name))
+        .filter(|item| !digital_writes.contains(&item.name))
         .map(|item| item.name.clone())
         .collect();
     let mut analog_local_names = BTreeSet::new();
@@ -73,6 +74,13 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
         bindings: Vec::new(),
         functions: Vec::new(),
         variable_events: BTreeMap::new(),
+        arrays: source
+            .variables
+            .iter()
+            .flat_map(|decl| &decl.items)
+            .filter(|item| !item.dimensions.is_empty())
+            .map(|item| (item.name.clone(), item.dimensions.clone()))
+            .collect(),
         candidates,
     };
     lower.names.extend(analog_local_names);
@@ -115,13 +123,20 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
     }
     for binding in &lower.bindings {
         let span = binding.span;
+        let dimensions = binding
+            .source_variable
+            .as_ref()
+            .and_then(|name| lower.arrays.get(name))
+            .cloned()
+            .unwrap_or_default();
+        let init = dimensions.is_empty().then(|| number(0, span));
         module.variables.push(VariableDecl {
             var_type: VarType::Integer,
             span,
             items: vec![VariableItem {
                 name: binding.variable.clone(),
-                dimensions: Vec::new(),
-                init: Some(number(0, span)),
+                dimensions: dimensions.clone(),
+                init: init.clone(),
                 span,
             }],
         });
@@ -135,8 +150,8 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
             }),
             items: vec![DigitalDeclItem {
                 name: binding.signal.clone(),
-                dimensions: Vec::new(),
-                init: Some(number(0, span)),
+                dimensions,
+                init,
                 span,
             }],
             span,
@@ -155,6 +170,7 @@ struct Lower {
     functions: Vec<(EventExpr, AnalogEventBinding)>,
     variable_events: BTreeMap<SmolStr, AnalogEventBinding>,
     candidates: BTreeSet<SmolStr>,
+    arrays: BTreeMap<SmolStr, Vec<ArrayDimension>>,
 }
 impl Lower {
     fn binding(&mut self, span: Span, source_variable: Option<SmolStr>) -> AnalogEventBinding {
@@ -166,6 +182,9 @@ impl Lower {
                 self.names.insert(variable.clone());
                 self.names.insert(signal.clone());
                 let binding = AnalogEventBinding {
+                    array: source_variable
+                        .as_ref()
+                        .is_some_and(|name| self.arrays.contains_key(name)),
                     source_variable,
                     variable,
                     signal,
@@ -187,10 +206,13 @@ impl Lower {
     }
     fn continuous_reads(&mut self, expression: &Expression) {
         super::flow_probes::visit_expression(expression, &mut |expression| {
-            if let Expression::Identifier(id) = expression {
-                if self.candidates.contains(&id.name) {
-                    self.variable_binding(&id.name, id.span);
-                }
+            let name = match expression {
+                Expression::Identifier(id) => &id.name,
+                Expression::ArrayAccess(access) => &access.array,
+                _ => return,
+            };
+            if self.candidates.contains(name) {
+                self.variable_binding(name, expression.span());
             }
         });
     }
@@ -200,10 +222,13 @@ impl Lower {
             locals,
             &mut |expression, locals| {
                 super::flow_probes::visit_expression(expression, &mut |expression| {
-                    if let Expression::Identifier(id) = expression {
-                        if self.candidates.contains(&id.name) && !locals.contains(&id.name) {
-                            self.variable_binding(&id.name, id.span);
-                        }
+                    let name = match expression {
+                        Expression::Identifier(id) => &id.name,
+                        Expression::ArrayAccess(access) => &access.array,
+                        _ => return,
+                    };
+                    if self.candidates.contains(name) && !locals.contains(name) {
+                        self.variable_binding(name, expression.span());
                     }
                 });
             },
@@ -221,6 +246,19 @@ impl Lower {
             return Ok(());
         };
         for term in terms {
+            if let Expression::ArrayAccess(access) = &mut term.signal {
+                if self.candidates.contains(&access.array) && !locals.contains(&access.array) {
+                    if term.edge.is_some() || access.packed.is_some() {
+                        return invalid(
+                            "analog array assignment events require an unpacked element without an edge qualifier",
+                            term.span,
+                        );
+                    }
+                    let binding = self.variable_binding(&access.array, term.span);
+                    access.array = binding.signal;
+                    continue;
+                }
+            }
             let binding = if let Some(event) = event_function(&term.signal)? {
                 if term.edge.is_some() {
                     return invalid(
@@ -469,6 +507,8 @@ pub(super) struct AssignmentEvents {
     pub event_depth: usize,
     writes: BTreeMap<SmolStr, Writes>,
     counters: BTreeMap<SmolStr, SmolStr>,
+    arrays: BTreeMap<SmolStr, (i64, usize)>,
+    array_targets: BTreeMap<SmolStr, (SmolStr, i64)>,
 }
 #[derive(Default)]
 struct Writes {
@@ -483,6 +523,8 @@ impl AssignmentEvents {
         };
         Self {
             event_depth: 0,
+            arrays: BTreeMap::new(),
+            array_targets: BTreeMap::new(),
             writes: lowered
                 .candidates
                 .iter()
@@ -498,20 +540,73 @@ impl AssignmentEvents {
                 .collect(),
         }
     }
-    pub fn record(&mut self, name: &SmolStr, initial: bool, span: Span) -> Option<AnalogStatement> {
-        let writes = self.writes.get_mut(name)?;
+    pub fn register_arrays(
+        &mut self,
+        arrays: &std::collections::HashMap<SmolStr, super::AnalyzedArray>,
+    ) {
+        for (name, layout) in arrays {
+            if self.writes.remove(name).is_none() {
+                continue;
+            }
+            self.arrays.insert(name.clone(), (layout.lower, layout.len));
+            for offset in 0..layout.len {
+                let index = layout.lower + offset as i64;
+                let element: SmolStr = format!("{name}[{index}]").into();
+                self.writes.insert(element.clone(), Writes::default());
+                if let Some(counter) = self.counters.get(name) {
+                    self.array_targets.insert(element, (counter.clone(), index));
+                }
+            }
+        }
+    }
+    pub fn has_counter(&self, name: &SmolStr) -> bool {
+        self.counters.contains_key(name)
+    }
+    pub fn record_indexed(
+        &mut self,
+        name: &SmolStr,
+        index: Expression,
+        initial: bool,
+        span: Span,
+    ) -> Option<AnalogStatement> {
+        let &(lower, len) = self.arrays.get(name)?;
+        for offset in 0..len {
+            let element: SmolStr = format!("{name}[{}]", lower + offset as i64).into();
+            self.record_write(&element, initial);
+        }
+        if !initial && self.event_depth > 0 {
+            self.counters
+                .get(name)
+                .map(|counter| increment_at(counter, Some(index), span))
+        } else {
+            None
+        }
+    }
+    fn record_write(&mut self, name: &SmolStr, initial: bool) {
+        let Some(writes) = self.writes.get_mut(name) else {
+            return;
+        };
         if initial {
             writes.initial = true;
         } else if self.event_depth > 0 {
             writes.event = true;
-            return self
-                .counters
-                .get(name)
-                .map(|counter| increment(counter, span));
         } else {
             writes.continuous = true;
         }
-        None
+    }
+    pub fn record(&mut self, name: &SmolStr, initial: bool, span: Span) -> Option<AnalogStatement> {
+        self.record_write(name, initial);
+        if initial || self.event_depth == 0 {
+            return None;
+        }
+        if let Some((counter, index)) = self.array_targets.get(name) {
+            Some(increment_at(counter, Some(integer(*index, span)), span))
+        } else {
+            self.counters
+                .get(name)
+                .filter(|_| !self.arrays.contains_key(name))
+                .map(|counter| increment(counter, span))
+        }
     }
     pub fn finish(&self, module: &mut super::AnalyzedModule) -> CompileResult<()> {
         let event_assigned =
@@ -519,6 +614,9 @@ impl AssignmentEvents {
         let immutable = |writes: &Writes| !writes.event && !writes.continuous;
         for binding in &module.digital.analog_events {
             if let Some(name) = &binding.source_variable {
+                if self.arrays.contains_key(name) {
+                    continue;
+                }
                 let writes = &self.writes[name];
                 if !event_assigned(writes) && !immutable(writes) {
                     return unsupported(
@@ -542,33 +640,79 @@ impl AssignmentEvents {
             .filter(|(_, writes)| immutable(writes))
             .map(|(name, _)| name.clone())
             .collect();
+        for (name, &(lower, len)) in &self.arrays {
+            let cells: Vec<_> = (0..len)
+                .map(|offset| {
+                    &self.writes[&SmolStr::from(format!("{name}[{}]", lower + offset as i64))]
+                })
+                .collect();
+            if cells.iter().all(|writes| immutable(writes)) {
+                module.digital.immutable_analog_variables.push(name.clone());
+            } else if cells
+                .iter()
+                .all(|writes| immutable(writes) || event_assigned(writes))
+            {
+                module.digital.event_assigned_variables.push(name.clone());
+            }
+        }
         Ok(())
     }
 }
 
 fn increment(name: &str, span: Span) -> AnalogStatement {
+    increment_at(name, None, span)
+}
+fn increment_at(name: &str, index: Option<Expression>, span: Span) -> AnalogStatement {
+    let (target, value) = if let Some(index) = index {
+        (
+            LValue::ArrayAccess {
+                name: name.into(),
+                index: Box::new(index.clone()),
+                span,
+            },
+            Expression::ArrayAccess(ArrayAccessExpr {
+                array: name.into(),
+                index: Box::new(index),
+                packed: None,
+                discrete_validity: None,
+                span,
+            }),
+        )
+    } else {
+        (
+            LValue::Variable {
+                name: name.into(),
+                span,
+            },
+            identifier(name, span),
+        )
+    };
     AnalogStatement::Assignment(AssignmentStmt {
-        target: LValue::Variable {
-            name: name.into(),
-            span,
-        },
+        target,
         span,
         value: Expression::Conditional(ConditionalExpr {
             condition: Box::new(Expression::Binary(BinaryExpr {
                 op: BinaryOp::Eq,
-                left: Box::new(identifier(name, span)),
+                left: Box::new(value.clone()),
                 right: Box::new(number(i32::MAX, span)),
                 span,
             })),
             then_expr: Box::new(number(0, span)),
             else_expr: Box::new(Expression::Binary(BinaryExpr {
                 op: BinaryOp::Add,
-                left: Box::new(identifier(name, span)),
+                left: Box::new(value.clone()),
                 right: Box::new(number(1, span)),
                 span,
             })),
             span,
         }),
+    })
+}
+fn integer(value: i64, span: Span) -> Expression {
+    Expression::Number(NumberLit {
+        value: value as f64,
+        raw: value.to_string().into(),
+        span,
     })
 }
 fn number(value: i32, span: Span) -> Expression {

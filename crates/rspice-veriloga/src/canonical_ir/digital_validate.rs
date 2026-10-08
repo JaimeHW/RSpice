@@ -515,7 +515,7 @@ impl CanonicalDigitalPlan {
                             }
                             check_terms(terms)
                         }
-                        DigitalWait::Expressions(terms) => check_expressions(function, terms),
+                        DigitalWait::Expressions(terms) => check_expressions(function, terms, self, &event_signals),
                         DigitalWait::Delay(value) => {
                             if !matches!(
                                 function.value(*value).value_type,
@@ -1105,12 +1105,31 @@ pub(crate) fn event_expression_schedule(
 fn check_expressions(
     function: &super::CfgFunction,
     terms: &[DigitalEventExpression],
+    plan: &CanonicalDigitalPlan,
+    event_signals: &HashSet<super::ids::DigitalSignalId>,
 ) -> IrValidationResult {
     if terms.is_empty() {
         return Err(error("event expression list must not be empty"));
     }
     for term in terms {
         event_expression_schedule(function, term.value).map_err(error)?;
+        if let Some(selection) = term.assignment {
+            if term.edge.is_some()
+                || !plan
+                    .arrays
+                    .iter()
+                    .any(|array| array.storage == selection.array)
+                || !selection.array.cell_range().is_some_and(|range| {
+                    range
+                        .map(super::ids::DigitalSignalId::new)
+                        .all(|id| event_signals.contains(&id))
+                })
+            {
+                return Err(error(
+                    "analog assignment-event selection requires an occurrence array without an edge qualifier",
+                ));
+            }
+        }
         if term.edge.is_some() && function.value(term.value).value_type == CfgValueType::Real {
             return Err(error("edge event expression must have a bit-valued result"));
         }

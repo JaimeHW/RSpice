@@ -388,6 +388,9 @@ mod digital_walk;
 mod discrete_projection;
 mod elaboration;
 mod flow_probes;
+pub(crate) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&Expression)) {
+    flow_probes::visit_expression(expression, visit);
+}
 mod function_effects;
 mod implicit_integrator;
 mod instance_parameters;
@@ -1930,6 +1933,7 @@ impl SemanticAnalyzer {
 
         // Establish ownership before routing declaration initialization. Numeric
         // declarations do not choose a domain; their procedural writers do.
+        self.assignment_events.register_arrays(&analyzed.arrays);
         self.analyze_digital(module, &mut analyzed);
         if let Some(lowered) = &event_lowering {
             analyzed.digital.analog_events = lowered.bindings.clone();
@@ -5420,15 +5424,45 @@ impl SemanticAnalyzer {
             );
         }
 
-        if let Some(index) = dyn_index {
-            return self.push_indexed_assignment(
-                target_name,
-                index,
+        if let Some(mut index) = dyn_index {
+            // The write and its occurrence must use the same address, even
+            // when the write changes an array value used by that address.
+            if self.assignment_events.has_counter(&target_name) {
+                self.local_counter += 1;
+                let name: SmolStr =
+                    format!("$rspice$array_write_index${}", self.local_counter).into();
+                self.register_function_temp(module, name.clone(), VarType::Real, span)?;
+                self.analyze_assignment(
+                    &AssignmentStmt {
+                        target: LValue::Variable {
+                            name: name.clone(),
+                            span,
+                        },
+                        value: index,
+                        span,
+                    },
+                    module,
+                    sink,
+                )?;
+                index = Expression::Identifier(Identifier { name, span });
+            }
+            self.push_indexed_assignment(
+                target_name.clone(),
+                index.clone(),
                 expression,
                 value_type,
                 span,
                 sink,
-            );
+            )?;
+            if let Some(increment) = self.assignment_events.record_indexed(
+                &target_name,
+                index,
+                self.in_analog_initial,
+                span,
+            ) {
+                self.analyze_statement(&increment, module, sink)?;
+            }
+            return Ok(());
         }
 
         // Find variable index; assignments to unknown storage are an error

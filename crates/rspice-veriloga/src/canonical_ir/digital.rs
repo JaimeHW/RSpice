@@ -247,6 +247,16 @@ pub struct DigitalSensitivityTerm {
 pub struct DigitalEventExpression {
     pub value: super::ids::ValueId,
     pub edge: Option<DigitalEdge>,
+    /// For an analog array assignment event, value computes the selected index.
+    /// Index changes alone are not assignments and cannot trigger this term.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignment: Option<DigitalAssignmentEventSelection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalAssignmentEventSelection {
+    pub array: DigitalArrayRef,
+    pub signed: bool,
 }
 
 /// How a sensitivity list came to be.

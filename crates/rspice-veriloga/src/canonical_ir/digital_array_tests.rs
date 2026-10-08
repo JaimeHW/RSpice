@@ -400,6 +400,7 @@ fn digital_arrays_link_validate_and_observe_selected_elements() {
             wait: DigitalWait::Expressions(vec![DigitalEventExpression {
                 value: read,
                 edge: None,
+                assignment: None,
             }]),
             resume,
             resume_args: vec![],
