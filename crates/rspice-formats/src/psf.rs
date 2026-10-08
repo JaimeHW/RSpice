@@ -183,6 +183,11 @@ fn parse_psf_number(token: &str, line: usize, identity: &str) -> Result<f64, Str
     if !value.is_finite() {
         return Err(format!("line {line} has non-finite value for '{identity}'"));
     }
+    if crate::numeric::decimal_underflowed(token, value) {
+        return Err(format!(
+            "line {line}: numeric token '{token}' for '{identity}' underflows at binary64 precision"
+        ));
+    }
     Ok(value)
 }
 
@@ -190,6 +195,52 @@ fn parse_psf_number(token: &str, line: usize, identity: &str) -> Result<f64, Str
 mod tests {
     use super::*;
     use std::error::Error as _;
+
+    fn sample(coordinate: &str, value: &str) -> String {
+        format!(
+            "HEADER\n\"analysis\" \"tran\"\nSWEEP\n\"time\" \"s\"\nTRACE\n\"V(out)\" \"V\"\nVALUE\n({coordinate} {value})\nEND\n"
+        )
+    }
+
+    #[test]
+    fn coordinates_and_samples_refuse_decimal_underflow_with_source_context() {
+        let limits = PsfReadLimits {
+            max_columns: 2,
+            max_rows: 1,
+        };
+        for literal in ["1e-999", "-1e-999", "2e-324", "-2e-324"] {
+            for (source, identity) in [
+                (sample(literal, "1"), "time"),
+                (sample("0", literal), "V(out)"),
+            ] {
+                let error = decode_psf_ascii(source.as_bytes(), limits)
+                    .unwrap_err()
+                    .to_string();
+                for expected in ["underflow", "line 8", identity, literal] {
+                    assert!(error.contains(expected), "{error}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn authored_zero_and_representable_subnormal_samples_remain_exact() {
+        let limits = PsfReadLimits {
+            max_columns: 2,
+            max_rows: 1,
+        };
+        for (literal, expected) in [
+            ("0e999", 0.0_f64),
+            ("-0e-999", -0.0_f64),
+            ("5e-324", 5e-324_f64),
+            ("-5e-324", -5e-324_f64),
+        ] {
+            let source = sample(literal, literal);
+            let data = decode_psf_ascii(source.as_bytes(), limits).unwrap();
+            assert_eq!(data.coordinate[0].to_bits(), expected.to_bits());
+            assert_eq!(data.signal_values[0][0].to_bits(), expected.to_bits());
+        }
+    }
 
     #[test]
     fn quoted_columns_limits_and_source_errors_survive_decoding() {
