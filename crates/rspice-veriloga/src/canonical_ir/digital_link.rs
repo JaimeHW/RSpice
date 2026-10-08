@@ -286,6 +286,9 @@ pub fn link_digital_plans(
         let mut signal = slots[first].clone();
         signal.name = net.name.clone().into();
         signal.procedurally_assignable = false;
+        // A variable port retains its initializer on its own storage. Its
+        // connection process drives this resolved net after initialization.
+        signal.initial_value = None;
         let net_slot = slots.len();
         index(net_slot, "signal")?;
         slots.push(signal);
