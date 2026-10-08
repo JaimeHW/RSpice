@@ -332,6 +332,13 @@ mod tests {
         assert!(header.contains("'shape': (3, 2, )"), "{header}");
         assert_eq!(bytes.len(), 128 + 6 * 16);
         assert_eq!(column_order(&export), "column order = frequency, V(out)");
+        let reopened = parse_result_dataset("ac.npy", &bytes).expect("reopen a complex matrix");
+        assert_eq!(reopened.sample_count, 3);
+        assert_eq!(reopened.waveforms.len(), 1);
+        assert_eq!(reopened.waveforms[0].x.as_ref(), &[1.0, 10.0, 100.0]);
+        let complex = reopened.waveforms[0].complex.as_ref().unwrap();
+        assert_eq!(complex.real.as_ref(), &[1.0, 0.5, 0.25]);
+        assert_eq!(complex.imag.as_ref(), &[0.0, -0.5, -0.25]);
     }
 
     #[test]

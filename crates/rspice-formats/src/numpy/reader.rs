@@ -71,6 +71,9 @@ pub enum NumpyReadFailure {
     ComplexCoordinate {
         name: String,
     },
+    ImaginaryMatrixCoordinate {
+        sample: usize,
+    },
 }
 
 impl std::fmt::Display for NumpyReadFailure {
@@ -122,6 +125,10 @@ impl std::fmt::Display for NumpyReadFailure {
                 write!(f, "NPZ requires one coordinate array named {expected}")
             }
             Self::ComplexCoordinate { .. } => f.write_str("NPZ coordinate array cannot be complex"),
+            Self::ImaginaryMatrixCoordinate { sample } => write!(
+                f,
+                "NPY coordinate column must have zero imaginary components; invalid sample {sample}"
+            ),
         }
     }
 }
@@ -350,6 +357,9 @@ pub(super) fn npy_vector(
     Ok((array.real.clone(), array.imag.clone()))
 }
 
+/// Interpret column zero as the coordinate in every multi-column table,
+/// including complex matrices written by `matrix::encode_npy`. A vector or
+/// single-column table has no explicit coordinate and uses sample indices.
 pub fn npy_matrix_to_dataset(
     array: NpyArray,
     max_rows: usize,
@@ -378,7 +388,15 @@ pub fn npy_matrix_to_dataset(
             row * columns + column
         }
     };
-    if array.imag.is_none() && columns >= 2 {
+    if columns >= 2 {
+        if let Some(imag) = &array.imag
+            && let Some(sample) = (0..rows).find(|row| imag[index(*row, 0)] != 0.0)
+        {
+            return Err(read_error(
+                format,
+                NumpyReadFailure::ImaginaryMatrixCoordinate { sample },
+            ));
+        }
         let coordinate = (0..rows).map(|row| array.real[index(row, 0)]).collect();
         let signals = (1..columns)
             .map(|column| DecodedNumericSignal {
@@ -386,7 +404,10 @@ pub fn npy_matrix_to_dataset(
                 real: (0..rows)
                     .map(|row| array.real[index(row, column)])
                     .collect(),
-                imag: None,
+                imag: array
+                    .imag
+                    .as_ref()
+                    .map(|imag| (0..rows).map(|row| imag[index(row, column)]).collect()),
                 unit: None,
             })
             .collect();
@@ -429,6 +450,93 @@ pub fn npy_matrix_to_dataset(
 mod tests {
     use super::*;
     use npyz::WriterBuilder as _;
+
+    #[test]
+    fn complex_coordinate_first_matrices_preserve_axes_and_rectangular_samples() {
+        use num_complex::Complex64;
+        let rows = [
+            [
+                Complex64::new(-0.0, 0.0),
+                Complex64::new(3.0, 4.0),
+                Complex64::new(-0.0, -2.0),
+            ],
+            [
+                Complex64::new(1e-9, -0.0),
+                Complex64::new(f64::NAN, f64::NAN),
+                Complex64::new(2.0, 1.0),
+            ],
+            [
+                Complex64::new(3e-9, 0.0),
+                Complex64::new(1.0, -1.0),
+                Complex64::new(0.0, -0.0),
+            ],
+        ];
+        for fortran in [false, true] {
+            let mut bytes = Vec::new();
+            let mut writer = npyz::WriteOptions::<Complex64>::new()
+                .default_dtype()
+                .shape(&[3, 3])
+                .order(if fortran {
+                    npyz::Order::Fortran
+                } else {
+                    npyz::Order::C
+                })
+                .writer(&mut bytes)
+                .begin_nd()
+                .unwrap();
+            if fortran {
+                writer
+                    .extend((0..3).flat_map(|column| rows.iter().map(move |row| row[column])))
+                    .unwrap();
+            } else {
+                writer.extend(rows.iter().flatten().copied()).unwrap();
+            }
+            writer.finish().unwrap();
+            let array = decode_npy(&bytes, 18, "numpy_npy").unwrap();
+            let decoded = npy_matrix_to_dataset(array, 3, 3, "numpy_npy").unwrap();
+            assert_eq!(
+                decoded
+                    .coordinate
+                    .iter()
+                    .map(|x| x.to_bits())
+                    .collect::<Vec<_>>(),
+                rows.iter()
+                    .map(|row| row[0].re.to_bits())
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(decoded.signals.len(), 2);
+            for (index, signal) in decoded.signals.iter().enumerate() {
+                assert_eq!(signal.name, format!("signal_{}", index + 1));
+                for (row, expected) in rows.iter().enumerate() {
+                    assert_eq!(signal.real[row].to_bits(), expected[index + 1].re.to_bits());
+                    assert_eq!(
+                        signal.imag.as_ref().unwrap()[row].to_bits(),
+                        expected[index + 1].im.to_bits()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn matrix_coordinates_cannot_silently_discard_an_imaginary_component() {
+        for imaginary in [1.0, f64::NAN, f64::INFINITY] {
+            let bytes = crate::numpy::encode_complex_array(
+                &[2, 2],
+                &[
+                    num_complex::Complex64::new(0.0, 0.0),
+                    num_complex::Complex64::new(1.0, 2.0),
+                    num_complex::Complex64::new(1.0, imaginary),
+                    num_complex::Complex64::new(3.0, 4.0),
+                ],
+            )
+            .unwrap();
+            let array = decode_npy(&bytes, 8, "numpy_npy").unwrap();
+            let error = npy_matrix_to_dataset(array, 2, 2, "numpy_npy").unwrap_err();
+            assert!(error.to_string().contains("coordinate column"), "{error}");
+            assert!(error.to_string().contains("sample 1"), "{error}");
+        }
+    }
 
     #[test]
     fn projects_fortran_order_without_transposing_samples() {
