@@ -23,6 +23,7 @@ impl<'a> PreparedEventCircuit<'a> {
                 | Vccs
                 | Cccs
                 | Bjt
+                | Diode
                 | InductorCoupling
                 | CoupledInductorPair
                 | TransmissionLine
@@ -240,6 +241,25 @@ impl<'a> PreparedEventCircuit<'a> {
                     options.limits.max_result_values,
                 )?;
                 ports.push((stamp.pp.row, stamp.nn.row));
+            }
+        }
+        for diode in &circuit.diodes.devices {
+            check_abort(abort)?;
+            terminals(diode.node_anode, diode.node_cathode)?;
+            if diode.rs != 0.0 {
+                return Err(error(format!(
+                    "diode '{}' has an unprepared series-resistance node",
+                    diode.name
+                )));
+            }
+            if diode.has_charge_storage() {
+                ResourceLimitError::ensure(
+                    ResourceKind::ResultValues,
+                    size.saturating_mul(64)
+                        .saturating_add(ports.len().saturating_add(1).saturating_mul(2)),
+                    options.limits.max_result_values,
+                )?;
+                ports.push((diode.node_anode, diode.node_cathode));
             }
         }
         for (index, &ordinal) in vs.branch_indices.iter().enumerate() {

@@ -1,44 +1,7 @@
 //! Nonlinear voltage constraints coupled to physical charge and GP memory.
 use super::*;
 use rspice_core::CurrentImpulseOwner;
-use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode};
-
-fn exact_restart(
-    engine: &Engine,
-    deck: &Netlist,
-    original: &TransientResult,
-    checkpoint: &TransientCheckpoint,
-    stop: f64,
-    step: f64,
-) {
-    let checkpoint = TransientCheckpoint::from_bytes(
-        &checkpoint
-            .to_bytes(TransientCheckpointEncoding::Packed)
-            .unwrap(),
-    )
-    .unwrap();
-    let (resumed, _) = engine
-        .run_tran_resume(deck, &checkpoint, stop, step)
-        .unwrap();
-    let seam = original
-        .time
-        .iter()
-        .position(|time| *time == resumed.time[0])
-        .unwrap();
-    assert_eq!(resumed.time, original.time[seam..]);
-    for (actual, expected) in resumed
-        .voltages
-        .iter()
-        .chain(&resumed.branch_currents)
-        .zip(original.voltages.iter().chain(&original.branch_currents))
-    {
-        if expected.is_empty() {
-            assert!(actual.is_empty());
-        } else {
-            assert_eq!(actual, &expected[seam..]);
-        }
-    }
-}
+use rspice_core::engine::TransientStartupMode;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]

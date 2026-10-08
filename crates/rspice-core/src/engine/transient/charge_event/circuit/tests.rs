@@ -281,11 +281,16 @@ fn prepared_event_circuit_refuses_mismatched_coupling_identity_and_coefficients(
 #[test]
 fn prepared_event_circuit_refuses_unowned_equations_and_obeys_limits_and_abort() {
     let options = options();
-    let unsupported = build("unsupported event\nV1 a 0 1\nD1 a 0 dm\n.model dm D\n.end\n");
+    let unsupported = build("unsupported event\nV1 a 0 1\nH1 b 0 V1 1\nR1 b 0 1k\n.end\n");
     let failure = PreparedEventCircuit::new(&unsupported, 1e-20, &options, &NoAbort)
         .err()
         .unwrap();
-    assert!(failure.to_string().contains("diode"), "{failure}");
+    assert!(
+        failure
+            .to_string()
+            .contains("current-controlled voltage sources"),
+        "{failure}"
+    );
     let mut circuit = build("event\nV1 a 0 1\nR1 a 0 1k\n.end\n");
     let mut restricted = self::options();
     restricted.limits.max_matrix_unknowns = 1;

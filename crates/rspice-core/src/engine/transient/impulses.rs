@@ -24,6 +24,7 @@ pub(super) struct Plan {
     num_nodes: usize,
     solved_branches: usize,
     capacitors: Vec<Option<usize>>,
+    diodes: Vec<Option<usize>>,
     bjt_terminals: Vec<[usize; 4]>,
     controlled_currents: Vec<Vec<(usize, Value)>>,
 }
@@ -71,6 +72,7 @@ pub(super) fn initialize(
             .saturating_add(solved_branches.saturating_mul(3))
             .saturating_add(controlled_count.saturating_mul(8));
     }
+    added_values = added_values.saturating_add(circuit.diodes.len());
     for model in &circuit.bjts.devices {
         added_values = added_values
             .saturating_add(bytes(model.name.len().saturating_add(2)).saturating_mul(4));
@@ -100,6 +102,8 @@ pub(super) fn initialize(
     }
     let mut capacitors = allocated(circuit.capacitors.len())?;
     capacitors.resize(circuit.capacitors.len(), None);
+    let mut diodes = allocated(circuit.diodes.len())?;
+    diodes.resize(circuit.diodes.len(), None);
     let mut controlled_currents = allocated(if controlled_count == 0 {
         0
     } else {
@@ -119,6 +123,13 @@ pub(super) fn initialize(
                 let fanout = &mut controlled_currents[control];
                 fanout.try_reserve(1).map_err(failure)?;
                 fanout.push((solved_branches + ordinal, source.gains[branch.index]));
+            }
+            DerivedTransientBranchCurrentKind::NativeDiode => {
+                let target = diodes.get_mut(branch.index)
+                    .ok_or_else(|| failure("unknown diode owner"))?;
+                if target.replace(solved_branches + ordinal).is_some() {
+                    return Err(failure("duplicate diode owner"));
+                }
             }
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 let target = capacitors
@@ -177,6 +188,7 @@ pub(super) fn initialize(
             num_nodes: result.num_nodes,
             solved_branches,
             capacitors,
+            diodes,
             bjt_terminals,
             controlled_currents,
         },
@@ -200,20 +212,23 @@ impl Plan {
         limits: &crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Prepared<'a>, SimulationError> {
-        let (capacitors, terminals): (&[Value], &[[Value; 4]]) = match event.device_impulses() {
-            PhysicalDeviceImpulses::Continuous => (&[], &[]),
-            PhysicalDeviceImpulses::Jumps {
-                capacitors,
-                bjt_terminals,
-            } => {
-                if capacitors.len() != self.capacitors.len()
-                    || bjt_terminals.len() != self.bjt_terminals.len()
-                {
-                    return Err(failure("unaligned physical device impulse population"));
+        let (capacitors, diodes, terminals): (&[Value], &[Value], &[[Value; 4]]) =
+            match event.device_impulses() {
+                PhysicalDeviceImpulses::Continuous => (&[], &[], &[]),
+                PhysicalDeviceImpulses::Jumps {
+                    capacitors,
+                    diodes,
+                    bjt_terminals,
+                } => {
+                    if capacitors.len() != self.capacitors.len()
+                        || diodes.len() != self.diodes.len()
+                        || bjt_terminals.len() != self.bjt_terminals.len()
+                    {
+                        return Err(failure("unaligned physical device impulse population"));
+                    }
+                    (capacitors, diodes, bjt_terminals)
                 }
-                (capacitors, bjt_terminals)
-            }
-        };
+            };
         let sources = event.impulses().flat_map(|(coordinate, charge)| {
             let source = self.source_index(coordinate);
             let fanout = source
@@ -237,6 +252,10 @@ impl Plan {
             .iter()
             .enumerate()
             .filter_map(|(index, &charge)| self.capacitors[index].map(|owner| Ok((owner, charge))));
+        let diodes = diodes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &charge)| self.diodes[index].map(|owner| Ok((owner, charge))));
         let terminals = terminals
             .iter()
             .zip(&self.bjt_terminals)
@@ -249,7 +268,7 @@ impl Plan {
         prepare(
             result,
             event.time(),
-            sources.chain(capacitors).chain(terminals),
+            sources.chain(capacitors).chain(diodes).chain(terminals),
             retained_values,
             limits,
             abort,
@@ -499,6 +518,7 @@ mod tests {
             num_nodes: 1,
             solved_branches: 2,
             capacitors: Vec::new(),
+            diodes: Vec::new(),
             bjt_terminals: Vec::new(),
             controlled_currents: Vec::new(),
         };

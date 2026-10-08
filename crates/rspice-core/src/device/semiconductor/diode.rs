@@ -1917,6 +1917,66 @@ impl Diode {
         )
     }
 
+    /// Sufficient local C2 chart for continuity propagation at a physical
+    /// event. A false result retains the event; it does not omit a device term
+    /// or reject its model. Joins and composite injection/recombination laws
+    /// need their own higher-derivative proof before certifying continuity.
+    pub(crate) fn physical_event_locally_c2(&self, vd: Value) -> bool {
+        if !vd.is_finite()
+            || self.active_breakdown_voltage().is_some()
+            || self.forward_knee_current != 0.0
+            || self.reverse_knee_current != 0.0
+            || self.sidewall_knee_current != 0.0
+            || self.recombination_saturation_current != 0.0
+        {
+            return false;
+        }
+        let smooth_junction = |emission: Value| {
+            let thermal = emission.max(EPSMIN) * self.vt;
+            thermal.is_normal()
+                && thermal > 0.0
+                && vd != -3.0 * thermal
+                && vd / thermal != MAX_EXP_ARG
+        };
+        if !smooth_junction(self.n)
+            || (self.sidewall_current_given
+                && self.sidewall_emission_given
+                && !smooth_junction(self.sidewall_emission_coefficient))
+        {
+            return false;
+        }
+        if self.tunneling.bottom_given || self.tunneling.sidewall_given {
+            let thermal = self.tunneling.emission.max(EPSMIN) * self.vt;
+            if !thermal.is_normal() || thermal <= 0.0 || -vd / thermal == MAX_EXP_ARG {
+                return false;
+            }
+        }
+        for (c, phi, grading, fc) in [
+            (self.cj0, self.vj, self.m, self.fc),
+            (
+                self.sidewall_cj0 * self.sidewall_perimeter,
+                self.sidewall_vj,
+                self.sidewall_m,
+                self.sidewall_fc,
+            ),
+        ] {
+            if c != 0.0
+                && (!c.is_finite()
+                    || c < 0.0
+                    || !phi.is_finite()
+                    || phi <= 0.0
+                    || !grading.is_finite()
+                    || !fc.is_finite()
+                    || vd == fc.clamp(0.0, 0.95) * phi)
+            {
+                return false;
+            }
+        }
+        let (f, g) = self.stamped_current_and_conductance(vd);
+        let (q, c) = self.junction_charge_and_capacitance(vd);
+        [f, g, q, c].into_iter().all(Value::is_finite)
+    }
+
     /// Sufficient, bias-independent certificate for the C1 monotone law used
     /// by implicit algebraic PSS islands. Breakdown matching and recombination
     /// have dialect-specific joins; injection knees need a separate proof.

@@ -8,6 +8,7 @@ impl Engine {
         &self,
         circuit: &mut crate::CircuitData,
         history: &mut BjtTransientHistory,
+        diode_history: &mut DiodeTransientHistory,
         incoming_history: &BjtTransientHistory,
         incoming: &[Value],
         time: Value,
@@ -25,6 +26,7 @@ impl Engine {
             circuit,
             incoming_history,
             PhysicalEventStep {
+                diode_history,
                 integration_coefficients: None,
                 incoming,
                 time,
@@ -63,8 +65,9 @@ impl Engine {
             circuit.inductors.v_prev[index] = winding.voltage;
         }
         circuit.update_coupled_inductor_pair_state(&point.state.solution);
+        diodes::commit(diode_history, &point.diodes);
         *history = outgoing_history;
-        Self::restart_physical_event_history(circuit, history);
+        Self::restart_physical_event_history(circuit, history, diode_history);
         Ok(point.state.solution)
     }
 }
@@ -97,6 +100,7 @@ mod tests {
             .transition_pss_boundary(
                 &mut circuit,
                 &mut history,
+                &mut DiodeTransientHistory::default(),
                 &old,
                 &incoming,
                 1.0,
@@ -140,6 +144,7 @@ mod tests {
                 .transition_pss_boundary(
                     &mut circuit,
                     &mut history,
+                    &mut DiodeTransientHistory::default(),
                     &old,
                     &bad,
                     1.0,
@@ -154,6 +159,7 @@ mod tests {
             .transition_pss_boundary(
                 &mut circuit,
                 &mut history,
+                &mut DiodeTransientHistory::default(),
                 &old,
                 &incoming,
                 1.0,
@@ -169,5 +175,42 @@ mod tests {
         let event = circuit.tlines[0].checkpoint_state().unwrap().events[0];
         assert!((event[5] + 2.0).abs() < 1e-12);
         assert!((event[7] - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pss_boundary_installs_diode_charge_and_outgoing_finite_current() {
+        let engine = Engine::default();
+        let deck = Netlist::parse("diode periodic boundary\nV1 n 0 DC .2 PWL(0 .2 1 .2 1 .4 2 .5)\nD1 n 0 dm\n.model dm D(IS=1e-30 CJO=2p VJ=1 M=0)\n.end\n").unwrap();
+        let mut circuit = engine.build_circuit(&deck).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let incoming = engine
+            .solve_dc_operating_point(&deck, &mut circuit, &mut matrix)
+            .unwrap();
+        let old =
+            Engine::initialize_bjt_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
+        let mut history = old.clone();
+        let mut diode =
+            Engine::initialize_diode_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias);
+        let outgoing = engine
+            .transition_pss_boundary(
+                &mut circuit,
+                &mut history,
+                &mut diode,
+                &old,
+                &incoming,
+                1.0,
+                0.25,
+                Default::default(),
+                &NoAbort,
+            )
+            .unwrap();
+        let node = circuit.get_node_by_name("n").unwrap() - 1;
+        assert!((outgoing[node] - 0.4).abs() < 1e-14);
+        assert!((diode.qd_prev[0] - 0.8e-12).abs() < 1e-26);
+        assert!((diode.cqd_prev[0] - 0.2e-12).abs() < 1e-26);
+        assert_eq!(diode.qd_prev_prev, diode.qd_prev);
+        assert_eq!(diode.qd_prev_prev_prev, diode.qd_prev);
     }
 }

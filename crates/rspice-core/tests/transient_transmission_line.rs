@@ -170,3 +170,72 @@ fn loaded_lossless_line_preserves_dc_bias_through_startup_and_resume() {
         }
     }
 }
+
+#[test]
+fn native_diode_storage_has_finite_current_at_line_arrival_and_packed_restart() {
+    let deck = Netlist::parse("diode line arrival\nV1 s 0 PWL(0 0 .5n 0 .5n 1 2n 1)\nRS s near 50\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\nD1 far 0 dm\n.model dm D(IS=1e-30 CJO=1p VJ=1 M=0)\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(far) i(d1)\n.end\n").unwrap();
+    let arrival = 0.5e-9 + 1e-9;
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let (result, checkpoints) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &deck,
+                1.51e-9,
+                1e-12,
+                rspice_core::engine::TransientStartupMode::OperatingPoint,
+                &[arrival],
+            )
+            .unwrap();
+        let index = result
+            .time
+            .iter()
+            .position(|time| *time == arrival)
+            .unwrap();
+        let v = result.try_voltage_waveform_named("far").unwrap();
+        let i = result.try_branch_current_waveform_named("d1").unwrap();
+        assert!(
+            v[index].abs() < 1e-10,
+            "{dialect:?}: junction charge remains continuous"
+        );
+        assert!(
+            (i[index] - 0.02).abs() < 1e-10,
+            "{dialect:?}: finite arrival current"
+        );
+        for (&time, (&voltage, &current)) in result.time[index..]
+            .iter()
+            .zip(v[index..].iter().zip(&i[index..]))
+        {
+            let decay = (-(time - arrival) / 25e-12).exp();
+            assert!((voltage - 0.5 * (1.0 - decay)).abs() < 3e-3);
+            assert!((current - 0.02 * decay).abs() < 1.2e-4);
+        }
+        let packed = checkpoints[0]
+            .checkpoint
+            .to_bytes(rspice_core::engine::TransientCheckpointEncoding::Packed)
+            .unwrap();
+        let checkpoint = TransientCheckpoint::from_bytes(&packed).unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&deck, &checkpoint, 1.51e-9, 1e-12)
+            .unwrap();
+        assert_eq!(
+            resumed.try_branch_current_waveform_named("d1").unwrap()[0].to_bits(),
+            i[index].to_bits()
+        );
+        assert!(
+            result
+                .current_impulses
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|trace| trace.complete
+                    && trace
+                        .points
+                        .iter()
+                        .all(|point| point.charge_coulombs.abs() < 1e-24))
+        );
+    }
+}

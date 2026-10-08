@@ -12,6 +12,7 @@ fn line_event_acceptance_is_atomic_and_retains_physical_slopes() {
             &circuit,
             &history,
             PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
                 integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,
@@ -58,6 +59,7 @@ fn line_event_acceptance_is_atomic_and_retains_physical_slopes() {
             &circuit,
             &history,
             PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
                 integration_coefficients: None,
                 incoming: &incoming,
                 time: 1.0,

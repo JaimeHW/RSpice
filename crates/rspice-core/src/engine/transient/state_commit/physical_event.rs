@@ -5,6 +5,7 @@
 use super::*;
 use crate::circuit::SourceTimeSide;
 use charge_event::circuit::{EventPhase, PreparedEventCircuit};
+pub(super) mod diodes;
 mod impulses;
 mod integration;
 mod lines;
@@ -16,6 +17,7 @@ pub(in crate::engine::transient) use orders::PhysicalEventOrders;
 pub(in crate::engine::transient) use startup::PhysicalStartupTargets;
 
 pub(in crate::engine::transient) struct PhysicalEventStep<'a> {
+    pub diode_history: &'a DiodeTransientHistory,
     pub incoming: &'a [Value],
     /// The independently converged incoming interval's history operator.
     /// It supplies a reference only at a certified continuous event with
@@ -37,6 +39,7 @@ pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     pub(super) bjt: PreparedBjtHistory,
     pub(super) capacitors: Vec<CapacitorAcceptedState>,
     pub(super) windings: Vec<AcceptedWinding>,
+    pub(super) diodes: Vec<diodes::AcceptedDiode>,
     pub(super) lines: Vec<lines::PreparedLineEvent>,
     left_limits: Vec<Option<Value>>,
     phase_anchors: Vec<Option<(usize, Value, Value)>>,
@@ -195,10 +198,12 @@ impl PreparedPhysicalEvent {
         &self,
         circuit: &crate::CircuitData,
         history: &BjtTransientHistory,
+        diode_history: &DiodeTransientHistory,
         step: AcceptedReactiveStep<'_>,
         context: bjt::BjtPhaseContext<'_>,
     ) -> Result<(), SimulationError> {
         context.bind(history)?;
+        diodes::validate_history(circuit, diode_history)?;
         validate_winding_history(circuit)?;
         if self.dt == 0.0
             || self.time.to_bits() != step.accepted_time.to_bits()
@@ -212,6 +217,7 @@ impl PreparedPhysicalEvent {
                 .all(|(a, b)| a.to_bits() == b.to_bits())
             || self.bjt.values.len() != circuit.bjts.len()
             || self.capacitors.len() != circuit.capacitors.len()
+            || self.diodes.len() != circuit.diodes.len()
             || self.windings.len() != circuit.inductors.len()
             || self.lines.len() != circuit.tlines.len()
             || context.incoming_arrival
@@ -253,7 +259,9 @@ impl Engine {
     pub(in crate::engine::transient) fn restart_physical_event_history(
         circuit: &mut crate::CircuitData,
         history: &mut BjtTransientHistory,
+        diode_history: &mut DiodeTransientHistory,
     ) {
+        diode_history.restart_preserving_current(0.0);
         circuit
             .capacitors
             .v_prev_prev
@@ -305,6 +313,15 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         validate_winding_history(circuit)?;
+        diodes::validate_history(circuit, step.diode_history)?;
+        crate::resource::ResourceLimitError::ensure(
+            crate::resource::ResourceKind::ResultValues,
+            circuit
+                .matrix_size()
+                .saturating_mul(64)
+                .saturating_add(circuit.diodes.len().saturating_mul(8)),
+            options.limits.max_result_values,
+        )?;
         let startup = matches!(step.phase_events, PhysicalEventOrders::Startup(_));
         let valid_interval = if startup {
             step.time == 0.0 && step.dt == 0.0
@@ -319,7 +336,13 @@ impl Engine {
         bjt::BjtPhaseContext::default().bind(history)?;
         let mut sampler = PreparedEventCircuit::new(circuit, flux_tolerance, options, abort)?;
         let seed = if startup {
-            Some(startup::seed(circuit, history, &sampler, abort)?)
+            Some(startup::seed(
+                circuit,
+                history,
+                step.diode_history,
+                &sampler,
+                abort,
+            )?)
         } else {
             None
         };
@@ -469,6 +492,7 @@ impl Engine {
             classified.continuous,
             circuit.capacitors.len(),
             circuit.bjts.len(),
+            circuit.diodes.len(),
         )?;
         let mut capacitors = Vec::with_capacity(circuit.capacitors.len());
         for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
@@ -498,6 +522,15 @@ impl Engine {
                 .into_iter())?,
             });
         }
+        let diodes = diodes::prepare(
+            circuit,
+            &step,
+            &state,
+            startup,
+            &mut device_impulses,
+            options,
+            abort,
+        )?;
         let windings = prepare_windings(circuit, &state.solution, options, abort)?;
         let mut values = Vec::with_capacity(circuit.bjts.len());
         let mut left_limits = Vec::with_capacity(circuit.bjts.len());
@@ -695,6 +728,7 @@ impl Engine {
             dt: step.dt,
             bjt,
             capacitors,
+            diodes,
             windings,
             lines,
             left_limits,
@@ -703,6 +737,18 @@ impl Engine {
         })
     }
 }
+
+#[cfg(test)]
+static EMPTY_DIODES: DiodeTransientHistory = DiodeTransientHistory {
+    vd_prev: Vec::new(),
+    vd_prev_prev: Vec::new(),
+    qd_prev: Vec::new(),
+    qd_prev_prev: Vec::new(),
+    qd_prev_prev_prev: Vec::new(),
+    cqd_prev: Vec::new(),
+    accepted_dt_prev: 0.0,
+    accepted_dt_prev_prev: 0.0,
+};
 
 #[cfg(test)]
 mod tests;

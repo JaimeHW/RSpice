@@ -298,6 +298,24 @@ impl PreparedEventCircuit<'_> {
             }
             sample.f_time[row - 1] = -physical.time_partial;
         }
+        for diode in &self.circuit.diodes.devices {
+            check_abort(abort)?;
+            let p = diode.node_anode;
+            let n = diode.node_cathode;
+            let vd = voltage(state, p) - voltage(state, n);
+            let (current, conductance) = diode.stamped_current_and_conductance(vd);
+            let (charge, capacitance) = diode.junction_charge_and_capacitance(vd);
+            for (stamp, value, slope) in [
+                (&mut sample.f, current, conductance),
+                (&mut sample.q, charge, capacitance),
+            ] {
+                for (row, sign) in [(p, 1.0), (n, -1.0)] {
+                    stamp.stamp_rhs(row, -sign * value);
+                    stamp.stamp(row, p, sign * slope);
+                    stamp.stamp(row, n, -sign * slope);
+                }
+            }
+        }
         for (index, (model, history)) in self.models.iter_mut().zip(phase).enumerate() {
             check_abort(abort)?;
             model.stamp_periodic_fq_with_forward_limit(

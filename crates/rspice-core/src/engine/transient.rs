@@ -739,9 +739,7 @@ use crate::circuit::XspiceCompanionPolicy;
 use state::TransientDeviceHistories;
 pub(in crate::engine) use state::{ReactiveHistorySeed, TransientCompanionStamp};
 mod xyce_dae;
-use state::{
-    AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
-};
+use state::{AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges};
 mod state_advanced_mos;
 mod state_commit;
 mod state_recovery;
@@ -6030,6 +6028,7 @@ impl Engine {
                     circuit: &mut circuit,
                     solution: &mut solution,
                     history: &mut bjt_history,
+                    diode_history: &mut diode_history,
                     operating_point: accepted_transient_op,
                 },
                 &physical_options,
@@ -6496,7 +6495,11 @@ impl Engine {
                     && !$analysis_final_step
                 {
                     if physical_sources.is_some() {
-                        Self::restart_physical_event_history(&mut circuit, &mut bjt_history);
+                        Self::restart_physical_event_history(
+                            &mut circuit,
+                            &mut bjt_history,
+                            &mut diode_history,
+                        );
                     } else {
                         Self::reseed_reactive_histories_for_restart(
                             &mut circuit,
@@ -10505,6 +10508,7 @@ impl Engine {
                         Some(self.prepare_physical_event(
                             &circuit, &bjt_history,
                             state_commit::physical_event::PhysicalEventStep {
+                                diode_history: &diode_history,
                                 integration_coefficients: Some(&coeff),
                                 incoming: &new_solution, time: t, dt,
                                 phase_events: state_commit::physical_event::PhysicalEventOrders::FromCauses {
@@ -11090,6 +11094,7 @@ impl Engine {
                     &circuit,
                     &bjt_history,
                     state_commit::physical_event::PhysicalEventStep {
+                        diode_history: &diode_history,
                         integration_coefficients: Some(&coeff),
                         incoming: &new_solution,
                         time: t,

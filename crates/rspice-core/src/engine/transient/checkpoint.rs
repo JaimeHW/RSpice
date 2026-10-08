@@ -1294,7 +1294,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v104 adds CCCS event conservation and finite/impulsive F-current output.
     // v105 corrects source and free-coordinate signs in the event voltage seed.
     // v106 preserves accepted diode displacement current through normalized restart.
-    hasher.update(b"rspice-transient-resolved-config-v106\0");
+    // v107 admits native diode F/Q, finite charge current and impulses at physical events.
+    hasher.update(b"rspice-transient-resolved-config-v107\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

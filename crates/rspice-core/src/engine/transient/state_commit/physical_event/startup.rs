@@ -114,6 +114,7 @@ fn aligned(count: usize, lengths: &[usize]) -> Result<(), SimulationError> {
 pub(super) fn seed(
     circuit: &crate::CircuitData,
     history: &BjtTransientHistory,
+    diode_history: &DiodeTransientHistory,
     sampler: &PreparedEventCircuit<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<StartupSeed, SimulationError> {
@@ -180,6 +181,14 @@ pub(super) fn seed(
         let charge = sum([(c.capacitances[index], c.v_prev[index])].into_iter())?;
         add(stamp.pp.row, charge)?;
         add(stamp.nn.row, -charge)?;
+    }
+    diodes::validate_history(circuit, diode_history)?;
+    for (diode, &charge) in circuit.diodes.devices.iter().zip(&diode_history.qd_prev) {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        add(diode.node_anode, charge)?;
+        add(diode.node_cathode, -charge)?;
     }
     let nodes = circuit.num_nodes();
     let mut currents = vec![0.0; circuit.matrix_size()];
@@ -278,6 +287,7 @@ pub(in crate::engine::transient) struct PhysicalStartupTargets<'a> {
     pub circuit: &'a mut crate::CircuitData,
     pub solution: &'a mut Vec<Value>,
     pub history: &'a mut BjtTransientHistory,
+    pub diode_history: &'a mut DiodeTransientHistory,
     pub operating_point: Option<AcceptedTransientOperatingPointContract>,
 }
 
@@ -300,6 +310,7 @@ impl Engine {
                 circuit,
                 solution,
                 history,
+                diode_history: &mut DiodeTransientHistory::default(),
                 operating_point: None,
             },
             options,
@@ -324,6 +335,7 @@ impl Engine {
             circuit,
             solution,
             history,
+            diode_history,
             operating_point,
         } = targets;
         if abort.is_aborted() {
@@ -341,6 +353,7 @@ impl Engine {
             circuit,
             history,
             PhysicalEventStep {
+                diode_history,
                 integration_coefficients: None,
                 incoming: solution,
                 time: 0.0,
@@ -423,6 +436,8 @@ impl Engine {
             circuit.inductors.i_prev_prev_prev[index] = winding.current;
             circuit.inductors.v_prev[index] = winding.voltage;
         }
+        diodes::commit(diode_history, &point.diodes);
+        diode_history.restart_preserving_current(0.0);
         circuit.reset_coupled_inductor_pair_state(&point.state.solution);
         *history = outgoing;
         *solution = point.state.solution;

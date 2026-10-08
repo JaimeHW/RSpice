@@ -10,7 +10,7 @@
 //! delay oracle evaluates the prescribed input at t - delay analytically;
 //! ngspice's discrete recurrence is a separate phase law.
 
-use rspice_core::engine::TransientResult;
+use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding, TransientResult};
 use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, SpiceDialect};
 
@@ -26,6 +26,8 @@ mod coverage_gaps;
 mod current_controlled;
 #[path = "gp_phase_regimes/magnetic.rs"]
 mod magnetic;
+#[path = "gp_phase_regimes/diodes.rs"]
+mod diodes;
 #[path = "gp_phase_regimes/nodal_voltage.rs"]
 mod nodal_voltage;
 #[path = "gp_phase_regimes/private_nodes.rs"]
@@ -417,6 +419,51 @@ fn gp_weil_phase_tracks_the_nonlinear_recurrence_across_operating_regimes() {
                 assert!(
                     error.base < 1e-14 + 0.02 * error.base_peak,
                     "{regime:?}/{dialect:?}/{polarity}: {error:?}"
+                );
+            }
+        }
+    }
+}
+
+fn exact_restart(
+    engine: &Engine,
+    deck: &Netlist,
+    original: &TransientResult,
+    checkpoint: &TransientCheckpoint,
+    stop: f64,
+    step: f64,
+) {
+    let checkpoint = TransientCheckpoint::from_bytes(
+        &checkpoint
+            .to_bytes(TransientCheckpointEncoding::Packed)
+            .unwrap(),
+    )
+    .unwrap();
+    let (resumed, _) = engine
+        .run_tran_resume(deck, &checkpoint, stop, step)
+        .unwrap();
+    let seam = original
+        .time
+        .iter()
+        .position(|time| *time == resumed.time[0])
+        .unwrap();
+    assert_eq!(resumed.time, original.time[seam..]);
+    for (actual, expected) in resumed
+        .voltages
+        .iter()
+        .chain(&resumed.branch_currents)
+        .zip(original.voltages.iter().chain(&original.branch_currents))
+    {
+        if expected.is_empty() {
+            assert!(actual.is_empty());
+        } else {
+            assert_eq!(actual.len(), expected.len() - seam);
+            for (index, (&actual, &expected)) in actual.iter().zip(&expected[seam..]).enumerate() {
+                assert_eq!(
+                    actual.to_bits(),
+                    expected.to_bits(),
+                    "restart sample {index} at {:e}: {actual:e} != {expected:e}",
+                    resumed.time[index]
                 );
             }
         }

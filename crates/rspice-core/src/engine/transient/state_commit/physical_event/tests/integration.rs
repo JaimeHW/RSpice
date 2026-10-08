@@ -13,6 +13,7 @@ fn integrated_event_does_not_erase_a_real_subtolerance_current_jump() {
             &circuit,
             &history,
             PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
                 integration_coefficients: Some(&coeff),
                 incoming: &incoming,
                 time: 1e-9,
@@ -47,6 +48,7 @@ fn integration_reference_requires_unchanged_authored_forcing_and_an_integration_
         let coeff = CompanionCoefficients::backward_euler();
         for integration in [None, Some(&coeff)] {
             let step = PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
                 integration_coefficients: integration,
                 incoming: &incoming,
                 time: 1e-9,
@@ -86,7 +88,11 @@ fn physical_event_restart_discards_incoming_mutual_flux_history() {
         }
         circuit.update_coupled_inductor_pair_state(&solution);
     }
-    Engine::restart_physical_event_history(&mut circuit, &mut history);
+    Engine::restart_physical_event_history(
+        &mut circuit,
+        &mut history,
+        &mut DiodeTransientHistory::default(),
+    );
     assert_flat_mutual_flux(&circuit, &solution);
 }
 
@@ -130,6 +136,7 @@ fn integration_reference_conserves_capacitor_current_and_mutual_flux_for_each_co
             ),
         ] {
             let step = PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
                 integration_coefficients: Some(&coeff),
                 incoming: &incoming,
                 time,

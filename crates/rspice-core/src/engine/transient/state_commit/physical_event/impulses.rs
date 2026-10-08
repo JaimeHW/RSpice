@@ -6,6 +6,7 @@ pub(in crate::engine::transient) enum PhysicalDeviceImpulses {
     Continuous,
     Jumps {
         capacitors: Vec<Value>,
+        diodes: Vec<Value>,
         bjt_terminals: Vec<[Value; 4]>,
     },
 }
@@ -15,12 +16,20 @@ impl PhysicalDeviceImpulses {
         continuous: bool,
         capacitors: usize,
         bjts: usize,
+        diodes: usize,
     ) -> Result<Self, SimulationError> {
         if continuous {
             return Ok(Self::Continuous);
         }
         let mut capacitor_charges = Vec::new();
         let mut terminal_charges = Vec::new();
+        let mut diode_charges = Vec::new();
+        diode_charges
+            .try_reserve_exact(diodes)
+            .map_err(|source| SimulationError::Allocation {
+                object: "diode impulse preparation",
+                source,
+            })?;
         capacitor_charges
             .try_reserve_exact(capacitors)
             .map_err(|_| failure("cannot allocate capacitor impulse preparation"))?;
@@ -29,6 +38,7 @@ impl PhysicalDeviceImpulses {
             .map_err(|_| failure("cannot allocate BJT impulse preparation"))?;
         Ok(Self::Jumps {
             capacitors: capacitor_charges,
+            diodes: diode_charges,
             bjt_terminals: terminal_charges,
         })
     }

@@ -5035,6 +5035,7 @@ impl Engine {
                     solution = self.transition_pss_boundary(
                         &mut circuit.circuit,
                         &mut circuit.bjt_history,
+                        &mut circuit.diode_history,
                         &incoming_history,
                         &solution,
                         t,

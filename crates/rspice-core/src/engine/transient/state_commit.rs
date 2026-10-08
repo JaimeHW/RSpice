@@ -837,7 +837,13 @@ impl Engine {
             None
         };
         let bjt = if let Some(event) = snapshots.physical_event {
-            event.validate(circuit, histories.bjt, step, snapshots.bjt_phase)?;
+            event.validate(
+                circuit,
+                histories.bjt,
+                histories.diode,
+                step,
+                snapshots.bjt_phase,
+            )?;
             event.bjt.clone()
         } else {
             Self::prepare_bjt_history(
@@ -1267,11 +1273,18 @@ impl Engine {
             suppress_gate_charge_history,
         );
 
-        for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
-            let vd =
-                Self::differential_voltage(accepted_solution, diode.node_anode, diode.node_cathode);
-            let (qd, _) = diode.junction_charge_and_capacitance(vd);
-            diode_history.accept_branch(idx, vd, qd, coeff, dt);
+        if let Some(event) = physical_event {
+            physical_event::diodes::commit(diode_history, &event.diodes);
+        } else {
+            for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
+                let vd = Self::differential_voltage(
+                    accepted_solution,
+                    diode.node_anode,
+                    diode.node_cathode,
+                );
+                let (qd, _) = diode.junction_charge_and_capacitance(vd);
+                diode_history.accept_branch(idx, vd, qd, coeff, dt);
+            }
         }
         diode_history.finish_step(dt);
 
@@ -1601,7 +1614,7 @@ impl Engine {
             // Native BDF2 must not differentiate through incoming charge or
             // flux states after an event. Retain outgoing rates and transport
             // memory, and restart from flat outgoing integration history.
-            Self::restart_physical_event_history(circuit, bjt_history);
+            Self::restart_physical_event_history(circuit, bjt_history, diode_history);
             // Keep the last interval width for first-order charge/flux
             // truncation on that flat seed. The absent second width identifies
             // the one-interval BE restart. Passive truncation shares the MOS

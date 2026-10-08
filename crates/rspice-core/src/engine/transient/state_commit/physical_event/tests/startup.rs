@@ -3,8 +3,14 @@ use super::*;
 #[test]
 fn physical_startup_observation_preflight_refusal_preserves_all_model_targets() {
     let (engine, mut circuit, _, mut solution, mut history) = fixture(
-        "startup observation refusal\nVc c 0 DC 0 PWL(0 1 1 1)\nC1 c 0 1p\nR1 c 0 1k\nVb b 0 .6\nQ1 0 b 0 qm\n.model qm NPN(IS=1e-16 TF=1n PTF=30)\n.end\n",
+        "startup observation refusal\nVc c 0 DC 0 PWL(0 .4 1 .4)\nD1 c 0 dm\n.model dm D(IS=1e-16 CJO=1p VJ=1 TT=.1n)\nC1 c 0 1p\nR1 c 0 1k\nVb b 0 .6\nQ1 0 b 0 qm\n.model qm NPN(IS=1e-16 TF=1n PTF=30)\n.end\n",
     );
+    let mut diode_history =
+        Engine::initialize_diode_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+    let before_diode_history = diode_history.clone();
+    let before_diode = circuit.diodes.devices[0]
+        .accepted_nonlinear_checkpoint()
+        .unwrap();
     let before_solution = solution.clone();
     let before_history = history.clone();
     let before_caps = (
@@ -20,6 +26,7 @@ fn physical_startup_observation_preflight_refusal_preserves_all_model_targets() 
     let mut observed = false;
     let result = engine.transition_physical_startup_with_observation(
         PhysicalStartupTargets {
+            diode_history: &mut diode_history,
             circuit: &mut circuit,
             solution: &mut solution,
             history: &mut history,
@@ -42,6 +49,13 @@ fn physical_startup_observation_preflight_refusal_preserves_all_model_targets() 
     assert!(observed);
     assert!(matches!(result, Err(SimulationError::ResourceLimit(_))));
     assert_eq!(solution, before_solution);
+    assert_eq!(diode_history, before_diode_history);
+    assert_eq!(
+        circuit.diodes.devices[0]
+            .accepted_nonlinear_checkpoint()
+            .unwrap(),
+        before_diode
+    );
     assert_eq!(history, before_history);
     assert_eq!(
         (
@@ -573,7 +587,9 @@ fn physical_startup_seed_charge_matches_all_physical_gp_storage_ports() {
             assert!(circuit.bjts.devices[0].uses_legacy_gummel_poon());
             let mut sampler =
                 PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
-            let seed = super::super::startup::seed(&circuit, &history, &sampler, &NoAbort).unwrap();
+            let seed =
+                super::super::startup::seed(&circuit, &history, &EMPTY_DIODES, &sampler, &NoAbort)
+                    .unwrap();
             let phases = [Some(EventPhase {
                 history: history.phase[0].as_ref().unwrap(),
                 endpoint: seed.inputs[0].unwrap(),
@@ -712,5 +728,60 @@ fn physical_startup_uses_authored_bjt_ic_charge_and_transport_prehistory() {
         let phase = history.phase[0].as_ref().unwrap();
         assert_eq!(phase.accepted_left_limits().next(), Some((0.0, prehistory)));
         assert_ne!(phase.accepted_samples().next().unwrap().1, prehistory);
+    }
+}
+
+#[test]
+fn diode_startup_cancellation_at_every_poll_preserves_charge_and_model_state() {
+    use crate::abort_signal::CountingAbort;
+    let (engine, circuit, _, solution, history) = fixture(
+        "diode atomic startup\nV1 n 0 DC .2 PWL(0 .4 1 .5)\nD1 n 0 dm\n.model dm D(IS=1e-16 CJO=1p VJ=1 TT=.1n)\n.end\n",
+    );
+    let diode_history =
+        Engine::initialize_diode_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+    let model = circuit.diodes.devices[0]
+        .accepted_nonlinear_checkpoint()
+        .unwrap();
+    let run = |abort: &dyn AbortSignal| {
+        let mut candidate = circuit.clone();
+        let mut state = solution.clone();
+        let mut bjt = history.clone();
+        let mut diode = diode_history.clone();
+        let result = engine.transition_physical_startup_with_observation(
+            PhysicalStartupTargets {
+                circuit: &mut candidate,
+                solution: &mut state,
+                history: &mut bjt,
+                diode_history: &mut diode,
+                operating_point: None,
+            },
+            &options(),
+            1e-20,
+            abort,
+            |_| Ok(()),
+        );
+        if result.is_err() {
+            assert_eq!(state, solution);
+            assert_eq!(bjt, history);
+            assert_eq!(diode, diode_history);
+            assert_eq!(
+                candidate.diodes.devices[0]
+                    .accepted_nonlinear_checkpoint()
+                    .unwrap(),
+                model
+            );
+        }
+        result
+    };
+    let census = CountingAbort::new(usize::MAX);
+    run(&census).unwrap();
+    assert!(census.count() > 20);
+    for threshold in 0..census.count() {
+        let abort = CountingAbort::new(threshold);
+        assert!(
+            matches!(run(&abort), Err(SimulationError::Aborted)),
+            "poll {threshold}"
+        );
+        assert_eq!(abort.polls_after_abort(), 0);
     }
 }

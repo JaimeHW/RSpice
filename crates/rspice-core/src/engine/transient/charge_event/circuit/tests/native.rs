@@ -410,3 +410,61 @@ fn prepared_event_circuit_gp_uses_held_physical_jacobian_and_both_history_sides(
         );
     }
 }
+
+#[test]
+fn native_diode_event_sampler_retains_complete_canonical_fq_without_mutation() {
+    for dialect in [
+        crate::SpiceDialect::Ngspice,
+        crate::SpiceDialect::Xyce,
+        crate::SpiceDialect::BestAvailable,
+    ] {
+        let engine =
+            crate::Engine::new(crate::SimulationConfig::default().with_spice_dialect(dialect));
+        let deck = crate::Netlist::parse("diode sampler\nV1 a 0 0\nV2 k 0 0\nD1 a k dm AREA=2 M=3 PJ=4\n.model dm D(IS=1e-16 N=1.2 ISR=1e-13 NR=2 IKF=1m IKR=2m JSW=2e-14 NS=1.5 IKP=.5m JTUN=1e-18 JTUNSW=2e-18 NTUN=2 CJO=1p VJ=.8 M=.4 FC=.5 CJSW=.2p VJSW=.7 MJSW=.3 FCS=.4 TT=.2n BV=3 IBV=1m)\n.end\n").unwrap();
+        let circuit = engine.build_circuit(&deck).unwrap();
+        let diode = &circuit.diodes.devices[0];
+        let before = diode.accepted_nonlinear_checkpoint().unwrap();
+        let a = diode.node_anode - 1;
+        let k = diode.node_cathode - 1;
+        let opts = options();
+        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &opts, &NoAbort).unwrap();
+        for voltage in [-3.05, -0.2, 0.05, 0.35, 0.65] {
+            let mut state = vec![0.0; circuit.matrix_size()];
+            state[a] = voltage + 0.125;
+            state[k] = 0.125;
+            let voltage = state[a] - state[k];
+            let sample = sampler
+                .sample(
+                    0.0,
+                    SourceTimeSide::RightLimit,
+                    &state,
+                    &[],
+                    &opts,
+                    &NoAbort,
+                )
+                .unwrap();
+            let (f, g) = diode.stamped_current_and_conductance(voltage);
+            let (q, c) = diode.junction_charge_and_capacitance(voltage);
+            for (stamp, value, slope) in [(&sample.f, f, g), (&sample.q, q, c)] {
+                assert_eq!(stamp.values[a], value);
+                assert_eq!(stamp.values[k], -value);
+                assert_eq!(entry(stamp, a, a), slope);
+                assert_eq!(entry(stamp, a, k), -slope);
+                assert_eq!(entry(stamp, k, a), -slope);
+                assert_eq!(entry(stamp, k, k), slope);
+            }
+        }
+        assert_eq!(diode.accepted_nonlinear_checkpoint().unwrap(), before);
+        drop(sampler);
+        let mut unprepared = circuit.clone();
+        unprepared.diodes.devices[0].rs = 1.0;
+        let error = PreparedEventCircuit::new(&unprepared, 1e-20, &opts, &NoAbort)
+            .err()
+            .unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("unprepared series-resistance node")
+        );
+    }
+}

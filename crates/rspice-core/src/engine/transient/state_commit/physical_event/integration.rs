@@ -111,6 +111,21 @@ pub(super) fn currents(
         add(stamp.pp.row, current)?;
         add(stamp.nn.row, -current)?;
     }
+    for (index, diode) in circuit.diodes.devices.iter().enumerate() {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let vd = diode.terminal_voltage(step.incoming);
+        let charge = diode.junction_charge_and_capacitance(vd).0;
+        let current = crate::numerics::integration::integrated_charge_current(
+            coeff,
+            step.dt,
+            charge,
+            step.diode_history.branch(index),
+        );
+        add(diode.node_anode, current)?;
+        add(diode.node_cathode, -current)?;
+    }
     for (model, accepted) in sampler.models().iter().zip(bjt.values) {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);

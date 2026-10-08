@@ -1367,10 +1367,11 @@ option is `.options eventfluxtol=1e-24`; ordered `option` commands also accept
 it. Explicit configuration overrides take precedence over authored options.
 This setting controls event conservation independently of charge tolerance
 and ordinary inductor timestep truncation. Existing device admission limits
-still apply. Checkpoint configuration identity version 106 binds this setting,
+still apply. Checkpoint configuration identity version 107 binds this setting,
 the GP transport-event tracking policy, physical-event integration restart,
-exact-history stop-step fitting, and accepted OneStep residual refresh across
-hybrid Gear2 intervals, and diode displacement current at normalized restarts;
+exact-history stop-step fitting, accepted OneStep residual refresh across
+hybrid Gear2 intervals, and native diode charge/current events and normalized
+restart currents;
 checkpoints with an earlier configuration identity require a fresh run.
 Native GP models in ngspice mode now use ngspice 46's thermal constants
 (`k=1.38064852e-23`, `q=1.6021766208e-19`) for their temperature-scaled
@@ -1452,6 +1453,16 @@ voltage seeding backtracks invalid trial values; the coupled physical solve
 still verifies charge, flux, rank and current balance. Branch-current-controlled,
 switched and stateful behavioral equations, CCVS voltage impulses, and remaining
 device providers require further implementation.
+
+Native diodes accompanying exact-delay GP or scalar lossless lines supply
+physical conduction and charge equations, including the resolved junction,
+sidewall, diffusion and overlap terms. Authored series resistance uses its
+elaborated resistor and junction node. Initial OP/UIC charge, outgoing finite
+`I(D)` and separate diode/source charge impulses share the joint event commit;
+checkpoint normalization retains the accepted displacement current. Public
+regressions cover charge jumps and series-RC response across three dialects and
+BE/Trap/Gear2, line arrivals, and packed restart. General constitutive-join and
+model-parameter qualification remains open in the core requirements ledger.
 
 Native GP physical events retain outgoing charge/flux rates and delay memory,
 then start a new integration epoch. Gear2 uses one BE interval before returning

@@ -48,6 +48,7 @@ fn physical_event_record_ceiling_keeps_instance_counts_and_accepted_state() {
             &circuit,
             &history,
             PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
                 integration_coefficients: None,
                 incoming: &incoming,
                 time,
@@ -84,6 +85,7 @@ fn physical_event_record_ceiling_keeps_instance_counts_and_accepted_state() {
             &circuit,
             &history,
             PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
                 integration_coefficients: None,
                 incoming: &incoming,
                 time,

@@ -270,6 +270,12 @@ pub(super) fn classify(
             propagated = propagated.merge(DelayEventOrder::AtLeast(2));
         }
     }
+    for diode in &circuit.diodes.devices {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        invariant &= diode.physical_event_locally_c2(diode.terminal_voltage(step.incoming));
+    }
     let order = if invariant {
         match propagated {
             DelayEventOrder::AtLeast(n) => DelayEventOrder::AtLeast(n.clamp(1, 3)),
