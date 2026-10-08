@@ -73,9 +73,7 @@ use crate::device::veriloga_builtins::{
     GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
 };
-use crate::device::{
-    TransmissionLine, TransmissionLineCheckpoint, XyceTeamResistanceNoiseCheckpoint,
-};
+use crate::device::{TransmissionLine, TransmissionLineCheckpoint, XyceTeamResistanceNoiseCheckpoint};
 use crate::engine::{
     OutputCommitError, OutputCommitPhase, PersistenceIncompatibleError, SimulationConfig,
 };
@@ -1295,7 +1293,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v103 adds controlled voltage/current events and VCCS current observations.
     // v104 adds CCCS event conservation and finite/impulsive F-current output.
     // v105 corrects source and free-coordinate signs in the event voltage seed.
-    hasher.update(b"rspice-transient-resolved-config-v105\0");
+    // v106 preserves accepted diode displacement current through normalized restart.
+    hasher.update(b"rspice-transient-resolved-config-v106\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

@@ -918,7 +918,8 @@ impl Engine {
 
     /// Normalize an owned, validated physical-breakpoint image into a new
     /// order-one integration epoch. The authoritative current accepted state
-    /// remains exact; older generations/derivatives are flattened and the
+    /// remains exact, including diode lead current; older generations are
+    /// flattened, unused derivative lanes are cleared, and the
     /// trial snapshot cache is deliberately invalidated.
     pub(in crate::engine) fn normalize_accepted_junction_transient_history_checkpoint_for_order_one(
         circuit: &crate::circuit::CircuitData,
@@ -1751,6 +1752,7 @@ D1 b 0 DM
             .expect("physical-breakpoint history normalizes");
         assert_eq!(normalized.bjt_history, expected_bjt);
         assert_eq!(normalized.diode_history, expected_diode);
+        assert_eq!(normalized.diode_history.cqd_prev, [206.0]);
         assert_eq!(normalized.vbic_snapshot_cache, vec![None]);
         assert!(checkpoint.vbic_snapshot_cache[0].is_some());
         assert_eq!(

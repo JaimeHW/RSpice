@@ -295,9 +295,9 @@ impl Engine {
     /// BJT charge reduction can carry internal voltages and limited junction
     /// biases which are not recoverable bit-for-bit from the external solution.
     /// Keep that accepted generation authoritative, flatten every older
-    /// generation onto it, and discard only derivative history. Diode charge is
-    /// handled the same way so a breakpoint cannot perturb an accepted limited
-    /// junction bias by recomputing it.
+    /// generation onto it. Diode dQ/dt also owns the published lead current,
+    /// so retain it across the restart; the first backward-Euler step does
+    /// not consume that derivative. No accepted junction bias is recomputed.
     #[inline]
     pub(super) fn flatten_bjt_and_diode_histories_for_order_one_restart(
         bjt_history: &mut BjtTransientHistory,
@@ -328,7 +328,7 @@ impl Engine {
         bjt_history.accepted_dt_prev = accepted_dt_seed;
         bjt_history.accepted_dt_prev_prev = accepted_dt_seed;
 
-        diode_history.restart(accepted_dt_seed);
+        diode_history.restart_preserving_current(accepted_dt_seed);
     }
 
     #[inline]
@@ -2502,7 +2502,7 @@ mod tests {
         assert_eq!(diode_history.qd_prev, vec![2.5]);
         assert_eq!(diode_history.qd_prev_prev, diode_history.qd_prev);
         assert_eq!(diode_history.qd_prev_prev_prev, diode_history.qd_prev);
-        assert_eq!(diode_history.cqd_prev, vec![0.0]);
+        assert_eq!(diode_history.cqd_prev, vec![99.0]);
         assert_eq!(diode_history.accepted_dt_prev, 0.125);
         assert_eq!(diode_history.accepted_dt_prev_prev, 0.125);
     }

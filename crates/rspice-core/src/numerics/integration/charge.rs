@@ -81,6 +81,18 @@ impl TwoTerminalChargeHistory {
         dt: Value,
     ) {
         let current = integrated_charge_current(coeff, dt, charge, self.branch(index));
+        self.accept_physical_branch(index, voltage, charge, current);
+    }
+
+    /// Commit an independently solved finite dQ/dt, including at an ideal
+    /// event. A charge impulse is not part of this finite current.
+    pub(crate) fn accept_physical_branch(
+        &mut self,
+        index: usize,
+        voltage: Value,
+        charge: Value,
+        current: Value,
+    ) {
         self.vd_prev_prev[index] = self.vd_prev[index];
         self.vd_prev[index] = voltage;
         self.qd_prev_prev_prev[index] = self.qd_prev_prev[index];
@@ -98,11 +110,17 @@ impl TwoTerminalChargeHistory {
     /// accepted physical bias or charge. The first BE step reads neither the
     /// cleared derivative nor the older generations.
     pub(crate) fn restart(&mut self, accepted_dt_seed: Value) {
+        self.restart_preserving_current(accepted_dt_seed);
+        self.cqd_prev.resize(self.qd_prev.len(), 0.0);
+        self.cqd_prev.fill(0.0);
+    }
+
+    /// Begin an order-one epoch while retaining the physical outgoing current
+    /// for observations and checkpoint restoration.
+    pub(crate) fn restart_preserving_current(&mut self, accepted_dt_seed: Value) {
         self.vd_prev_prev.clone_from(&self.vd_prev);
         self.qd_prev_prev.clone_from(&self.qd_prev);
         self.qd_prev_prev_prev.clone_from(&self.qd_prev);
-        self.cqd_prev.resize(self.qd_prev.len(), 0.0);
-        self.cqd_prev.fill(0.0);
         self.accepted_dt_prev = accepted_dt_seed;
         self.accepted_dt_prev_prev = accepted_dt_seed;
     }
@@ -218,6 +236,39 @@ mod tests {
         state.clone_from(&captured);
         state.accept_branch(0, 5.0, 25.0, &CompanionCoefficients::trapezoidal(), 0.25);
         assert_eq!(state.cqd_prev, [44.0]);
+    }
+
+    #[test]
+    fn physical_charge_jump_restarts_without_turning_impulse_into_finite_current() {
+        let mut state = TwoTerminalChargeHistory::from_biases([(0.0, 0.0)].into_iter());
+        state.accept_physical_branch(0, 1.0, 2.0, 3.0);
+        state.finish_step(0.25);
+        state.restart_preserving_current(0.0);
+        assert_eq!(state.vd_prev, [1.0]);
+        assert_eq!(state.vd_prev_prev, [1.0]);
+        assert_eq!(state.qd_prev, [2.0]);
+        assert_eq!(state.qd_prev_prev, [2.0]);
+        assert_eq!(state.qd_prev_prev_prev, [2.0]);
+        assert_eq!(state.cqd_prev, [3.0]);
+        assert_eq!(
+            (state.accepted_dt_prev, state.accepted_dt_prev_prev),
+            (0.0, 0.0)
+        );
+        // The next BE interval differentiates only its own charge change.
+        // The event's two-coulomb jump is accounted for as a separate impulse.
+        for dt in [0.125, 0.25] {
+            assert_eq!(
+                integrated_charge_current(
+                    &CompanionCoefficients::backward_euler(),
+                    dt,
+                    2.0 + 3.0 * dt,
+                    state.branch(0),
+                ),
+                3.0
+            );
+        }
+        state.restart(0.0);
+        assert_eq!(state.cqd_prev, [0.0]);
     }
 
     #[test]

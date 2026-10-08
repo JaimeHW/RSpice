@@ -2652,3 +2652,48 @@ fn locked_paired_schedule_resume_integrates_the_seam_interval() {
         "the resumed segment must stay on the unsegmented trajectory (worst |dv| = {worst:.6e})"
     );
 }
+
+#[test]
+fn native_diode_current_survives_normalized_packed_restart() {
+    let deck = Netlist::parse("diode restart current\nV1 n 0 SIN(.2 .02 1meg)\nD1 n 0 dm\n.model dm D(IS=1e-30 CJO=1n VJ=1 M=0)\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16\n.save i(d1)\n.end\n").unwrap();
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            let engine = Engine::new(SimulationConfig {
+                integration_method: method,
+                ..SimulationConfig::default().with_spice_dialect(dialect)
+            });
+            let (first, checkpoint) = engine.run_tran_checkpointed(&deck, 23e-9, 1e-9).unwrap();
+            let current = *first
+                .try_branch_current_waveform_named("d1")
+                .unwrap()
+                .last()
+                .unwrap();
+            assert!(
+                current > 1e-4,
+                "the seam includes a finite displacement current"
+            );
+            let checkpoint = TransientCheckpoint::from_bytes(
+                &checkpoint
+                    .to_bytes(TransientCheckpointEncoding::Packed)
+                    .unwrap(),
+            )
+            .unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&deck, &checkpoint, 25e-9, 1e-9)
+                .unwrap();
+            assert_eq!(
+                resumed.try_branch_current_waveform_named("d1").unwrap()[0].to_bits(),
+                current.to_bits(),
+                "{dialect:?}/{method:?}: normalized restart must retain I(D1)"
+            );
+        }
+    }
+}
