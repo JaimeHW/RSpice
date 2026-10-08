@@ -1,6 +1,8 @@
 //! HDF5 projections through the canonical writer shared with the CLI.
 
-use rspice_core::io::{Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Error, Hdf5Table};
+use rspice_core::io::{
+    Hdf5Attribute, Hdf5Column, Hdf5Coordinate, Hdf5Document, Hdf5Error, Hdf5Table,
+};
 use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::analysis_type::AnalysisType;
 use rspice_results::waveform::RetainedWaveform;
@@ -176,10 +178,9 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
         return Err(Hdf5ProjectionError::NoSamples);
     }
 
-    let coordinate_name =
-        crate::waveform_io::result::axis_signal_for_analysis_type(analysis.analysis_type)
-            .0
-            .to_owned();
+    let coordinate_name = crate::waveform_io::result::axis_signal_for_analysis(analysis)
+        .0
+        .to_owned();
     let rows = coordinate.len();
     let count = columns.len();
     let mut document = Hdf5Document::new(analysis.label.clone());
@@ -198,6 +199,16 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
             columns,
         })
         .map_err(Hdf5ProjectionError::InvalidTable)?;
+    let group = document.groups.last_mut().expect("table was added");
+    if spectral && coordinate_name != "frequency" {
+        group.set_attr(
+            "independent_name",
+            Hdf5Attribute::Text(coordinate_name.clone()),
+        );
+    }
+    if let Some(unit) = analysis.waveform_coordinate_unit() {
+        group.set_attr("coordinate_unit", Hdf5Attribute::Text(unit.to_owned()));
+    }
     Ok(Hdf5Export {
         document,
         section,
@@ -206,4 +217,68 @@ pub fn prepare_hdf5<W: AsRef<RetainedWaveform>>(
         columns: count,
         zeroed_imaginary,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hdf5::{Hdf5Limits, decode_hdf5};
+    use rspice_results::result_import::{
+        ResultImportCoordinate, ResultImportFormat, ResultImportSource,
+    };
+
+    #[test]
+    fn retained_hdf5_round_trip_preserves_coordinate_identity() {
+        for (kind, name, unit) in [
+            (AnalysisType::Transient, "Elapsed time", Some("s")),
+            (AnalysisType::Transient, "Clock", None),
+            (AnalysisType::DcSweep, "bias", Some("A")),
+            (AnalysisType::DcSweep, "ambient", Some("K")),
+            (AnalysisType::DcSweep, "control", None),
+            (AnalysisType::Ac, "Test frequency", Some("Hz")),
+            (AnalysisType::Ac, "Tone", None),
+        ] {
+            let mut waveform = RetainedWaveform::new("out", vec![1.0, 2.0], vec![-0.0, 4.0]);
+            if kind == AnalysisType::Ac {
+                waveform =
+                    waveform.with_complex_components("out", vec![-0.0, 4.0], vec![2.0, -1.0]);
+            }
+            let mut analysis = AnalysisResult::new(1, kind, "Retained coordinate", 0.0)
+                .with_waveforms(vec![waveform]);
+            analysis.import_source = Some(ResultImportSource {
+                source_name: "source.h5".into(),
+                format: ResultImportFormat::Hdf5,
+                coordinate: Some(ResultImportCoordinate {
+                    name: name.into(),
+                    unit: unit.map(str::to_owned),
+                }),
+            });
+            let export =
+                prepare_hdf5(&analysis, &analysis.waveforms.iter().collect::<Vec<_>>()).unwrap();
+            let mut bytes = Vec::new();
+            rspice_core::io::write_hdf5(&mut bytes, &export.document).unwrap();
+            let decoded = decode_hdf5(
+                &bytes,
+                Hdf5Limits {
+                    max_columns: 10,
+                    max_values: 100,
+                    coordinate_names: &["time", "frequency", "x"],
+                },
+                "hdf5",
+            )
+            .unwrap();
+            assert_eq!(decoded.coordinate_name, name);
+            assert_eq!(export.coordinate_name, name);
+            assert_eq!(decoded.coordinate_unit.as_deref(), unit);
+            assert_eq!(decoded.coordinate, [1.0, 2.0]);
+            assert_eq!(decoded.signals[0].unit, None);
+            assert_eq!(decoded.signals[0].real[0].to_bits(), (-0.0_f64).to_bits());
+            if kind == AnalysisType::Ac {
+                assert_eq!(
+                    decoded.signals[0].imag.as_deref(),
+                    Some([2.0, -1.0].as_slice())
+                );
+            }
+        }
+    }
 }

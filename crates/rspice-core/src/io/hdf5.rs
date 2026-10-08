@@ -63,6 +63,12 @@
 //! - datasets `frequency`, then `signal_{i:04}_real` and `signal_{i:04}_imag`,
 //!   all `f64`.
 //!
+//! All section families may state `coordinate_unit` when the producer retains
+//! a unit; absence means unstated. A spectral section may also state
+//! `independent_name` to preserve an authored coordinate label. Its physical
+//! dataset remains `frequency`, which is also the default label for older
+//! files without that attribute.
+//!
 //! A complex value is therefore two real datasets rather than a compound
 //! type: every HDF5 reader can open an `f64` array, and few agree on how a
 //! complex one is spelled.
@@ -261,8 +267,8 @@ pub enum Hdf5Coordinate {
         values: Vec<f64>,
     },
     /// The frequency axis of a spectral section, written as the dataset
-    /// `frequency`. It states no `independent_name`: the dataset's own name is
-    /// the name, and every RSpice-written spectral section uses it.
+    /// `frequency`. A caller may add `independent_name` on the resulting group
+    /// to preserve an authored label; otherwise the label is `frequency`.
     Frequency(Vec<f64>),
 }
 

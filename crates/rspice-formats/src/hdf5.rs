@@ -440,6 +440,11 @@ fn parse_rspice_hdf5_section(
         ));
     }
     if family == Hdf5SectionFamily::Ac {
+        let coordinate_name = if attrs.contains_key("independent_name") {
+            hdf_string_attr(&attrs, "independent_name", format)?
+        } else {
+            "frequency".to_owned()
+        };
         let coordinate = hdf_f64_dataset(&group, "frequency", format, limits)?;
         ensure_table_value_limit(
             format,
@@ -465,7 +470,7 @@ fn parse_rspice_hdf5_section(
         }
         return Ok(DecodedHdf5::Section {
             family,
-            coordinate_name: "frequency".to_owned(),
+            coordinate_name,
             coordinate_unit,
             coordinate,
             signals,
