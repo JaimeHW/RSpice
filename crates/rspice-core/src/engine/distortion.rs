@@ -137,6 +137,7 @@ impl Engine {
             };
             points.push(point);
             abort.observe_progress((index + 1) as Value / frequencies.len() as Value);
+            check_abort(abort)?;
         }
 
         Ok(DistortionAnalysisResult { f2_over_f1, points })
