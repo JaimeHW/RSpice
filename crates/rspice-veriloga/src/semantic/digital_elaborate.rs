@@ -878,7 +878,7 @@ enum ConnectionForm<'a> {
     /// `.a(bus[3])` or `.a(bus[7:4])` — some of a declared net's bits.
     Select {
         name: &'a SmolStr,
-        select: SelectBounds,
+        select: Box<SelectBounds>,
         span: Span,
     },
 }
@@ -981,15 +981,15 @@ fn connection_form<'a>(
         Expression::Identifier(identifier) => Ok(ConnectionForm::Net(identifier)),
         Expression::ArrayAccess(access) => Ok(ConnectionForm::Select {
             name: &access.array,
-            select: SelectBounds::Bit(close(&access.index)),
+            select: Box::new(SelectBounds::Bit(close(&access.index))),
             span: access.span,
         }),
         Expression::Digital(DigitalExpr::PartSelect(select)) => Ok(ConnectionForm::Select {
             name: &select.name,
-            select: SelectBounds::Part {
+            select: Box::new(SelectBounds::Part {
                 msb: close(&select.msb),
                 lsb: close(&select.lsb),
-            },
+            }),
             span: select.span,
         }),
         other => Err(semantic_error(
