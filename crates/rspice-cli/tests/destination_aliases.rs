@@ -3,6 +3,84 @@ use std::process::Command;
 
 const DECK: &str = "* source alias\nV1 in 0 1\nR1 in 0 1k\n.tran 1n 2n\n.end\n";
 
+#[cfg(unix)]
+mod unix {
+    use super::*;
+    use std::path::Path;
+
+    fn link_to_nested_directory(root: &Path) {
+        let nested = root.join("real/nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::os::unix::fs::symlink(&nested, root.join("link")).unwrap();
+    }
+
+    #[test]
+    fn parent_components_after_directory_links_cannot_replace_sources() {
+        for flag in ["-o", "--checkpoint", "--summary", "--meas-file"] {
+            let dir = common::test_dir("parent_link_source");
+            link_to_nested_directory(&dir);
+            let source = dir.join("real/deck.cir");
+            let alias = dir.join("link/../deck.cir");
+            std::fs::write(&source, DECK).unwrap();
+            assert_eq!(std::fs::read_to_string(&alias).unwrap(), DECK);
+            let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                .args(["--quiet", "run"])
+                .arg(&source)
+                .args(["-f", "csv", flag])
+                .arg(&alias)
+                .output()
+                .unwrap();
+            assert_eq!(result.status.code(), Some(2), "{flag}: {result:?}");
+            assert!(String::from_utf8_lossy(&result.stderr).contains("source"));
+            assert_eq!(std::fs::read_to_string(&source).unwrap(), DECK);
+            assert_eq!(std::fs::read_to_string(alias).unwrap(), DECK);
+        }
+    }
+
+    #[test]
+    fn directory_link_parent_aliases_cannot_publish_two_artifacts_to_one_new_file() {
+        let dir = common::test_dir("parent_link_outputs");
+        link_to_nested_directory(&dir);
+        let source = dir.join("deck.cir");
+        let destination = dir.join("real/output.csv");
+        std::fs::write(&source, DECK).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "run"])
+            .arg(&source)
+            .args(["-f", "csv", "-o"])
+            .arg(&destination)
+            .arg("--summary")
+            .arg(dir.join("link/../output.csv"))
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(2), "{result:?}");
+        assert!(String::from_utf8_lossy(&result.stderr).contains("share output destination"));
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn directory_link_parent_components_do_not_claim_the_wrong_source() {
+        let dir = common::test_dir("parent_link_distinct");
+        link_to_nested_directory(&dir);
+        let source = dir.join("deck.cir");
+        std::fs::write(&source, DECK).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "run"])
+            .arg(&source)
+            .args(["-f", "csv", "-o"])
+            .arg(dir.join("link/../deck.cir"))
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(std::fs::read_to_string(source).unwrap(), DECK);
+        assert!(
+            std::fs::read_to_string(dir.join("real/deck.cir"))
+                .unwrap()
+                .starts_with("time,")
+        );
+    }
+}
+
 #[test]
 fn replacing_a_distinct_hard_link_preserves_the_source_entry() {
     let dir = common::test_dir("hard_link_output");

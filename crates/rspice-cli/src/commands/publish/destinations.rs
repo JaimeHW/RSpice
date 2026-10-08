@@ -46,8 +46,23 @@ fn key(path: &Path) -> std::io::Result<PathBuf> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => absolute,
         Err(error) => return Err(error),
     };
+    // Resolve existing directory aliases without requiring a destination to
+    // exist. Atomic replacement owns a directory entry, not a hard-link inode.
+    // Do this before collapsing `..`: on Unix, link/../file refers to the
+    // parent of the directory the link reaches, not the link's own parent.
+    let mut resolved = absolute.clone();
+    let mut parent = absolute.parent();
+    while let Some(candidate) = parent {
+        if let Ok(canonical) = candidate.canonicalize() {
+            if let Ok(suffix) = absolute.strip_prefix(candidate) {
+                resolved = canonical.join(suffix);
+            }
+            break;
+        }
+        parent = candidate.parent();
+    }
     let mut normalized = PathBuf::new();
-    for component in absolute.components() {
+    for component in resolved.components() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
@@ -55,18 +70,6 @@ fn key(path: &Path) -> std::io::Result<PathBuf> {
             }
             component => normalized.push(component.as_os_str()),
         }
-    }
-    // Resolve existing directory aliases without requiring a destination to
-    // exist. Atomic replacement owns a directory entry, not a hard-link inode.
-    let mut parent = normalized.parent();
-    while let Some(candidate) = parent {
-        if let Ok(canonical) = candidate.canonicalize() {
-            if let Ok(suffix) = normalized.strip_prefix(candidate) {
-                normalized = canonical.join(suffix);
-            }
-            break;
-        }
-        parent = candidate.parent();
     }
     #[cfg(windows)]
     {
