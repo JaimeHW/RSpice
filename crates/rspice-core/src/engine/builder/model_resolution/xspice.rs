@@ -1470,6 +1470,20 @@ mod tests {
         assert_eq!(resolved.string_vector_params[0].1, ["<8 0>"]);
     }
 
+    #[test]
+    fn word_vectors_keep_literal_contents_when_a_string_field_shadows_a_number() {
+        for vector in ["[string literal]", "\"[string literal]\"", "{words}"] {
+            let netlist = Netlist::parse(&format!(
+                "* literal field name\n.PARAM string=7 words=\"[string literal]\"\n\
+                 A1 [in] print_param_types string_array={vector} string=\"text\"\n.END\n"
+            ))
+            .unwrap();
+            let resolved = resolve_first_xspice(&netlist);
+            assert_eq!(resolved.string_vector_params[0].1, ["string", "literal"]);
+            assert_eq!(resolved.string_params[0].1, "text");
+        }
+    }
+
     struct ParamOnlyModel {
         name: &'static str,
         params: Vec<ParamSpec>,

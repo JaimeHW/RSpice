@@ -476,6 +476,9 @@ vector expressions can read model defaults, with enclosing parameters retaining
 precedence and run temperature options applied consistently.
 Bare-word vectors wait for complete lexical, instance, and model scalar bindings
 before numeric or string classification, including quoted vectors and aliases.
+Explicit string and vector fields take precedence over enclosing numeric names
+when classifying bare words; this does not turn explicitly braced numeric reads
+of those fields into strings. Independent root vectors retain their sampling order.
 Literal words remain string entries in both top-level and subcircuit instances;
 quote individual entries to preserve text that also names a numeric binding or
 resembles a recognized expression function call.

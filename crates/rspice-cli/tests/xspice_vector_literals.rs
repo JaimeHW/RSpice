@@ -194,3 +194,37 @@ fn malformed_deferred_vectors_preserve_existing_artifacts() {
         }
     }
 }
+
+#[test]
+fn word_vectors_respect_nonnumeric_instance_overrides_in_check_and_run() {
+    for fields in [
+        "string_array=[string] string=\"text\"",
+        "string={text} string_array=\"[string]\"",
+        "string_array={words} string={text}",
+        "string_array=[real_array] real_array=[1 2]",
+        "real_array={payload} string_array=[real_array]",
+    ] {
+        for scoped in [false, true] {
+            let directory = common::test_dir("word_vector_field_shadow");
+            let deck = directory.join("deck.cir");
+            let result = directory.join("result.csv");
+            let mut body = format!("A1 [in] print_param_types {fields}");
+            if scoped {
+                body = format!(".SUBCKT cell in\n{body}\n.ENDS\nX1 in cell");
+            }
+            std::fs::write(&deck, format!(
+                "* nonnumeric vector classification\n.PARAM string=7 real_array=7\nV1 in 0 1\n{body}\n\
+                 .PARAM words=\"[string]\" text=\"text\" payload=\"[1 2]\"\n.OP\n.END\n"
+            )).unwrap();
+            for command in ["check", "run"] {
+                let output = invoke(command, &deck, &result);
+                assert!(
+                    output.status.success(),
+                    "{fields}, scoped={scoped}, {command}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            assert!(std::fs::read_to_string(&result).unwrap().contains("V(IN)"));
+        }
+    }
+}

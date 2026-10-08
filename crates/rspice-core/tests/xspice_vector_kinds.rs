@@ -177,42 +177,50 @@ fn ambiguous_vectors_reject_unclosed_nested_and_trailing_syntax() {
 #[test]
 fn ambiguous_vector_capture_and_binding_preserve_typed_cancellation() {
     use rspice_core::{SimulationError, abort_signal::CountingAbort, netlist::ParseWithAbortError};
-    for scoped in [false, true] {
-        let source = deck(
-            "A1 [in] print_param_types string_array=[alpha \"two words\" beta]",
-            "",
-            scoped,
-        );
-        let count = CountingAbort::new(usize::MAX);
-        let netlist = Netlist::parse_with_abort(&source, &count).unwrap();
-        for limit in 0..count.count() {
-            let abort = CountingAbort::new(limit);
-            assert!(
-                matches!(
-                    Netlist::parse_with_abort(&source, &abort),
-                    Err(ParseWithAbortError::Aborted)
-                ),
-                "parse limit={limit}, scoped={scoped}"
+    for (fields, definitions) in [
+        ("string_array=[alpha \"two words\" beta]", ""),
+        (
+            "string_array=[string \"two words\" beta] string={payload}",
+            ".PARAM string=7 payload=\"text\"",
+        ),
+    ] {
+        for scoped in [false, true] {
+            let source = deck(
+                &format!("A1 [in] print_param_types {fields}"),
+                definitions,
+                scoped,
             );
-            assert_eq!(abort.count(), limit + 1);
-            assert_eq!(abort.polls_after_abort(), 0);
+            let count = CountingAbort::new(usize::MAX);
+            let netlist = Netlist::parse_with_abort(&source, &count).unwrap();
+            for limit in 0..count.count() {
+                let abort = CountingAbort::new(limit);
+                assert!(
+                    matches!(
+                        Netlist::parse_with_abort(&source, &abort),
+                        Err(ParseWithAbortError::Aborted)
+                    ),
+                    "parse limit={limit}, scoped={scoped}"
+                );
+                assert_eq!(abort.count(), limit + 1);
+                assert_eq!(abort.polls_after_abort(), 0);
+            }
+            let count = CountingAbort::new(usize::MAX);
+            Engine::default()
+                .build_circuit_with_abort(&netlist, &count)
+                .unwrap();
+            for limit in 0..count.count() {
+                let abort = CountingAbort::new(limit);
+                let result = Engine::default().build_circuit_with_abort(&netlist, &abort);
+                assert!(
+                    matches!(result, Err(SimulationError::Aborted)),
+                    "build limit={limit}, scoped={scoped}: {:?}",
+                    result.err()
+                );
+                assert_eq!(abort.count(), limit + 1);
+                assert_eq!(abort.polls_after_abort(), 0);
+            }
+            Engine::default().build_circuit(&netlist).unwrap();
         }
-        let count = CountingAbort::new(usize::MAX);
-        Engine::default()
-            .build_circuit_with_abort(&netlist, &count)
-            .unwrap();
-        for limit in 0..count.count() {
-            let abort = CountingAbort::new(limit);
-            let result = Engine::default().build_circuit_with_abort(&netlist, &abort);
-            assert!(
-                matches!(result, Err(SimulationError::Aborted)),
-                "build limit={limit}, scoped={scoped}: {:?}",
-                result.err()
-            );
-            assert_eq!(abort.count(), limit + 1);
-            assert_eq!(abort.polls_after_abort(), 0);
-        }
-        Engine::default().build_circuit(&netlist).unwrap();
     }
 }
 
@@ -284,5 +292,100 @@ fn vector_alias_fields_are_not_mistaken_for_scalar_bindings() {
                 .build_circuit(&Netlist::parse(&source).unwrap())
                 .unwrap();
         }
+    }
+}
+
+#[test]
+fn word_vectors_use_explicit_nonnumeric_types_before_enclosing_numbers() {
+    use rspice_core::netlist::{ElementKind, flatten_netlist_with_models};
+    for (field, value) in [
+        ("string", "\"text\""),
+        ("string", "{text}"),
+        ("string", "7 string=\"text\""),
+        ("real_array", "[1 2]"),
+        ("real_array", "{payload}"),
+        ("complex", "<1 2>"),
+        ("complex_array", "[<1 2>]"),
+    ] {
+        for vector in [
+            format!("[{field}]"),
+            format!("\"[{field}]\""),
+            "{words}".into(),
+        ] {
+            for scoped in [false, true] {
+                for definitions_first in [false, true] {
+                    for override_first in [false, true] {
+                        let definitions = format!(
+                            ".PARAM {field}=7 text=\"text\" payload=\"[1 2]\" words=\"[{field}]\"\n.MODEL alias print_param_types(real=1)"
+                        );
+                        let fields = if override_first {
+                            format!("{field}={value} string_array={vector}")
+                        } else {
+                            format!("string_array={vector} {field}={value}")
+                        };
+                        let mut source = deck(
+                            &format!("A1 [in] alias {fields}"),
+                            if definitions_first { "" } else { &definitions },
+                            scoped,
+                        );
+                        if definitions_first {
+                            source =
+                                source.replace("V1 in 0 .5", &format!("{definitions}\nV1 in 0 .5"));
+                        }
+                        let netlist = Netlist::parse(&source).unwrap();
+                        Engine::default()
+                            .build_circuit(&netlist)
+                            .unwrap_or_else(|error| panic!("{source}: {error}"));
+                        if scoped {
+                            let flattened = flatten_netlist_with_models(&netlist).unwrap();
+                            let strings = flattened
+                                .elements
+                                .iter()
+                                .find_map(|element| {
+                                    if let ElementKind::Xspice {
+                                        string_vector_params,
+                                        ..
+                                    } = &element.kind
+                                    {
+                                        string_vector_params
+                                            .iter()
+                                            .find(|(name, _)| {
+                                                name.eq_ignore_ascii_case("string_array")
+                                            })
+                                            .map(|(_, values)| values)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap();
+                            assert_eq!(strings, &[field], "{source}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn bare_vector_capture_handles_string_preferred_parameter_names() {
+    use rspice_core::netlist::ElementKind;
+    for name in ["file", "model", "result_path"] {
+        for scoped in [false, true] {
+            let source = deck(&format!("A1 in out gain {name}=[literal]"), "", scoped);
+            // The model schema may reject this field, but parsing an authored
+            // vector must not assume it came from a scalar string alias.
+            Netlist::parse(&source).unwrap();
+        }
+        let source =
+            format!("* numeric vector\n.PARAM known=7\nA1 in out gain {name}=[known]\n.END\n");
+        let netlist = Netlist::parse(&source).unwrap();
+        let ElementKind::Xspice {
+            real_vector_params, ..
+        } = &netlist.elements[0].kind
+        else {
+            panic!("expected XSPICE instance");
+        };
+        assert_eq!(real_vector_params[0].1, [7.0]);
     }
 }

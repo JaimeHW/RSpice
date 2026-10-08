@@ -156,6 +156,7 @@ impl XspiceInstanceParams<'_> {
     ) -> Result<Option<MaterializedXspiceParams>, ParseWithAbortError> {
         let mut materialized = None;
         let mut numeric_fields = None;
+        let mut non_scalar_fields = None;
         for (name, expression) in self
             .expr_params
             .iter()
@@ -191,7 +192,27 @@ impl XspiceInstanceParams<'_> {
                     .map(|name| name.to_ascii_uppercase())
                     .collect::<HashSet<_>>()
             });
-            let parsed = parse_xspice_string_value(name, value, scope, numeric_fields, abort)?;
+            let non_scalar_fields = non_scalar_fields.get_or_insert_with(|| {
+                let mut fields = self.non_scalar_fields();
+                // Deferred scalar-looking aliases can materialize as strings
+                // or vectors. They shadow numeric fallbacks before any alias
+                // is replaced, independently of assignment order.
+                fields.extend(
+                    self.expr_params
+                        .iter()
+                        .filter(|(_, expression)| scope.get_string(expression).is_some())
+                        .map(|(name, _)| name.to_ascii_uppercase()),
+                );
+                fields
+            });
+            let parsed = parse_xspice_string_value(
+                name,
+                value,
+                scope,
+                numeric_fields,
+                non_scalar_fields,
+                abort,
+            )?;
             materialized
                 .get_or_insert_with(|| MaterializedXspiceParams::copy_from(self))
                 .replace(name, parsed)?;

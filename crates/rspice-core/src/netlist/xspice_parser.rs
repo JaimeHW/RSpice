@@ -55,6 +55,7 @@ struct XspiceParseContext<'a> {
     eager: bool,
     final_scope: bool,
     instance_fields: &'a HashSet<String>,
+    non_scalar_fields: &'a HashSet<String>,
     current_field: &'a str,
 }
 
@@ -120,6 +121,7 @@ pub(crate) fn parse_xspice(
         eager: false,
         final_scope: false,
         instance_fields: &HashSet::new(),
+        non_scalar_fields: &HashSet::new(),
         current_field: "",
     };
     let netlist_params = &context;
@@ -270,6 +272,7 @@ pub(crate) fn parse_xspice(
             eager: true,
             final_scope: false,
             instance_fields: &instance_fields,
+            non_scalar_fields: &HashSet::new(),
             current_field: &id_str,
         };
         context.check_abort()?;
@@ -1133,8 +1136,11 @@ fn fold_instance_value(
                     })
                     .collect::<Result<Vec<_>, ParseError>>()?;
                 string_vector_value(entries)
-            } else if parse_deferred_xspice_vector(&expression).is_some() {
-                XspiceParamValue::StringVectorDeferred(expression)
+            } else if let Some(vector) = parse_deferred_xspice_vector(&expression) {
+                // The complete assignment inventory is now available. Fold
+                // independent root vectors in source order, but defer any
+                // sibling whose final scalar/string/vector type is still pending.
+                parse_vector_literal(name, vector, line, context, false)?
             } else if let Some(value) = context.try_evaluate(&expression) {
                 XspiceParamValue::Resolved(value)
             } else {
@@ -1709,9 +1715,24 @@ fn vector_param_kind(
             {
                 return XspiceVectorKind::Numeric;
             }
-            if !netlist_params.final_scope && defer_simple_param_refs {
-                // An actual subcircuit argument may change the inherited type.
+            if !netlist_params.final_scope
+                && (!netlist_params.eager
+                    || defer_simple_param_refs
+                    || (!value.eq_ignore_ascii_case(netlist_params.current_field)
+                        && netlist_params
+                            .instance_fields
+                            .contains(&value.to_ascii_uppercase())))
+            {
+                // Root assignments and subcircuit arguments can shadow an
+                // enclosing numeric binding with a nonnumeric field.
                 return XspiceVectorKind::Deferred;
+            }
+            if !value.eq_ignore_ascii_case(netlist_params.current_field)
+                && netlist_params
+                    .non_scalar_fields
+                    .contains(&value.to_ascii_uppercase())
+            {
+                return XspiceVectorKind::String;
             }
             if netlist_params.get_complex(value).is_some()
                 || netlist_params.get_parameter_expression(value).is_some()
@@ -1807,6 +1828,23 @@ fn parse_string_backed_param_value(
         return Ok(None);
     }
 
+    parse_vector_literal(
+        param_name,
+        value,
+        line_num,
+        netlist_params,
+        defer_simple_param_refs,
+    )
+    .map(Some)
+}
+
+fn parse_vector_literal(
+    param_name: &str,
+    value: &str,
+    line_num: usize,
+    netlist_params: &XspiceParseContext<'_>,
+    defer_simple_param_refs: bool,
+) -> Result<XspiceParamValue, ParseError> {
     let tokens = tokenize(value).map_err(|err| ParseError::Syntax {
         line: line_num,
         message: format!("Invalid XSPICE vector parameter literal: {err}"),
@@ -1820,7 +1858,7 @@ fn parse_string_backed_param_value(
         defer_simple_param_refs,
     )?;
     finish_vector_literal(&mut stream, line_num, param_name)?;
-    Ok(Some(parsed))
+    Ok(parsed)
 }
 
 /// Parse an alias in its lexical scope without evaluating numeric entries.
@@ -1830,6 +1868,7 @@ pub(super) fn parse_xspice_string_value(
     value: &str,
     scope: &ParamContext,
     numeric_fields: &HashSet<String>,
+    non_scalar_fields: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<XspiceParamValue, super::ParseWithAbortError> {
     let cancellation = super::parser::NumericParseAbort::new(abort);
@@ -1839,6 +1878,7 @@ pub(super) fn parse_xspice_string_value(
         eager: false,
         final_scope: true,
         instance_fields: numeric_fields,
+        non_scalar_fields,
         current_field: name,
     };
     let parsed = context.check_abort().and_then(|()| {
