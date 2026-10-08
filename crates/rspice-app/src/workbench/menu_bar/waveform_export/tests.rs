@@ -2007,8 +2007,75 @@ fn engineering_export_preference_dispatches_an_hdf5_dataset() {
     )
     .expect("reopen the dataset");
     assert_eq!(reopened.coordinate_name, "time");
+    assert_eq!(reopened.coordinate_unit.as_deref(), Some("s"));
     assert_eq!(reopened.waveforms[0].name, "V(out)");
     assert_eq!(reopened.waveforms[0].y.as_ref(), &[0.0, 1.25, -0.5]);
+}
+
+#[test]
+fn hdf5_export_ui_retains_imported_coordinate_names_and_units() {
+    use rspice_results::result_import::{
+        ResultImportCoordinate, ResultImportFormat, ResultImportSource,
+    };
+
+    for (kind, name, unit) in [
+        (AnalysisType::Transient, "Elapsed time", Some("s")),
+        (AnalysisType::Transient, "Clock", None),
+        (AnalysisType::DcSweep, "bias", Some("A")),
+        (AnalysisType::DcSweep, "control", None),
+        (AnalysisType::Ac, "Test frequency", Some("Hz")),
+        (AnalysisType::Ac, "Tone", None),
+    ] {
+        let trace = if kind == AnalysisType::Ac {
+            complex_waveform(
+                "|out|",
+                "out",
+                vec![1.0, 2.0],
+                vec![1.0, 2.0],
+                vec![-0.0, 4.0],
+                vec![2.0, -1.0],
+            )
+        } else {
+            waveform("out", vec![1.0, 2.0], vec![-0.0, 4.0])
+        };
+        let mut analysis =
+            AnalysisResult::new(1, kind, "Imported coordinate").with_waveforms(vec![trace]);
+        analysis.import_source = Some(ResultImportSource {
+            source_name: "original.h5".into(),
+            format: ResultImportFormat::Hdf5,
+            coordinate: Some(ResultImportCoordinate {
+                name: name.into(),
+                unit: unit.map(str::to_owned),
+            }),
+        });
+        let mut state = state_with_typed_result(analysis);
+        state
+            .ui
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::EngineeringExport, 8)
+            .unwrap();
+        let io = MockExportWorkflowIo::default();
+        action_export_csv_with_io(&mut state, &io);
+        let files = io.byte_files.borrow();
+        assert_eq!(files.len(), 1, "{}", last_log_message(&state));
+        let reopened = crate::workbench::workflows::result_import_workflow::parse_result_dataset(
+            "waveforms.h5",
+            &files[0].1,
+        )
+        .unwrap();
+        assert_eq!(reopened.coordinate_name, name);
+        assert_eq!(reopened.coordinate_unit.as_deref(), unit);
+        assert_eq!(reopened.analysis_type, kind);
+        assert_eq!(reopened.waveforms[0].x.as_ref(), &[1.0, 2.0]);
+        assert_eq!(reopened.waveforms[0].unit, None);
+        if kind == AnalysisType::Ac {
+            let components = reopened.waveforms[0].complex.as_ref().unwrap();
+            assert_eq!(components.real[0].to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(components.imag.as_ref(), &[2.0, -1.0]);
+        } else {
+            assert_eq!(reopened.waveforms[0].y[0].to_bits(), (-0.0_f64).to_bits());
+        }
+    }
 }
 
 #[test]
