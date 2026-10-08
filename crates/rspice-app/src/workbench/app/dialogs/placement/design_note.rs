@@ -19,32 +19,13 @@ const DESCRIPTION: &str =
 const DISCARD_TITLE: &str = "Unsaved dialog changes";
 const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No schematic documentation has been changed.";
 
-#[derive(Debug)]
-enum DraftValidation {
-    Invalid(String),
-    Valid(PendingDesignNotePlacement),
-}
-
-impl DraftValidation {
-    fn can_commit(&self) -> bool {
-        matches!(self, Self::Valid(_))
-    }
-
-    fn message(&self) -> Option<&str> {
-        match self {
-            Self::Invalid(message) => Some(message),
-            Self::Valid(_) => None,
-        }
-    }
-}
-
 impl RSpiceApp {
     pub(in crate::workbench) fn render_design_note_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.design_note.open {
             return;
         }
         let validation = validate_draft(&self.state);
-        let validation_message = validation.message().map(str::to_owned);
+        let validation_message = validation.as_ref().err().cloned();
         let preview_text = design_note_preview_text(&self.state);
         let discard_confirm = self.state.dialogs.design_note.discard_confirm;
         let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
@@ -55,7 +36,7 @@ impl RSpiceApp {
             } else {
                 "Cancel"
             })
-            .primary_enabled(validation.can_commit())
+            .primary_enabled(validation.is_ok())
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::Control(note_placement::text_id()));
         if discard_confirm {
@@ -81,7 +62,7 @@ impl RSpiceApp {
         });
         match response.choice {
             DialogChoice::Primary => {
-                if let DraftValidation::Valid(pending) = validate_draft(&self.state) {
+                if let Ok(pending) = validate_draft(&self.state) {
                     self.state.schematic.session.editor.pending_design_note = Some(pending);
                     self.state.schematic.arm_tool(Tool::DesignNote);
                     self.state.dialogs.design_note.close();
@@ -98,38 +79,34 @@ impl RSpiceApp {
     }
 }
 
-fn validate_draft(state: &AppState) -> DraftValidation {
+fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String> {
     let draft = &state.dialogs.design_note;
     if state.schematic_edit_read_only() {
-        return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
+        return Err("The active schematic is read-only.".to_owned());
     }
     let Some(source) = draft.source.as_ref() else {
-        return DraftValidation::Invalid(
-            "Reopen Place text or note to capture the active schematic.".to_owned(),
-        );
+        return Err("Reopen Place text or note to capture the active schematic.".to_owned());
     };
     if source.design_epoch != state.design_execution_epoch {
-        return DraftValidation::Invalid(
-            "The design document changed. Close and reopen Place text or note.".to_owned(),
-        );
+        return Err("The design document changed. Close and reopen Place text or note.".to_owned());
     }
     if source.document_epoch != state.active_schematic_epoch {
-        return DraftValidation::Invalid(
+        return Err(
             "The active schematic buffer changed. Close and reopen Place text or note.".to_owned(),
         );
     }
     if source.topology_version != state.schematic.topology_version() {
-        return DraftValidation::Invalid(
+        return Err(
             "The schematic topology changed. Close and reopen Place text or note.".to_owned(),
         );
     }
     if source.document.display_path() != state.workspace.content.active_view.display_path() {
-        return DraftValidation::Invalid(
+        return Err(
             "The active cell/view changed. Close and reopen Place text or note.".to_owned(),
         );
     }
     if *source != schematic_editor_request_source(state) {
-        return DraftValidation::Invalid(
+        return Err(
             "The active schematic context changed. Close and reopen Place text or note.".to_owned(),
         );
     }
@@ -139,8 +116,8 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         source.topology_version,
         &state.schematic.document().design_notes,
     ) {
-        Ok(pending) => DraftValidation::Valid(pending.with_source(source.clone())),
-        Err(error) => DraftValidation::Invalid(error.to_string()),
+        Ok(pending) => Ok(pending.with_source(source.clone())),
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -206,10 +183,10 @@ mod tests {
     #[test]
     fn valid_draft_freezes_authority_without_mutating_document() {
         let mut state = AppState::default();
-        assert!(!validate_draft(&state).can_commit());
+        assert!(validate_draft(&state).is_err());
         let source = schematic_editor_request_source(&state);
         state.dialogs.design_note.open(source.clone());
-        let DraftValidation::Valid(pending) = validate_draft(&state) else {
+        let Ok(pending) = validate_draft(&state) else {
             panic!("valid draft");
         };
         assert_eq!(pending.text, "Bias network");
@@ -247,7 +224,7 @@ mod tests {
                 .unwrap();
             let source = schematic_editor_request_source(&state);
             state.dialogs.design_note.open(source.clone());
-            assert!(validate_draft(&state).can_commit());
+            assert!(validate_draft(&state).is_ok());
             match change {
                 "document" => state.design_execution_epoch += 1,
                 "occurrence" => {
@@ -304,14 +281,14 @@ mod tests {
                 _ => unreachable!(),
             }
             let notes = state.schematic.document().design_notes.clone();
-            assert!(!validate_draft(&state).can_commit(), "{change}");
+            assert!(validate_draft(&state).is_err(), "{change}");
             assert_eq!(state.dialogs.design_note.source, Some(source));
             if !state.schematic_edit_read_only() {
                 state
                     .dialogs
                     .design_note
                     .open(schematic_editor_request_source(&state));
-                assert!(validate_draft(&state).can_commit(), "fresh {change}");
+                assert!(validate_draft(&state).is_ok(), "fresh {change}");
             }
             assert_eq!(state.schematic.document().design_notes, notes);
             assert!(!state.schematic.can_undo());
