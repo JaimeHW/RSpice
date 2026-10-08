@@ -582,7 +582,12 @@ fn compare_cells(
     match (left, right) {
         (Some(left), Some(right)) => match (left.numeric, right.numeric) {
             (Some(left), Some(right)) => left.total_cmp(&right),
-            _ => natural_key(&left.display).cmp(&natural_key(&right.display)),
+            // Keep cell kinds ordered consistently. Comparing mixed kinds by
+            // display text creates cycles, e.g. numeric 2 < numeric 10 < text
+            // "15" < numeric 2, which violates the sorting contract.
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => natural_key(&left.display).cmp(&natural_key(&right.display)),
         },
         (Some(_), None) => std::cmp::Ordering::Greater,
         (None, Some(_)) => std::cmp::Ordering::Less,
@@ -675,7 +680,7 @@ fn compare_number(value: f64, operator: &str, target: f64) -> bool {
         "<=" => value <= target,
         ">" => value > target,
         ">=" => value >= target,
-        "=" => value.total_cmp(&target).is_eq(),
+        "=" => value == target,
         _ => false,
     }
 }
@@ -683,6 +688,67 @@ fn compare_number(value: f64, operator: &str, target: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mixed_numeric_and_display_only_cells_have_a_total_sort_order() {
+        let two = EngineeringCell {
+            display: "2".into(),
+            numeric: Some(2.0),
+        };
+        let ten = EngineeringCell {
+            display: "10".into(),
+            numeric: Some(10.0),
+        };
+        let display_only = EngineeringCell::text("15");
+        let empty = EngineeringCell::text("");
+        let nan = EngineeringCell {
+            display: "unavailable".into(),
+            numeric: Some(f64::NAN),
+        };
+        let cells = [
+            None,
+            Some(&two),
+            Some(&ten),
+            Some(&display_only),
+            Some(&empty),
+            Some(&nan),
+        ];
+        for &a in &cells {
+            for &b in &cells {
+                assert_eq!(compare_cells(a, b), compare_cells(b, a).reverse());
+                for &c in &cells {
+                    if compare_cells(a, b).is_le() && compare_cells(b, c).is_le() {
+                        assert!(
+                            compare_cells(a, c).is_le(),
+                            "non-transitive ordering: {a:?}, {b:?}, {c:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_equality_filters_treat_signed_zeros_as_equal() {
+        for value in [-0.0, 0.0] {
+            for query in ["= 0", "= -0"] {
+                let cell = EngineeringCell {
+                    display: value.to_string(),
+                    numeric: Some(value),
+                };
+                assert!(filter_matches(
+                    &cell,
+                    query,
+                    EngineeringFilterGrammar::EngineeringValues
+                ));
+                assert!(filter_matches(
+                    &EngineeringCell::text(cell.display),
+                    query,
+                    EngineeringFilterGrammar::EngineeringValues
+                ));
+            }
+        }
+    }
 
     #[test]
     fn typed_grammar_understands_engineering_values_ranges_exact_and_regex() {
