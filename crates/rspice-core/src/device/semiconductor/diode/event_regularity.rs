@@ -74,7 +74,7 @@ impl Diode {
                 }
             }
         }
-        let components = self.current_components_before_knees(vd, self.junction_gmin);
+        let components = self.current_components_before_knees(vd, self.stamped_junction_gmin());
         if components
             .into_iter()
             .any(|(i, g)| !i.is_finite() || !g.is_finite())

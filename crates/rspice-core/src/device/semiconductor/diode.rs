@@ -1608,27 +1608,38 @@ impl Diode {
         (self.prev_vd, id, gd, cd)
     }
 
-    /// Apply the instance's area and multiplicity to every area-referred
-    /// quantity (ngspice's `DIOarea` × `DIOm` handling).
+    /// Apply instance area and multiplicity under the selected dialect.
+    /// Select the dialect before calling this method.
     ///
-    /// Saturation, tunneling and knee currents and the zero-bias depletion
-    /// capacitance scale with the junction area; series resistance scales
-    /// inversely.
+    /// Saturation current and depletion capacitance scale with area times
+    /// multiplicity; series resistance scales inversely. Xyce's IKF scales
+    /// with multiplicity alone, and its IBV/IS matching ratio is independent
+    /// of area. ngspice uses area-scaled injection knees.
     ///
-    /// The breakdown knee current is the one place the LEVEL matters:
+    /// In ngspice the breakdown knee scaling depends on LEVEL:
     /// `diotemp.c` scales IBV by multiplicity alone at LEVEL=1 and by area ×
     /// multiplicity at LEVEL=3. IBV feeds the forward/reverse matching loop
     /// that sets the effective breakdown voltage, so getting this wrong moves
     /// the knee rather than just its height.
     pub(crate) fn apply_instance_scaling(&mut self, area: Value, multiplicity: Value) {
         let scale = area * multiplicity;
+        self.candidate_eval_valid = false;
+        self.multiplicity *= multiplicity;
         self.junction_scale *= scale;
         self.is *= scale;
-        self.ibv *= match self.level {
-            DiodeLevel::Geometric => scale,
-            DiodeLevel::Legacy | DiodeLevel::Pspice => multiplicity,
+        self.ibv *= if self.xyce_dialect {
+            scale
+        } else {
+            match self.level {
+                DiodeLevel::Geometric => scale,
+                DiodeLevel::Legacy | DiodeLevel::Pspice => multiplicity,
+            }
         };
-        self.forward_knee_current *= scale;
+        self.forward_knee_current *= if self.xyce_dialect {
+            multiplicity
+        } else {
+            scale
+        };
         self.reverse_knee_current *= scale;
         self.recombination_saturation_current *= scale;
         self.tunneling.bottom *= scale;
@@ -1925,7 +1936,17 @@ impl Diode {
 
     /// Physical F and dF/dV at an arbitrary bias, without Newton limiting.
     pub(crate) fn stamped_current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        self.current_and_conductance_with_gmin(vd, self.junction_gmin)
+        self.current_and_conductance_with_gmin(vd, self.stamped_junction_gmin())
+    }
+
+    /// Xyce multiplies the complete device equations by M, including GMIN.
+    /// ngspice folds M into model parameters before adding its unscaled GMIN.
+    fn stamped_junction_gmin(&self) -> Value {
+        if self.xyce_dialect {
+            self.junction_gmin * self.multiplicity
+        } else {
+            self.junction_gmin
+        }
     }
 
     /// Sufficient, bias-independent certificate for the C1 monotone law used
@@ -1944,7 +1965,7 @@ impl Diode {
             && finite_nonnegative(self.is)
             && finite_nonnegative(self.bottom_saturation_current())
             && finite_nonnegative(self.sidewall_saturation_current * self.sidewall_perimeter)
-            && finite_nonnegative(self.junction_gmin)
+            && finite_nonnegative(self.stamped_junction_gmin())
             && self.n.is_finite()
             && self.n > 0.0
             && self.vt.is_finite()
@@ -2052,14 +2073,12 @@ impl Diode {
     /// conductance. A changed GMIN therefore cannot stale it. Xyce's active
     /// forward knee is the one non-affine GMIN path and must reevaluate F/G.
     fn candidate_stamped_current_and_conductance(&self, vd: Value) -> (Value, Value) {
-        if self.junction_gmin != 0.0 && self.xyce_forward_injection(vd) {
+        let gmin = self.stamped_junction_gmin();
+        if gmin != 0.0 && self.xyce_forward_injection(vd) {
             self.stamped_current_and_conductance(vd)
         } else {
             let (current, conductance) = self.candidate_current_and_conductance(vd);
-            (
-                current + self.junction_gmin * vd,
-                conductance + self.junction_gmin,
-            )
+            (current + gmin * vd, conductance + gmin)
         }
     }
 

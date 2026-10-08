@@ -6487,10 +6487,14 @@ impl Engine {
                             .is_some_and(|value| value.is_finite() && value > 0.0);
                     let rs_externalized = rs_given || minres_applied;
 
-                    // Instance scaling: AREA and M/MULT both act as parallel
-                    // junction multipliers for the lumped junction (ngspice
-                    // DIOload semantics): currents and depletion charge scale
-                    // up, series resistance scales down.
+                    diode.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
+                    diode.set_ngspice_compatibility(
+                        self.config.spice_dialect == SpiceDialect::Ngspice,
+                    );
+
+                    // Select the dialect before resolving AREA and M/MULT:
+                    // Xyce and ngspice differ in injection and breakdown
+                    // scaling. Both scale depletion charge up and RS down.
                     //
                     // The defaults come off the model card, not from 1.0/0.0:
                     // LEVEL=3 foundry cards routinely carry their own AREA and
@@ -6559,7 +6563,6 @@ impl Engine {
                     }
                     diode.apply_instance_scaling(area, mult);
                     diode.set_sidewall_perimeter(sidewall_perimeter * mult);
-                    diode.multiplicity = mult;
                     diode.set_initially_off(
                         instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
                     );
@@ -6589,10 +6592,6 @@ impl Engine {
                             scale,
                         );
                     }
-                    diode.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
-                    diode.set_ngspice_compatibility(
-                        self.config.spice_dialect == SpiceDialect::Ngspice,
-                    );
                     if self.config.spice_dialect == SpiceDialect::Xyce {
                         diode.set_temperature_xyce_7(temp_k, tnom_k);
                     } else {

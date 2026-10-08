@@ -327,20 +327,25 @@ fn gp_diode_smooth_model_terms_do_not_create_endless_delay_events() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_xyce_diode_injection_preserves_charge_impulses_and_finite_currents() {
-    for (temperature, coefficient) in [(27.0, 0.0), (127.0, 0.01), (-23.0, 0.01), (127.0, -0.01)] {
+    for (temperature, coefficient, area, mult) in [
+        (27.0, 0.0, 1.0, 1.0),
+        (127.0, 0.01, 4.0, 3.0),
+        (-23.0, 0.01, 0.25, 0.5),
+        (127.0, -0.01, 4.0, 3.0),
+    ] {
         let vt: f64 = (temperature + 273.15) * 1.380_622_6e-23 / 1.602_191_8e-19;
         let ratio: f64 = (temperature + 273.15) / 300.15;
         let saturation = 1e-14 * ((ratio - 1.0) * 1.11 / vt + 3.0 * ratio.ln()).exp();
         let knee = 1e-3 * (1.0 + coefficient * (temperature - 27.0));
-        let v0 = vt * (1.0 + 1e-3 / saturation).ln();
-        let v1 = vt * (1.0 + 5e-3 / saturation).ln();
+        let v0 = vt * (1.0 + 1e-3 / (area * saturation)).ln();
+        let v1 = vt * (1.0 + 5e-3 / (area * saturation)).ln();
         for gmin in [0.0, 1e-3] {
             let current = |v: f64| {
-                let normal = saturation * (v / vt).exp_m1() + gmin * v;
+                let normal = area * saturation * (v / vt).exp_m1() + gmin * v;
                 if knee > 0.0 {
-                    normal / (1.0 + normal / knee).sqrt()
+                    mult * normal / (1.0 + normal / knee).sqrt()
                 } else {
-                    normal
+                    mult * normal
                 }
             };
             for method in [
@@ -349,7 +354,7 @@ fn gp_xyce_diode_injection_preserves_charge_impulses_and_finite_currents() {
                 IntegrationMethod::Gear2,
             ] {
                 let engine = engine(SpiceDialect::Xyce, method);
-                let deck = Netlist::parse(&format!("Xyce injection event\nVD d 0 DC {v0:.17e} PWL(0 {v0:.17e} 1n {v0:.17e} 1n {v1:.17e} 3n {v1:.17e})\nD1 d 0 dm TEMP={temperature}\n.model dm D(IS=1e-14 N=1 EG=1.11 XTI=3 TNOM=27 IKF=1m TIKF={coefficient} CJO=0 TT=2n)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN={gmin:e} RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(d) i(d1) i(vd)\n.end\n")).unwrap();
+                let deck = Netlist::parse(&format!("Xyce injection event\nVD d 0 DC {v0:.17e} PWL(0 {v0:.17e} 1n {v0:.17e} 1n {v1:.17e} 3n {v1:.17e})\nD1 d 0 dm TEMP={temperature} AREA={area} M={mult}\n.model dm D(IS=1e-14 N=1 EG=1.11 XTI=3 TNOM=27 IKF=1m TIKF={coefficient} CJO=0 TT=2n)\nVC c 0 2\nVB b 0 .6\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=100 TF=.1n PTF=57.29577951308232)\n.options GMIN={gmin:e} RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(d) i(d1) i(vd)\n.end\n")).unwrap();
                 let (result, checkpoints) = engine
                     .run_tran_checkpoint_schedule_with_startup_mode(
                         &deck,
@@ -365,7 +370,7 @@ fn gp_xyce_diode_injection_preserves_charge_impulses_and_finite_currents() {
                     let expected = current(if time >= 1e-9 { v1 } else { v0 });
                     assert!(
                         (diode[index] - expected).abs() < 1e-13 + expected.abs() * 1e-9,
-                        "TEMP={temperature}/{coefficient}/{method:?}/{gmin}: I(D1) at {time:e}: {} vs {expected:e}",
+                        "TEMP={temperature}/TIKF={coefficient}/AREA={area}/M={mult}/{method:?}/{gmin}: I(D1) at {time:e}: {} vs {expected:e}",
                         diode[index]
                     );
                     if time == 0.0 || time == 1e-9 {

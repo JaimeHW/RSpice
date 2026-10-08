@@ -519,3 +519,134 @@ fn diode_xyce_tikf_controls_temperature_resolved_current_and_charge() {
         }
     }
 }
+
+#[test]
+fn diode_xyce_scaling_preserves_injection_and_series_admittance() {
+    let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
+    let v: f64 = 0.65;
+    for area in [4.0, 0.25, 1.0] {
+        for mult in [1.0, 3.0, 0.5] {
+            for gmin in [0.0, 1e-3] {
+                for resistance in [0.0, 10.0] {
+                    // Xyce applies AREA to IS/CJO/RS, leaves IKF unchanged,
+                    // then multiplies the completed F/Q (including GMIN) by M.
+                    let normal = area * 1e-14 * (v / vt).exp_m1() + gmin * v;
+                    let normal_g = area * 1e-14 * (v / vt).exp() / vt + gmin;
+                    let r = normal / 1e-3;
+                    let expected_i = mult * normal / (1.0 + r).sqrt();
+                    let expected_g = mult * normal_g * (1.0 + 0.5 * r) / (1.0 + r).powf(1.5);
+                    let series = resistance / (area * mult);
+                    let supply = v + series * expected_i;
+                    let deck = Netlist::parse(&format!("Xyce diode scaling\nV1 a 0 DC {supply:.17e} AC 1\nD1 a 0 dm AREA={area} M={mult}\n.model dm D(IS=1e-14 N=1 IKF=1m RS={resistance} CJO=1p VJ=1 M=0 TT=2n)\n.options GMIN={gmin} RELTOL=1e-9 ABSTOL=1e-15 VNTOL=1e-12\n.end\n")).unwrap();
+                    let mut config =
+                        SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+                    config.convergence_config.gmin_target = 0.0;
+                    let engine = Engine::new(config);
+                    let point = engine.run_dc_op(&deck).unwrap();
+                    for actual in [
+                        -branch_current(&point, "V1"),
+                        point.try_dc_observable_named("I(D1)").unwrap(),
+                    ] {
+                        assert!(
+                            (actual - expected_i).abs() < 1e-14 + 1e-8 * expected_i.abs(),
+                            "AREA={area} M={mult} GMIN={gmin} RS={resistance}: {actual:e} vs {expected_i:e}"
+                        );
+                    }
+                    let ac = engine.run_ac(&deck, &[1e7]).unwrap();
+                    let index = ac[0]
+                        .branch_names
+                        .iter()
+                        .position(|n| n.eq_ignore_ascii_case("v1"))
+                        .unwrap();
+                    let junction = rspice_core::Complex64::new(
+                        expected_g,
+                        std::f64::consts::TAU * 1e7 * (area * mult * 1e-12 + 2e-9 * expected_g),
+                    );
+                    let expected = junction / (1.0 + series * junction);
+                    let actual = -ac[0].currents[index];
+                    assert!(
+                        (actual - expected).norm() < 1e-13 + 1e-8 * expected.norm(),
+                        "AC AREA={area} M={mult} GMIN={gmin} RS={resistance}: {actual:?} vs {expected:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn diode_xyce_scaling_preserves_breakdown_voltage_and_gmin() {
+    let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
+    // Xyce's IBV matching operates on model densities, independently of AREA.
+    let mut xbv = 5.0 - vt * (1.0_f64 + 1e-3 / 1e-14).ln();
+    for _ in 0..25 {
+        xbv = 5.0 - vt * (1e-3 / 1e-14 + 1.0 - xbv / vt).ln();
+        let matched = 1e-14 * (((5.0 - xbv) / vt).exp_m1() + xbv / vt);
+        if (matched - 1e-3).abs() <= 1e-6 {
+            break;
+        }
+    }
+    for area in [4.0, 0.25, 1.0] {
+        for mult in [1.0, 3.0, 0.5] {
+            for gmin in [0.0, 1e-3] {
+                let avalanche = area * 1e-14 * ((5.0 - xbv) / vt).exp();
+                let expected_i = mult * (-avalanche - 5.0 * gmin);
+                let expected_g = mult * (avalanche / vt + gmin);
+                let deck = Netlist::parse(&format!("Xyce breakdown scaling\nV1 a 0 DC -5 AC 1\nD1 a 0 dm AREA={area} M={mult}\n.model dm D(IS=1e-14 N=1 BV=5 IBV=1m CJO=0 TT=2n)\n.options GMIN={gmin} RELTOL=1e-9 ABSTOL=1e-15 VNTOL=1e-12\n.end\n")).unwrap();
+                let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+                config.convergence_config.gmin_target = 0.0;
+                let engine = Engine::new(config);
+                let point = engine.run_dc_op(&deck).unwrap();
+                for actual in [
+                    -branch_current(&point, "V1"),
+                    point.try_dc_observable_named("I(D1)").unwrap(),
+                ] {
+                    assert!(
+                        (actual - expected_i).abs() < 1e-14 + 1e-8 * expected_i.abs(),
+                        "BV AREA={area} M={mult} GMIN={gmin}: {actual:e} vs {expected_i:e}"
+                    );
+                }
+                let ac = engine.run_ac(&deck, &[1e7]).unwrap();
+                let index = ac[0]
+                    .branch_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case("v1"))
+                    .unwrap();
+                let expected = rspice_core::Complex64::new(
+                    expected_g,
+                    std::f64::consts::TAU * 1e7 * 2e-9 * expected_g,
+                );
+                let actual = -ac[0].currents[index];
+                assert!((actual - expected).norm() < 1e-13 + 1e-8 * expected.norm());
+            }
+        }
+    }
+}
+
+#[test]
+fn diode_ngspice_scaling_keeps_gmin_outside_parameter_multiplicity() {
+    let vt: f64 = 300.15 * 1.380_648_52e-23 / 1.602_176_620_8e-19;
+    let normal = 3.0 * 1e-14 * (0.65 / vt).exp_m1();
+    let expected = normal / (1.0 + (normal / 3e-3).sqrt()) + 1e-3 * 0.65;
+    let deck = Netlist::parse("ngspice diode multiplicity\nV1 a 0 .65\nD1 a 0 dm M=3\n.model dm D(IS=1e-14 N=1 IKF=1m CJO=0)\n.options GMIN=1m\n.end\n").unwrap();
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice);
+    config.convergence_config.gmin_target = 0.0;
+    let point = Engine::new(config).run_dc_op(&deck).unwrap();
+    let actual = -branch_current(&point, "V1");
+    assert!((actual - expected).abs() < 1e-14 + 1e-9 * expected.abs());
+}
+
+#[test]
+fn diode_xyce_scaling_gmin_matches_parallel_instances() {
+    let vt: f64 = 300.15 * 1.380_622_6e-23 / 1.602_191_8e-19;
+    let expected = 3.0 * (1e-14 * (0.1 / vt).exp_m1() + 1e-3 * 0.1);
+    let deck = Netlist::parse("Xyce diode GMIN multiplicity\nV1 a 0 .1\nD1 a 0 dm M=3\n.model dm D(IS=1e-14 N=1 CJO=0)\n.options GMIN=1m\n.end\n").unwrap();
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+    config.convergence_config.gmin_target = 0.0;
+    let point = Engine::new(config).run_dc_op(&deck).unwrap();
+    let actual = -branch_current(&point, "V1");
+    assert!(
+        (actual - expected).abs() < 1e-14 + 1e-9 * expected.abs(),
+        "GMIN M=3: {actual:e} vs {expected:e}"
+    );
+}
