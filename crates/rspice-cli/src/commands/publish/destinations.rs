@@ -35,6 +35,17 @@ impl Drop for DestinationScope {
 
 fn key(path: &Path) -> std::io::Result<PathBuf> {
     let absolute = std::path::absolute(path)?;
+    // An existing Windows file can also be reached by its 8.3 basename.
+    // Resolving only its parent leaves those spellings distinct and lets an
+    // output replace a protected source. Resolve the existing entry first,
+    // preserving leaf symlinks: atomic replacement owns the link, not its target.
+    #[cfg(windows)]
+    let absolute = match std::fs::symlink_metadata(&absolute) {
+        Ok(metadata) if !metadata.file_type().is_symlink() => absolute.canonicalize()?,
+        Ok(_) => absolute,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => absolute,
+        Err(error) => return Err(error),
+    };
     let mut normalized = PathBuf::new();
     for component in absolute.components() {
         match component {
