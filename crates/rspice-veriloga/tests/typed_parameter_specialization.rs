@@ -1144,9 +1144,14 @@ endmodule
         device
     };
     let mut device = verify(&original, 4.0, true);
-    device.try_set_parameter("P", 7.0).unwrap();
+    // P also enters the compiled digital initializer. A numeric-only update
+    // would leave the two domains disagreeing; source specialization follows.
+    assert!(matches!(
+        device.try_set_parameter("P", 7.0),
+        Err(rspice_veriloga::device::ParameterValueError::RequiresElaboration { .. })
+    ));
     device.try_resolve_parameter_defaults().unwrap();
-    assert_eq!(device.try_evaluate().unwrap()[0], 6.0);
+    assert_eq!(device.try_evaluate().unwrap()[0], 4.0);
     for (override_value, expected, integer) in [
         (ScalarParameterValue::Real(5.0), 5.0, false),
         (ScalarParameterValue::Integer(7), 6.0, true),
