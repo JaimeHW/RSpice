@@ -89,6 +89,8 @@ mod connect_modules;
 #[cfg(all(test, feature = "veriloga"))]
 mod elaboration_scan;
 #[cfg(feature = "veriloga")]
+mod mixed_boundaries;
+#[cfg(feature = "veriloga")]
 mod mixed_modules;
 #[cfg(feature = "veriloga")]
 mod veriloga_instances;
@@ -2413,6 +2415,9 @@ enum XspiceAutoBridgeKind {
 #[derive(Debug, Clone)]
 struct PlannedXspiceAutoBridge {
     node: usize,
+    /// A distinct event endpoint for an HDL port connected to a physical net.
+    /// Legacy XSPICE boundaries use both representations of `node`.
+    event_node: Option<usize>,
     kind: XspiceAutoBridgeKind,
     vcc: crate::Value,
     /// Where [`Self::vcc`] came from, for the one pass that says so or refuses
@@ -2561,6 +2566,26 @@ fn collect_flat_analog_nodes(
     circuit: &CircuitData,
     flat_elements: &[Element],
 ) {
+    // Generated bridge subcircuits are absent from the source element list.
+    // Include their R/C/L terminals so a template cannot make an electrically
+    // loaded event endpoint look like a direct event net.
+    for stamp in circuit
+        .resistors
+        .stamps
+        .iter()
+        .chain(&circuit.capacitors.stamps)
+    {
+        insert_non_ground_node(nodes, stamp.pp.row);
+        insert_non_ground_node(nodes, stamp.nn.row);
+    }
+    for &node in circuit
+        .inductors
+        .node_pos
+        .iter()
+        .chain(&circuit.inductors.node_neg)
+    {
+        insert_non_ground_node(nodes, node);
+    }
     for element in flat_elements {
         if matches!(element.kind, ElementKind::Xspice { .. }) {
             continue;
@@ -3013,6 +3038,7 @@ fn plan_xspice_auto_bridges(
                 );
                 PlannedXspiceAutoBridge {
                     node,
+                    event_node: None,
                     kind,
                     vcc: supply.level,
                     supply: Some(supply.derivation),
@@ -3053,6 +3079,7 @@ fn plan_xspice_auto_bridges(
         };
         Some(PlannedXspiceAutoBridge {
             node,
+            event_node: None,
             kind,
             vcc: 0.0,
             supply: None,
@@ -3370,24 +3397,25 @@ fn xspice_auto_bridge_generated_card(
     bridge: &PlannedXspiceAutoBridge,
     instance_name: &str,
     node_label: &str,
+    event_label: &str,
 ) -> String {
     let vcc = bridge.vcc;
     let half_vcc = vcc / 2.0;
     match bridge.kind {
         XspiceAutoBridgeKind::Adc => format!(
-            "{instance_name} [ {node_label} ] [ {node_label} ] adc_bridge(in_low={half_vcc} in_high={half_vcc})"
+            "{instance_name} [ {node_label} ] [ {event_label} ] adc_bridge(in_low={half_vcc} in_high={half_vcc})"
         ),
         XspiceAutoBridgeKind::Dac => format!(
-            "{instance_name} [ {node_label} ] [ {node_label} ] dac_bridge(out_low=0 out_high={vcc})"
+            "{instance_name} [ {event_label} ] [ {node_label} ] dac_bridge(out_low=0 out_high={vcc})"
         ),
         XspiceAutoBridgeKind::Bidi => format!(
-            "{instance_name} [ {node_label} ] [ {node_label} ] null bidi_bridge(out_high={vcc} in_low={half_vcc} in_high={half_vcc})"
+            "{instance_name} [ {node_label} ] [ {event_label} ] null bidi_bridge(out_high={vcc} in_low={half_vcc} in_high={half_vcc})"
         ),
         XspiceAutoBridgeKind::RealToV => {
-            format!("{instance_name} {node_label} null {node_label} r_to_v")
+            format!("{instance_name} {event_label} {node_label} real_to_v")
         }
         XspiceAutoBridgeKind::VToReal => {
-            format!("{instance_name} {node_label} {node_label} v_to_real")
+            format!("{instance_name} {node_label} {event_label} v_to_real")
         }
     }
 }
@@ -4500,6 +4528,20 @@ fn add_template_xspice_auto_bridge(
         .map(|bridge| xspice_auto_bridge_node_label(Some(all_node_names), bridge.node))
         .collect();
     let node_list = node_labels.join(" ");
+    let event_list = bridges
+        .iter()
+        .map(|bridge| {
+            xspice_auto_bridge_node_label(
+                Some(all_node_names),
+                bridge.event_node.unwrap_or(bridge.node),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (inputs, outputs) = match first_bridge.kind {
+        XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::RealToV => (&event_list, &node_list),
+        _ => (&node_list, &event_list),
+    };
 
     let setup_card = format_xspice_auto_bridge_template_card(
         &template.key,
@@ -4516,9 +4558,9 @@ fn add_template_xspice_auto_bridge(
         &template.key,
         &template.device_card,
         &[
-            XspiceAutoBridgeFormatArg::Int(first_bridge.node),
-            XspiceAutoBridgeFormatArg::Str(&node_list),
-            XspiceAutoBridgeFormatArg::Str(&node_list),
+            XspiceAutoBridgeFormatArg::Int(first_bridge.event_node.unwrap_or(first_bridge.node)),
+            XspiceAutoBridgeFormatArg::Str(inputs),
+            XspiceAutoBridgeFormatArg::Str(outputs),
             XspiceAutoBridgeFormatArg::Float(first_bridge.vcc),
         ],
     )?;
@@ -4754,16 +4796,17 @@ fn add_planned_xspice_auto_bridge(
         return add_template_xspice_auto_bridge(circuit, &bridges, template, context, abort);
     }
 
+    let event_node = bridge.event_node.unwrap_or(bridge.node);
     let vcc = bridge.vcc;
     let half_vcc = vcc / 2.0;
     let (model_name, instance_name, connections, numeric_params, output_branch) = match bridge.kind
     {
         XspiceAutoBridgeKind::Adc => (
             "adc_bridge",
-            format!("__rspice_auto_adc_{}", bridge.node),
+            format!("__rspice_auto_adc_{event_node}"),
             vec![
                 PortConnection::AnalogVector(vec![bridge.node]),
-                PortConnection::DigitalVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![event_node]),
             ],
             vec![
                 ("in_low".to_string(), half_vcc),
@@ -4773,9 +4816,9 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::Dac => (
             "dac_bridge",
-            format!("__rspice_auto_dac_{}", bridge.node),
+            format!("__rspice_auto_dac_{event_node}"),
             vec![
-                PortConnection::DigitalVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![event_node]),
                 PortConnection::AnalogVector(vec![bridge.node]),
             ],
             vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)],
@@ -4786,10 +4829,10 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::Bidi => (
             "bidi_bridge",
-            format!("__rspice_auto_bidi_{}", bridge.node),
+            format!("__rspice_auto_bidi_{event_node}"),
             vec![
                 PortConnection::AnalogVector(vec![bridge.node]),
-                PortConnection::DigitalVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![event_node]),
                 PortConnection::Null,
             ],
             vec![
@@ -4801,9 +4844,9 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::RealToV => (
             "real_to_v",
-            format!("__rspice_auto_real_to_v_{}", bridge.node),
+            format!("__rspice_auto_real_to_v_{event_node}"),
             vec![
-                PortConnection::Real(bridge.node),
+                PortConnection::Real(event_node),
                 PortConnection::Analog(bridge.node),
             ],
             Vec::new(),
@@ -4811,10 +4854,10 @@ fn add_planned_xspice_auto_bridge(
         ),
         XspiceAutoBridgeKind::VToReal => (
             "v_to_real",
-            format!("__rspice_auto_v_to_real_{}", bridge.node),
+            format!("__rspice_auto_v_to_real_{event_node}"),
             vec![
                 PortConnection::Analog(bridge.node),
-                PortConnection::Real(bridge.node),
+                PortConnection::Real(event_node),
             ],
             Vec::new(),
             // No output branch: the observer's output is an event, not a
@@ -4917,9 +4960,10 @@ fn add_planned_xspice_auto_bridge(
     );
     if node_names.is_some() {
         let node_label = xspice_auto_bridge_node_label(node_names, bridge.node);
+        let event_label = xspice_auto_bridge_node_label(node_names, event_node);
         log::info!(
             "Generated XSPICE auto-bridge card: {}",
-            xspice_auto_bridge_generated_card(bridge, &instance_name, &node_label)
+            xspice_auto_bridge_generated_card(bridge, &instance_name, &node_label, &event_label)
         );
     }
     circuit.add_xspice_instance(instance);
@@ -9413,6 +9457,40 @@ impl Engine {
                 )?;
             } else {
                 reject_disabled_xspice_auto_bridge(&circuit, &auto_bridges)?;
+            }
+        }
+
+        #[cfg(feature = "veriloga")]
+        {
+            let bridges = mixed_boundaries::plan_conversions(
+                &mut circuit,
+                &flat_elements,
+                &scoped_auto_bridge_metadata,
+                &boundary_supplies,
+                &design_connect_rules,
+            )?;
+            if !bridges.is_empty() {
+                if !netlist.options.auto_bridge.unwrap_or(true) {
+                    reject_disabled_xspice_auto_bridge(&circuit, &bridges)?;
+                }
+                report_planned_xspice_auto_bridge_supplies(&circuit, &bridges, &boundary_supplies)?;
+                add_planned_xspice_auto_bridges(
+                    &mut circuit,
+                    &bridges,
+                    &netlist.options.auto_bridge_templates,
+                    XspiceAutoBridgeContext {
+                        source_path: netlist.source_path.as_deref(),
+                        temperature: self.config.temperature,
+                        ramptime: self.config.ramptime,
+                        digital_delay_type: self.config.digital_delay_type,
+                        spice_dialect: self.config.spice_dialect,
+                        family_enabled: netlist.options.auto_bridge_family.unwrap_or(true),
+                        show_generated: netlist.options.auto_bridge_show_generated.unwrap_or(false),
+                        node_names: None,
+                        resource_limits: self.config.resource_limits,
+                    },
+                    abort,
+                )?;
             }
         }
 

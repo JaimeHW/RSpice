@@ -821,11 +821,11 @@ struct Bridges {
 /// A typed port that connects directly to the shared event domain. Electrical
 /// conversion, when required, must be elaborated explicitly before enrollment.
 #[derive(Clone)]
-struct EventPort {
+pub(crate) struct EventPort {
     signal: DigitalSignalId,
-    bit: Option<u32>,
-    node: usize,
-    direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
+    pub(crate) bit: Option<u32>,
+    pub(crate) node: usize,
+    pub(crate) direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
 }
 
 /// One vector boundary port, as a bus over the deck nodes its bits landed on.
@@ -2048,6 +2048,51 @@ impl MixedSignalHost {
             .iter()
             .filter(|port| port.bit.is_none())
             .map(|port| port.node)
+    }
+
+    pub(crate) fn direct_event_ports(&self) -> impl Iterator<Item = (&EventPort, &str)> {
+        self.event_ports.iter().map(|port| {
+            (
+                port,
+                self.state
+                    .digital
+                    .plan()
+                    .signal(port.signal)
+                    .unwrap()
+                    .name
+                    .as_str(),
+            )
+        })
+    }
+
+    /// Move only the event endpoint when elaboration inserts an electrical
+    /// converter. Continuous terminals retain their original solver nodes.
+    pub(crate) fn rebind_event_port(
+        &mut self,
+        index: usize,
+        node: usize,
+    ) -> Result<(), MixedSignalError> {
+        self.require_idle("rebind an event port")?;
+        let port =
+            self.event_ports
+                .get_mut(index)
+                .ok_or_else(|| MixedSignalError::InvalidBridge {
+                    detail: format!("event port index {index} is not declared"),
+                })?;
+        if let Some(bit) = port.bit {
+            let signal = self.state.digital.plan().signal(port.signal).unwrap();
+            let bus_name = format!("{}.{}", self.instance, signal.name);
+            for bus in &mut self.boundary_buses {
+                if bus.name == bus_name {
+                    // Boundary members run from MSB to LSB for either range
+                    // direction; `bit` is the packed value's bit position.
+                    let member = bus.members.len() - 1 - bit as usize;
+                    bus.members[member] = node;
+                }
+            }
+        }
+        port.node = node;
+        Ok(())
     }
 
     pub(crate) fn declare_event_port(

@@ -766,7 +766,7 @@ endmodule
 "#;
 
 #[test]
-fn a_bidirectional_discrete_port_is_refused_rather_than_guessed() {
+fn a_bidirectional_variable_port_is_refused() {
     let model = ModelFile::new("bidi", BIDIRECTIONAL);
     let deck = format!(
         "* a bidirectional discrete boundary\n\
@@ -781,7 +781,7 @@ fn a_bidirectional_discrete_port_is_refused_rather_than_guessed() {
     let error = error_for(&deck, 20.0e-9, 1.0e-9);
     let lowered = error.to_lowercase();
     assert!(
-        lowered.contains("bidirectional") && lowered.contains("io"),
+        (lowered.contains("inout") || lowered.contains("bidirectional")) && lowered.contains("io"),
         "the refusal must name the shape and the port: {error}"
     );
 }
@@ -3707,4 +3707,182 @@ endmodule
         }
         assert!((waveform(&result, "converted").last().unwrap() - 5.0).abs() < 1e-7);
     }
+}
+
+#[test]
+fn typed_event_boundaries_convert_loaded_real_ports_through_physical_voltage() {
+    let model = ModelFile::new(
+        "automatic_real",
+        r#"
+`timescale 1ns/1ps
+module real_source(q);
+ output q; wreal q;
+ real value=1;
+ initial begin #1 value=3; end
+ assign q=value;
+endmodule
+module real_sink(r,p);
+ input r; wreal r;
+ inout p; electrical p;
+ analog I(p)<+(V(p)-r)/1000;
+endmodule
+"#,
+    );
+    for reverse in [false, true] {
+        let cards = if reverse {
+            "Xr physical observed real_sink\nXs physical real_source"
+        } else {
+            "Xs physical real_source\nXr physical observed real_sink"
+        };
+        let deck = format!(
+            "* automatic real boundaries\n{cards}\nXg 0 grounded real_sink\nRload physical 0 1k\nRout observed 0 1k\nRg grounded 0 1k\n.va \"{}\" real_source module=real_source\n.va \"{}\" real_sink module=real_sink\n.end\n",
+            model.deck_path(),
+            model.deck_path()
+        );
+        let result = run(&deck, 3e-9, 0.1e-9);
+        let physical = waveform(&result, "physical");
+        let observed = waveform(&result, "observed");
+        assert_eq!(result.event_only_node_kind("physical"), None);
+        assert!((physical[0] - 1.0).abs() < 1e-7);
+        assert!((physical.last().unwrap() - 3.0).abs() < 1e-7);
+        assert!(
+            result
+                .time
+                .iter()
+                .zip(&physical)
+                .any(|(&t, &v)| t > 1e-9 && t < 2e-9 && v > 1.1 && v < 2.9),
+            "the converter must retain its ramp"
+        );
+        for ((&time, &voltage), sampled) in result.time.iter().zip(&physical).zip(observed) {
+            assert!(
+                (sampled - voltage / 2.0).abs() < 1e-6,
+                "reverse={reverse}, t={time}, physical={voltage}, observed={sampled}"
+            );
+        }
+        assert!(
+            waveform(&result, "grounded")
+                .iter()
+                .all(|value| value.abs() < 1e-8)
+        );
+        let disabled = deck.replace(".end", ".options auto_bridge=false\n.end");
+        assert!(error_for(&disabled, 3e-9, 0.1e-9).contains("insertion is disabled"));
+    }
+}
+
+#[test]
+fn typed_event_boundaries_convert_real_ports_using_template_endpoints() {
+    let model = ModelFile::new(
+        "real_template",
+        r#"
+`timescale 1ns/1ps
+module source(q);
+ output q; wreal q;
+ real value=1;
+ initial begin #1 value=2; end
+ assign q=value;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* real converter template\nXs out source\nR1 out 0 1k\n.va \"{}\" source\n.end\n",
+        model.deck_path()
+    );
+    let mut netlist = Netlist::parse(&deck).unwrap();
+    netlist
+        .options
+        .auto_bridge_templates
+        .push(rspice_core::netlist::XspiceAutoBridgeTemplate {
+            key: "auto_bridge_real_out".into(),
+            setup_card: ".model configured_real real_to_v (gain=2 transition_time=200p)".into(),
+            device_card: "Areal%d %s %s configured_real".into(),
+            max_nodes: Some(1),
+        });
+    let result = Engine::default().run_tran(&netlist, 2e-9, 0.05e-9).unwrap();
+    let out = waveform(&result, "out");
+    assert!((out[0] - 2.0).abs() < 1e-7);
+    assert!((out.last().unwrap() - 4.0).abs() < 1e-7);
+    assert!(
+        result
+            .time
+            .iter()
+            .zip(&out)
+            .any(|(&t, &v)| t > 1e-9 && t < 1.2e-9 && v > 2.1 && v < 3.9)
+    );
+}
+
+#[test]
+fn typed_event_boundaries_convert_bidirectional_drive_release_and_sense() {
+    let model = ModelFile::new(
+        "physical_bidi",
+        r#"
+`timescale 1ns/1ps
+module physical_io(io,p);
+ inout io; wire io;
+ inout p; electrical p;
+ reg drive=1;
+ integer seen=0;
+ initial begin #3 drive=1'bz; end
+ assign io=drive;
+ always @(io) begin
+  if(io===1'b1) seen=1;
+  else if(io===1'b0) seen=0;
+  else seen=-1;
+ end
+ analog I(p)<+(V(p)-seen)/1000;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* automatic bidirectional boundary\n.param vcc=3.3\nXio pad seen physical_io\nRload pad 0 1k\nRseen seen 0 1k\n.va \"{}\" physical_io\n.end\n",
+        model.deck_path()
+    );
+    struct Progress {
+        start: std::time::Instant,
+        last: Mutex<(usize, f64, Vec<(String, f64)>)>,
+    }
+    impl AbortSignal for Progress {
+        fn is_aborted(&self) -> bool {
+            self.start.elapsed().as_secs() >= 20 || self.last.lock().unwrap().0 > 2000
+        }
+        fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+            *self.last.lock().unwrap() = (
+                sample.time.len(),
+                sample.time.last().copied().unwrap_or_default(),
+                sample
+                    .node_names
+                    .iter()
+                    .zip(sample.node_voltages)
+                    .map(|(name, values)| {
+                        (name.clone(), values.last().copied().unwrap_or_default())
+                    })
+                    .collect(),
+            );
+        }
+    }
+    let progress = Progress {
+        start: std::time::Instant::now(),
+        last: Mutex::new((0, 0.0, vec![])),
+    };
+    let netlist = Netlist::parse(&deck).unwrap();
+    let result = Engine::default()
+        .run_tran_with_abort(&netlist, 8e-9, 0.1e-9, &progress)
+        .unwrap_or_else(|error| {
+            panic!("{error}: last progress {:?}", progress.last.lock().unwrap())
+        });
+    let pad = waveform(&result, "pad");
+    let seen = waveform(&result, "seen");
+    let loaded_high = 3.3 * 1000.0 / 1020.0;
+    assert!(
+        (pad[0] - loaded_high).abs() < 1e-6,
+        "the 20 ohm driver and 1 kohm load must satisfy KCL: {pad:?}"
+    );
+    assert!(
+        pad.last().unwrap().abs() < 1e-6,
+        "released pad must discharge: {pad:?}"
+    );
+    assert!((seen[0] - 0.5).abs() < 1e-7, "{seen:?}");
+    assert!(
+        seen.last().unwrap().abs() < 1e-7,
+        "the released port must sense its external pull-down: {seen:?}"
+    );
 }

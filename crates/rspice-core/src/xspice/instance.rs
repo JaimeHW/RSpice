@@ -1665,6 +1665,50 @@ impl XspiceInstance {
         )
     }
 
+    /// Sample each inout port's executed driver, without substituting the
+    /// node's resolved value or this model's future output target.
+    pub(crate) fn update_committed_digital_outputs(
+        &mut self,
+        drivers: &super::event::XspiceDigitalDrivers,
+    ) {
+        for (port, connection) in self.ports.iter().zip(&self.connections) {
+            if port.direction != super::PortDirection::InOut
+                || !matches!(
+                    connection,
+                    PortConnection::Digital(_)
+                        | PortConnection::DigitalInverted(_)
+                        | PortConnection::DigitalVector(_)
+                        | PortConnection::DigitalVectorMapped(_)
+                )
+            {
+                continue;
+            }
+            for_each_event_connection_node(connection, |index, node| {
+                let value = drivers
+                    .get(&node)
+                    .and_then(|drivers| {
+                        drivers
+                            .iter()
+                            .find_map(|((instance, name, element), value)| {
+                                (instance == &self.name && name == &port.name && *element == index)
+                                    .then_some(*value)
+                            })
+                    })
+                    .unwrap_or_else(DigitalValue::high_z);
+                let inverted = match connection {
+                    PortConnection::DigitalInverted(_) => true,
+                    PortConnection::DigitalVectorMapped(nodes) => nodes[index].inverted,
+                    _ => false,
+                };
+                self.context.set_committed_digital_output(
+                    &port.name,
+                    index,
+                    if inverted { value.invert() } else { value },
+                );
+            });
+        }
+    }
+
     /// Update inputs and attach finite-output analog transition metadata from
     /// upstream XSPICE instances.
     pub(crate) fn update_inputs_with_analog_transitions(

@@ -1507,6 +1507,7 @@ impl CircuitData {
             // to call a model.
             crate::xspice::settle_cost::note_instance_evaluation();
             let instance = instances[index].make_mut();
+            instance.update_committed_digital_outputs(&event_values.digital_drivers);
             instance.set_transient_companion_coefficients(companion_coefficients);
             instance.set_xyce_one_step_order2(xyce_one_step_order2);
             if let Err(e) = instance.update_inputs_with_analog_transitions(

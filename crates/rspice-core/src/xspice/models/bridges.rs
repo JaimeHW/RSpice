@@ -940,7 +940,10 @@ fn bidi_drive_current(
     params: BidiParams,
     layout: BidiStateLayout,
 ) -> BidiAnalogDrive {
-    if !ctx.is_transient() {
+    // The initial transient point must solve the initialized digital state.
+    // There is no elapsed interval over which to slew the allocator's default
+    // midpoint/current. Acceptance then seeds the history used by later steps.
+    if !ctx.is_transient() || ctx.time == 0.0 {
         let svoc = bidi_target_svoc(drive, params);
         let (current, partial, _) = bidi_current_target(voltage, drive, svoc, params);
         return BidiAnalogDrive {
@@ -1419,7 +1422,13 @@ impl CodeModel for BidiBridge {
                 digital_strength_from_code(ctx.int_state(layout.strength_base + index));
             let digital_input = digital_vector_input_value(ctx, "d", index);
             let direction = if direction_request == BidiDirection::Bidirectional {
-                bidi_default_effective_direction(digital_input, old_state, old_strength)
+                // The last scheduled ADC target may still be in flight. Compare
+                // with our executed contribution so a delayed observation is
+                // never mistaken for a new external driver and fed back to A.
+                let own = ctx
+                    .committed_digital_output("d", index)
+                    .unwrap_or_else(|| DigitalValue::new(old_state, old_strength));
+                bidi_default_effective_direction(digital_input, own.state, own.strength)
             } else {
                 direction_request
             };

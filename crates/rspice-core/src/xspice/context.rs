@@ -478,6 +478,9 @@ pub struct CmContext {
     //-------------------------------------------------------------------------
     /// Input port values by name
     inputs: HashMap<String, InputValue>,
+    /// Executed digital output contributions sampled from the event bank.
+    /// These are input observations, distinct from scheduled output targets.
+    committed_digital_outputs: HashMap<String, Vec<DigitalValue>>,
     /// Last event time for scalar digital input ports.
     input_event_times: HashMap<String, Value>,
     /// Last event time for vector digital input ports, per element.
@@ -621,6 +624,7 @@ impl CmContext {
             iteration: 0,
             resource_limits: crate::resource::ResourceLimits::default(),
             inputs: HashMap::new(),
+            committed_digital_outputs: HashMap::new(),
             input_event_times: HashMap::new(),
             input_vector_event_times: HashMap::new(),
             port_total_loads: HashMap::new(),
@@ -1041,6 +1045,33 @@ impl CmContext {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn set_committed_digital_output(
+        &mut self,
+        name: &str,
+        index: usize,
+        value: DigitalValue,
+    ) {
+        if !self.committed_digital_outputs.contains_key(name) {
+            self.committed_digital_outputs
+                .insert(name.to_owned(), Vec::new());
+        }
+        let values = self.committed_digital_outputs.get_mut(name).unwrap();
+        if values.len() <= index {
+            values.resize(index + 1, DigitalValue::high_z());
+        }
+        values[index] = value;
+    }
+
+    /// This port's contribution after executing due events. A queued target
+    /// may differ until its delay expires. `None` denotes a standalone model
+    /// evaluation without a circuit event bank.
+    pub fn committed_digital_output(&self, name: &str, index: usize) -> Option<DigitalValue> {
+        self.committed_digital_outputs
+            .get(name)?
+            .get(index)
+            .copied()
     }
 
     /// Set last event time for a scalar digital input.
