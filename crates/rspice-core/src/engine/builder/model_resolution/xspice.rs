@@ -926,52 +926,19 @@ fn resolve_native_xtradev_instance_expr_params(
         return Ok(Vec::new());
     }
 
-    let mut ctx = build_instance_eval_context(netlist, model_def, instance_params)?;
-    let mut pending = instance_expr_params.to_vec();
-    let mut resolved = Vec::with_capacity(instance_expr_params.len());
-
-    while !pending.is_empty() {
-        let mut progress = false;
-        let mut unresolved = Vec::new();
-        let mut first_error = None;
-
-        for (name, expr) in pending {
-            match ctx.evaluate(&expr) {
-                Ok(value) if value.is_finite() => {
-                    ctx.set(&name, value);
-                    resolved.push((name, value));
-                    progress = true;
-                }
-                Ok(value) => {
-                    return Err(SimulationError::Circuit(format!(
-                        "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' \
-                         parameter '{name}' resolved to non-finite value {value}"
-                    )));
-                }
-                Err(crate::netlist::expr::ExpressionEvaluationError::Aborted) => {
-                    return Err(SimulationError::Aborted);
-                }
-                Err(crate::netlist::expr::ExpressionEvaluationError::Expression(err)) => {
-                    if first_error.is_none() {
-                        first_error = Some((name.clone(), err.to_string()));
-                    }
-                    unresolved.push((name, expr));
-                }
-            }
-        }
-
-        if !progress {
-            let (name, err) = first_error.expect("unresolved expression has an error");
-            return Err(SimulationError::Circuit(format!(
-                "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
-                 '{name}' could not be resolved: {err}"
-            )));
-        }
-
-        pending = unresolved;
-    }
-
-    Ok(resolved)
+    let context = build_instance_eval_context(netlist, model_def, instance_params)?;
+    crate::netlist::expr::resolve_real_instance_expressions(
+        &context,
+        instance_expr_params,
+        &HashSet::new(),
+        netlist.abort,
+    )
+    .map_err(|error| match error {
+        crate::netlist::expr::ParameterResolutionError::Aborted => SimulationError::Aborted,
+        error => SimulationError::Circuit(format!(
+            "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}': {error}"
+        )),
+    })
 }
 
 fn resolve_native_xtradev_params(

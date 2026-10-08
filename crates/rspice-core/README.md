@@ -452,6 +452,8 @@ forward-reference probes do not advance the live statistical stream.
 Repeated XSPICE instance assignments use the last value, including changes in
 value type or expression deferral. Scalar fields resolve sibling dependencies
 at the root and inside subcircuits without consuming samples on failed retries.
+Native XSPICE capacitor/inductor parameter resolution uses the same dependency
+rules, including retained expressions, cycle detection, and typed cancellation.
 Pending instance overrides cannot be replaced by enclosing globals or model
 defaults in sibling expressions; a self-reference may still use its enclosing
 or model value. Root expressions that read sibling fields wait for the complete
