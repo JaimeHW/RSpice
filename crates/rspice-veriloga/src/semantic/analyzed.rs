@@ -436,6 +436,7 @@ pub struct AnalyzedContribution {
 /// Analyzed variable assignment
 #[derive(Debug, Clone)]
 pub struct AnalyzedAssignment {
+    pub occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     /// Variable name being assigned
     pub target: SmolStr,
     /// Index of variable in variables list (for array targets: the base

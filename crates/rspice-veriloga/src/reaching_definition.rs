@@ -208,6 +208,7 @@ pub(crate) fn insert_equation_snapshots(
                     splices.push((
                         reaching.map_or(0, |index| index + 1),
                         VarAssignment {
+                            occurrence_source: None,
                             var_index: variables.len() - 1,
                             index: None,
                             expr: {
@@ -626,6 +627,7 @@ endmodule
             .map(|value| {
                 let expr = arena.push(Node::Const(value));
                 IrAssignmentItem::Assign(VarAssignment {
+                    occurrence_source: None,
                     var_index: 0,
                     index: None,
                     expr,

@@ -3227,6 +3227,7 @@ impl<'a> AssignmentProgramCursor<'a> {
                     lower,
                     index,
                     value,
+                    ..
                 } => {
                     let start = [index, value]
                         .into_iter()
@@ -3799,6 +3800,7 @@ fn lower_canonical_assignment(
             bytecode_program,
             limits,
         )?;
+        let program = program.with_analog_occurrence_source(assignment.occurrence_source);
         trace_assignment_program_stack(model, assignment.target_name.as_str(), &program);
         assignments.push(NativeAssignment::Direct { var_index, program });
     }
@@ -3873,6 +3875,7 @@ fn lower_canonical_indexed_assignment(
         value_program,
         limits,
     )?;
+    let value = value.with_analog_occurrence_source(assignment.occurrence_source);
     trace_assignment_program_stack(model, assignment.target_name.as_str(), &value);
     if let Some(var_index) = constant_indexed_assignment_slot(&index, base, len, lower) {
         validate_assignment_target(model, var_index)?;
@@ -4800,6 +4803,7 @@ fn lower_assignment_step_with_limits(
                 &assignment.program,
                 limits,
             )?;
+            let program = program.with_analog_occurrence_source(assignment.occurrence_source);
             Ok(NativeAssignment::Direct {
                 var_index: assignment.var_index,
                 program,
@@ -4811,6 +4815,7 @@ fn lower_assignment_step_with_limits(
             lower,
             index,
             value,
+            occurrence_source,
         } => {
             let index = NativeProgram::from_bytecode(
                 model.name.clone(),
@@ -4824,6 +4829,7 @@ fn lower_assignment_step_with_limits(
                 value,
                 limits,
             )?;
+            let value = value.with_analog_occurrence_source(*occurrence_source);
             if let Some(var_index) = constant_indexed_assignment_slot(&index, *base, *len, *lower) {
                 validate_assignment_target(model, var_index)?;
                 return Ok(NativeAssignment::Direct {

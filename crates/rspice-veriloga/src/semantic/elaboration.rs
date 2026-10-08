@@ -353,6 +353,7 @@ impl<'a> HierarchyElaborator<'a> {
                 .checked_add(1)
                 .ok_or_else(|| internal_error("hierarchy control-task site overflow".into()))?;
             let assignment = AnalyzedAssignment {
+                occurrence_source: None,
                 target: task.into(),
                 var_index,
                 index: None,
@@ -1624,6 +1625,15 @@ fn rewrite_assignment(
         .cloned()
         .unwrap_or_else(|| assignment.target.clone());
     Ok(AnalyzedAssignment {
+        occurrence_source: assignment
+            .occurrence_source
+            .map(|source| -> CompileResult<_> {
+                Ok(crate::analog_occurrences::AnalogOccurrenceSource {
+                    group: base.site(AnalogSiteId(source.group))?.0,
+                    member: source.member,
+                })
+            })
+            .transpose()?,
         target,
         var_index: variable_base
             .checked_add(assignment.var_index)

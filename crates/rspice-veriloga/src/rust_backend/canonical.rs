@@ -395,7 +395,7 @@ fn kernel_region_metrics(
             shape_signature(value_id)
         );
         match &value.kind {
-            CfgValueKind::AnalogCounter { .. } => write!(out, "analog-counter-occurrence"),
+            CfgValueKind::AnalogCounter { occurrence_source, .. } => write!(out, "analog-counter-occurrence:{occurrence_source:?}"),
             CfgValueKind::AnalogTasksEnabled => write!(out, "analog-tasks-enabled"),
             CfgValueKind::AnalogTaskGuard(_) => write!(out, "analog-task-guard"),
             CfgValueKind::AnalogTask(task) => write!(

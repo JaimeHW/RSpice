@@ -719,9 +719,11 @@ self permutations, authored array direction, mixed real/integer reads and digita
 four-state widths. Module and static local digital arrays retain complete values
 across blocking/nonblocking delays, repeated event controls, and checkpoint restore.
 Analog copies retain their numerical derivatives and per-cell ownership checks.
-Aggregate analog event coalescing remains open: an event-controlled whole-array
-assignment currently publishes its element assignments through the occurrence
-journal. That behavior is not qualified as an atomic whole-array notification.
+Schema 117 retains source assignment groups in the analog occurrence journal.
+A whole-array assignment publishes its affected cells together before digital
+controls resume; separate assignments and loop iterations retain separate events.
+The grouping survives hierarchy, inactive guards, rejected candidates and
+checkpoint restore. This is implementation coverage, not vendor qualification.
 
 Indexed part-selects (`+:`/`-:`), unpacked net/port arrays, partial-array values and slices, replicated
 initializer patterns, cross-instance scheduling qualification,

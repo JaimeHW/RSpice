@@ -4497,6 +4497,7 @@ endmodule
     fn lower_assignment_step_rejects_direct_target_outside_variable_storage() {
         let model = compiled_model_with_variables(1);
         let step = AssignmentStep::Assign(crate::codegen::AssignmentProgram {
+            occurrence_source: None,
             var_index: 1,
             program: crate::codegen::BytecodeProgram {
                 instructions: vec![crate::codegen::Instruction::PushConst(11.0)],
@@ -6802,6 +6803,7 @@ endmodule
                     lower,
                     index,
                     value,
+                    ..
                 } => {
                     let raw_index = vm.execute(index)?;
                     let slot = Vm::array_slot(raw_index, *base, *len, *lower)?;
@@ -7369,6 +7371,7 @@ endmodule
         value: Vec<Instruction>,
     ) -> AssignmentStep {
         AssignmentStep::AssignIndexed {
+            occurrence_source: None,
             base,
             len,
             lower,

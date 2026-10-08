@@ -99,7 +99,7 @@ impl MixedSignalHost {
     pub(super) fn analog_event_targets(
         &mut self,
         solution: &[f64],
-    ) -> Result<Vec<(DigitalSignalId, u32)>, MixedSignalError> {
+    ) -> Result<Vec<Vec<(DigitalSignalId, u32)>>, MixedSignalError> {
         if !self
             .state
             .digital
@@ -148,24 +148,32 @@ impl MixedSignalHost {
             .collect();
         let occurrences = self
             .analog
-            .analog_assignment_occurrences()
+            .analog_assignment_occurrence_groups()
             .map_err(|error| classify(&error))?;
         let trial = self.trial.as_mut().expect("active analog event trial");
-        for (name, counter) in occurrences {
+        let mut pending_group = None;
+        for (name, counter, group) in occurrences {
             let index = *indices
                 .get(name)
                 .ok_or_else(|| MixedSignalError::InvalidBridge {
                     detail: format!("analog occurrence {name} has no digital binding"),
                 })?;
             if let Some(occurrence) = trial.vectors.analog_events[index].observe(counter) {
-                trial
-                    .vectors
-                    .analog_event_order
-                    .try_reserve(1)
-                    .map_err(|_| MixedSignalError::InvalidBridge {
-                        detail: "could not retain analog occurrence order".into(),
-                    })?;
-                trial.vectors.analog_event_order.push((index, occurrence));
+                let allocation_error = |_| MixedSignalError::InvalidBridge {
+                    detail: "could not retain analog occurrence order".into(),
+                };
+                if pending_group != Some(group) {
+                    trial
+                        .vectors
+                        .analog_event_order
+                        .try_reserve(1)
+                        .map_err(allocation_error)?;
+                    trial.vectors.analog_event_order.push(Vec::new());
+                    pending_group = Some(group);
+                }
+                let members = trial.vectors.analog_event_order.last_mut().unwrap();
+                members.try_reserve(1).map_err(allocation_error)?;
+                members.push((index, occurrence));
             }
         }
         // A missing backend record must never silently turn ordered events back
@@ -184,25 +192,31 @@ impl MixedSignalHost {
         }
         let trial = self.trial.as_ref().unwrap();
         let mut targets = Vec::new();
-        for &(index, occurrence) in &trial.vectors.analog_event_order {
-            let signal = bindings[index].1;
-            let held = self
-                .state
-                .digital
-                .read(signal)
-                .and_then(FourStateValue::to_u64)
-                .filter(|value| *value <= u64::from(COUNTER_MASK))
-                .ok_or_else(|| MixedSignalError::InvalidBridge {
-                    detail: "analog event counter lost its initialized signal".into(),
-                })? as u32;
-            let counter = &trial.vectors.analog_events[index];
-            if counter.pending(occurrence, held) {
-                targets.push((signal, counter.target(occurrence)));
+        for group in &trial.vectors.analog_event_order {
+            let mut members = Vec::new();
+            for &(index, occurrence) in group {
+                let signal = bindings[index].1;
+                let held = self
+                    .state
+                    .digital
+                    .read(signal)
+                    .and_then(FourStateValue::to_u64)
+                    .filter(|value| *value <= u64::from(COUNTER_MASK))
+                    .ok_or_else(|| MixedSignalError::InvalidBridge {
+                        detail: "analog event counter lost its initialized signal".into(),
+                    })? as u32;
+                let counter = &trial.vectors.analog_events[index];
+                if counter.pending(occurrence, held) {
+                    members.push((signal, counter.target(occurrence)));
+                }
+            }
+            if !members.is_empty() {
+                targets.push(members);
             }
         }
         // Preserve the cause before its digital handler can change the event
         // operand and erase the model's candidate root on reevaluation.
-        if targets.iter().any(|(signal, target)| {
+        if targets.iter().flatten().any(|(signal, target)| {
             self.state
                 .digital
                 .read(*signal)
@@ -242,10 +256,13 @@ impl MixedSignalHost {
         let trial = self.trial.as_mut().unwrap();
         trial.published_tick = trial.published_tick.max(tick);
         let tick = trial.published_tick;
-        // Every source occurrence has its own publication. The digital kernel
-        // may rearm controls between occurrences; cell identity cannot merge them.
-        for (signal, value) in targets {
-            let drives = [(signal, FourStateValue::from_u64(32, u64::from(value)))];
+        // Publish every aggregate together. Digital controls may rearm between
+        // source assignments, never between members of one assignment.
+        for group in targets {
+            let drives: Vec<_> = group
+                .into_iter()
+                .map(|(signal, value)| (signal, FourStateValue::from_u64(32, u64::from(value))))
+                .collect();
             self.with_analog_participant(solution, |digital, producer| {
                 digital.force_many_from_analog_at(&drives, tick, time, time, producer)
             })?;

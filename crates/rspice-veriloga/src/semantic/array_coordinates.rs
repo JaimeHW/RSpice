@@ -90,13 +90,23 @@ impl SemanticAnalyzer {
             )?;
             captured.push(temp);
         }
+        let group = self
+            .assignment_events
+            .has_counter(&name)
+            .then(|| self.next_analog_site().0);
         for (ordinal, temp) in captured.into_iter().enumerate() {
             let slot = target
                 .layout
                 .declaration_slot(ordinal)
                 .expect("array assignment element");
             let index = array.lower + slot as i64;
-            self.analyze_assignment(
+            let previous = self.occurrence_source;
+            self.occurrence_source =
+                group.map(|group| crate::analog_occurrences::AnalogOccurrenceSource {
+                    group,
+                    member: ordinal as u32,
+                });
+            let result = self.analyze_assignment(
                 &AssignmentStmt {
                     target: LValue::ArrayAccess {
                         name: name.clone(),
@@ -117,7 +127,9 @@ impl SemanticAnalyzer {
                 },
                 module,
                 sink,
-            )?;
+            );
+            self.occurrence_source = previous;
+            result?;
         }
         Ok(true)
     }

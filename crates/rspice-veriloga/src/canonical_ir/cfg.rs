@@ -1287,6 +1287,7 @@ pub enum CfgValueKind {
     AnalogCounter {
         slot: ValueId,
         counter: ValueId,
+        occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     },
     /// Runtime dispatch permission; false during numerical observation.
     AnalogTasksEnabled,
@@ -1488,7 +1489,7 @@ impl CfgValueKind {
                 .iter()
                 .map(|selection| selection.index)
                 .collect(),
-            Self::AnalogCounter { slot, counter } => vec![*counter, *slot],
+            Self::AnalogCounter { slot, counter, .. } => vec![*counter, *slot],
             Self::AnalogTask(task) => task.expressions().copied().collect(),
             Self::AnalogTaskGuard(value) => vec![*value],
             Self::DigitalRepeatCount { input, .. }
@@ -1777,7 +1778,7 @@ impl CfgValueKind {
                 selection.index = map(selection.index);
             }
             Self::AnalogTaskGuard(value) => *value = map(*value),
-            Self::AnalogCounter { slot, counter } => {
+            Self::AnalogCounter { slot, counter, .. } => {
                 // Lane lowering maps positionally, in the order of operands().
                 *counter = map(*counter);
                 *slot = map(*slot);

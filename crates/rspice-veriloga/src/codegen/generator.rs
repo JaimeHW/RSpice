@@ -736,6 +736,7 @@ impl CodeGenerator {
                     let program = self.compile_expr(arena, assign.expr, emit_ctx)?;
                     match assign.index {
                         Some(target) => AssignmentStep::AssignIndexed {
+                            occurrence_source: assign.occurrence_source,
                             base: assign.var_index,
                             len: target.len,
                             lower: target.lower,
@@ -743,6 +744,7 @@ impl CodeGenerator {
                             value: program,
                         },
                         None => AssignmentStep::Assign(AssignmentProgram {
+                            occurrence_source: assign.occurrence_source,
                             var_index: assign.var_index,
                             program,
                         }),

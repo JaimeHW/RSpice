@@ -581,6 +581,7 @@ impl<'a, V: FrequencyScalar> SmallSignalEngine<'a, V> {
                     lower,
                     index,
                     value,
+                    ..
                 } => {
                     let index_value = self.execute_value(index)?;
                     let raw = self.real_value(index_value, "array index")?;
@@ -1626,6 +1627,7 @@ mod tests {
         let program = |instructions| BytecodeProgram { instructions };
         let assign = |var_index, instructions| {
             AssignmentStep::Assign(AssignmentProgram {
+                occurrence_source: None,
                 var_index,
                 program: program(instructions),
             })
@@ -1641,6 +1643,7 @@ mod tests {
                 ]),
                 body: vec![
                     AssignmentStep::AssignIndexed {
+                        occurrence_source: None,
                         base: 3,
                         len: 2,
                         lower: 0,
@@ -1677,6 +1680,7 @@ mod tests {
             AssignmentStep::Loop {
                 condition: dead_pole.clone(),
                 body: vec![AssignmentStep::Assign(AssignmentProgram {
+                    occurrence_source: None,
                     var_index: 2,
                     program: dead_pole,
                 })],
@@ -1710,6 +1714,7 @@ mod tests {
         };
         let steps = [
             AssignmentStep::Assign(AssignmentProgram {
+                occurrence_source: None,
                 var_index: 0,
                 program: BytecodeProgram {
                     instructions: vec![
@@ -1720,10 +1725,12 @@ mod tests {
                 },
             }),
             AssignmentStep::Assign(AssignmentProgram {
+                occurrence_source: None,
                 var_index: 1,
                 program: product.clone(),
             }),
             AssignmentStep::Assign(AssignmentProgram {
+                occurrence_source: None,
                 var_index: 2,
                 program: BytecodeProgram {
                     instructions: vec![Instruction::PushConst(1.0), Instruction::IdtJacobian],
@@ -1774,6 +1781,7 @@ mod tests {
         let mut context = ac_context();
         context.variables = vec![2.0, 0.0];
         let increment = AssignmentStep::Assign(AssignmentProgram {
+            occurrence_source: None,
             var_index: 0,
             program: BytecodeProgram {
                 instructions: vec![
@@ -1796,6 +1804,7 @@ mod tests {
             let assignments = [
                 increment.clone(),
                 AssignmentStep::Assign(AssignmentProgram {
+                    occurrence_source: None,
                     var_index: 1,
                     program: product.clone(),
                 }),

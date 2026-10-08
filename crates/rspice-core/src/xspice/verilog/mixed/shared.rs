@@ -1348,14 +1348,22 @@ impl MixedDigitalCoordinator {
             targets.extend(
                 host.analog_event_targets(solution)?
                     .into_iter()
-                    .map(|(signal, value)| (map.signals[usize::from(signal)], value)),
+                    .map(|group| {
+                        group
+                            .into_iter()
+                            .map(|(signal, value)| (map.signals[usize::from(signal)], value))
+                            .collect::<Vec<_>>()
+                    }),
             );
         }
         if !targets.is_empty() {
             let tick = hdl_tick(cursor.time, |at| at.nearest_tick(self.resolution))?;
             cursor.published_tick = cursor.published_tick.max(tick);
-            for (signal, value) in targets {
-                let drives = [(signal, FourStateValue::from_u64(32, u64::from(value)))];
+            for group in targets {
+                let drives: Vec<_> = group
+                    .into_iter()
+                    .map(|(signal, value)| (signal, FourStateValue::from_u64(32, u64::from(value))))
+                    .collect();
                 let external = participant
                     .as_mut()
                     .map(|external| &mut **external as &mut dyn DigitalActiveParticipant);

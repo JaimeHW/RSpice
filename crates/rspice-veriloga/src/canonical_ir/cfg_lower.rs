@@ -1704,6 +1704,7 @@ impl<'a> CfgLowerer<'a> {
                     self.block,
                     CfgValueType::AnalogEffect,
                     CfgValueKind::AnalogCounter {
+                        occurrence_source: assignment.occurrence_source,
                         slot,
                         counter: value,
                     },
@@ -1729,6 +1730,7 @@ impl<'a> CfgLowerer<'a> {
                 self.block,
                 CfgValueType::AnalogEffect,
                 CfgValueKind::AnalogCounter {
+                    occurrence_source: assignment.occurrence_source,
                     slot,
                     counter: value,
                 },

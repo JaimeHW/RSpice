@@ -350,6 +350,7 @@ pub struct VarDef {
 /// Variable assignment in IR form
 #[derive(Debug, Clone)]
 pub struct VarAssignment {
+    pub occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     /// Index of variable being assigned (for indexed writes: the array's
     /// first element)
     pub var_index: usize,
@@ -1742,6 +1743,7 @@ impl DeviceIR {
                         None => None,
                     };
                     out.push(IrAssignmentItem::Assign(VarAssignment {
+                        occurrence_source: assign.occurrence_source,
                         var_index: assign.var_index,
                         index,
                         expr,
@@ -2945,6 +2947,7 @@ pub mod autodiff {
             evaluation_input: None,
         });
         assignments.push(IrAssignmentItem::Assign(VarAssignment {
+            occurrence_source: None,
             var_index: slot,
             index: None,
             expr,
@@ -3011,6 +3014,7 @@ pub mod autodiff {
                                     None => (shadow_index[&shadow], None),
                                 };
                                 group.push(VarAssignment {
+                                    occurrence_source: None,
                                     var_index,
                                     index,
                                     expr: derivative,
@@ -3794,6 +3798,7 @@ pub mod autodiff {
                                     .array_shadow_base(&target.array, &axis)
                                     .expect("auxiliary-shadowed array has a contiguous run");
                                 rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                    occurrence_source: None,
                                     var_index: shadow_base,
                                     index: Some(IndexedTarget {
                                         array: shadow_name,
@@ -3805,6 +3810,7 @@ pub mod autodiff {
                                 }));
                             } else {
                                 rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                    occurrence_source: None,
                                     var_index: shadow_index[&shadow_name],
                                     index: None,
                                     expr: derivative,

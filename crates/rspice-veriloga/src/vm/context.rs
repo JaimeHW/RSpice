@@ -541,11 +541,12 @@ impl VmContext {
         &mut self,
         slot: usize,
         value: f64,
+        source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     ) -> Result<(), VmError> {
         if self.record_task_effects
             && let Some(journal) = &mut self.analog_occurrences
         {
-            journal.record(slot, value)?;
+            journal.record(slot, value, source)?;
         }
         Ok(())
     }

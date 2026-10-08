@@ -5884,6 +5884,17 @@ impl VerilogADevice {
     pub fn analog_assignment_occurrences(
         &self,
     ) -> Result<impl Iterator<Item = (&str, u32)>, VmError> {
+        Ok(self
+            .analog_assignment_occurrence_groups()?
+            .map(|(name, counter, _)| (name, counter)))
+    }
+
+    /// Assignment notifications with an evaluation-local group identity.
+    /// Members of one whole-array source assignment share a group and must be
+    /// delivered together before digital processes resume.
+    pub fn analog_assignment_occurrence_groups(
+        &self,
+    ) -> Result<impl Iterator<Item = (&str, u32, u32)>, VmError> {
         let records = self
             .context
             .analog_occurrences
@@ -5895,6 +5906,7 @@ impl VerilogADevice {
             (
                 self.model.variable_names[record.variable].as_str(),
                 record.counter,
+                record.group,
             )
         }))
     }
@@ -7604,8 +7616,11 @@ impl VerilogADevice {
                         ));
                     }
                     let value = vm.execute(&assignment.program)?;
-                    vm.context
-                        .record_analog_occurrence(assignment.var_index, value)?;
+                    vm.context.record_analog_occurrence(
+                        assignment.var_index,
+                        value,
+                        assignment.occurrence_source,
+                    )?;
                     vm.context.variables[assignment.var_index] = value;
                 }
                 crate::codegen::AssignmentStep::AssignIndexed {
@@ -7614,6 +7629,7 @@ impl VerilogADevice {
                     lower,
                     index,
                     value,
+                    occurrence_source,
                 } => {
                     let slot = vm
                         .execute(index)
@@ -7625,7 +7641,8 @@ impl VerilogADevice {
                         ));
                     }
                     let value = vm.execute(value)?;
-                    vm.context.record_analog_occurrence(slot, value)?;
+                    vm.context
+                        .record_analog_occurrence(slot, value, *occurrence_source)?;
                     vm.context.variables[slot] = value;
                 }
                 crate::codegen::AssignmentStep::Loop { condition, body } => {
@@ -9679,6 +9696,7 @@ mod bytecode_assignment_integrity_tests {
         context.variables = vec![7.0];
         let mut vm = Vm::new(&mut context);
         let steps = [AssignmentStep::Assign(AssignmentProgram {
+            occurrence_source: None,
             var_index: 1,
             program: BytecodeProgram {
                 instructions: vec![Instruction::PushParam(999)],
@@ -9698,6 +9716,7 @@ mod bytecode_assignment_integrity_tests {
         context.variables = vec![7.0];
         let mut vm = Vm::new(&mut context);
         let steps = [AssignmentStep::AssignIndexed {
+            occurrence_source: None,
             base: 1,
             len: 1,
             lower: 0,
@@ -9737,6 +9756,7 @@ mod bytecode_assignment_integrity_tests {
     #[test]
     fn compiled_assignment_layout_rejects_corrupt_scalar_and_indexed_targets() {
         let scalar = [AssignmentStep::Assign(AssignmentProgram {
+            occurrence_source: None,
             var_index: 1,
             program: BytecodeProgram {
                 instructions: vec![Instruction::PushConst(9.0)],
@@ -9747,6 +9767,7 @@ mod bytecode_assignment_integrity_tests {
         assert!(matches!(error, VmError::InvalidModel(_)));
 
         let indexed = [AssignmentStep::AssignIndexed {
+            occurrence_source: None,
             base: usize::MAX,
             len: 2,
             lower: 0,
@@ -12454,6 +12475,7 @@ endmodule
             "fixture must contain assignment bytecode"
         );
         model.assignment_steps = vec![AssignmentStep::Assign(AssignmentProgram {
+            occurrence_source: None,
             var_index: 0,
             program: BytecodeProgram {
                 instructions: vec![Instruction::PushParam(999)],
@@ -12561,6 +12583,7 @@ endmodule
             "fixture must not contain static condition programs"
         );
         model.assignment_steps = vec![AssignmentStep::Assign(AssignmentProgram {
+            occurrence_source: None,
             var_index: 0,
             program: BytecodeProgram {
                 instructions: vec![Instruction::PushParam(999)],

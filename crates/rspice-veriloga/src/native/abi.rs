@@ -45,7 +45,7 @@ pub(crate) fn operand_array_call(
     };
     if matches!(op, NativeOp::RecordAnalogCounter) {
         return Ok(Some(OperandArrayCall {
-            count: 2,
+            count: 4,
             descriptor: 0,
             helper: record_analog_counter_native,
         }));
@@ -689,13 +689,18 @@ unsafe extern "C" fn record_analog_counter_native(
         set_native_context_error(context, "analog occurrence has no operands");
         return 0.0;
     }
-    let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
+    let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
     let value = operands[0];
     if let Some(journal) = unsafe { context.analog_occurrences.as_mut() } {
         let slot = operands[1];
         if !slot.is_finite() || slot.fract() != 0.0 || slot < 0.0 || slot >= usize::MAX as f64 {
             set_native_context_error(context, "analog occurrence slot is invalid");
-        } else if let Err(error) = journal.record(slot as usize, value) {
+        } else if let Err(error) = crate::analog_occurrences::AnalogOccurrenceSource::from_operands(
+            operands[2],
+            operands[3],
+        )
+        .and_then(|source| journal.record(slot as usize, value, source))
+        {
             set_native_context_error(context, error.to_string());
         }
     }

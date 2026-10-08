@@ -616,6 +616,7 @@ pub struct StampProgram {
 /// Assignment program for a variable
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssignmentProgram {
+    pub occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     /// Index of variable being assigned
     pub var_index: usize,
     /// The bytecode program to compute the value
@@ -631,6 +632,8 @@ pub enum AssignmentStep {
     /// element `index - lower` of the contiguous variable run at `base`.
     /// Out-of-range indexes are a runtime error (never a silent skip).
     AssignIndexed {
+        /// Source aggregate assignment and declaration-order member.
+        occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
         /// First element's variable slot
         base: usize,
         /// Number of elements

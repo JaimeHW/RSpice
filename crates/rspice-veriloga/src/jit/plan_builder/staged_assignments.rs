@@ -311,7 +311,8 @@ pub(super) fn lower(
                 if live.get(write.var_index).copied().unwrap_or(false) {
                     lowered.push(NativeAssignment::Direct {
                         var_index: write.var_index,
-                        program: copy_or_lower(&write.program, &role)?,
+                        program: copy_or_lower(&write.program, &role)?
+                            .with_analog_occurrence_source(write.occurrence_source),
                     });
                 }
             }
@@ -321,10 +322,12 @@ pub(super) fn lower(
                 lower,
                 index,
                 value,
+                occurrence_source,
             } => {
                 if assignment_range_live(*base, *len, live) {
                     let index = copy_or_lower(index, &ExpressionRole::Index)?;
-                    let value = copy_or_lower(value, &role)?;
+                    let value = copy_or_lower(value, &role)?
+                        .with_analog_occurrence_source(*occurrence_source);
                     if let Some(var_index) =
                         constant_indexed_assignment_slot(&index, *base, *len, *lower)
                     {

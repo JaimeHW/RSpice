@@ -330,6 +330,7 @@ pub(crate) enum IntegerBinaryOp {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NativeProgram {
+    analog_occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     ops: Vec<NativeOp>,
     max_stack_depth: usize,
     current_pair_dependencies: Vec<usize>,
@@ -1487,6 +1488,7 @@ impl NativeProgram {
             max_stack_depth,
             current_pair_dependencies,
             prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         }
     }
@@ -2477,6 +2479,7 @@ impl NativeProgram {
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies,
             prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         })
     }
@@ -2522,6 +2525,7 @@ impl NativeProgram {
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         })
     }
@@ -2576,6 +2580,7 @@ impl NativeProgram {
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         })
     }
@@ -2614,6 +2619,7 @@ impl NativeProgram {
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         })
     }
@@ -2653,6 +2659,7 @@ impl NativeProgram {
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         })
     }
@@ -2691,6 +2698,7 @@ impl NativeProgram {
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         })
     }
@@ -2737,8 +2745,17 @@ impl NativeProgram {
             max_stack_depth: optimized_max_stack_depth,
             current_pair_dependencies: lowerer.current_pair_dependencies,
             prior_current_dependencies: lowerer.prior_current_dependencies,
+            analog_occurrence_source: None,
             branch_unknown_dependencies,
         })
+    }
+
+    pub(crate) fn with_analog_occurrence_source(
+        mut self,
+        source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
+    ) -> Self {
+        self.analog_occurrence_source = source;
+        self
     }
 
     pub(crate) fn record_analog_counter(
@@ -2766,6 +2783,12 @@ impl NativeProgram {
         } else {
             self.ops.push(NativeOp::Const(slot as f64));
         }
+        self.ops.extend(
+            crate::analog_occurrences::AnalogOccurrenceSource::operands(
+                self.analog_occurrence_source,
+            )
+            .map(NativeOp::Const),
+        );
         self.ops.push(NativeOp::RecordAnalogCounter);
         self.max_stack_depth = compute_native_max_stack_depth(
             "analog occurrence".into(),
@@ -9521,7 +9544,7 @@ fn compute_native_max_stack_depth(
 
 pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
     match op {
-        NativeOp::RecordAnalogCounter => (2, 1),
+        NativeOp::RecordAnalogCounter => (4, 1),
         NativeOp::AnalogTasksEnabled => (0, 1),
         NativeOp::AnalogTaskGuard | NativeOp::AnalogFinish(_) => (1, 1),
         NativeOp::Const(_)
@@ -10033,6 +10056,7 @@ mod tests {
             max_stack_depth: 5,
             current_pair_dependencies: vec![4],
             prior_current_dependencies: vec![1, 2],
+            analog_occurrence_source: None,
             branch_unknown_dependencies: vec![3],
         };
 
@@ -10048,6 +10072,7 @@ mod tests {
             max_stack_depth: 1,
             current_pair_dependencies: Vec::new(),
             prior_current_dependencies: Vec::new(),
+            analog_occurrence_source: None,
             branch_unknown_dependencies: Vec::new(),
         };
 
@@ -10068,6 +10093,7 @@ mod tests {
             max_stack_depth: 1,
             current_pair_dependencies: Vec::new(),
             prior_current_dependencies: vec![0],
+            analog_occurrence_source: None,
             branch_unknown_dependencies: Vec::new(),
         };
 
@@ -10088,6 +10114,7 @@ mod tests {
             max_stack_depth: 1,
             current_pair_dependencies: Vec::new(),
             prior_current_dependencies: Vec::new(),
+            analog_occurrence_source: None,
             branch_unknown_dependencies: Vec::new(),
         };
 

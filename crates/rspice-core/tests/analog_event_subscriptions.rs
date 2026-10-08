@@ -2048,3 +2048,100 @@ endmodule
         }
     }
 }
+
+#[test]
+fn whole_array_assignment_events_group_members_across_loops_hierarchy_and_replay() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let text = r#"
+`timescale 1ps/1ps
+module aggregate(p); inout p; electrical p;
+ parameter integer N=2;
+ real data[4:3]; integer whole=0,selected=0,paired=0,k,rounds=N,enabled=1;
+ initial begin #150 enabled=0; #100 enabled=1; end
+ analog @(timer(100p,100p)) if (enabled) begin
+   for (k=0; k<rounds; k=k+1) data='{0.25,0.5};
+   data[4]=0.25;
+   data='{data[3],data[4]};
+ end
+ always @(data) whole=whole+1;
+ always @(data[4]) selected=selected+1;
+ initial forever begin @(data[4]); @(data[3]); paired=paired+1; end
+ analog I(p)<+(V(p)-(whole+10*selected+100*paired))/1000;
+endmodule
+module wrapper(p,q); inout p,q; electrical p,q;
+ aggregate first(p); aggregate #(.N(1)) second(q);
+endmodule
+"#;
+    // Shared circuit execution: two flattened children must retain their own
+    // assignment identities. Cells wake together, source assignments separately.
+    let source = Source::new(text);
+    let deck = Netlist::parse(&format!(
+        "* aggregate source events\nX1 p q wrapper\nRp p 0 1k\nRq q 0 1k\n.va \"{}\" wrapper module=wrapper\n.end\n", source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 350e-12, 30e-12).unwrap();
+    for (time, p, q) in [
+        (120e-12, 122.0, 66.5),
+        (220e-12, 122.0, 66.5),
+        (320e-12, 244.0, 133.0),
+    ] {
+        for (node, expected) in [("p", p), ("q", q)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-8,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+    // Standalone publication uses the same grouping and rolls back notifications.
+    let compile = || {
+        MixedSignalHost::compile(
+            text,
+            Some("aggregate"),
+            "aggregate",
+            &[1],
+            SchedulerLimits::default(),
+        )
+        .unwrap()
+    };
+    let evaluate = |host: &mut MixedSignalHost, time, step| {
+        host.begin_trial(
+            time,
+            step,
+            IntegrationCoefficients::inactive(),
+            time == 0.0,
+            false,
+        )
+        .unwrap();
+        settle_standalone_observer(host, &[0.0]);
+    };
+    let values = |host: &MixedSignalHost| {
+        ["whole", "selected", "paired"]
+            .map(|name| u32::from_str_radix(&host.read_digital(name).unwrap(), 2).unwrap())
+    };
+    let mut host = compile();
+    evaluate(&mut host, 0.0, 0.0);
+    host.accept_trial().unwrap();
+    evaluate(&mut host, 100e-12, 100e-12);
+    assert_eq!(values(&host), [4, 4, 2]);
+    host.reject_trial().unwrap();
+    assert_eq!(values(&host), [0, 0, 0]);
+    evaluate(&mut host, 100e-12, 100e-12);
+    host.accept_trial().unwrap();
+    let checkpoint = host.checkpoint().unwrap();
+    let mut restored = compile();
+    restored.restore(&checkpoint).unwrap();
+    for candidate in [&mut host, &mut restored] {
+        for (time, step, expected) in [
+            (150e-12, 50e-12, [4, 4, 2]),
+            (200e-12, 50e-12, [4, 4, 2]),
+            (250e-12, 50e-12, [4, 4, 2]),
+            (300e-12, 50e-12, [8, 8, 4]),
+        ] {
+            evaluate(candidate, time, step);
+            candidate.accept_trial().unwrap();
+            assert_eq!(values(candidate), expected);
+        }
+    }
+}

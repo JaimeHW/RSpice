@@ -1131,6 +1131,7 @@ fn execute_assignment_steps(vm: &mut Vm<'_>, steps: &[AssignmentStep]) -> Result
                 lower,
                 index,
                 value,
+                ..
             } => {
                 let raw_index = vm.execute(index)?;
                 let slot = Vm::array_slot(raw_index, *base, *len, *lower)?;

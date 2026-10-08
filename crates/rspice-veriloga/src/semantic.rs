@@ -450,6 +450,7 @@ pub struct SemanticAnalyzer {
     next_analog_site: u32,
     in_analog_initial: bool,
     assignment_events: analog_events::AssignmentEvents,
+    occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     /// Constant parameter default values (compile-time diagnostics only:
     /// instances may override parameters, so these must never influence
     /// generated code)
@@ -541,6 +542,7 @@ impl SemanticAnalyzer {
             next_analog_site: 0,
             in_analog_initial: false,
             assignment_events: Default::default(),
+            occurrence_source: None,
             param_consts: HashMap::new(),
             external_parameter_names: HashMap::new(),
             exact_parameter_constants: Default::default(),
@@ -1920,6 +1922,7 @@ impl SemanticAnalyzer {
             let site = self.next_analog_site();
             analyzed.prologue_statements.push(statements.len());
             statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+                occurrence_source: None,
                 target: localparam.name.clone(),
                 var_index,
                 index: None,
@@ -1983,6 +1986,7 @@ impl SemanticAnalyzer {
                         )?;
                         let site = self.next_analog_site();
                         let assignment = AnalyzedAssignment {
+                            occurrence_source: None,
                             target: analyzed.variables[var_index].name.clone(),
                             var_index,
                             index: None,
@@ -2015,6 +2019,7 @@ impl SemanticAnalyzer {
                 )?;
                 let site = self.next_analog_site();
                 let assignment = AnalyzedAssignment {
+                    occurrence_source: None,
                     target: item.name.clone(),
                     var_index,
                     index: None,
@@ -3057,6 +3062,7 @@ impl SemanticAnalyzer {
                                         );
                                         let site = self.next_analog_site();
                                         let assignment = AnalyzedAssignment {
+                                            occurrence_source: None,
                                             target,
                                             var_index: layout.base + offset,
                                             index: None,
@@ -3127,6 +3133,7 @@ impl SemanticAnalyzer {
                             // expression would let the two halves of that pair
                             // disagree about its type.
                             self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
+                                occurrence_source: None,
                                 target: hoisted.clone(),
                                 var_index,
                                 index: None,
@@ -3138,6 +3145,7 @@ impl SemanticAnalyzer {
                                 unfiltered_initial_step_guard: None,
                             }));
                             sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+                                occurrence_source: None,
                                 target: hoisted.clone(),
                                 var_index,
                                 index: None,
@@ -3913,6 +3921,7 @@ impl SemanticAnalyzer {
         // consumer of this variable.
         let site = self.next_analog_site();
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            occurrence_source: None,
             target: name.clone(),
             var_index,
             index: None,
@@ -4154,6 +4163,7 @@ impl SemanticAnalyzer {
         // cnt = <count>; idx = 0;
         let count_site = self.next_analog_site();
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            occurrence_source: None,
             target: cnt_name.clone(),
             var_index: cnt_index,
             index: None,
@@ -4166,6 +4176,7 @@ impl SemanticAnalyzer {
         }));
         let index_site = self.next_analog_site();
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            occurrence_source: None,
             target: idx_name.clone(),
             var_index: idx_index,
             index: None,
@@ -4189,6 +4200,7 @@ impl SemanticAnalyzer {
         // One struct, cloned: the site travels with it, so the two copies of
         // the counter bump are paired without a second stamp.
         let increment = AnalyzedAssignment {
+            occurrence_source: None,
             target: idx_name.clone(),
             var_index: idx_index,
             index: None,
@@ -4924,6 +4936,7 @@ impl SemanticAnalyzer {
         });
         let expression_guard = self.active_site_guard();
         let mut assignment = AnalyzedAssignment {
+            occurrence_source: None,
             target: "$bound_step".into(),
             var_index,
             index: None,
@@ -4995,6 +5008,7 @@ impl SemanticAnalyzer {
         });
         let expression_guard = self.active_site_guard();
         let mut assignment = AnalyzedAssignment {
+            occurrence_source: None,
             target: "$discontinuity".into(),
             var_index,
             index: None,
@@ -5092,6 +5106,7 @@ impl SemanticAnalyzer {
         // and only active calls move the value
         let site = self.next_analog_site();
         self.task_resets.push(AnalyzedAssignment {
+            occurrence_source: None,
             target: name.into(),
             var_index,
             index: None,
@@ -5516,6 +5531,7 @@ impl SemanticAnalyzer {
         let site = self.next_analog_site();
         let expression_guard = self.active_site_guard();
         self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
+            occurrence_source: self.occurrence_source,
             target: target_name.clone(),
             var_index,
             index: None,
@@ -5530,6 +5546,7 @@ impl SemanticAnalyzer {
 
         // Record the assignment for code generation
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            occurrence_source: self.occurrence_source,
             target: target_name.clone(),
             var_index,
             index: None,
@@ -5574,6 +5591,7 @@ impl SemanticAnalyzer {
         let site = self.next_analog_site();
         let expression_guard = self.active_site_guard();
         self.record_region(AnalyzedRegion::Assignment(AnalyzedAssignment {
+            occurrence_source: self.occurrence_source,
             target: array_name.clone(),
             var_index: layout.base,
             index: Some(index.clone()),
@@ -5586,6 +5604,7 @@ impl SemanticAnalyzer {
         }));
         let expression = self.apply_guard(expression, fallback);
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            occurrence_source: self.occurrence_source,
             target: array_name,
             var_index: layout.base,
             index: Some(index),

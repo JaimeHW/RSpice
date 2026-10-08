@@ -137,9 +137,14 @@ pub(super) fn evaluate_helper_with_session(
             {
                 return Err(session.fail("analog occurrence slot is invalid"));
             }
+            let source = crate::analog_occurrences::AnalogOccurrenceSource::from_operands(
+                operands[2],
+                operands[3],
+            )
+            .map_err(|error| session.fail(error.to_string()))?;
             session
                 .context
-                .record_analog_occurrence(slot as usize, operands[0])
+                .record_analog_occurrence(slot as usize, operands[0], source)
                 .map_err(|error| session.fail(error.to_string()))?;
             Ok(operands[0])
         }
@@ -1262,14 +1267,14 @@ mod tests {
             evaluate_helper(463, 0, 0, 0, [0.0; 5], &[0.0; 3]),
             Err(HelperError::StatefulRuntimeUnavailable)
         );
-        for slot in [2.0, 1.0] {
+        for (member, slot) in [2.0, 1.0].into_iter().enumerate() {
             assert_eq!(
                 evaluate_helper_with_session(
                     463,
                     0,
                     0,
                     0,
-                    [1.0, slot, 0.0, 0.0, 0.0],
+                    [1.0, slot, 8.0, member as f64, 0.0],
                     &[0.0; 3],
                     Some(&mut session)
                 ),
@@ -1299,10 +1304,12 @@ mod tests {
                 .unwrap(),
             &[
                 AnalogAssignmentOccurrence {
+                    group: 0,
                     variable: 2,
                     counter: 1
                 },
                 AnalogAssignmentOccurrence {
+                    group: 0,
                     variable: 1,
                     counter: 1
                 },

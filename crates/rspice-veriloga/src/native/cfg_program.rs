@@ -896,10 +896,21 @@ impl Lowerer<'_> {
         };
         let operand = |value: CfgValueId| self.read(lowered, value);
         match &entry.kind {
-            CfgValueKind::AnalogCounter { slot, counter } => push(
-                NativeOp::RecordAnalogCounter,
-                &[operand(*counter)?, operand(*slot)?],
-            ),
+            CfgValueKind::AnalogCounter {
+                slot,
+                counter,
+                occurrence_source,
+            } => {
+                let [group, member] =
+                    crate::analog_occurrences::AnalogOccurrenceSource::operands(*occurrence_source);
+                let group = builder.push(NativeOp::Const(group), &[], ValueType::F64)?;
+                let member = builder.push(NativeOp::Const(member), &[], ValueType::F64)?;
+                builder.push(
+                    NativeOp::RecordAnalogCounter,
+                    &[operand(*counter)?, operand(*slot)?, group, member],
+                    value_type,
+                )
+            }
             CfgValueKind::AnalogTasksEnabled => push(NativeOp::AnalogTasksEnabled, &[]),
             CfgValueKind::AnalogTaskGuard(value) => {
                 push(NativeOp::AnalogTaskGuard, &[operand(*value)?])

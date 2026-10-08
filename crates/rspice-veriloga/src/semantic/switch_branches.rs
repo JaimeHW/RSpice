@@ -147,6 +147,7 @@ fn assignment(
     span: Span,
 ) -> AnalyzedAssignment {
     AnalyzedAssignment {
+        occurrence_source: None,
         target: variable.0.clone(),
         var_index: variable.1,
         index: None,
@@ -265,7 +266,12 @@ fn remap_statements(
 ) {
     for statement in statements {
         match statement {
-            AnalyzedStatement::Assignment(value) => value.site = map(value.site),
+            AnalyzedStatement::Assignment(value) => {
+                value.site = map(value.site);
+                if let Some(source) = &mut value.occurrence_source {
+                    source.group = map(AnalogSiteId(source.group)).0;
+                }
+            }
             AnalyzedStatement::Task(value) => value.site = map(AnalogSiteId(value.site)).0,
             AnalyzedStatement::Loop(value) => {
                 value.site = map(value.site);
@@ -300,7 +306,12 @@ fn rewrite_regions(
                     continue;
                 }
             }
-            AnalyzedRegion::Assignment(value) => value.site = map(value.site),
+            AnalyzedRegion::Assignment(value) => {
+                value.site = map(value.site);
+                if let Some(source) = &mut value.occurrence_source {
+                    source.group = map(AnalogSiteId(source.group)).0;
+                }
+            }
             AnalyzedRegion::Task(value) => value.site = map(AnalogSiteId(value.site)).0,
             AnalyzedRegion::Conditional {
                 condition_site,

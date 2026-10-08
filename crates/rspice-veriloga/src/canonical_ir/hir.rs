@@ -372,6 +372,7 @@ pub struct HirContribution {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirAssignment {
+    pub occurrence_source: Option<crate::analog_occurrences::AnalogOccurrenceSource>,
     pub target: VariableId,
     pub target_name: SmolStr,
     pub index: Option<HirExprRef>,
@@ -2844,6 +2845,7 @@ fn lower_statement(
                 },
             );
             HirStatement::Assignment(HirAssignment {
+                occurrence_source: assignment.occurrence_source,
                 target: VariableId::from(assignment.var_index),
                 target_name: assignment.target.clone(),
                 index,
@@ -2937,6 +2939,7 @@ fn lower_region(
             let expr = lowerer.lower_expr(&assignment.expression);
             pair_authored(lowerer, correspondence, executed, start, expr.id);
             HirRegion::Assignment(HirAssignment {
+                occurrence_source: assignment.occurrence_source,
                 target: VariableId::from(assignment.var_index),
                 target_name: assignment.target.clone(),
                 index,
