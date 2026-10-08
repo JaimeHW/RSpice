@@ -376,9 +376,27 @@ pub fn clipped_plot_paths(
 ) -> Result<Vec<Vec<SemanticPoint>>, HardcopySourceError> {
     if points
         .iter()
-        .any(|point| !point.0.is_finite() || !point.1.is_finite())
+        .any(|point| !point.0.is_finite() || point.1.is_infinite())
     {
         return Err(HardcopySourceError::NonFiniteResultSample);
+    }
+    if points.iter().any(|point| point.1.is_nan()) {
+        let mut paths = Vec::new();
+        for segment in points
+            .split(|point| point.1.is_nan())
+            .filter(|segment| !segment.is_empty())
+        {
+            paths.extend(clipped_plot_paths(
+                segment,
+                x_minimum,
+                x_maximum,
+                y_minimum,
+                y_maximum,
+                plot_width,
+                plot_height,
+            )?);
+        }
+        return Ok(paths);
     }
     let x_span = x_maximum - x_minimum;
     let y_span = y_maximum - y_minimum;
@@ -537,7 +555,7 @@ pub(super) fn typed_numeric_value(value: &TypedValue) -> Option<f64> {
     match value {
         TypedValue::Real(value) => Some(*value),
         TypedValue::Integer(value) => Some(*value as f64),
-        TypedValue::Boolean(_) | TypedValue::Text(_) => None,
+        TypedValue::Missing(_) | TypedValue::Boolean(_) | TypedValue::Text(_) => None,
     }
 }
 
@@ -549,18 +567,22 @@ pub(super) fn trace_y_at_x(
         .iter()
         .find(|point| point.x().to_bits() == x.to_bits())
     {
-        return Some(point.y());
+        return point.y().is_finite().then_some(point.y());
     }
     points.windows(2).find_map(|pair| {
         let left = pair[0];
         let right = pair[1];
+        if !left.y().is_finite() || !right.y().is_finite() {
+            return None;
+        }
         if (left.x() <= x && x <= right.x()) || (right.x() <= x && x <= left.x()) {
             let span = right.x() - left.x();
             if span == 0.0 {
                 Some(left.y())
             } else {
                 let fraction = (x - left.x()) / span;
-                Some(left.y() + fraction * (right.y() - left.y()))
+                let value = left.y() + fraction * (right.y() - left.y());
+                value.is_finite().then_some(value)
             }
         } else {
             None
@@ -738,6 +760,41 @@ mod drawing_sheet_geometry_tests {
         assert_eq!(
             bounds.maximum.x_um,
             (10 + SCHEMATIC_EDGE_ALLOWANCE_UNITS) * SCHEMATIC_UNIT_UM
+        );
+    }
+}
+
+#[cfg(test)]
+mod waveform_gap_tests {
+    use super::*;
+
+    #[test]
+    fn hardcopy_paths_stop_at_unavailable_samples_and_reject_invalid_numbers() {
+        let points = [
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (2.0, f64::NAN),
+            (3.0, 1.0),
+            (4.0, 0.0),
+        ];
+        let paths = clipped_plot_paths(&points, 0.0, 4.0, 0.0, 1.0, 1000, 1000).unwrap();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(paths[0].len(), 2);
+        assert_eq!(paths[1].len(), 2);
+        assert!(paths[0].last().unwrap().x_um < paths[1][0].x_um);
+        assert!(
+            clipped_plot_paths(&[(0.0, f64::NAN)], 0.0, 1.0, 0.0, 1.0, 1000, 1000)
+                .unwrap()
+                .is_empty()
+        );
+        for point in [(f64::NAN, 1.0), (0.0, f64::INFINITY)] {
+            assert!(clipped_plot_paths(&[point], 0.0, 1.0, 0.0, 1.0, 1000, 1000).is_err());
+        }
+        assert_eq!(
+            typed_numeric_value(&TypedValue::Missing(
+                rspice_results::visualization_document::ValueType::Real
+            )),
+            None
         );
     }
 }
