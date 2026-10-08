@@ -58,6 +58,7 @@ pub fn project_native_bundle<'a, W: AsRef<RetainedWaveform>>(
     Ok(NativeBundleDataset {
         analysis: native_analysis,
         coordinate_name,
+        coordinate_unit: analysis.waveform_coordinate_unit(),
         coordinate: reference,
         signals,
     })

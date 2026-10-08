@@ -36,6 +36,8 @@ struct NativeDataset {
 #[serde(deny_unknown_fields)]
 struct NativeCoordinate {
     name: String,
+    #[serde(default)]
+    unit: Option<String>,
     values: Vec<f64>,
 }
 
@@ -136,11 +138,19 @@ pub fn decode_native_bundle(
             context: "dataset.json is invalid",
             source: error,
         })?;
-    if dataset.schema != "rspice-waveform-dataset/1" {
+    if !matches!(
+        dataset.schema.as_str(),
+        "rspice-waveform-dataset/1" | "rspice-waveform-dataset/2"
+    ) {
         return Err(NativeBundleError::InvalidData(format!(
             "unsupported dataset schema '{}'",
             dataset.schema
         )));
+    }
+    if dataset.schema == "rspice-waveform-dataset/1" && dataset.coordinate.unit.is_some() {
+        return Err(NativeBundleError::InvalidData(
+            "coordinate units require rspice-waveform-dataset/2".into(),
+        ));
     }
     let domain = dataset
         .analysis
@@ -167,13 +177,17 @@ pub fn decode_native_bundle(
             unit: signal.unit,
         });
     }
-    Ok(DecodedNumericDataset {
-        coordinate_unit: None,
+    let mut decoded = DecodedNumericDataset {
+        coordinate_unit: dataset.coordinate.unit,
         domain,
         coordinate_name: dataset.coordinate.name,
         coordinate: dataset.coordinate.values,
         signals,
-    })
+    };
+    decoded
+        .normalize_coordinate_unit()
+        .map_err(NativeBundleError::InvalidData)?;
+    Ok(decoded)
 }
 
 pub(super) fn read_zip_member(

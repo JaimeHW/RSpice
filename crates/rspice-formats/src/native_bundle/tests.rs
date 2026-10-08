@@ -27,6 +27,75 @@ fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
 }
 
 #[test]
+fn coordinate_units_round_trip_through_version_two_without_relabeling_samples() {
+    let dataset = NativeBundleDataset {
+        analysis: crate::WaveformDomain::DcSweep,
+        coordinate_name: "bias",
+        coordinate_unit: Some("mA"),
+        coordinate: &[0.0, 2.0],
+        signals: vec![NativeBundleSignal {
+            name: "out",
+            unit: Some("V"),
+            values: NativeBundleSignalValues::Real(&[1.0, 3.0]),
+        }],
+    };
+    let bytes = encode_native_bundle(
+        NativeBundleKind::Dataset,
+        &dataset,
+        MAX_RESULT_DATASET_BYTES,
+    )
+    .unwrap();
+    let decoded = decode_native_bundle(&bytes, NativeBundleKind::Dataset, limits()).unwrap();
+    assert_eq!(decoded.coordinate_name, "bias");
+    assert_eq!(decoded.coordinate_unit.as_deref(), Some("A"));
+    assert_eq!(decoded.coordinate, [0.0, 0.002]);
+    assert_eq!(decoded.signals[0].real, [1.0, 3.0]);
+}
+
+#[test]
+fn native_export_rejects_coordinates_its_reader_cannot_interpret() {
+    for (domain, unit, coordinate, reason) in [
+        (
+            crate::WaveformDomain::Transient,
+            "V",
+            [0.0, 1.0],
+            "incompatible",
+        ),
+        (
+            crate::WaveformDomain::Ac,
+            "THz",
+            [1e307, 1e308],
+            "overflows",
+        ),
+        (
+            crate::WaveformDomain::Transient,
+            "fs",
+            [0.0, f64::from_bits(1)],
+            "underflows",
+        ),
+    ] {
+        let dataset = NativeBundleDataset {
+            analysis: domain,
+            coordinate_name: "x",
+            coordinate_unit: Some(unit),
+            coordinate: &coordinate,
+            signals: vec![NativeBundleSignal {
+                name: "out",
+                unit: None,
+                values: NativeBundleSignalValues::Real(&[1.0, 2.0]),
+            }],
+        };
+        let error = encode_native_bundle(
+            NativeBundleKind::Dataset,
+            &dataset,
+            MAX_RESULT_DATASET_BYTES,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains(reason), "{error}");
+    }
+}
+
+#[test]
 fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
     let coordinate = [1.0e3, 2.0e3, 4.0e3];
     let real_values = [0.25, 0.5, 1.0];
@@ -35,6 +104,7 @@ fn native_export_schema_is_deterministic_and_round_trips_real_and_complex() {
     let dataset = NativeBundleDataset {
         analysis: crate::WaveformDomain::Ac,
         coordinate_name: "frequency",
+        coordinate_unit: None,
         coordinate: &coordinate,
         signals: vec![
             NativeBundleSignal {

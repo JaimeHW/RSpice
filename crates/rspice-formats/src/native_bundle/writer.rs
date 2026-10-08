@@ -32,6 +32,8 @@ struct DatasetDocument<'a> {
 #[derive(Serialize)]
 struct CoordinateDocument<'a> {
     name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unit: Option<&'a str>,
     values: &'a [f64],
 }
 
@@ -80,10 +82,15 @@ pub fn encode_native_bundle(
         })
         .collect();
     let document = DatasetDocument {
-        schema: DATASET_SCHEMA,
+        schema: if dataset.coordinate_unit.is_some() {
+            "rspice-waveform-dataset/2"
+        } else {
+            DATASET_SCHEMA
+        },
         analysis: dataset.analysis.schema_name(),
         coordinate: CoordinateDocument {
             name: dataset.coordinate_name,
+            unit: dataset.coordinate_unit,
             values: dataset.coordinate,
         },
         signals,
@@ -159,6 +166,9 @@ pub fn encode_native_bundle(
 
 fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Result<(), String> {
     validate_identity("coordinate", dataset.coordinate_name)?;
+    if let Some(unit) = dataset.coordinate_unit {
+        validate_identity("coordinate unit", unit)?;
+    }
     if !(2..=MAX_ROWS).contains(&dataset.coordinate.len()) {
         return Err(format!(
             "native bundle coordinate has {} samples; supported range is 2..={MAX_ROWS}",
@@ -173,6 +183,18 @@ fn validate_dataset(dataset: &NativeBundleDataset<'_>, max_values: usize) -> Res
         ));
     }
     validate_coordinate(dataset.analysis, dataset.coordinate)?;
+    if dataset.coordinate_unit.is_some() {
+        // Publication must satisfy the reader's physical-coordinate contract.
+        // Validate conversion without changing the borrowed source samples.
+        let mut coordinate = crate::numeric::DecodedNumericDataset {
+            domain: dataset.analysis,
+            coordinate_name: dataset.coordinate_name.to_owned(),
+            coordinate_unit: dataset.coordinate_unit.map(str::to_owned),
+            coordinate: dataset.coordinate.to_vec(),
+            signals: Vec::new(),
+        };
+        coordinate.normalize_coordinate_unit()?;
+    }
 
     let mut identities = HashSet::with_capacity(dataset.signals.len());
     let mut value_count = dataset.coordinate.len();

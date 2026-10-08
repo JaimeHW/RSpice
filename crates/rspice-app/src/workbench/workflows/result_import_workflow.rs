@@ -1247,6 +1247,33 @@ mod tests {
             assert_eq!(axis.name, name);
             assert_eq!(axis.unit, canonical);
             assert_eq!(axis.data, [0.0, end]);
+            let domain = if restored.analysis_type == AnalysisType::Transient {
+                rspice_formats::WaveformDomain::Transient
+            } else {
+                rspice_formats::WaveformDomain::DcSweep
+            };
+            use rspice_formats::native_bundle::{
+                NativeBundleKind, NativeBundleReadLimits, decode_native_bundle,
+                encode_native_bundle, result::project_native_bundle,
+            };
+            let bundle =
+                project_native_bundle(restored, &[&restored.waveforms[0]], domain).unwrap();
+            let bytes =
+                encode_native_bundle(NativeBundleKind::Dataset, &bundle, MAX_RESULT_DATASET_BYTES)
+                    .unwrap();
+            let reimported = decode_native_bundle(
+                &bytes,
+                NativeBundleKind::Dataset,
+                NativeBundleReadLimits {
+                    max_members: 2,
+                    max_expanded_bytes: MAX_RESULT_DATASET_BYTES,
+                    max_member_bytes: MAX_RESULT_DATASET_BYTES,
+                },
+            )
+            .unwrap();
+            assert_eq!(reimported.coordinate_name, name);
+            assert_eq!(reimported.coordinate_unit.as_deref(), Some(canonical));
+            assert_eq!(reimported.coordinate, [0.0, end]);
         }
     }
 

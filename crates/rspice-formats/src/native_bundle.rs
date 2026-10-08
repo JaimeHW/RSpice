@@ -52,6 +52,7 @@ impl NativeBundleKind {
 pub struct NativeBundleDataset<'a> {
     pub analysis: crate::WaveformDomain,
     pub coordinate_name: &'a str,
+    pub coordinate_unit: Option<&'a str>,
     pub coordinate: &'a [f64],
     pub signals: Vec<NativeBundleSignal<'a>>,
 }
