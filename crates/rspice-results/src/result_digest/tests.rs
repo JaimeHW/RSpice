@@ -3,6 +3,62 @@
 use super::*;
 
 #[test]
+fn pole_stability_proofs_change_digests_and_legacy_bytes_stay_unchanged() {
+    use rspice_core::analysis::pole_zero::{PoleSpectrum, RootSetEvidence, SpectrumCertificate};
+    use rspice_core::analysis::stb::{CircuitPoleEvidence, StbAnalyzer};
+    let core_certificate = SpectrumCertificate::exact(1, 0).unwrap();
+    let mut certificate = PoleZeroSpectrumCertificate {
+        problem_order: 1,
+        infinite_count: 0,
+        max_backward_error: 0.0,
+        qualification_tolerance: core_certificate.qualification_tolerance,
+        asymptotically_stable: None,
+    };
+    let writer = || ResultDigestWriter::new("test-stability-proof", ResultDigestEncoding::CURRENT);
+    let digest = |certificate| {
+        let mut w = writer();
+        encode_pole_zero_root_evidence(&mut w, &PoleZeroRootSetEvidence::Qualified { certificate });
+        w.finish()
+    };
+    let legacy = digest(certificate);
+    let mut old_writer = writer();
+    old_writer.u8(2);
+    old_writer.u64(1);
+    old_writer.u64(0);
+    old_writer.f64(0.0);
+    old_writer.f64(certificate.qualification_tolerance);
+    assert_eq!(legacy, old_writer.finish());
+    let mut hashes = vec![legacy];
+    let mut stb_hashes = Vec::new();
+    for proof in [None, Some(false), Some(true)] {
+        certificate.asymptotically_stable = proof;
+        if proof.is_some() {
+            let hash = digest(certificate);
+            assert!(!hashes.contains(&hash));
+            hashes.push(hash);
+        }
+        let mut core_certificate = core_certificate;
+        core_certificate.asymptotically_stable = proof;
+        let mut response = StbAnalyzer::new(Default::default())
+            .analyze(&[1.0], &[rspice_core::Complex64::new(0.5, 0.0)])
+            .unwrap();
+        response.circuit_poles = CircuitPoleEvidence::Available {
+            spectrum: PoleSpectrum {
+                poles: vec![rspice_core::Complex64::new(-1e-18, 1.0)],
+                evidence: RootSetEvidence::Qualified {
+                    certificate: core_certificate,
+                },
+            },
+        };
+        let mut w = writer();
+        encode_stb_response(&mut w, &response);
+        let hash = w.finish();
+        assert!(!stb_hashes.contains(&hash));
+        stb_hashes.push(hash);
+    }
+}
+
+#[test]
 fn stb_circuit_modes_and_unavailability_participate_in_the_digest() {
     use rspice_core::analysis::pole_zero::{Matrix, PoleZeroAnalyzer};
     use rspice_core::analysis::stb::{

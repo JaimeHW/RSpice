@@ -489,6 +489,7 @@ fn schema_v15_pole_zero_results_migrate_only_as_legacy_unknown() {
     };
     *pole_evidence = crate::state::PoleZeroRootSetEvidence::Qualified {
         certificate: crate::state::PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
             problem_order: 1,
             infinite_count: 0,
             max_backward_error: 0.0,

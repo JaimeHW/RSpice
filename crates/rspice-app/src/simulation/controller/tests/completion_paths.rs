@@ -456,6 +456,7 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
     let controller = SimulationController::new();
     let pole_evidence = PoleZeroRootSetEvidence::Qualified {
         certificate: PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
             problem_order: 2,
             infinite_count: 0,
             max_backward_error: 1.0e-14,
@@ -465,6 +466,7 @@ fn scalar_and_complex_analysis_conversion_retains_exact_typed_payloads() {
     };
     let zero_evidence = PoleZeroRootSetEvidence::Qualified {
         certificate: PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
             problem_order: 1,
             infinite_count: 0,
             max_backward_error: 2.0e-14,

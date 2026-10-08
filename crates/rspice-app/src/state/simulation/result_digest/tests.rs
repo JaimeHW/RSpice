@@ -614,6 +614,7 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
             }],
             pole_evidence: PoleZeroRootSetEvidence::Qualified {
                 certificate: PoleZeroSpectrumCertificate {
+                    asymptotically_stable: None,
                     problem_order: 1,
                     infinite_count: 0,
                     max_backward_error: 1.0e-14,
@@ -623,6 +624,7 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
             },
             zero_evidence: PoleZeroRootSetEvidence::Qualified {
                 certificate: PoleZeroSpectrumCertificate {
+                    asymptotically_stable: None,
                     problem_order: 1,
                     infinite_count: 0,
                     max_backward_error: 2.0e-14,
@@ -656,6 +658,7 @@ fn typed_payload_is_current_content_identity_without_rewriting_v1_history() {
     };
     *pole_evidence = PoleZeroRootSetEvidence::Approximate {
         certificate: PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
             problem_order: 1,
             infinite_count: 0,
             max_backward_error: 1.0e-9,

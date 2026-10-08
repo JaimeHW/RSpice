@@ -12,6 +12,8 @@ pub struct PoleZeroSpectrumCertificate {
     pub infinite_count: u64,
     pub max_backward_error: f64,
     pub qualification_tolerance: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asymptotically_stable: Option<bool>,
 }
 
 impl PoleZeroSpectrumCertificate {
@@ -23,12 +25,14 @@ impl PoleZeroSpectrumCertificate {
     }
 
     fn as_core(self) -> Option<rspice_core::analysis::pole_zero::SpectrumCertificate> {
-        rspice_core::analysis::pole_zero::SpectrumCertificate::new(
+        let mut certificate = rspice_core::analysis::pole_zero::SpectrumCertificate::new(
             usize::try_from(self.problem_order).ok()?,
             usize::try_from(self.infinite_count).ok()?,
             self.max_backward_error,
             self.qualification_tolerance,
-        )
+        )?;
+        certificate.asymptotically_stable = self.asymptotically_stable;
+        certificate.is_valid().then_some(certificate)
     }
 
     #[must_use]
@@ -65,6 +69,23 @@ pub enum PoleZeroRootSetEvidence {
 }
 
 impl PoleZeroRootSetEvidence {
+    pub(crate) fn as_core(&self) -> Option<rspice_core::analysis::pole_zero::RootSetEvidence> {
+        use rspice_core::analysis::pole_zero::RootSetEvidence;
+        Some(match self {
+            Self::NotRequested => RootSetEvidence::NotRequested,
+            Self::LegacyUnknown => RootSetEvidence::LegacyUnknown,
+            Self::QualifiedEmpty { certificate } => RootSetEvidence::QualifiedEmpty {
+                certificate: certificate.as_core()?,
+            },
+            Self::Qualified { certificate } => RootSetEvidence::Qualified {
+                certificate: certificate.as_core()?,
+            },
+            Self::Approximate { certificate } => RootSetEvidence::Approximate {
+                certificate: certificate.as_core()?,
+            },
+        })
+    }
+
     #[must_use]
     pub const fn label(&self) -> &'static str {
         match self {

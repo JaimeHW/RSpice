@@ -20,20 +20,20 @@ impl PoleStabilityVerdict {
 }
 
 pub fn pole_stability(data: &PoleZeroData) -> PoleStabilityVerdict {
+    use rspice_core::analysis::pole_zero::{PoleSpectrum, StabilityVerdict};
+    let Some(evidence) = data.pole_evidence.as_core() else {
+        return PoleStabilityVerdict::Indeterminate;
+    };
     let poles = data
         .roots
         .iter()
         .filter(|root| root.is_pole())
-        .collect::<Vec<_>>();
-    if !data.pole_evidence.is_qualified()
-        || !data.pole_evidence.is_consistent_with_count(poles.len())
-    {
-        return PoleStabilityVerdict::Indeterminate;
-    }
-    if poles.iter().all(|pole| pole.real < 0.0) {
-        PoleStabilityVerdict::Stable
-    } else {
-        PoleStabilityVerdict::Unstable
+        .map(|pole| rspice_core::Complex64::new(pole.real, pole.imag))
+        .collect();
+    match (PoleSpectrum { poles, evidence }).stability_verdict() {
+        StabilityVerdict::Stable => PoleStabilityVerdict::Stable,
+        StabilityVerdict::Unstable => PoleStabilityVerdict::Unstable,
+        StabilityVerdict::Indeterminate => PoleStabilityVerdict::Indeterminate,
     }
 }
 
@@ -101,11 +101,15 @@ pub fn summarize_roots(data: &PoleZeroData) -> PoleZeroSummary<'_> {
 mod tests {
     use super::*;
 
-    fn qualified_evidence(root_count: u64) -> crate::pole_zero::PoleZeroRootSetEvidence {
+    fn qualified_evidence(
+        root_count: u64,
+        stable: Option<bool>,
+    ) -> crate::pole_zero::PoleZeroRootSetEvidence {
         let certificate = crate::pole_zero::PoleZeroSpectrumCertificate {
             problem_order: root_count,
             infinite_count: 0,
             max_backward_error: 1.0e-14,
+            asymptotically_stable: stable,
             qualification_tolerance:
                 crate::pole_zero::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(
                     root_count,
@@ -124,7 +128,7 @@ mod tests {
         let mut data = PoleZeroData::new("axis pole");
         data.roots.push(ComplexRoot::pole(0.0, 10.0));
         data.roots.push(ComplexRoot::pole(0.0, -10.0));
-        data.pole_evidence = qualified_evidence(2);
+        data.pole_evidence = qualified_evidence(2, Some(false));
 
         assert_eq!(pole_stability(&data), PoleStabilityVerdict::Unstable);
     }
@@ -134,7 +138,7 @@ mod tests {
         let mut data = PoleZeroData::new("unstable");
         data.roots.push(ComplexRoot::pole(0.0, 10.0));
         data.roots.push(ComplexRoot::pole(0.5, 0.0));
-        data.pole_evidence = qualified_evidence(2);
+        data.pole_evidence = qualified_evidence(2, Some(false));
 
         assert_eq!(pole_stability(&data), PoleStabilityVerdict::Unstable);
     }
@@ -144,7 +148,7 @@ mod tests {
         let mut data = PoleZeroData::new("stable");
         data.roots.push(ComplexRoot::pole(-0.5, 0.0));
         data.roots.push(ComplexRoot::pole(-2.0, 10.0));
-        data.pole_evidence = qualified_evidence(2);
+        data.pole_evidence = qualified_evidence(2, Some(true));
 
         assert_eq!(pole_stability(&data), PoleStabilityVerdict::Stable);
     }
@@ -161,6 +165,7 @@ mod tests {
                     problem_order: 1,
                     infinite_count: 0,
                     max_backward_error: 1.0e-9,
+                    asymptotically_stable: None,
                     qualification_tolerance: crate::pole_zero::PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
                 },
             },
@@ -172,8 +177,30 @@ mod tests {
         data.roots.clear();
         data.pole_evidence = crate::pole_zero::PoleZeroRootSetEvidence::NotRequested;
         assert_eq!(pole_stability(&data), PoleStabilityVerdict::Indeterminate);
-        data.pole_evidence = qualified_evidence(0);
+        data.pole_evidence = qualified_evidence(0, None);
         assert_eq!(pole_stability(&data), PoleStabilityVerdict::Stable);
+    }
+
+    #[test]
+    fn backward_qualification_does_not_replace_stability_evidence() {
+        let mut data = PoleZeroData::new("rounded roots");
+        data.roots.push(ComplexRoot::pole(-1e-18, 1.0));
+        data.roots.push(ComplexRoot::pole(-1e-18, -1.0));
+        for (proof, expected) in [
+            (None, PoleStabilityVerdict::Indeterminate),
+            (Some(false), PoleStabilityVerdict::Unstable),
+            (Some(true), PoleStabilityVerdict::Stable),
+        ] {
+            data.pole_evidence = qualified_evidence(2, proof);
+            let json = serde_json::to_string(&data.pole_evidence).unwrap();
+            data.pole_evidence = serde_json::from_str(&json).unwrap();
+            assert_eq!(pole_stability(&data), expected);
+        }
+        data.roots[0].real = f64::NAN;
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Indeterminate);
+        data.roots.clear();
+        data.pole_evidence = qualified_evidence(0, Some(false));
+        assert_eq!(pole_stability(&data), PoleStabilityVerdict::Indeterminate);
     }
 
     #[test]

@@ -539,6 +539,7 @@ fn worker_result_round_trip() {
         zeros: vec![(-3.0, 0.0)],
         pole_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::Qualified {
             certificate: rspice_results::pole_zero::PoleZeroSpectrumCertificate {
+                asymptotically_stable: Some(true),
                 problem_order: 1,
                 infinite_count: 0,
                 max_backward_error: 1.0e-14,
@@ -549,6 +550,7 @@ fn worker_result_round_trip() {
         },
         zero_evidence: rspice_results::pole_zero::PoleZeroRootSetEvidence::Approximate {
             certificate: rspice_results::pole_zero::PoleZeroSpectrumCertificate {
+                asymptotically_stable: None,
                 problem_order: 1,
                 infinite_count: 0,
                 max_backward_error: 1.0e-9,
@@ -570,6 +572,10 @@ fn worker_result_round_trip() {
         } => {
             assert_eq!(poles, vec![(-1.0, 2.0)]);
             assert_eq!(zeros, vec![(-3.0, 0.0)]);
+            assert_eq!(
+                pole_evidence.certificate().unwrap().asymptotically_stable,
+                Some(true)
+            );
             assert!(matches!(
                 pole_evidence,
                 rspice_results::pole_zero::PoleZeroRootSetEvidence::Qualified { .. }

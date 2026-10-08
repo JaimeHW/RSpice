@@ -524,6 +524,7 @@ fn csv_export_publishes_exact_pole_zero_evidence_without_pseudo_waveforms() {
         }],
         pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
             certificate: crate::state::PoleZeroSpectrumCertificate {
+                asymptotically_stable: None,
                 problem_order: 1,
                 infinite_count: 0,
                 max_backward_error: 1.0e-14,
@@ -534,6 +535,7 @@ fn csv_export_publishes_exact_pole_zero_evidence_without_pseudo_waveforms() {
         },
         zero_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
             certificate: crate::state::PoleZeroSpectrumCertificate {
+                asymptotically_stable: None,
                 problem_order: 1,
                 infinite_count: 0,
                 max_backward_error: 2.0e-14,
@@ -585,6 +587,7 @@ fn csv_export_marks_unavailable_pole_zero_gain_explicitly() {
         zeros: Vec::new(),
         pole_evidence: crate::state::PoleZeroRootSetEvidence::Qualified {
             certificate: crate::state::PoleZeroSpectrumCertificate {
+                asymptotically_stable: None,
                 problem_order: 1,
                 infinite_count: 0,
                 max_backward_error: 1.0e-14,

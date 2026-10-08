@@ -452,6 +452,7 @@ fn pole_zero_payload_requires_matching_type_and_finite_values() {
         zeros: Vec::new(),
         pole_evidence: PoleZeroRootSetEvidence::Qualified {
             certificate: PoleZeroSpectrumCertificate {
+                asymptotically_stable: None,
                 problem_order: 1,
                 infinite_count: 0,
                 max_backward_error: 0.0,

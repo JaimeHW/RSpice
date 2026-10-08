@@ -1293,20 +1293,30 @@ fn encode_stb_response(
                 }
                 // Available evidence is validated before retaining a result.
                 use rspice_core::analysis::pole_zero::RootSetEvidence as R;
-                writer.u8(match &spectrum.evidence {
+                let evidence_tag = match &spectrum.evidence {
                     R::NotRequested => 0,
                     R::QualifiedEmpty { .. } => 1,
                     R::Qualified { .. } => 2,
                     R::Approximate { .. } => 3,
                     R::LegacyUnknown => 4,
                     _ => 255,
-                });
+                };
                 let certificate = spectrum.evidence.certificate();
+                writer.u8(
+                    if certificate.is_some_and(|c| c.asymptotically_stable.is_some()) {
+                        evidence_tag + 4
+                    } else {
+                        evidence_tag
+                    },
+                );
                 writer.option(certificate, |w, c| {
                     w.usize(c.problem_order);
                     w.usize(c.infinite_count);
                     w.f64(c.max_backward_error);
                     w.f64(c.qualification_tolerance);
+                    if let Some(stable) = c.asymptotically_stable {
+                        w.bool(stable);
+                    }
                 });
             }
             E::Unavailable { cause } => match cause {
@@ -1671,15 +1681,27 @@ fn encode_pole_zero_root_evidence(
     match evidence {
         PoleZeroRootSetEvidence::NotRequested => writer.u8(0),
         PoleZeroRootSetEvidence::QualifiedEmpty { certificate } => {
-            writer.u8(1);
+            writer.u8(if certificate.asymptotically_stable.is_some() {
+                5
+            } else {
+                1
+            });
             encode_pole_zero_certificate(writer, *certificate);
         }
         PoleZeroRootSetEvidence::Qualified { certificate } => {
-            writer.u8(2);
+            writer.u8(if certificate.asymptotically_stable.is_some() {
+                6
+            } else {
+                2
+            });
             encode_pole_zero_certificate(writer, *certificate);
         }
         PoleZeroRootSetEvidence::Approximate { certificate } => {
-            writer.u8(3);
+            writer.u8(if certificate.asymptotically_stable.is_some() {
+                7
+            } else {
+                3
+            });
             encode_pole_zero_certificate(writer, *certificate);
         }
         PoleZeroRootSetEvidence::LegacyUnknown => writer.u8(4),
@@ -1694,6 +1716,11 @@ fn encode_pole_zero_certificate(
     writer.u64(certificate.infinite_count);
     writer.f64(certificate.max_backward_error);
     writer.f64(certificate.qualification_tolerance);
+    // New evidence tags distinguish this extension; absent evidence preserves
+    // the published legacy digest bytes exactly.
+    if let Some(stable) = certificate.asymptotically_stable {
+        writer.bool(stable);
+    }
 }
 
 fn encode_dc_op(writer: &mut ResultDigestWriter, result: &DcOpResult) {

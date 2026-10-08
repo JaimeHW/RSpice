@@ -1423,6 +1423,10 @@ fn append_pole_zero_evidence_csv(
                 "qualification_tolerance",
                 format!("{:.17e}", certificate.qualification_tolerance),
             ),
+            (
+                "asymptotically_stable",
+                optional_bool_csv(certificate.asymptotically_stable),
+            ),
         ] {
             contents.push_str(&format!("{root_kind}_{field},,,,{value}\n"));
         }
@@ -1465,6 +1469,29 @@ mod tests {
     use rspice_results::analysis_payload::AnalysisResultPayload;
     use rspice_results::analysis_result::AnalysisResult;
     use rspice_results::analysis_type::AnalysisType;
+
+    #[test]
+    fn pole_zero_csv_preserves_stability_proof_and_legacy_absence() {
+        use rspice_results::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
+        for proof in [None, Some(false), Some(true)] {
+            let evidence = PoleZeroRootSetEvidence::Qualified {
+                certificate: PoleZeroSpectrumCertificate {
+                    problem_order: 1,
+                    infinite_count: 0,
+                    max_backward_error: 0.0,
+                    qualification_tolerance:
+                        PoleZeroSpectrumCertificate::canonical_qualification_tolerance(1).unwrap(),
+                    asymptotically_stable: proof,
+                },
+            };
+            let mut csv = String::new();
+            append_pole_zero_evidence_csv(&mut csv, "pole", &evidence);
+            assert!(csv.contains(&format!(
+                "pole_asymptotically_stable,,,,{}\n",
+                optional_bool_csv(proof)
+            )));
+        }
+    }
 
     #[test]
     fn scalar_table_preserves_cells_and_refuses_incomplete_or_invalid_evidence() {

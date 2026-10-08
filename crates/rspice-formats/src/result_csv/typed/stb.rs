@@ -153,6 +153,12 @@ pub(super) fn prepare(response: &StbResult) -> EncodedTypedCsv {
                     "qualification_tolerance",
                     number(Some(certificate.qualification_tolerance)),
                 );
+                evidence(
+                    "asymptotically_stable",
+                    certificate
+                        .asymptotically_stable
+                        .map_or_else(String::new, |stable| stable.to_string()),
+                );
             }
             for (index, pole) in spectrum.poles.iter().enumerate() {
                 row(
@@ -205,12 +211,12 @@ mod tests {
             .analyze(&[10.0], &[rspice_core::Complex64::new(1.0, 0.0)])
             .unwrap();
         assert!(prepare(&response).contents.contains("status,not_computed"));
+        let mut certificate = SpectrumCertificate::exact(3, 2).unwrap();
+        certificate.asymptotically_stable = Some(false);
         response.circuit_poles = CircuitPoleEvidence::Available {
             spectrum: PoleSpectrum {
                 poles: vec![rspice_core::Complex64::new(2.0, 0.0)],
-                evidence: RootSetEvidence::Qualified {
-                    certificate: SpectrumCertificate::exact(3, 2).unwrap(),
-                },
+                evidence: RootSetEvidence::Qualified { certificate },
             },
         };
         let csv = prepare(&response).contents;
@@ -232,6 +238,7 @@ mod tests {
             "infinite_count,2",
             "max_backward_error,",
             "qualification_tolerance,",
+            "asymptotically_stable,false",
         ] {
             assert!(csv.contains(field), "{field}");
         }

@@ -118,6 +118,7 @@ fn retained_certificate(
     certificate: rspice_core::analysis::pole_zero::SpectrumCertificate,
 ) -> Result<PoleZeroSpectrumCertificate, SimulationError> {
     Ok(PoleZeroSpectrumCertificate {
+        asymptotically_stable: certificate.asymptotically_stable,
         problem_order: u64::try_from(certificate.problem_order).map_err(|_| {
             SimulationError::SolverError(
                 "pole-zero certificate problem order exceeds the retained result contract"
@@ -292,8 +293,9 @@ C1 out 0 1n
 
     #[test]
     fn core_root_evidence_is_retained_without_losing_certificate_fields() {
-        let certificate = rspice_core::analysis::pole_zero::SpectrumCertificate::exact(1, 0)
+        let mut certificate = rspice_core::analysis::pole_zero::SpectrumCertificate::exact(1, 0)
             .expect("canonical certificate");
+        certificate.asymptotically_stable = Some(true);
         let retained = retained_root_evidence(
             &rspice_core::analysis::pole_zero::RootSetEvidence::Qualified { certificate },
         )
@@ -303,6 +305,7 @@ C1 out 0 1n
             retained,
             PoleZeroRootSetEvidence::Qualified {
                 certificate: PoleZeroSpectrumCertificate {
+                    asymptotically_stable: Some(true),
                     problem_order: 1,
                     infinite_count: 0,
                     max_backward_error: certificate.max_backward_error,

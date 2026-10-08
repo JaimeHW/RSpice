@@ -95,6 +95,7 @@ mod tests {
 
     fn qualified_evidence(root_count: u64) -> crate::state::PoleZeroRootSetEvidence {
         let certificate = crate::state::PoleZeroSpectrumCertificate {
+            asymptotically_stable: None,
             problem_order: root_count,
             infinite_count: 0,
             max_backward_error: 1.0e-14,
