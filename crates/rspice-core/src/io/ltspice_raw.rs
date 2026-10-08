@@ -910,11 +910,12 @@ fn parse_binary_data(
 /// walk stops there and leaves the bytes behind it — blank space, or the next
 /// plot's header — for the caller to account for. `wanted` of `None` infers
 /// the row count from the data up to EOF or the next plot header.
-fn collect_ascii_lines(
-    payload: &[u8],
+fn collect_ascii_lines<'a>(
+    payload: &'a [u8],
     wanted: Option<usize>,
-    collected: &mut Vec<String>,
+    collected: &mut Vec<&'a str>,
     offset: &mut usize,
+    admit_rows: impl Fn(usize) -> Result<(), RawParseError>,
 ) -> Result<(), RawParseError> {
     while wanted.is_none_or(|wanted| collected.len() < wanted) {
         let Some(rest) = payload.get(*offset..) else {
@@ -941,10 +942,11 @@ fn collect_ascii_lines(
         if trimmed.is_empty() {
             continue;
         }
+        admit_rows(collected.len().saturating_add(1))?;
         collected.try_reserve(1).map_err(|error| {
             RawParseError::DataError(format!("unable to retain raw ASCII rows: {error}"))
         })?;
-        collected.push(trimmed.to_string());
+        collected.push(trimmed);
     }
     Ok(())
 }
@@ -957,11 +959,16 @@ fn parse_ascii_data(
     resource_limits: ResourceLimits,
 ) -> Result<(Vec<RawWaveform>, usize, usize), RawParseError> {
     let num_vars = header.no_variables;
+    // Header fields may appear in any order. Admit the final dimensions before
+    // retaining rows even if No. Points appeared before the flags or variables.
+    ensure_waveform_dimensions(header, header.no_points, resource_limits)?;
     let mut lines = Vec::new();
     let mut consumed = 0usize;
     // The first row decides the layout, and the layout decides how many rows
     // this plot owns, so it is read before the rest of the walk is bounded.
-    collect_ascii_lines(payload, Some(1), &mut lines, &mut consumed)?;
+    collect_ascii_lines(payload, Some(1), &mut lines, &mut consumed, |_| {
+        ensure_waveform_dimensions(header, 1, resource_limits)
+    })?;
     let row_oriented = lines
         .first()
         .map(|line| line.split_whitespace().count() > num_vars)
@@ -977,7 +984,14 @@ fn parse_ascii_data(
             )
         })?)
     };
-    collect_ascii_lines(payload, wanted, &mut lines, &mut consumed)?;
+    collect_ascii_lines(payload, wanted, &mut lines, &mut consumed, |rows| {
+        let points = if row_oriented {
+            rows
+        } else {
+            rows.div_ceil(num_vars)
+        };
+        ensure_waveform_dimensions(header, points, resource_limits)
+    })?;
 
     let point_count = if row_oriented {
         if header.no_points > 0 && lines.len() != header.no_points {

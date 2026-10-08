@@ -885,10 +885,12 @@ For tables, `max_result_values` counts coordinate values and both components
 of complex samples. RAW FFT imports also charge all numeric metadata fields
 against both value budgets, in addition to the file's sample storage, before
 decoding the typed metadata. The budgets cover every plot before selection,
-including empty spectra. FFT JSON uses the same admission scanner without
-retaining an extra untyped payload tree. HDF5 readers admit the combined dataset
-and measurement
-value count before decoding any section, including sections not selected.
+including empty spectra. ASCII RAW imports enforce both value limits as rows
+are read, including plots whose point count is inferred from their data. A
+refusal reports the first point that would exceed the remaining file budget.
+FFT JSON uses the same admission scanner without retaining an extra untyped
+payload tree. HDF5 readers admit the combined dataset and measurement value
+count before decoding any section, including sections not selected.
 FFT JSON and delimited imports apply both value limits to numeric source
 fields, including metadata repeated in CSV/TSV records, before assembling spectra.
 Legacy table and FFT JSON value limits are enforced during decoding, before an
