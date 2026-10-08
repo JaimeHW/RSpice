@@ -109,7 +109,7 @@ pub(super) fn materialize(
             )));
         }
         let node = circuit.get_or_create_node(&name);
-        circuit.rebind_xspice_digital_node(bridge.node, node);
+        circuit.rebind_xspice_event_node(bridge.node, node);
         node
     };
     let names = circuit.node_names_sorted();

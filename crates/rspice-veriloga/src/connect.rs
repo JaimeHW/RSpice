@@ -113,9 +113,18 @@ impl ConnectDirection {
     }
 }
 
+/// The discrete value carried across a connection, independent of discipline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectValueKind {
+    FourState,
+    Real,
+}
+
 /// One side of a connect module, as section 7.6 reads its declaration.
 #[derive(Debug, Clone)]
 pub struct ConnectModulePort {
+    /// Continuous ports have no discrete value representation.
+    pub value_kind: Option<ConnectValueKind>,
     pub name: SmolStr,
     pub discipline: SmolStr,
     pub direction: PortDirection,
@@ -303,12 +312,26 @@ impl ConnectRuleTable {
         required: ConnectDirection,
         db: &DisciplineDb,
     ) -> Result<&InsertionRule, ConnectError> {
+        self.select_typed(continuous, discrete, required, None, db)
+    }
+
+    /// Select only bodies whose discrete port can carry the actual net value.
+    /// `None` retains discipline-only selection for an untyped source graph.
+    pub fn select_typed(
+        &self,
+        continuous: &str,
+        discrete: &str,
+        required: ConnectDirection,
+        value_kind: Option<ConnectValueKind>,
+        db: &DisciplineDb,
+    ) -> Result<&InsertionRule, ConnectError> {
         let mut best: Option<&InsertionRule> = None;
         let mut best_rank = 0u8;
         let mut tied: Option<&InsertionRule> = None;
 
         for rule in &self.insertions {
-            if !rule.direction.admits(required)
+            if value_kind.is_some_and(|kind| rule.discrete.value_kind != Some(kind))
+                || !rule.direction.admits(required)
                 || !disciplines_compatible(db, &rule.continuous.discipline, continuous)
                 || !disciplines_compatible(db, &rule.discrete.discipline, discrete)
             {
@@ -443,6 +466,8 @@ pub enum ResolutionMode {
 /// in a particular context".
 #[derive(Debug, Clone)]
 pub struct NetSegment {
+    /// A typed discrete segment restricts insertion to compatible value ports.
+    pub value_kind: Option<ConnectValueKind>,
     /// Section 7.8.5's `SigName`.
     pub name: SmolStr,
     /// The discipline declared on the net in this context, in or out of it.
@@ -462,6 +487,7 @@ impl NetSegment {
         Self {
             name: name.into(),
             declared: None,
+            value_kind: None,
             digital_behavioral: false,
             children: Vec::new(),
         }
@@ -469,6 +495,11 @@ impl NetSegment {
 
     pub fn declared(mut self, discipline: impl Into<SmolStr>) -> Self {
         self.declared = Some(discipline.into());
+        self
+    }
+
+    pub fn with_value_kind(mut self, kind: ConnectValueKind) -> Self {
+        self.value_kind = Some(kind);
         self
     }
 
@@ -808,26 +839,31 @@ pub fn plan_connect_modules(
                 (lower_discipline, upper_discipline)
             };
             let required = required_direction(link.direction, upper_domain);
+            let discrete_segment = if upper_domain == Domain::Discrete {
+                upper
+            } else {
+                link.lower
+            };
+            let value_kind = signal.segments[discrete_segment].value_kind;
 
-            let rule =
-                table
-                    .select(continuous, discrete, required, db)
-                    .map_err(|error| match error {
-                        // The selector knows the disciplines but not the net; the
-                        // diagnostic clause 7 asks for names both.
-                        ConnectError::NoConnectRule {
-                            continuous,
-                            discrete,
-                            direction,
-                            ..
-                        } => ConnectError::NoConnectRule {
-                            net: segment.name.clone(),
-                            continuous,
-                            discrete,
-                            direction,
-                        },
-                        other => other,
-                    })?;
+            let rule = table
+                .select_typed(continuous, discrete, required, value_kind, db)
+                .map_err(|error| match error {
+                    // The selector knows the disciplines but not the net; the
+                    // diagnostic clause 7 asks for names both.
+                    ConnectError::NoConnectRule {
+                        continuous,
+                        discrete,
+                        direction,
+                        ..
+                    } => ConnectError::NoConnectRule {
+                        net: segment.name.clone(),
+                        continuous,
+                        discrete,
+                        direction,
+                    },
+                    other => other,
+                })?;
 
             let binding = ConnectModuleBinding {
                 upper,
@@ -1138,7 +1174,23 @@ fn connect_module_decl(
                     port: name.clone(),
                     span: declaration.span,
                 })?;
+            let real =
+                matches!(
+                    declaration.net_type,
+                    Some(crate::ast::PortNetType::Wreal(_) | crate::ast::PortNetType::Real)
+                ) || module.digital_nets.iter().any(|net| {
+                    net.kind.is_real() && net.items.iter().any(|item| item.name == *name)
+                }) || module.variables.iter().any(|variable| {
+                    variable.var_type == crate::ast::VarType::Real
+                        && variable.items.iter().any(|item| item.name == *name)
+                });
             ports.push(ConnectModulePort {
+                value_kind: (discipline_domain(db, discipline) == Some(Domain::Discrete))
+                    .then_some(if real {
+                        ConnectValueKind::Real
+                    } else {
+                        ConnectValueKind::FourState
+                    }),
                 name: name.clone(),
                 discipline: discipline.into(),
                 direction: declaration.direction,

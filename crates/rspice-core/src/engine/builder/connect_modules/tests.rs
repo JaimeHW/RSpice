@@ -53,13 +53,11 @@ fn the_generated_instance_name_is_section_7_8_5s() {
     assert_eq!(selected.instance, "din__a2d__logic");
 }
 
-/// Real-valued event traffic is not a discipline boundary, so clause 7 is not
-/// consulted for it at all.
+/// A logic-only library does not select a four-state body for a real net.
 #[test]
-fn a_real_event_boundary_selects_nothing() {
+fn a_logic_only_library_leaves_real_conversion_policy_unchanged() {
     let (table, db) = table(&builtin_connect_library_source());
     for kind in [Kind::RealToV, Kind::VToReal] {
-        assert!(boundary_direction(kind).is_none());
         assert!(
             select_for_boundary(&table, &db, kind, "w", "a1", "r")
                 .expect("no error")

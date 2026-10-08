@@ -44,12 +44,7 @@ pub(super) fn plan_conversions(
                 (Some(_), DigitalLinkDirection::Inout) => XspiceAutoBridgeKind::Bidi,
                 (None, DigitalLinkDirection::Input) => XspiceAutoBridgeKind::VToReal,
                 (None, DigitalLinkDirection::Output) => XspiceAutoBridgeKind::RealToV,
-                _ => {
-                    return Err(SimulationError::Circuit(format!(
-                        "mixed instance '{}' port '{signal}' on node '{node_label}' requires an explicit bidirectional real electrical conversion",
-                        host.instance_name()
-                    )));
-                }
+                (None, DigitalLinkDirection::Inout) => XspiceAutoBridgeKind::RealBidi,
             };
             let selected =
                 rules.select_for_boundary_node(kind, &node_label, host.instance_name(), signal)?;

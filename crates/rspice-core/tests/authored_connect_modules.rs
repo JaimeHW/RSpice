@@ -143,3 +143,138 @@ endconnectrules
         .unwrap();
     assert!((rise.time - 717e-12).abs() < 2e-20, "{trace:?}");
 }
+
+#[test]
+fn authored_real_inout_uses_its_loading_law_and_preserves_single_driver_nets() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module real_source(q);
+ inout q; wreal q;
+ real level=1.5;
+ initial #1 level=3.0;
+ assign q=level;
+endmodule
+connectmodule real_boundary(a,r);
+ inout a; electrical a;
+ inout r; logic r; wreal r;
+ parameter real resistance=100;
+ analog I(a)<+(V(a)-r)/resistance;
+endmodule
+connectmodule logic_boundary(a,d);
+ inout a; electrical a;
+ inout d; logic d;
+ analog I(a)<+V(a);
+endmodule
+connectrules chosen;
+ connect logic_boundary;
+ connect real_boundary #(.resistance(500));
+endconnectrules
+"#,
+    );
+    let deck=Netlist::parse(&format!(
+        "* explicit real inout loading\nX1 physical real_source\nRload physical 0 1k\n.va \"{}\" real_source\n.end\n",source.path()
+    )).unwrap();
+    let engine = Engine::default();
+    for _ in 0..2 {
+        let result = engine.run_tran(&deck, 2e-9, 100e-12).unwrap();
+        assert!((voltage(&result, "physical", 0.5e-9) - 1.0).abs() < 1e-7);
+        assert!((voltage(&result, "physical", 1.5e-9) - 2.0).abs() < 1e-7);
+        assert!(result.event_only_node_kind("physical").is_none());
+    }
+}
+
+#[test]
+fn authored_real_input_output_bodies_preserve_xspice_gain_and_propagation() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module unused(p); inout p; electrical p; analog I(p)<+V(p); endmodule
+connectmodule sense(a,r);
+ input a; electrical a;
+ output r; logic r; wreal r;
+ real sample=0;
+ always #100 sample=V(a);
+ assign r=sample;
+endmodule
+connectmodule drive(a,r);
+ output a; electrical a;
+ input r; logic r; wreal r;
+ analog I(a)<+(V(a)-r)/200;
+endmodule
+connectrules chosen;
+ connect sense;
+ connect drive;
+endconnectrules
+"#,
+    );
+    let deck=Netlist::parse(&format!(
+        "* authored real XSPICE conversion\nV1 input 0 pwl(0 0 1n 1)\nA1 input output g\n.model g real_gain(gain=2 delay=17p)\nRload output 0 1k\n.va \"{}\" unused\n.end\n",source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1.1e-9, 70e-12).unwrap();
+    assert!((voltage(&result, "output", 1.02e-9) - 2.0 / 1.2).abs() < 1e-7);
+    let trace = result
+        .real_trace_named("OUTPUT__drive__logic__event")
+        .expect("real drive trace");
+    let step = trace
+        .iter()
+        .find(|point| (point.value - 1.4).abs() < 1e-10)
+        .unwrap();
+    assert!((step.time - 717e-12).abs() < 2e-20, "{trace:?}");
+}
+
+#[test]
+fn authored_real_inout_resolves_independent_drivers_in_loaded_feedback() {
+    let model = r#"
+`timescale 1ps/1ps
+module real_source(q);
+ inout q; wrealsum q;
+ real level=1.5;
+ initial #1000 level=3.0;
+ assign q=level;
+endmodule
+connectmodule feedback(a,r);
+ inout a; electrical a;
+ inout r; logic r; wrealsum r;
+ real sample=0, returned=0;
+ always begin #100 sample=0.25*V(a); #10 returned=sample; end
+ assign r=returned;
+ analog I(a)<+(V(a)-r)/500;
+endmodule
+connectrules chosen;
+ connect feedback;
+endconnectrules
+"#;
+    for resolved in [true, false] {
+        let source = Source::new(&if resolved {
+            model.to_string()
+        } else {
+            model.replace("wrealsum", "wreal")
+        });
+        let deck = Netlist::parse(&format!(
+            "* independent drive and return feedback\nX1 physical real_source\nRload physical 0 1k\n.va \"{}\" real_source\n.end\n", source.path()
+        )).unwrap();
+        let outcome = Engine::default().run_tran(&deck, 1.8e-9, 25e-12);
+        if !resolved {
+            let error = outcome.unwrap_err().to_string();
+            assert!(
+                error.contains("driver") && error.contains("resolution"),
+                "{error}"
+            );
+            continue;
+        }
+        let result = outcome.unwrap();
+        // Rload and the authored 500-ohm source give V=(level+sample)/1.5.
+        // Each clock feeds a quarter of the physical voltage back after 10 ps
+        // as a distinct RNM driver: V[n+1]=level/1.5+V[n]/6, with equilibrium
+        // level/1.25. The delay separates sampling from its physical consequence.
+        for (time, expected) in [(50e-12, 1.0), (150e-12, 7.0 / 6.0), (250e-12, 43.0 / 36.0)] {
+            let actual = voltage(&result, "physical", time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "t={time}: {actual} != {expected}"
+            );
+        }
+        assert!((voltage(&result, "physical", 1.75e-9) - 2.4).abs() < 1e-5);
+    }
+}

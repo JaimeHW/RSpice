@@ -34,80 +34,38 @@
 //!
 //! Each module retains its declared time unit and precision through elaboration.
 //!
-//! Mixed modules are executed through [`MixedSignalHost`], whose trial
-//! transaction aligns the digital event slot with each analog Newton solve.
-//! The boundary is explicit: an ADC bridge publishes accepted analog samples
-//! with hysteresis, and a DAC bridge stamps a Thevenin equivalent. Each bridge
-//! carries *one bit* of one discrete signal, so a vector port is one bridge per
-//! conductor — the deck names one node per bit — while the discrete half still
-//! sees whole-vector transitions, because the A/D settle composes a port's bit
-//! drives into one write. Event-only bidirectional ports share the resolved
-//! driver store; electrical bidirectional conversion remains unimplemented.
+//! Mixed modules execute through [`MixedSignalHost`] and the circuit-wide mixed
+//! coordinator. Analog candidates and digital settlement participate in one
+//! accepted/rejected trial. Physical event times remain separate from the
+//! declared HDL time precision; advancing a reporting tick does not execute a
+//! future physical timer.
 //!
-//! # Where a `wreal` meets an analog node
+//! Typed event-only HDL and XSPICE ports share resolved signals directly. At an
+//! electrical boundary, the builder allocates a private event endpoint and a
+//! converter with the selected loading, timing, and threshold behavior. Each
+//! vector conductor retains its identity, while simultaneous input decisions
+//! publish as one bank. Four-state bidirectional conversion tracks external
+//! drivers independently of its own electrical contribution.
 //!
-//! HDL and XSPICE real-valued connections use the linked runtime's authored driver
-//! resolution and publish accepted real event traces. Explicit `real_to_v` and
-//! `v_to_real` instances provide electrical conversion. Automatic insertion for
-//! mixed real ports remains unimplemented. The boundary's rulings below
-//! describe the timing and resolution requirements for that integration. The
-//! mixed host above now implements the time half of them —
-//! [`Instant::floor_tick`](super::event_scheduler::Instant::floor_tick)
-//! is the floor, and the crossing an A/D bridge is dated by is interpolated
-//! inside the accepted step rather than snapped to the tick. That host applies
-//! a *second* time mapping the ruling below does not cover, because it is not
-//! about advancing anything: an A/D transition's own timestamp names the tick
-//! its event lands on, and Verilog-AMS LRM 2.4 section 7.3.6.1 fixes that at
-//! the nearest tick rather than the floor — see
-//! [`MixedSignalHost::settle_analog_bridges`].
-//! What a `wreal` still needs from this section is the *driver-resolution*
-//! hazard below, which is not about time at all.
+//! # Real-valued nets and connection bodies
 //!
-//! **The two event worlds do not share a tick encoding**:
+//! Shared real nets retain their declared resolution and publish accepted real
+//! event traces. HDL and XSPICE outputs each contribute their original driver;
+//! resolved observations never become additional drivers. Standard `wreal`
+//! enforces one driver. Explicit RNM resolution extensions can combine drivers.
 //!
-//! * the circuit's queue keys an event by `f64::to_bits(seconds)`, which is
-//!   exact and unquantized because XSPICE event times are chosen by code models
-//!   and by the step controller rather than lying on a declared grid;
-//! * this host keys one by an integer count of the finest declared precision
-//!   of the compiled HDL design.
+//! The builder supplies default `real_to_v` and `v_to_real` conversions for
+//! unidirectional electrical boundaries. Selected authored connection bodies
+//! override those defaults and execute through the same mixed host. A physical
+//! real inout requires an authored bidirectional body or an explicit real inout
+//! template defining its electrical behavior and driver ownership.
 //!
-//! No mapping between the two is exact in both directions, so the choice is
-//! which property to keep, and there is one answer that keeps the right ones
-//! *for advancing the digital world*:
-//! **floor an analog time to the tick at or before it, and publish an event at
-//! the unquantized analog time.** Flooring is monotone, so a non-decreasing
-//! sequence of accepted analog times gives [`DigitalHost::advance_to`] a
-//! non-decreasing sequence of ticks; it never runs the digital world past an
-//! instant the integrator has accepted, which rounding to nearest would;
-//! and two analog times inside one tick collapse rather than reorder, which is
-//! what a declared precision *means*. Publishing at the analog time rather than
-//! at the tick's seconds is what keeps D5 clause 2 — the step controller stops
-//! bit-exactly at an event time — untouched by the grid.
-//!
-//! Shared real nets use the HDL net's declared resolution, including the
-//! single-driver restriction of `wreal`. Enrollment counts HDL and XSPICE output
-//! identities together. Every original XSPICE output contributes once; resolved
-//! observations are input views and never become additional drivers. XSPICE-only
-//! real nets retain their existing resolver.
-//!
-//! The bridge halves already exist as code models — `real_to_v` and
-//! `v_to_real` (sample on accepted step, no threshold, no breakpoint), both
-//! planned in by `engine::builder`'s `plan_xspice_auto_bridges`, the single
-//! planner a connect-module route extends — and neither needs anything from
-//! this host.
-//!
-//! # Where the connect-module route stands
-//!
-//! Verilog-AMS LRM 2.4 clause 7's decisions — which discipline a net resolves
-//! to, which connect module a mixed-discipline connection needs, where the
-//! instance goes and how its ports bind — are made by
-//! [`rspice_veriloga::connect`], on a signal's net-segment hierarchy. What is
-//! missing between there and the planner named above is the *hierarchy*: this
-//! host runs a digital design and [`MixedSignalHost`] bridges a fixed
-//! boundary, and neither elaborates a Verilog-AMS module tree into
-//! `CircuitData` nodes. Until one does, a resolved connect module has no node
-//! to be planned onto, which is why the planner has no connect-module input
-//! rather than an empty one.
+//! Connection-rule selection distinguishes real and four-state ports as well
+//! as discipline and direction. Built-in delegation requires an equivalent
+//! shipped declaration; a matching module name does not replace an authored
+//! body. Mixed child modules retain their equations and discrete processes.
+//! Automatic connection insertion at internal HDL hierarchy boundaries remains
+//! separate compiler elaboration work.
 //!
 //! [`DigitalHost::advance_to`]: host::DigitalHost::advance_to
 

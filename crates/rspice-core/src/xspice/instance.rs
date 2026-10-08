@@ -3266,7 +3266,7 @@ impl XspiceInstance {
     }
 
     #[cfg(feature = "veriloga")]
-    pub(crate) fn rebind_digital_node(&mut self, from: usize, to: usize) {
+    pub(crate) fn rebind_event_node(&mut self, from: usize, to: usize) {
         let rebind = |node: &mut usize| {
             if *node == from {
                 *node = to;
@@ -3274,8 +3274,12 @@ impl XspiceInstance {
         };
         for connection in &mut self.connections {
             match connection {
-                PortConnection::Digital(node) | PortConnection::DigitalInverted(node) => rebind(node),
-                PortConnection::DigitalVector(nodes) => nodes.iter_mut().for_each(rebind),
+                PortConnection::Digital(node)
+                | PortConnection::DigitalInverted(node)
+                | PortConnection::Real(node) => rebind(node),
+                PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
+                    nodes.iter_mut().for_each(rebind)
+                }
                 PortConnection::DigitalVectorMapped(nodes) => {
                     for connection in nodes {
                         rebind(&mut connection.node);

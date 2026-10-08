@@ -2412,6 +2412,8 @@ enum XspiceAutoBridgeKind {
     Bidi,
     RealToV,
     VToReal,
+    /// Bidirectional real conversion requires an authored body or template.
+    RealBidi,
 }
 
 #[derive(Debug, Clone)]
@@ -2497,7 +2499,9 @@ impl XspiceExplicitDigitalBridgeCoverage {
             XspiceAutoBridgeKind::Adc => self.adc = true,
             XspiceAutoBridgeKind::Dac => self.dac = true,
             XspiceAutoBridgeKind::Bidi => self.bidi = true,
-            XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => {}
+            XspiceAutoBridgeKind::RealToV
+            | XspiceAutoBridgeKind::VToReal
+            | XspiceAutoBridgeKind::RealBidi => {}
         }
     }
 
@@ -3396,6 +3400,7 @@ fn xspice_auto_bridge_kind_label(kind: XspiceAutoBridgeKind) -> &'static str {
         XspiceAutoBridgeKind::Bidi => "bidirectional digital/analog",
         XspiceAutoBridgeKind::RealToV => "real-to-voltage",
         XspiceAutoBridgeKind::VToReal => "voltage-to-real",
+        XspiceAutoBridgeKind::RealBidi => "bidirectional real/electrical",
     }
 }
 
@@ -3404,10 +3409,10 @@ fn xspice_auto_bridge_generated_card(
     instance_name: &str,
     node_label: &str,
     event_label: &str,
-) -> String {
+) -> Option<String> {
     let vcc = bridge.vcc;
     let half_vcc = vcc / 2.0;
-    match bridge.kind {
+    Some(match bridge.kind {
         XspiceAutoBridgeKind::Adc => format!(
             "{instance_name} [ {node_label} ] [ {event_label} ] adc_bridge(in_low={half_vcc} in_high={half_vcc})"
         ),
@@ -3423,7 +3428,8 @@ fn xspice_auto_bridge_generated_card(
         XspiceAutoBridgeKind::VToReal => {
             format!("{instance_name} {node_label} {event_label} v_to_real")
         }
-    }
+        XspiceAutoBridgeKind::RealBidi => return None,
+    })
 }
 
 fn reject_disabled_xspice_auto_bridge(
@@ -3445,7 +3451,9 @@ fn reject_disabled_xspice_auto_bridge(
 fn xspice_auto_bridge_template_type_name(kind: XspiceAutoBridgeKind) -> &'static str {
     match kind {
         XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::Bidi => "d",
-        XspiceAutoBridgeKind::RealToV | XspiceAutoBridgeKind::VToReal => "real",
+        XspiceAutoBridgeKind::RealToV
+        | XspiceAutoBridgeKind::VToReal
+        | XspiceAutoBridgeKind::RealBidi => "real",
     }
 }
 
@@ -3457,7 +3465,7 @@ fn xspice_auto_bridge_template_direction(kind: XspiceAutoBridgeKind) -> &'static
         // one.
         XspiceAutoBridgeKind::Adc | XspiceAutoBridgeKind::VToReal => "in",
         XspiceAutoBridgeKind::Dac | XspiceAutoBridgeKind::RealToV => "out",
-        XspiceAutoBridgeKind::Bidi => "inout",
+        XspiceAutoBridgeKind::Bidi | XspiceAutoBridgeKind::RealBidi => "inout",
     }
 }
 
@@ -4881,14 +4889,17 @@ fn add_planned_xspice_auto_bridge(
             // carry.
             None,
         ),
+        XspiceAutoBridgeKind::RealBidi => {
+            let label = xspice_auto_bridge_node_label(node_names, bridge.node);
+            return Err(SimulationError::Circuit(format!(
+                "real inout on node '{label}' requires an authored bidirectional real connect module or a real inout bridge template defining its electrical conversion"
+            )));
+        }
     };
 
-    // A selected connect module replaces the parameters this bridge would have
-    // stamped, not the model it stamps them on: delegation is the whole reason
-    // a connect module runs here at all. With no section 7.7.3 override the
-    // numbers are the same ones, derived the same way from the same supply,
-    // which is why a deck that names a connect module gets the bridge it would
-    // have got without one.
+    // Authored bodies have already materialized above. A delegated shipped
+    // declaration supplies its selected parameters to the equivalent built-in
+    // model; boundaries without a selected declaration use the default values.
     #[cfg(feature = "veriloga")]
     let numeric_params = if let Some(selected) = bridge.connect_module.as_ref() {
         connect_modules::delegated_parameters(selected, bridge.kind, vcc)?
@@ -4991,10 +5002,11 @@ fn add_planned_xspice_auto_bridge(
     if node_names.is_some() {
         let node_label = xspice_auto_bridge_node_label(node_names, bridge.node);
         let event_label = xspice_auto_bridge_node_label(node_names, event_node);
-        log::info!(
-            "Generated XSPICE auto-bridge card: {}",
+        if let Some(card) =
             xspice_auto_bridge_generated_card(bridge, &instance_name, &node_label, &event_label)
-        );
+        {
+            log::info!("Generated XSPICE auto-bridge card: {card}");
+        }
     }
     circuit.add_xspice_instance(instance);
     Ok(())

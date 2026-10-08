@@ -43,8 +43,8 @@
 
 use rspice_veriloga::ast::PortDirection;
 use rspice_veriloga::connect::{
-    ConnectDirection, ConnectRuleTable, NetSegment, PortLink, ResolutionMode, Signal,
-    plan_connect_modules, resolve_disciplines,
+    ConnectDirection, ConnectRuleTable, ConnectValueKind, NetSegment, PortLink, ResolutionMode,
+    Signal, plan_connect_modules, resolve_disciplines,
 };
 use rspice_veriloga::disciplines::DisciplineDb;
 
@@ -113,18 +113,20 @@ impl PlannedConnectModule {
 /// is a total function so neither can grow a case the other has not.
 pub(super) fn boundary_direction(
     kind: super::XspiceAutoBridgeKind,
-) -> Option<(PortDirection, ConnectDirection)> {
+) -> (PortDirection, ConnectDirection) {
     use super::XspiceAutoBridgeKind as Kind;
     match kind {
-        // The digital device reads the node, so its port is an input and the
-        // analog side drives.
-        Kind::Adc => Some((PortDirection::Input, ConnectDirection::AnalogToDiscrete)),
-        Kind::Dac => Some((PortDirection::Output, ConnectDirection::DiscreteToAnalog)),
-        Kind::Bidi => Some((PortDirection::Inout, ConnectDirection::Bidirectional)),
-        // Real-valued event traffic is not a discipline boundary: clause 7
-        // resolves disciplines, and a `wreal` net carries a real number rather
-        // than a discipline's potential and flow.
-        Kind::RealToV | Kind::VToReal => None,
+        Kind::Adc | Kind::VToReal => (PortDirection::Input, ConnectDirection::AnalogToDiscrete),
+        Kind::Dac | Kind::RealToV => (PortDirection::Output, ConnectDirection::DiscreteToAnalog),
+        Kind::Bidi | Kind::RealBidi => (PortDirection::Inout, ConnectDirection::Bidirectional),
+    }
+}
+
+fn boundary_value_kind(kind: super::XspiceAutoBridgeKind) -> ConnectValueKind {
+    use super::XspiceAutoBridgeKind as Kind;
+    match kind {
+        Kind::Adc | Kind::Dac | Kind::Bidi => ConnectValueKind::FourState,
+        Kind::RealToV | Kind::VToReal | Kind::RealBidi => ConnectValueKind::Real,
     }
 }
 
@@ -140,15 +142,24 @@ pub(super) fn select_for_boundary(
     instance_name: &str,
     port_name: &str,
 ) -> Result<Option<PlannedConnectModule>, SimulationError> {
-    let Some((port_direction, expected)) = boundary_direction(kind) else {
+    let (port_direction, expected) = boundary_direction(kind);
+    let value_kind = boundary_value_kind(kind);
+    // A logic-only configuration leaves existing real conversion policy alone.
+    if value_kind == ConnectValueKind::Real
+        && !table
+            .insertions()
+            .iter()
+            .any(|rule| rule.discrete.value_kind == Some(value_kind))
+    {
         return Ok(None);
-    };
+    }
 
     let mut signal = Signal::default();
     let lower = signal.push(
         NetSegment::new(node_label)
             .declared(EVENT_DISCIPLINE)
-            .digital_behavioral(),
+            .digital_behavioral()
+            .with_value_kind(value_kind),
     );
     signal.push(
         NetSegment::new(node_label)
@@ -185,7 +196,13 @@ pub(super) fn select_for_boundary(
     }
 
     let parameters = table
-        .select(DECK_DISCIPLINE, EVENT_DISCIPLINE, expected, db)
+        .select_typed(
+            DECK_DISCIPLINE,
+            EVENT_DISCIPLINE,
+            expected,
+            Some(value_kind),
+            db,
+        )
         .and_then(|rule| rule.numeric_parameters())
         .map_err(|error| connect_error(node_label, &error))?
         .into_iter()
@@ -250,7 +267,7 @@ pub(super) fn delegated_parameters(
             ("in_low".to_string(), half_supply),
             ("in_high".to_string(), half_supply),
         ],
-        Kind::RealToV | Kind::VToReal => Vec::new(),
+        Kind::RealToV | Kind::VToReal | Kind::RealBidi => Vec::new(),
     };
 
     // `dac_bridge` reads `out_undef` as the midpoint of the two levels exactly
@@ -291,7 +308,7 @@ fn delegated_timing(kind: super::XspiceAutoBridgeKind) -> &'static [(&'static st
     match kind {
         Kind::Adc => &[("tdrise", "rise_delay"), ("tdfall", "fall_delay")],
         Kind::Dac | Kind::Bidi => &[("trise", "t_rise"), ("tfall", "t_fall")],
-        Kind::RealToV | Kind::VToReal => &[],
+        Kind::RealToV | Kind::VToReal | Kind::RealBidi => &[],
     }
 }
 
@@ -302,7 +319,7 @@ pub(super) fn expected_library_module(kind: super::XspiceAutoBridgeKind) -> Opti
         Kind::Adc => Some("a2d"),
         Kind::Dac => Some("d2a"),
         Kind::Bidi => Some("bidir"),
-        Kind::RealToV | Kind::VToReal => None,
+        Kind::RealToV | Kind::VToReal | Kind::RealBidi => None,
     }
 }
 
@@ -555,10 +572,11 @@ impl DesignConnectRules {
             return Ok(None);
         };
         let rule = table
-            .select(
+            .select_typed(
                 DECK_DISCIPLINE,
                 EVENT_DISCIPLINE,
-                boundary_direction(kind).expect("selected logic boundary").1,
+                boundary_direction(kind).1,
+                Some(boundary_value_kind(kind)),
                 db,
             )
             .map_err(|error| connect_error(node_label, &error))?;
@@ -605,21 +623,20 @@ impl DesignConnectRules {
 /// them. It is a second walk over the instances rather than a field on the
 /// planner's own traversal so that a deck with no connect rules pays nothing —
 /// the caller runs this only after finding rules.
-fn digital_port_owners(
+fn event_port_owners(
     circuit: &crate::CircuitData,
 ) -> std::collections::BTreeMap<usize, (String, String)> {
     let mut owners: std::collections::BTreeMap<usize, (String, String)> = Default::default();
     for instance in &circuit.xspice_instances {
         for (port_idx, port) in instance.ports().iter().enumerate() {
-            if port.default_type != crate::xspice::PortType::Digital {
-                continue;
-            }
             let Some(connection) = instance.connection_at(port_idx) else {
                 continue;
             };
             let mut nodes = std::collections::BTreeMap::new();
             super::register_digital_connection_nodes(&mut nodes, connection, port.direction);
-            for node in nodes.keys() {
+            let mut real_nodes = std::collections::BTreeMap::new();
+            super::register_real_connection_nodes(&mut real_nodes, connection, port.direction);
+            for node in nodes.keys().chain(real_nodes.keys()) {
                 owners
                     .entry(*node)
                     .or_insert_with(|| (instance.name.clone(), port.name.clone()));
@@ -647,12 +664,9 @@ pub(super) fn attach_to_planned_bridges(
     }
 
     let node_names = circuit.node_names_sorted();
-    let owners = digital_port_owners(circuit);
+    let owners = event_port_owners(circuit);
 
     for bridge in bridges.iter_mut() {
-        if boundary_direction(bridge.kind).is_none() {
-            continue;
-        }
         let node_label = super::xspice_auto_bridge_node_label(Some(&node_names), bridge.node);
         let (instance_name, port_name) = owners
             .get(&bridge.node)
