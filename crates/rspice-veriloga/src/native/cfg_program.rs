@@ -1052,6 +1052,73 @@ impl Lowerer<'_> {
                 let input = operand(*input)?;
                 push(NativeOp::DdtState(slot), &[input])
             }
+            CfgValueKind::Cross {
+                operator,
+                input,
+                direction,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                let slot = self.state_slot(*operator, CanonicalStateOperator::Cross)?;
+                push(
+                    NativeOp::CrossState(slot),
+                    &[
+                        operand(*input)?,
+                        operand(*direction)?,
+                        operand(*time_tol)?,
+                        operand(*expr_tol)?,
+                        operand(*enable)?,
+                    ],
+                )
+            }
+            CfgValueKind::Above {
+                operator,
+                input,
+                time_tol,
+                expr_tol,
+                enable,
+            } => {
+                let slot = self.state_slot(*operator, CanonicalStateOperator::Above)?;
+                push(
+                    NativeOp::AboveState(slot),
+                    &[
+                        operand(*input)?,
+                        operand(*time_tol)?,
+                        operand(*expr_tol)?,
+                        operand(*enable)?,
+                    ],
+                )
+            }
+            CfgValueKind::Timer {
+                operator,
+                start,
+                period,
+                time_tol,
+                enable,
+            } => {
+                let slot = self.state_slot(*operator, CanonicalStateOperator::Timer)?;
+                push(
+                    NativeOp::TimerState(slot),
+                    &[
+                        operand(*start)?,
+                        operand(*period)?,
+                        operand(*time_tol)?,
+                        operand(*enable)?,
+                    ],
+                )
+            }
+            CfgValueKind::LastCrossing {
+                operator,
+                input,
+                direction,
+            } => {
+                let slot = self.state_slot(*operator, CanonicalStateOperator::Cross)?;
+                push(
+                    NativeOp::LastCrossingState(slot),
+                    &[operand(*input)?, operand(*direction)?],
+                )
+            }
             CfgValueKind::Idt {
                 operator,
                 input,

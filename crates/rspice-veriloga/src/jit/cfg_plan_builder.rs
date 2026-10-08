@@ -2042,6 +2042,120 @@ endmodule
     }
 
     #[test]
+    fn analog_event_block_programs_execute_and_restore_detector_history() {
+        use crate::device::VerilogADevice;
+        use crate::jit::expr::NativeOp;
+        use crate::jit::plan_program::PlanProgram;
+
+        for (expression, operation, expected) in [
+            (
+                "cross(x,1,1n,1p,1)",
+                NativeOp::CrossState(0),
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+            (
+                "cross(x,-1,1n,1p,1)",
+                NativeOp::CrossState(0),
+                [0.0, 0.0, 1.0, 0.0],
+            ),
+            ("cross(x,1,1n,1p,0)", NativeOp::CrossState(0), [0.0; 4]),
+            (
+                "above(x,1n,1p,1)",
+                NativeOp::AboveState(0),
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+            ("above(x,1n,1p,0)", NativeOp::AboveState(0), [0.0; 4]),
+            (
+                "timer(0.5,0.5,1n,1)",
+                NativeOp::TimerState(0),
+                [0.0, 1.0, 0.0, 1.0],
+            ),
+            ("timer(0.5,0.5,1n,0)", NativeOp::TimerState(0), [0.0; 4]),
+            (
+                "last_crossing(x,1)",
+                NativeOp::LastCrossingState(0),
+                [-1.0, 0.25, 0.25, 0.875],
+            ),
+        ] {
+            let source = format!(
+                "module native_events(p,n); inout p,n; electrical p,n; real x,y;
+                 analog begin x=V(p,n); y={expression}; I(p,n)<+y; end endmodule"
+            );
+            let report = VerilogACompiler::default()
+                .compile_runtime(&source, None)
+                .unwrap();
+            let (plan, refusal) =
+                build_default_model_plan_reported(&report.model, &report.canonical_ir).unwrap();
+            assert!(refusal.is_none(), "{expression}: {refusal:?}");
+            plan.validate_shape(&report.model).unwrap();
+            let PlanProgram::Blocks(program) = &plan.prelude.as_ref().unwrap().program else {
+                panic!("{expression} must execute in the canonical block prelude");
+            };
+            assert_eq!(
+                program
+                    .ssa()
+                    .instructions()
+                    .iter()
+                    .filter(|instruction| instruction.op() == operation)
+                    .count(),
+                1,
+                "{expression}: each detector executes once per evaluation"
+            );
+            let new_device = || {
+                let device = VerilogADevice::try_new_with_canonical_ir(
+                    "EVENTS",
+                    report.model.clone(),
+                    &report.canonical_ir,
+                    &[1, 0],
+                )
+                .unwrap();
+                assert!(device.is_using_native());
+                device
+            };
+            let mut device = new_device();
+            device.try_begin_analysis(2).unwrap();
+            let mut previous_time = 0.0;
+            for (index, (time, voltage)) in [(0.0, -1.0), (0.5, 1.0), (0.75, -1.0), (1.0, 1.0)]
+                .into_iter()
+                .enumerate()
+            {
+                let accepted = (index > 0).then(|| device.checkpoint_state().unwrap());
+                for attempt in 0..2 {
+                    device.set_timestep(time - previous_time);
+                    device.set_time(time);
+                    device.update_voltages(&[voltage]);
+                    // Newton re-evaluation must not consume the occurrence or
+                    // advance accepted interpolation/timer history.
+                    for _ in 0..2 {
+                        let current = device.try_evaluate().unwrap()[0];
+                        assert!(
+                            (current - expected[index]).abs() < 1e-12,
+                            "{expression} at {time}, attempt {attempt}: {current} != {}",
+                            expected[index]
+                        );
+                    }
+                    if attempt == 0 {
+                        if let Some(accepted) = &accepted {
+                            device.validate_checkpoint_state(accepted).unwrap();
+                            device.apply_validated_checkpoint_state(accepted);
+                        }
+                    }
+                }
+                device.try_advance_state().unwrap();
+                if index == 2 {
+                    // Construct a fresh device and continue from accepted
+                    // semantic state, including the earlier crossing time.
+                    let accepted = device.checkpoint_state().unwrap();
+                    device = new_device();
+                    device.validate_checkpoint_state(&accepted).unwrap();
+                    device.apply_validated_checkpoint_state(&accepted);
+                }
+                previous_time = time;
+            }
+        }
+    }
+
+    #[test]
     fn guarded_ddt_jacobians_reuse_the_hoisted_primal() {
         use crate::jit::expr::NativeOp;
         use crate::jit::plan_program::PlanProgram;
