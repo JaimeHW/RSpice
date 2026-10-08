@@ -479,6 +479,96 @@ endmodule
     );
 }
 
+#[test]
+fn coupled_inout_observers_track_same_value_takeover_atomic_banks_and_replay() {
+    use crate::xspice::verilog::store::ExternalNetChange;
+    #[derive(Default)]
+    struct ObserverBank {
+        next: Vec<(ExternalBitDriverId, DigitalValue)>,
+        changes: Vec<ExternalNetChange>,
+    }
+    impl DigitalActiveParticipant for ObserverBank {
+        fn settle_active(
+            &mut self,
+            exchange: &mut DigitalActiveExchange<'_>,
+        ) -> Result<bool, DigitalRunError> {
+            self.changes.extend(exchange.take_event_changes());
+            let next = std::mem::take(&mut self.next);
+            exchange.drive_many(&next)?;
+            Ok(!next.is_empty())
+        }
+    }
+    let mut digital = host(
+        r#"
+`timescale 1ns/1ps
+module takeover;
+ wire io; reg drive=1'bz;
+ initial begin #1 drive=1; #1 drive=1'bz; end
+ assign io=drive;
+endmodule
+"#,
+        &["io"],
+    );
+    let ids = digital
+        .attach_external_bits(&[0], &[(0, target(1, "Abridge")), (0, target(1, "Aother"))])
+        .unwrap();
+    digital.observe_other_drivers(&ids).unwrap();
+    let mut bank = ObserverBank {
+        next: vec![(ids[0], DigitalValue::one())],
+        ..Default::default()
+    };
+    digital.prepare_start().unwrap();
+    digital.advance_to_with(0, &mut bank).unwrap();
+    let accepted = digital.clone();
+    for _ in 0..2 {
+        digital = accepted.clone();
+        bank.changes.clear();
+        digital.advance_to_with(1000, &mut bank).unwrap();
+        assert_eq!(bit(&digital, "io"), "1");
+        assert!(
+            matches!(bank.changes.as_slice(), [ExternalNetChange::DriverInput { driver, previous, value, starts_publication: true }]
+            if *driver == ids[0] && *previous == DigitalValue::high_z() && *value == DigitalValue::one())
+        );
+        bank.changes.clear();
+        digital.advance_to_with(2000, &mut bank).unwrap();
+        assert_eq!(bit(&digital, "io"), "1");
+        assert!(
+            matches!(bank.changes.as_slice(), [ExternalNetChange::DriverInput { driver, value, .. }]
+            if *driver == ids[0] && *value == DigitalValue::high_z())
+        );
+        bank.changes.clear();
+        bank.next = vec![
+            (ids[0], DigitalValue::high_z()),
+            (ids[1], DigitalValue::zero()),
+        ];
+        digital.settle_with(2000, &mut bank).unwrap();
+        assert_eq!(bit(&digital, "io"), "0");
+        assert_eq!(bank.changes.len(), 3);
+        for (index, change) in bank.changes.iter().enumerate() {
+            assert_eq!(change.starts_publication(), index == 0);
+            match change {
+                ExternalNetChange::DriverInput { driver, value, .. } if *driver == ids[0] => {
+                    assert_eq!(*value, DigitalValue::zero())
+                }
+                ExternalNetChange::DriverInput { driver, value, .. } if *driver == ids[1] => {
+                    assert_eq!(*value, DigitalValue::high_z())
+                }
+                ExternalNetChange::Bits(change) => assert_eq!(change.value, DigitalValue::zero()),
+                _ => panic!("unexpected observer change: {change:?}"),
+            }
+        }
+    }
+    let mut fresh = digital.fresh();
+    let mut bank = ObserverBank::default();
+    fresh.prepare_start().unwrap();
+    fresh.advance_to_with(0, &mut bank).unwrap();
+    assert_eq!(bit(&fresh, "io"), "z");
+    assert!(
+        bank.changes.is_empty(),
+        "a fresh analysis clears both driver and observer state"
+    );
+}
+
 fn routed_inverters() -> crate::CircuitData {
     let mut circuit = crate::CircuitData::new();
     for name in ["command", "bus", "response"] {

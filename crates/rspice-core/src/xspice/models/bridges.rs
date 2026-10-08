@@ -700,9 +700,10 @@ fn bidi_analog_segments(
     index: usize,
     drive: DigitalValue,
     layout: BidiStateLayout,
+    event_time: Option<Value>,
 ) -> BidiAnalogSegments {
     let step = bidi_analog_step(ctx);
-    let Some(event_time) = ctx.input_digital_vector_event_time("d", index) else {
+    let Some(event_time) = event_time else {
         return BidiAnalogSegments::one(BidiAnalogSegment {
             drive,
             interval: step,
@@ -939,6 +940,7 @@ fn bidi_drive_current(
     drive: DigitalValue,
     params: BidiParams,
     layout: BidiStateLayout,
+    event_time: Option<Value>,
 ) -> BidiAnalogDrive {
     // The initial transient point must solve the initialized digital state.
     // There is no elapsed interval over which to slew the allocator's default
@@ -959,7 +961,7 @@ fn bidi_drive_current(
         current = 0.0;
     }
     let mut partial = 0.0;
-    let segments = bidi_analog_segments(ctx, index, drive, layout);
+    let segments = bidi_analog_segments(ctx, index, drive, layout, event_time);
     for segment in segments.iter() {
         svoc = bidi_advance_svoc(svoc, segment.drive, segment.interval, params);
         let (target, target_partial, range) =
@@ -1421,14 +1423,33 @@ impl CodeModel for BidiBridge {
             let old_strength =
                 digital_strength_from_code(ctx.int_state(layout.strength_base + index));
             let digital_input = digital_vector_input_value(ctx, "d", index);
+            let others = (direction_request == BidiDirection::Bidirectional)
+                .then(|| ctx.other_digital_drivers("d", index))
+                .flatten();
+            let drive_input = others.map_or(digital_input, |(value, _)| value);
+            let drive_time = others
+                .map(|(_, time)| time)
+                .or_else(|| ctx.input_digital_vector_event_time("d", index));
             let direction = if direction_request == BidiDirection::Bidirectional {
-                // The last scheduled ADC target may still be in flight. Compare
-                // with our executed contribution so a delayed observation is
-                // never mistaken for a new external driver and fed back to A.
+                // Driver ownership survives a takeover at the same resolved
+                // value. Standalone model callers without a circuit-provided
+                // observer retain the executed-output comparison; a scheduled
+                // ADC target may still be in flight and cannot establish it.
                 let own = ctx
                     .committed_digital_output("d", index)
                     .unwrap_or_else(|| DigitalValue::new(old_state, old_strength));
-                bidi_default_effective_direction(digital_input, own.state, own.strength)
+                if let Some((other, _)) = others {
+                    if matches!(
+                        other.strength,
+                        DigitalStrength::HighZ | DigitalStrength::Undetermined
+                    ) {
+                        BidiDirection::Adc
+                    } else {
+                        BidiDirection::Dac
+                    }
+                } else {
+                    bidi_default_effective_direction(digital_input, own.state, own.strength)
+                }
             } else {
                 direction_request
             };
@@ -1472,12 +1493,13 @@ impl CodeModel for BidiBridge {
 
             let drive = match direction {
                 BidiDirection::Adc => DigitalValue::high_z(),
-                BidiDirection::Dac | BidiDirection::Bidirectional => digital_input,
+                BidiDirection::Dac | BidiDirection::Bidirectional => drive_input,
             };
-            let analog_drive = bidi_drive_current(ctx, index, voltage, drive, params, layout);
+            let analog_drive =
+                bidi_drive_current(ctx, index, voltage, drive, params, layout, drive_time);
             if commit_outputs
                 && direction != BidiDirection::Adc
-                && let Some(event_time) = ctx.input_digital_vector_event_time("d", index)
+                && let Some(event_time) = drive_time
                 && let Some(completion_time) =
                     bidi_analog_transition_breakpoint(event_time, drive, params)
                 && completion_time > ctx.time + 1.0e-18

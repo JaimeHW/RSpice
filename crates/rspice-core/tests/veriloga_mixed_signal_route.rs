@@ -3886,3 +3886,141 @@ endmodule
         "the released port must sense its external pull-down: {seen:?}"
     );
 }
+
+#[test]
+fn typed_event_boundaries_bidirectional_vector_takes_over_identical_analog_observations() {
+    let model = ModelFile::new(
+        "bidi_takeover",
+        r#"
+`timescale 1ns/1ps
+module takeover(io,p);
+ inout [4:3] io; wire [4:3] io;
+ inout p; electrical p;
+ reg [1:0] drive=2'bzz;
+ integer seen=0;
+ initial begin #3 drive=2'b10; #6 drive=2'bzz; end
+ assign io=drive;
+ always @(io) begin
+  if(io===2'b10) seen=2;
+  else if(io===2'b01) seen=1;
+  else seen=0;
+ end
+ analog I(p)<+(V(p)-seen)/1000;
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* bidirectional same-level takeover\n.param vcc=3.3\nXio hi lo seen takeover\nVhi hi_bias 0 PWL(0 3.3 5n 3.3 5.2n 0)\nVlo lo_bias 0 PWL(0 0 5n 0 5.2n 3.3)\nRhi hi_bias hi 1k\nRlo lo_bias lo 1k\nRseen seen 0 1k\n.va \"{}\" takeover\n.end\n",
+        model.deck_path()
+    );
+    struct Limit {
+        start: std::time::Instant,
+        last: Mutex<(usize, f64)>,
+    }
+    impl AbortSignal for Limit {
+        fn is_aborted(&self) -> bool {
+            self.start.elapsed().as_secs() > 20 || self.last.lock().unwrap().0 > 20000
+        }
+        fn observe_transient_sample(&self, sample: TransientSample<'_>) {
+            *self.last.lock().unwrap() = (
+                sample.time.len(),
+                sample.time.last().copied().unwrap_or_default(),
+            );
+        }
+    }
+    let limit = Limit {
+        start: std::time::Instant::now(),
+        last: Mutex::new((0, 0.0)),
+    };
+    let netlist = Netlist::parse(&deck).unwrap();
+    let result = Engine::default()
+        .run_tran_with_abort(&netlist, 14e-9, 0.1e-9, &limit)
+        .unwrap_or_else(|error| panic!("{error}, last progress {:?}", limit.last.lock().unwrap()));
+    let hi = waveform(&result, "hi");
+    let lo = waveform(&result, "lo");
+    let mut held = 0;
+    for ((&time, &high), &low) in result.time.iter().zip(&hi).zip(&lo) {
+        if time > 6.5e-9 && time < 8.9e-9 {
+            assert!(
+                (high - 3.3 * 1000.0 / 1020.0).abs() < 1e-6,
+                "t={time}, high={high}"
+            );
+            assert!(
+                (low - 3.3 * 20.0 / 1020.0).abs() < 1e-6,
+                "t={time}, low={low}"
+            );
+            held += 1;
+        }
+    }
+    assert!(held > 0);
+    assert!(hi.last().unwrap().abs() < 1e-6);
+    assert!((lo.last().unwrap() - 3.3).abs() < 1e-6);
+    assert!((waveform(&result, "seen").last().unwrap() - 0.5).abs() < 1e-7);
+    let bus = result
+        .digital_buses
+        .iter()
+        .find(|bus| bus.name.eq_ignore_ascii_case("xio.io"))
+        .unwrap();
+    assert_eq!((bus.msb, bus.lsb), (4, 3));
+    assert_eq!(bus.members, ["XIO.IO__EVENT_1", "XIO.IO__EVENT_0"]);
+    assert_eq!(
+        result
+            .digital_trace_named(&bus.members[0])
+            .unwrap()
+            .last()
+            .unwrap()
+            .value
+            .state,
+        rspice_core::xspice::DigitalState::Zero
+    );
+    assert_eq!(
+        result
+            .digital_trace_named(&bus.members[1])
+            .unwrap()
+            .last()
+            .unwrap()
+            .value
+            .state,
+        rspice_core::xspice::DigitalState::One
+    );
+}
+
+#[test]
+fn typed_event_boundaries_bidirectional_physical_contention_obeys_loaded_kcl() {
+    let model = ModelFile::new(
+        "physical_contention",
+        r#"
+module output_driver(io);
+ inout io; wire io;
+ parameter integer LEVEL=0;
+ assign io=(LEVEL!=0);
+endmodule
+"#,
+    );
+    for reverse in [false, true] {
+        let cards = if reverse {
+            "Xlow pad output_driver LEVEL=0\nXhigh pad output_driver LEVEL=1"
+        } else {
+            "Xhigh pad output_driver LEVEL=1\nXlow pad output_driver LEVEL=0"
+        };
+        let deck = format!(
+            "* physical contention\n.param vcc=3.3\n{cards}\nRload pad 0 1k\n.va \"{}\" output_driver\n.end\n",
+            model.deck_path()
+        );
+        let mut netlist = Netlist::parse(&deck).unwrap();
+        netlist.options.auto_bridge_templates.push(rspice_core::netlist::XspiceAutoBridgeTemplate {
+            key: "auto_bridge_d_inout".into(),
+            setup_card: ".model pad_driver bidi_bridge (out_high=3.3 in_low=1.65 in_high=1.65 r_stl=20 r_sth=20 drive_low=1 drive_high=1)".into(),
+            device_card: "Abidi%d [ %s ] [ %s ] null pad_driver".into(),
+            max_nodes: Some(1),
+        });
+        let result = Engine::default().run_tran(&netlist, 1e-9, 0.1e-9).unwrap();
+        let expected = 3.3 * 1000.0 / 2020.0;
+        for value in waveform(&result, "pad") {
+            assert!(
+                (value - expected).abs() < 1e-6,
+                "reverse={reverse}, pad={value}, expected={expected}"
+            );
+        }
+    }
+}

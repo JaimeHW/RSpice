@@ -1670,6 +1670,8 @@ impl XspiceInstance {
     pub(crate) fn update_committed_digital_outputs(
         &mut self,
         drivers: &super::event::XspiceDigitalDrivers,
+        time: Value,
+        shared: impl Fn(usize) -> bool,
     ) {
         for (port, connection) in self.ports.iter().zip(&self.connections) {
             if port.direction != super::PortDirection::InOut
@@ -1705,8 +1707,54 @@ impl XspiceInstance {
                     index,
                     if inverted { value.invert() } else { value },
                 );
+                if !shared(node) {
+                    let other = drivers
+                        .get(&node)
+                        .into_iter()
+                        .flat_map(|drivers| drivers.iter())
+                        .filter(|((instance, name, element), _)| {
+                            !(instance == &self.name && name == &port.name && *element == index)
+                        })
+                        .fold(DigitalValue::high_z(), |resolved, (_, value)| {
+                            resolved.resolve(value)
+                        });
+                    self.context.set_other_digital_drivers(
+                        &port.name,
+                        index,
+                        if inverted { other.invert() } else { other },
+                        time,
+                    );
+                }
             });
         }
+    }
+
+    pub(crate) fn observe_other_digital_drivers(
+        &mut self,
+        port_name: &str,
+        index: usize,
+        value: DigitalValue,
+        time: Value,
+    ) -> bool {
+        let connection = self
+            .port_indices
+            .get(port_name)
+            .and_then(|&port| self.connections.get(port));
+        let inverted = match connection {
+            Some(PortConnection::DigitalInverted(_)) => true,
+            Some(PortConnection::DigitalVectorMapped(nodes)) => nodes[index].inverted,
+            _ => false,
+        };
+        let changed = self.context.set_other_digital_drivers(
+            port_name,
+            index,
+            if inverted { value.invert() } else { value },
+            time,
+        );
+        if changed {
+            self.mark_event_inputs_dirty();
+        }
+        changed
     }
 
     /// Update inputs and attach finite-output analog transition metadata from
@@ -2282,6 +2330,26 @@ impl XspiceInstance {
                 && port.direction != super::PortDirection::InOut
             {
                 continue;
+            }
+
+            if port.direction == super::PortDirection::InOut {
+                let width = match connection {
+                    PortConnection::Digital(_) | PortConnection::DigitalInverted(_) => 1,
+                    PortConnection::DigitalVector(nodes) => nodes.len(),
+                    PortConnection::DigitalVectorMapped(nodes) => nodes.len(),
+                    _ => 0,
+                };
+                for index in 0..width {
+                    if let Some((value, time)) =
+                        self.context.other_digital_drivers(&port.name, index)
+                    {
+                        self.event_input_signature_scratch
+                            .push(EventInputSignatureEntry {
+                                event_time: Some(time),
+                                value: EventInputSignatureValue::Digital(value),
+                            });
+                    }
+                }
             }
 
             match connection {
@@ -3553,6 +3621,82 @@ mod tests {
         panic_via_context_accessor: bool,
         ports: Vec<PortSpec>,
         params: Vec<ParamSpec>,
+    }
+
+    #[test]
+    fn inout_observer_changes_bypass_unchanged_event_input_skip() {
+        struct Observer {
+            ports: [PortSpec; 1],
+            values: Arc<Mutex<Vec<DigitalValue>>>,
+        }
+        impl CodeModel for Observer {
+            fn name(&self) -> &str {
+                "inout_observer"
+            }
+            fn ports(&self) -> &[PortSpec] {
+                &self.ports
+            }
+            fn parameters(&self) -> &[ParamSpec] {
+                &[]
+            }
+            fn init(&self, _: &mut CmContext) -> CmResult<()> {
+                Ok(())
+            }
+            fn can_skip_unchanged_event_inputs(&self) -> bool {
+                true
+            }
+            fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+                self.values
+                    .lock()
+                    .unwrap()
+                    .push(ctx.other_digital_drivers("io", 0).unwrap().0);
+                Ok(())
+            }
+        }
+        let values = Arc::new(Mutex::new(Vec::new()));
+        let mut port = PortSpec::input("io", PortType::Digital);
+        port.direction = PortDirection::InOut;
+        let mut instance = XspiceInstance::new(
+            "Aobserver",
+            Arc::new(Observer {
+                ports: [port],
+                values: values.clone(),
+            }),
+            vec![PortConnection::Digital(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        instance
+            .context
+            .set_input_digital("io", DigitalValue::one());
+        instance.context.set_input_digital_event_time("io", 0.0);
+        for (time, value) in [
+            (0.0, DigitalValue::high_z()),
+            (1e-9, DigitalValue::one()),
+            (1e-9, DigitalValue::one()),
+            (2e-9, DigitalValue::high_z()),
+        ] {
+            instance.observe_other_digital_drivers("io", 0, value, time);
+            instance
+                .evaluate(
+                    time,
+                    1e-9,
+                    AnalysisType::Transient,
+                    EvaluationPhase::DirectEvaluation,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            *values.lock().unwrap(),
+            [
+                DigitalValue::high_z(),
+                DigitalValue::one(),
+                DigitalValue::high_z()
+            ]
+        );
     }
 
     struct MutablePortsModel {

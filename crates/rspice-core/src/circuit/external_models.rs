@@ -1329,6 +1329,22 @@ impl CircuitData {
     }
 
     #[cfg(feature = "veriloga")]
+    fn observe_xspice_shared_inout(
+        &mut self,
+        wave: &XspiceActiveWave,
+        owner: usize,
+        target: &crate::xspice::event_scheduler::EventTarget,
+        value: crate::xspice::DigitalValue,
+    ) {
+        if self.xspice_instances[owner]
+            .make_mut()
+            .observe_other_digital_drivers(&target.port_name, target.driver_index, value, wave.time)
+        {
+            self.xspice_dispatch_pending[owner] = true;
+        }
+    }
+
+    #[cfg(feature = "veriloga")]
     pub(crate) fn observe_xspice_shared_real_inputs(
         &mut self,
         wave: &XspiceActiveWave,
@@ -1507,7 +1523,11 @@ impl CircuitData {
             // to call a model.
             crate::xspice::settle_cost::note_instance_evaluation();
             let instance = instances[index].make_mut();
-            instance.update_committed_digital_outputs(&event_values.digital_drivers);
+            instance.update_committed_digital_outputs(
+                &event_values.digital_drivers,
+                time,
+                |node| resolver.owns(node),
+            );
             instance.set_transient_companion_coefficients(companion_coefficients);
             instance.set_xyce_one_step_order2(xyce_one_step_order2);
             if let Err(e) = instance.update_inputs_with_analog_transitions(

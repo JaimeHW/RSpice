@@ -19,9 +19,10 @@
 //! then retained; when a step grows it beyond [`MERIT_GROWTH_GATE`] while
 //! the residual is still unconverged, the step is re-tried at geometrically
 //! damped fractions until one satisfies an Armijo decrease or the trial
-//! budget is exhausted (the best trial seen is then kept). Steps that do not
-//! grow the residual an order of magnitude are never touched, so converging
-//! decks see bit-identical trajectories.
+//! budget is exhausted (the best trial seen is then kept). A repeated two-cycle
+//! also engages the search. For the rest of that timestep attempt, residual
+//! increases are damped to retain the progress made by leaving the cycle.
+//! Other small increases and ordinary non-repeating plateaus are left alone.
 
 use super::*;
 
@@ -31,7 +32,8 @@ use super::*;
 /// explore a hard junction edge before capture — stays well below this; an
 /// eagerness experiment that also damped flat unconverged plateaus strangled
 /// that wandering and converged strictly less often, so only genuine
-/// blow-ups (and non-finite residuals) engage the search. Iterates the
+/// blow-ups (and non-finite residuals) engage this gate. Observed two-cycles
+/// have a separate guard that retains subsequent damping progress. Iterates the
 /// search cannot help (a limiter-pinned non-descent direction) are the
 /// gmin-continuation rescue's job, not the line search's.
 const MERIT_GROWTH_GATE: Value = 10.0;
@@ -68,6 +70,32 @@ pub(super) struct NewtonMeritBacktrack {
 }
 
 impl NewtonMeritBacktrack {
+    /// A clipped code-model law can alternate between two finite solutions
+    /// without increasing residual magnitude. Timestep cuts repeat that cycle;
+    /// backtrack only after the iterate actually returns, not on a flat merit
+    /// plateau where a device limiter may still be making useful progress.
+    pub(super) fn repeats_two_cycle(
+        older: &[Value],
+        previous: &[Value],
+        current: &[Value],
+    ) -> bool {
+        if older.is_empty() || older.len() != current.len() || previous.len() != current.len() {
+            return false;
+        }
+        let mut moved = false;
+        for ((&old, &prev), &now) in older.iter().zip(previous).zip(current) {
+            if !old.is_finite() || !prev.is_finite() || !now.is_finite() {
+                return false;
+            }
+            let scale = old.abs().max(prev.abs()).max(now.abs()).max(1.0);
+            if (old - now).abs() > 1e-10 * scale {
+                return false;
+            }
+            moved |= (prev - now).abs() > 1e-8 * scale;
+        }
+        moved
+    }
+
     /// True when the freshly stamped iterate's merit shows the last Newton
     /// step left the basin of its linearization: order-of-magnitude residual
     /// growth (or a non-finite residual) while the iterate is still
@@ -156,6 +184,35 @@ impl NewtonMeritBacktrack {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backtracking_recognizes_repeated_two_cycles_without_damping_progress() {
+        assert!(NewtonMeritBacktrack::repeats_two_cycle(
+            &[2.0, 0.0],
+            &[1.0, 0.0],
+            &[2.0, 0.0]
+        ));
+        assert!(!NewtonMeritBacktrack::repeats_two_cycle(
+            &[2.0],
+            &[1.0],
+            &[0.5]
+        ));
+        assert!(!NewtonMeritBacktrack::repeats_two_cycle(
+            &[2.0],
+            &[2.0],
+            &[2.0]
+        ));
+        assert!(!NewtonMeritBacktrack::repeats_two_cycle(
+            &[],
+            &[1.0],
+            &[2.0]
+        ));
+        assert!(!NewtonMeritBacktrack::repeats_two_cycle(
+            &[f64::INFINITY],
+            &[1.0],
+            &[f64::INFINITY]
+        ));
+    }
 
     #[test]
     fn backtracking_preserves_finite_trials_and_the_original_full_step() {

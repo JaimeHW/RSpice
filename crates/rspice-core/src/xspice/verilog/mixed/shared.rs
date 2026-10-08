@@ -652,6 +652,13 @@ impl MixedDigitalCoordinator {
             .attach_external_bits(observed, drivers)
     }
 
+    pub(crate) fn observe_other_drivers(
+        &mut self,
+        drivers: &[ExternalBitDriverId],
+    ) -> Result<(), DigitalRunError> {
+        self.digital.make_mut().observe_other_drivers(drivers)
+    }
+
     pub(crate) fn remap_circuit_nodes(&mut self, remap: impl Fn(usize) -> usize) {
         debug_assert!(!self.enabled);
         self.digital.make_mut().remap_external_nodes(&remap);

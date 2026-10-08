@@ -42,6 +42,7 @@ struct BitTopology {
     by_signal: Vec<Vec<usize>>,
     external_sources: Vec<(usize, EventTarget)>,
     external_by_net: Vec<Vec<usize>>,
+    other_driver_observers: Vec<bool>,
     observed: Vec<bool>,
     external_attached: bool,
 }
@@ -51,6 +52,7 @@ pub(super) struct ConnectedBits {
     topology: Arc<BitTopology>,
     resolved: Vec<DigitalValue>,
     external_values: Vec<DigitalValue>,
+    other_driver_values: Vec<DigitalValue>,
     pending: Vec<Option<FourStateValue>>,
     touched: Vec<DigitalSignalId>,
 }
@@ -60,6 +62,7 @@ impl ConnectedBits {
         Self {
             resolved: vec![DigitalValue::high_z(); topology.nets.len()],
             external_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
+            other_driver_values: vec![DigitalValue::high_z(); topology.external_sources.len()],
             pending: vec![None; topology.by_signal.len()],
             touched: Vec::new(),
             topology,
@@ -95,6 +98,7 @@ impl DigitalSignalStore {
             by_signal: vec![Vec::new(); self.values.len()],
             external_sources: Vec::new(),
             external_by_net: vec![Vec::new(); nets.len()],
+            other_driver_observers: Vec::new(),
             observed: vec![false; nets.len()],
             external_attached: false,
         };
@@ -191,6 +195,7 @@ impl DigitalSignalStore {
         let topology = Arc::make_mut(&mut connected.topology);
         topology.external_attached = true;
         topology.external_sources.extend_from_slice(drivers);
+        topology.other_driver_observers.resize(drivers.len(), false);
         for &net in observed {
             topology.observed[net] = true;
         }
@@ -205,7 +210,41 @@ impl DigitalSignalStore {
         connected
             .external_values
             .resize(drivers.len(), DigitalValue::high_z());
+        connected
+            .other_driver_values
+            .resize(drivers.len(), DigitalValue::high_z());
         Ok((0..drivers.len()).map(ExternalBitDriverId).collect())
+    }
+
+    /// Inout receivers observe the net with their own contribution excluded.
+    /// This observation can change while the ordinary resolved bit stays still.
+    pub(crate) fn observe_other_drivers(
+        &mut self,
+        drivers: &[ExternalBitDriverId],
+    ) -> Result<(), String> {
+        let connected = self.connected.as_mut().ok_or("no connected bit topology")?;
+        if let Some(driver) = drivers
+            .iter()
+            .find(|driver| driver.0 >= connected.external_values.len())
+        {
+            return Err(format!("unknown external bit observer {}", driver.0));
+        }
+        let topology = Arc::make_mut(&mut connected.topology);
+        for driver in drivers {
+            topology.other_driver_observers[driver.0] = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn other_driver_value(&self, driver: ExternalBitDriverId) -> Option<DigitalValue> {
+        let connected = self.connected.as_ref()?;
+        connected
+            .topology
+            .other_driver_observers
+            .get(driver.0)
+            .copied()
+            .filter(|observed| *observed)?;
+        connected.other_driver_values.get(driver.0).copied()
     }
 
     pub(crate) fn has_external_participants(&self) -> bool {
@@ -240,7 +279,7 @@ impl DigitalSignalStore {
             .into_iter()
             .filter_map(|change| match change {
                 ExternalNetChange::Bits(change) => Some(change),
-                ExternalNetChange::Real { .. } => None,
+                ExternalNetChange::Real { .. } | ExternalNetChange::DriverInput { .. } => None,
             })
             .collect()
     }
@@ -329,19 +368,40 @@ impl DigitalSignalStore {
                 resolve_bit(resolved, value.bit(offset))
             },
         );
-        let mut resolved = match hdl {
+        let hdl_value = match hdl {
             FourStateBit::Zero => Some(DigitalValue::zero()),
             FourStateBit::One => Some(DigitalValue::one()),
             FourStateBit::Unknown => Some(DigitalValue::unknown()),
             FourStateBit::HighImpedance => None,
         };
+        let resolve_external = |excluded: Option<usize>| {
+            let mut resolved = hdl_value;
+            for &slot in &topology.external_by_net[net_index] {
+                if excluded == Some(slot) {
+                    continue;
+                }
+                let value = connected.external_values[slot];
+                if value.state != DigitalState::HighZ {
+                    resolved = Some(resolved.map_or(value, |existing| existing.resolve(&value)));
+                }
+            }
+            resolved.unwrap_or_else(DigitalValue::high_z)
+        };
+        let resolved = resolve_external(None);
         for &slot in &topology.external_by_net[net_index] {
-            let value = connected.external_values[slot];
-            if value.state != DigitalState::HighZ {
-                resolved = Some(resolved.map_or(value, |existing| existing.resolve(&value)));
+            if topology.other_driver_observers[slot] {
+                let value = resolve_external(Some(slot));
+                let previous = std::mem::replace(&mut connected.other_driver_values[slot], value);
+                if previous != value {
+                    self.external_changes.push(ExternalNetChange::DriverInput {
+                        driver: ExternalBitDriverId(slot),
+                        previous,
+                        value,
+                        starts_publication: self.external_changes.len() == publication_start,
+                    });
+                }
             }
         }
-        let resolved = resolved.unwrap_or_else(DigitalValue::high_z);
         let previous = std::mem::replace(&mut connected.resolved[net_index], resolved);
         if previous != resolved && topology.observed[net_index] {
             self.external_changes

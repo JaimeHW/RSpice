@@ -481,6 +481,9 @@ pub struct CmContext {
     /// Executed digital output contributions sampled from the event bank.
     /// These are input observations, distinct from scheduled output targets.
     committed_digital_outputs: HashMap<String, Vec<DigitalValue>>,
+    /// Resolved contributions excluding this port's driver, with the physical
+    /// time they changed. Only circuit-enrolled inout ports populate this view.
+    other_digital_drivers: HashMap<String, Vec<Option<(DigitalValue, Value)>>>,
     /// Last event time for scalar digital input ports.
     input_event_times: HashMap<String, Value>,
     /// Last event time for vector digital input ports, per element.
@@ -625,6 +628,7 @@ impl CmContext {
             resource_limits: crate::resource::ResourceLimits::default(),
             inputs: HashMap::new(),
             committed_digital_outputs: HashMap::new(),
+            other_digital_drivers: HashMap::new(),
             input_event_times: HashMap::new(),
             input_vector_event_times: HashMap::new(),
             port_total_loads: HashMap::new(),
@@ -1072,6 +1076,38 @@ impl CmContext {
             .get(name)?
             .get(index)
             .copied()
+    }
+
+    pub(crate) fn set_other_digital_drivers(
+        &mut self,
+        name: &str,
+        index: usize,
+        value: DigitalValue,
+        time: Value,
+    ) -> bool {
+        if !self.other_digital_drivers.contains_key(name) {
+            self.other_digital_drivers
+                .insert(name.to_owned(), Vec::new());
+        }
+        let values = self.other_digital_drivers.get_mut(name).unwrap();
+        if values.len() <= index {
+            values.resize(index + 1, None);
+        }
+        if values[index].is_some_and(|(old, _)| old == value) {
+            return false;
+        }
+        values[index] = Some((value, time));
+        true
+    }
+
+    /// Resolved drive from all other contributors on an inout port. Unlike the
+    /// ordinary input, this excludes the model's own output observation.
+    pub fn other_digital_drivers(&self, name: &str, index: usize) -> Option<(DigitalValue, Value)> {
+        self.other_digital_drivers
+            .get(name)?
+            .get(index)
+            .copied()
+            .flatten()
     }
 
     /// Set last event time for a scalar digital input.

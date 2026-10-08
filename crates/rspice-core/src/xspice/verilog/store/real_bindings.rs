@@ -14,6 +14,12 @@ impl ExternalRealDriverId {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ExternalNetChange {
     Bits(DigitalBitChange),
+    DriverInput {
+        driver: ExternalBitDriverId,
+        previous: DigitalValue,
+        value: DigitalValue,
+        starts_publication: bool,
+    },
     Real {
         signal: DigitalSignalId,
         previous: f64,
@@ -25,7 +31,10 @@ impl ExternalNetChange {
     pub(crate) fn starts_publication(self) -> bool {
         match self {
             Self::Bits(change) => change.starts_publication,
-            Self::Real {
+            Self::DriverInput {
+                starts_publication, ..
+            }
+            | Self::Real {
                 starts_publication, ..
             } => starts_publication,
         }
@@ -33,7 +42,10 @@ impl ExternalNetChange {
     fn set_start(&mut self, start: bool) {
         match self {
             Self::Bits(change) => change.starts_publication = start,
-            Self::Real {
+            Self::DriverInput {
+                starts_publication, ..
+            }
+            | Self::Real {
                 starts_publication, ..
             } => *starts_publication = start,
         }

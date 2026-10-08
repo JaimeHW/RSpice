@@ -105,6 +105,16 @@ impl DigitalActiveExchange<'_> {
                 detail: format!("unknown shared digital net {net}"),
             })
     }
+    pub(crate) fn read_other_drivers(
+        &self,
+        driver: ExternalBitDriverId,
+    ) -> Result<DigitalValue, DigitalRunError> {
+        self.host.store.other_driver_value(driver).ok_or_else(|| {
+            DigitalRunError::ExternalExecution {
+                detail: format!("unknown external bit observer {}", driver.index()),
+            }
+        })
+    }
     #[cfg(test)]
     pub(crate) fn take_changes(&mut self) -> Vec<DigitalBitChange> {
         self.host.store.take_external_bit_changes()
@@ -297,6 +307,20 @@ impl DigitalHost {
             .map(|(_, target)| self.scheduler.intern_target(target.clone()))
             .collect();
         Ok(identities)
+    }
+
+    pub(crate) fn observe_other_drivers(
+        &mut self,
+        drivers: &[ExternalBitDriverId],
+    ) -> Result<(), DigitalRunError> {
+        if self.elaboration_closed {
+            return Err(DigitalRunError::ExternalExecution {
+                detail: "event topology cannot change after digital execution starts".into(),
+            });
+        }
+        self.store
+            .observe_other_drivers(drivers)
+            .map_err(|detail| DigitalRunError::ExternalExecution { detail })
     }
 
     pub(crate) fn attach_external_reals(

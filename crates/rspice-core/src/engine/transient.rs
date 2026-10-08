@@ -7762,6 +7762,8 @@ impl Engine {
                 TransientMeritRollback,
             )> = None;
             let mut last_stamped_iterate: Vec<Value> = Vec::new();
+            let mut penultimate_stamped_iterate: Vec<Value> = Vec::new();
+            let mut merit_cycle_detected = false;
             let mut last_stamped_merit = Value::INFINITY;
 
             // Newton-Raphson iteration for this timestep.
@@ -8034,6 +8036,14 @@ impl Engine {
                     let current_merit = self
                         .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
                         .unwrap_or(Value::INFINITY);
+                    if merit_backtrack.is_none() {
+                        merit_cycle_detected |=
+                            globalization::NewtonMeritBacktrack::repeats_two_cycle(
+                                &penultimate_stamped_iterate,
+                                &last_stamped_iterate,
+                                &new_solution,
+                            );
+                    }
                     if let Some((mut search, rollback)) = merit_backtrack.take() {
                         match search.judge(current_merit) {
                             globalization::BacktrackAction::Trial(trial) => {
@@ -8065,7 +8075,13 @@ impl Engine {
                             || globalization::NewtonMeritBacktrack::step_needs_globalization(
                                 last_stamped_merit,
                                 current_merit,
-                            ))
+                            )
+                            // Once a repeated cycle is observed, retain the
+                            // decrease obtained by damping. Otherwise the next
+                            // raw step can discard it and restart the cycle.
+                            || (merit_cycle_detected && current_merit > 1.0
+                                && last_stamped_merit.is_finite()
+                                && current_merit >= last_stamped_merit))
                     {
                         static MERIT_BACKTRACK_LOG_COUNT: std::sync::atomic::AtomicUsize =
                             std::sync::atomic::AtomicUsize::new(0);
@@ -8104,6 +8120,7 @@ impl Engine {
                         total_merit_trials += 1;
                         continue;
                     }
+                    std::mem::swap(&mut penultimate_stamped_iterate, &mut last_stamped_iterate);
                     last_stamped_iterate.clone_from(&new_solution);
                     last_stamped_merit = current_merit;
                     capture_transient_merit_rollback(
