@@ -5,6 +5,7 @@ use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visit
 use serde_json::Value;
 
 mod header;
+mod numbers;
 pub(crate) use header::{Kind, kind};
 
 pub(super) fn parse(
@@ -14,6 +15,7 @@ pub(super) fn parse(
     limits: ResourceLimits,
 ) -> Result<Value, crate::cli::CliError> {
     let mut admission = Admission {
+        numbers: numbers::Numbers::new(content),
         limits,
         count: 0,
         failure: None,
@@ -55,13 +57,33 @@ pub(super) fn optional_text<'a>(
     }
 }
 
-struct Admission {
+struct Admission<'a> {
+    numbers: numbers::Numbers<'a>,
     limits: ResourceLimits,
     count: usize,
     failure: Option<ResourceLimitError>,
 }
 
-impl Admission {
+impl Admission<'_> {
+    fn number<E: de::Error>(&mut self, value: f64, scope: Scope) -> Result<(), E> {
+        if scope == Scope::AllNumbers {
+            self.admit()?;
+        }
+        // Advance for metadata too: all numeric visitors share source order.
+        let spelling = self
+            .numbers
+            .next()
+            .ok_or_else(|| E::custom("missing source spelling for JSON number"))?;
+        if matches!(
+            scope,
+            Scope::Sample | Scope::NullableSample | Scope::AllNumbers
+        ) && rspice_formats::numeric::decimal_underflowed(spelling, value)
+        {
+            return Err(E::custom("JSON number underflows at binary64 precision"));
+        }
+        Ok(())
+    }
+
     fn admit<E: de::Error>(&mut self) -> Result<(), E> {
         let requested = self.count.saturating_add(1);
         for (resource, limit) in [
@@ -130,12 +152,12 @@ impl Scope {
     }
 }
 
-struct Seed<'a> {
-    admission: &'a mut Admission,
+struct Seed<'a, 'source> {
+    admission: &'a mut Admission<'source>,
     scope: Scope,
 }
 
-impl<'de> DeserializeSeed<'de> for Seed<'_> {
+impl<'de> DeserializeSeed<'de> for Seed<'_, '_> {
     type Value = Value;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
@@ -148,7 +170,7 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
     }
 }
 
-impl<'de> Visitor<'de> for Seed<'_> {
+impl<'de> Visitor<'de> for Seed<'_, '_> {
     type Value = Value;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -161,23 +183,17 @@ impl<'de> Visitor<'de> for Seed<'_> {
     }
 
     fn visit_i64<E: de::Error>(self, value: i64) -> Result<Value, E> {
-        if self.scope == Scope::AllNumbers {
-            self.admission.admit()?;
-        }
+        self.admission.number(value as f64, self.scope)?;
         Ok(value.into())
     }
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Value, E> {
-        if self.scope == Scope::AllNumbers {
-            self.admission.admit()?;
-        }
+        self.admission.number(value as f64, self.scope)?;
         Ok(value.into())
     }
 
     fn visit_f64<E: de::Error>(self, value: f64) -> Result<Value, E> {
-        if self.scope == Scope::AllNumbers {
-            self.admission.admit()?;
-        }
+        self.admission.number(value, self.scope)?;
         serde_json::Number::from_f64(value)
             .map(Value::Number)
             .ok_or_else(|| E::custom("non-finite JSON number"))
@@ -271,6 +287,7 @@ mod tests {
                     limits.max_result_values = 1;
                 }
                 let mut admission = Admission {
+                    numbers: numbers::Numbers::new(&content),
                     limits,
                     count: 0,
                     failure: None,
@@ -301,6 +318,7 @@ mod tests {
             "0,".repeat(100_000)
         );
         let mut admission = Admission {
+            numbers: numbers::Numbers::new(&content),
             limits: ResourceLimits::default(),
             count: 0,
             failure: None,
@@ -315,5 +333,19 @@ mod tests {
         assert!(error.to_string().contains("non-numeric"), "{error}");
         assert!(input.position() < 128);
         assert!(admission.failure.is_none());
+    }
+
+    #[test]
+    fn fft_underflow_is_rejected_in_metadata_bins_and_harmonics() {
+        let path = std::path::Path::new("fft.json");
+        for content in [
+            r#"{"analysis":"fft","sampling":{"start_time_s":1e-999}}"#,
+            r#"{"analysis":"fft","bins":[{"index":0,"real":-1e-999}]}"#,
+            r#"{"largest_harmonics":[{"phase_degrees":2e-324}],"analysis":"fft"}"#,
+        ] {
+            let error = parse(path, content, Kind::Fft, ResourceLimits::default()).unwrap_err();
+            assert!(error.to_string().contains("underflow"), "{error}");
+            assert!(error.to_string().contains("line"), "{error}");
+        }
     }
 }
