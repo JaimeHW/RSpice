@@ -3250,8 +3250,8 @@ endmodule
         );
         let error = Engine::default()
             .build_circuit(&Netlist::parse(&private).unwrap())
-            .err()
-            .expect("local parameters are not instance parameters");
+            .map(|_| ())
+            .expect_err("local parameters are not instance parameters");
         let rspice_core::SimulationError::Elaboration(error) = error else {
             panic!("expected a typed elaboration error, got {error}");
         };
