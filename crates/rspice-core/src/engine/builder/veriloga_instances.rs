@@ -29,6 +29,44 @@ pub(super) struct PreparedInstance<'a> {
     pub multiplicity: Option<f64>,
 }
 
+struct PublicParameter<'a> {
+    name: &'a str,
+    needs_source: bool,
+}
+
+/// Public numeric and exact declarations share the external namespace. The
+/// compiler rejects case-insensitive collisions before partitioning it into
+/// runtime slots and retained elaboration constants. Hidden hierarchy/local
+/// declarations never claim an instance-facing name, including engine controls.
+fn public_parameter<'a>(entry: &'a CachedVerilogAModel, name: &str) -> Option<PublicParameter<'a>> {
+    if let Some(index) = entry.model.parameter_index(name) {
+        let parameter = &entry.model.parameters[index];
+        return Some(PublicParameter {
+            name: parameter.name.as_str(),
+            needs_source: parameter.elaboration_value.is_some(),
+        });
+    }
+    let parameters = &entry
+        .canonical_ir
+        .as_deref()?
+        .digital
+        .elaboration_parameters;
+    parameters
+        .iter()
+        .find(|parameter| {
+            parameter.is_public
+                && (parameter.name.eq_ignore_ascii_case(name)
+                    || parameter
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.eq_ignore_ascii_case(name)))
+        })
+        .map(|parameter| PublicParameter {
+            name: parameter.name.as_str(),
+            needs_source: true,
+        })
+}
+
 pub(super) fn prepare<'a>(
     netlist: &crate::Netlist,
     element: &crate::netlist::Element,
@@ -44,7 +82,7 @@ pub(super) fn prepare<'a>(
     else {
         unreachable!("Verilog-A instance preparation requires an X-card");
     };
-    let declares = |name: &str| entry.model.parameter_index(name).is_some();
+    let declares = |name: &str| public_parameter(entry, name).is_some();
     let mut context = super::InstanceParameterContext::new(netlist, temperature);
     let temperature = super::veriloga_instance_temperature(
         &element.name,
@@ -86,7 +124,7 @@ pub(super) fn prepare<'a>(
             multiplicity = Some(value);
             continue;
         }
-        let index = entry.model.parameter_index(name).ok_or_else(|| {
+        let parameter = public_parameter(entry, name).ok_or_else(|| {
             refuse(
                 &element.name,
                 subckt_name,
@@ -94,9 +132,8 @@ pub(super) fn prepare<'a>(
                 format!("unknown parameter '{name}'"),
             )
         })?;
-        let parameter = &entry.model.parameters[index];
-        specializes |= parameter.elaboration_value.is_some();
-        overrides.push((parameter.name.as_str(), value));
+        specializes |= parameter.needs_source;
+        overrides.push((parameter.name, value));
     }
 
     let (model, canonical_ir) = if specializes && !overrides.is_empty() {
@@ -149,6 +186,17 @@ pub(super) fn prepare<'a>(
     } else {
         (Arc::clone(&entry.model), entry.canonical_ir.clone())
     };
+    // Exact values have already undergone source assignment conversion. They
+    // have no numeric runtime slot. Inspect the effective model: an implicit
+    // parameter can change from an exact integral value to a real override.
+    if specializes {
+        overrides.retain(|(name, _)| {
+            model
+                .parameters
+                .iter()
+                .any(|parameter| parameter.is_public && parameter.name == *name)
+        });
+    }
     Ok(PreparedInstance {
         model,
         canonical_ir,

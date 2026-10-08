@@ -3193,3 +3193,121 @@ endmodule
         }
     }
 }
+
+#[test]
+fn packed_instance_parameters_and_aliases_specialize_both_execution_routes() {
+    for mixed in [false, true] {
+        let process = if mixed { "initial #1 q=2;" } else { "" };
+        let model = ModelFile::new(
+            "packed_instance_parameters",
+            &format!(
+                r#"
+`timescale 1ns/1ps
+module packed_instance(p);
+ inout p; electrical p;
+ parameter [7:0] CODE=4;
+ aliasparam PATTERN=CODE;
+ parameter real GAIN=1;
+ parameter real LEVEL=CODE+0.0;
+ localparam [7:0] PRIVATE=7;
+ integer q=1;
+ {process}
+ analog I(p)<+(V(p)-LEVEL*GAIN*q)/1000;
+endmodule
+"#
+            ),
+        );
+        let deck = format!(
+            "* packed instance parameters\n.param pattern=259\n\
+             Xa pa packed_instance\n\
+             Xb pb packed_instance CoDe={{pattern}} GAIN=2\n\
+             Xc pc packed_instance PaTtErN=261\n\
+             Xd pd packed_instance pattern=259 gain=2 m=2\n\
+             Ra pa 0 1k\nRb pb 0 1k\nRc pc 0 1k\nRd pd 0 1k\n\
+             .va \"{}\" packed_instance module=packed_instance\n.end\n",
+            model.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.1e-9);
+        for (node, before) in [("pa", 2.0), ("pb", 3.0), ("pc", 2.5), ("pd", 4.0)] {
+            for (&time, &value) in result.time.iter().zip(waveform(&result, node).iter()) {
+                let expected = if mixed && time > 1.1e-9 {
+                    before * 2.0
+                } else if time < 0.9e-9 || !mixed {
+                    before
+                } else {
+                    continue;
+                };
+                assert!(
+                    (value - expected).abs() < 1e-8,
+                    "mixed={mixed}: {node} at {time}: {value}"
+                );
+            }
+        }
+        let private = format!(
+            "* private packed parameter\nX1 p packed_instance PRIVATE=3\nR1 p 0 1k\n\
+             .va \"{}\" packed_instance module=packed_instance\n.end\n",
+            model.deck_path()
+        );
+        let error = Engine::default()
+            .build_circuit(&Netlist::parse(&private).unwrap())
+            .err()
+            .expect("local parameters are not instance parameters");
+        let rspice_core::SimulationError::Elaboration(error) = error else {
+            panic!("expected a typed elaboration error, got {error}");
+        };
+        assert_eq!(
+            error.kind,
+            rspice_core::ElaborationErrorKind::ParameterUnknown
+        );
+    }
+}
+
+#[test]
+fn packed_instance_parameters_own_engine_control_names() {
+    for mixed in [false, true] {
+        let process = if mixed { "initial #1 q=1;" } else { "" };
+        let model = ModelFile::new(
+            "packed_control_names",
+            &format!(
+                r#"
+`timescale 1ns/1ps
+module packed_controls(p);
+ inout p; electrical p;
+ parameter [7:0] m=1;
+ parameter [7:0] T=2;
+ aliasparam temp=T;
+ parameter [7:0] dtemp=3;
+ parameter [7:0] R=4;
+ aliasparam trise=R;
+ parameter real LEVEL=m+T+dtemp+R+0.0;
+ integer q=0;
+ {process}
+ analog I(p)<+(V(p)-LEVEL-q-($temperature-300.0))/1000;
+endmodule
+"#
+            ),
+        );
+        // These are model values, including m=0. They must neither scale the
+        // device nor override its 300 K temperature or conflict as offsets.
+        let deck = format!(
+            "* packed controls\n.options temp=26.85\n\
+             X1 p packed_controls m=0 temp=8 dtemp=9 trise=10\nR1 p 0 1k\n\
+             .va \"{}\" packed_controls module=packed_controls\n.end\n",
+            model.deck_path()
+        );
+        let result = run(&deck, 2e-9, 0.1e-9);
+        for (&time, &value) in result.time.iter().zip(waveform(&result, "p").iter()) {
+            let expected = if mixed && time > 1.1e-9 {
+                14.0
+            } else if time < 0.9e-9 || !mixed {
+                13.5
+            } else {
+                continue;
+            };
+            assert!(
+                (value - expected).abs() < 1e-8,
+                "mixed={mixed} at {time}: {value}"
+            );
+        }
+    }
+}
