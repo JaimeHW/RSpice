@@ -1225,10 +1225,9 @@ impl MixedDigitalCoordinator {
                         limit,
                     });
                 }
-                let external = match &mut participant {
-                    Some(external) => Some(&mut **external as &mut dyn DigitalActiveParticipant),
-                    None => None,
-                };
+                let external = participant
+                    .as_mut()
+                    .map(|external| &mut **external as &mut dyn DigitalActiveParticipant);
                 let mut active = CircuitAnalogParticipant {
                     hosts: &mut *hosts,
                     maps: &self.maps,
