@@ -19,6 +19,19 @@ use typed_csv::prepare_typed_result_csv;
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
+
+/// Headers and container metadata also count against the receiving workflow's
+/// byte limit. Refuse an oversized artifact before selecting a destination.
+fn admit_result_export_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    let limit = crate::workbench::workflows::result_import_workflow::MAX_RESULT_DATASET_BYTES;
+    if bytes.len() as u64 > limit {
+        return Err(format!(
+            "The encoded result is {} bytes; the import limit is {limit} bytes. Hide traces or export a smaller selection.",
+            bytes.len()
+        ));
+    }
+    Ok(bytes)
+}
 /// An export that silently wrote an empty file would be indistinguishable
 /// from one that wrote the dataset, so the hidden traces are named as the
 /// reason rather than reported as an absence of samples.

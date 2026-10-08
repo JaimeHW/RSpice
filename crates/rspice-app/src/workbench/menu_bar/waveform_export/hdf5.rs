@@ -50,7 +50,7 @@ pub(super) fn encode_hdf5(export: &Hdf5Export) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     write_hdf5(&mut bytes, &export.document)
         .map_err(|error| format!("the HDF5 document could not be written: {error}"))?;
-    Ok(bytes)
+    super::admit_result_export_bytes(bytes)
 }
 
 pub(super) fn export_hdf5(

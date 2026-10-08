@@ -144,7 +144,10 @@ pub(super) fn export_numpy(
     let bytes = match match kind {
         NumpyKind::Array => encode_npy(&prepared),
         NumpyKind::Archive => encode_npz(&prepared),
-    } {
+    }
+    .map_err(|error| error.to_string())
+    .and_then(super::admit_result_export_bytes)
+    {
         Ok(bytes) => bytes,
         Err(error) => {
             note_result_export_failure(state, format!("{} encoding failed: {error}", kind.label()));

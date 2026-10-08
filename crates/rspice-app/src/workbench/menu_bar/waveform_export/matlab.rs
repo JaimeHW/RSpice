@@ -75,6 +75,7 @@ fn event_only_refusal(analysis: &crate::state::AnalysisResult) -> Option<String>
 pub(super) fn encode_matlab(export: &MatlabExport) -> Result<Vec<u8>, String> {
     write_mat_v5(&export.header_text, &export.variables)
         .map_err(|error| format!("the MATLAB v5 file could not be written: {error}"))
+        .and_then(super::admit_result_export_bytes)
 }
 
 pub(super) fn export_matlab(
