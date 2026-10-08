@@ -1,0 +1,155 @@
+//! CLI RAW output must carry the same signal meaning into the application.
+mod common;
+
+use common::test_dir;
+use rspice_formats::{WaveformDomain, spice_raw::decode_spice_raw};
+use std::path::Path;
+use std::process::Command;
+
+fn convert(source: &Path, output: &Path, format: &str) {
+    let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "convert"])
+        .arg(source)
+        .arg(output)
+        .args(["--to", format])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+}
+
+#[test]
+fn raw_exports_retain_explicit_signal_units_in_the_application_reader() {
+    let dir = test_dir("raw_application_units");
+    let source = dir.join("source.json");
+    let data = serde_json::json!({
+        "plot_name":"Exact units",
+        "scale":{"name":"frequency", "type":"frequency", "unit":"Hz", "values":[1.0,2.0]},
+        "signals":[
+            {"name":" voltage ", "type":"voltage", "unit":"mV", "values":[1.0,-0.0]},
+            {"name":"transfer", "type":"value", "unit":"1", "real":[2.0,3.0], "imag":[-4.0,5.0]},
+            {"name":"unstated", "type":"value", "values":[6.0,7.0]}
+        ]
+    });
+    std::fs::write(&source, serde_json::to_vec(&data).unwrap()).unwrap();
+    for format in ["raw", "ascii"] {
+        let output = dir.join(format!("result.{format}"));
+        convert(&source, &output, format);
+        let decoded =
+            decode_spice_raw(&std::fs::read(output).unwrap(), Default::default()).unwrap();
+        assert_eq!(decoded.coordinate, [1.0, 2.0]);
+        assert_eq!(decoded.signals.len(), 3);
+        assert_eq!(decoded.signals[0].name, " voltage ");
+        assert_eq!(decoded.signals[0].unit.as_deref(), Some("mV"));
+        assert_eq!(decoded.signals[0].real[1].to_bits(), (-0.0_f64).to_bits());
+        assert!(decoded.signals[0].imag.is_none());
+        assert_eq!(decoded.signals[1].unit.as_deref(), Some("1"));
+        assert_eq!(decoded.signals[1].real, [2.0, 3.0]);
+        assert_eq!(
+            decoded.signals[1].imag.as_deref(),
+            Some([-4.0, 5.0].as_slice())
+        );
+        assert!(decoded.signals[2].unit.is_none());
+    }
+}
+
+#[test]
+fn coordinate_meaning_precedes_plot_titles_and_signal_complexity() {
+    let dir = test_dir("raw_application_domain");
+    let source = dir.join("source.json");
+    for (name, kind, plot, domain, values) in [
+        (
+            "time",
+            "time",
+            "AC package",
+            WaveformDomain::Transient,
+            [0.0, 1.0],
+        ),
+        (
+            "point",
+            "index",
+            "AC Operating Point",
+            WaveformDomain::DcSweep,
+            [0.0, 1.0],
+        ),
+        (
+            "frequency",
+            "frequency",
+            "Transient Analysis",
+            WaveformDomain::Ac,
+            [1.0, 2.0],
+        ),
+        (
+            "bias",
+            "voltage",
+            "package transfer",
+            WaveformDomain::DcSweep,
+            [-1.0, 1.0],
+        ),
+        (
+            "parameter",
+            "value",
+            "AC Analysis",
+            WaveformDomain::DcSweep,
+            [-1.0, 1.0],
+        ),
+    ] {
+        for complex in [false, true] {
+            let signal = if complex {
+                serde_json::json!({"name":"x", "real":[1.0,2.0], "imag":[3.0,4.0]})
+            } else {
+                serde_json::json!({"name":"x", "values":[1.0,2.0]})
+            };
+            let data = serde_json::json!({"plot_name":plot, "scale":{"name":name,"type":kind,"values":values}, "signals":[signal]});
+            std::fs::write(&source, serde_json::to_vec(&data).unwrap()).unwrap();
+            for format in ["raw", "ascii"] {
+                let output = dir.join(format!("result.{format}"));
+                convert(&source, &output, format);
+                let decoded =
+                    decode_spice_raw(&std::fs::read(output).unwrap(), Default::default()).unwrap();
+                assert_eq!(decoded.domain, domain, "{plot}, complex={complex}");
+                assert_eq!(decoded.coordinate_name, name);
+                assert_eq!(decoded.coordinate, values);
+                assert_eq!(decoded.signals.len(), 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn scalar_raw_results_retain_the_first_signal_and_use_an_ordinal_axis() {
+    for (plot, complex) in [
+        ("DC Operating Point", false),
+        ("AC Operating Point", true),
+        ("Pole-Zero Analysis", true),
+        ("Transfer Function", false),
+        ("Integrated Noise - V^2 or A^2", false),
+        ("Sensitivity Analysis", false),
+    ] {
+        let flags = if complex { "complex" } else { "real" };
+        let values = if complex { "2,3 4,5" } else { "2 4" };
+        let source = format!(
+            "Title: scalars\nPlotname: {plot}\nFlags: {flags}\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 first voltage\n1 second current\nValues:\n0 {values}\n"
+        );
+        let decoded = decode_spice_raw(source.as_bytes(), Default::default()).unwrap();
+        assert_eq!(decoded.coordinate_name, "point", "{plot}");
+        assert_eq!(decoded.coordinate, [0.0]);
+        assert_eq!(decoded.domain, WaveformDomain::DcSweep);
+        assert_eq!(decoded.signals.len(), 2);
+        assert_eq!(decoded.signals[0].name, "first");
+        assert_eq!(decoded.signals[0].real, [2.0]);
+        assert_eq!(
+            decoded.signals[0].imag.as_deref(),
+            complex.then_some([3.0].as_slice())
+        );
+    }
+}
+
+#[test]
+fn waveform_coordinates_cannot_silently_discard_imaginary_values() {
+    let source = b"Title: axis\nPlotname: AC Analysis\nFlags: complex\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 frequency frequency\n1 V(out) voltage\nValues:\n0 1,9 2,3\n";
+    let error = decode_spice_raw(source, Default::default()).unwrap_err();
+    assert!(
+        error.to_string().contains("nonzero imaginary component"),
+        "{error}"
+    );
+}

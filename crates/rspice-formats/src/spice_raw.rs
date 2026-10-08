@@ -34,33 +34,85 @@ pub fn decode_spice_raw(
 ) -> Result<DecodedNumericDataset, RawReadError> {
     let parsed = rspice_core::io::parse_raw_reader_with_limits(&mut Cursor::new(bytes), limits)
         .map_err(RawReadError::Parse)?;
-    let mut waveforms = parsed.waveforms.into_iter();
-    let scale = waveforms.next().ok_or(RawReadError::NoVariables)?;
-    let coordinate_name = scale.name;
-    let coordinate = scale.y;
+    parsed
+        .validate_real_coordinate()
+        .map_err(RawReadError::Parse)?;
+    let ordinal = parsed.has_ordinal_axis().map_err(RawReadError::Parse)?;
+    let units = rspice_core::io::ltspice_raw::raw_table_units(&parsed.header)
+        .map_err(RawReadError::Parse)?
+        .unwrap_or_else(|| vec![None; parsed.variables.len()]);
+    let domain = coordinate_domain(&parsed, ordinal)?;
+    let mut waveforms = parsed.waveforms.into_iter().zip(units).peekable();
+    let (coordinate_name, coordinate) = if ordinal {
+        let (first, _) = waveforms.peek().ok_or(RawReadError::NoVariables)?;
+        (
+            "point".to_owned(),
+            (0..first.y.len()).map(|index| index as f64).collect(),
+        )
+    } else {
+        let (scale, _) = waveforms.next().ok_or(RawReadError::NoVariables)?;
+        (scale.name, scale.y)
+    };
     let mut signals = Vec::new();
-    for waveform in waveforms {
+    for (waveform, unit) in waveforms {
         signals.push(DecodedNumericSignal {
             name: waveform.name,
             real: waveform.y,
             imag: waveform.y_imag,
-            unit: None,
+            unit,
         });
     }
-    let plot = parsed.header.plotname.to_ascii_lowercase();
-    let domain = if parsed.header.is_complex || plot.contains("ac") {
-        crate::WaveformDomain::Ac
-    } else if plot.contains("tran") || coordinate_name.to_ascii_lowercase().contains("time") {
-        crate::WaveformDomain::Transient
-    } else {
-        crate::WaveformDomain::DcSweep
-    };
     Ok(DecodedNumericDataset {
         domain,
         coordinate_name,
         coordinate,
         signals,
     })
+}
+
+fn coordinate_domain(
+    parsed: &rspice_core::io::ltspice_raw::RawWaveformData,
+    ordinal: bool,
+) -> Result<crate::WaveformDomain, RawReadError> {
+    use crate::WaveformDomain::{Ac, DcSweep, Transient};
+    if ordinal {
+        return Ok(DcSweep);
+    }
+    let coordinate = parsed.variables.first().ok_or(RawReadError::NoVariables)?;
+    // The declared independent quantity outranks display titles and the
+    // storage representation of dependent signals. Sweeps can be complex.
+    let declared = match coordinate.var_type.trim().to_ascii_lowercase().as_str() {
+        "time" => Some(Transient),
+        "frequency" => Some(Ac),
+        "index" | "voltage" | "current" | "temperature" | "resistance" | "capacitance"
+        | "inductance" | "power" | "conductance" => Some(DcSweep),
+        _ => None,
+    };
+    if let Some(domain) = declared {
+        return Ok(domain);
+    }
+    match coordinate.name.trim().to_ascii_lowercase().as_str() {
+        "time" | "t" | "timestamp" => return Ok(Transient),
+        "frequency" | "freq" | "hz" => return Ok(Ac),
+        "point" | "index" => return Ok(DcSweep),
+        _ => {}
+    }
+    if rspice_core::io::ltspice_raw::raw_table_has_coordinate(&parsed.header)
+        .map_err(RawReadError::Parse)?
+    {
+        return Ok(DcSweep);
+    }
+    // Legacy sources sometimes omit a meaningful coordinate declaration.
+    // Match analysis titles as titles, not substrings such as "ac" in "package".
+    Ok(
+        match parsed.header.plotname.trim().to_ascii_lowercase().as_str() {
+            "transient analysis" | "transient" | "tran" => Transient,
+            "ac analysis" | "ac" | "noise spectral density" | "distortion analysis" => Ac,
+            "dc transfer characteristic" | "dc sweep" | "dc analysis" => DcSweep,
+            _ if parsed.header.is_complex => Ac,
+            _ => DcSweep,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -73,10 +125,15 @@ mod tests {
         } else {
             "real double"
         };
-        let mut bytes = format!("Title: fixture\nPlotname: {plot}\nFlags: {flags}\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 {coordinate} time\n1 V(out) voltage\nBinary:\n").into_bytes();
+        let kind = match coordinate.to_ascii_lowercase().as_str() {
+            "time" => "time",
+            "frequency" => "frequency",
+            _ => "value",
+        };
+        let mut bytes = format!("Title: fixture\nPlotname: {plot}\nFlags: {flags}\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 {coordinate} {kind}\n1 V(out) voltage\nBinary:\n").into_bytes();
         let adjacent = f64::from_bits(1.0_f64.to_bits() + 1);
         let values = if complex {
-            vec![2.0, 99.0, adjacent, -0.0]
+            vec![2.0, 0.0, adjacent, -0.0]
         } else {
             vec![2.0, adjacent]
         };
@@ -95,6 +152,9 @@ mod tests {
             ("unknown", "TIME", false, Transient),
             ("AC Analysis", "frequency", false, Ac),
             ("unknown", "x", true, Ac),
+            ("package transfer", "x", false, DcSweep),
+            ("Transient Analysis", "x", true, Transient),
+            ("DC transfer characteristic", "x", true, DcSweep),
         ] {
             let bytes = binary_fixture(plot, coordinate, complex);
             let decoded = decode_spice_raw(&bytes, Default::default()).unwrap();
