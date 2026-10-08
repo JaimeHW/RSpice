@@ -106,6 +106,169 @@ fn constant_rational_output_rounds_after_all_factors_and_the_input_offset() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_denormalization_preserves_finite_canonical_coefficients_and_initial_states() {
+    use rspice_core::xspice::{AnalysisType, XspiceSmallSignalDescriptor};
+    use rspice_core::{Engine, Netlist};
+
+    let tiny = f64::from_bits(1);
+    for (frequency, leading, linear, constant, gain) in [
+        (
+            2.0f64.powi(600),
+            2.0f64.powi(1000),
+            2.0f64.powi(400),
+            2.0f64.powi(-200),
+            2.0f64.powi(-200),
+        ),
+        (
+            2.0f64.powi(-600),
+            2.0f64.powi(-1000),
+            2.0f64.powi(-400),
+            2.0f64.powi(200),
+            2.0f64.powi(200),
+        ),
+        (1.0, tiny, tiny, tiny, tiny),
+        (1.0, -tiny, -tiny, -tiny, -tiny),
+    ] {
+        for sign in [-1.0, 1.0] {
+            let denominator = [leading, sign * linear, constant];
+            let mut context = CmContext::new();
+            context.analysis = AnalysisType::Transient;
+            context.set_param("gain", gain);
+            context.set_param("denormalized_freq", sign * frequency);
+            context.set_real_vector_param("num_coeff", vec![1.0]);
+            context.set_real_vector_param("den_coeff", denominator.to_vec());
+            context.set_real_vector_param("int_ic", vec![0.2, 0.4]);
+            SXfer.init(&mut context).unwrap();
+            let XspiceSmallSignalDescriptor::Rational { coefficients, .. } =
+                SXfer.small_signal_descriptor(&context).unwrap()
+            else {
+                panic!("dynamic transfer must retain its rational descriptor");
+            };
+            assert_eq!(coefficients.numerator, [1.0]);
+            assert_eq!(coefficients.denominator, [1.0, 1.0, 1.0]);
+            assert_eq!(coefficients.gain, 1.0);
+            assert_eq!(
+                [context.state(0), context.state(1), context.state(2)],
+                [0.4, 0.2, 0.0]
+            );
+            context.set_input_analog("in", 1.0);
+            context.timestep = 0.5;
+            SXfer.evaluate(&mut context).unwrap();
+            for (index, expected) in [0.6, 0.4, 0.4].into_iter().enumerate() {
+                relative_component(context.state(index), expected);
+            }
+            relative_component(context.output("out"), 0.6);
+            relative_component(context.partial("out"), 0.4);
+
+            let netlist = Netlist::parse(&format!(
+                "Normalized rational states\nV1 in 0 dc 0 ac 1\nA1 in out filt\n.model filt s_xfer(gain={gain:e} denormalized_freq={:e} num_coeff=[1] den_coeff=[{}])\nRload out 0 1\n.end\n",
+                sign * frequency, coefficient_list(&denominator)
+            )).unwrap();
+            let engine = Engine::default();
+            for point in engine
+                .run_ac(&netlist, &[0.0, 1.0 / std::f64::consts::TAU])
+                .unwrap()
+            {
+                let output = point
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("out"))
+                    .unwrap();
+                let expected = if point.frequency == 0.0 {
+                    (1.0, 0.0)
+                } else {
+                    (0.0, -1.0)
+                };
+                assert!((point.voltages[output].re - expected.0).abs() < 1e-12);
+                assert!((point.voltages[output].im - expected.1).abs() < 1e-12);
+            }
+            let spectrum = engine.run_pole_spectrum(&netlist).unwrap();
+            assert!(spectrum.evidence.is_qualified());
+            assert_eq!(spectrum.poles.len(), 2);
+            for pole in spectrum.poles {
+                assert!((pole.re + 0.5).abs() < 1e-10);
+                assert!((pole.im.abs() - 3.0f64.sqrt() / 2.0).abs() < 1e-10);
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_denormalization_retains_numerator_terms_across_frequency_power_range() {
+    use rspice_core::xspice::XspiceSmallSignalDescriptor;
+    for exponent in [-1, 1] {
+        let frequency = 2.0f64.powi(600 * exponent);
+        let coefficient = 2.0f64.powi(-200 * exponent);
+        let authored = vec![
+            2.0f64.powi(1000 * exponent),
+            2.0f64.powi(400 * exponent),
+            coefficient,
+        ];
+        let mut context = CmContext::new();
+        context.set_param("gain", 1.0);
+        context.set_param("denormalized_freq", frequency);
+        context.set_real_vector_param("num_coeff", authored.clone());
+        context.set_real_vector_param("den_coeff", authored);
+        SXfer.init(&mut context).unwrap();
+        let XspiceSmallSignalDescriptor::Rational { coefficients, .. } =
+            SXfer.small_signal_descriptor(&context).unwrap()
+        else {
+            panic!("canceled modes still require a rational descriptor");
+        };
+        assert_eq!(coefficients.numerator, [coefficient; 3]);
+        assert_eq!(coefficients.denominator, [1.0; 3]);
+        assert_eq!(coefficients.gain, 1.0 / coefficient);
+        for frequency in [0.0, 1.0 / std::f64::consts::TAU, 1e200] {
+            let gain = SXfer.output_input_ac_partials(&context, "out", frequency)[0].1;
+            relative_component(gain.re, 1.0);
+            relative_component(gain.im, 0.0);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn rational_denormalization_reports_coefficients_lost_by_the_realization() {
+    for (gain, numerator, denominator, frequency, parameter, element) in [
+        (
+            1.0,
+            vec![1.0],
+            vec![1e300, 1e-300],
+            1.0,
+            "den_coeff",
+            Some(1),
+        ),
+        (
+            1.0,
+            vec![1e-300, 0.0],
+            vec![1.0, 1.0],
+            1e100,
+            "num_coeff",
+            Some(0),
+        ),
+        (1e-300, vec![1.0], vec![1e300, 1e300], 1.0, "gain", None),
+    ] {
+        let mut context = CmContext::new();
+        context.set_param("gain", gain);
+        context.set_param("denormalized_freq", frequency);
+        context.set_real_vector_param("num_coeff", numerator);
+        context.set_real_vector_param("den_coeff", denominator);
+        let error = SXfer
+            .init(&mut context)
+            .expect_err("normalization must not erase a nonzero coefficient")
+            .to_string();
+        for expected in [parameter, "underflow", "realization"] {
+            assert!(error.contains(expected), "{error}");
+        }
+        if let Some(index) = element {
+            assert!(error.contains(&format!("element {index}")), "{error}");
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn rational_ac_retains_finite_quotients_beyond_intermediate_float_range() {
     use rspice_core::{Complex64, Engine, Netlist};
     let large_frequency = 1e200;

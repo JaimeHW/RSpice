@@ -788,16 +788,26 @@ fn finite_s_xfer_vector_param(ctx: &CmContext, name: &str) -> CmResult<Vec<Value
     Ok(values.to_vec())
 }
 
-fn descending_to_denormalized_ascending(
-    coefficients: &[Value],
-    denormalized_freq: Value,
-) -> Vec<Value> {
-    coefficients
-        .iter()
-        .rev()
-        .enumerate()
-        .map(|(power, coefficient)| coefficient / denormalized_freq.powi(power as i32))
-        .collect()
+fn s_xfer_realization_value(
+    value: ScaledProduct,
+    source: Value,
+    parameter: &str,
+    index: Option<usize>,
+) -> CmResult<Value> {
+    let value = value.value();
+    if !value.is_finite() || (value == 0.0 && source != 0.0) {
+        let element = index.map_or_else(String::new, |index| format!("element {index} "));
+        let reason = if value == 0.0 {
+            "underflows to zero"
+        } else {
+            "overflows"
+        };
+        return Err(s_xfer_param_error(
+            parameter,
+            format!("{element}{reason} when normalized for the controller-canonical realization"),
+        ));
+    }
+    Ok(value)
 }
 
 fn s_xfer_coefficients(ctx: &CmContext) -> CmResult<SXferCoefficients> {
@@ -819,13 +829,14 @@ fn s_xfer_coefficients(ctx: &CmContext) -> CmResult<SXferCoefficients> {
         ));
     }
 
-    let mut gain = finite_s_xfer_param(ctx, "gain")?;
+    let gain = finite_s_xfer_param(ctx, "gain")?;
+    let leading = denominator_desc[0];
+    if leading == 0.0 {
+        return Err(s_xfer_error(
+            "highest-order denominator coefficient must be non-zero",
+        ));
+    }
     if denominator_desc.len() == 1 {
-        if denominator_desc[0] == 0.0 {
-            return Err(s_xfer_error(
-                "highest-order denominator coefficient must be non-zero",
-            ));
-        }
         // A constant transfer has no integrator states to normalize. Keep
         // its factors separate until the complete response is evaluated.
         return Ok(SXferCoefficients {
@@ -835,37 +846,46 @@ fn s_xfer_coefficients(ctx: &CmContext) -> CmResult<SXferCoefficients> {
         });
     }
 
-    let mut numerator = descending_to_denormalized_ascending(numerator_desc, denormalized_freq);
-    let mut denominator = descending_to_denormalized_ascending(denominator_desc, denormalized_freq);
-    let leading = denominator.last().copied().unwrap_or(0.0);
-    if leading.abs() <= 1.0e-30 {
-        return Err(s_xfer_error(
-            "highest-order denominator coefficient must be non-zero",
-        ));
+    // For degree n, the monic denominator coefficient at s^i is
+    // d[i] * frequency^(n-i) / d[n]. Materialize only that complete ratio,
+    // never a frequency power or the denormalized leading term on its own.
+    let mut denominator = Vec::with_capacity(denominator_desc.len());
+    let mut frequency_power = ScaledProduct::ONE;
+    for (index, &coefficient) in denominator_desc.iter().enumerate() {
+        if index > 0 {
+            frequency_power = frequency_power.multiply(denormalized_freq);
+        }
+        denominator.push(s_xfer_realization_value(
+            frequency_power
+                .multiply(coefficient)
+                .without_factor(leading),
+            coefficient,
+            "den_coeff",
+            Some(index),
+        )?);
     }
+    denominator.reverse();
+    let gain = s_xfer_realization_value(
+        frequency_power.multiply(gain).without_factor(leading),
+        gain,
+        "gain",
+        None,
+    )?;
 
-    if leading != 1.0 {
-        for coefficient in &mut denominator {
-            *coefficient /= leading;
+    // Preserve ngspice's canonical state units: numerator denormalization
+    // stays separate from the input gain, so authored int_ic needs no scaling.
+    let mut numerator = Vec::with_capacity(numerator_desc.len());
+    let mut inverse_frequency_power = ScaledProduct::ONE;
+    for (power, &coefficient) in numerator_desc.iter().rev().enumerate() {
+        if power > 0 {
+            inverse_frequency_power = inverse_frequency_power.without_factor(denormalized_freq);
         }
-        gain /= leading;
-    }
-    if !gain.is_finite() {
-        return Err(s_xfer_error("gain must be finite"));
-    }
-    for coefficient in &mut numerator {
-        if !coefficient.is_finite() {
-            return Err(s_xfer_error(
-                "denormalized numerator coefficient is non-finite",
-            ));
-        }
-    }
-    for coefficient in &denominator {
-        if !coefficient.is_finite() {
-            return Err(s_xfer_error(
-                "denormalized denominator coefficient is non-finite",
-            ));
-        }
+        numerator.push(s_xfer_realization_value(
+            inverse_frequency_power.multiply(coefficient),
+            coefficient,
+            "num_coeff",
+            Some(numerator_desc.len() - 1 - power),
+        )?);
     }
 
     Ok(SXferCoefficients {
