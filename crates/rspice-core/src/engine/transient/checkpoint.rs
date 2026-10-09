@@ -11745,16 +11745,10 @@ mod tests {
         line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
         line.update_history(checkpoint.time, 0.0, 0.0, 0.0, 0.0);
         checkpoint.tline_states = vec![line.checkpoint_state().unwrap()];
-        let legacy = checkpoint
-            .to_text()
+        let legacy = legacy_text(&checkpoint, 54)
             .lines()
-            .filter(|row| !row.starts_with("solution_dependent_capacitor_increment_available "))
             .map(|row| {
-                if row.starts_with(TEXT_HEADER_PREFIX) {
-                    format!("{TEXT_HEADER_PREFIX}54")
-                } else if row.starts_with("tline_state ")
-                    || row.starts_with("solution_dependent_capacitor_state 1 ")
-                {
+                if row.starts_with("tline_state ") {
                     row.rsplit_once(' ').unwrap().0.to_string()
                 } else {
                     row.to_string()
