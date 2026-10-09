@@ -962,7 +962,7 @@ pub(super) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
                     pos_indices
                         .iter()
                         .chain(neg_indices)
-                        .map(|value| Pending::Expression(value)),
+                        .map(Pending::Expression),
                 );
             }
             Expression::BranchAccess(BranchAccess::Branch { index, .. }) => {
