@@ -26,6 +26,7 @@ pub fn execution_resource_policy_blocker(
             | AnalysisSpec::Tf { .. }
             | AnalysisSpec::Disto { .. }
             | AnalysisSpec::DcMismatch { .. }
+            | AnalysisSpec::Soa { .. }
     ) {
         return None;
     }

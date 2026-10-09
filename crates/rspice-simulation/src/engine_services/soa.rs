@@ -3,7 +3,7 @@
 //! Compares simulated device stress against the configured limits,
 //! and reports every violation with the instance and the margin.
 
-use super::{is_ground_like, normalize_voltage_signal_name, parse_runner_netlist_with_abort};
+use super::{is_ground_like, normalize_voltage_signal_name};
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use crate::soa_duration::finalize_soa_durations;
 use rspice_core::Value;
@@ -15,6 +15,7 @@ use rspice_results::safety::{
     SoADefinition, SoAEvaluation, SoALimit, SoAManager, SoAParameter, SoAViolation, SoaVoltageBasis,
 };
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::Path;
 
 mod model_ratings;
@@ -159,7 +160,7 @@ pub struct SoaData {
 /// Run SOA analysis with default configuration and no source path.
 ///
 /// Test-only. The shipping path is
-/// [`run_soa_analysis_with_config_and_source_path_and_abort`], which the device
+/// [`run_soa_analysis_with_context`], which the device
 /// spec calls with the configuration the user set.
 #[cfg(test)]
 pub fn run_soa_analysis_with_abort(
@@ -177,19 +178,42 @@ pub fn run_soa_analysis_with_abort(
 /// Run explicitly configured SOA analysis with source-path resolution and
 /// cooperative cancellation through parsing, transient solving, and every
 /// device/time-point check.
+#[cfg(test)]
 pub fn run_soa_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &SoaRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<SoaData> {
+    run_soa_analysis_with_context(
+        netlist_text,
+        config,
+        super::ServiceContext::with_defaults(source_path, abort),
+    )
+}
+
+/// Execute SOA under the caller's source, cancellation, and resource policy.
+pub fn run_soa_analysis_with_context(
+    netlist_text: &str,
+    config: &SoaRunConfig,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<SoaData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
-    let mut netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let mut netlist = context.parse(netlist_text)?;
     // The solver evaluates the expanded hierarchy. Register and observe those
     // same concrete instances, including devices inside PDK subcircuits.
-    let flattened = rspice_core::netlist::flatten_netlist_with_models_with_abort(&netlist, abort)
-        .map_err(|error| match error {
+    let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
+        &netlist,
+        rspice_core::netlist::FlattenerConfig {
+            max_depth: context.limits.max_hierarchy_depth,
+            max_elements: context.limits.max_flattened_elements,
+            ..Default::default()
+        },
+        abort,
+    )
+    .map_err(|error| match error {
         rspice_core::netlist::ParseWithAbortError::Aborted => ServiceRunError::Aborted,
         rspice_core::netlist::ParseWithAbortError::Parse(
             rspice_core::netlist::ParseError::ResourceLimit(error),
@@ -202,7 +226,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         .observation
         .validate_selection(&flattened.elements)
         .map_err(ServiceRunError::Failure)?;
-    let engine = rspice_core::engine::Engine::new(super::build_engine_config(&netlist, None));
+    let engine = rspice_core::engine::Engine::new(context.engine_config(&netlist));
     let (layouts, model_limits) =
         terminals::resolve(&netlist, &flattened.elements, config, &engine, abort)?;
     let mut manager = SoAManager::with_thresholds(config.observation.thresholds)
@@ -287,6 +311,27 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
             abort,
         )
         .map_err(|error| ServiceRunError::from_core("SOA transient error", error))?;
+    // Stress traces and violation records can outnumber the transient's own
+    // outputs. Reserve their worst-case scalar footprint before constructing
+    // any per-rule histories, including the axes used by retained waveforms.
+    let channels = resolved
+        .iter()
+        .flat_map(|(_, definition)| &definition.limits)
+        .fold(1usize, |count, limit| {
+            count.saturating_add(
+                1 + 2 * usize::from(limit.current_envelope.is_some())
+                    + 2 * usize::from(limit.power_derating.is_some()),
+            )
+        });
+    let first = result
+        .time
+        .partition_point(|time| *time < config.observation.start_time);
+    let history_budget = reporting::HistoryBudget::reserve(
+        result.time.len() - first,
+        channels,
+        registered_rules,
+        context.limits,
+    )?;
     // Solver quality describes the full source solve, including startup.
     let convergence = rspice_results::convergence_quality::TransientConvergenceEvidence::capture(
         engine.convergence_quality(),
@@ -579,13 +624,7 @@ pub fn run_soa_analysis_with_config_and_source_path_and_abort(
         &reporting_options,
         config.observation.start_time,
         engine.config().resource_limits,
-        1 + stress_history
-            .iter()
-            .map(|trace| {
-                1 + 2 * usize::from(trace.envelope.is_some())
-                    + 2 * usize::from(trace.derating.is_some())
-            })
-            .sum::<usize>(),
+        history_budget,
         abort,
     )?;
     Ok(SoaData {
@@ -688,6 +727,36 @@ mod tests {
         let result = run_soa_analysis_with_abort("invalid", &abort);
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
+    }
+
+    #[test]
+    fn soa_reserves_derived_histories_before_the_checker_allocates_them() {
+        let deck = "SOA budget\nVg g 0 1\nVd d 0 1\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.end\n";
+        let config = SoaRunConfig {
+            stop_time: 1e-6,
+            step_time: 1e-7,
+            ..Default::default()
+        };
+        let context = super::super::ServiceContext::with_defaults(None, &NoAbort);
+        let full = run_soa_analysis_with_context(deck, &config, context).unwrap();
+        assert_eq!(full.stress_history.len(), 2);
+        // Two stress columns plus the count column need two scalars apiece
+        // for their retained time/value pairs, one common axis, and up to
+        // two three-scalar event records per sample: 13 values per point.
+        let mut limits = context.limits;
+        limits.max_result_values = full.time.len() * 12;
+        let error = run_soa_analysis_with_context(
+            deck,
+            &config,
+            super::super::ServiceContext { limits, ..context },
+        )
+        .unwrap_err();
+        let ServiceRunError::ResourceLimit(error) = error else {
+            panic!("expected derived history budget refusal, got {error:?}");
+        };
+        assert_eq!(error.resource, rspice_core::ResourceKind::ResultValues);
+        assert_eq!(error.requested, full.time.len() * 13);
+        assert_eq!(error.limit, limits.max_result_values);
     }
 
     #[test]

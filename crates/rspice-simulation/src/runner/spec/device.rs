@@ -57,8 +57,7 @@ pub(super) fn run_device_spec(
                 check_vce_max,
                 max_vce,
             },
-            source_path,
-            abort,
+            context,
         ),
         // Dispatched by the whole specification rather than destructured
         // here: the card is written by the one writer the Analyses page also
@@ -292,16 +291,11 @@ fn run_optimization(
 fn run_soa(
     netlist: &str,
     cfg: svc_runner::SoaRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_soa_analysis_with_config_and_source_path_and_abort(
-            netlist,
-            &cfg,
-            source_path,
-            abort,
-        )
+        svc_runner::run_soa_analysis_with_context(netlist, &cfg, context)
     })?;
     let mut waveforms = HashMap::new();
     super::ensure_not_aborted(abort)?;

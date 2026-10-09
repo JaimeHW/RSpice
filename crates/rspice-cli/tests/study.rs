@@ -518,6 +518,18 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
             }}),
             false,
         ),
+        (
+            "soa",
+            "SOA policy\nVg g 0 1\nVd d 0 1\nM1 d g 0 0 NM\n.model NM NMOS LEVEL=1\n.end\n",
+            json!({"Soa": {
+                "stop_time": 1e-6, "step_time": 1e-7,
+                "check_vgs_max": true, "max_vgs": 1.8,
+                "check_vds_max": true, "max_vds": 3.3,
+                "check_vbe_max": false, "max_vbe": 0.9,
+                "check_vce_max": false, "max_vce": 5.0
+            }}),
+            true,
+        ),
     ];
     for (name, source, analysis, swept) in cases {
         std::fs::write(&circuit, source).unwrap();

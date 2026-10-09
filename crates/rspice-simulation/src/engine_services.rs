@@ -126,7 +126,7 @@ pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 // through `simulation::engine_bridge`, dispatched from `AnalysisConfig`. This
 // module is the RF and advanced layer. Duplicates of all four once sat here
 // unreachable; adding a fifth would mean the same thing again.
-pub use soa::{SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort};
+pub use soa::{SoaRunConfig, run_soa_analysis_with_context};
 pub use sparameter::{SParameterPort, SParameterRunConfig, SParameterSweep};
 pub use sweeps::{
     run_parametric_analysis_with_base_and_source_path_and_abort,

@@ -3,12 +3,49 @@
 use super::*;
 use rspice_core::analysis::transient::TransientOutputProjection;
 
+/// Conservative reservation for the retained axes, stress columns, and up to
+/// one three-scalar violation record per rule per accepted observation.
+#[derive(Clone, Copy)]
+pub(super) struct HistoryBudget {
+    channels: usize,
+    values: usize,
+}
+
+impl HistoryBudget {
+    pub(super) fn reserve(
+        points: usize,
+        channels: usize,
+        rules: usize,
+        limits: rspice_core::ResourceLimits,
+    ) -> ServiceRunResult<Self> {
+        let values = points.saturating_mul(
+            channels
+                .saturating_mul(2)
+                .saturating_add(1)
+                .saturating_add(rules.saturating_mul(3)),
+        );
+        check_values(values, limits)?;
+        Ok(Self { channels, values })
+    }
+}
+
+fn check_values(values: usize, limits: rspice_core::ResourceLimits) -> ServiceRunResult<()> {
+    if values > limits.max_result_values {
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::ResultValues,
+            values,
+            limits.max_result_values,
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn projection(
     time: &[f64],
     options: &rspice_core::netlist::SimulationOptions,
     start: f64,
     limits: rspice_core::ResourceLimits,
-    channels: usize,
+    budget: HistoryBudget,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Option<TransientOutputProjection>> {
     if options.output_interval_schedule.is_none() && options.output_time_points.is_empty() {
@@ -58,21 +95,12 @@ pub(super) fn projection(
             .map_err(ServiceRunError::Failure)?;
     // Both the authoritative observations and the reporting view travel with
     // the result. Charge both to the output budget before allocating columns.
-    let values = time
-        .len()
-        .saturating_mul(channels.saturating_add(1))
-        .saturating_add(
-            requested
-                .len()
-                .saturating_mul(channels.saturating_mul(2).saturating_add(1)),
-        );
-    if values > limits.max_result_values {
-        return Err(ServiceRunError::resource_limit(
-            rspice_core::ResourceKind::ResultValues,
-            values,
-            limits.max_result_values,
-        ));
-    }
+    let values = budget.values.saturating_add(
+        requested
+            .len()
+            .saturating_mul(budget.channels.saturating_mul(2).saturating_add(1)),
+    );
+    check_values(values, limits)?;
     ensure_not_aborted(abort)?;
     Ok(Some(projection))
 }
@@ -89,25 +117,26 @@ mod tests {
         .unwrap()
         .options;
         let time = [0.2, 0.3, 0.55, 1.0];
-        let view = projection(&time, &options, 0.2, Default::default(), 2, &NoAbort)
+        let budget = HistoryBudget::reserve(time.len(), 2, 1, Default::default()).unwrap();
+        let view = projection(&time, &options, 0.2, Default::default(), budget, &NoAbort)
             .unwrap()
             .unwrap();
         assert_eq!(view.times(), &[0.25, 0.9, 1.0]);
         let mut limits = rspice_core::ResourceLimits::default();
         limits.max_result_values = 20;
         assert!(matches!(
-            projection(&time, &options, 0.2, limits, 2, &NoAbort),
+            projection(&time, &options, 0.2, limits, budget, &NoAbort),
             Err(ServiceRunError::ResourceLimit(_))
         ));
         let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         assert!(matches!(
-            projection(&time, &options, 0.2, Default::default(), 2, &abort),
+            projection(&time, &options, 0.2, Default::default(), budget, &abort),
             Err(ServiceRunError::Aborted)
         ));
         let mut invalid = options.clone();
         invalid.output_time_points = vec![0.19];
-        assert!(projection(&time, &invalid, 0.15, Default::default(), 2, &NoAbort).is_err());
+        assert!(projection(&time, &invalid, 0.15, Default::default(), budget, &NoAbort).is_err());
         invalid.output_time_points = vec![f64::NAN];
-        assert!(projection(&time, &invalid, 0.2, Default::default(), 2, &NoAbort).is_err());
+        assert!(projection(&time, &invalid, 0.2, Default::default(), budget, &NoAbort).is_err());
     }
 }

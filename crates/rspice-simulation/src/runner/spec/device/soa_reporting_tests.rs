@@ -39,8 +39,7 @@ fn soa_reporting_preserves_between_sample_violations_through_worker_and_retentio
                 check_vce_max: false,
                 max_vce: 5.0,
             },
-            None,
-            &NoAbort,
+            svc_runner::ServiceContext::with_defaults(None, &NoAbort),
         )
         .unwrap()
     };
