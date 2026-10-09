@@ -666,3 +666,53 @@ fn generated_declarations_reject_invalid_interface_and_cyclic_schemes() {
         assert!(message.contains(expected), "{body}: {message}");
     }
 }
+
+
+#[test]
+fn directly_nested_conditionals_share_the_outer_scope_level() {
+    for selection in [0, 1, 2] {
+        let source = format!(
+            r#"
+module top;
+ parameter integer SELECT={selection};
+ generate if(SELECT==0) begin : chosen reg q=0; end
+ else if(SELECT==1) begin : chosen reg q=1; end
+ else case(SELECT)
+   2: begin : chosen reg q=1; end
+   default: begin : chosen reg q=0; end
+ endcase
+ if(0) wire unused;
+ else if(1) reg anonymous=1;
+ endgenerate
+endmodule
+"#
+        );
+        let names = signal_names(&plan(&source));
+        assert!(names.iter().any(|name| name == "chosen.q"), "{names:?}");
+        assert!(
+            names.iter().any(|name| name == "genblk2.anonymous"),
+            "{names:?}"
+        );
+        assert_eq!(names.len(), 2);
+    }
+    // Direct nesting applies only to conditionals, not a loop's bare body.
+    let names = signal_names(&plan(
+        "module top; genvar i; generate for(i=0;i<1;i=i+1) if(1) reg q=1; endgenerate endmodule",
+    ));
+    assert_eq!(names, ["genblk1[0].genblk1.q"]);
+}
+
+#[test]
+fn generated_scope_names_conflict_even_in_unselected_branches() {
+    for body in [
+        "wire same; generate if(0) begin : same reg q; end endgenerate",
+        "generate if(0) begin : same reg q; end if(1) begin : same reg r; end endgenerate",
+        "generate if(0) begin : first reg q; end else if(0) begin : same reg q; end if(0) begin : same reg r; end endgenerate",
+    ] {
+        let error = compile_error(&format!("module top; {body} endmodule"));
+        assert!(
+            error.contains("conflicts with another declaration"),
+            "{error}"
+        );
+    }
+}

@@ -368,9 +368,11 @@ impl GenerateConstruct {
 /// analysis.
 #[derive(Debug, Clone)]
 pub struct GenerateBlock {
-    /// `begin : name`. Section 12.4.1 requires one on a generate loop, because
-    /// the loop's instances are named by the block and the index.
+    /// Authored block name, or its generated external name after preparation.
     pub name: Option<SmolStr>,
+    /// A bare conditional nested directly inside a conditional shares its scope
+    /// level with that outer construct (VAMS-2023 6.6.2).
+    pub directly_nested: bool,
     pub items: Box<Module>,
     /// Generate constructs written inside this block, in declaration order.
     pub nested: Vec<GenerateConstruct>,

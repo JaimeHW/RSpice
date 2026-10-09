@@ -341,7 +341,8 @@ use super::*;
 // Version 127 preserves implicit-net policy and generated net scopes (HIR 145).
 // Version 128 normalizes explicitly continuous wire storage (HIR 146).
 // Version 129 retains generated local declarations and analog bodies (HIR 147).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 129;
+// Version 130 preserves generated analog order and scope identities (HIR 148).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 130;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

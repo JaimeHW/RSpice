@@ -2676,3 +2676,51 @@ endmodule
         }
     }
 }
+
+
+#[test]
+fn nested_generated_analog_bodies_follow_elaboration_order() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module top(output electrical p,q,r);
+ parameter integer COUNT=2;
+ real value,seed,sampled;
+ genvar i,j;
+ analog initial seed=0;
+ analog value=0;
+ generate for(i=0;i<COUNT;i=i+1) begin : outer
+   analog value=value*10+1;
+   analog initial seed=seed*10+5;
+   for(j=0;j<2;j=j+1) begin : inner
+     analog value=value*10+j+2;
+     analog initial seed=seed*10+j+6;
+   end
+   analog value=value*10+4;
+   analog initial seed=seed*10+8;
+ end endgenerate
+ analog initial seed=seed*10+9;
+ analog begin value=value*10+9; V(p)<+value*1e-8; V(q)<+seed*1e-8; V(r)<+sampled; end
+ initial #0.5 sampled=V(p);
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* analog concatenation after unrolling\nX1 p q r top\nX2 a b c top COUNT=1\n.va \"{}\" top module=top\n.end\n",source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 1.23412349),
+        ("q", 5.67856789),
+        ("r", 1.23412349),
+        ("a", 0.00012349),
+        ("b", 0.00056789),
+        ("c", 0.00012349),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}

@@ -162,9 +162,9 @@ impl Parser<'_> {
         self.expect(TokenKind::LParen)?;
         let condition = self.parse_expression()?;
         self.expect(TokenKind::RParen)?;
-        let then_block = self.parse_generate_block()?;
+        let then_block = self.parse_conditional_generate_block()?;
         let else_block = if self.match_token(TokenKind::Else) {
-            Some(self.parse_generate_block()?)
+            Some(self.parse_conditional_generate_block()?)
         } else {
             None
         };
@@ -203,7 +203,7 @@ impl Parser<'_> {
                         default_span,
                     ));
                 }
-                default = Some(self.parse_generate_block()?);
+                default = Some(self.parse_conditional_generate_block()?);
                 continue;
             }
 
@@ -216,7 +216,7 @@ impl Parser<'_> {
                 }
             }
             self.expect(TokenKind::Colon)?;
-            let block = self.parse_generate_block()?;
+            let block = self.parse_conditional_generate_block()?;
             items.push(GenerateCaseItem {
                 labels,
                 block,
@@ -232,11 +232,19 @@ impl Parser<'_> {
         })))
     }
 
+    fn parse_conditional_generate_block(&mut self) -> Result<GenerateBlock, ParseError> {
+        let directly_nested = matches!(self.current().kind, TokenKind::If | TokenKind::Case);
+        let mut block = self.parse_generate_block()?;
+        block.directly_nested = directly_nested;
+        Ok(block)
+    }
+
     /// `begin [: name] <generate item>* end`, or one bare generate item.
     fn parse_generate_block(&mut self) -> Result<GenerateBlock, ParseError> {
         let start = self.current_span();
         let mut block = GenerateBlock {
             name: None,
+            directly_nested: false,
             items: Box::new(Module::new("", start)),
             nested: Vec::new(),
             span: start,
@@ -331,6 +339,7 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
         unroller.construct(construct, "", &mut expanded)?;
     }
     absorb(module, expanded);
+    scope::sort_analog_items(module);
     Ok(())
 }
 
@@ -364,13 +373,6 @@ fn absorb(module: &mut Module, expanded: Module) {
     ] {
         if let Some(generated) = generated {
             Parser::merge_analog_block(slot, generated);
-            // Generated blocks retain their source location, including relative
-            // ordering with analog statements outside the generate construct.
-            if let Some(block) = slot {
-                block
-                    .statements
-                    .sort_by_key(|statement| scope::analog_span(statement).start);
-            }
         }
     }
 }
@@ -390,6 +392,21 @@ struct Unroller<'a> {
 
 impl Unroller<'_> {
     fn construct(
+        &mut self,
+        construct: &GenerateConstruct,
+        prefix: &str,
+        out: &mut Module,
+    ) -> Result<(), ParseError> {
+        let mut expanded = Module::new("", construct.span());
+        self.construct_items(construct, prefix, &mut expanded)?;
+        // A complete construct is one ordered group. Never sort its repeated
+        // statements by source offset: every loop iteration has the same spans.
+        scope::group_analog_items(&mut expanded, construct.span());
+        absorb(out, expanded);
+        Ok(())
+    }
+
+    fn construct_items(
         &mut self,
         construct: &GenerateConstruct,
         prefix: &str,
@@ -543,6 +560,9 @@ impl Unroller<'_> {
         prefix: &str,
         out: &mut Module,
     ) -> Result<(), ParseError> {
+        let target = out;
+        let mut expanded = Module::new("", block.span);
+        let out = &mut expanded;
         reject_declarations(&block.items)?;
         let local_names = block.items.declared_names();
         let constants_len = self.constants.definitions.len();
@@ -631,6 +651,8 @@ impl Unroller<'_> {
         for nested in &block.nested {
             self.construct(nested, prefix, out)?;
         }
+        scope::sort_analog_items(out);
+        absorb(target, expanded);
         self.constants.definitions.truncate(constants_len);
         self.genvars.truncate(genvars_len);
         self.scope_prefix = previous_prefix;

@@ -216,6 +216,11 @@ and simulation statements retain source ordering and independent state. Ordinary
 parameter and port declarations remain illegal inside a generated block (VAMS-2023
 6.6). HIR 147 / cache record 129 invalidate pre-expansion artifacts. General hierarchical
 references and other unsupported module-item forms remain separate requirements.
+Analog blocks concatenate after elaboration: repeated iterations remain in loop
+order, and nested generated constructs stay between their surrounding authored
+statements. Directly nested conditional generates share the enclosing scope level
+and construct number; conflicting block names diagnose even in unselected branches.
+HIR 148 / cache record 130 invalidate artifacts with earlier ordering or scope names.
 Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
 artifacts produced before scoped implicit-net construction.
 Explicit continuous-discipline `wire`/`tri` declarations allocate only physical

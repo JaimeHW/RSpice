@@ -107,21 +107,7 @@ impl Unroller<'_> {
                 for statement in &mut copy.statements {
                     self.substitute_analog(statement);
                 }
-                // Keep an occurrence's analog statements together when merged
-                // with other occurrences and source-level analog blocks.
-                let span = copy.span;
-                Parser::merge_analog_block(
-                    slot,
-                    AnalogBlock {
-                        statements: vec![AnalogStatement::Block(BlockStmt {
-                            name: None,
-                            variables: Vec::new(),
-                            statements: copy.statements,
-                            span,
-                        })],
-                        span,
-                    },
-                );
+                Parser::merge_analog_block(slot, copy);
             }
         }
     }
@@ -384,5 +370,42 @@ pub(super) fn analog_span(statement: &AnalogStatement) -> Span {
         AnalogStatement::Call(value) => value.span,
         AnalogStatement::Disable(value) => value.span,
         AnalogStatement::Null(span) => *span,
+    }
+}
+
+/// Order authored items within one lexical occurrence, keeping each nested
+/// generate construct together as an already ordered group (VAMS-2023 6.9.1).
+pub(super) fn sort_analog_items(module: &mut Module) {
+    for block in [
+        &mut module.analog_block,
+        &mut module.analog_initial,
+        &mut module.analog_final,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        block
+            .statements
+            .sort_by_key(|statement| analog_span(statement).start);
+    }
+}
+
+pub(super) fn group_analog_items(module: &mut Module, span: Span) {
+    for block in [
+        &mut module.analog_block,
+        &mut module.analog_initial,
+        &mut module.analog_final,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let statements = std::mem::take(&mut block.statements);
+        block.statements.push(AnalogStatement::Block(BlockStmt {
+            name: None,
+            variables: Vec::new(),
+            statements,
+            span,
+        }));
+        block.span = span;
     }
 }

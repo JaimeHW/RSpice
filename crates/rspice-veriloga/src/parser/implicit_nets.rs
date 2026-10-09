@@ -144,47 +144,97 @@ fn constructs(
 ) -> Result<(), ParseError> {
     let mut reserved = reserved.clone();
     for construct in constructs.iter() {
-        let blocks: Vec<_> = match construct {
-            GenerateConstruct::Block(block) => vec![block],
-            GenerateConstruct::Loop(loop_) => vec![&loop_.body],
-            GenerateConstruct::Conditional(conditional) => std::iter::once(&conditional.then_block)
-                .chain(conditional.else_block.as_ref())
-                .collect(),
-            GenerateConstruct::Case(case) => case
-                .items
-                .iter()
-                .map(|item| &item.block)
-                .chain(case.default.as_ref())
-                .collect(),
-        };
-        reserved.extend(blocks.into_iter().filter_map(|block| block.name.clone()));
+        let mut declared = Vec::new();
+        block_names(construct, &mut declared);
+        // Alternatives of one conditional may have the same name. Names from
+        // separate constructs conflict even when their branches are inactive.
+        let mut alternatives = HashSet::new();
+        for (name, span) in declared {
+            if !alternatives.insert(name.clone()) {
+                continue;
+            }
+            if !reserved.insert(name.clone()) {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: "generate scope".into(),
+                        found: format!(
+                            "block name '{name}' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)"
+                        ),
+                    },
+                    span,
+                ));
+            }
+        }
     }
     for (index, construct) in constructs.iter_mut().enumerate() {
-        let mut blocks = Vec::new();
-        match construct {
-            GenerateConstruct::Block(block) => blocks.push(block),
-            GenerateConstruct::Loop(loop_) => blocks.push(&mut loop_.body),
-            GenerateConstruct::Conditional(conditional) => {
-                blocks.push(&mut conditional.then_block);
-                blocks.extend(conditional.else_block.as_mut());
+        name_construct(construct, index + 1, known, &reserved, defaults)?;
+    }
+    Ok(())
+}
+
+fn block_names<'a>(construct: &'a GenerateConstruct, names: &mut Vec<(&'a SmolStr, Span)>) {
+    let blocks: Vec<_> = match construct {
+        GenerateConstruct::Block(block) => vec![block],
+        GenerateConstruct::Loop(value) => vec![&value.body],
+        GenerateConstruct::Conditional(value) => std::iter::once(&value.then_block)
+            .chain(value.else_block.as_ref())
+            .collect(),
+        GenerateConstruct::Case(value) => value
+            .items
+            .iter()
+            .map(|item| &item.block)
+            .chain(value.default.as_ref())
+            .collect(),
+    };
+    for block in blocks {
+        if block.directly_nested {
+            for nested in &block.nested {
+                block_names(nested, names);
             }
-            GenerateConstruct::Case(case) => {
-                blocks.extend(case.items.iter_mut().map(|item| &mut item.block));
-                blocks.extend(case.default.as_mut());
-            }
+        } else if let Some(name) = &block.name {
+            names.push((name, block.span));
         }
-        for block in blocks {
-            if block.name.is_none() {
-                let mut number = (index + 1).to_string();
-                while reserved.contains(format!("genblk{number}").as_str()) {
-                    number.insert(0, '0');
-                }
-                block.name = Some(format!("genblk{number}").into());
+    }
+}
+
+fn name_construct(
+    construct: &mut GenerateConstruct,
+    ordinal: usize,
+    known: &HashSet<SmolStr>,
+    reserved: &HashSet<SmolStr>,
+    defaults: &[(u32, bool)],
+) -> Result<(), ParseError> {
+    let blocks: Vec<_> = match construct {
+        GenerateConstruct::Block(block) => vec![block],
+        GenerateConstruct::Loop(value) => vec![&mut value.body],
+        GenerateConstruct::Conditional(value) => std::iter::once(&mut value.then_block)
+            .chain(value.else_block.as_mut())
+            .collect(),
+        GenerateConstruct::Case(value) => value
+            .items
+            .iter_mut()
+            .map(|item| &mut item.block)
+            .chain(value.default.as_mut())
+            .collect(),
+    };
+    for block in blocks {
+        if block.directly_nested {
+            // Direct nesting adds neither a scope nor another construct number.
+            for nested in &mut block.nested {
+                name_construct(nested, ordinal, known, reserved, defaults)?;
             }
-            let locals = scope(&mut block.items, known, defaults)?;
-            let reserved = block.items.declared_names();
-            self::constructs(&mut block.nested, &locals, &reserved, defaults)?;
+            continue;
         }
+        if block.name.is_none() {
+            let mut number = ordinal.to_string();
+            while reserved.contains(format!("genblk{number}").as_str()) {
+                number.insert(0, '0');
+            }
+            block.name = Some(format!("genblk{number}").into());
+        }
+        let locals = scope(&mut block.items, known, defaults)?;
+        let reserved = block.items.declared_names();
+        constructs(&mut block.nested, &locals, &reserved, defaults)?;
     }
     Ok(())
 }
