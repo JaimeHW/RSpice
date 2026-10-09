@@ -239,6 +239,7 @@ fn main() -> ExitCode {
         Commands::Run(args) => commands::run(args, &config, cli.verbose, cli.quiet),
         Commands::Health(args) => commands::health(args, &config, cli.verbose, cli.quiet),
         Commands::Capabilities(args) => commands::capabilities::execute(args, cli.quiet),
+        Commands::Study(args) => commands::study::execute(args, &config, cli.quiet),
         Commands::Info(args) => commands::info(args, &config, cli.verbose, cli.quiet),
         Commands::Models(args) => commands::models(args, cli.verbose, cli.quiet),
         Commands::CompileVa(args) => commands::compile_va(args, &config, cli.verbose, cli.quiet),

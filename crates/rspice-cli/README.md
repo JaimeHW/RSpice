@@ -34,6 +34,65 @@ includes resolve against the working directory. Every flag is in
 `rspice <command> --help`; what follows is the behaviour a flag list does not
 show.
 
+## Preparing a structured study
+
+`rspice study check study.json` validates a version-1 JSON study, its captured
+circuit sources, typed settings, and dependency graph without running a solver.
+`rspice study plan study.json --json` additionally reports the prepared task order,
+stable instance IDs, configuration digests, source digest, and snapshot digest.
+Both commands support `--json` and `--timeout SECONDS`; an explicit JSON request
+still produces output under `--quiet`. A validation failure returns a nonzero
+status and a `valid: false` document. Parser diagnostics retain included-file
+paths and line numbers; legacy syntax errors carry the file path in their message.
+
+```json
+{
+  "schema_version": 1,
+  "id": "54dac9d3-e7c4-46d3-b2ae-9db058426b19",
+  "circuit": { "path": "circuits/divider.cir" },
+  "tasks": [
+    { "id": "bias", "analysis": "DcOp" },
+    {
+      "id": "response",
+      "depends_on": ["bias"],
+      "analysis": {
+        "Ac": {
+          "start_freq": 1.0,
+          "stop_freq": 1000000.0,
+          "points_per_unit": 20,
+          "sweep": "Decade"
+        }
+      }
+    }
+  ]
+}
+```
+
+The nonzero study UUID namespaces task identities. Keep it and each task's `id`
+when editing settings or labels. Task names are case-sensitive and contain
+1–128 ASCII letters, digits, dots, underscores, or hyphens. Dependencies name
+tasks explicitly. Array order breaks ties between independent tasks; prerequisites
+always precede consumers. Unknown fields, repeated task names, missing or cyclic
+dependencies, and unhonorable task-specific numerical settings are errors.
+
+`circuit.path` is relative to the study file; optional
+`circuit.include_search_paths` entries are relative to the circuit directory.
+Configured include/library paths also participate. Study input must be a file,
+so there is an explicit base for relative paths. The circuit contains devices,
+models, options, measurements, and save directives; analysis cards and control
+scripts are rejected because the study owns the task graph. Includes and library
+sections are captured during preparation. The study's `numeric` defaults apply
+to analyses that consume them, and each task's `numeric` record overrides them.
+Study requests and circuit options own solver settings; `.rspicerc` simulation
+defaults belong to the existing `run` command. Resource configuration bounds
+study/source ingestion and preparation.
+
+The typed analysis representation is shared with application execution.
+PAC/PXF/PNOISE/PSTB additionally require a matching `periodic` object containing
+`kind` and complete typed `settings`. Structured sweep settings and `study run`
+are not exposed yet. Successful preparation is not evidence of convergence or
+numerical qualification.
+
 ## Inspecting a netlist
 
 `info --models` includes each model's type and parameters, preserving numeric,

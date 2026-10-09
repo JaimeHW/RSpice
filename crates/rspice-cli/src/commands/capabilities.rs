@@ -46,6 +46,7 @@ pub fn execute(args: CapabilitiesArgs, quiet: bool) -> Result<(), CliError> {
         }
     }
     crate::console::line(format_args!("Additional workflows:"))?;
+    crate::console::line(format_args!("  study_files: partial — {STUDY_SUPPORT}"))?;
     for (name, reason) in WORKFLOW_GAPS {
         crate::console::line(format_args!("  {name}: unsupported — {reason}"))?;
     }
@@ -152,11 +153,9 @@ fn mapping(status: MappingStatus) -> Value {
     })
 }
 
-const WORKFLOW_GAPS: [(&str, &str); 6] = [
-    (
-        "study_files",
-        "No structured headless study-file command is exposed yet.",
-    ),
+const STUDY_SUPPORT: &str = "study check and study plan validate version 1 typed task graphs; study execution and structured sweep settings are not exposed yet.";
+
+const WORKFLOW_GAPS: [(&str, &str); 5] = [
     (
         "saved_result_processing",
         "Saved results can be converted and compared, but not remeasured, transformed, or plotted by a standalone command.",
@@ -214,7 +213,7 @@ fn report() -> Value {
             })
         })
         .collect();
-    let workflows: Vec<_> = WORKFLOW_GAPS
+    let mut workflows: Vec<_> = WORKFLOW_GAPS
         .iter()
         .map(|(id, reason)| {
             json!({
@@ -223,6 +222,10 @@ fn report() -> Value {
             })
         })
         .collect();
+    workflows.insert(
+        0,
+        json!({ "id": "study_files", "support": Support::partial(STUDY_SUPPORT) }),
+    );
     json!({
         "schema": "rspice.capabilities",
         "schema_version": 1,

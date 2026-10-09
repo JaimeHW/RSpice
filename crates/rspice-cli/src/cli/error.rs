@@ -292,6 +292,13 @@ pub enum CliError {
         suggestion: Option<String>,
     },
 
+    #[error("Invalid study {path}: {message}")]
+    StudyInput {
+        path: PathBuf,
+        message: String,
+        line: Option<usize>,
+    },
+
     #[error("Control script failed at {origin}: {source}")]
     ControlScriptError {
         #[source]
@@ -434,7 +441,9 @@ impl CliError {
             CliError::SimulationError { .. } => {
                 Category::Engine(SimulationErrorCategory::Simulation)
             }
-            CliError::ParseError { .. } | CliError::AddResistorsMaterialization { .. } => {
+            CliError::ParseError { .. }
+            | CliError::StudyInput { .. }
+            | CliError::AddResistorsMaterialization { .. } => {
                 Category::Engine(SimulationErrorCategory::Netlist)
             }
             CliError::ResourceLimit { .. } => {
@@ -569,6 +578,12 @@ impl CliError {
             Self::InputReadError { .. } => ErrorDetails::new("input_read_error", category, true),
             Self::ParseError { line, .. } => {
                 let mut details = ErrorDetails::new("parse_error", category, false);
+                details.line = *line;
+                details
+            }
+            Self::StudyInput { path, line, .. } => {
+                let mut details = ErrorDetails::new("study.invalid_input", category, false);
+                details.path = Some(path.display().to_string());
                 details.line = *line;
                 details
             }

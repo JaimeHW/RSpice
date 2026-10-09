@@ -5411,6 +5411,7 @@ dependencies = [
  "rspice-core",
  "rspice-formats",
  "rspice-output",
+ "rspice-simulation",
  "rspice-veriloga",
  "rspice-veriloga-runtime",
  "rustyhdf5",

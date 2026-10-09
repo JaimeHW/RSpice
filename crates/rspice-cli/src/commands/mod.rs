@@ -32,6 +32,7 @@ mod report_identity;
 mod result_signal;
 pub mod run;
 mod run_signals;
+pub mod study;
 mod touchstone_name;
 pub(crate) mod vcd_io;
 pub(crate) mod waveform_io;
