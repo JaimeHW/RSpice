@@ -57,31 +57,40 @@ pub(crate) fn digest_with_cards(base: ContentDigest, cards: &[String]) -> Conten
 /// Queue order, so two FFT instances on one transient produce a stable deck.
 /// Called before dependency bindings are taken: a bound card changes the
 /// producer's config digest, and a binding freezes that digest.
-pub(crate) fn attach_bound_observation_cards(tasks: &mut [PreparedTask]) {
-    let mut carried: Vec<(usize, String)> = Vec::new();
+pub(crate) fn attach_bound_observation_cards(
+    tasks: &mut [PreparedTask],
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> crate::error::ServiceRunResult<()> {
+    use crate::error::ensure_not_aborted;
+    let mut carried = std::collections::BTreeMap::<usize, Vec<String>>::new();
+    let mut transient_positions = std::collections::HashMap::new();
+    for (index, task) in tasks.iter().enumerate() {
+        ensure_not_aborted(abort)?;
+        if matches!(task.queued_analysis().spec, AnalysisSpec::Transient { .. }) {
+            transient_positions.insert(task.instance_id(), index);
+        }
+    }
     for task in tasks.iter() {
+        ensure_not_aborted(abort)?;
         let AnalysisSpec::Fft { .. } = task.queued_analysis().spec else {
             continue;
         };
         let card = task.queued_analysis().analysis_line.clone();
         for dependency in task.dependencies() {
-            if let Some(producer) = tasks.iter().position(|candidate| {
-                candidate.instance_id() == *dependency
-                    && matches!(
-                        candidate.queued_analysis().spec,
-                        AnalysisSpec::Transient { .. }
-                    )
-            }) {
-                carried.push((producer, card.clone()));
+            ensure_not_aborted(abort)?;
+            if let Some(producer) = transient_positions.get(dependency) {
+                carried.entry(*producer).or_default().push(card.clone());
                 break;
             }
         }
     }
-    for (producer, card) in carried {
+    for (producer, additional) in carried {
+        ensure_not_aborted(abort)?;
         let mut cards = tasks[producer].bound_observation_cards().to_vec();
-        cards.push(card);
+        cards.extend(additional);
         tasks[producer].with_bound_observation_cards(cards);
     }
+    Ok(())
 }
 
 /// Splice each carrying task's cards into that task's deck, and give every

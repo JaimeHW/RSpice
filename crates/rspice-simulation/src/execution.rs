@@ -5,6 +5,7 @@
 //! snapshot's generation-bound permit immediately before dispatch.
 
 mod authorization;
+mod headless_tasks;
 mod permit;
 pub mod preparation;
 #[cfg(test)]
@@ -14,6 +15,7 @@ mod task_preparation;
 
 pub use crate::preparation::{PreparationError, PreparationStage};
 pub use authorization::PreparedRunAuthorization;
+pub use headless_tasks::{HeadlessTaskRequest, prepare_headless_tasks};
 pub use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities, PSS_SPECTRUM_ROLE,
     PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch, SavePolicy, TouchstoneExportPolicy,

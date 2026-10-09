@@ -428,6 +428,11 @@ impl PreparedTask {
         &self.dependencies
     }
 
+    /// Exact producer identities and artifact kinds frozen during preparation.
+    pub fn dependency_bindings(&self) -> &[PreparedDependencyBinding] {
+        &self.dependency_bindings
+    }
+
     /// Export policy captured for this task before point expansion.
     pub fn touchstone_export_policy(&self) -> Option<&TouchstoneExportPolicy> {
         self.touchstone_export.as_ref()

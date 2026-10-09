@@ -324,7 +324,8 @@ where
     if !errors.is_empty() {
         return Err(errors);
     }
-    bind_prepared_task_dependencies(&mut queue)?;
+    bind_prepared_task_dependencies(&mut queue, &rspice_core::NoAbort)
+        .map_err(|error| vec![error.to_string()])?;
     Ok(queue)
 }
 
@@ -333,18 +334,22 @@ where
 /// Observation cards are attached before producer digests are captured.
 pub(crate) fn bind_prepared_task_dependencies(
     queue: &mut [PreparedTask],
-) -> Result<(), Vec<String>> {
+    abort: &dyn rspice_core::abort_signal::AbortSignal,
+) -> crate::error::ServiceRunResult<()> {
+    use crate::error::{ServiceRunError, ensure_not_aborted};
     let mut errors = Vec::new();
     // Before the producer identities are taken, because attaching a
     // card to a transient changes that transient's payload digest —
     // and the bindings below capture the digest a dependent must see.
     // A `.fft` card makes every requested sample time a solver stop,
     // so it is part of the solve it rides on, not an observation of it.
-    bound_cards::attach_bound_observation_cards(queue);
+    bound_cards::attach_bound_observation_cards(queue, abort)?;
     let producer_identities = queue
         .iter()
-        .map(|task| {
-            (
+        .enumerate()
+        .map(|(index, task)| {
+            ensure_not_aborted(abort)?;
+            Ok((
                 task.instance_id(),
                 (
                     task.source_revision(),
@@ -366,11 +371,14 @@ pub(crate) fn bind_prepared_task_dependencies(
                             ..
                         }
                     ),
+                    index,
                 ),
-            )
+            ))
         })
-        .collect::<HashMap<_, _>>();
-    for task in queue.iter_mut() {
+        .collect::<crate::error::ServiceRunResult<HashMap<_, _>>>()?;
+    let mut all_bindings = Vec::with_capacity(queue.len());
+    for task in queue.iter() {
+        ensure_not_aborted(abort)?;
         // The kinds this task's request admits, in preference order.
         // A periodic small-signal request whose carrier is the
         // preceding periodic solve admits either family, and the one
@@ -380,54 +388,55 @@ pub(crate) fn bind_prepared_task_dependencies(
             &task.queued_analysis().spec_options,
         );
         if required_kinds.is_empty() {
+            all_bindings.push(Vec::new());
             continue;
         }
-        let producers = task
-            .dependencies()
-            .iter()
-            .filter_map(|dependency| {
-                let (revision, config_digest, transient, pss, hb, op, qpss) =
-                    producer_identities.get(dependency)?;
-                let kind = required_kinds.iter().copied().find(|kind| match kind {
-                    ExecutionArtifactKind::TransientTrajectory => *transient,
-                    ExecutionArtifactKind::PeriodicState => *pss,
-                    ExecutionArtifactKind::HbState => *hb,
-                    ExecutionArtifactKind::QpssState => *qpss,
-                    ExecutionArtifactKind::DcOperatingPointSeed => *op,
-                })?;
-                Some(match kind {
-                    ExecutionArtifactKind::TransientTrajectory => {
-                        PreparedDependencyBinding::transient_trajectory(
-                            *dependency,
-                            *revision,
-                            *config_digest,
-                        )
-                    }
-                    ExecutionArtifactKind::PeriodicState => {
-                        PreparedDependencyBinding::periodic_state(
-                            *dependency,
-                            *revision,
-                            *config_digest,
-                        )
-                    }
-                    ExecutionArtifactKind::QpssState => PreparedDependencyBinding::qpss_state(
+        let mut producers = Vec::new();
+        for dependency in task.dependencies() {
+            ensure_not_aborted(abort)?;
+            let Some((revision, config_digest, transient, pss, hb, op, qpss, _)) =
+                producer_identities.get(dependency)
+            else {
+                continue;
+            };
+            let Some(kind) = required_kinds.iter().copied().find(|kind| match kind {
+                ExecutionArtifactKind::TransientTrajectory => *transient,
+                ExecutionArtifactKind::PeriodicState => *pss,
+                ExecutionArtifactKind::HbState => *hb,
+                ExecutionArtifactKind::QpssState => *qpss,
+                ExecutionArtifactKind::DcOperatingPointSeed => *op,
+            }) else {
+                continue;
+            };
+            producers.push(match kind {
+                ExecutionArtifactKind::TransientTrajectory => {
+                    PreparedDependencyBinding::transient_trajectory(
                         *dependency,
                         *revision,
                         *config_digest,
-                    ),
-                    ExecutionArtifactKind::HbState => {
-                        PreparedDependencyBinding::hb_state(*dependency, *revision, *config_digest)
-                    }
-                    ExecutionArtifactKind::DcOperatingPointSeed => {
-                        PreparedDependencyBinding::dc_operating_point_seed(
-                            *dependency,
-                            *revision,
-                            *config_digest,
-                        )
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
+                    )
+                }
+                ExecutionArtifactKind::PeriodicState => PreparedDependencyBinding::periodic_state(
+                    *dependency,
+                    *revision,
+                    *config_digest,
+                ),
+                ExecutionArtifactKind::QpssState => {
+                    PreparedDependencyBinding::qpss_state(*dependency, *revision, *config_digest)
+                }
+                ExecutionArtifactKind::HbState => {
+                    PreparedDependencyBinding::hb_state(*dependency, *revision, *config_digest)
+                }
+                ExecutionArtifactKind::DcOperatingPointSeed => {
+                    PreparedDependencyBinding::dc_operating_point_seed(
+                        *dependency,
+                        *revision,
+                        *config_digest,
+                    )
+                }
+            });
+        }
+        ensure_not_aborted(abort)?;
         if producers.len() != 1 {
             errors.push(format!(
                 "{} must bind exactly one prepared {} task, found {}",
@@ -440,17 +449,36 @@ pub(crate) fn bind_prepared_task_dependencies(
                 producers.len()
             ));
         } else {
-            task.set_dependency_bindings(producers);
+            for binding in &producers {
+                let producer_index = producer_identities[&binding.producer_instance_id()].7;
+                if let Err(error) =
+                    crate::prepared_dependency::validate_prepared_dependency_contract_with_options(
+                        &task.queued_analysis().spec,
+                        &task.queued_analysis().spec_options,
+                        &queue[producer_index].queued_analysis().spec,
+                    )
+                {
+                    errors.push(format!(
+                        "{}: {error}",
+                        task.queued_analysis().spec.run_type().display_name()
+                    ));
+                }
+            }
         }
+        all_bindings.push(producers);
     }
     if errors.is_empty() {
+        for (task, bindings) in queue.iter_mut().zip(all_bindings) {
+            ensure_not_aborted(abort)?;
+            task.set_dependency_bindings(bindings);
+        }
         Ok(())
     } else {
-        Err(errors)
+        Err(ServiceRunError::Failure(errors.join("; ")))
     }
 }
 
-fn executes_via_spec(spec: &AnalysisSpec) -> bool {
+pub(super) fn executes_via_spec(spec: &AnalysisSpec) -> bool {
     matches!(
         spec,
         AnalysisSpec::Tf { .. }
