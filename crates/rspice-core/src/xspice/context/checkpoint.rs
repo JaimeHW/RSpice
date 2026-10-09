@@ -332,6 +332,12 @@ macro_rules! port_size {
 }
 
 impl CmContext {
+    pub(crate) fn has_owned_runtime_checkpoint_state(&self) -> bool {
+        self.has_serializable_checkpoint_state()
+            || !self.transient_histories.is_empty()
+            || !self.inertial_outputs.is_empty()
+    }
+
     fn portable_boundary(&self) -> Result<(), String> {
         if self.resource_transaction.is_some()
             || !self.resources.values.is_empty()

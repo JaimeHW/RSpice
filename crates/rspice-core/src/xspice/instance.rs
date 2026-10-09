@@ -12,6 +12,8 @@ use super::{
 };
 use crate::{Complex64, Value};
 
+pub(crate) mod checkpoint;
+
 /// The non-scalar instance parameters a code model can be given. Each list is
 /// keyed by parameter name, and passing five of them positionally made a
 /// swapped pair a runtime type error inside the model instead of a compile
@@ -542,7 +544,7 @@ fn validate_port_connection(
 
 /// Element of an analog vector connection whose resolved input type must be
 /// preserved for current-sense and named-branch inputs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum AnalogInputConnection {
     /// Single-ended voltage-style input.
     Node(usize),
@@ -714,7 +716,7 @@ impl AnalogInputConnection {
 }
 
 /// Resolved digital event-node reference with ngspice-compatible inversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct DigitalPortConnection {
     pub node: usize,
     pub inverted: bool,
@@ -761,7 +763,7 @@ struct EventInputSignatureEntry {
 }
 
 /// Connection for a single port
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum PortConnection {
     /// Analog node connection (circuit node index, 0 = ground)
     Analog(usize),
@@ -2264,7 +2266,6 @@ impl XspiceInstance {
     /// Enumerate original digital output identities, including vector element
     /// indices and inverted connections. Inversion belongs to schedule_events;
     /// an observer or an input alias is never an additional driver.
-    #[cfg(feature = "veriloga")]
     pub(crate) fn for_each_digital_output_driver(
         &self,
         visit: impl FnMut(super::event_scheduler::EventTarget),
@@ -2272,7 +2273,6 @@ impl XspiceInstance {
         self.for_each_typed_event_output_driver(false, visit);
     }
 
-    #[cfg(feature = "veriloga")]
     pub(crate) fn for_each_real_output_driver(
         &self,
         visit: impl FnMut(super::event_scheduler::EventTarget),
@@ -2280,7 +2280,6 @@ impl XspiceInstance {
         self.for_each_typed_event_output_driver(true, visit);
     }
 
-    #[cfg(feature = "veriloga")]
     fn for_each_typed_event_output_driver(
         &self,
         real: bool,

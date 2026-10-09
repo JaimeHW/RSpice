@@ -92,7 +92,7 @@ impl std::error::Error for CmError {}
 //=============================================================================
 
 /// Port connection type for XSPICE code models
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum PortType {
     /// Single-ended analog voltage (v)
     Voltage,
@@ -145,7 +145,7 @@ impl PortType {
 }
 
 /// Port direction
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum PortDirection {
     /// Input port (read-only)
     In,
@@ -631,8 +631,9 @@ pub enum XspiceCheckpointSupport {
     /// The model has no hidden mutable state beyond parameters and the
     /// accepted MNA solution, so rebuilding and re-evaluating it is sufficient.
     Stateless,
-    /// The model's hidden mutable state is confined to `CmContext` state
-    /// arrays that are represented in transient checkpoint files.
+    /// The model's hidden mutable state is confined to `CmContext`. The
+    /// instance and selected checkpoint format must also support every context
+    /// field in use; this declaration alone does not enable circuit resume.
     Serializable,
     /// The model owns state that is not yet represented in checkpoint files.
     Unsupported { reason: String },

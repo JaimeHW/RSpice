@@ -1,6 +1,6 @@
 use super::*;
 use crate::Value;
-use crate::xspice::{CmError, EvaluationPhase};
+use crate::xspice::{CmError, EvaluationPhase, XspiceCheckpointSupport};
 
 //=============================================================================
 // Basic Gates
@@ -609,6 +609,10 @@ macro_rules! define_gate {
                 gate_params()
             }
 
+            fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+                XspiceCheckpointSupport::Serializable
+            }
+
             fn can_skip_unchanged_event_inputs(&self) -> bool {
                 true
             }
@@ -733,6 +737,10 @@ impl CodeModel for DigitalNand {
         gate_params()
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
     }
@@ -792,6 +800,10 @@ impl CodeModel for DigitalNor {
         DigitalNand.parameters()
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
     }
@@ -845,6 +857,10 @@ impl CodeModel for DigitalXnor {
     }
     fn parameters(&self) -> &[ParamSpec] {
         DigitalNand.parameters()
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
     }
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
@@ -911,6 +927,10 @@ impl CodeModel for DigitalInverter {
         inverter_params()
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
     }
@@ -964,6 +984,10 @@ impl CodeModel for DigitalBuffer {
     }
     fn parameters(&self) -> &[ParamSpec] {
         gate_params()
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
     }
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
@@ -1031,6 +1055,10 @@ impl CodeModel for DigitalTristate {
         tristate_params()
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
     }
@@ -1090,6 +1118,10 @@ impl CodeModel for DigitalPullup {
         digital_pull_resistor_parameters()
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
     }
@@ -1123,6 +1155,10 @@ impl CodeModel for DigitalPulldown {
     }
     fn parameters(&self) -> &[ParamSpec] {
         digital_pull_resistor_parameters()
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
     }
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
@@ -1262,6 +1298,10 @@ impl CodeModel for DigitalOpenCollector {
         open_collector_params()
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
     }
@@ -1314,6 +1354,10 @@ impl CodeModel for DigitalOpenEmitter {
 
     fn parameters(&self) -> &[ParamSpec] {
         open_emitter_params()
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
     }
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
