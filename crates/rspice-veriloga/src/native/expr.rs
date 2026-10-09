@@ -10146,6 +10146,7 @@ mod tests {
             span,
         };
         let analyzed = AnalyzedModule {
+            elaboration_warnings: Vec::new(),
             physical_nodes: Default::default(),
             hierarchical_connections: false,
             name: module_name.into(),

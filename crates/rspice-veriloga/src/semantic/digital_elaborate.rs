@@ -128,6 +128,7 @@ pub(crate) fn elaborate_digital_hierarchy(
         root_source,
         root,
         &mut elaborator.connections.specializations,
+        &mut elaborator.connections.warnings,
     )?;
     let resolved_root = elaborator.connections.resolved_types.get("").cloned();
     let (root_source, root) = resolved_root
@@ -149,6 +150,7 @@ pub(crate) fn elaborate_digital_hierarchy(
         .unwrap_or((root_source, root));
     elaborator.append_instances(root_source, Scope::for_root(root, root_source)?)?;
     Ok(ElaboratedHierarchy {
+        warnings: elaborator.connections.warnings,
         root: prepared_root,
         instances: elaborator.instances,
         occurrences: elaborator.occurrences,
@@ -157,6 +159,7 @@ pub(crate) fn elaborate_digital_hierarchy(
 
 /// One specialization per occurrence, shared by both domain lowerings.
 pub(super) struct ElaboratedHierarchy {
+    pub warnings: Vec<super::SemanticWarning>,
     pub root: Option<std::sync::Arc<SpecializedModule>>,
     pub instances: Vec<ElaboratedDigitalInstance>,
     pub occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
@@ -532,6 +535,7 @@ impl DigitalElaborator<'_> {
                 child_source,
                 child,
                 &mut self.connections.specializations,
+                &mut self.connections.warnings,
             )?;
             for (relative, module) in resolved {
                 let name = if relative.is_empty() {

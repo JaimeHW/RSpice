@@ -60,6 +60,7 @@ pub(crate) fn elaborate_executable_module<'a>(
         .map(|module| (&module.source, &module.analyzed))
         .unwrap_or((root, selected));
     let mut elaborator = HierarchyElaborator::new(analyzed, source_modules, selected.clone());
+    elaborator.flattened.elaboration_warnings.extend(hierarchy.warnings);
     elaborator.shared_occurrences = hierarchy.occurrences;
     elaborator.digital_frames = hierarchy
         .instances

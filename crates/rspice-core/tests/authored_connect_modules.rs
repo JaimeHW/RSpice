@@ -2382,3 +2382,64 @@ connectrules chosen; connect drive; endconnectrules
         );
     }
 }
+
+#[test]
+fn inherited_digital_disciplines_select_loaded_converters_across_arrays_and_hierarchy() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+discipline low; domain discrete; potential Voltage; enddiscipline
+discipline high; domain discrete; potential Temperature; enddiscipline
+`default_discipline low
+module low_source(output wreal value);
+ real level=2.5; initial #1 level=4.5; assign value=level;
+endmodule
+`default_discipline high
+module high_source(output wreal value);
+ real level=3.5; initial #1 level=5.5; assign value=level;
+endmodule
+module bank(output wreal [3:2] a,b);
+ parameter integer BASE=7;
+ wreal first[BASE:BASE+1],second[BASE:BASE+1];
+ low_source low_a(first[BASE]),low_b(first[BASE+1]);
+ high_source high_a(second[BASE]),high_b(second[BASE+1]);
+ assign a[3]=first[BASE]; assign a[2]=first[BASE+1];
+ assign b[3]=second[BASE]; assign b[2]=second[BASE+1];
+ // Inputs are structural connections so the bus acquires its discipline.
+ low_observer l({a[3],a[2]}); high_observer h({b[3],b[2]});
+endmodule
+module low_observer(input low wreal [1:0] values); endmodule
+module high_observer(input high wreal [1:0] values); endmodule
+module load(input electrical [1:0] a,output electrical p);
+ analog begin I(a[1])<+V(a[1])/1000; I(a[0])<+V(a[0])/1000; V(p)<+V(a[1])+V(a[0]); end
+endmodule
+module top(output electrical p,q);
+ wire [1:0] x,y;
+ bank #(.BASE(-3)) nested(x,y);
+ load left(x,p),right(y,q);
+endmodule
+connectmodule low_gain(input low wreal value,output electrical a);
+ analog I(a)<+(V(a)-2*value)/1000;
+endmodule
+connectmodule high_gain(input high wreal value,output electrical a);
+ analog I(a)<+(V(a)-3*value)/1000;
+endmodule
+connectrules chosen; connect low_gain; connect high_gain; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* inherited disciplines\nX1 p q top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+    for (time, p, q) in [(0.5e-9, 5.0, 10.5), (1.4e-9, 9.0, 16.5)] {
+        for (node, expected) in [("p", p), ("q", q)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}

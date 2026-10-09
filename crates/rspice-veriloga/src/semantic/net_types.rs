@@ -1,6 +1,7 @@
-//! Resolve real-net types over concrete port-connected occurrences before lowering.
-//! Templates stay immutable: only occurrences whose wire type changes are rebuilt.
+//! Resolve net types and disciplines over concrete port-connected occurrences.
+//! Templates stay immutable: only changed occurrences are rebuilt before lowering.
 mod connections;
+mod disciplines;
 
 use super::digital_elaborate::{
     SpecializationKey, SpecializedModule, check_hierarchy_capacity, digital_subtrees,
@@ -52,21 +53,8 @@ pub(super) fn resolve(
     source: &Module,
     analyzed: &AnalyzedModule,
     specializations: &mut HashMap<SpecializationKey, Arc<SpecializedModule>>,
+    warnings: &mut Vec<super::SemanticWarning>,
 ) -> CompileResult<HashMap<SmolStr, Arc<SpecializedModule>>> {
-    let has_real =
-        |module: &AnalyzedModule| {
-            module.digital.signals.iter().any(
-                |signal| matches!(signal.class, DigitalSignalClass::Net(kind) if kind.is_real()),
-            )
-        };
-    if !has_real(analyzed)
-        && !file.modules.values().any(has_real)
-        && !sources
-            .values()
-            .any(|module| module.generate_template.is_some())
-    {
-        return Ok(HashMap::new());
-    }
     let mut required = digital_subtrees(file, sources);
     if !analyzed.digital.signals.is_empty() {
         required.insert(source.name.clone());
@@ -180,16 +168,7 @@ pub(super) fn resolve(
             });
         }
     }
-    if !nets.iter().any(|net| net.kind.is_real()) {
-        // Selected array cells below can still supply a real type.
-        if !occurrences.iter().any(|occurrence| {
-            occurrence.module.analyzed.digital.signals.iter().any(
-                |signal| matches!(signal.class, DigitalSignalClass::Net(kind) if kind.is_real()),
-            )
-        }) {
-            return Ok(HashMap::new());
-        }
-    }
+    let inherited = disciplines::resolve(file, sources, &occurrences, specializations, warnings)?;
     let mut parents: Vec<_> = (0..nets.len()).collect();
     let mut selected_types = Vec::new();
     let mut selected_links = Vec::new();
@@ -300,10 +279,17 @@ pub(super) fn resolve(
         }
     }
     let mut resolved = HashMap::new();
-    for (index, types) in promotions {
+    let changed: std::collections::BTreeSet<_> =
+        promotions.keys().chain(inherited.keys()).copied().collect();
+    for index in changed {
         let occurrence = &occurrences[index];
         let mut source = occurrence.module.source.clone();
-        promote(&mut source, &types);
+        if let Some(types) = promotions.get(&index) {
+            promote(&mut source, types);
+        }
+        if let Some(disciplines) = inherited.get(&index) {
+            disciplines::apply(&mut source, disciplines);
+        }
         let previous = &occurrence.module.analyzed;
         let analyzed = super::hierarchy_connections::analyze_occurrence(
             file,

@@ -994,6 +994,7 @@ impl SemanticAnalyzer {
         self.current_time_scale = module.time_scale;
         self.digital_selector_constants = DigitalConstants::from_module(module);
         let mut analyzed = AnalyzedModule {
+            elaboration_warnings: Vec::new(),
             physical_nodes,
             hierarchical_connections: false,
             name: module.name.clone(),

@@ -6,6 +6,7 @@
 
 mod actual;
 mod compatibility;
+pub(super) use compatibility::net_operands;
 mod inputs;
 mod net_arrays;
 mod packed;
@@ -30,6 +31,7 @@ use std::sync::Arc;
 
 #[derive(Default)]
 pub(super) struct ConnectionModules {
+    pub warnings: Vec<super::SemanticWarning>,
     pub specializations: HashMap<SpecializationKey, Arc<SpecializedModule>>,
     pub prepared: HashMap<(SpecializationKey, SmolStr), Option<Arc<SpecializedModule>>>,
     pub resolved_types: HashMap<SmolStr, Arc<SpecializedModule>>,
@@ -70,6 +72,45 @@ fn error(message: impl Into<String>, span: Span) -> CompileError {
     ))
 }
 
+pub(super) fn declared_discipline(
+    source: &Module,
+    module: &AnalyzedModule,
+    name: &str,
+) -> Option<SmolStr> {
+    source
+        .nets
+        .iter()
+        .filter(|net| net.names.iter().any(|candidate| candidate == name))
+        .find_map(|net| net.discipline.clone())
+        .or_else(|| {
+            source
+                .port_declarations
+                .iter()
+                .find(|port| port.names.iter().any(|candidate| candidate == name))
+                .and_then(|port| port.discipline.clone())
+        })
+        .or_else(|| {
+            module
+                .physical_nodes
+                .real_aliases
+                .get(name)
+                .and_then(|alias| {
+                    source
+                        .nets
+                        .iter()
+                        .filter(|net| net.names.contains(&alias.array))
+                        .find_map(|net| net.discipline.clone())
+                        .or_else(|| {
+                            source
+                                .port_declarations
+                                .iter()
+                                .find(|port| port.names.contains(&alias.array))
+                                .and_then(|port| port.discipline.clone())
+                        })
+                })
+        })
+}
+
 fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endpoint> {
     if let Some(signal) = module
         .digital
@@ -77,38 +118,7 @@ fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endp
         .iter()
         .find(|signal| signal.name == name)
     {
-        let discipline = source
-            .nets
-            .iter()
-            .find(|net| net.names.iter().any(|candidate| candidate == name))
-            .and_then(|net| net.discipline.clone())
-            .or_else(|| {
-                source
-                    .port_declarations
-                    .iter()
-                    .find(|port| port.names.iter().any(|candidate| candidate == name))
-                    .and_then(|port| port.discipline.clone())
-            })
-            .or_else(|| {
-                module
-                    .physical_nodes
-                    .real_aliases
-                    .get(name)
-                    .and_then(|alias| {
-                        source
-                            .nets
-                            .iter()
-                            .find(|net| net.names.contains(&alias.array))
-                            .and_then(|net| net.discipline.clone())
-                            .or_else(|| {
-                                source
-                                    .port_declarations
-                                    .iter()
-                                    .find(|port| port.names.contains(&alias.array))
-                                    .and_then(|port| port.discipline.clone())
-                            })
-                    })
-            })
+        let discipline = declared_discipline(source, module, name)
             .or_else(|| module.default_discipline.clone())
             .unwrap_or_else(|| "logic".into());
         let net_kind = match signal.class {

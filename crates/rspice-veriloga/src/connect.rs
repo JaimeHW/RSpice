@@ -503,6 +503,9 @@ pub struct NetSegment {
     /// ones; both arrive here already reduced to one name, because that is a
     /// conflict the declaring pass can see and this one cannot.
     pub declared: Option<SmolStr>,
+    /// The default in the module that owns this segment. It applies only when
+    /// bottom-up resolution finds no child discipline in the segment's domain.
+    pub default_discipline: Option<SmolStr>,
     /// Annex F.2.1 step 4a: "Any net which is used in digital behavioral code
     /// shall be considered digital."
     pub digital_behavioral: bool,
@@ -515,6 +518,7 @@ impl NetSegment {
         Self {
             name: name.into(),
             declared: None,
+            default_discipline: None,
             value_kind: None,
             digital_behavioral: false,
             children: Vec::new(),
@@ -523,6 +527,11 @@ impl NetSegment {
 
     pub fn declared(mut self, discipline: impl Into<SmolStr>) -> Self {
         self.declared = Some(discipline.into());
+        self
+    }
+
+    pub fn with_default_discipline(mut self, discipline: impl Into<SmolStr>) -> Self {
+        self.default_discipline = Some(discipline.into());
         self
     }
 
@@ -645,6 +654,8 @@ impl Signal {
 /// What resolution produced.
 #[derive(Debug, Clone)]
 pub struct ResolvedSignal {
+    /// Segment that produced each entry of `warnings`, in the same order.
+    pub warning_segments: Vec<usize>,
     /// One entry per segment, in segment order. `None` is section 7.4.4's
     /// legal unknown: a net with no mixed-port connection needs no discipline.
     pub disciplines: Vec<Option<SmolStr>>,
@@ -679,6 +690,7 @@ pub fn resolve_disciplines(
         return Err(ConnectError::DetailResolutionMode);
     }
 
+    let mut warning_segments = Vec::new();
     let mut disciplines: Vec<Option<SmolStr>> = vec![None; signal.segments.len()];
     let mut domains: Vec<Option<Domain>> = vec![None; signal.segments.len()];
     let mut warnings = Vec::new();
@@ -736,8 +748,20 @@ pub fn resolve_disciplines(
             .filter_map(|link| disciplines[link.lower].clone())
             .collect();
 
+        for (ordinal, left) in found.iter().enumerate() {
+            for right in found.iter().skip(ordinal + 1) {
+                if !db.are_compatible(left, right) {
+                    return Err(ConnectError::IncompatibleNetDisciplines {
+                        net: segment.name.clone(),
+                        left: left.clone(),
+                        right: right.clone(),
+                    });
+                }
+            }
+        }
+        let warning_count = warnings.len();
         let resolved = match found.len() {
-            0 => match default_discipline {
+            0 => match segment.default_discipline.as_deref().or(default_discipline) {
                 // "provided their domain is the same as the domain of the net"
                 Some(default) if discipline_domain(db, default) == Some(domain) => {
                     Some(SmolStr::from(default))
@@ -747,6 +771,7 @@ pub fn resolve_disciplines(
             1 => found.iter().next().cloned(),
             _ => table.resolve_list(&found, &segment.name, &mut warnings)?,
         };
+        warning_segments.extend(std::iter::repeat_n(index, warnings.len() - warning_count));
         disciplines[index] = resolved;
     }
 
@@ -755,10 +780,10 @@ pub fn resolve_disciplines(
     // connect through a port to a segment of a different domain). Otherwise
     // this is an error." A port is a connection in both directions, so a
     // segment's parent counts as much as its children do.
-    let mut parent_domain: Vec<Option<Domain>> = vec![None; signal.segments.len()];
+    let mut mixed_parent = vec![false; signal.segments.len()];
     for (index, segment) in signal.segments.iter().enumerate() {
         for link in &segment.children {
-            parent_domain[link.lower] = domains[index];
+            mixed_parent[link.lower] |= domains[index] != domains[link.lower];
         }
     }
     for (index, segment) in signal.segments.iter().enumerate() {
@@ -770,7 +795,7 @@ pub fn resolve_disciplines(
             .children
             .iter()
             .any(|link| domains[link.lower] != own_domain)
-            || parent_domain[index].is_some_and(|domain| Some(domain) != own_domain);
+            || mixed_parent[index];
         if crosses_domain {
             return Err(ConnectError::UnresolvedDiscipline {
                 net: segment.name.clone(),
@@ -779,6 +804,7 @@ pub fn resolve_disciplines(
     }
 
     Ok(ResolvedSignal {
+        warning_segments,
         disciplines,
         domains,
         warnings,

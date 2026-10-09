@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 143 resolves inherited digital-net disciplines before selecting converters.
 /// Version 142 validates port discipline compatibility and retains local branch natures.
 /// Version 141 resolves structural concatenations before real-net port lowering.
 /// Version 140 resolves connected wire/tri net types per concrete HDL occurrence.
@@ -133,7 +134,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 142;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 143;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

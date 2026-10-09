@@ -14,6 +14,37 @@ pub(super) fn check_actual(
     let Some(lower_discipline) = lower.segment.declared.as_deref() else {
         return Ok(());
     };
+    for (name, span) in net_operands(source, module, actual) {
+        let Some(upper) = endpoint(source, module, name) else {
+            continue;
+        };
+        if upper.net_kind.is_some() != lower.net_kind.is_some() {
+            continue;
+        }
+        if let Some(upper_discipline) = upper.segment.declared.as_deref() {
+            file.connect_rules
+                .check_net_compatibility(
+                    &file.disciplines,
+                    upper_discipline,
+                    lower_discipline,
+                    name,
+                )
+                .map_err(|cause| {
+                    error(format!("instance '{path}' port '{port}': {cause}"), span)
+                })?;
+        }
+    }
+    Ok(())
+}
+
+/// Only structural operands connect nets. Computed values and selector operands
+/// retain assignment semantics; a zero replication contributes no connection.
+pub(in crate::semantic) fn net_operands<'a>(
+    source: &Module,
+    module: &AnalyzedModule,
+    actual: &'a Expression,
+) -> Vec<(&'a str, Span)> {
+    let mut operands = Vec::new();
     let mut expressions = vec![actual];
     let mut elements = Vec::new();
     loop {
@@ -31,27 +62,7 @@ pub(super) fn check_actual(
                 // read by the expression. Selectors also do not connect nets.
                 _ => continue,
             };
-            let Some(upper) = endpoint(source, module, name) else {
-                continue;
-            };
-            if upper.net_kind.is_some() != lower.net_kind.is_some() {
-                continue;
-            }
-            if let Some(upper_discipline) = upper.segment.declared.as_deref() {
-                file.connect_rules
-                    .check_net_compatibility(
-                        &file.disciplines,
-                        upper_discipline,
-                        lower_discipline,
-                        name,
-                    )
-                    .map_err(|cause| {
-                        error(
-                            format!("instance '{path}' port '{port}': {cause}"),
-                            expression.span(),
-                        )
-                    })?;
-            }
+            operands.push((name.as_str(), expression.span()));
         } else if let Some(element) = elements.pop() {
             match element {
                 ArrayLiteralElement::Value(value) => expressions.push(value),
@@ -74,5 +85,5 @@ pub(super) fn check_actual(
             break;
         }
     }
-    Ok(())
+    operands
 }

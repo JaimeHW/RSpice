@@ -183,6 +183,14 @@ checks cover authored scalar, array, selected and concatenated net operands befo
 input assignments are prepared. Analog flattening retains each child port's local
 branch discipline while sharing the connected physical node. Schema 142 and core
 cache record 124 invalidate artifacts compiled before these checks.
+Declared digital interconnects without a local discipline now acquire one bottom-up
+from concrete child ports before converter selection. Resolution follows selected
+`resolveto` rules, with each owning module's default used only when there are no
+matching child disciplines. Explicit declarations retain precedence. Scalar, selected,
+array and concatenated connections share this pass, including parameterized generated
+occurrences and authored connect bodies. Ambiguous resolution rules retain the required
+source-order warning in runtime reports and file diagnostics. Schema 143 and cache
+record 125 invalidate artifacts compiled before inherited resolution.
 The existing `output real` variable-port form is an RSpice compatibility extension,
 not the VAMS-2023 real-net port syntax (`wreal`).
 Compatible scalar and complete bus connections to real nets resolve `wire`/`tri`

@@ -1854,3 +1854,161 @@ connectrules supply_limits; connect {parent}, {child} resolveto exclude; endconn
         assert!(error.to_string().contains("resolveto exclude"), "{error}");
     }
 }
+
+const INHERITED_DISCIPLINES: &str = r#"
+discipline low; domain discrete; potential Voltage; enddiscipline
+discipline high; domain discrete; potential Temperature; enddiscipline
+`default_discipline low
+module low_source(output wreal value);
+ assign value=2.5;
+endmodule
+`default_discipline high
+module high_source(output wreal value);
+ assign value=3.5;
+endmodule
+module selected(output wire value);
+ parameter integer MODE=0;
+ generate if (MODE==0) begin : low_arm
+  low_source nested(value);
+ end else begin : high_arm
+  high_source nested(value);
+ end endgenerate
+endmodule
+module load(input electrical a, output electrical p);
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module top(output electrical p,q);
+ parameter integer MODE=0;
+ wire x,y;
+ selected #(.MODE(MODE)) first(x);
+ selected #(.MODE(1-MODE)) second(y);
+ load left(x,p),right(y,q);
+endmodule
+connectmodule low_gain(input low wreal value, output electrical a);
+ analog I(a)<+(V(a)-2*value)/1000;
+endmodule
+connectmodule high_gain(input high wreal value, output electrical a);
+ analog I(a)<+(V(a)-3*value)/1000;
+endmodule
+connectrules chosen; connect low_gain; connect high_gain; endconnectrules
+"#;
+
+#[test]
+fn inherited_disciplines_follow_generated_occurrences_defaults_and_replay() {
+    let compiler = compiler();
+    let artifact = compiler
+        .compile_runtime(INHERITED_DISCIPLINES, Some("top"))
+        .unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("MODE", 1.0)], &NoPipelineControl)
+        .unwrap();
+    for report in [&artifact, &specialized] {
+        report.canonical_ir.validate().unwrap();
+        let rebuilt = compiler
+            .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            rebuilt.canonical_ir.runtime_source_identity()
+        );
+    }
+    // A local declaration wins over inherited resolution and exposes the conflict.
+    let explicit = INHERITED_DISCIPLINES.replace("wire x,y;", "wire high x; wire y;");
+    let error = compiler
+        .compile_runtime(&explicit, Some("top"))
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        error.contains("incompatible disciplines") && error.contains("first"),
+        "{error}"
+    );
+}
+
+#[test]
+fn inherited_resolution_rules_keep_exclusions_unknowns_and_warnings() {
+    let source = r#"
+discipline first; domain discrete; potential Voltage; enddiscipline
+discipline second; domain discrete; potential Voltage; enddiscipline
+module one(output first wreal value); endmodule
+module two(output second wreal value); endmodule
+module load(input electrical a, output electrical p);
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module top(output electrical p);
+ wreal net;
+ one left(net); two right(net); load receiver(net,p);
+endmodule
+connectmodule converter(input first wreal value, output electrical a);
+ analog I(a)<+(V(a)-value)/1000;
+endmodule
+connectrules chosen;
+ connect first,second resolveto first;
+ connect first,second resolveto second;
+ connect converter;
+endconnectrules
+"#;
+    let compiler = compiler();
+    let report = compiler.compile_runtime(source, Some("top")).unwrap();
+    let warnings: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "VA-SEM-DISCIPLINE-RESOLUTION")
+        .collect();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].message.contains("net 'net'") && warnings[0].message.contains("first"));
+    let replay = compiler
+        .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(replay.diagnostics.len(), report.diagnostics.len());
+    for (original, replayed) in report.diagnostics.iter().zip(&replay.diagnostics) {
+        assert_eq!(original.code, replayed.code);
+        assert_eq!(original.message, replayed.message);
+        let span = original.span.as_ref().unwrap();
+        assert_eq!(
+            replayed.byte_start.map(|value| value as u64),
+            Some(u64::from(span.byte_start))
+        );
+        assert_eq!(
+            replayed.line.map(|value| value as u64),
+            span.start.as_ref().map(|position| position.line as u64)
+        );
+    }
+    let explicit = source.replace("wreal net;", "wreal first net;");
+    let explicit = compiler.compile_runtime(&explicit, Some("top")).unwrap();
+    assert!(
+        explicit
+            .diagnostics
+            .iter()
+            .all(|warning| warning.code != "VA-SEM-DISCIPLINE-RESOLUTION")
+    );
+    let single_rule = source.replace(" connect first,second resolveto second;", "");
+    for (bad, expected) in [
+        (
+            single_rule.replace("resolveto first", "resolveto exclude"),
+            "resolveto exclude",
+        ),
+        (
+            single_rule.replace(" connect first,second resolveto first;", ""),
+            "no resolved discipline",
+        ),
+        (
+            single_rule.replace(
+                "discipline second; domain discrete; potential Voltage",
+                "discipline second; domain discrete; potential Temperature",
+            ),
+            "incompatible disciplines",
+        ),
+    ] {
+        let error = compiler
+            .compile_runtime(&bad, Some("top"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains(expected), "{expected}: {error}");
+    }
+}

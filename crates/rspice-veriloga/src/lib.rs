@@ -996,6 +996,7 @@ impl VerilogACompiler {
         report.diagnostics = analyzed
             .warnings
             .iter()
+            .chain(&executable.elaboration_warnings)
             .flat_map(|warning| {
                 let source = analyzed
                     .connection_configuration
@@ -1151,7 +1152,13 @@ impl VerilogACompiler {
 
         Ok((
             model,
-            runtime_report::semantic_warning_diagnostics(source, &analyzed.warnings),
+            runtime_report::semantic_warning_diagnostics(source, &analyzed.warnings)
+                .into_iter()
+                .chain(runtime_report::semantic_warning_diagnostics(
+                    source,
+                    &executable.elaboration_warnings,
+                ))
+                .collect(),
         ))
     }
 
@@ -2117,10 +2124,22 @@ impl VerilogACompiler {
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
 
         let mut diagnostics = prepared.diagnostics.clone();
+        let source_warnings: Vec<_> = executable
+            .elaboration_warnings
+            .iter()
+            .filter(|warning| configuration.is_none() || warning.span.source.raw() != 1)
+            .cloned()
+            .collect();
+        diagnostics.extend(
+            prepared
+                .source_map
+                .warnings(&prepared.source, &source_warnings),
+        );
         if let Some(configuration) = configuration {
             for warning in analyzed
                 .warnings
                 .iter()
+                .chain(&executable.elaboration_warnings)
                 .filter(|warning| warning.span.source.raw() == 1)
             {
                 diagnostics.extend(
