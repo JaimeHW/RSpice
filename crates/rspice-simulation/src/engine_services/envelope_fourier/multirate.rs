@@ -11,8 +11,9 @@ pub(super) fn run(
     netlist: &rspice_core::Netlist,
     config: &EnvelopeRunConfig,
     settings: &EnvelopeMultirateConfig,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<EnvelopeData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     let step = config.envelope_step.unwrap_or(config.stop_time / 1200.0);
     let core = settings
@@ -24,7 +25,7 @@ pub(super) fn run(
             &config.modulation_sources,
         )
         .map_err(ServiceRunError::Failure)?;
-    let engine = super::super::build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         settings.solver.relative_tolerance,
         "Envelope resolved engine configuration",
@@ -72,13 +73,21 @@ pub(super) fn run(
     let interval_schedule = netlist.options.output_interval_schedule.is_some();
     let explicit = !netlist.options.output_time_points.is_empty();
     let mut times = if explicit {
-        for time in &netlist.options.output_time_points {
+        let mut retained = 0usize;
+        for (index, time) in netlist.options.output_time_points.iter().enumerate() {
+            poll_periodically(abort, index)?;
             if !time.is_finite() || *time < 0.0 {
                 return Err(ServiceRunError::Failure(
                     "Envelope reporting times must be finite and nonnegative".into(),
                 ));
             }
+            retained = retained.saturating_add(usize::from(*time <= config.stop_time));
         }
+        ensure_envelope_limit(
+            ResourceKind::AnalysisPoints,
+            retained,
+            context.limits.max_analysis_points,
+        )?;
         netlist
             .options
             .output_time_points
@@ -88,7 +97,12 @@ pub(super) fn run(
             .collect()
     } else if !interval_schedule && config.adaptive_mode == EnvelopeAdaptiveMode::FixedEnvelopeStep
     {
-        uniform_envelope_times(config.stop_time, step, abort)?
+        uniform_envelope_times(
+            config.stop_time,
+            step,
+            context.limits.max_analysis_points,
+            abort,
+        )?
     } else {
         Vec::new()
     };
@@ -125,7 +139,7 @@ pub(super) fn run(
         .run_mission_with_abort(&request, seed.as_ref(), abort)
         .map_err(|e| ServiceRunError::from_core("Multirate Envelope", e))?;
     drop(prepared);
-    project(mission, netlist, settings.adaptive, abort)
+    project(mission, netlist, settings.adaptive, context)
 }
 
 fn scalar(name: &str, value: Value, unit: &str, time: Option<Value>) -> rspice_core::MeasureResult {
@@ -144,8 +158,14 @@ fn project(
     mission: NetlistEnvelopeMission,
     netlist: &rspice_core::Netlist,
     adaptive: bool,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<EnvelopeData> {
+    let abort = context.abort;
+    ensure_envelope_limit(
+        ResourceKind::AnalysisPoints,
+        mission.samples.len(),
+        context.limits.max_analysis_points,
+    )?;
     let state = &mission.final_state;
     let grid = state.grid();
     let bins: Vec<_> = grid
@@ -169,7 +189,7 @@ fn project(
                 Some(schedule),
                 unique[0],
                 *unique.last().unwrap(),
-                rspice_core::ResourceLimits::default().max_analysis_points,
+                context.limits.max_analysis_points,
             )
             .map_err(ServiceRunError::from)?;
         time = projection.times().to_vec();
@@ -180,7 +200,7 @@ fn project(
         // Exactly two sides per event, one sample at every other report.
         time.dedup();
         let count = time.len().saturating_add(mission.transitions.len());
-        let limit = rspice_core::ResourceLimits::default().max_analysis_points;
+        let limit = context.limits.max_analysis_points;
         if count > limit {
             return Err(ServiceRunError::resource_limit(
                 rspice_core::ResourceKind::AnalysisPoints,
@@ -258,7 +278,7 @@ fn project(
         }
     }
     source_values = source_values.saturating_add(scalar_values);
-    let limit = rspice_core::ResourceLimits::default().max_result_values;
+    let limit = context.limits.max_result_values;
     if retained.saturating_add(source_values) > limit {
         return Err(ServiceRunError::resource_limit(
             rspice_core::ResourceKind::ResultValues,

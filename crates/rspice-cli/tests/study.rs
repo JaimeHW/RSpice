@@ -447,8 +447,11 @@ fn running_study_cancellation_joins_the_solver_and_keeps_stderr_json() {
 fn study_run_refuses_unsupported_route_limits_and_honors_deadlines() {
     let root = common::test_dir("study-runtime-policy");
     let mut document = fixture(&root);
-    document["tasks"] = json!([{ "id": "envelope", "analysis": {"Envelope": {
-        "fundamental_freq": 1000.0, "num_harmonics": 1, "stop_time": 0.001
+    document["tasks"] = json!([{ "id": "optimization", "analysis": {"Optimization": {
+        "variables": [{"name": "r", "min": 1.0, "max": 2.0, "initial": 1.5}],
+        "objective_node": "out", "objective_ref": "0", "goal": "Minimize",
+        "target": null, "algorithm": "PatternSearch", "max_iterations": 10,
+        "cost_tolerance": 1e-6, "fd_step": 1e-3, "initial_step": 0.1, "min_step": 1e-6
     }} }]);
     let path = save(&root, &document);
     let destination = root.join("result.json");
@@ -1000,4 +1003,65 @@ fn spectral_study_accepts_custom_execution_limits() {
     assert!(output.status.success(), "{output:?}");
     let saved: Value = serde_json::from_slice(&std::fs::read(destination).unwrap()).unwrap();
     assert_eq!(saved["schema"], "rspice.study.results");
+}
+
+#[test]
+fn envelope_studies_enforce_custom_limits_and_preserve_existing_output() {
+    let root = common::test_dir("study-envelope-limits");
+    let mut document = fixture(&root);
+    std::fs::write(root.join("circuits/divider.cir"),
+        "Envelope policy\nV1 in 0 SIN(0 1 1Meg)\nVmod mod 0 PWL(0 0 4u 0)\nR1 in out 1k\nR2 out 0 1k\n.save V(out)\n.end\n").unwrap();
+    let destination = root.join("result.json");
+    for multirate in [
+        Value::Null,
+        json!({"adaptive": false, "collocation_points": [8]}),
+    ] {
+        document["tasks"] = json!([{ "id": "envelope", "analysis": {"Envelope": {
+            "fundamental_freq": 1e6, "num_harmonics": 1, "stop_time": 4e-6,
+            "envelope_step": 0.5e-6, "modulation_sources": ["Vmod"], "multirate": multirate
+        }}}]);
+        let path = save(&root, &document);
+        let args = [
+            "study",
+            "run",
+            path.to_str().unwrap(),
+            "--output",
+            destination.to_str().unwrap(),
+            "--json",
+        ];
+        std::fs::write(
+            root.join("config.toml"),
+            "[resources]\nmax_matrix_unknowns = 1000\n",
+        )
+        .unwrap();
+        let output = invoke(&root, &args);
+        assert!(output.status.success(), "{multirate}: {output:?}");
+        let saved: Value = serde_json::from_slice(&std::fs::read(&destination).unwrap()).unwrap();
+        assert_eq!(saved["schema"], "rspice.study.results");
+        for (setting, resource, limit) in [
+            ("max_matrix_unknowns", "matrix_unknowns", 1),
+            ("max_analysis_points", "analysis_points", 2),
+            ("max_result_values", "result_values", 1),
+        ] {
+            std::fs::write(&destination, "previous result").unwrap();
+            std::fs::write(
+                root.join("config.toml"),
+                format!("[resources]\n{setting} = {limit}\n"),
+            )
+            .unwrap();
+            let output = invoke(&root, &args);
+            assert_eq!(
+                output.status.code(),
+                Some(75),
+                "{multirate}, {setting}: {output:?}"
+            );
+            let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(error["error"]["resource"], resource, "{error}");
+            assert_eq!(error["error"]["limit"], limit, "{error}");
+            assert_eq!(
+                std::fs::read_to_string(&destination).unwrap(),
+                "previous result"
+            );
+        }
+    }
 }

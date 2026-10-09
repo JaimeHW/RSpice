@@ -2,7 +2,6 @@
 //! analyses that linearize about one.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 
 use rspice_core::abort_signal::AbortSignal;
 
@@ -175,8 +174,7 @@ pub(super) fn run_periodic_spec(
                 adaptive_mode,
                 extraction_path,
             },
-            source_path,
-            abort,
+            context,
         ),
         spec @ AnalysisSpec::Fourier { .. } => run_spectral_from_trajectory_with_context(
             spec,
@@ -1013,16 +1011,11 @@ fn project_hb_data(
 fn run_envelope(
     netlist: &str,
     cfg: svc_runner::EnvelopeRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_envelope_analysis_with_source_path_and_abort(
-            netlist,
-            &cfg,
-            source_path,
-            abort,
-        )
+        svc_runner::run_envelope_analysis_with_context(netlist, &cfg, context)
     })?;
     let mut waveforms = HashMap::with_capacity(data.waveforms.len());
     for waveform in data.waveforms {

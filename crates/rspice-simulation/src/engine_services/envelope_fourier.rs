@@ -6,16 +6,13 @@
 
 #[cfg(test)]
 use super::run_transient_analysis_with_source_path_and_abort;
-use super::{
-    ServiceRunError, ServiceRunResult, TransientData, build_engine_config,
-    parse_runner_netlist_with_abort,
-};
+use super::{ServiceContext, ServiceRunError, ServiceRunResult, TransientData};
 use crate::error::{ensure_not_aborted, poll_periodically};
 use num_complex::Complex64;
-use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
+use rspice_core::{ResourceKind, ResourceLimits, Value};
 use rspice_simulation_contract::envelope_policy::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
 };
@@ -29,6 +26,7 @@ pub use initialization::EnvelopeInitializationConfig;
 #[cfg(test)]
 pub use initialization::EnvelopeShootingIntegration;
 use rspice_core::engine::Engine;
+#[cfg(test)]
 use std::path::Path;
 use trajectory::EnvelopeTrajectory;
 
@@ -161,20 +159,38 @@ pub struct EnvelopeData {
 /// Run envelope analysis with source-path resolution and cooperative
 /// cancellation through initialization, transient solving, and projection
 /// extraction.
+#[cfg(test)]
 pub fn run_envelope_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: &EnvelopeRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<EnvelopeData> {
+    run_envelope_analysis_with_context(
+        netlist_text,
+        config,
+        ServiceContext {
+            source_path,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub fn run_envelope_analysis_with_context(
+    netlist_text: &str,
+    config: &EnvelopeRunConfig,
+    context: ServiceContext<'_>,
+) -> ServiceRunResult<EnvelopeData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     let validation = config.validate();
     ensure_not_aborted(abort)?;
     validation.map_err(ServiceRunError::Failure)?;
 
-    let parsed = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let parsed = context.parse(netlist_text)?;
     if let Some(settings) = &config.multirate {
-        return multirate::run(&parsed, config, settings, abort);
+        return multirate::run(&parsed, config, settings, context);
     }
     let samples_per_cycle = (config.num_harmonics.max(1) as f64 * 16.0).max(32.0);
     let highest_carrier = config.carrier_tones().fold(0.0, Value::max);
@@ -216,8 +232,9 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
         estimated_output_points,
         carrier_tones.len(),
         1,
+        context.limits,
     )?;
-    Engine::new(build_engine_config(&parsed, None))
+    Engine::new(context.engine_config(&parsed))
         .validate_transient_source_names_with_abort(&parsed, &config.modulation_sources, abort)
         .map_err(|error| {
             ServiceRunError::from_core("Envelope modulation-source validation error", error)
@@ -239,13 +256,18 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
     };
     let transient = match config.initial_periodic_solve {
         EnvelopeInitialPeriodicSolve::TransientSpectralEstimate => {
-            trajectory::run_transient(&integration_netlist, config, step_time, abort)?
+            trajectory::run_transient(&integration_netlist, config, step_time, context)?
         }
         EnvelopeInitialPeriodicSolve::PeriodicSteadyState => {
-            run_pss_initialized_envelope_transient(&integration_netlist, config, step_time, abort)?
+            run_pss_initialized_envelope_transient(
+                &integration_netlist,
+                config,
+                step_time,
+                context,
+            )?
         }
         EnvelopeInitialPeriodicSolve::HarmonicBalance => {
-            run_hb_initialized_envelope_transient(&integration_netlist, config, step_time, abort)?
+            run_hb_initialized_envelope_transient(&integration_netlist, config, step_time, context)?
         }
     };
     if transient.time.is_empty() {
@@ -263,17 +285,18 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
         &parsed.options,
         &transient.time,
         &carrier_tones,
-        rspice_core::ResourceLimits::default().max_analysis_points,
+        context.limits.max_analysis_points,
         abort,
     )? {
         Some(times) => times,
-        None => envelope_output_times(&parsed, &transient.time, config, step_time, abort)?,
+        None => envelope_output_times(&parsed, &transient.time, config, step_time, context)?,
     };
     validate_projection_workload(
         transient.time.len(),
         requested_output_time.len(),
         carrier_tones.len(),
         transient.signals.len(),
+        context.limits,
     )?;
     let output_time = centered_projection_output_times(
         &requested_output_time,
@@ -288,13 +311,18 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
         .ok_or_else(|| {
             ServiceRunError::Failure("Envelope result waveform count overflowed".to_string())
         })?;
-    let result_value_count = envelope_retained_value_count(output_time.len(), waveform_count)?;
-    let result_limit = rspice_core::ResourceLimits::default().max_result_values;
-    if result_value_count > result_limit {
-        return Err(ServiceRunError::Failure(format!(
-            "Envelope extraction requires {result_value_count} result values, exceeding the configured result-value limit {result_limit}"
-        )));
-    }
+    let result_value_count = envelope_retained_value_count(output_time.len(), waveform_count)?
+        .saturating_add(
+            transient
+                .convergence
+                .as_ref()
+                .map_or(0, |evidence| evidence.transfer_value_count()),
+        );
+    ensure_envelope_limit(
+        ResourceKind::ResultValues,
+        result_value_count,
+        context.limits.max_result_values,
+    )?;
     let mut waveforms =
         Vec::with_capacity(transient.signals.len().saturating_mul(carrier_tones.len()));
     for signal in transient.signals {
@@ -310,7 +338,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
             continue;
         }
         let envelopes = match config.extraction_path {
-            EnvelopeExtractionPath::Projection => compute_carrier_envelopes_with_abort(
+            EnvelopeExtractionPath::Projection => compute_carrier_envelopes_with_context(
                 &transient.time,
                 &values,
                 &output_time,
@@ -319,7 +347,7 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
                     .as_ref()
                     .map(rspice_core::ImpulseTraceRef::Current)
                     .or_else(|| voltage.as_ref().map(rspice_core::ImpulseTraceRef::Voltage)),
-                abort,
+                context,
             )?,
         };
         for (tone_index, (carrier, env)) in carrier_tones.iter().copied().zip(envelopes).enumerate()
@@ -350,6 +378,18 @@ pub fn run_envelope_analysis_with_source_path_and_abort(
         waveforms,
         convergence: transient.convergence,
     })
+}
+
+fn ensure_envelope_limit(
+    resource: ResourceKind,
+    requested: usize,
+    limit: usize,
+) -> ServiceRunResult<()> {
+    if requested > limit {
+        Err(ServiceRunError::resource_limit(resource, requested, limit))
+    } else {
+        Ok(())
+    }
 }
 
 fn envelope_retained_value_count(
@@ -386,10 +426,16 @@ fn envelope_output_times(
     adaptive_time: &[Value],
     config: &EnvelopeRunConfig,
     solver_step: Value,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<Vec<Value>> {
+    let abort = context.abort;
     match config.adaptive_mode {
         EnvelopeAdaptiveMode::Enabled => {
+            ensure_envelope_limit(
+                ResourceKind::AnalysisPoints,
+                adaptive_time.len(),
+                context.limits.max_analysis_points,
+            )?;
             let mut output = Vec::with_capacity(adaptive_time.len());
             for (index, time) in adaptive_time.iter().copied().enumerate() {
                 poll_periodically(abort, index)?;
@@ -399,10 +445,15 @@ fn envelope_output_times(
         }
         EnvelopeAdaptiveMode::FixedEnvelopeStep => {
             let step = config.envelope_step.unwrap_or(solver_step);
-            uniform_envelope_times(config.stop_time, step, abort)
+            uniform_envelope_times(
+                config.stop_time,
+                step,
+                context.limits.max_analysis_points,
+                abort,
+            )
         }
         EnvelopeAdaptiveMode::EventAlignedOnly => {
-            let engine = Engine::new(build_engine_config(netlist, None));
+            let engine = Engine::new(context.engine_config(netlist));
             let mut times = engine
                 .transient_source_event_times_with_abort(
                     netlist,
@@ -426,6 +477,11 @@ fn envelope_output_times(
                 (*left - *right).abs() <= 64.0 * Value::EPSILON * scale
             });
             ensure_not_aborted(abort)?;
+            ensure_envelope_limit(
+                ResourceKind::AnalysisPoints,
+                times.len(),
+                context.limits.max_analysis_points,
+            )?;
             Ok(times)
         }
     }
@@ -434,6 +490,7 @@ fn envelope_output_times(
 fn uniform_envelope_times(
     stop_time: Value,
     step: Value,
+    limit: usize,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Value>> {
     let intervals = (stop_time / step).floor();
@@ -443,25 +500,23 @@ fn uniform_envelope_times(
         ));
     }
     let interval_count = intervals as usize;
-    let point_count = interval_count.checked_add(2).ok_or_else(|| {
-        ServiceRunError::Failure("Envelope output schedule overflowed".to_string())
-    })?;
-    let limit = rspice_core::ResourceLimits::default().max_analysis_points;
-    if point_count > limit {
-        return Err(ServiceRunError::Failure(format!(
-            "Envelope fixed output schedule requires {point_count} points, exceeding the configured analysis-point limit {limit}"
-        )));
-    }
+    let last = (interval_count as Value * step).min(stop_time);
+    let append_stop = stop_time - last
+        > 64.0 * Value::EPSILON * stop_time.abs().max(step.abs()).max(Value::MIN_POSITIVE);
+    let point_count = interval_count
+        .checked_add(1)
+        .and_then(|count| count.checked_add(usize::from(append_stop)))
+        .ok_or_else(|| {
+            ServiceRunError::Failure("Envelope output schedule overflowed".to_string())
+        })?;
+    ensure_envelope_limit(ResourceKind::AnalysisPoints, point_count, limit)?;
     let mut times = Vec::with_capacity(point_count);
     for index in 0..=interval_count {
         poll_periodically(abort, index)?;
         let time = (index as Value * step).min(stop_time);
         times.push(time);
     }
-    if times.last().is_none_or(|last| {
-        stop_time - *last
-            > 64.0 * Value::EPSILON * stop_time.abs().max(step.abs()).max(Value::MIN_POSITIVE)
-    }) {
+    if append_stop {
         times.push(stop_time);
     } else if let Some(last) = times.last_mut() {
         *last = stop_time;
@@ -473,8 +528,9 @@ fn run_pss_initialized_envelope_transient(
     netlist: &rspice_core::Netlist,
     config: &EnvelopeRunConfig,
     step_time: Value,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<EnvelopeTrajectory> {
+    let abort = context.abort;
     let pss_config = config
         .initialization
         .pss_config(
@@ -483,7 +539,7 @@ fn run_pss_initialized_envelope_transient(
         )
         .map_err(ServiceRunError::Failure)?;
 
-    let engine = Engine::new(build_engine_config(netlist, None));
+    let engine = Engine::new(context.engine_config(netlist));
     let (periodic, state) = engine
         .run_pss_with_frozen_source_continuation_state_abort(
             netlist,
@@ -524,8 +580,9 @@ fn run_hb_initialized_envelope_transient(
     netlist: &rspice_core::Netlist,
     config: &EnvelopeRunConfig,
     step_time: Value,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<EnvelopeTrajectory> {
+    let abort = context.abort;
     let hb_config = config
         .initialization
         .hb_config(
@@ -533,7 +590,7 @@ fn run_hb_initialized_envelope_transient(
             config.num_harmonics,
         )
         .map_err(ServiceRunError::Failure)?;
-    let engine = Engine::new(build_engine_config(netlist, None));
+    let engine = Engine::new(context.engine_config(netlist));
     let (periodic, state) = engine
         .run_hb_envelope_continuation_state_with_abort(
             netlist,
@@ -586,6 +643,7 @@ enum EnvelopeProjectionBasis {
     Sin(usize),
 }
 
+#[cfg(test)]
 fn compute_carrier_envelopes_with_abort(
     time: &[Value],
     values: &[Value],
@@ -594,6 +652,25 @@ fn compute_carrier_envelopes_with_abort(
     current: Option<rspice_core::ImpulseTraceRef<'_>>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Vec<Vec<Complex64>>> {
+    compute_carrier_envelopes_with_context(
+        time,
+        values,
+        output_time,
+        carrier_frequencies,
+        current,
+        ServiceContext::with_defaults(None, abort),
+    )
+}
+
+fn compute_carrier_envelopes_with_context(
+    time: &[Value],
+    values: &[Value],
+    output_time: &[Value],
+    carrier_frequencies: &[Value],
+    current: Option<rspice_core::ImpulseTraceRef<'_>>,
+    context: ServiceContext<'_>,
+) -> ServiceRunResult<Vec<Vec<Complex64>>> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     if time.len() != values.len() || time.len() < 2 {
         return Err(ServiceRunError::Failure(
@@ -634,6 +711,7 @@ fn compute_carrier_envelopes_with_abort(
         output_time.len(),
         carrier_frequencies.len(),
         1,
+        context.limits,
     )?;
     let projection_window = carrier_projection_window(carrier_frequencies, abort)?;
     let span_tolerance = 128.0
@@ -650,7 +728,7 @@ fn compute_carrier_envelopes_with_abort(
 
     let basis = carrier_projection_basis(carrier_frequencies.len());
     let prefix_values =
-        build_projection_prefixes(time, values, carrier_frequencies, &basis, abort)?;
+        build_projection_prefixes(time, values, carrier_frequencies, &basis, context)?;
     let current_prefixes = current
         .map(|trace| {
             current::projection_prefixes(
@@ -670,12 +748,11 @@ fn compute_carrier_envelopes_with_abort(
         .ok_or_else(|| {
             ServiceRunError::Failure("Envelope result value count overflowed".to_string())
         })?;
-    let result_limit = rspice_core::ResourceLimits::default().max_result_values;
-    if projected_value_count > result_limit {
-        return Err(ServiceRunError::Failure(format!(
-            "Envelope extraction requires {projected_value_count} result values, exceeding the configured result-value limit {result_limit}"
-        )));
-    }
+    ensure_envelope_limit(
+        ResourceKind::ResultValues,
+        projected_value_count,
+        context.limits.max_result_values,
+    )?;
 
     let mut envelopes = (0..carrier_frequencies.len())
         .map(|_| Vec::with_capacity(output_time.len()))
@@ -837,7 +914,13 @@ fn validate_projection_workload(
     output_count: usize,
     carrier_count: usize,
     signal_count: usize,
+    limits: ResourceLimits,
 ) -> ServiceRunResult<()> {
+    ensure_envelope_limit(
+        ResourceKind::AnalysisPoints,
+        sample_count.max(output_count),
+        limits.max_analysis_points,
+    )?;
     let basis_count = carrier_count
         .checked_mul(2)
         .and_then(|count| count.checked_add(1))
@@ -847,20 +930,19 @@ fn validate_projection_workload(
     let matrix_values = basis_count.checked_mul(basis_count).ok_or_else(|| {
         ServiceRunError::Failure("Envelope projection matrix size overflowed".to_string())
     })?;
-    let result_limit = rspice_core::ResourceLimits::default().max_result_values;
-    if matrix_values > result_limit {
-        return Err(ServiceRunError::Failure(format!(
-            "Envelope projection matrix requires {matrix_values} values, exceeding the configured result-value limit {result_limit}"
-        )));
-    }
+    ensure_envelope_limit(
+        ResourceKind::ResultValues,
+        matrix_values,
+        limits.max_result_values,
+    )?;
     let prefix_values = sample_count.checked_mul(basis_count).ok_or_else(|| {
         ServiceRunError::Failure("Envelope projection workspace size overflowed".to_string())
     })?;
-    if prefix_values > result_limit {
-        return Err(ServiceRunError::Failure(format!(
-            "Envelope projection workspace requires {prefix_values} values, exceeding the configured result-value limit {result_limit}"
-        )));
-    }
+    ensure_envelope_limit(
+        ResourceKind::ResultValues,
+        prefix_values,
+        limits.max_result_values,
+    )?;
     let prefix_work = prefix_values.checked_mul(signal_count).ok_or_else(|| {
         ServiceRunError::Failure("Envelope projection work estimate overflowed".to_string())
     })?;
@@ -913,17 +995,17 @@ fn build_projection_prefixes(
     values: &[Value],
     carrier_frequencies: &[Value],
     basis: &[EnvelopeProjectionBasis],
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<Vec<Vec<Value>>> {
+    let abort = context.abort;
     let prefix_value_count = time.len().checked_mul(basis.len()).ok_or_else(|| {
         ServiceRunError::Failure("Envelope projection workspace size overflowed".to_string())
     })?;
-    let result_limit = rspice_core::ResourceLimits::default().max_result_values;
-    if prefix_value_count > result_limit {
-        return Err(ServiceRunError::Failure(format!(
-            "Envelope projection workspace requires {prefix_value_count} values, exceeding the configured result-value limit {result_limit}"
-        )));
-    }
+    ensure_envelope_limit(
+        ResourceKind::ResultValues,
+        prefix_value_count,
+        context.limits.max_result_values,
+    )?;
     let mut prefixes = basis
         .iter()
         .map(|_| {
@@ -1883,16 +1965,16 @@ mod tests {
 
     #[test]
     fn projection_workload_rejects_excessive_dense_work_before_allocation() {
-        let error = validate_projection_workload(2, 10_000, 64, 1)
+        let error = validate_projection_workload(2, 10_000, 64, 1, ResourceLimits::default())
             .expect_err("excessive cubic work must fail closed");
         assert!(error.to_string().contains("dense operations"));
     }
 
     #[test]
     fn projection_workload_accounts_for_every_extracted_signal() {
-        validate_projection_workload(2, 100_000, 2, 1)
+        validate_projection_workload(2, 100_000, 2, 1, ResourceLimits::default())
             .expect("one small-basis signal remains within the projection workload budget");
-        let error = validate_projection_workload(2, 100_000, 2, 9)
+        let error = validate_projection_workload(2, 100_000, 2, 9, ResourceLimits::default())
             .expect_err("the same projection across nine signals must include all work");
         assert!(error.to_string().contains("dense operations"));
     }
@@ -1943,9 +2025,72 @@ mod tests {
     }
 
     #[test]
+    fn fixed_envelope_schedule_admits_exactly_the_retained_points() {
+        assert_eq!(
+            uniform_envelope_times(1.0, 1.0, 2, &NoAbort).unwrap(),
+            [0.0, 1.0]
+        );
+        assert_eq!(
+            uniform_envelope_times(1.0, 0.3, 5, &NoAbort).unwrap().len(),
+            5
+        );
+        for (step, limit, requested) in [(1.0, 1, 2), (0.3, 4, 5)] {
+            assert!(matches!(
+                uniform_envelope_times(1.0, step, limit, &NoAbort),
+                Err(ServiceRunError::ResourceLimit(error))
+                    if error.resource == ResourceKind::AnalysisPoints && error.requested == requested && error.limit == limit
+            ));
+        }
+    }
+
+    #[test]
+    fn carrier_projection_uses_caller_workspace_and_point_limits() {
+        let time = (0..=64).map(|i| f64::from(i) / 64.0).collect::<Vec<_>>();
+        let values = time
+            .iter()
+            .map(|t| (std::f64::consts::TAU * t).cos())
+            .collect::<Vec<_>>();
+        let mut limits = ResourceLimits::default();
+        limits.max_analysis_points = 65;
+        limits.max_result_values = 195;
+        let run = |limits| {
+            compute_carrier_envelopes_with_context(
+                &time,
+                &values,
+                &[0.5],
+                &[1.0],
+                None,
+                ServiceContext {
+                    source_path: None,
+                    limits,
+                    abort: &NoAbort,
+                },
+            )
+        };
+        let result = run(limits).unwrap();
+        assert!((result[0][0].re - 1.0).abs() < 0.003 && result[0][0].im.abs() < 1e-12);
+        limits.max_result_values = 194;
+        assert!(
+            matches!(run(limits), Err(ServiceRunError::ResourceLimit(error))
+            if error.resource == ResourceKind::ResultValues && error.requested == 195 && error.limit == 194)
+        );
+        limits.max_result_values = 195;
+        limits.max_analysis_points = 64;
+        assert!(
+            matches!(run(limits), Err(ServiceRunError::ResourceLimit(error))
+            if error.resource == ResourceKind::AnalysisPoints && error.requested == 65 && error.limit == 64)
+        );
+    }
+
+    #[test]
     fn fixed_envelope_schedule_preserves_requested_spacing_and_stop() {
-        let times = uniform_envelope_times(1.0, 0.3, &NoAbort)
-            .expect("fixed envelope schedule should be representable");
+        let times = uniform_envelope_times(
+            1.0,
+            0.3,
+            ResourceLimits::default().max_analysis_points,
+            &NoAbort,
+        )
+        .expect("fixed envelope schedule should be representable");
 
         assert_eq!(times.len(), 5);
         for (actual, expected) in times.iter().zip([0.0, 0.3, 0.6, 0.9, 1.0]) {

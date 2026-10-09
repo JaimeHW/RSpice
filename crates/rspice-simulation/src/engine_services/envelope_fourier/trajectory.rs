@@ -169,9 +169,10 @@ pub(super) fn run_transient(
     netlist: &rspice_core::Netlist,
     config: &EnvelopeRunConfig,
     step_time: Value,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<EnvelopeTrajectory> {
-    let engine = Engine::new(build_engine_config(netlist, None));
+    let abort = context.abort;
+    let engine = Engine::new(context.engine_config(netlist));
     let result = engine
         .run_tran_with_abort(netlist, config.stop_time, step_time, abort)
         .map_err(|error| ServiceRunError::from_core("Envelope transient analysis", error))?;

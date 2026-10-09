@@ -35,13 +35,39 @@ fn envelope_current_branches_survive_all_initializers_and_worker_transport() {
         Init::HarmonicBalance,
         Init::PeriodicSteadyState,
     ] {
-        let result = run_envelope(
-            deck,
-            envelope_current_config(method),
-            None,
-            &rspice_core::abort_signal::NoAbort,
-        )
-        .unwrap();
+        let mut limits = rspice_core::ResourceLimits::default();
+        limits.max_matrix_unknowns = 1000;
+        let run = |limits| {
+            run_envelope(
+                deck,
+                envelope_current_config(method),
+                svc_runner::ServiceContext {
+                    source_path: None,
+                    limits,
+                    abort: &rspice_core::NoAbort,
+                },
+            )
+        };
+        for resource in [
+            "matrix_unknowns",
+            "analysis_points",
+            "result_values",
+            "netlist_bytes",
+        ] {
+            let mut limited = limits;
+            match resource {
+                "matrix_unknowns" => limited.max_matrix_unknowns = 1,
+                "analysis_points" => limited.max_analysis_points = 2,
+                "result_values" => limited.max_result_values = 1,
+                _ => limited.max_netlist_bytes = 1,
+            }
+            let error = run(limited).unwrap_err();
+            assert!(
+                matches!(&error, SimulationError::ResourceLimit { resource: actual, .. } if actual == resource),
+                "{method:?}: {error:?}"
+            );
+        }
+        let result = run(limits).unwrap();
         let result = crate::runner::worker_contract::round_trip_response_for_test(result);
         let SimulationResult::Transient {
             time, waveforms, ..
@@ -77,8 +103,7 @@ fn envelope_current_preserves_native_device_lead_units_and_values() {
         envelope_current_config(
             rspice_simulation_contract::analysis_spec::EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
         ),
-        None,
-        &rspice_core::abort_signal::NoAbort,
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort),
     )
     .unwrap();
     let SimulationResult::Transient { waveforms, .. } = result else {
@@ -106,8 +131,7 @@ fn envelope_current_includes_ideal_capacitor_charge_in_source_current() {
         envelope_current_config(
             rspice_simulation_contract::analysis_spec::EnvelopeInitialPeriodicSolve::TransientSpectralEstimate,
         ),
-        None,
-        &rspice_core::abort_signal::NoAbort,
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort),
     )
     .unwrap();
     let SimulationResult::Transient { waveforms, .. } = result else {

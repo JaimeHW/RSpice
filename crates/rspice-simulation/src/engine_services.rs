@@ -2,6 +2,7 @@
 //!
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
+#[cfg(test)]
 use rspice_core::engine::Engine;
 
 mod context;
@@ -58,8 +59,7 @@ pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 #[cfg(test)]
 pub use envelope_fourier::{EnvelopeInitializationConfig, EnvelopeShootingIntegration};
 pub use envelope_fourier::{
-    EnvelopeRunConfig, FourierData, FourierRunConfig,
-    run_envelope_analysis_with_source_path_and_abort,
+    EnvelopeRunConfig, FourierData, FourierRunConfig, run_envelope_analysis_with_context,
 };
 pub(crate) use envelope_fourier::{
     fourier_output_is_current, run_fourier_from_impulses_with_abort, split_fourier_output,
@@ -182,6 +182,7 @@ pub(crate) use crate::netlist_preparation::build_engine_config;
 /// deck a second time and could overwrite that run-owned value.  Producer and
 /// dependent-analysis services share this helper so retained-state identity
 /// is based on exactly the same configuration contract.
+#[cfg(test)]
 fn build_resolved_periodic_engine(
     netlist: &rspice_core::Netlist,
     tolerance: rspice_core::Value,

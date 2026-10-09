@@ -63,8 +63,34 @@ fn multirate_envelope_saved_controls_execute_and_retain_physical_results() {
     let spec = spec(&draft);
     let line = draft.to_config().unwrap().to_spice();
     assert!(line.contains("multirate="));
+    let mut limits = rspice_core::ResourceLimits::default();
+    limits.max_matrix_unknowns = 1000;
+    let run = |limits| {
+        crate::runner::spec::run_spec_request(
+            &crate::engine_bridge::EngineBridge::new().with_resource_limits(limits),
+            spec.clone(),
+            Default::default(),
+            DECK,
+            None,
+            &Default::default(),
+            &rspice_core::NoAbort,
+        )
+    };
+    for resource in ["matrix_unknowns", "analysis_points", "result_values"] {
+        let mut limited = limits;
+        match resource {
+            "matrix_unknowns" => limited.max_matrix_unknowns = 1,
+            "analysis_points" => limited.max_analysis_points = 2,
+            _ => limited.max_result_values = 1,
+        }
+        let error = run(limited).unwrap_err();
+        assert!(
+            matches!(&error, crate::error::SimulationError::ResourceLimit { resource: actual, .. } if actual == resource),
+            "{error:?}"
+        );
+    }
     let result = crate::result_conversion::convert(
-        crate::runner::pvt_point_evidence::run_standalone_spec(DECK, spec),
+        round_trip_response_for_test(run(limits).unwrap()),
         AnalysisType::Envelope,
         "Envelope",
         || 0.0,
