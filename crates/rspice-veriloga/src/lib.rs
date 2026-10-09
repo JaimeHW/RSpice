@@ -2102,8 +2102,9 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         // External libraries may add helper modules. Resolve an implicit root
         // against the device closure before those helpers enter its namespace.
-        let module_name = Some(prepared.resolved_module(module_name)?);
-        let selected = prepared.analysis_for_module(module_name.unwrap(), &mut measurements)?;
+        let resolved_module = prepared.resolved_module(module_name)?;
+        let selected = prepared.analysis_for_module(resolved_module, &mut measurements)?;
+        let module_name = Some(resolved_module);
         let analyzed = match configuration {
             Some(configuration) => std::borrow::Cow::Owned(configuration.apply(
                 &prepared.source,
