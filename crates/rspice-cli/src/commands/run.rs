@@ -30,6 +30,7 @@ mod fft_document;
 mod fourier_document;
 mod frequency;
 mod naming;
+mod payload_report;
 mod periodic;
 mod planning;
 mod quasi_periodic;

@@ -1,6 +1,6 @@
 //! Publish payload-based reports through the same projection as conversion.
 
-use super::super::{
+use super::{
     RunContext, document,
     export::{ColumnData, ExportTable},
 };

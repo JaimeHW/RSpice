@@ -1342,13 +1342,7 @@ fn report_dc_match(
     Ok(())
 }
 
-/// Write one mismatch result.
-///
-/// The flat table is a single row of named scalars, the way `.TF`'s is: the
-/// three sigmas and the nominal value, then each retained contributor's
-/// displacement and variance share. The ranked table with each contributor's
-/// own sigma and derivative stays in the typed document, which is the only
-/// representation that can carry a table of rows.
+/// Write a complete mismatch report using the same projection as conversion.
 fn export_dc_match(
     ctx: &RunContext<'_>,
     result: &rspice_core::analysis::dcmatch::DcMatchResult,
@@ -1357,54 +1351,12 @@ fn export_dc_match(
         return Ok(());
     };
     let analysis_id = resolved.analysis("dcmatch")?;
-    use super::export::{ColumnData, ExportColumn, ExportTable};
-
-    let unit = dc_match_unit(result);
-    let scalar = |name: String, var_type: &str, value: f64| ExportColumn {
-        unit: None,
-        name,
-        var_type: var_type.to_string(),
-        data: ColumnData::Real(vec![value]),
-    };
-    let quantity = if unit == "A" { "current" } else { "voltage" };
-    let mut columns = vec![
-        scalar("nominal_value".to_owned(), quantity, result.nominal_value),
-        scalar("sigma_total".to_owned(), quantity, result.sigma_total),
-        scalar("sigma_mismatch".to_owned(), quantity, result.sigma_mismatch),
-        scalar("sigma_process".to_owned(), quantity, result.sigma_process),
-        scalar("quoted_sigma".to_owned(), quantity, result.quoted_sigma()),
-    ];
-    for contributor in &result.contributors {
-        let owner = format!("{}/{}", contributor.instance, contributor.parameter);
-        columns.push(scalar(
-            format!("contribution({owner})"),
-            quantity,
-            contributor.contribution,
-        ));
-        columns.push(scalar(
-            format!("share({owner})"),
-            "share",
-            contributor.share,
-        ));
-    }
-    let table = ExportTable {
-        scale_unit: None,
-        analysis: "dcmatch".to_string(),
-        plot_name: "DC Mismatch".to_string(),
-        scale_name: "point".to_string(),
-        scale_type: "index".to_string(),
-        scale: vec![0.0],
-        columns,
-    };
-    super::document::publish_table_result(
+    super::payload_report::publish(
         ctx,
         &resolved.path,
         analysis_id,
-        // The mismatch result publishes named scalars and a ranked
-        // contributor table rather than a series, so its typed values live in
-        // the document's payload.
-        super::document::empty_schema(),
-        &table,
+        "dcmatch",
+        "DC Mismatch",
         || rspice_core::execution::AnalysisResultDocument::from_dc_match(analysis_id, result),
     )?;
 

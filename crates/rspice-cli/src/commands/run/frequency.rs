@@ -18,7 +18,7 @@ use crate::hdf5::{
 };
 use crate::report::format_spice_exponent;
 
-mod report;
+use super::payload_report as report;
 mod table;
 
 fn map_frequency_error(
