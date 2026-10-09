@@ -665,3 +665,133 @@ fn expression_capacitor_current_retains_small_increments_after_capacitance_chang
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn prescribed_capacitance_differentiates_product_charge_and_resumes() {
+    use rspice_core::engine::{
+        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+    };
+    for power in [1, 2] {
+        for ramp in [false, true] {
+            for differential in [false, true] {
+                for (terminals, sign) in [("out 0", 1.0), ("0 out", -1.0)] {
+                    for with_ic in [false, true] {
+                        for method in [
+                            IntegrationMethod::BackwardEuler,
+                            IntegrationMethod::Trapezoidal,
+                            IntegrationMethod::Gear2,
+                            IntegrationMethod::TrapGear,
+                        ] {
+                            // Keep the original constant-voltage/linear-C reproducer, and
+                            // seed zero C' for all-method quadratic startup qualification.
+                            if power == 1
+                                && (ramp
+                                    || differential
+                                    || sign < 0.0
+                                    || with_ic
+                                    || method != IntegrationMethod::BackwardEuler)
+                            {
+                                continue;
+                            }
+                            let slope = if ramp { 0.2 } else { 0.0 };
+                            let multiplier = if with_ic { 2.0 } else { 1.0 };
+                            let dependency = if differential { "+0*V(out)" } else { "" };
+                            let ic = if with_ic {
+                                format!(" IC={sign} M=2")
+                            } else {
+                                String::new()
+                            };
+                            let label = format!(
+                                "power={power},ramp={ramp},diff={differential},{terminals},ic={with_ic},{method:?}"
+                            );
+                            let deck = Netlist::parse(&format!(
+                                "Prescribed capacitor charge\nBdrive out 0 V={{1+{slope}*time/1u}}\nC1 {terminals} C={{1p*(1+(time/1u)^{power}){dependency}}}{ic}\n.ic V(out)=1\n.options GMIN=0 RELTOL=1e-8 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-24\n.options NONLIN-TRAN RELTOL=1e-9 ABSTOL=1e-16 RHSTOL=1e-13 MAXSTEP=200\n.save all\n.end\n"
+                            )).unwrap();
+                            let engine = Engine::new(SimulationConfig {
+                                integration_method: method,
+                                max_timestep: 1e-9,
+                                min_timestep: 1e-12,
+                                ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
+                            });
+                            let (result, checkpoints) = engine
+                                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                                    &deck,
+                                    1e-6,
+                                    1e-9,
+                                    TransientStartupMode::Uic,
+                                    &[0.7e-6],
+                                    &rspice_core::NoAbort,
+                                )
+                                .unwrap_or_else(|e| panic!("{label}: {e}"));
+                            let voltage = result.try_voltage_waveform_named("out").unwrap();
+                            let capacitor = result.try_branch_current_waveform_named("C1").unwrap();
+                            let source =
+                                result.try_branch_current_waveform_named("Bdrive").unwrap();
+                            let mut samples = 0;
+                            let mut max_error: f64 = 0.0;
+                            for (i, &time) in result.time.iter().enumerate() {
+                                let x = time / 1e-6;
+                                let v = 1.0 + slope * x;
+                                assert!((voltage[i] - v).abs() < 1e-10, "{label}: voltage");
+                                if time <= 0.1e-6 {
+                                    continue;
+                                }
+                                samples += 1;
+                                let c = multiplier * 1e-12 * (1.0 + x.powi(power));
+                                let c_rate =
+                                    multiplier * 1e-6 * f64::from(power) * x.powi(power - 1);
+                                let truth =
+                                    c * slope / 1e-6 + if differential { 0.0 } else { v * c_rate };
+                                max_error = max_error.max((sign * capacitor[i] - truth).abs());
+                                assert!(
+                                    (source[i] + truth).abs() < multiplier * 4e-9,
+                                    "{label}: source at {time:e}"
+                                );
+                                assert!(
+                                    (source[i] + sign * capacitor[i]).abs() < 1e-12,
+                                    "{label}: KCL"
+                                );
+                            }
+                            if power == 1 {
+                                eprintln!("original constant-voltage case: final I(C)={:e} A, max error={max_error:e} A", capacitor.last().unwrap());
+                            }
+                            assert!(samples > 100);
+                            assert!(
+                                max_error < multiplier * 4e-9,
+                                "{label}: current error {max_error:e}"
+                            );
+                            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                            assert_eq!(checkpoints.len(), 1);
+                            let checkpoint = TransientCheckpoint::from_bytes(
+                                &checkpoints[0]
+                                    .checkpoint
+                                    .to_bytes(TransientCheckpointEncoding::Packed)
+                                    .unwrap(),
+                            )
+                            .unwrap();
+                            let (resumed, _) = engine
+                                .run_tran_resume(&deck, &checkpoint, 1e-6, 1e-9)
+                                .unwrap();
+                            let offset = result
+                                .time
+                                .iter()
+                                .position(|&t| t == checkpoint.time)
+                                .unwrap();
+                            assert_eq!(resumed.time, result.time[offset..], "{label}");
+                            assert_eq!(resumed.voltages.len(), result.voltages.len());
+                            assert_eq!(resumed.branch_currents.len(), result.branch_currents.len());
+                            for (actual, full) in
+                                resumed.voltages.iter().zip(&result.voltages).chain(
+                                    resumed.branch_currents.iter().zip(&result.branch_currents),
+                                )
+                            {
+                                assert_eq!(actual, &full[offset..], "{label}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

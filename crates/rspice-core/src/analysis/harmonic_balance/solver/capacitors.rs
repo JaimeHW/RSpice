@@ -34,30 +34,46 @@ impl PeriodicCapacitor {
             .expression
             .sample_periodic_capacitance(point, integral_start)?;
         let capacitance = self.multiplier * sample.value;
-        let current = capacitance * frequency * solution[rate];
         let terminals = if let Some(branch) = self.branch {
             // Nodal KCL already comes from the registered constitutive port.
-            // Its physical current equation is Ibranch - C*f0*r = 0.
+            // Its physical current equation is Ibranch - Icap = 0.
             f.stamp_rhs(branch + 1, -solution[branch]);
             f.stamp(branch + 1, branch + 1, 1.0);
             [(branch + 1, -1.0), (0, 0.0)]
         } else {
             [(self.pos, 1.0), (self.neg, -1.0)]
         };
-        for (node, sign) in terminals {
-            f.stamp_rhs(node, -sign * current);
-            f.stamp(node, rate + 1, sign * capacitance * frequency);
-            for &(column, partial) in &sample.partials {
-                f.stamp(
-                    node,
-                    column + 1,
-                    sign * self.multiplier * partial * frequency * solution[rate],
-                );
+        if self.expression.is_solution_dependent() {
+            let current = capacitance * frequency * solution[rate];
+            for (node, sign) in terminals {
+                f.stamp_rhs(node, -sign * current);
+                f.stamp(node, rate + 1, sign * capacitance * frequency);
+                for &(column, partial) in &sample.partials {
+                    f.stamp(
+                        node,
+                        column + 1,
+                        sign * self.multiplier * partial * frequency * solution[rate],
+                    );
+                }
+            }
+        } else {
+            // Prescribed C(t,z) owns Q=C*V. Differentiating this Q also
+            // supplies V*dC/dt and the output-frequency sideband in PAC/QPAC.
+            let voltage = |node: usize| node.checked_sub(1).map_or(0.0, |col| solution[col]);
+            let voltage = voltage(self.pos) - voltage(self.neg);
+            for (row, sign) in terminals {
+                q.stamp_rhs(row, -sign * capacitance * voltage);
+                q.stamp(row, self.pos, sign * capacitance);
+                q.stamp(row, self.neg, -sign * capacitance);
+                for &(column, partial) in &sample.partials {
+                    q.stamp(row, column + 1, sign * self.multiplier * partial * voltage);
+                }
             }
         }
         // r = dV/dt / f0. This voltage-valued descriptor coordinate avoids
-        // substituting d(C*V)/dt for C*dV/dt. In a response solve the Q column
-        // supplies the perturbed input frequency, including its sideband.
+        // substituting d(C*V)/dt for solution-controlled C*dV/dt. Prescribed
+        // C stamps its product charge directly; this coordinate still records
+        // its voltage rate. In a response solve it carries the input frequency.
         f.stamp_rhs(rate + 1, solution[rate]);
         f.stamp(rate + 1, rate + 1, -1.0);
         for (node, sign) in [(self.pos, 1.0), (self.neg, -1.0)] {

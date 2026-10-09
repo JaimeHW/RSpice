@@ -864,6 +864,25 @@ pub struct SolutionDependentCapacitorState {
     pub dqdx_prev: Vec<(usize, Value)>,
 }
 
+impl SolutionDependentCapacitorState {
+    /// Preserve small changes before adding a charge origin. Xyce integrates
+    /// C(x,t)*dV for solution-controlled C, but uses Q=C(t)*V for prescribed C.
+    fn charge_increment(
+        &self,
+        capacitance: Value,
+        voltage: Value,
+        previous_voltage: Value,
+        solution_dependent: bool,
+    ) -> Value {
+        let delta_v = voltage - previous_voltage;
+        if solution_dependent {
+            0.5 * (self.c_prev + capacitance) * delta_v
+        } else {
+            capacitance * delta_v + (capacitance - self.c_prev) * previous_voltage
+        }
+    }
+}
+
 impl Default for SolutionDependentCapacitorState {
     fn default() -> Self {
         Self {
@@ -1346,8 +1365,8 @@ impl Capacitors {
 
     /// Start a new integration epoch from an authenticated periodic solution.
     /// Call after restoring SDT constants and the physical terminal currents.
-    /// For i=C(x,z,t)*v', only charge increments are observable: set Q(0)=0
-    /// and start its accumulated external derivatives from that same origin.
+    /// Solution-controlled C uses an arbitrary charge origin; prescribed C
+    /// retains its physical Q=C(t)*V. Both start a fresh increment history.
     /// The first resumed interval must be order one, so no fictitious earlier
     /// charge samples enter Gear2/Trap. Subsequent accepts build real history.
     pub(crate) fn initialize_solution_dependent_periodic_origin(
@@ -1378,10 +1397,19 @@ impl Capacitors {
             let stamp = self.stamps[index];
             let voltage = |node: usize| node.checked_sub(1).map_or(0.0, |column| solution[column]);
             let voltage = voltage(stamp.pp.row) - voltage(stamp.nn.row);
+            let charge = if self
+                .value_expression(index)
+                .unwrap()
+                .is_solution_dependent()
+            {
+                0.0
+            } else {
+                capacitance * voltage
+            };
             self.value_expression_states[index] = Some(SolutionDependentCapacitorState {
                 c_prev: capacitance,
-                q_prev: 0.0,
-                q_prev_prev: 0.0,
+                q_prev: charge,
+                q_prev_prev: charge,
                 charge_increment_prev: 0.0,
                 dcdx_prev: linearization.partials,
                 dqdx_prev: Vec::new(),
@@ -1410,7 +1438,8 @@ impl Capacitors {
     /// `q = q_old + 0.5*(C_old+C_new)*dV`. Its Jacobian holds all accepted
     /// history fixed: the terminal coefficient is the average capacitance,
     /// and every control contributes `0.5*dV*dC/dX`. An accumulated historical
-    /// derivative is not the Jacobian of this discrete step.
+    /// derivative is not the Jacobian of this discrete step. A prescribed
+    /// time-only capacitance instead uses Q=C(t)*V and terminal coefficient C.
     pub(crate) fn stamp_solution_dependent_transient_companion(
         &mut self,
         matrix: &mut StaticMatrix,
@@ -1475,14 +1504,10 @@ impl Capacitors {
         }
 
         for index in 0..self.stamps.len() {
-            if self
-                .value_expressions
-                .get(index)
-                .and_then(Option::as_ref)
-                .is_none()
-            {
+            let Some(expression) = self.value_expression(index) else {
                 continue;
-            }
+            };
+            let solution_dependent = expression.is_solution_dependent();
             let linearization = self
                 .linearize_effective_capacitance(index, solution, time)
                 .ok_or_else(|| {
@@ -1540,8 +1565,13 @@ impl Capacitors {
             }
 
             let delta_v = v_new - self.v_prev[index];
-            let average_capacitance = 0.5 * (state.c_prev + capacitance);
-            let charge_increment = average_capacitance * delta_v;
+            let terminal_derivative = if solution_dependent {
+                0.5 * (state.c_prev + capacitance)
+            } else {
+                capacitance
+            };
+            let charge_increment =
+                state.charge_increment(capacitance, v_new, self.v_prev[index], solution_dependent);
             let dqd_x = linearization
                 .partials
                 .iter()
@@ -1591,7 +1621,6 @@ impl Capacitors {
             let pos_col = (stamp.pp.row > 0).then(|| stamp.pp.row - 1);
             let neg_col = (stamp.nn.row > 0).then(|| stamp.nn.row - 1);
             let mut derivative_terms = Vec::with_capacity(dqd_x.len() + 2);
-            let terminal_derivative = average_capacitance;
             if let Some(column) = pos_col {
                 derivative_terms.push((column, terminal_derivative));
             }
@@ -1684,14 +1713,10 @@ impl Capacitors {
             return;
         }
         for index in 0..self.stamps.len() {
-            if self
-                .value_expressions
-                .get(index)
-                .and_then(Option::as_ref)
-                .is_none()
-            {
+            let Some(expression) = self.value_expression(index) else {
                 continue;
-            }
+            };
+            let solution_dependent = expression.is_solution_dependent();
             let Some(linearization) =
                 self.linearize_effective_capacitance(index, solution, accepted_time)
             else {
@@ -1732,8 +1757,13 @@ impl Capacitors {
                     .collect();
             }
             let delta_v = v_new - self.v_prev[index];
-            let charge_increment = 0.5 * (state.c_prev + capacitance) * delta_v;
-            let charge = state.q_prev + charge_increment;
+            let charge_increment =
+                state.charge_increment(capacitance, v_new, self.v_prev[index], solution_dependent);
+            let charge = if solution_dependent {
+                state.q_prev + charge_increment
+            } else {
+                capacitance * v_new
+            };
             let mut dqd_x = Vec::with_capacity(linearization.partials.len());
             for (column, dcdx) in &linearization.partials {
                 let old_dcdx = solution_partial(&state.dcdx_prev, *column);
@@ -2561,6 +2591,33 @@ mod capacitor_state_tests {
         );
         assert_eq!(rhs, [3.0]);
         assert_eq!(matrix.values_mut(), &[7.0]);
+    }
+
+    #[test]
+    fn capacitor_periodic_origin_distinguishes_prescribed_and_differential_charge() {
+        for differential in [false, true] {
+            let law = if differential {
+                "1+.2*cos(2*pi*1k*time)+0*V(out)"
+            } else {
+                "1+.2*cos(2*pi*1k*time)"
+            };
+            let mut expression = SolutionDependentCapacitor::new("C1".into(), law).unwrap();
+            expression.bind_references(|_| Some(1), |_| None).unwrap();
+            assert_eq!(expression.is_solution_dependent(), differential);
+            let mut capacitors = Capacitors::default();
+            capacitors.add_with_value_expression("C1".into(), 1, 0, 1e-12, expression);
+            capacitors
+                .initialize_solution_dependent_periodic_origin(
+                    &[2.0],
+                    1e-9,
+                    &CompanionCoefficients::backward_euler(),
+                )
+                .unwrap();
+            let state = capacitors.value_expression_states[0].as_ref().unwrap();
+            assert_eq!(state.q_prev, if differential { 0.0 } else { 2.4e-12 });
+            assert_eq!(state.q_prev_prev, state.q_prev);
+            assert_eq!(state.charge_increment_prev, 0.0);
+        }
     }
 
     #[test]

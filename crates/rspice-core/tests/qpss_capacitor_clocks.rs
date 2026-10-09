@@ -24,10 +24,15 @@ fn deck(capacitance: &str, ic: &str) -> Netlist {
     .unwrap()
 }
 
-fn response(grid: &QuasiPeriodicGrid, offset: f64, drive: &[Complex64]) -> Vec<Complex64> {
-    // Independent Fourier KCL: v/R + C(t)*(v'-vin')=0.
-    // C(t)=102 nF - 2 nF cos(theta_2); differentiating C*v would
-    // use the output frequency here and give a different mixing response.
+fn response(
+    grid: &QuasiPeriodicGrid,
+    offset: f64,
+    drive: &[Complex64],
+    differential: bool,
+) -> Vec<Complex64> {
+    // C(t)=102 nF - 2 nF cos(theta_2). Prescribed C uses d(C*V)/dt,
+    // so each Fourier row carries its output frequency. A declared solution
+    // dependency retains C*dV/dt and differentiates the input column instead.
     let n = grid.len();
     let mut matrix = vec![vec![Complex64::ZERO; n + 1]; n];
     for (row, k) in grid.indices().iter().enumerate() {
@@ -43,7 +48,8 @@ fn response(grid: &QuasiPeriodicGrid, offset: f64, drive: &[Complex64]) -> Vec<C
             };
             let admittance = Complex64::new(
                 0.0,
-                TAU * (offset + grid.frequencies_hz()[col]) * capacitance,
+                TAU * (offset + grid.frequencies_hz()[if differential { col } else { row }])
+                    * capacitance,
             );
             matrix[row][col] = admittance;
             matrix[row][n] += admittance * drive[col];
@@ -69,91 +75,107 @@ fn response(grid: &QuasiPeriodicGrid, offset: f64, drive: &[Complex64]) -> Vec<C
     matrix.iter().map(|row| row[n]).collect()
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn qpss_capacitor_clocks_and_nested_memory_match_carrier_and_qpac() {
     let second = 1e3 * SQRT_2;
-    for depth in 0..=2 {
-        let law = match depth {
-            0 => format!("100n*(1.02-0.02*cos(2*pi*{second}*time)+v(0))"),
-            1 => format!("100n*(1+0.1*(2*pi*{second})*SDT(0.2*sin(2*pi*{second}*time)))"),
-            _ => format!("100n*(1+0.1*(2*pi*{second})^2*SDT(SDT(0.2*cos(2*pi*{second}*time))))"),
-        };
-        let netlist = deck(&law, if depth == 2 { "IC=.3" } else { "" });
-        let mut config = QpssConfig::new(vec![1e3, second], vec![2, 2]);
-        config.solver.relative_tolerance = 1e-10;
-        config.solver.current_absolute_tolerance = 1e-14;
-        if depth == 2 {
-            config.solver.linear.method = QuasiPeriodicLinearMethod::Krylov;
-        }
-        let point = engine().run_qpss(&netlist, config).unwrap();
-        let grid = engine()
-            .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
-            .unwrap();
-        assert_eq!(point.integral_names().len(), depth + 1);
-        let out = point
-            .node_names()
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case("out"))
-            .unwrap();
-        let source = point.node_names().len()
-            + point
+    for differential in [false, true] {
+        for depth in 0..=2 {
+            let law = match depth {
+                0 => format!("100n*(1.02-0.02*cos(2*pi*{second}*time))"),
+                1 => format!("100n*(1+0.1*(2*pi*{second})*SDT(0.2*sin(2*pi*{second}*time)))"),
+                _ => {
+                    format!("100n*(1+0.1*(2*pi*{second})^2*SDT(SDT(0.2*cos(2*pi*{second}*time))))")
+                }
+            };
+            let law = if differential {
+                format!("({law})+0*V(out)")
+            } else {
+                law
+            };
+            let netlist = deck(&law, if depth == 2 { "IC=.3" } else { "" });
+            let mut config = QpssConfig::new(vec![1e3, second], vec![2, 2]);
+            config.solver.relative_tolerance = 1e-10;
+            config.solver.current_absolute_tolerance = 1e-14;
+            if depth == 2 {
+                config.solver.linear.method = QuasiPeriodicLinearMethod::Krylov;
+            }
+            let point = engine().run_qpss(&netlist, config).unwrap_or_else(|error| {
+                panic!("differential={differential}, depth={depth}: {error}")
+            });
+            let grid = engine()
+                .validate_qpss_operating_point_with_abort(&netlist, &point, &NoAbort)
+                .unwrap();
+            assert_eq!(point.integral_names().len(), depth + 1);
+            let out = point
+                .node_names()
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("out"))
+                .unwrap();
+            let source = point.node_names().len()
+                + point
+                    .branch_names()
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case("Vdrive"))
+                    .unwrap();
+            let mut drive = vec![Complex64::ZERO; grid.len()];
+            let cap_branch = point
                 .branch_names()
                 .iter()
-                .position(|name| name.eq_ignore_ascii_case("Vdrive"))
-                .unwrap();
-        let mut drive = vec![Complex64::ZERO; grid.len()];
-        let cap_branch = point
-            .branch_names()
-            .iter()
-            .position(|name| name.eq_ignore_ascii_case("C1"));
-        assert_eq!(cap_branch.is_some(), depth == 2);
-        drive[grid.index_of(&[1, 0]).unwrap()] = Complex64::new(0.0, -0.1);
-        drive[grid.index_of(&[-1, 0]).unwrap()] = Complex64::new(0.0, 0.1);
-        for (index, expected) in response(&grid, 0.0, &drive).into_iter().enumerate() {
-            assert!(
-                (point.spectra()[out][index] - expected).norm() < 1e-8,
-                "depth {depth}, carrier {index}"
-            );
-            assert!((point.spectra()[source][index] + expected / 1e3).norm() < 1e-11);
-            if let Some(branch) = cap_branch {
+                .position(|name| name.eq_ignore_ascii_case("C1"));
+            assert_eq!(cap_branch.is_some(), depth == 2);
+            drive[grid.index_of(&[1, 0]).unwrap()] = Complex64::new(0.0, -0.1);
+            drive[grid.index_of(&[-1, 0]).unwrap()] = Complex64::new(0.0, 0.1);
+            for (index, expected) in response(&grid, 0.0, &drive, differential)
+                .into_iter()
+                .enumerate()
+            {
                 assert!(
-                    (point.spectra()[point.node_names().len() + branch][index] - expected / 1e3)
-                        .norm()
-                        < 1e-11
+                    (point.spectra()[out][index] - expected).norm() < 1e-8,
+                    "depth {depth}, carrier {index}"
+                );
+                assert!((point.spectra()[source][index] + expected / 1e3).norm() < 1e-11);
+                if let Some(branch) = cap_branch {
+                    assert!(
+                        (point.spectra()[point.node_names().len() + branch][index]
+                            - expected / 1e3)
+                            .norm()
+                            < 1e-11
+                    );
+                }
+            }
+            for input in [[0, 0], [-1, 1]] {
+                let request = QpacRequest {
+                    offsets_hz: vec![130.0],
+                    input_source: "Vdrive".into(),
+                    input_lattice: input.to_vec(),
+                    output_node: "out".into(),
+                    output_ref: "0".into(),
+                    output_lattice: vec![input[0], input[1] - 1],
+                    magnitude: 2.0,
+                    phase_degrees: 37.0,
+                    solver: Default::default(),
+                };
+                let output = grid.index_of(&request.output_lattice).unwrap();
+                let result = engine()
+                    .run_qpac_from_qpss(&netlist, request, &point)
+                    .unwrap();
+                drive.fill(Complex64::ZERO);
+                drive[grid.index_of(&input).unwrap()] = Complex64::new(1.0, 0.0);
+                let expected = response(&grid, 130.0, &drive, differential);
+                for (index, value) in expected.iter().enumerate() {
+                    assert!(
+                        (result.unit_solutions[0].spectra[out][index] - value).norm() < 1e-8,
+                        "depth {depth}, QPAC {input:?}/{index}"
+                    );
+                }
+                assert!(
+                    (result.output_response[0]
+                        - expected[output] * Complex64::from_polar(2.0, 37_f64.to_radians()))
+                    .norm()
+                        < 2e-8
                 );
             }
-        }
-        for input in [[0, 0], [-1, 1]] {
-            let request = QpacRequest {
-                offsets_hz: vec![130.0],
-                input_source: "Vdrive".into(),
-                input_lattice: input.to_vec(),
-                output_node: "out".into(),
-                output_ref: "0".into(),
-                output_lattice: vec![input[0], input[1] - 1],
-                magnitude: 2.0,
-                phase_degrees: 37.0,
-                solver: Default::default(),
-            };
-            let output = grid.index_of(&request.output_lattice).unwrap();
-            let result = engine()
-                .run_qpac_from_qpss(&netlist, request, &point)
-                .unwrap();
-            drive.fill(Complex64::ZERO);
-            drive[grid.index_of(&input).unwrap()] = Complex64::new(1.0, 0.0);
-            let expected = response(&grid, 130.0, &drive);
-            for (index, value) in expected.iter().enumerate() {
-                assert!(
-                    (result.unit_solutions[0].spectra[out][index] - value).norm() < 1e-8,
-                    "depth {depth}, QPAC {input:?}/{index}"
-                );
-            }
-            assert!(
-                (result.output_response[0]
-                    - expected[output] * Complex64::from_polar(2.0, 37_f64.to_radians()))
-                .norm()
-                    < 2e-8
-            );
         }
     }
 }

@@ -126,3 +126,52 @@ fn envelope_expression_capacitors_keep_coupled_state_integrals_and_charge_drift(
         );
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn prescribed_capacitance_envelope_retains_product_charge_and_current() {
+    for method in [IntegrationMethod::Trapezoidal, IntegrationMethod::Gear2] {
+        let deck=Netlist::parse_with_options(
+            "Prescribed capacitor envelope\nVslow slow 0 PWL(0 0 .1m 0 .2m 1 .5m 1)\nRslow slow 0 1k\nBdrive 0 out I={1m-100n*.2*2*pi*1k*sin(2*pi*1k*time)}\nR1 out 0 1k\nC1 out 0 C={100n*(1+.2*cos(2*pi*1k*time))} IC=1\n.options hbint tahb=0\n.end\n",
+            NetlistParseOptions { expression_dialect: ExpressionDialect::Xyce, ..Default::default() }
+        ).unwrap();
+        let engine = Engine::new(SimulationConfig {
+            integration_method: method,
+            ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
+        });
+        let mut config = HbConfig::new(1e3)
+            .with_harmonics(3)
+            .with_collocation_points(33);
+        config.tolerance = 1e-10;
+        config.abstol = 1e-14;
+        let envelope = engine
+            .run_envelope_with_abort(&deck, config, &["Vslow".into()], 0.25e-3, 0.5e-6, &NoAbort)
+            .unwrap();
+        let checkpoint = TransientCheckpoint::from_bytes(
+            &envelope
+                .final_checkpoint()
+                .to_bytes(rspice_core::engine::TransientCheckpointEncoding::Packed)
+                .unwrap(),
+        )
+        .unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&deck, &checkpoint, 0.5e-3, 0.5e-6)
+            .unwrap();
+        for result in [envelope.continued_transient(), &resumed] {
+            let voltage = result.try_voltage_waveform_named("out").unwrap();
+            let current = result.try_branch_current_waveform_named("C1").unwrap();
+            for (index, &time) in result.time.iter().enumerate() {
+                let truth = -20e-9 * TAU * 1e3 * (TAU * 1e3 * time).sin();
+                assert!(
+                    (voltage[index] - 1.0).abs() < 2e-5,
+                    "{method:?}: voltage at {time:e}"
+                );
+                assert!(
+                    (current[index] - truth).abs() < 3e-8,
+                    "{method:?}: current at {time:e}: {} vs {truth}",
+                    current[index]
+                );
+            }
+        }
+    }
+}

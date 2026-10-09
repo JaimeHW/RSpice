@@ -293,7 +293,9 @@ fn hb_retained_state_identity(
 
 fn hb_resolved_simulation_identity(config: &super::SimulationConfig) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"rspice-hb-resolved-simulation-config-v1\0");
+    // v2 binds HB and QPSS carriers to prescribed-capacitance product charge.
+    // Pre-fix carriers must not seed response or continuation under new F/Q.
+    hasher.update(b"rspice-hb-resolved-simulation-config-v2\0");
     for (name, value) in [
         ("tolerance", config.tolerance),
         ("temperature", config.temperature),

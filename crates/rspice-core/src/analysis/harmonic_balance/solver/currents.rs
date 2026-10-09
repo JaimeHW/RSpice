@@ -244,14 +244,14 @@ impl HbSolver {
             let waves = self.native_state_waveforms(state)?;
             let count = self.fft.size();
             let mut solution = vec![0.0; waves.len()];
-            let zero_charge = vec![0.0; count];
             let rate_start = self.num_nodes + self.capacitor_rate_start();
             let integral_start = self.num_nodes + self.physical_branch_count();
             let mut state_start = integral_start + self.behavioral_sources.integral_count();
             for index in 0..self.periodic_capacitors.len() {
                 let mut capacitor = self.periodic_capacitors[index].clone();
                 let mut current = vec![0.0; count];
-                for (sample, current) in current.iter_mut().enumerate() {
+                let mut charge = vec![0.0; count];
+                for (sample, (current, charge)) in current.iter_mut().zip(&mut charge).enumerate() {
                     if abort.is_aborted() {
                         return Err(HbError::Aborted);
                     }
@@ -259,7 +259,7 @@ impl HbSolver {
                         *value = wave[sample];
                     }
                     let time = sample as Value / count as Value / self.config.fundamental_freq;
-                    *current = capacitor.multiplier
+                    let capacitance = capacitor.multiplier
                         * capacitor
                             .expression
                             .sample_periodic_capacitance(
@@ -274,11 +274,20 @@ impl HbSolver {
                                 state_start,
                             )
                             .map_err(HbError::InvalidCircuit)?
-                            .value
-                        * self.config.fundamental_freq
-                        * solution[rate_start + index];
+                            .value;
+                    if capacitor.expression.is_solution_dependent() {
+                        *current = capacitance
+                            * self.config.fundamental_freq
+                            * solution[rate_start + index];
+                    } else {
+                        let voltage = |node: usize| {
+                            node.checked_sub(1).map_or(0.0, |column| solution[column])
+                        };
+                        *charge =
+                            capacitance * (voltage(capacitor.pos) - voltage(capacitor.neg));
+                    }
                 }
-                let positive = self.lead_phasors(&current, &zero_charge)?;
+                let positive = self.lead_phasors(&current, &charge)?;
                 let negative = positive.iter().map(|value| -*value).collect();
                 state_start += capacitor.expression.program.sdt_count;
                 result.push(HbDeviceLeadSpectra {

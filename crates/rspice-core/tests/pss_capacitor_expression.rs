@@ -147,3 +147,55 @@ fn expression_capacitor_pss_owns_integral_coordinates_and_rebases_history() {
         assert!(engine.run_pss(&invalid, config()).is_err(), "{expression}");
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn prescribed_capacitance_pss_preserves_product_charge_through_continuation() {
+    for method in [IntegrationMethod::Trapezoidal, IntegrationMethod::Gear2] {
+        for with_ic in [false, true] {
+            let ic = if with_ic { " IC=1" } else { "" };
+            let deck = parse(&format!(
+                "Prescribed capacitor shooting\nBdrive 0 out I={{1m-100n*.2*2*pi*1k*sin(2*pi*1k*time)}}\nR1 out 0 1k\nC1 out 0 C={{100n*(1+.2*cos(2*pi*1k*time))}}{ic}\n.end\n"
+            ));
+            let engine = Engine::new(SimulationConfig {
+                integration_method: method,
+                ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
+            });
+            let (analysis, state) = engine
+                .run_pss_with_continuation_state(&deck, config().with_points_per_period(1024))
+                .unwrap();
+            let out = analysis
+                .result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case("out"))
+                .unwrap();
+            for &voltage in &analysis.result.waveforms[out].values {
+                assert!(
+                    (voltage - 1.0).abs() < 3e-5,
+                    "{method:?}/{with_ic}: {voltage}"
+                );
+            }
+            let (continued, _) = engine
+                .run_tran_from_pss_state(&deck, &state, 0.4e-3, 0.5e-6)
+                .unwrap();
+            let voltage = continued.try_voltage_waveform_named("out").unwrap();
+            let current = continued.try_branch_current_waveform_named("C1").unwrap();
+            for (index, &time) in continued.time.iter().enumerate() {
+                let truth = -20e-9
+                    * std::f64::consts::TAU
+                    * 1e3
+                    * (std::f64::consts::TAU * 1e3 * time).sin();
+                assert!(
+                    (voltage[index] - 1.0).abs() < 5e-5,
+                    "{method:?}/{with_ic}: voltage at {time:e}"
+                );
+                assert!(
+                    (current[index] - truth).abs() < 1e-7,
+                    "{method:?}/{with_ic}: current at {time:e}: {} vs {truth}",
+                    current[index]
+                );
+            }
+        }
+    }
+}

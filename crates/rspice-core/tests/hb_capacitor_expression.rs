@@ -216,11 +216,12 @@ fn expression_capacitor_qpss_preserves_multitone_current() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn expression_capacitor_time_law_drives_downstream_integral() {
     let netlist = parse(
         "Timed capacitor with integral observer\n\
-        Bdrive 0 input I={sin(2*pi*1k*time)/1k+100n*(1+0.2*cos(2*pi*1k*time))*2*pi*1k*cos(2*pi*1k*time)}\n\
+        Bdrive 0 input I={sin(2*pi*1k*time)/1k+100n*2*pi*1k*(cos(2*pi*1k*time)+0.2*cos(4*pi*1k*time))}\n\
         R1 input 0 1k\nC1 input 0 C={100n*(1+0.2*cos(2*pi*1k*time))}\n\
         Bobserve observed 0 V={2*pi*1k*SDT(V(input))}\nR2 observed 0 1k\n.options hbint tahb=0\n.end\n",
     );
@@ -241,4 +242,60 @@ fn expression_capacitor_time_law_drives_downstream_integral() {
         .coefficients;
     assert!((observed[0].re - 1.).abs() < 1e-6, "{:?}", observed);
     assert!((observed[1] + 1.).norm() < 1e-6, "{:?}", observed);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn prescribed_capacitance_hb_retains_current_at_constant_voltage() {
+    for (terminals, sign) in [("out 0", 1.0), ("0 out", -1.0)] {
+        for with_ic in [false, true] {
+            let ic = if with_ic {
+                format!(" IC={sign}")
+            } else {
+                String::new()
+            };
+            let netlist = parse(&format!(
+                "Prescribed capacitor carrier\nBdrive 0 out I={{1m-100n*.2*2*pi*1k*sin(2*pi*1k*time)}}\nR1 out 0 1k\nC1 {terminals} C={{100n*(1+.2*cos(2*pi*1k*time))}}{ic}\n.options hbint tahb=0\n.end\n"
+            ));
+            let mut config = HbConfig::new(1e3)
+                .with_harmonics(3)
+                .with_collocation_points(33);
+            config.tolerance = 1e-10;
+            config.abstol = 1e-14;
+            let hb = engine().run_hb(&netlist, config).unwrap();
+            let voltage = &hb
+                .result
+                .spectral_voltages
+                .iter()
+                .find(|v| v.node_name.eq_ignore_ascii_case("out"))
+                .unwrap()
+                .coefficients;
+            assert!((voltage[0] - 1.0).norm() < 1e-8);
+            assert!(voltage[1..].iter().all(|v| v.norm() < 1e-8));
+            let current = &hb.result.reactive_spectra[0].current_coefficients;
+            for (harmonic, actual) in current.iter().enumerate() {
+                let expected = if harmonic == 1 {
+                    Complex64::new(0.0, sign * 20e-9 * TAU * 1e3)
+                } else {
+                    Complex64::ZERO
+                };
+                assert!(
+                    (actual - expected).norm() < 1e-11,
+                    "{terminals}/{with_ic}: {harmonic}, {actual} vs {expected}"
+                );
+            }
+            if with_ic {
+                let branch = &hb
+                    .result
+                    .mna_branch_currents
+                    .iter()
+                    .find(|b| b.device_name.eq_ignore_ascii_case("C1"))
+                    .unwrap()
+                    .coefficients;
+                for (actual, expected) in branch.iter().zip(current) {
+                    assert!((actual - expected).norm() < 1e-11);
+                }
+            }
+        }
+    }
 }
