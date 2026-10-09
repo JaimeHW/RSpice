@@ -49,7 +49,7 @@
       "id": "C07",
       "status": "open",
       "requirement": "Dynamic, hysteretic and distributed elements",
-      "qualification_task": "Public memory, switch, line and magnetic cases with event refinement, causal histories, conservation and continuation."
+      "qualification_task": "Public memory, switch, line and magnetic cases with event refinement, causal histories, conservation and continuation. transient_passive_currents::expression_capacitor_control_copy_preserves_the_manufactured_waveform checks the same nonlinear capacitance controlled directly or through a unity VCVS against an independent waveform and current law. The ordinary transient Newton Jacobian differentiates the discrete charge increment with accepted history fixed, including terminal and external controls."
     },
     {
       "id": "C08",

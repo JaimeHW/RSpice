@@ -416,3 +416,123 @@ rload xout 0 100
         "four-node ISWITCH final load voltage must reflect exact RON=1 conduction"
     );
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn expression_capacitor_control_copy_preserves_the_manufactured_waveform() {
+    use rspice_core::engine::{
+        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+    };
+    // V(out,reference)=1+.02*sin(wt) and I=C(V)*dV/dt are authored
+    // independently. A unity VCVS presents exactly that same control value.
+    // Xyce NONLIN-TRAN tolerances are independent of ordinary .options.
+    // The step resolves backward Euler over a complete carrier period.
+    for control in ["V(out,reference)", "V(ctrl)"] {
+        for (terminals, sign) in [("out reference", 1.0), ("reference out", -1.0)] {
+            for with_ic in [false, true] {
+                let ic = if with_ic {
+                    format!(" IC={sign}")
+                } else {
+                    String::new()
+                };
+                let deck = Netlist::parse(&format!(
+                    "Expression capacitor control alias\nVref reference 0 .125\nEcopy ctrl 0 out reference 1\nR1 out reference 1Meg\nC1 {terminals} C={{10p*exp(20*({control}-1))}}{ic}\nBdrive reference out I={{(1+.02*sin(2*pi*1Meg*time))/1Meg+10p*exp(.4*sin(2*pi*1Meg*time))*.02*2*pi*1Meg*cos(2*pi*1Meg*time)}}\n.ic V(out)=1.125 V(reference)=.125 V(ctrl)=1\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.options NONLIN-TRAN RELTOL=1e-9 ABSTOL=1e-16 RHSTOL=1e-13 MAXSTEP=200\n.save all\n.end\n"
+                )).unwrap();
+                for method in [
+                    IntegrationMethod::BackwardEuler,
+                    IntegrationMethod::Trapezoidal,
+                    IntegrationMethod::Gear2,
+                    IntegrationMethod::TrapGear,
+                ] {
+                    let label = format!("{control}/{terminals}/{with_ic}/{method:?}");
+                    let mut config =
+                        SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+                    config.integration_method = method;
+                    config.max_timestep = 0.125e-9;
+                    config.min_timestep = 0.125e-12;
+                    config.convergence_config.gmin_target = 0.0;
+                    let engine = Engine::new(config);
+                    let (result, checkpoints) = engine
+                        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                            &deck,
+                            1e-6,
+                            0.125e-9,
+                            TransientStartupMode::Uic,
+                            &[0.375e-6],
+                            &rspice_core::NoAbort,
+                        )
+                        .unwrap_or_else(|error| panic!("{label}: {error}"));
+                    let voltage = result.try_voltage_waveform_named("out").unwrap();
+                    let current = result.try_branch_current_waveform_named("c1").unwrap();
+                    let drive = result.try_branch_current_waveform_named("bdrive").unwrap();
+                    let mut max_voltage_error: f64 = 0.0;
+                    let mut max_current_error: f64 = 0.0;
+                    for (i, &time) in result.time.iter().enumerate().skip(1) {
+                        let phase = std::f64::consts::TAU * 1e6 * time;
+                        let expected = 1.0 + 0.02 * phase.sin();
+                        let expected_current = 10e-12
+                            * (0.4 * phase.sin()).exp()
+                            * 0.02
+                            * std::f64::consts::TAU
+                            * 1e6
+                            * phase.cos();
+                        max_voltage_error =
+                            max_voltage_error.max((voltage[i] - 0.125 - expected).abs());
+                        max_current_error =
+                            max_current_error.max((sign * current[i] - expected_current).abs());
+                        assert!(
+                            (sign * current[i] + (voltage[i] - 0.125) / 1e6 - drive[i]).abs()
+                                < 1e-12,
+                            "{label} KCL at {time:e}: cap={} load={} drive={} residual={}",
+                            sign * current[i],
+                            (voltage[i] - 0.125) / 1e6,
+                            drive[i],
+                            sign * current[i] + (voltage[i] - 0.125) / 1e6 - drive[i]
+                        );
+                    }
+                    eprintln!(
+                        "{label}: {} points, voltage error {max_voltage_error:e}, current error {max_current_error:e}",
+                        result.time.len()
+                    );
+                    assert!(
+                        max_voltage_error < 3e-5,
+                        "{label}: voltage error {max_voltage_error:e}"
+                    );
+                    assert!(
+                        max_current_error < 3e-9,
+                        "{label}: current error {max_current_error:e}"
+                    );
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                    if control == "V(ctrl)" {
+                        let checkpoint = TransientCheckpoint::from_bytes(
+                            &checkpoints[0]
+                                .checkpoint
+                                .to_bytes(TransientCheckpointEncoding::Packed)
+                                .unwrap(),
+                        )
+                        .unwrap();
+                        let (resumed, _) = engine
+                            .run_tran_resume(&deck, &checkpoint, 1e-6, 0.125e-9)
+                            .unwrap();
+                        let offset = result
+                            .time
+                            .iter()
+                            .position(|&time| time == checkpoint.time)
+                            .unwrap();
+                        assert_eq!(resumed.time, result.time[offset..], "{label}");
+                        assert_eq!(resumed.voltages.len(), result.voltages.len());
+                        assert_eq!(resumed.branch_currents.len(), result.branch_currents.len());
+                        for (actual, full) in resumed
+                            .voltages
+                            .iter()
+                            .zip(&result.voltages)
+                            .chain(resumed.branch_currents.iter().zip(&result.branch_currents))
+                        {
+                            assert_eq!(actual, &full[offset..], "{label}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

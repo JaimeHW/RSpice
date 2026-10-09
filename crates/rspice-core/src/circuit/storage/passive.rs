@@ -1400,12 +1400,11 @@ impl Capacitors {
 
     /// Stamp the DAE companion for every solution-dependent capacitor.
     ///
-    /// The accepted state stores charge and the integrated external
-    /// derivatives. Trial Newton points use Xyce's trapezoidal charge update
-    /// `q = q_old + 0.5*(C_old+C_new)*dV`, then apply the selected integration
-    /// coefficients to `q` and `dQ/dX`. Terminal derivatives are always
-    /// replaced by `+/-C`; the integrated `dC/dX*dV` term is only used for
-    /// non-terminal dependencies.
+    /// Trial Newton points use the trapezoidal charge increment
+    /// `q = q_old + 0.5*(C_old+C_new)*dV`. Its Jacobian holds all accepted
+    /// history fixed: the terminal coefficient is the average capacitance,
+    /// and every control contributes `0.5*dV*dC/dX`. An accumulated historical
+    /// derivative is not the Jacobian of this discrete step.
     pub(crate) fn stamp_solution_dependent_transient_companion(
         &mut self,
         matrix: &mut StaticMatrix,
@@ -1416,9 +1415,8 @@ impl Capacitors {
         self.stamp_solution_dependent_companion::<false>(matrix, rhs, solution, step, None, false)
     }
 
-    /// Newton's Jacobian of the discrete charge increment with accepted
-    /// history fixed. Shooting differentiates this step map, rather than the
-    /// integrated external dQ/dX stored for Xyce transient compatibility.
+    /// The shared discrete-step Jacobian plus optional physical-current
+    /// residuals for shooting's differentiated step map.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn stamp_solution_dependent_shooting_companion(
         &mut self,
@@ -1538,28 +1536,10 @@ impl Capacitors {
             let average_capacitance = 0.5 * (state.c_prev + capacitance);
             let charge_increment = average_capacitance * delta_v;
             let charge = state.q_prev + charge_increment;
-            let mut dqd_x = Vec::with_capacity(linearization.partials.len());
-            for (column, dcdx) in &linearization.partials {
-                let old_dcdx = solution_partial(&state.dcdx_prev, *column);
-                let old_dqdx = solution_partial(&state.dqdx_prev, *column);
-                let derivative = if SHOOTING {
-                    0.5 * delta_v * dcdx
-                } else {
-                    old_dqdx + 0.5 * (old_dcdx + *dcdx) * delta_v
-                };
-                dqd_x.push((*column, derivative));
-            }
-            for (column, old_dqdx) in &state.dqdx_prev {
-                if !SHOOTING
-                    && !linearization
-                        .partials
-                        .iter()
-                        .any(|(current_column, _)| current_column == column)
-                {
-                    let old_dcdx = solution_partial(&state.dcdx_prev, *column);
-                    dqd_x.push((*column, *old_dqdx + 0.5 * old_dcdx * delta_v));
-                }
-            }
+            let dqd_x = linearization
+                .partials
+                .iter()
+                .map(|&(column, dcdx)| (column, 0.5 * delta_v * dcdx));
 
             let current = if SHOOTING {
                 // The arbitrary charge origin cancels analytically. Preserve
@@ -1615,11 +1595,7 @@ impl Capacitors {
             let pos_col = (stamp.pp.row > 0).then(|| stamp.pp.row - 1);
             let neg_col = (stamp.nn.row > 0).then(|| stamp.nn.row - 1);
             let mut derivative_terms = Vec::with_capacity(dqd_x.len() + 2);
-            let terminal_derivative = if SHOOTING {
-                average_capacitance
-            } else {
-                capacitance
-            };
+            let terminal_derivative = average_capacitance;
             if let Some(column) = pos_col {
                 derivative_terms.push((column, terminal_derivative));
             }
@@ -1627,9 +1603,6 @@ impl Capacitors {
                 derivative_terms.push((column, -terminal_derivative));
             }
             for (column, derivative) in dqd_x {
-                if !SHOOTING && (Some(column) == pos_col || Some(column) == neg_col) {
-                    continue;
-                }
                 derivative_terms.push((column, derivative));
             }
 
@@ -2592,7 +2565,7 @@ mod capacitor_state_tests {
     }
 
     #[test]
-    fn shooting_capacitor_jacobian_holds_history_and_certifies_physical_current() {
+    fn capacitor_step_jacobian_holds_history_and_certifies_physical_current() {
         for branch in [None, Some(1)] {
             for method in [
                 IntegrationMethod::BackwardEuler,
@@ -2658,6 +2631,19 @@ mod capacitor_state_tests {
                     let entry = matrix.get_index(row, col).unwrap();
                     assert_close(matrix.values_mut()[entry.offset()], scale * derivative);
                 }
+                let expected_matrix = matrix.values_mut().to_vec();
+                matrix.clear_values();
+                rhs.fill(0.0);
+                caps.stamp_solution_dependent_transient_companion(
+                    &mut matrix,
+                    &mut rhs,
+                    &solution,
+                    step(),
+                )
+                .unwrap();
+                // Ordinary transient uses the same fixed-history step
+                // derivative, even when old trajectory derivatives are huge.
+                assert_eq!(matrix.values_mut(), expected_matrix);
                 matrix.clear_values();
                 rhs.fill(0.0);
                 caps.stamp_solution_dependent_shooting_companion(
