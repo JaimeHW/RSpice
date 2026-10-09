@@ -854,6 +854,72 @@ endmodule
 }
 
 #[test]
+fn root_parameter_array_specialization_preserves_replacement_contract() {
+    use rspice_veriloga::{NoPipelineControl, ScalarParameterValue};
+
+    let source = r#"
+module top(output electrical p);
+ parameter integer LEFT=2, RIGHT=1;
+ aliasparam HIGH=LEFT;
+ parameter real taps[LEFT:RIGHT]='{(LEFT-RIGHT+1){2.5}};
+ real sampled;
+ initial sampled=taps[RIGHT];
+ analog V(p)<+sampled;
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let initial = compiler.compile_runtime(source, Some("top")).unwrap();
+    for overrides in [
+        vec![("LEFT", 3.0)],
+        vec![("HIGH", 3.0)],
+        vec![("RIGHT", 0.0)],
+    ] {
+        let error = compiler
+            .specialize_mixed_runtime(&initial.canonical_ir, &overrides, &NoPipelineControl)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("replacement array") && error.contains("taps"),
+            "{error}"
+        );
+    }
+    let shifted = compiler
+        .specialize_mixed_runtime_typed(
+            &initial.canonical_ir,
+            &[
+                ("HIGH", ScalarParameterValue::Integer(4)),
+                ("RIGHT", ScalarParameterValue::Integer(3)),
+            ],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&shifted.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        shifted.canonical_ir.runtime_source_identity(),
+        replay.canonical_ir.runtime_source_identity()
+    );
+
+    // Private arrays derive their size from effective public parameters and
+    // cannot receive an external replacement assignment.
+    let local = compiler
+        .compile_runtime(
+            &source.replace("parameter real taps", "localparam real taps"),
+            Some("top"),
+        )
+        .unwrap();
+    compiler
+        .specialize_mixed_runtime(&local.canonical_ir, &[("LEFT", 3.0)], &NoPipelineControl)
+        .unwrap();
+}
+
+#[test]
 fn local_parameter_arrays_validate_shapes_types_and_readonly_access() {
     for declaration in [
         "localparam real a[1:0]='{1};",

@@ -254,7 +254,9 @@ and bounds in the target occurrence while evaluating runtime indices in the call
 Imported arrays add no externally overridable parameters. Bounds, dependencies,
 integer assignment conversion and source replay follow the existing typed parameter
 path. Resizing a public parameter array requires an explicit replacement array value.
-HIR 156 / cache record 138 invalidate artifacts predating these array bindings.
+External scalar specialization also enforces that rule, including alias overrides;
+private local arrays may derive new shapes from effective public parameters.
+HIR 157 / cache record 139 invalidate artifacts predating these array contracts.
 Foreign digital storage, multiple HDL roots/cross-model hierarchy, string parameter
 binding, aggregate expressions that depend on other arrays, hierarchy-dependent
 generate decisions, and scope indices that themselves depend on hierarchical

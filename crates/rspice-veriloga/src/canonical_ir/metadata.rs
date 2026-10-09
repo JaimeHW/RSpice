@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 157 enforces array replacement on externally specialized root sizes.
 /// Version 156 retains private readonly arrays and hierarchical numeric array values.
 /// Version 155 binds automatically inserted connect bodies in their upper context.
 /// Version 154 binds upward and absolute references in concrete selected occurrences.
@@ -144,7 +145,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 156;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 157;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

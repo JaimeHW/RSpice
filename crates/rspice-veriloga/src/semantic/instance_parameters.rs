@@ -5,13 +5,38 @@ pub(super) fn constants(source: &Module) -> DigitalConstants {
     DigitalConstants::from_module(source)
 }
 
+impl SemanticAnalyzer {
+    /// External scalar specialization obeys the same declaration-size contract
+    /// as source instances, including aliases and $param_given dependencies.
+    pub(crate) fn validate_root_array_replacements(effective: &Module) -> CompileResult<()> {
+        let Some(parameters) = &effective.unspecialized_parameters else {
+            return Ok(());
+        };
+        if !parameters
+            .iter()
+            .any(|parameter| !parameter.dimensions.is_empty())
+        {
+            return Ok(());
+        }
+        let mut declared = effective.clone();
+        declared.parameters = parameters.clone();
+        let provided: Vec<_> = effective
+            .parameters
+            .iter()
+            .enumerate()
+            .filter_map(|(index, parameter)| parameter.is_given.then_some(index))
+            .collect();
+        validate_array_replacements(&declared, effective, &provided, &effective.name)
+    }
+}
+
 /// Concrete reference discovery must retain the same array replacement rule as
 /// ordinary hierarchy elaboration (VAMS-2023 3.4.4). Re-expanding a replicated
 /// default at the new width is not an explicit array assignment.
 pub(super) fn validate_array_replacements(
     declared: &Module,
     effective: &Module,
-    provided: &[(usize, String)],
+    provided: &[usize],
     path: &str,
 ) -> CompileResult<()> {
     if provided.is_empty() {
@@ -20,7 +45,7 @@ pub(super) fn validate_array_replacements(
     let before = constants(declared);
     let after = constants(effective);
     for (index, parameter) in declared.parameters.iter().enumerate() {
-        if parameter.dimensions.is_empty() || provided.iter().any(|(given, _)| *given == index) {
+        if parameter.dimensions.is_empty() || provided.contains(&index) {
             continue;
         }
         let extent = |dimension: &ArrayDimension, constants: &DigitalConstants| {
@@ -43,7 +68,8 @@ pub(super) fn validate_array_replacements(
         };
         let mut changed = false;
         for dimension in &parameter.dimensions {
-            let (Some(before), Some(after)) = (extent(dimension, &before), extent(dimension, &after))
+            let (Some(before), Some(after)) =
+                (extent(dimension, &before), extent(dimension, &after))
             else {
                 return Err(SemanticError::new(
                     SemanticErrorKind::InvalidExpression(format!(

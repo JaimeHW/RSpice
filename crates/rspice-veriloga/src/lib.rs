@@ -1263,6 +1263,7 @@ impl VerilogACompiler {
                 parameter.is_given = true;
                 source_specialization.push((parameter.name.clone(), value.clone()));
             }
+            SemanticAnalyzer::validate_root_array_replacements(selected)?;
             parser::expand_specialized_generates(selected)?;
         }
         measurements.record(PipelinePhase::Parse, phase_started.elapsed())?;
