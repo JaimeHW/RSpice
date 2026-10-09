@@ -641,6 +641,7 @@ impl Resolver {
         child.reference_sources = None;
         crate::parser::expand_specialized_generates(&mut child)?;
         validate_parameter_references(&child)?;
+        context::extend_insertions(&self.sources, &mut child, &path);
         let index = self.frames.len();
         if self.selected {
             child.reference_context = Some(path.clone());

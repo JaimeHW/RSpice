@@ -351,6 +351,10 @@ pub(crate) struct ReferenceDesign {
     pub root: SmolStr,
     pub root_source: Module,
     pub occurrences: std::collections::HashMap<SmolStr, Module>,
+    /// Connections added after domain resolution, keyed by their upper context.
+    pub inserted: std::collections::HashMap<SmolStr, Vec<ModuleInstance>>,
+    /// Private executable connect types retain their authored scope name.
+    pub module_names: std::collections::HashMap<SmolStr, SmolStr>,
 }
 
 #[derive(Clone, Debug)]

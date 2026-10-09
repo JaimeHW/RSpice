@@ -6,6 +6,7 @@ impl Resolver {
         validate_parameter_references(&root)?;
         root.reference_sources = None;
         root.reference_context = selected.then(|| "".into());
+        extend_insertions(&sources, &mut root, "");
         let specialization = root
             .parameters
             .iter()
@@ -91,7 +92,11 @@ impl Resolver {
             }
             if self.selected
                 && first.index.is_none()
-                && (first.name == current.source.name || first.name == current.instance_name)
+                && (first.name == current.source.name
+                    || first.name == current.instance_name
+                    || self.sources.design.as_ref().is_some_and(|design| {
+                        design.module_names.get(&current.source.name) == Some(&first.name)
+                    }))
             {
                 return Ok((frame, Vec::new(), 1));
             }
@@ -153,6 +158,8 @@ pub(super) fn prepare(
             root: selected,
             root_source: root,
             occurrences,
+            inserted: HashMap::new(),
+            module_names: HashMap::new(),
         }),
     });
     let design = catalog.design.as_ref().unwrap();
@@ -212,6 +219,8 @@ pub(super) fn resolver(sources: Sources, module: &Module) -> CompileResult<(Reso
     }
     resolver.frames[owner].source = module.clone();
     resolver.frames[owner].source.reference_sources = None;
+    let sources = resolver.sources.clone();
+    extend_insertions(&sources, &mut resolver.frames[owner].source, path);
     resolver.frames[owner].physical = None;
     Ok((resolver, owner))
 }
@@ -226,4 +235,124 @@ pub(crate) fn occurrence(source: &Module, path: &str) -> Option<Module> {
     }
     module.reference_sources = Some(catalog.clone());
     Some(module)
+}
+
+pub(super) fn extend_insertions(sources: &Sources, module: &mut Module, path: &str) {
+    if let Some(instances) = sources
+        .design
+        .as_ref()
+        .and_then(|design| design.inserted.get(path))
+    {
+        for instance in instances {
+            if !module
+                .instances
+                .iter()
+                .any(|existing| existing.name == instance.name)
+            {
+                module.instances.push(instance.clone());
+            }
+        }
+    }
+}
+
+/// Resolve an automatically inserted body and its descendants in the upper
+/// connection's context (VAMS-2023 7.8.4, 7.8.6). The retained declarations and
+/// insertion descriptors have no catalog back-references.
+pub(crate) fn insert(
+    sources: Sources,
+    parent: &Module,
+    body: &Module,
+    authored_name: &SmolStr,
+    instance: ModuleInstance,
+) -> CompileResult<(Sources, Vec<Module>)> {
+    let parent_path = parent.reference_context.as_deref().ok_or_else(|| {
+        error(
+            "connect insertion has no selected parent occurrence",
+            instance.span,
+        )
+    })?;
+    let path: SmolStr = if parent_path.is_empty() {
+        instance.name.clone()
+    } else {
+        format!("{parent_path}.{}", instance.name).into()
+    };
+    let mut catalog = (*sources).clone();
+    let mut template = body.clone();
+    template.reference_sources = None;
+    template.reference_context = None;
+    catalog.modules.insert(body.name.clone(), template);
+    let design = catalog
+        .design
+        .as_mut()
+        .ok_or_else(|| error("connect insertion has no selected design", instance.span))?;
+    design
+        .module_names
+        .insert(body.name.clone(), authored_name.clone());
+    design
+        .inserted
+        .entry(parent_path.into())
+        .or_default()
+        .push(instance.clone());
+    let sources = Arc::new(catalog);
+    let (mut resolver, owner) = resolver(sources.clone(), parent)?;
+    // resolver replaces the parent with its resolved physical view. Add this
+    // insertion there too, then refresh declaration discovery for the new member.
+    extend_insertions(&sources, &mut resolver.frames[owner].source, parent_path);
+    let source = resolver.frames[owner].source.clone();
+    for symbol in source.pending_hierarchical_references.keys() {
+        resolver.resolved.insert((owner, symbol.clone()));
+    }
+    resolver.frames[owner].root_members = source.declared_names();
+    resolver.frames[owner].instances = source
+        .instances
+        .iter()
+        .enumerate()
+        .map(|(index, instance)| (instance.name.clone(), index))
+        .collect();
+    let ordinal = resolver.frames[owner].instances[&instance.name];
+    let first = resolver.child(owner, ordinal, instance.span)?;
+    let within = |candidate: &str| {
+        candidate == path.as_str()
+            || candidate
+                .strip_prefix(path.as_str())
+                .is_some_and(|rest| rest.starts_with('.'))
+    };
+    let mut cursor = first;
+    while cursor < resolver.frames.len() {
+        if within(&resolver.frames[cursor].path) {
+            for ordinal in 0..resolver.frames[cursor].source.instances.len() {
+                let span = resolver.frames[cursor].source.instances[ordinal].span;
+                resolver.child(cursor, ordinal, span)?;
+            }
+            let references: Vec<_> = resolver.frames[cursor]
+                .source
+                .pending_hierarchical_references
+                .keys()
+                .cloned()
+                .collect();
+            for reference in references {
+                resolver.reference(cursor, &reference)?;
+            }
+        }
+        cursor += 1;
+    }
+    let mut catalog = (*sources).clone();
+    let design = catalog.design.as_mut().unwrap();
+    let mut paths = Vec::new();
+    for frame in resolver.frames {
+        if within(&frame.path) {
+            paths.push(frame.path.clone());
+            design.occurrences.insert(frame.path, frame.source);
+        }
+    }
+    let catalog = Arc::new(catalog);
+    let modules = paths
+        .iter()
+        .map(|path| {
+            let mut source = catalog.design.as_ref().unwrap().occurrences[path].clone();
+            source.reference_sources = Some(catalog.clone());
+            source
+        })
+        .collect();
+    Ok((catalog, modules))
 }

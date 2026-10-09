@@ -50,6 +50,67 @@ endmodule
 "#;
 
 #[test]
+fn foreign_inserted_connect_hierarchy_uses_each_parent_supply_and_parameters() {
+    for (mode, count) in [("merged", 1.0), ("split", 2.0)] {
+        let source = Source::new(&format!(
+            r#"
+`timescale 1ns/1ps
+module source(output logic q);
+ reg q;
+ initial begin q=0; #0.2 q=1; end
+endmodule
+module group(inout electrical p);
+ parameter real G=1;
+ electrical vdd;
+ analog V(vdd)<+$root.top.BASE+G+1e9*$abstime;
+ source first(p);
+ source second(p);
+endmodule
+module top(inout electrical p,q);
+ parameter real BASE=2, EXTRA=0.5;
+ group a(p);
+ group #(.G(4)) b(q);
+endmodule
+module output_stage(input logic d,output electrical a);
+ analog I(a)<+(V(a)-(d ? V(group.vdd)+group.G+drive.S+$root.top.EXTRA : 0))/1000;
+endmodule
+connectmodule drive(input logic d,output electrical a);
+ parameter real S=1, R=9;
+ output_stage stage(d,a);
+ analog I(a)<+V(a)/(1000*drive.R);
+endmodule
+connectrules selected; connect drive {mode} #(.S(3),.R(1)); endconnectrules
+"#
+        ));
+        let deck = Netlist::parse(&format!(
+            "* occurrence-bound inserted helpers\nX1 p q top BASE=2\nX2 r s top BASE=5\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\n.va \"{}\" top module=top\n.end\n", source.path(),
+        )).unwrap();
+        let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+        for (node, base, gain) in [
+            ("p", 2.0, 1.0),
+            ("q", 2.0, 4.0),
+            ("r", 5.0, 1.0),
+            ("s", 5.0, 4.0),
+        ] {
+            assert!(
+                voltage(&result, node, 0.1e-9).abs() < 1e-7,
+                "{mode} {node}: off"
+            );
+            for time in [0.5e-9, 0.8e-9] {
+                let index = result.time.iter().position(|value| *value >= time).unwrap();
+                let target = base + 2.0 * gain + 1e9 * result.time[index] + 3.0 + 0.5;
+                let expected = count * target / (2.0 * count + 1.0);
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{mode} {node} t={time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn hierarchy_connect_insertion_preserves_merged_split_loading_and_sampling() {
     for (mode, high) in [("merged", 1.5), ("split", 2.0)] {
         let source = Source::new(&format!(

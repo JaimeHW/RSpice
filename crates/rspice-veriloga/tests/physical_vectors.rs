@@ -2721,3 +2721,91 @@ endmodule
     let artifact = compiler().compile_runtime(source, Some("drive")).unwrap();
     artifact.canonical_ir.validate().unwrap();
 }
+
+#[test]
+fn foreign_inserted_connect_helpers_survive_virtual_configuration_and_replay() {
+    use rspice_veriloga::{VirtualCompileLimits, VirtualSourceBundle};
+    let source = r#"
+module source(output logic q); assign q=1; endmodule
+module group(inout electrical p);
+ parameter real G=2;
+ electrical vdd;
+ analog V(vdd)<+$root.top.BASE+G;
+ source first(p);
+endmodule
+module top(inout electrical p,q);
+ parameter real BASE=1;
+ group a(p);
+ group #(.G(5)) b(q);
+endmodule
+"#;
+    let library = r#"
+module stage(input logic d,output electrical a);
+ analog I(a)<+(V(a)-d*(V(group.vdd)+drive.GAIN))/1000;
+endmodule
+connectmodule drive(input logic d,output electrical a);
+ parameter integer N=1;
+ parameter real GAIN=1;
+ generate if(N==2) begin : enabled
+   stage helper(d,a);
+ end else begin : disabled
+   analog I(a)<+V(a)/1000;
+ end endgenerate
+endmodule
+connectrules selected; connect drive #(.N(2),.GAIN(3)); endconnectrules
+"#;
+    let compiler = compiler();
+    let device =
+        VirtualSourceBundle::from_sources("device.vams", [("device.vams", source)]).unwrap();
+    let device = compiler
+        .prepare_virtual_runtime_source(&device, VirtualCompileLimits::default())
+        .unwrap();
+    let bundle =
+        VirtualSourceBundle::from_sources("rules.vams", [("rules.vams", library)]).unwrap();
+    let library = compiler
+        .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+        .unwrap();
+    let configuration = library.connection_configuration("selected").unwrap();
+    let artifact = device
+        .compile_runtime_with_connections("top", &configuration, &NoPipelineControl)
+        .unwrap();
+    artifact.runtime.canonical_ir.validate().unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &artifact.runtime.canonical_ir,
+            &[("BASE", 4.0)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&specialized.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        specialized.canonical_ir.hir.branches,
+        replay.canonical_ir.hir.branches
+    );
+    assert_eq!(
+        specialized.canonical_ir.runtime_source_identity(),
+        replay.canonical_ir.runtime_source_identity()
+    );
+    let invalid = source
+        .replace("module group(", "module renamed(")
+        .replace("group a(", "renamed a(")
+        .replace("group #(", "renamed #(");
+    let invalid =
+        VirtualSourceBundle::from_sources("device.vams", [("device.vams", invalid)]).unwrap();
+    let invalid = compiler
+        .prepare_virtual_runtime_source(&invalid, VirtualCompileLimits::default())
+        .unwrap();
+    let error = invalid
+        .compile_runtime_with_connections("top", &configuration, &NoPipelineControl)
+        .err()
+        .expect("missing insertion ancestor must be diagnosed")
+        .to_string();
+    assert!(
+        error.contains("group") && error.contains("scope"),
+        "{error}"
+    );
+}

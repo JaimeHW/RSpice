@@ -126,6 +126,7 @@ pub(crate) fn elaborate_digital_hierarchy(
         source_modules,
         root_source,
         root,
+        &elaborator.connections.bound_occurrences,
         &mut elaborator.connections.specializations,
         &mut elaborator.connections.warnings,
     )?;
@@ -475,10 +476,13 @@ impl DigitalElaborator<'_> {
                     instance.span,
                 ));
             }
+            let path = qualify(&frame.path, &instance.name);
+            let bound = self.connections.bound_occurrences.get(&path).cloned();
             let connection = self.connections.modules.get(&instance.module).cloned();
             let child = connection
                 .as_deref()
                 .map(|module| &module.analyzed)
+                .or_else(|| bound.as_deref().map(|module| &module.analyzed))
                 .or_else(|| self.analyzed.modules.get(&instance.module))
                 .ok_or_else(|| {
                     semantic_error(
@@ -486,9 +490,9 @@ impl DigitalElaborator<'_> {
                         instance.span,
                     )
                 })?;
-            let path = qualify(&frame.path, &instance.name);
             stack.push(frame);
-            if connection.is_none() && !self.required.contains(&instance.module) {
+            if connection.is_none() && bound.is_none() && !self.required.contains(&instance.module)
+            {
                 continue;
             }
             check_hierarchy_capacity(stack.len(), self.instances.len(), &path, instance.span)?;
@@ -507,8 +511,10 @@ impl DigitalElaborator<'_> {
     ) -> CompileResult<HierarchyFrame> {
         let parent_scope = &ancestors.last().expect("instance parent").scope;
         let connection = self.connections.modules.get(&instance.module).cloned();
-        let child_source = connection
+        let bound = self.connections.bound_occurrences.get(path).cloned();
+        let child_source = bound
             .as_deref()
+            .or(connection.as_deref())
             .map(|module| &module.source)
             .or_else(|| self.source_modules.get(&instance.module).copied())
             .ok_or_else(|| {
@@ -564,11 +570,14 @@ impl DigitalElaborator<'_> {
                 self.source_modules,
                 child_source,
                 child,
+                &self.connections.bound_occurrences,
                 &mut self.connections.specializations,
                 &mut self.connections.warnings,
             )?;
             for (relative, module) in resolved {
-                let name = if relative.is_empty() {
+                let name = if child_source.reference_context.is_some() {
+                    relative
+                } else if relative.is_empty() {
                     path.into()
                 } else {
                     qualify(path, &relative)
@@ -949,7 +958,10 @@ impl DigitalElaborator<'_> {
                 range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                 signed: declared.signedness.is_signed(),
                 is_variable: declared.class.is_variable(),
-                is_input_port: child.physical_nodes.real_input_buses.contains(&declared.name)
+                is_input_port: child
+                    .physical_nodes
+                    .real_input_buses
+                    .contains(&declared.name)
                     || declared.element_alias.as_ref().is_some_and(|alias| {
                         child.physical_nodes.real_input_buses.contains(&alias.array)
                     }),

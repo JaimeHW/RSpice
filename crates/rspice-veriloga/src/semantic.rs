@@ -597,7 +597,8 @@ impl SemanticAnalyzer {
             }
             _ => false,
         });
-        if !hierarchical || ordinary == 1 {
+        let has_connections = source.items.iter().any(|item| matches!(item, Item::ConnectModule(_)));
+        if !hierarchical || (ordinary == 1 && !has_connections) {
             return self.analyze(source);
         }
         let (disciplines, connect_rules) = Self::new().connection_definitions(source)?;

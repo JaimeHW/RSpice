@@ -36,6 +36,9 @@ pub(super) struct ConnectionModules {
     pub prepared: HashMap<(SpecializationKey, SmolStr), Option<Arc<SpecializedModule>>>,
     pub resolved_types: HashMap<SmolStr, Arc<SpecializedModule>>,
     pub modules: HashMap<SmolStr, Arc<SpecializedModule>>,
+    /// Concrete inserted bodies and helpers, before net-type resolution.
+    pub bound_occurrences: HashMap<SmolStr, Arc<SpecializedModule>>,
+    reference_sources: Option<Arc<crate::ast::ReferenceSourceCatalog>>,
     identities: HashMap<String, SmolStr>,
 }
 
@@ -225,19 +228,28 @@ fn prepare_boundaries(
     let mut aliases = module.digital.bit_aliases.clone();
     let constants = super::instance_parameters::constants(source);
     for (instance_index, instance) in source.instances.iter().enumerate() {
-        let Some(child) = analyzed.modules.get(&instance.module) else {
+        let child_path = if path.is_empty() {
+            instance.name.to_string()
+        } else {
+            format!("{path}.{}", instance.name)
+        };
+        let bound = bodies.bound_occurrences.get(child_path.as_str()).cloned();
+        let Some(child) = bound
+            .as_deref()
+            .map(|body| &body.analyzed)
+            .or_else(|| analyzed.modules.get(&instance.module))
+        else {
             continue;
         };
         if !has_rules && child.digital.signals.is_empty() {
             continue;
         }
-        let Some(child_source) = sources.get(&instance.module) else {
+        let Some(child_source) = bound
+            .as_deref()
+            .map(|body| &body.source)
+            .or_else(|| sources.get(&instance.module).copied())
+        else {
             continue;
-        };
-        let child_path = if path.is_empty() {
-            instance.name.to_string()
-        } else {
-            format!("{path}.{}", instance.name)
         };
         let (_, specialized) = specialize_module(
             analyzed,
@@ -277,7 +289,13 @@ fn prepare_boundaries(
                 continue;
             };
             compatibility::check_actual(
-                analyzed, source, module, actual, &lower, &child_path, &port.name,
+                analyzed,
+                source,
+                module,
+                actual,
+                &lower,
+                &child_path,
+                &port.name,
             )?;
             if port.direction == PortDirection::Input
                 && lower.net_kind.is_some()
@@ -487,7 +505,7 @@ fn prepare_boundaries(
             // their constants before ordinary hierarchy override resolution.
             rule.numeric_parameters()
                 .map_err(|cause| error(cause.to_string(), span))?;
-            let body_name = bodies.materialize(analyzed, sources, rule, &insertion)?;
+            let body_name = bodies.materialize(analyzed, sources, source, rule, &insertion)?;
             let mut private: SmolStr = format!("{}__net", insertion.instance).into();
             while !used.insert(private.clone()) {
                 private = format!("{private}_").into();
@@ -706,16 +724,21 @@ impl ConnectionModules {
         &mut self,
         analyzed: &AnalyzedFile,
         sources: &HashMap<SmolStr, &Module>,
+        parent: &Module,
         rule: &InsertionRule,
         insertion: &ConnectModuleInsertion,
     ) -> CompileResult<SmolStr> {
         let key = format!(
-            "{:?}:{:?}:{:?}:{:?}:{:?}",
+            "{:?}:{:?}:{:?}:{:?}:{:?}:{:?}",
             rule.connect_module,
             insertion.continuous,
             insertion.discrete,
             rule.continuous.direction,
-            rule.discrete.direction
+            rule.discrete.direction,
+            parent
+                .reference_context
+                .as_ref()
+                .map(|path| (path, &insertion.instance))
         );
         if let Some(name) = self.identities.get(&key) {
             return Ok(name.clone());
@@ -811,7 +834,62 @@ impl ConnectionModules {
             }
         }
         apply_ports(&mut body, &name, rule, insertion);
-        let module = analyze_occurrence(analyzed, &body, transition, default_discipline)?;
+        let module = if parent.reference_context.is_some() {
+            let catalog = self
+                .reference_sources
+                .clone()
+                .or_else(|| parent.reference_sources.clone())
+                .ok_or_else(|| {
+                    error("selected connect context has no source closure", rule.span)
+                })?;
+            let (catalog, occurrences) = super::source_references::context::insert(
+                catalog,
+                parent,
+                &body,
+                &rule.connect_module,
+                ModuleInstance {
+                    module: name.clone(),
+                    name: insertion.instance.clone().into(),
+                    parameters: insertion.parameters.clone(),
+                    connections: Vec::new(),
+                    span: rule.span,
+                },
+            )?;
+            for source in occurrences {
+                let (source_transition, source_discipline) = if source.name == name {
+                    (transition, default_discipline.clone())
+                } else {
+                    declaration_defaults(analyzed, &source)?
+                };
+                let module =
+                    analyze_occurrence(analyzed, &source, source_transition, source_discipline)?;
+                self.bound_occurrences.insert(
+                    source
+                        .reference_context
+                        .clone()
+                        .expect("inserted occurrence context"),
+                    Arc::new(SpecializedModule {
+                        source,
+                        analyzed: module,
+                    }),
+                );
+            }
+            self.reference_sources = Some(catalog);
+            let path = if parent.reference_context.as_deref() == Some("") {
+                insertion.instance.clone()
+            } else {
+                format!(
+                    "{}.{}",
+                    parent.reference_context.as_ref().unwrap(),
+                    insertion.instance
+                )
+            };
+            let occurrence = &self.bound_occurrences[path.as_str()];
+            body = occurrence.source.clone();
+            occurrence.analyzed.clone()
+        } else {
+            analyze_occurrence(analyzed, &body, transition, default_discipline)?
+        };
         // A natureless discrete discipline is still discrete storage; conversely
         // an overridden continuous port must remain a physical unknown.
         for (port, domain) in [
@@ -843,4 +921,32 @@ impl ConnectionModules {
         self.identities.insert(key, name.clone());
         Ok(name)
     }
+}
+
+fn declaration_defaults(
+    file: &AnalyzedFile,
+    source: &Module,
+) -> CompileResult<(f64, Option<SmolStr>)> {
+    let mut transition = SemanticAnalyzer::SIMULATOR_DEFAULT_TRANSITION;
+    let mut discipline = None;
+    for item in &file.source.items {
+        match item {
+            Item::DefaultTransition(directive) => {
+                transition = SemanticAnalyzer::eval_const_with(&directive.value, &HashMap::new())
+                    .ok_or_else(|| error("invalid default transition", directive.span))?;
+            }
+            Item::DefaultDiscipline(directive) => discipline = directive.discipline.clone(),
+            Item::Module(module) if module.name == source.name => {
+                return Ok((transition, discipline));
+            }
+            _ => {}
+        }
+    }
+    Err(error(
+        format!(
+            "inserted helper module '{}' has no retained declaration",
+            source.name
+        ),
+        source.span,
+    ))
 }

@@ -53,6 +53,7 @@ pub(super) fn resolve(
     sources: &HashMap<SmolStr, &Module>,
     source: &Module,
     analyzed: &AnalyzedModule,
+    bound: &HashMap<SmolStr, Arc<SpecializedModule>>,
     specializations: &mut HashMap<SpecializationKey, Arc<SpecializedModule>>,
     warnings: &mut Vec<super::SemanticWarning>,
 ) -> CompileResult<HashMap<SmolStr, Arc<SpecializedModule>>> {
@@ -69,7 +70,7 @@ pub(super) fn resolve(
         analyzed: analyzed.clone(),
     });
     let mut occurrences = vec![Occurrence {
-        path: "".into(),
+        path: source.reference_context.clone().unwrap_or_default(),
         parent: None,
         key: SpecializationKey::root(source)?,
         module: root,
@@ -81,19 +82,24 @@ pub(super) fn resolve(
         let parent = occurrences[cursor].module.clone();
         let constants = super::instance_parameters::constants(&parent.source);
         for instance in &parent.source.instances {
-            if !required.contains(&instance.module) {
-                continue;
-            }
-            let (Some(child_source), Some(child)) = (
-                sources.get(&instance.module),
-                file.modules.get(&instance.module),
-            ) else {
-                continue;
-            };
             let path: SmolStr = if occurrences[cursor].path.is_empty() {
                 instance.name.clone()
             } else {
                 format!("{}.{}", occurrences[cursor].path, instance.name).into()
+            };
+            let concrete = bound.get(&path);
+            if concrete.is_none() && !required.contains(&instance.module) {
+                continue;
+            }
+            let (Some(child_source), Some(child)) = (
+                concrete
+                    .map(|body| &body.source)
+                    .or_else(|| sources.get(&instance.module).copied()),
+                concrete
+                    .map(|body| &body.analyzed)
+                    .or_else(|| file.modules.get(&instance.module)),
+            ) else {
+                continue;
             };
             let (key, specialized) = specialize_module(
                 file,
@@ -122,7 +128,7 @@ pub(super) fn resolve(
                     .entry(instance.module.clone())
                     .or_insert_with(|| {
                         Arc::new(SpecializedModule {
-                            source: (*child_source).clone(),
+                            source: child_source.clone(),
                             analyzed: child.clone(),
                         })
                     })
