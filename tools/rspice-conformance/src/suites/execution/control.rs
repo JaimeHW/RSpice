@@ -384,6 +384,8 @@ impl ExecutionRunner {
                                 | ControlAnalysisResult::TransferFunction(_)
                                 | ControlAnalysisResult::PoleZero(_)
                                 | ControlAnalysisResult::Sensitivity(_)
+                                | ControlAnalysisResult::Stability(_)
+                                | ControlAnalysisResult::DcMatch(_)
                                 | ControlAnalysisResult::Distortion(_) => {
                                     // Version 1 contracts admit OP, AC and TRAN
                                     // only. New engine analyses need their own
