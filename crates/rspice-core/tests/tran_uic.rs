@@ -320,6 +320,89 @@ l1 mid 0 1 ic=2
     );
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_inductor_ic_cannot_fall_back_to_an_unconstrained_dc_solution() {
+    // Xyce 7.10 refuses both decks: the imposed currents cannot satisfy KCL.
+    // Exercise both the configured numerical floor and the unregularized
+    // solve, which used to accept different incorrect recovery paths.
+    for dialect in [SpiceDialect::Xyce, SpiceDialect::BestAvailable] {
+        for floor in [0.0, 1e-15] {
+            let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+            config.convergence_config.gmin_target = floor;
+            let engine = Engine::new(config);
+            for load in [
+                "R1 out winding 10\nL1 winding 0 5n IC=-.0002\n",
+                "L1 out 0 5n IC=.0005\nD1 out 0 diode\n.model diode D(IS=1e-14)\n",
+            ] {
+                let deck = Netlist::parse(&format!(
+                    "Inconsistent winding current\nI1 0 out .00025\n{load}.options GMIN=0\n.end\n"
+                ))
+                .unwrap();
+                let result = engine.run_tran_with_startup_mode(
+                    &deck,
+                    2e-9,
+                    5e-12,
+                    TransientStartupMode::OperatingPoint,
+                );
+                assert!(
+                    result.is_err(),
+                    "{dialect:?}, floor {floor:e}: an unsatisfied winding IC in {load} must not be silently replaced by DC: {:?}",
+                    result.map(|value| value.try_branch_current_waveform_named("l1").unwrap()[0])
+                );
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_inductor_ic_seeds_a_valid_rl_operating_point_and_decay() {
+    let deck = Netlist::parse(
+        "Authored RL current\nV1 in 0 1\nR1 in winding 10\nL1 winding 0 5n IC=-.0002\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-14 VNTOL=1e-10\n.end\n",
+    )
+    .unwrap();
+    for method in [
+        IntegrationMethod::Trapezoidal,
+        IntegrationMethod::Gear2,
+        IntegrationMethod::TrapGear,
+    ] {
+        let config = SimulationConfig {
+            integration_method: method,
+            ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
+        };
+        let result = Engine::new(config).run_tran(&deck, 2e-9, 1e-12).unwrap();
+        let current = result.try_branch_current_waveform_named("l1").unwrap();
+        let voltage = result.try_voltage_waveform_named("winding").unwrap();
+        assert!((current[0] + 0.0002).abs() < 1e-14);
+        assert!((voltage[0] - 1.002).abs() < 1e-12);
+        for ((&time, &current), &voltage) in result.time.iter().zip(current).zip(voltage) {
+            let expected = 0.1 - 0.1002 * (-time / 0.5e-9).exp();
+            assert!(
+                (current - expected).abs() < 5e-7,
+                "{method:?} at {time:e}: {current:e} != {expected:e}"
+            );
+            assert!((voltage - (1.0 - 10.0 * current)).abs() < 1e-10);
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_inductor_ic_preserves_a_valid_nonlinear_operating_point() {
+    let deck = Netlist::parse(
+        "Authored diode winding current\nI1 0 out .00025\nL1 out 0 5n IC=.0002\nD1 out 0 diode\n.model diode D(IS=1e-14)\n.options GMIN=0\n.end\n",
+    )
+    .unwrap();
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let result = engine.run_tran(&deck, 2e-9, 5e-12).unwrap();
+    let initial_current = result.try_branch_current_waveform_named("l1").unwrap()[0];
+    let initial_voltage = result.try_voltage_waveform_named("out").unwrap()[0];
+    assert!((initial_current - 0.0002).abs() < 1e-14);
+    assert!((0.5..0.7).contains(&initial_voltage));
+}
+
+
 #[test]
 fn mixed_tran_cards_require_and_honor_explicit_selected_startup_mode() {
     let netlist = Netlist::parse(

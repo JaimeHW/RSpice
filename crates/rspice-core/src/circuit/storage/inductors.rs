@@ -107,6 +107,10 @@ impl Inductors {
         }
     }
 
+    pub(crate) fn has_operating_point_initial_conditions(&self) -> bool {
+        !self.ignore_operating_point_ic && self.has_explicit_initial_conditions()
+    }
+
     /// Get equivalent resistance for trapezoidal integration
     #[inline]
     pub fn req(&self, idx: usize, dt: Value) -> Value {

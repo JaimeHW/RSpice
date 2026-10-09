@@ -1758,7 +1758,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
-        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        let gmin_floor = self.transient_operating_point_nodal_gmin_floor(circuit);
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut solution = Self::sanitize_initial_guess(initial_guess, size);
         Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
@@ -1895,7 +1895,7 @@ impl Engine {
             if self.config.spice_dialect == SpiceDialect::Xyce && !node_constraints.is_empty() {
                 0.0
             } else {
-                self.dc_nodal_gmin_floor(circuit)
+                self.transient_operating_point_nodal_gmin_floor(circuit)
             };
         let primary = self.solve_linear_transient_constraint_system(
             circuit,
@@ -2136,7 +2136,7 @@ impl Engine {
             if self.config.spice_dialect == SpiceDialect::Xyce && !node_hints.is_empty() {
                 0.0
             } else {
-                self.dc_nodal_gmin_floor(circuit)
+                self.transient_operating_point_nodal_gmin_floor(circuit)
             };
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut use_transient_current_seed = false;

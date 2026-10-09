@@ -524,7 +524,7 @@ impl Engine {
         }
     }
 
-    /// Re-solve the t=0 operating point with the authored `.IC` clamps held,
+    /// Re-solve the t=0 operating point with authored node and winding ICs held,
     /// seeded from whichever unconstrained DC startup path converges.
     ///
     /// Only the Newton seed comes from the unconstrained system; the accepted
@@ -647,9 +647,11 @@ impl Engine {
             // recovery layer, including errors during a nodeset interval.
             Err(error) if !Self::is_recoverable_startup_error(&error) => return Err(error),
             Err(transient_err) => {
-                if !transient_ic_constraints.is_empty() {
-                    // ngspice keeps the `.IC` clamps installed through every
-                    // one of its operating-point recovery aids, so a seed the
+                if !transient_ic_constraints.is_empty()
+                    || circuit.inductors.has_operating_point_initial_conditions()
+                {
+                    // Node clamps and active element-current constraints must
+                    // survive every operating-point recovery aid. A seed the
                     // constrained Newton cannot reach from is not licence to
                     // accept a different, unconstrained system: the recovery
                     // paths below solve one, and overlaying only the named IC

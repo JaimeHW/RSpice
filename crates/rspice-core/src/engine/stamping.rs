@@ -66,6 +66,21 @@ impl Engine {
         }
     }
 
+    /// A prescribed winding current removes the inductor's DC short. The
+    /// remaining network must determine a finite voltage without a numerical
+    /// shunt absorbing a mismatch between fixed currents. Continuation may
+    /// still regularize trial systems; the accepted constrained bias may not.
+    pub(in crate::engine) fn transient_operating_point_nodal_gmin_floor(
+        &self,
+        circuit: &CircuitData,
+    ) -> Value {
+        if circuit.inductors.has_operating_point_initial_conditions() {
+            0.0
+        } else {
+            self.dc_nodal_gmin_floor(circuit)
+        }
+    }
+
     /// Final transient nodal conditioning floor for the active dialect.
     ///
     /// Xyce removes its continuation shunt from the transient DAE. Native and
