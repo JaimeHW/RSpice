@@ -143,6 +143,7 @@ mod shared;
 mod standalone;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 use shared::MixedDigital;
+pub(crate) use shared::checkpoint as coordinator_checkpoint;
 pub(crate) use shared::{MixedDigitalCoordinator, SharedTrialCursor};
 use standalone::StandaloneExecution;
 
@@ -411,6 +412,10 @@ pub(crate) struct CandidateLedger {
 }
 
 impl CandidateLedger {
+    pub(crate) fn has_pending_candidate(&self) -> bool {
+        self.carried_time.is_some() || self.probe_time.is_some()
+    }
+
     /// Whether a crossing found on candidate `time` was carried by the write
     /// this latched.
     fn carries(&self, time: f64, bridge: usize) -> bool {

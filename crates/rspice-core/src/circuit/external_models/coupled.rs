@@ -29,6 +29,27 @@ pub(crate) struct XspiceDigitalBindings {
 }
 
 impl XspiceDigitalBindings {
+    pub(in crate::circuit) fn checkpoint_other_drivers(
+        &self,
+        owner: &crate::xspice::verilog::MixedDigitalCoordinator,
+        target: &EventTarget,
+    ) -> Result<Option<DigitalValue>, String> {
+        if !self.by_node.contains_key(&target.node_id) {
+            return Ok(None);
+        }
+        let driver = self
+            .drivers
+            .get(target)
+            .ok_or("missing shared XSPICE driver")?;
+        if self.inout_observers.get(&driver.index()).map(|(_, t)| t) != Some(target) {
+            return Err("missing shared XSPICE inout observer".into());
+        }
+        owner
+            .checkpoint_other_drivers(*driver)
+            .map(Some)
+            .ok_or_else(|| "restored HDL owner has no XSPICE inout observation".into())
+    }
+
     pub(super) fn checkpoint_observations(
         &self,
         owner: &crate::xspice::verilog::MixedDigitalCoordinator,

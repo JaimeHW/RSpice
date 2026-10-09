@@ -105,6 +105,7 @@ pub use data_file::{
 };
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub use event::EventValue;
+#[cfg(any(feature = "veriloga", test))]
 pub(crate) use event::checkpoint as event_checkpoint;
 pub(crate) use event::{
     SharedXspiceEventQueue, SharedXspiceEventValues, XspiceEventScheduler, XspiceEventValues,
@@ -115,6 +116,8 @@ pub use external::{
     set_digital_cosim_runtime_factory, set_digital_process_runtime_factory,
 };
 pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
+#[cfg(feature = "veriloga")]
+pub(crate) use instance::checkpoint as instance_checkpoint;
 pub(crate) use instance::{
     CodeModelVectorParams, EventInputKind, SharedXspiceInstance, XspiceEventInputs,
     XspiceInstanceCheckpoint,

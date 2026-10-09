@@ -53,6 +53,8 @@ mod linear_stamping;
 mod magnetic;
 #[cfg(feature = "veriloga")]
 mod mixed_signal;
+#[cfg(feature = "veriloga")]
+pub(crate) mod mixed_checkpoint;
 mod net_kind;
 mod scheduler;
 pub(crate) use scheduler::{Activation, ActivationLanes};

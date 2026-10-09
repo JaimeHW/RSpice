@@ -776,6 +776,13 @@ impl MixedDigitalCoordinator {
             .filter_map(|&(node, signal)| self.digital.read_real(signal).map(|value| (node, value)))
     }
 
+    pub(crate) fn checkpoint_other_drivers(
+        &self,
+        driver: ExternalBitDriverId,
+    ) -> Option<crate::xspice::DigitalValue> {
+        self.digital.checkpoint_other_drivers(driver)
+    }
+
     pub(crate) fn external_contributions(
         &self,
     ) -> impl Iterator<Item = (&EventTarget, crate::xspice::EventValue)> + '_ {

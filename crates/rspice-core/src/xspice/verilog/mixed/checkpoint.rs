@@ -157,6 +157,18 @@ fn decision(value: u8) -> Result<FourStateBit, String> {
 }
 
 impl MixedSignalHost {
+    pub(crate) fn validate_participant_checkpoint_boundary(
+        &self,
+        time: f64,
+    ) -> Result<(), String> {
+        self.require_idle("capture a circuit participant")
+            .map_err(|e| e.to_string())?;
+        if !self.state.started || self.state.accepted_time != time {
+            return Err("participant and circuit accepted times differ".into());
+        }
+        Ok(())
+    }
+
     fn participant_topology(&self) -> Result<[u8; 32], String> {
         let adc: Vec<_> = self
             .state

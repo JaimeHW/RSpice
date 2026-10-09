@@ -18,6 +18,13 @@ pub(crate) struct CoordinatorCheckpoint {
 }
 
 impl MixedDigitalCoordinator {
+    pub(crate) fn validate_checkpoint_boundary(&self, time: f64) -> Result<(), String> {
+        if self.trial_open || self.accepted_time != Some(time) {
+            return Err("coordinator and circuit accepted times differ".into());
+        }
+        Ok(())
+    }
+
     /// Rebuild an instance's read-only values from the restored circuit owner.
     /// No process executes and no bridge publication occurs during restoration.
     pub(in crate::xspice::verilog::mixed) fn checkpoint_view(

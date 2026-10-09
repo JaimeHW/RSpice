@@ -85,6 +85,18 @@ impl std::io::Write for HashWriter {
 }
 
 impl XspiceInstance {
+    /// Resolve receiving-circuit loads without evaluating model inputs or body.
+    pub(crate) fn prepare_checkpoint_loads(
+        &mut self,
+        loads: &HashMap<usize, Value>,
+    ) -> Result<(), String> {
+        for (port, connection) in self.ports.iter().zip(&self.connections) {
+            set_context_event_total_load(&mut self.context, &port.name, connection, loads)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
     fn runtime_checkpoint_identity(
         &self,
         num_nodes: usize,

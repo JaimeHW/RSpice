@@ -95,6 +95,8 @@ pub(crate) use mixed::{
     PreparedMixedAcceptance, SharedTrialCursor,
 };
 pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
+pub(crate) use mixed::checkpoint as participant_checkpoint;
+pub(crate) use mixed::coordinator_checkpoint;
 
 /// What one tick of the digital host's clock is, and why it is not read from
 /// the source.

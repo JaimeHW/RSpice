@@ -85,7 +85,8 @@ use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
 
 use super::store::{
-    DigitalSignalStore, EventCapture, SignalTransition, StoreError, TransitionValues, signal_name,
+    DigitalSignalStore, EventCapture, ExternalBitDriverId, SignalTransition, StoreError,
+    TransitionValues, signal_name,
 };
 use crate::xspice::EventValue;
 use crate::xspice::digital::DigitalValue;
@@ -684,6 +685,13 @@ impl DigitalHost {
     /// The value a real net holds right now.
     pub(crate) fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
         self.store.real_value(signal)
+    }
+
+    pub(crate) fn checkpoint_other_drivers(
+        &self,
+        driver: ExternalBitDriverId,
+    ) -> Option<DigitalValue> {
+        self.store.other_driver_value(driver)
     }
 
     pub(crate) fn external_contributions(
