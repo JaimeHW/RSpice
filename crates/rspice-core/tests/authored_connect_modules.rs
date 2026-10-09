@@ -2022,3 +2022,70 @@ connectrules chosen; connect feedback merged; endconnectrules
     }
     assert!((voltage(&result, "p", 1.75e-9) - 2.4).abs() < 1e-5);
 }
+
+
+#[test]
+fn inline_real_net_disciplines_select_the_correct_loaded_converters() {
+    let model = r#"
+`timescale 1ns/1ps
+discipline low; domain discrete; potential Voltage; enddiscipline
+discipline high; domain discrete; potential Temperature; enddiscipline
+module receiver(input electrical a, output electrical p);
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module bank(p,q,r);
+ parameter integer BASE=-2;
+ output p,q,r; electrical p,q,r;
+ wreal low cells[BASE:BASE+1];
+ wreal high upper;
+ real level=2;
+ initial #1 level=4;
+ assign cells[BASE]=level;
+ assign upper=level;
+ receiver first(cells[BASE],p);
+ receiver second(upper,q);
+ analog V(r)<+cells[BASE]+upper;
+endmodule
+module top(p,q,r);
+ output p,q,r; electrical p,q,r;
+ bank #(.BASE(3)) nested(p,q,r);
+endmodule
+connectmodule low_gain(input low wreal value, output electrical a);
+ analog I(a)<+(V(a)-2*value)/1000;
+endmodule
+connectmodule high_gain(value,a);
+ input high wreal value;
+ output a; electrical a;
+ analog I(a)<+(V(a)-3*value)/1000;
+endmodule
+connectrules chosen; connect low_gain; connect high_gain; endconnectrules
+"#;
+    for ambiguous in [false, true] {
+        let source = Source::new(&if ambiguous {
+            model.replace("potential Temperature", "potential Voltage")
+        } else {
+            model.to_owned()
+        });
+        let deck = Netlist::parse(&format!(
+            "* explicit real-net disciplines\nX1 p q r top\n.va \"{}\" top module=top\n.end\n",
+            source.path()
+        ))
+        .unwrap();
+        let outcome = Engine::default().run_tran(&deck, 1.5e-9, 50e-12);
+        if ambiguous {
+            let error = outcome.unwrap_err().to_string();
+            assert!(error.contains("match both connect module"), "{error}");
+            continue;
+        }
+        let result = outcome.unwrap();
+        for (time, level) in [(0.5e-9, 2.0), (1.4e-9, 4.0)] {
+            for (node, expected) in [("p", level), ("q", 1.5 * level), ("r", 2.0 * level)] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{node}@{time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}

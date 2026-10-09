@@ -1098,6 +1098,25 @@ impl SemanticAnalyzer {
                 }
             }
         }
+        for net in module.digital_nets.iter().filter(|net| net.kind.is_real()) {
+            for item in &net.items {
+                if let Some(discipline) = net_disciplines.get(&item.name)
+                    && self
+                        .disciplines
+                        .get_discipline(discipline)
+                        .is_some_and(|discipline| discipline.domain != Domain::Discrete)
+                {
+                    return Err(SemanticError::new(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "real net '{}' requires a discrete discipline; '{}' is continuous",
+                            item.name, discipline
+                        )),
+                        item.span,
+                    )
+                    .into());
+                }
+            }
+        }
         for net in module.nets.iter().filter(|net| net.is_ground) {
             for name in &net.names {
                 // Preserve the existing shorthand `ground g;` for undeclared

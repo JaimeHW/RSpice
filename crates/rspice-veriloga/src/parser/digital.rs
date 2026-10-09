@@ -14,6 +14,7 @@ use super::Parser;
 use crate::ast::*;
 use crate::error::{ParseError, ParseErrorKind};
 use crate::lexer::TokenKind;
+use crate::source::Span;
 use smol_str::SmolStr;
 
 /// The gate primitives of IEEE 1364-2005 section 7.2 this compiler accepts.
@@ -193,20 +194,31 @@ impl Parser<'_> {
         Ok(items)
     }
 
-    /// `wire [signed] [range] name [= expr] [, ...] ;`
+    /// `wire [discipline] [signed] [range] name [= expr] [, ...] ;`
     ///
     /// and Verilog-AMS LRM 2.4 Syntax 3-8's real net,
     /// `wreal [discipline] [range] name [= expr] [, ...] ;`, which differs only
-    /// in the keyword and in the discipline the standard lets one carry.
-    pub(super) fn parse_digital_net_decl(&mut self) -> Result<DigitalNetDecl, ParseError> {
+    /// in the keyword and the real-valued signal type.
+    pub(super) fn parse_digital_net_decl(
+        &mut self,
+        module: &mut Module,
+    ) -> Result<DigitalNetDecl, ParseError> {
         let start = self.current_span();
         if self.check(TokenKind::Wreal) {
-            return self.parse_wreal_net_decl();
+            return self.parse_wreal_net_decl(module);
         }
         self.expect(TokenKind::Wire)?;
+        let discipline = self.parse_discrete_discipline(true)?;
         let signedness = self.parse_signedness();
         let range = self.parse_optional_vector_range()?;
         let items = self.parse_digital_decl_items()?;
+        Self::retain_discrete_discipline(
+            module,
+            discipline,
+            &range,
+            &items,
+            start.extend(self.previous_span()),
+        );
         Ok(DigitalNetDecl {
             kind: DigitalNetKind::Wire,
             signedness,
@@ -227,13 +239,20 @@ impl Parser<'_> {
     /// real has no sign bit to declare, and `wreal signed;` is therefore a net
     /// called `signed`, exactly as `real signed;` has always been a variable
     /// called `signed`.
-    fn parse_wreal_net_decl(&mut self) -> Result<DigitalNetDecl, ParseError> {
+    fn parse_wreal_net_decl(&mut self, module: &mut Module) -> Result<DigitalNetDecl, ParseError> {
         let start = self.current_span();
         let resolution = self.wreal_resolution();
         self.advance(); // consume the net-type keyword
-        self.parse_wreal_discipline()?;
+        let discipline = self.parse_discrete_discipline(false)?;
         let range = self.parse_optional_vector_range()?;
         let items = self.parse_digital_decl_items()?;
+        Self::retain_discrete_discipline(
+            module,
+            discipline,
+            &range,
+            &items,
+            start.extend(self.previous_span()),
+        );
         Ok(DigitalNetDecl {
             kind: DigitalNetKind::Wreal(resolution),
             signedness: Signedness::Unsigned,
@@ -257,21 +276,18 @@ impl Parser<'_> {
             .unwrap_or(WrealResolution::Single)
     }
 
-    /// Read the optional discipline identifier of a `wreal` declaration.
-    ///
-    /// Verilog-AMS LRM 2.4 Syntax 3-8 permits one, and section 3.11's Discrete
-    /// Domain Rule says which ones are compatible: a real net's discipline must
-    /// have a discrete domain. `ddiscrete` is the standard discrete discipline
-    /// and the only one this compiler implements; any other name is refused
-    /// here rather than accepted and ignored, because a discipline that was
-    /// read and dropped would silently place the net in a domain nothing
-    /// afterwards honours.
-    ///
-    /// A discipline is distinguished from the net's own name the way the port
-    /// grammar distinguishes them: a net identifier follows the discipline,
-    /// optionally after a range. A bracket alone is ambiguous because it can
-    /// instead start the net's unpacked dimensions (`wreal cells[0:1];`).
-    fn parse_wreal_discipline(&mut self) -> Result<(), ParseError> {
+    /// Distinguish an optional discipline from the declared net name. A range
+    /// after a name can instead be an unpacked dimension, so look through it
+    /// and require a following declaration name before consuming a discipline.
+    fn parse_discrete_discipline(
+        &mut self,
+        signedness_follows: bool,
+    ) -> Result<Option<SmolStr>, ParseError> {
+        if signedness_follows
+            && matches!(self.current().kind, TokenKind::Signed | TokenKind::Unsigned)
+        {
+            return Ok(None);
+        }
         let mut next = self.pos + 1;
         if self
             .tokens
@@ -293,40 +309,68 @@ impl Parser<'_> {
                 }
             }
         }
+        let next_kind = self.tokens.get(next).map(|token| token.kind);
         let followed_by_declaration = matches!(
-            self.tokens.get(next).map(|token| token.kind),
+            next_kind,
             Some(TokenKind::Identifier | TokenKind::EscapedIdentifier)
-        );
-        if !(self.check(TokenKind::Identifier) && followed_by_declaration) {
-            return Ok(());
+        ) || (signedness_follows
+            && matches!(next_kind, Some(TokenKind::Signed | TokenKind::Unsigned)));
+        if !((matches!(
+            self.current().kind,
+            TokenKind::Identifier | TokenKind::EscapedIdentifier
+        ) || self.is_discipline_keyword())
+            && followed_by_declaration)
+        {
+            return Ok(None);
         }
-        let span = self.current_span();
-        let name = self.expect_identifier("discipline")?;
-        if name != "ddiscrete" {
-            return Err(ParseError::new(
-                ParseErrorKind::UnsupportedConstruct {
-                    context: "`wreal` declaration".to_string(),
-                    found: format!(
-                        "the discipline `{name}`; Verilog-AMS LRM 2.4 section 3.11's Discrete \
-                         Domain Rule makes a real net's discipline a discrete-domain one, and \
-                         `ddiscrete` is the only one this compiler implements"
-                    ),
-                },
+        Ok(Some(self.expect_identifier("discipline")?.into()))
+    }
+
+    /// Inline and separate discipline declarations share the same AST contract.
+    /// Semantic analysis owns name lookup, domain checks, and conflict detection.
+    fn retain_discrete_discipline(
+        module: &mut Module,
+        discipline: Option<SmolStr>,
+        range: &Option<VectorRange>,
+        items: &[DigitalDeclItem],
+        span: Span,
+    ) {
+        if let Some(discipline) = discipline {
+            module.nets.push(NetDecl {
+                discipline: Some(discipline),
+                range: range.clone(),
+                names: items.iter().map(|item| item.name.clone()).collect(),
+                is_ground: false,
+                is_internal: true,
                 span,
-            ));
+            });
         }
-        Ok(())
     }
 
     /// `reg [signed] [range] name [unpacked dims] [, ...] ;`
     pub(super) fn parse_digital_variable_decl(
         &mut self,
+        module: Option<&mut Module>,
     ) -> Result<DigitalVariableDecl, ParseError> {
         let start = self.current_span();
         self.expect(TokenKind::Reg)?;
+        let discipline = if module.is_some() {
+            self.parse_discrete_discipline(true)?
+        } else {
+            None
+        };
         let signedness = self.parse_signedness();
         let range = self.parse_optional_vector_range()?;
         let items = self.parse_digital_decl_items()?;
+        if let Some(module) = module {
+            Self::retain_discrete_discipline(
+                module,
+                discipline,
+                &range,
+                &items,
+                start.extend(self.previous_span()),
+            );
+        }
         Ok(DigitalVariableDecl {
             kind: DigitalVariableKind::Reg,
             signedness,
@@ -641,7 +685,7 @@ impl Parser<'_> {
                     variables.push(self.parse_variable_decl()?);
                 }
                 TokenKind::Reg => {
-                    digital_variables.push(self.parse_digital_variable_decl()?);
+                    digital_variables.push(self.parse_digital_variable_decl(None)?);
                 }
                 _ => statements.push(self.parse_digital_statement()?),
             }

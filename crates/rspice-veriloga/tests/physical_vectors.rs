@@ -1001,3 +1001,44 @@ endmodule
         );
     }
 }
+
+
+#[test]
+fn real_net_disciplines_survive_array_specialization_and_source_replay() {
+    let source = r#"
+discipline sense; domain discrete; enddiscipline
+module reader(input sense wreal value, output electrical p);
+ analog V(p)<+value;
+endmodule
+module top(p);
+ parameter integer BASE=-2;
+ output p; electrical p;
+ wreal sense cells[BASE:BASE+1];
+ assign cells[BASE]=1.25;
+ reader selected(cells[BASE],p);
+endmodule
+"#;
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&compiled.canonical_ir, &[("BASE", 5.0)], &NoPipelineControl)
+        .unwrap();
+    specialized.canonical_ir.validate().unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&specialized.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        specialized.canonical_ir.digital.content_identity,
+        replay.canonical_ir.digital.content_identity
+    );
+    assert!(
+        replay
+            .canonical_ir
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "cells[5]")
+    );
+}

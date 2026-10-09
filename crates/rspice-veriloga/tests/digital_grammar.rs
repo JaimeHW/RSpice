@@ -2886,7 +2886,56 @@ fn real_net_dimensions_do_not_consume_the_net_name_as_a_discipline() {
         parse(&format!("module top; {declaration} endmodule"));
     }
     for declaration in ["wreal custom cells;", "wreal custom [3:0] cells;"] {
-        let error = parse_error(&format!("module top; {declaration} endmodule"));
-        assert!(error.contains("the discipline `custom`"), "{error}");
+        let error = analyze_error(&format!("module top; {declaration} endmodule"));
+        assert!(
+            error.contains("discipline") && error.contains("custom"),
+            "{error}"
+        );
     }
+}
+
+
+#[test]
+fn inline_discrete_disciplines_and_port_prefixes_retain_the_declared_domain() {
+    let definition = "discipline sense; domain discrete; enddiscipline";
+    for ports in [
+        "module top(r); input sense wreal r;",
+        "module top(input sense wreal r);",
+        "module top(r); input wreal sense r;",
+        "module top(input wreal sense r);",
+        "module top(r); input r; wreal sense r;",
+    ] {
+        let analyzed = analyze(&format!("{definition} {ports} endmodule"));
+        let module = only_module(&analyzed);
+        assert_eq!(module.ports[0].discipline, "sense");
+        assert!(module.digital.signals[0].class.is_real());
+    }
+    let analyzed = analyze(&format!(
+        "{definition} module top(p); output p; electrical p;
+        wire sense signed [3:0] word;
+        reg sense signed [3:0] data;
+        wreal ddiscrete sample;
+        assign word=data; assign sample=1.5;
+        initial data=3;
+        analog V(p)<+word+sample;
+        endmodule"
+    ));
+    assert!(only_module(&analyzed).internal_nodes.is_empty());
+    for body in [
+        "wreal electrical value;",
+        "wreal value; electrical value;",
+        "module child(input electrical wreal value); endmodule",
+    ] {
+        let source = if body.starts_with("module") {
+            body.to_string()
+        } else {
+            format!("module top; {body} endmodule")
+        };
+        let error = analyze_error(&source);
+        assert!(error.contains("requires a discrete discipline"), "{error}");
+    }
+    let error = analyze_error(&format!(
+        "{definition} module top; wreal sense value; logic value; endmodule"
+    ));
+    assert!(error.contains("Incompatible disciplines"), "{error}");
 }

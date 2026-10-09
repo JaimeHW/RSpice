@@ -168,8 +168,17 @@ measure each local port's flow, including when parent connections tie ports toge
 These probes work in analog expressions and discrete processes, with custom nature
 flow access functions as well as `I`. Port probes cannot drive contributions or
 read potentials. Branch ranges and terminal selectors participate in parameter
-specialization. Artifact schema 135 and core cache record 117 invalidate models
+specialization. Artifact schema 136 and core cache record 118 invalidate models
 compiled before these checks.
+Inline discipline names on `wreal`, `wire`, and module-level `reg` declarations
+retain the same semantic identity as separate discipline declarations. ANSI and
+body port declarations accept discipline-before-type syntax, while preserving the
+existing reverse-order compatibility spelling. Real nets require a discrete
+discipline; unknown and conflicting declarations diagnose before connection
+insertion. `logic` and the conventional `ddiscrete` name are built-in discrete
+disciplines; user-defined discrete disciplines participate in converter selection.
+The existing `output real` variable-port form is an RSpice compatibility extension,
+not the VAMS-2023 real-net port syntax (`wreal`).
 Unpacked arrays of four-state wire nets retain independent drivers per word.
 Constant element and packed bit/part targets accept continuous assignments;
 procedural writes remain invalid for nets. Statically selected elements connect

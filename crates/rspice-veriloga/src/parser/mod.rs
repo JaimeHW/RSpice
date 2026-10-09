@@ -456,49 +456,7 @@ impl<'a> Parser<'a> {
                 };
 
                 if let Some(direction) = direction {
-                    // ANSI style: direction [wire|reg] [discipline] [signed]
-                    // [range] name
-                    let net_type = match self.current().kind {
-                        TokenKind::Wire => {
-                            self.advance();
-                            Some(PortNetType::Wire)
-                        }
-                        TokenKind::Reg => {
-                            self.advance();
-                            Some(PortNetType::Reg)
-                        }
-                        TokenKind::Integer => {
-                            self.advance();
-                            Some(PortNetType::Integer)
-                        }
-                        // Verilog-AMS LRM 2.4 section 6.5.2 puts `wreal`
-                        // exactly where a 1364 net type goes.
-                        TokenKind::Wreal => {
-                            let resolution = self.wreal_resolution();
-                            self.advance();
-                            Some(PortNetType::Wreal(resolution))
-                        }
-                        // And a *variable* type where 1364 section 12.3.4 puts
-                        // `reg`. `output real vout;` is that form with section
-                        // 3.9's `real`, which is the only port a process may
-                        // procedurally assign a real to.
-                        TokenKind::Real => {
-                            self.advance();
-                            Some(PortNetType::Real)
-                        }
-                        _ => None,
-                    };
-                    self.check_integer_port(direction, net_type)?;
-                    let discipline: Option<SmolStr> = if self.is_discipline_keyword()
-                        || (self.check(TokenKind::Identifier)
-                            && (self.peek_is(TokenKind::Identifier)
-                                || self.peek_is(TokenKind::EscapedIdentifier)
-                                || self.peek_is(TokenKind::LBracket)))
-                    {
-                        Some(self.expect_identifier("discipline")?.into())
-                    } else {
-                        None
-                    };
+                    let (net_type, discipline) = self.parse_port_type_and_discipline(direction)?;
                     let signedness = if net_type == Some(PortNetType::Integer) {
                         Signedness::Signed
                     } else {
@@ -683,11 +641,11 @@ impl<'a> Parser<'a> {
             // name until the digital grammar existed; each one that gained a
             // production moved here.
             TokenKind::Wire | TokenKind::Wreal => {
-                let net = self.parse_digital_net_decl()?;
+                let net = self.parse_digital_net_decl(module)?;
                 module.digital_nets.push(net);
             }
             TokenKind::Reg => {
-                let variable = self.parse_digital_variable_decl()?;
+                let variable = self.parse_digital_variable_decl(Some(module))?;
                 module.digital_variables.push(variable);
             }
             TokenKind::Assign => {
@@ -1068,56 +1026,7 @@ impl<'a> Parser<'a> {
             _ => return Err(self.error(ParseErrorKind::InvalidPort)),
         };
 
-        // IEEE 1364-2005 section 12.3.4's compact form: the port carries its
-        // own net or variable type. Read before the discipline because both are
-        // optional and only one of them can be present — a discipline is a
-        // Verilog-AMS spelling and `wire`/`reg` are reserved words, so neither
-        // can be mistaken for the other.
-        let net_type = match self.current().kind {
-            TokenKind::Wire => {
-                self.advance();
-                Some(PortNetType::Wire)
-            }
-            TokenKind::Reg => {
-                self.advance();
-                Some(PortNetType::Reg)
-            }
-            TokenKind::Integer => {
-                self.advance();
-                Some(PortNetType::Integer)
-            }
-            // Verilog-AMS LRM 2.4 section 6.5.2's port grammar reads
-            // `[discipline_identifier] [net_type | wreal]`, so a real-valued
-            // port declares its type here like any other.
-            TokenKind::Wreal => {
-                let resolution = self.wreal_resolution();
-                self.advance();
-                Some(PortNetType::Wreal(resolution))
-            }
-            // The variable half of the same grammar rule, as IEEE 1364-2005
-            // section 12.3.4 already reads `output reg q;`.
-            TokenKind::Real => {
-                self.advance();
-                Some(PortNetType::Real)
-            }
-            _ => None,
-        };
-
-        self.check_integer_port(direction, net_type)?;
-
-        // Optional discipline. User-defined disciplines are identifiers, so
-        // distinguish `inout foo bar;` from `inout foo, bar;` by requiring
-        // two adjacent identifiers, matching ANSI port-list parsing.
-        let discipline = if self.is_discipline_keyword()
-            || (self.check(TokenKind::Identifier)
-                && (self.peek_is(TokenKind::Identifier)
-                    || self.peek_is(TokenKind::EscapedIdentifier)
-                    || self.peek_is(TokenKind::LBracket)))
-        {
-            Some(self.expect_identifier("discipline")?)
-        } else {
-            None
-        };
+        let (net_type, discipline) = self.parse_port_type_and_discipline(direction)?;
 
         // IEEE 1364-2005 section 12.3.3: `input [signed] [range] names;`
         let signedness = if net_type == Some(PortNetType::Integer) {
@@ -1142,7 +1051,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Semicolon)?;
         Ok(PortDeclaration {
             direction,
-            discipline: discipline.map(|s| s.into()),
+            discipline,
             range,
             signedness,
             net_type,
@@ -1150,6 +1059,62 @@ impl<'a> Parser<'a> {
             initializers,
             span: start.extend(self.previous_span()),
         })
+    }
+
+    /// VAMS-2023 6.5.2 puts the discipline before a net/reg type. Preserve the
+    /// previously accepted type-before-discipline spelling as a compatibility form.
+    fn parse_port_type_and_discipline(
+        &mut self,
+        direction: PortDirection,
+    ) -> Result<(Option<PortNetType>, Option<SmolStr>), ParseError> {
+        let mut net_type = self.parse_port_storage_type();
+        let discipline = if self.is_discipline_keyword()
+            || (matches!(
+                self.current().kind,
+                TokenKind::Identifier | TokenKind::EscapedIdentifier
+            ) && self.current().text.as_deref() != Some("signed")
+                && matches!(
+                    self.tokens.get(self.pos + 1).map(|token| token.kind),
+                    Some(
+                        TokenKind::Identifier
+                            | TokenKind::EscapedIdentifier
+                            | TokenKind::LBracket
+                            | TokenKind::Wire
+                            | TokenKind::Reg
+                            | TokenKind::Wreal
+                            | TokenKind::Integer
+                            | TokenKind::Real
+                            | TokenKind::Signed
+                            | TokenKind::Unsigned
+                    )
+                )) {
+            Some(self.expect_identifier("discipline")?.into())
+        } else {
+            None
+        };
+        if net_type.is_none() && discipline.is_some() {
+            net_type = self.parse_port_storage_type();
+        }
+        if net_type == Some(PortNetType::Integer) && discipline.is_some() {
+            return Err(self.error(ParseErrorKind::InvalidPort));
+        }
+        self.check_integer_port(direction, net_type)?;
+        Ok((net_type, discipline))
+    }
+
+    fn parse_port_storage_type(&mut self) -> Option<PortNetType> {
+        let result = match self.current().kind {
+            TokenKind::Wire => PortNetType::Wire,
+            TokenKind::Reg => PortNetType::Reg,
+            TokenKind::Integer => PortNetType::Integer,
+            TokenKind::Wreal => PortNetType::Wreal(self.wreal_resolution()),
+            // Existing RSpice compatibility extension; the standard's
+            // output_variable_type is integer or time, and real ports are wreal.
+            TokenKind::Real => PortNetType::Real,
+            _ => return None,
+        };
+        self.advance();
+        Some(result)
     }
 
     /// The integer output-variable form has no discipline, sign or range prefix.
