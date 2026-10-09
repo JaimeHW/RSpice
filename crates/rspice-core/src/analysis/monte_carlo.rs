@@ -170,7 +170,8 @@ pub struct MonteCarloConfig {
     /// the resolved seed is retained in the result for replay.
     pub seed: Option<u64>,
 
-    /// Number of histogram bins for output distribution
+    /// Maximum number of histogram bins for the output distribution.
+    /// Coincident rounded edges are collapsed to avoid empty intervals.
     pub histogram_bins: usize,
 
     /// Confidence interval percentage (95 = 95%)
@@ -227,7 +228,8 @@ pub struct VariableStatistics {
     pub min: Value,
     /// Maximum value
     pub max: Value,
-    /// Histogram bin counts
+    /// Histogram bin counts. Intervals include their lower edge; only the
+    /// final interval includes its upper edge as well.
     pub histogram: Vec<usize>,
     /// Histogram bin edges
     pub bin_edges: Vec<Value>,
@@ -287,31 +289,35 @@ impl VariableStatistics {
         min: Value,
         max: Value,
     ) -> (Vec<usize>, Vec<Value>) {
-        if num_bins == 0 {
+        if num_bins <= 1 || min == max {
             return (vec![samples.len()], vec![min, max]);
         }
 
-        let range = max - min;
-        if !range.is_finite() || range <= 0.0 || !min.is_finite() || !max.is_finite() {
-            return (vec![samples.len()], vec![min, max]);
+        // Publish the exact extrema and classify against those same rounded
+        // edges. A separate width-based quotient can disagree at boundaries,
+        // and min + bins * width can stop short of the largest sample.
+        let mut bin_edges = vec![min];
+        for index in 1..num_bins {
+            // Form the convex combination before rounding. Subtracting the
+            // extrema can overflow, while separately rounded products can
+            // displace even an exactly representable boundary.
+            let edge = rspice_veriloga_runtime::arithmetic::sum_products_ratio(
+                [(min, (num_bins - index) as Value), (max, index as Value)].into_iter(),
+                std::iter::once((num_bins as Value, 1.0)),
+            )
+            .expect("a convex combination of finite extrema is representable");
+            // There may be fewer representable boundaries than requested
+            // bins, especially in a narrow range at a large offset.
+            if edge > *bin_edges.last().expect("the minimum edge is present") && edge < max {
+                bin_edges.push(edge);
+            }
         }
-
-        let bin_width = range / num_bins as Value;
-        if !bin_width.is_finite() || bin_width <= 0.0 {
-            return (vec![samples.len()], vec![min, max]);
-        }
-        let mut histogram = vec![0usize; num_bins];
-        let bin_edges: Vec<Value> = (0..=num_bins)
-            .map(|i| min + (i as Value) * bin_width)
-            .collect();
+        bin_edges.push(max);
+        let mut histogram = vec![0usize; bin_edges.len() - 1];
 
         for &sample in samples {
-            let bin_position = ((sample - min) / bin_width).floor();
-            if !bin_position.is_finite() {
-                continue;
-            }
-            let bin = bin_position.max(0.0) as usize;
-            let bin = bin.min(num_bins - 1);
+            let bin = bin_edges.partition_point(|&edge| edge <= sample) - 1;
+            let bin = bin.min(histogram.len() - 1);
             histogram[bin] += 1;
         }
 

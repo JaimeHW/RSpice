@@ -3,6 +3,63 @@ use rspice_core::analysis::monte_carlo::{
 };
 use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner};
 
+fn assert_histogram_membership(statistics: &VariableStatistics) {
+    assert_eq!(statistics.bin_edges.len(), statistics.histogram.len() + 1);
+    assert_eq!(statistics.bin_edges.first(), Some(&statistics.min));
+    assert_eq!(statistics.bin_edges.last(), Some(&statistics.max));
+    for (index, edges) in statistics.bin_edges.windows(2).enumerate() {
+        assert!(
+            edges[0] < edges[1] || statistics.min == statistics.max,
+            "empty interval: {edges:?}"
+        );
+        let last = index + 1 == statistics.histogram.len();
+        let count = statistics
+            .samples
+            .iter()
+            .filter(|&&sample| {
+                sample >= edges[0] && (sample < edges[1] || last && sample <= edges[1])
+            })
+            .count();
+        assert_eq!(statistics.histogram[index], count, "bin {index}: {edges:?}");
+    }
+    assert_eq!(
+        statistics.histogram.iter().sum::<usize>(),
+        statistics.samples.len()
+    );
+}
+
+#[test]
+fn histogram_counts_match_the_published_intervals() {
+    for (samples, bins) in [
+        (vec![-0.3, 0.0, 0.3, 0.6, 0.9], 7),
+        (vec![0.0, 0.3, 0.30000000000000004, 0.6, 0.7, 0.9, 1.0], 10),
+        (vec![1e16, 1e16 + 2.0, 1e16 + 4.0], 20),
+        (vec![-1e16 - 4.0, -1e16 - 2.0, -1e16], 20),
+        (vec![2.0; 3], 20),
+    ] {
+        let statistics = VariableStatistics::from_samples("out", samples, bins);
+        assert_histogram_membership(&statistics);
+    }
+}
+
+#[test]
+fn histograms_retain_representable_bins_across_extreme_ranges() {
+    let limit = f64::MAX;
+    let statistics = VariableStatistics::from_samples(
+        "out",
+        vec![-limit, -limit * 0.5, 0.0, limit * 0.5, limit],
+        4,
+    );
+    assert_eq!(statistics.histogram, [1, 1, 1, 2]);
+    assert_histogram_membership(&statistics);
+    let tiny = f64::from_bits(1);
+    let statistics =
+        VariableStatistics::from_samples("out", vec![0.0, tiny, 2.0 * tiny, 3.0 * tiny], 20);
+    assert_eq!(statistics.histogram, [1, 1, 2]);
+    assert_eq!(statistics.bin_edges, [0.0, tiny, 2.0 * tiny, 3.0 * tiny]);
+    assert_histogram_membership(&statistics);
+}
+
 fn student_interval<const N: usize>(
     samples: [f64; N],
     confidence_pct: f64,
