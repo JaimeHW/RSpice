@@ -86,8 +86,9 @@ impl<'a> PreparedEventCircuit<'a> {
         circuit: &crate::CircuitData,
     ) -> bool {
         use PeriodicDeviceFamily::*;
-        !circuit.ccvs.is_empty()
-            && (0..circuit.ccvs.len()).any(|index| Self::ccvs_equation(circuit, index).is_none())
+        // A purely algebraic circuit has no charge/flux to transfer and
+        // keeps its established DC/IC startup contract.
+        (!circuit.capacitors.is_empty() || !circuit.inductors.is_empty())
             && PeriodicDeviceFamily::ALL.into_iter().all(|family| {
                 family.instance_count(circuit) == 0
                     || matches!(
@@ -158,9 +159,35 @@ impl<'a> PreparedEventCircuit<'a> {
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Self> {
+        Self::prepare(
+            circuit,
+            flux_tolerance,
+            options,
+            abort,
+            Self::supports_linear_events(circuit),
+        )
+    }
+
+    /// Finite-voltage callers retain the nonlinear charge/flux owner. A
+    /// voltage action requires the full transient descriptor instead.
+    pub(in crate::engine::transient) fn for_finite_voltages(
+        circuit: &'a crate::CircuitData,
+        flux_tolerance: Value,
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<Self> {
+        Self::prepare(circuit, flux_tolerance, options, abort, false)
+    }
+
+    fn prepare(
+        circuit: &'a crate::CircuitData,
+        flux_tolerance: Value,
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+        use_descriptor: bool,
+    ) -> Result<Self> {
         check_abort(abort)?;
         options.validate()?;
-        let use_descriptor = Self::supports_linear_events(circuit);
         let nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
         ResourceLimitError::ensure(

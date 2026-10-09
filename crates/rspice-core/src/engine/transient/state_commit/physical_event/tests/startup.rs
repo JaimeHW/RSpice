@@ -147,7 +147,9 @@ fn physical_startup_solves_coupled_rates_in_the_selected_gp_charge_chart() {
             )
             .unwrap();
             Engine::initialize_bjt_phase_history(&circuit, &mut history).unwrap();
-            let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+            let sampler =
+                PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                    .unwrap();
             let static_base = sampler.models()[0].mna_terminal_currents_at_solution(&solution)[1];
             let capacitance =
                 1e-6 / circuit.bjts.devices[0].vt * if direction > 0.0 { 3.6 } else { 1.0 };
@@ -586,7 +588,8 @@ fn physical_startup_seed_charge_matches_all_physical_gp_storage_ports() {
             ));
             assert!(circuit.bjts.devices[0].uses_legacy_gummel_poon());
             let mut sampler =
-                PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+                PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                    .unwrap();
             let seed =
                 super::super::startup::seed(&circuit, &history, &EMPTY_DIODES, &sampler, &NoAbort)
                     .unwrap();

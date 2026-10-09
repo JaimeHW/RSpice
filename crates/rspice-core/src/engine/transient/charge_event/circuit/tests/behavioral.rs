@@ -11,7 +11,8 @@ fn prescribed_behavioral_voltage_and_current_supply_physical_rates_and_kcl() {
     let mut incoming = vec![0.0; circuit.matrix_size()];
     incoming[n] = 1.25;
     incoming[m] = 1.5;
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let sample = sampler
         .sample(
             0.5,
@@ -53,7 +54,8 @@ fn behavioral_derivative_workspace_preserves_typed_limits_and_cancellation() {
         build("bounded behavioral event\nBV n 0 V={sin(time)+cos(time)}\nR n 0 1k\n.end\n");
     let mut options = options();
     options.limits.max_result_values = 32_000;
-    let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     assert!(
         matches!(sampler.topology(0.5, SourceTimeSide::RightLimit, &options, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.resource==ResourceKind::ResultValues && error.limit==32_000 && error.requested>error.limit)
     );
@@ -89,7 +91,8 @@ fn nodal_behavioral_current_supplies_algebraic_coordinate_rates_and_domain_backt
     let mut incoming = vec![0.0; circuit.matrix_size()];
     incoming[x] = 1.25;
     incoming[y] = 1.75_f64.powi(3);
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(0.5, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();
@@ -113,7 +116,8 @@ fn nodal_behavioral_current_supplies_algebraic_coordinate_rates_and_domain_backt
     );
 
     let circuit = build("nonlinear trial domain\nB1 n 0 I={exp(v(n))}\n.end\n");
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let invalid = sampler
         .sample(
             0.0,
@@ -160,7 +164,8 @@ fn nodal_voltage_constraints_retain_nonlinear_feedback_rates_and_charge_fanout()
         let options = options();
         let x = circuit.get_node_by_name("x").unwrap() - 1;
         let y = circuit.get_node_by_name("y").unwrap() - 1;
-        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        let mut sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
         let topology = sampler
             .topology(0.5, SourceTimeSide::RightLimit, &options, &NoAbort)
             .unwrap();
@@ -210,7 +215,8 @@ fn nodal_voltage_physical_samples_preserve_domain_and_resource_failures() {
     let circuit = build("voltage trial domain\nB1 y 0 V={exp(v(x))}\nVX x 0 0\n.end\n");
     let options = options();
     let x = circuit.get_node_by_name("x").unwrap() - 1;
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let mut state = vec![0.0; circuit.matrix_size()];
     state[x] = 1000.0;
     assert!(
@@ -264,7 +270,8 @@ fn nodal_voltage_seed_backtracks_overflow_and_conserves_incoming_charge() {
     let mut charge = vec![0.0; incoming.len()];
     charge[y] = -20e-6;
     let original = incoming.clone();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();

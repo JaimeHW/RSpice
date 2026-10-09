@@ -19,7 +19,8 @@ fn line_event_circuit_solves_both_wave_limits_and_finite_rates() {
     .unwrap();
     let retained = line.checkpoint_state().unwrap();
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let zeros = vec![0.0; circuit.matrix_size()];
     for (side, near_v, far_v, near_rate, far_rate) in [
         (SourceTimeSide::LeftLimit, -0.5, 0.25, -2.0, 1.0),

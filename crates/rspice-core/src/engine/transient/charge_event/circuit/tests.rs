@@ -56,7 +56,8 @@ fn event_flux_tolerance_controls_native_linkage_conservation() {
         (1e-12, false),
     ] {
         let mut sampler =
-            PreparedEventCircuit::new(&circuit, absolute, &options, &NoAbort).unwrap();
+            PreparedEventCircuit::for_finite_voltages(&circuit, absolute, &options, &NoAbort)
+                .unwrap();
         let topology = sampler
             .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
             .unwrap();
@@ -105,7 +106,8 @@ fn prepared_event_circuit_solves_rlc_jump_and_sided_source_rates() {
         "RLC source event\nV1 s 0 PWL(0 0 1 0 1 2 2 4)\nR1 s n 4\nL1 n 0 .5\nC1 s 0 3u\nI1 0 s PWL(0 0 1 0 1 .01 2 .02)\n.end\n",
     );
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let incoming = vec![0.0; circuit.matrix_size()];
     let left = sampler
         .sample(
@@ -163,7 +165,8 @@ fn prepared_event_circuit_owns_zero_resistor_current_once() {
     let circuit = build("zero resistor\nV1 a 0 PWL(0 0 1 0 1 2)\nR0 a b 0\nR1 b 0 100\n.end\n");
     assert_eq!(circuit.resistor_branches.len(), 1);
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(1.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();
@@ -200,7 +203,8 @@ fn prepared_event_circuit_stamps_each_authored_mutual_overlay_once() {
     for k in [0.5, -0.5] {
         let circuit = coupled(k);
         let options = options();
-        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        let mut sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
         let a = circuit.num_nodes() + circuit.inductors.branch_indices[0] - 1;
         let b = circuit.num_nodes() + circuit.inductors.branch_indices[1] - 1;
         let mut state = vec![0.0; circuit.matrix_size()];
@@ -268,9 +272,10 @@ fn prepared_event_circuit_refuses_mismatched_coupling_identity_and_coefficients(
             6 => circuit.couplings.clear(),
             _ => circuit.coupled_inductor_pairs.clear(),
         }
-        let failure = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort)
-            .err()
-            .unwrap();
+        let failure =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                .err()
+                .unwrap();
         assert!(
             failure.to_string().contains("coupling"),
             "{mutation}: {failure}"
@@ -284,9 +289,10 @@ fn prepared_event_circuit_refuses_unowned_equations_and_obeys_limits_and_abort()
     let unsupported = build(
         "unsupported event\nV1 a 0 1\nH1 b 0 V1 1\nR1 b 0 1k\nD1 b 0 DM\n.model DM D\n.end\n",
     );
-    let failure = PreparedEventCircuit::new(&unsupported, 1e-20, &options, &NoAbort)
-        .err()
-        .unwrap();
+    let failure =
+        PreparedEventCircuit::for_finite_voltages(&unsupported, 1e-20, &options, &NoAbort)
+            .err()
+            .unwrap();
     assert!(
         failure.to_string().contains("voltage-impulse descriptor"),
         "{failure}"
@@ -295,10 +301,11 @@ fn prepared_event_circuit_refuses_unowned_equations_and_obeys_limits_and_abort()
     let mut restricted = self::options();
     restricted.limits.max_matrix_unknowns = 1;
     assert!(matches!(
-        PreparedEventCircuit::new(&circuit, 1e-20, &restricted, &NoAbort),
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &restricted, &NoAbort),
         Err(SimulationError::ResourceLimit(_))
     ));
-    let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     assert!(
         sampler
             .topology(0.0, SourceTimeSide::RightLimit, &restricted, &NoAbort)
@@ -316,11 +323,11 @@ fn prepared_event_circuit_refuses_unowned_equations_and_obeys_limits_and_abort()
         }
     }
     assert!(matches!(
-        PreparedEventCircuit::new(&circuit, 1e-20, &options, &Stop),
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &Stop),
         Err(SimulationError::Aborted)
     ));
     circuit.allocate_branch();
-    let failure = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort)
+    let failure = PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort)
         .err()
         .unwrap();
     assert!(
@@ -334,7 +341,8 @@ fn prepared_event_circuit_preserves_numeric_trial_failure_for_backtracking() {
     let mut circuit = build("overflow probe\nR1 a 0 1\n.end\n");
     circuit.resistors.conductances[0] = 1e200;
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let invalid = sampler
         .sample(
             0.0,
@@ -366,12 +374,12 @@ fn prepared_event_circuit_checks_storage_budget_and_refuses_auxiliary_capacitor_
     let mut options = options();
     options.limits.max_result_values = circuit.matrix_size() * 64;
     assert!(matches!(
-        PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort),
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort),
         Err(SimulationError::ResourceLimit(_))
     ));
     options.limits = ResourceLimits::default();
     circuit.capacitors.ic_branch_indices[0] = Some(circuit.voltage_sources.branch_indices[0]);
-    let failure = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort)
+    let failure = PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort)
         .err()
         .unwrap();
     assert!(
@@ -380,7 +388,7 @@ fn prepared_event_circuit_checks_storage_budget_and_refuses_auxiliary_capacitor_
     );
     circuit.capacitors.ic_branch_indices[0] = None;
     circuit.capacitors.capacitances.clear();
-    let failure = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort)
+    let failure = PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort)
         .err()
         .unwrap();
     assert!(

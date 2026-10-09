@@ -44,7 +44,9 @@ fn integration_reference_requires_unchanged_authored_forcing_and_an_integration_
             "Forcing identity\n{source}\nR1 n 0 1k\nC1 n 0 1p\n.end\n",
         ));
         let sources = causal::roots(&mut circuit, 2e-9);
-        let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+        let sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                .unwrap();
         let coeff = CompanionCoefficients::backward_euler();
         for integration in [None, Some(&coeff)] {
             let step = PhysicalEventStep {
@@ -126,7 +128,9 @@ fn integration_reference_conserves_capacitor_current_and_mutual_flux_for_each_co
             circuit.inductors.v_prev[index] =
                 [2.0, 8.0][index] * previous_rates[index] + mutual * previous_rates[1 - index];
         }
-        let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+        let sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                .unwrap();
         for (coeff, at) in [
             (CompanionCoefficients::backward_euler(), time - dt / 2.0),
             (CompanionCoefficients::trapezoidal(), time),

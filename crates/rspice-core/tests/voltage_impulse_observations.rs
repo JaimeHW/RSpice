@@ -590,7 +590,7 @@ fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn ccvs_actions_survive_live_delivery_compression_and_packed_restart() {
+fn linear_actions_survive_live_delivery_compression_and_packed_restart() {
     use rspice_core::engine::{
         TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode, SpiceDialect,
         CompressionConfig,
@@ -616,83 +616,88 @@ fn ccvs_actions_survive_live_delivery_compression_and_packed_restart() {
             }
         }
     }
-    let deck=Netlist::parse("CCVS retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
-    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
-        for method in [
-            IntegrationMethod::Trapezoidal,
-            IntegrationMethod::Gear2,
-            IntegrationMethod::TrapGear,
-        ] {
-            let mut config = rspice_core::SimulationConfig {
-                spice_dialect: dialect,
-                integration_method: method,
-                ..Default::default()
-            };
-            config.convergence_config.gmin_target = 0.0;
-            let engine = Engine::new(config);
-            let live = Live::default();
-            let (full, schedule) = engine
-                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
-                    &deck,
-                    4e-9,
-                    5e-12,
-                    TransientStartupMode::OperatingPoint,
-                    &[1e-9, 1.5e-9],
-                    &live,
-                )
-                .unwrap();
-            let observed = live.0.lock().unwrap();
-            assert_eq!(Some(&observed.0), full.voltage_impulses.as_ref());
-            assert_eq!(Some(&observed.1), full.current_impulses.as_ref());
-            drop(observed);
-            let compressed = engine
-                .compress_transient_result_with_abort(
-                    &deck,
-                    &full,
-                    &CompressionConfig::default(),
-                    &NoAbort,
-                )
-                .unwrap();
-            compressed.validate().unwrap();
-            assert_eq!(compressed.voltage_impulses, full.voltage_impulses);
-            assert_eq!(compressed.current_impulses, full.current_impulses);
-            for saved in schedule {
-                let checkpoint = TransientCheckpoint::from_bytes(
-                    &saved
-                        .checkpoint
-                        .to_bytes(TransientCheckpointEncoding::Packed)
-                        .unwrap(),
-                )
-                .unwrap();
-                let (resumed, _) = engine
-                    .run_tran_resume(&deck, &checkpoint, 4e-9, 5e-12)
+    for text in [
+        "CCVS retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
+        "Current-driven retained actions\nI1 0 out PWL(0 0 1n 0 1n 1m 2n 1m 2n 0 4n 0)\nR1 out winding 10\nL1 winding 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
+    ] {
+        let deck = Netlist::parse(text).unwrap();
+        for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+            for method in [
+                IntegrationMethod::Trapezoidal,
+                IntegrationMethod::Gear2,
+                IntegrationMethod::TrapGear,
+            ] {
+                let mut config = rspice_core::SimulationConfig {
+                    spice_dialect: dialect,
+                    integration_method: method,
+                    ..Default::default()
+                };
+                config.convergence_config.gmin_target = 0.0;
+                let engine = Engine::new(config);
+                let live = Live::default();
+                let (full, schedule) = engine
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                        &deck,
+                        4e-9,
+                        5e-12,
+                        TransientStartupMode::OperatingPoint,
+                        &[1e-9, 1.5e-9],
+                        &live,
+                    )
                     .unwrap();
-                let offset = full
-                    .time
-                    .iter()
-                    .position(|&t| t == checkpoint.time)
+                let observed = live.0.lock().unwrap();
+                assert_eq!(Some(&observed.0), full.voltage_impulses.as_ref());
+                assert_eq!(Some(&observed.1), full.current_impulses.as_ref());
+                drop(observed);
+                let compressed = engine
+                    .compress_transient_result_with_abort(
+                        &deck,
+                        &full,
+                        &CompressionConfig::default(),
+                        &NoAbort,
+                    )
                     .unwrap();
-                assert_eq!(resumed.time, full.time[offset..], "{dialect:?}/{method:?}");
-                for (a, b) in resumed
-                    .voltages
-                    .iter()
-                    .zip(&full.voltages)
-                    .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
-                {
-                    assert_eq!(a, &b[offset..], "{dialect:?}/{method:?}");
+                compressed.validate().unwrap();
+                assert_eq!(compressed.voltage_impulses, full.voltage_impulses);
+                assert_eq!(compressed.current_impulses, full.current_impulses);
+                for saved in schedule {
+                    let checkpoint = TransientCheckpoint::from_bytes(
+                        &saved
+                            .checkpoint
+                            .to_bytes(TransientCheckpointEncoding::Packed)
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let (resumed, _) = engine
+                        .run_tran_resume(&deck, &checkpoint, 4e-9, 5e-12)
+                        .unwrap();
+                    let offset = full
+                        .time
+                        .iter()
+                        .position(|&t| t == checkpoint.time)
+                        .unwrap();
+                    assert_eq!(resumed.time, full.time[offset..], "{dialect:?}/{method:?}");
+                    for (a, b) in resumed
+                        .voltages
+                        .iter()
+                        .zip(&full.voltages)
+                        .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+                    {
+                        assert_eq!(a, &b[offset..], "{dialect:?}/{method:?}");
+                    }
+                    let mut voltages = full.voltage_impulses.clone().unwrap();
+                    for trace in &mut voltages {
+                        trace.points.retain(|p| p.time > checkpoint.time);
+                        trace.derivatives.retain(|p| p.time > checkpoint.time);
+                    }
+                    assert_eq!(resumed.voltage_impulses, Some(voltages));
+                    let mut currents = full.current_impulses.clone().unwrap();
+                    for trace in &mut currents {
+                        trace.points.retain(|p| p.time > checkpoint.time);
+                        trace.derivatives.retain(|p| p.time > checkpoint.time);
+                    }
+                    assert_eq!(resumed.current_impulses, Some(currents));
                 }
-                let mut voltages = full.voltage_impulses.clone().unwrap();
-                for trace in &mut voltages {
-                    trace.points.retain(|p| p.time > checkpoint.time);
-                    trace.derivatives.retain(|p| p.time > checkpoint.time);
-                }
-                assert_eq!(resumed.voltage_impulses, Some(voltages));
-                let mut currents = full.current_impulses.clone().unwrap();
-                for trace in &mut currents {
-                    trace.points.retain(|p| p.time > checkpoint.time);
-                    trace.derivatives.retain(|p| p.time > checkpoint.time);
-                }
-                assert_eq!(resumed.current_impulses, Some(currents));
             }
         }
     }
@@ -760,6 +765,36 @@ fn ccvs_current_forcing_and_mutual_flux_keep_original_polarities() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn current_driven_inductor_keeps_flux_actions_out_of_finite_voltage() {
+    let deck = Netlist::parse("Current-driven winding\nI1 0 out PWL(0 0 1n 0 1n 1m 2n 1m)\nL1 out 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    let result = ccvs_engine().run_tran(&deck, 2e-9, 5e-12).unwrap();
+    for (&time, &voltage) in result
+        .time
+        .iter()
+        .zip(result.try_voltage_waveform_named("out").unwrap())
+    {
+        assert!(
+            voltage.abs() < 1e-10,
+            "finite V(out) at {time:e}: {voltage:e}"
+        );
+    }
+    let voltage = action_voltage(&result, "out");
+    assert!(voltage.complete);
+    assert_eq!(voltage.points.len(), 1);
+    assert_eq!(voltage.points[0].time, 1e-9);
+    action_close(voltage.points[0].volt_seconds, 5e-12);
+    assert!(voltage.derivatives.is_empty());
+    for (&time, &current) in result
+        .time
+        .iter()
+        .zip(result.try_branch_current_waveform_named("l1").unwrap())
+    {
+        action_close(current, if time < 1e-9 { 0.0 } else { 1e-3 });
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn ccvs_nonbinary_startup_preserves_exact_stored_charge() {
     let deck = Netlist::parse("Unchanged stored charge\nV1 in 0 DC .4 PWL(0 .4 1n .4 2n .4)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0\n.save all\n.end\n").unwrap();
     let result = ccvs_engine().run_tran(&deck, 0.5e-9, 5e-12).unwrap();
@@ -774,5 +809,132 @@ fn ccvs_nonbinary_startup_preserves_exact_stored_charge() {
             trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
             "{trace:?}"
         );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn current_driven_coupled_winding_preserves_flux_and_finite_decay() {
+    for k in [-0.2, 0.2] {
+        let deck = Netlist::parse(&format!("Current-driven transformer\nI1 0 out PWL(0 0 1n 0 1n 1m 4n 1m)\nL1 out 0 5n\nL2 secondary 0 20n\nK1 L1 L2 {k}\nR2 secondary 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n")).unwrap();
+        let result = ccvs_engine().run_tran(&deck, 3e-9, 1e-12).unwrap();
+        // Secondary linkage is continuous: dI2=-M/L2*dI1. The primary
+        // impulse is (L1-M^2/L2)*dI1; finite secondary decay has tau=L2/R2.
+        let action = action_voltage(&result, "out");
+        assert_eq!(action.points.len(), 1);
+        action_close(action.points[0].volt_seconds, 4.8e-12);
+        assert!(action_voltage(&result, "secondary").points.is_empty());
+        for (i, &time) in result.time.iter().enumerate() {
+            let decay = if time < 1e-9 {
+                0.0
+            } else {
+                (-(time - 1e-9) / 2e-9).exp()
+            };
+            let expected_i2 = -k * 0.0005 * decay;
+            let current = result.try_branch_current_waveform_named("l2").unwrap()[i];
+            assert!(
+                (current - expected_i2).abs() < 1e-10,
+                "t={time:e}: {current:e} != {expected_i2:e}"
+            );
+            let voltage = result.try_voltage_waveform_named("out").unwrap()[i];
+            assert!(
+                (voltage - 0.0001 * decay).abs() < 1e-10,
+                "t={time:e}: {voltage:e}"
+            );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn cccs_driven_winding_retains_current_impulse_and_voltage_derivative() {
+    let deck = Netlist::parse("Current-action winding\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1)\nC1 in 0 2p\nF1 0 out V1 -2\nL1 out 0 5n\n.options GMIN=0\n.save all\n.end\n").unwrap();
+    let result = ccvs_engine().run_tran(&deck, 2e-9, 5e-12).unwrap();
+    assert!(
+        result
+            .try_voltage_waveform_named("out")
+            .unwrap()
+            .iter()
+            .all(|&v| v == 0.0)
+    );
+    assert!(
+        result
+            .try_branch_current_waveform_named("l1")
+            .unwrap()
+            .iter()
+            .all(|&i| i == 0.0)
+    );
+    let current = action_current(&result, "l1");
+    assert_eq!(current.points.len(), 1);
+    assert_eq!(current.points[0].time, 1e-9);
+    action_close(current.points[0].charge_coulombs, 4e-12);
+    let voltage = action_voltage(&result, "out");
+    assert!(voltage.points.is_empty());
+    assert_eq!(voltage.derivatives.len(), 1);
+    assert_eq!(voltage.derivatives[0].time, 1e-9);
+    assert_eq!(voltage.derivatives[0].order, 1);
+    action_close(voltage.derivatives[0].coefficient, 2e-20);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn current_driven_winding_startup_keeps_authored_flux_and_regular_source_slopes() {
+    use rspice_core::engine::{TransientStartupMode, SpiceDialect};
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for method in [
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            for startup in [
+                TransientStartupMode::OperatingPoint,
+                TransientStartupMode::Uic,
+            ] {
+                let initial_flux = if startup == TransientStartupMode::Uic {
+                    "IC=-.0002"
+                } else {
+                    ""
+                };
+                let deck = Netlist::parse(&format!("Initial winding flux\nI1 0 out DC .00025 PWL(0 .00025 1n .00125 2n .00125)\nR1 out winding 10\nL1 winding 0 5n {initial_flux}\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n")).unwrap();
+                let mut config = rspice_core::SimulationConfig {
+                    spice_dialect: dialect,
+                    integration_method: method,
+                    ..Default::default()
+                };
+                config.convergence_config.gmin_target = 0.0;
+                let result = Engine::new(config)
+                    .run_tran_with_startup_mode(&deck, 2e-9, 5e-12, startup)
+                    .unwrap();
+                action_close(
+                    result.try_branch_current_waveform_named("l1").unwrap()[0],
+                    0.00025,
+                );
+                action_close(
+                    result.try_voltage_waveform_named("winding").unwrap()[0],
+                    0.005,
+                );
+                action_close(result.try_voltage_waveform_named("out").unwrap()[0], 0.0075);
+                let seam = result.time.iter().position(|&t| t == 1e-9).unwrap();
+                action_close(
+                    result.try_voltage_waveform_named("winding").unwrap()[seam],
+                    0.0,
+                );
+                action_close(
+                    result.try_voltage_waveform_named("out").unwrap()[seam],
+                    0.0125,
+                );
+                for node in ["out", "winding"] {
+                    let trace = action_voltage(&result, node);
+                    if startup == TransientStartupMode::Uic {
+                        assert_eq!(trace.points.len(), 1, "{dialect:?}/{method:?}: {trace:?}");
+                        assert_eq!(trace.points[0].time, 0.0);
+                        action_close(trace.points[0].volt_seconds, 2.25e-12);
+                    } else {
+                        assert!(trace.points.is_empty(), "{dialect:?}/{method:?}: {trace:?}");
+                    }
+                }
+            }
+        }
     }
 }

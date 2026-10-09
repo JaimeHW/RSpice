@@ -67,7 +67,7 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
         }
         let options = self.pss_physical_event_options(solver);
-        let mut sampler = PreparedEventCircuit::new(
+        let mut sampler = PreparedEventCircuit::for_finite_voltages(
             &resolved,
             self.config.transient_event_flux_abstol,
             &options,

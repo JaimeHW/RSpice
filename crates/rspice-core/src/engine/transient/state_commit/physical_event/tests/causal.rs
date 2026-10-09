@@ -484,7 +484,8 @@ fn gp_startup_phase_seed_matches_the_physical_solution() {
             ));
             let _sources = roots(&mut circuit, 2.0);
             let mut sampler =
-                PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+                PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                    .unwrap();
             let actual = sampler.forward_inputs(&incoming, &NoAbort).unwrap()[0].unwrap();
             let phase = history.phase[0].as_ref().unwrap();
             let seeded = phase.accepted_samples().next_back().unwrap().1;
@@ -528,7 +529,9 @@ fn gp_startup_phase_seed_respects_adjacent_biases_without_changing_newton_cache(
             let cache = circuit.bjts.devices[0]
                 .accepted_nonlinear_checkpoint()
                 .unwrap();
-            let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+            let sampler =
+                PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                    .unwrap();
             let base = circuit.get_node_by_name("b").unwrap() - 1;
             let mut currents = Vec::new();
             for voltage in [
@@ -586,7 +589,9 @@ fn gp_startup_phase_seed_keeps_authored_uic_separate_from_solved_bias() {
             p * 0.4,
             p * 1.1
         ));
-        let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+        let sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                .unwrap();
         for seed in [
             ReactiveHistorySeed::SolvedBias,
             ReactiveHistorySeed::UicStartup,

@@ -5,7 +5,8 @@ fn prepared_current_control_uses_finite_inductor_state_and_its_rate() {
     let circuit =
         build("finite current control\nV1 n 0 1\nL1 n 0 1u\nF1 out 0 L1 2\nR1 out 0 1k\n.end\n");
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();
@@ -34,7 +35,8 @@ fn prepared_controlled_sources_transfer_constraint_rates_and_current_jacobians()
         "controlled event\nV1 ctrl 0 PWL(0 1 1 2)\nE1 n 0 ctrl 0 -2\nG1 m 0 n 0 .003\nRM m 0 2k\nCN n 0 1u\nRN n 0 1k\n.end\n",
     );
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();
@@ -88,7 +90,7 @@ fn prepared_controlled_sources_refuse_invalid_topology_and_coefficients() {
             }
         }
         assert!(matches!(
-            PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort),
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort),
             Err(SimulationError::Circuit(_))
         ));
     }
@@ -100,7 +102,8 @@ fn resistive_ccvs_feedback_preserves_original_constraint_current_rate_and_impuls
         "CCVS feedback\nV1 ref 0 PWL(0 1 1 2)\nRC b ref 2\nH1 b 0 RC 1\nCB b 0 1u\nRB b 0 1k\n.options device zeroresistancetol=2\n.end\n",
     );
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();
@@ -153,14 +156,15 @@ fn ccvs_event_admission_rejects_unowned_controls_and_invalid_metadata() {
             _ => candidate.ccvs.branch_indices[0] = candidate.resistor_branches.branch_indices[0],
         }
         assert!(
-            PreparedEventCircuit::new(&candidate, 1e-20, &options(), &NoAbort).is_err(),
+            PreparedEventCircuit::for_finite_voltages(&candidate, 1e-20, &options(), &NoAbort)
+                .is_err(),
             "mutation {mutation}"
         );
     }
     let mut zero = circuit.clone();
     zero.ccvs.transresistances[0] = 0.0;
     zero.ccvs.ctrl_branch[0] = zero.voltage_sources.branch_indices[0];
-    assert!(PreparedEventCircuit::new(&zero, 1e-20, &options(), &NoAbort).is_ok());
+    assert!(PreparedEventCircuit::for_finite_voltages(&zero, 1e-20, &options(), &NoAbort).is_ok());
 }
 
 #[test]
@@ -180,7 +184,8 @@ fn zero_transresistance_does_not_transfer_a_control_current_impulse() {
     let circuit =
         build("zero CCVS\nV1 c 0 PWL(0 1 1 2)\nC1 c 0 2u\nH1 b 0 V1 0\nR1 b 0 1k\n.end\n");
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();

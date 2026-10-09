@@ -15,7 +15,8 @@ fn current_event_coupling_gp_delay_has_storage_and_algebraic_feedback_cases() {
                 let original_state = original.accepted_nonlinear_checkpoint().unwrap();
                 let delay = original.legacy_excess_phase_delay();
                 let mut sampler =
-                    PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+                    PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort)
+                        .unwrap();
                 let input = sampler.forward_inputs(&incoming, &NoAbort).unwrap()[0].unwrap();
                 let delta = polarity * 1e-5;
                 let mut history = DelayBuffer::new(0);

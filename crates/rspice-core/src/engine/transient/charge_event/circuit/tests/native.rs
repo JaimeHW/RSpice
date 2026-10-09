@@ -8,7 +8,8 @@ fn dependent_flux_keeps_every_original_storage_and_voltage_audit() {
         "dependent flux audits\nV1 in 0 DC .5 PWL(0 .5 1 .5 1 1)\nR1 in a 1\nL1 a 0 1\nL2 b 0 4\nR2 b 0 4\nK1 L1 L2 1\n.end\n",
     );
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let topology = sampler
         .topology(1.0, SourceTimeSide::RightLimit, &options, &NoAbort)
         .unwrap();
@@ -83,7 +84,8 @@ fn prepared_event_circuit_solves_biased_gp_jump_with_canonical_rbi_ports() {
         let original = &circuit.bjts.devices[0];
         assert!(original.mna_promoted() && original.needs_mna_rbi_branch());
         let before = original.accepted_nonlinear_checkpoint().unwrap();
-        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        let mut sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
         let forward = sampler.forward_inputs(&incoming, &NoAbort).unwrap()[0].unwrap();
         assert!(forward.abs() > 1e-8);
         let mut history = DelayBuffer::new(0);
@@ -183,7 +185,8 @@ fn bug805(text: &str) {
     let delay = model.legacy_excess_phase_delay();
     close(delay, 1.487_816_392_838_078e-10, 1e-25);
     let options = options();
-    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    let mut sampler =
+        PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
     let forward = sampler.forward_inputs(&incoming, &NoAbort).unwrap()[0].unwrap();
     let mut history = DelayBuffer::new(0);
     history
@@ -299,7 +302,8 @@ fn prepared_event_circuit_gp_uses_held_physical_jacobian_and_both_history_sides(
         let original = &circuit.bjts.devices[0];
         let before = original.accepted_nonlinear_checkpoint().unwrap();
         let delay = original.legacy_excess_phase_delay();
-        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        let mut sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
         let b = circuit.get_node_by_name("b").unwrap() - 1;
         let c = circuit.get_node_by_name("c").unwrap() - 1;
         let mut input_at = |base| {
@@ -427,7 +431,8 @@ fn native_diode_event_sampler_retains_complete_canonical_fq_without_mutation() {
         let a = diode.node_anode - 1;
         let k = diode.node_cathode - 1;
         let opts = options();
-        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &opts, &NoAbort).unwrap();
+        let mut sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &opts, &NoAbort).unwrap();
         for voltage in [-3.05, -0.2, 0.05, 0.35, 0.65] {
             let mut state = vec![0.0; circuit.matrix_size()];
             state[a] = voltage + 0.125;
@@ -458,7 +463,7 @@ fn native_diode_event_sampler_retains_complete_canonical_fq_without_mutation() {
         drop(sampler);
         let mut unprepared = circuit.clone();
         unprepared.diodes.devices[0].rs = 1.0;
-        let error = PreparedEventCircuit::new(&unprepared, 1e-20, &opts, &NoAbort)
+        let error = PreparedEventCircuit::for_finite_voltages(&unprepared, 1e-20, &opts, &NoAbort)
             .err()
             .unwrap();
         assert!(

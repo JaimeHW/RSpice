@@ -5977,21 +5977,6 @@ impl Engine {
             vbic_snapshot_cache = restored.vbic_snapshot_cache;
         }
 
-        let has_line_events =
-            charge_event::circuit::PreparedEventCircuit::supports_scalar_line_events(&circuit)
-                && bjt_history.weil_phase.iter().all(Option::is_none);
-        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) || has_line_events
-            || charge_event::circuit::PreparedEventCircuit::supports_linear_events(&circuit)
-        {
-            Some(Self::collect_physical_source_events(
-                &circuit,
-                tstop,
-                &self.config.resource_limits,
-                abort,
-            )?)
-        } else {
-            None
-        };
         let physical_options = charge_event::EventOptions {
             limits: self.config.resource_limits,
             solver: matrix.solver_options(),
@@ -6005,6 +5990,36 @@ impl Engine {
         };
         // Absolute linkage tolerance in webers, independent of charge/current units.
         let physical_flux_tolerance = self.config.transient_event_flux_abstol;
+        // Only constrained charge/flux needs distributional event ownership.
+        // A regular linear ODE retains the ordinary integration/grid contract.
+        let has_linear_events =
+            if charge_event::circuit::PreparedEventCircuit::supports_linear_events(&circuit) {
+                charge_event::circuit::PreparedEventCircuit::new(
+                    &circuit,
+                    physical_flux_tolerance,
+                    &physical_options,
+                    abort,
+                )?
+                .linear_descriptor()
+                .is_some_and(|descriptor| descriptor.has_impulses())
+            } else {
+                false
+            };
+        let has_line_events =
+            charge_event::circuit::PreparedEventCircuit::supports_scalar_line_events(&circuit)
+                && bjt_history.weil_phase.iter().all(Option::is_none);
+        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) || has_line_events
+            || has_linear_events
+        {
+            Some(Self::collect_physical_source_events(
+                &circuit,
+                tstop,
+                &self.config.resource_limits,
+                abort,
+            )?)
+        } else {
+            None
+        };
         // A resume observes newly accepted actions only, not the past impulse
         // at its already accepted checkpoint seam.
         let physical_impulse_plan = if physical_sources.is_some() {

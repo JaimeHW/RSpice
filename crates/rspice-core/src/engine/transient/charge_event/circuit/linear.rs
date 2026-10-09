@@ -170,6 +170,10 @@ impl LinearDescriptor {
         &self.source_branches
     }
 
+    pub(in crate::engine::transient) fn has_impulses(&self) -> bool {
+        self.kernel.has_impulses()
+    }
+
     pub(in crate::engine::transient) fn storage(
         &self,
         state: &[Value],

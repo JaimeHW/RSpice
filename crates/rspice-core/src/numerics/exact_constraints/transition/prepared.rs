@@ -44,6 +44,10 @@ impl Transition {
 }
 
 impl PreparedTransition {
+    pub(crate) fn has_impulses(&self) -> bool {
+        self.impulse_orders != 0
+    }
+
     pub(crate) fn retained_words(&self) -> usize {
         self.retained_words
     }

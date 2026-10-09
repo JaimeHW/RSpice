@@ -16,11 +16,6 @@ impl Engine {
         solver: crate::solver::SolverOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        if PreparedEventCircuit::supports_linear_events(circuit) {
-            return Err(failure(
-                "PSS boundary requires retained CCVS voltage-impulse observations",
-            ));
-        }
         let options = self.pss_physical_event_options(solver);
         let orders: Vec<_> = incoming_history
             .phase
@@ -42,6 +37,15 @@ impl Engine {
             self.config.transient_event_flux_abstol,
             abort,
         )?;
+        if point.descriptor_impulses.as_ref().is_some_and(|orders| {
+            orders
+                .iter()
+                .any(|values| values[..circuit.num_nodes()].iter().any(|&v| v != 0.0))
+        }) {
+            return Err(failure(
+                "PSS boundary requires retained voltage-impulse observations",
+            ));
+        }
         // Append the event to the history preceding the incoming interval.
         // The ordinary PSS acceptance may already have sampled its left limit.
         self.ensure_transport_history_copy(incoming_history, history.transport_allocated_bytes())?;
