@@ -33,6 +33,7 @@ pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
 pub(crate) use qpss::{
     run_qpss_analysis_on_materialized_with_abort,
     run_qpss_analysis_with_dc_seed_on_materialized_with_abort,
+    run_qpss_analysis_with_dc_seed_on_materialized_with_context,
 };
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_abort;
 mod soa;
@@ -64,6 +65,7 @@ pub(crate) use hb::HbData;
 pub(crate) use hb::HbSpectrum;
 pub(crate) use hb::run_hb_analysis_on_materialized_with_abort;
 pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_abort;
+pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_context;
 #[cfg(test)]
 pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub use hb::{HbRunConfig, HbToneRunConfig};
@@ -116,7 +118,7 @@ pub(crate) use pss::run_pss_analysis_on_materialized_with_abort;
 #[cfg(test)]
 pub(crate) use pss::run_pss_analysis_with_config_and_source_path_and_abort;
 pub use pss::{PssRunConfig, run_pss_analysis_with_source_path_and_abort};
-pub(crate) use pss::{PssSeedEnvironment, run_pss_analysis_with_dc_seed_and_source_path_and_abort};
+pub(crate) use pss::{PssSeedEnvironment, run_pss_analysis_with_dc_seed_and_context};
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
 #[cfg(test)]
 pub use qpss::run_qpss_analysis_with_source_path_and_abort;
@@ -170,11 +172,12 @@ fn build_resolved_periodic_engine(
     tolerance: rspice_core::Value,
     context: &str,
 ) -> ServiceRunResult<Engine> {
-    let mut config = build_engine_config(netlist, None);
-    config.tolerance = tolerance;
-    Engine::try_new_with_resolved_config(config).map_err(|error| {
-        ServiceRunError::from_core(context, rspice_core::SimulationError::Configuration(error))
-    })
+    ServiceContext {
+        source_path: None,
+        limits: Default::default(),
+        abort: &rspice_core::NoAbort,
+    }
+    .periodic_engine(netlist, tolerance, context)
 }
 
 // =============================================================================

@@ -105,36 +105,33 @@ pub(super) fn run_periodic_spec(
                 None
             };
             let data = super::run_abort_aware_service(abort, || {
-                let circuit = artifact.environment().materialize(
+                let circuit = artifact.environment().materialize_with_resource_limits(
                     netlist,
                     source_path,
                     dependencies,
+                    context.limits,
                     abort,
                 )?;
-                svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
+                svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
                     &circuit,
                     config,
                     seed.as_ref(),
-                    abort,
+                    context,
                 )
             })?;
             super::ensure_not_aborted(abort)?;
             SimulationResult::from_qpss_operating_point(data.operating_point)
                 .map_err(SimulationError::InvalidConfig)
         }
-        spec @ AnalysisSpec::Pss { .. } => run_pss(
-            netlist,
-            pss_run_config(spec)?,
-            source_path,
-            dependencies,
-            abort,
-        ),
+        spec @ AnalysisSpec::Pss { .. } => {
+            run_pss(netlist, pss_run_config(spec)?, dependencies, context)
+        }
         AnalysisSpec::PssSpectrum { num_harmonics } => {
-            run_pss_spectrum(num_harmonics, dependencies, abort)
+            run_pss_spectrum(num_harmonics, dependencies, context)
         }
         spec @ AnalysisSpec::HarmonicBalance { .. } => {
             let config = hb_run_config(spec, abort)?;
-            run_harmonic_balance(netlist, &config, true, source_path, dependencies, abort)
+            run_harmonic_balance(netlist, &config, true, dependencies, context)
         }
         AnalysisSpec::Envelope {
             multirate,
@@ -668,10 +665,10 @@ fn periodic_sparameter_result(
 fn run_pss(
     netlist: &str,
     config: svc_runner::PssRunConfig,
-    source_path: Option<&Path>,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
         SimulationError::InvalidConfig(format!(
             "shooting PSS operating-point dependency is unavailable: {error}"
@@ -686,10 +683,9 @@ fn run_pss(
         ))
     })?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pss_analysis_with_dc_seed_and_source_path_and_abort(
+        svc_runner::run_pss_analysis_with_dc_seed_and_context(
             netlist,
             &config,
-            source_path,
             svc_runner::PssSeedEnvironment {
                 dc_seed: &dc_seed,
                 temperature_celsius: artifact.temperature_celsius(),
@@ -697,7 +693,7 @@ fn run_pss(
                 nominal_supply_voltage: artifact.nominal_supply_voltage(),
                 supply_source_names: artifact.supply_source_names(),
             },
-            abort,
+            context,
         )
     })?;
 
@@ -745,8 +741,9 @@ fn project_pss_data(
 fn run_pss_spectrum(
     num_harmonics: usize,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let artifact = dependencies.periodic_state().map_err(|error| {
         SimulationError::InvalidConfig(format!(
             "PSS spectrum periodic-state dependency is unavailable: {error}"
@@ -766,6 +763,32 @@ fn run_pss_spectrum(
         return Err(SimulationError::SolverError(
             "PSS spectrum source has an incomplete node-waveform basis".to_owned(),
         ));
+    }
+    let points = num_harmonics.saturating_add(1);
+    let signals = node_names
+        .iter()
+        .filter(|name| name.as_str() != "0" && !name.eq_ignore_ascii_case("gnd"))
+        .count();
+    let values = points.saturating_mul(signals.saturating_mul(3).saturating_add(1));
+    for (resource, requested, limit) in [
+        (
+            rspice_core::ResourceKind::AnalysisPoints,
+            points,
+            context.limits.max_analysis_points,
+        ),
+        (
+            rspice_core::ResourceKind::ResultValues,
+            values,
+            context.limits.max_result_values,
+        ),
+    ] {
+        if requested > limit {
+            return Err(SimulationError::ResourceLimit {
+                resource: resource.as_str().into(),
+                requested,
+                limit,
+            });
+        }
     }
     let mut waveforms = HashMap::new();
     let mut frequencies = Vec::new();
@@ -877,10 +900,10 @@ fn run_harmonic_balance(
     netlist: &str,
     hb_cfg: &svc_runner::HbRunConfig,
     retain_harmonics: bool,
-    source_path: Option<&Path>,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let artifact = dependencies.dc_operating_point_seed().map_err(|error| {
         SimulationError::InvalidConfig(format!(
             "HB operating-point dependency is unavailable: {error}"
@@ -890,15 +913,18 @@ fn run_harmonic_balance(
         .core_seed()
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        let circuit =
-            artifact
-                .environment()
-                .materialize(netlist, source_path, dependencies, abort)?;
-        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_abort(
+        let circuit = artifact.environment().materialize_with_resource_limits(
+            netlist,
+            context.source_path,
+            dependencies,
+            context.limits,
+            abort,
+        )?;
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_context(
             &circuit,
             hb_cfg,
             Some(&seed),
-            abort,
+            context,
         )
     })?;
 

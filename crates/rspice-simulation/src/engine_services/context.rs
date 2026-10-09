@@ -40,4 +40,22 @@ impl<'a> ServiceContext<'a> {
         config.resource_limits = self.limits;
         config
     }
+
+    /// Deck options are already resolved. Periodic run settings own the
+    /// tolerance and must not be overwritten by a second option merge.
+    pub(crate) fn periodic_engine(
+        self,
+        netlist: &Netlist,
+        tolerance: f64,
+        diagnostic: &str,
+    ) -> ServiceRunResult<rspice_core::engine::Engine> {
+        let mut config = self.engine_config(netlist);
+        config.tolerance = tolerance;
+        rspice_core::engine::Engine::try_new_with_resolved_config(config).map_err(|error| {
+            super::ServiceRunError::from_core(
+                diagnostic,
+                rspice_core::SimulationError::Configuration(error),
+            )
+        })
+    }
 }

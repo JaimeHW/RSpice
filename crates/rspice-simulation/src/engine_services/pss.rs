@@ -37,7 +37,7 @@ use crate::periodic::{build_core_pss_config, validate_pss_config};
 /// Run PSS analysis with cooperative cancellation and no source path.
 ///
 /// Test-only. PSS ships through
-/// [`run_pss_analysis_with_dc_seed_and_source_path_and_abort`], which the
+/// [`run_pss_analysis_with_dc_seed_and_context`], which the
 /// periodic spec calls with the operating point its dependency produced.
 #[cfg(test)]
 pub fn run_pss_analysis_with_abort(
@@ -100,7 +100,16 @@ pub fn run_pss_analysis_with_config_and_source_path_and_abort(
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PssData> {
-    run_pss_analysis_internal(netlist_text, config, source_path, None, abort)
+    run_pss_analysis_internal(
+        netlist_text,
+        config,
+        None,
+        super::ServiceContext {
+            source_path,
+            limits: Default::default(),
+            abort,
+        },
+    )
 }
 
 /// Run shooting PSS from the exact operating-point state authenticated by
@@ -108,6 +117,7 @@ pub fn run_pss_analysis_with_config_and_source_path_and_abort(
 /// process-bound source; its voltage corner is applied once before both basis
 /// validation and shooting, and its temperature is propagated to the core
 /// engine in Kelvin.
+#[cfg(test)]
 pub(crate) fn run_pss_analysis_with_dc_seed_and_source_path_and_abort(
     netlist_text: &str,
     config: &PssRunConfig,
@@ -115,13 +125,21 @@ pub(crate) fn run_pss_analysis_with_dc_seed_and_source_path_and_abort(
     seed_environment: PssSeedEnvironment<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PssData> {
-    run_pss_analysis_internal(
+    run_pss_analysis_with_dc_seed_and_context(
         netlist_text,
         config,
-        source_path,
-        Some(seed_environment),
-        abort,
+        seed_environment,
+        super::ServiceContext::with_defaults(source_path, abort),
     )
+}
+
+pub(crate) fn run_pss_analysis_with_dc_seed_and_context(
+    netlist_text: &str,
+    config: &PssRunConfig,
+    seed_environment: PssSeedEnvironment<'_>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<PssData> {
+    run_pss_analysis_internal(netlist_text, config, Some(seed_environment), context)
 }
 
 pub(crate) struct PssSeedEnvironment<'a> {
@@ -135,10 +153,10 @@ pub(crate) struct PssSeedEnvironment<'a> {
 fn run_pss_analysis_internal(
     netlist_text: &str,
     config: &PssRunConfig,
-    source_path: Option<&Path>,
     seed_environment: Option<PssSeedEnvironment<'_>>,
-    abort: &dyn AbortSignal,
+    context: super::ServiceContext<'_>,
 ) -> ServiceRunResult<PssData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     let validation = validate_pss_config(config);
     ensure_not_aborted(abort)?;
@@ -154,11 +172,7 @@ fn run_pss_analysis_internal(
             )
         })
         .transpose()?;
-    let mut netlist = parse_runner_netlist_with_abort(
-        temperature_source.as_deref().unwrap_or(netlist_text),
-        source_path,
-        abort,
-    )?;
+    let mut netlist = context.parse(temperature_source.as_deref().unwrap_or(netlist_text))?;
     netlist.source_text = Some(netlist_text.to_owned());
 
     let seeded_temperature_kelvin = seed_environment
@@ -175,14 +189,14 @@ fn run_pss_analysis_internal(
         })
         .transpose()?;
 
-    run_pss_analysis_on_materialized_with_abort(
+    run_pss_analysis_on_materialized_with_context(
         &netlist,
         config,
         seed_environment
             .as_ref()
             .map(|environment| environment.dc_seed),
         seeded_temperature_kelvin,
-        abort,
+        context,
     )
 }
 
@@ -195,9 +209,30 @@ pub(crate) fn run_pss_analysis_on_materialized_with_abort(
     temperature_kelvin: Option<Value>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PssData> {
+    run_pss_analysis_on_materialized_with_context(
+        netlist,
+        config,
+        dc_seed,
+        temperature_kelvin,
+        super::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_pss_analysis_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: &PssRunConfig,
+    dc_seed: Option<&PssDcOperatingPointSeed>,
+    temperature_kelvin: Option<Value>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<PssData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     validate_pss_config(config).map_err(ServiceRunError::Failure)?;
-    let mut sim_config = build_engine_config(netlist, None);
+    let mut sim_config = context.engine_config(netlist);
     sim_config.tolerance = config.tolerance;
     if let Some(temperature_kelvin) = temperature_kelvin {
         sim_config.temperature = temperature_kelvin;

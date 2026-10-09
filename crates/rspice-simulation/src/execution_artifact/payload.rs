@@ -600,6 +600,25 @@ impl PeriodicOperatingEnvironment {
         dependencies: &ResolvedExecutionDependencies,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
+        self.materialize_with_resource_limits(
+            source,
+            source_path,
+            dependencies,
+            rspice_core::ResourceLimits::default(),
+            abort,
+        )
+    }
+
+    /// Apply the authenticated operating environment under the consumer's
+    /// explicit source policy, including temperature-dependent reparsing.
+    pub fn materialize_with_resource_limits(
+        &self,
+        source: &str,
+        source_path: Option<&std::path::Path>,
+        dependencies: &ResolvedExecutionDependencies,
+        limits: rspice_core::ResourceLimits,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
         use crate::error as services;
         self.validate()
             .map_err(|error| services::ServiceRunError::Failure(error.to_string()))?;
@@ -612,11 +631,13 @@ impl PeriodicOperatingEnvironment {
                 self.temperature_celsius,
                 abort,
             )?;
-        let mut circuit = crate::netlist_preparation::parse_runner_netlist_with_abort(
-            &temperature_source,
-            source_path,
-            abort,
-        )?;
+        let mut circuit =
+            crate::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort(
+                &temperature_source,
+                source_path,
+                limits,
+                abort,
+            )?;
         circuit.source_text = Some(source.to_owned());
         if let (Some(supply), Some(nominal)) = (self.supply_voltage, self.nominal_supply_voltage) {
             crate::netlist_preparation::apply_voltage_corner(

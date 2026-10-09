@@ -1,8 +1,5 @@
 //! Driven QPSS service: resolved deck execution and tuple-preserving spectra.
-use super::{
-    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
-    parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult, parse_runner_netlist_with_abort};
 use crate::error::ensure_not_aborted;
 use crate::results::qpss::{QpssData, qpss_data_from_operating_point_with_abort};
 use rspice_core::abort_signal::AbortSignal;
@@ -39,8 +36,27 @@ pub(crate) fn run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
     dc_seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<QpssData> {
+    run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+        netlist,
+        config,
+        dc_seed,
+        super::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: QpssConfig,
+    dc_seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<QpssData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         config.solver.relative_tolerance,
         "QPSS resolved engine configuration is invalid",

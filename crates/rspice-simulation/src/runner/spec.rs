@@ -348,6 +348,7 @@ mod tests {
     mod hb_handoff;
     mod multirate_envelope;
     mod periodic_port_noise;
+    mod periodic_resource_limits;
     mod pss_handoff;
     mod qpac;
     mod qpnoise;

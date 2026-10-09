@@ -27,6 +27,10 @@ pub fn execution_resource_policy_blocker(
             | AnalysisSpec::Disto { .. }
             | AnalysisSpec::DcMismatch { .. }
             | AnalysisSpec::Soa { .. }
+            | AnalysisSpec::Pss { .. }
+            | AnalysisSpec::PssSpectrum { .. }
+            | AnalysisSpec::HarmonicBalance { .. }
+            | AnalysisSpec::Qpss { .. }
     ) {
         return None;
     }

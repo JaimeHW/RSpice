@@ -582,3 +582,93 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
         }
     }
 }
+
+#[test]
+fn periodic_studies_accept_and_enforce_custom_execution_limits() {
+    let root = common::test_dir("study-periodic-execution-limits");
+    let mut document = fixture(&root);
+    let source = "Periodic policy\nV1 in 0 SIN(0 .1 1k)\nR1 in out 1k\nR2 out 0 1k\n.end\n";
+    let qpss = json!({"Qpss": {
+        "tones": [
+            {"frequency": 1000.0, "harmonics": 1, "source": "V1", "name": null},
+            {"frequency": 1414.213562373095, "harmonics": 1, "source": "I1", "name": null}
+        ],
+        "max_iterations": 100, "relative_tolerance": 1e-6,
+        "autonomous": false, "oscillator_node": null,
+        "controls": {"initial_state": "dc_operating_point"}
+    }});
+    let cases = [
+        (
+            "pss",
+            source,
+            json!({"Pss": {
+                "fundamental_freq": 1000.0, "tone_sources": ["V1"],
+                "tstab_periods": 0, "points_per_period": 64,
+                "tolerance": 1e-6, "num_harmonics": 3
+            }}),
+        ),
+        (
+            "hb",
+            source,
+            json!({"HarmonicBalance": {
+                "tones": [{"frequency": 1000.0, "harmonics": 3, "source": null, "name": null}],
+                "reltol": 1e-6, "abstol": 1e-12, "max_iterations": 30,
+                "damping": 1.0, "oversample": 4, "max_mixing_order": 3,
+                "use_krylov": false, "gmres_restart": 30,
+                "source_stepping": false, "verbose": false
+            }}),
+        ),
+        (
+            "qpss",
+            "QP policy\nV1 in 0 DC 0 AC .1\nI1 0 out DC 0 AC .0001\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+            qpss,
+        ),
+    ];
+    let destination = root.join("result.json");
+    for (name, source, analysis) in cases {
+        std::fs::write(root.join("circuits/divider.cir"), source).unwrap();
+        document["tasks"] = json!([
+            {"id": "bias", "analysis": "DcOp"},
+            {"id": name, "depends_on": ["bias"], "analysis": analysis}
+        ]);
+        if name == "pss" {
+            document["tasks"].as_array_mut().unwrap().push(json!({
+                "id": "spectrum", "depends_on": ["pss"],
+                "analysis": {"PssSpectrum": {"num_harmonics": 3}}
+            }));
+        }
+        let path = save(&root, &document);
+        let run = || {
+            invoke(
+                &root,
+                &[
+                    "study",
+                    "run",
+                    path.to_str().unwrap(),
+                    "--output",
+                    destination.to_str().unwrap(),
+                    "--json",
+                ],
+            )
+        };
+        std::fs::write(
+            root.join("config.toml"),
+            "[resources]\nmax_matrix_unknowns = 1000\n",
+        )
+        .unwrap();
+        let success = run();
+        assert!(success.status.success(), "{name}: {success:?}");
+        let published = std::fs::read(&destination).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            "[resources]\nmax_analysis_points = 2\n",
+        )
+        .unwrap();
+        let failure = run();
+        assert_eq!(failure.status.code(), Some(75), "{name}: {failure:?}");
+        let error: Value = serde_json::from_slice(&failure.stderr).unwrap();
+        assert_eq!(error["error"]["resource"], "analysis_points");
+        assert_eq!(error["error"]["limit"], 2);
+        assert_eq!(std::fs::read(&destination).unwrap(), published);
+    }
+}
