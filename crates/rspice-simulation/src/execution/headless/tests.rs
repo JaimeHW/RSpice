@@ -1,6 +1,5 @@
 use super::*;
 use crate::execution::PreparedRunAuthorization;
-use crate::execution_artifact::ExecutionArtifactEnvelope;
 use crate::execution_options::SpecExecutionOptions;
 use crate::preparation::QueuedAnalysis;
 use crate::results::SimulationResult;
@@ -49,19 +48,12 @@ fn execute(snapshot: PreparedRunSnapshot) -> Vec<SimulationResult> {
     let mut artifacts = HashMap::new();
     let mut results = Vec::new();
     let mut runner = SimulationRunner::new();
-    for task in dispatch.into_tasks() {
-        let identity = (
-            task.snapshot_digest(),
-            task.instance_id(),
-            task.source_revision(),
-            task.config_digest(),
-        );
-        runner
-            .start_prepared(
-                task.resolve_dependency_artifacts(&artifacts).unwrap(),
-                false,
-            )
-            .unwrap();
+    let mut pending = dispatch.into_tasks();
+    while let Some(task) = pending.pop_front() {
+        let identity = task.instance_id();
+        let dispatch = task.resolve_dependency_artifacts(&artifacts).unwrap();
+        let producer = dispatch.artifact_producer().unwrap();
+        runner.start_prepared(dispatch, false).unwrap();
         let deadline = Instant::now() + Duration::from_secs(20);
         let result = loop {
             if let Some(result) = runner.poll_result() {
@@ -73,21 +65,8 @@ fn execute(snapshot: PreparedRunSnapshot) -> Vec<SimulationResult> {
             );
             std::thread::sleep(Duration::from_millis(1));
         };
-        // Only the producer with recorded spectra has an FFT handoff. A
-        // standalone transient is not an empty trajectory dependency.
-        if matches!(&result, SimulationResult::Transient { spectra, .. } if !spectra.is_empty())
-            && let Some(artifact) = ExecutionArtifactEnvelope::from_transient_result(
-                identity.0,
-                identity.1,
-                identity.2,
-                identity.3,
-                &result,
-                &[],
-                true,
-            )
-            .unwrap()
-        {
-            artifacts.insert(identity.1, artifact);
+        if let Some(artifact) = producer.capture(&result, &pending).unwrap() {
+            artifacts.insert(identity, artifact);
         }
         results.push(result);
     }
@@ -460,4 +439,112 @@ fn hierarchy_cancellation_retains_its_type_through_preparation_errors() {
         HeadlessPreparationError::from(failure),
         HeadlessPreparationError::Aborted
     ));
+}
+
+fn periodic_tasks() -> Vec<HeadlessTaskRequest> {
+    let seed = op();
+    let mut carrier = task(
+        AnalysisSpec::Pss {
+            method: rspice_simulation_contract::analysis_spec::PssMethod::Shooting,
+            fundamental_freq: 1e3,
+            tone_sources: vec!["V1".into()],
+            tstab_periods: 1,
+            points_per_period: 32,
+            tolerance: 1e-6,
+            oscillator_mode: false,
+            oscillator_node: None,
+            num_harmonics: 1,
+            integration_method: None,
+            tstab: 0.0,
+            max_iterations: 20,
+            abstol: 1e-12,
+            damping: 1.0,
+            max_period_change: 0.1,
+            verbose: false,
+        },
+        ".pss FUND=1k HARMS=1 POINTS=32 TSTABPERIODS=1".into(),
+    );
+    carrier.dependencies.push(seed.instance_id);
+    let mut spectrum = task(
+        AnalysisSpec::PssSpectrum { num_harmonics: 1 },
+        "* retain the exact PSS spectrum".into(),
+    );
+    spectrum.dependencies.push(carrier.instance_id);
+    vec![seed, carrier, spectrum]
+}
+
+#[test]
+fn shared_artifact_capture_executes_an_op_pss_spectrum_chain() {
+    let path = origin();
+    let source = "Periodic handoffs\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.end\n";
+    let snapshot = prepare_headless_run(
+        HeadlessRunInput::new(source, &path, periodic_tasks()),
+        &NoAbort,
+    )
+    .unwrap();
+    let results = execute(snapshot);
+    assert_eq!(results.len(), 3);
+    assert!(matches!(&results[0], SimulationResult::DcOp(_)));
+    assert!(matches!(
+        &results[1],
+        SimulationResult::Transient {
+            periodic_state: Some(_),
+            ..
+        }
+    ));
+    let SimulationResult::Ac {
+        frequencies,
+        waveforms,
+        ..
+    } = &results[2]
+    else {
+        panic!("PSS spectrum result");
+    };
+    assert!(frequencies.contains(&1000.0));
+    assert!(!waveforms.is_empty());
+}
+
+#[test]
+fn shared_artifact_capture_rejects_foreign_consumers_and_invalid_results() {
+    let path = origin();
+    let source = "Bounded handoffs\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.end\n";
+    let requests = periodic_tasks();
+    let prepare = |source: &str| {
+        let snapshot = prepare_headless_run(
+            HeadlessRunInput::new(source, &path, requests.clone()),
+            &NoAbort,
+        )
+        .unwrap();
+        PreparedRunAuthorization::default()
+            .authorize_campaign_member(snapshot)
+            .unwrap()
+    };
+    let mut tasks = prepare(source).into_tasks();
+    let producer = tasks
+        .pop_front()
+        .unwrap()
+        .resolve_dependency_artifacts(&HashMap::new())
+        .unwrap()
+        .artifact_producer()
+        .unwrap();
+    let foreign = prepare(&source.replace("1k\n.end", "2k\n.end"));
+    let result = SimulationResult::DcOp(Box::new(crate::results::DcOpResult {
+        mna_node_names: vec!["OUT".into()],
+        mna_solution: vec![f64::NAN],
+        ..Default::default()
+    }));
+    assert!(matches!(
+        producer.capture(&result, foreign.tasks()),
+        Err(crate::prepared_dependency::ExecutionArtifactError::StaleSnapshot { .. })
+    ));
+    assert!(
+        producer.capture(&result, &tasks).is_err(),
+        "a nonfinite OP solution must not become a dependency artifact"
+    );
+    assert!(
+        producer
+            .capture(&result, std::iter::empty())
+            .unwrap()
+            .is_none()
+    );
 }

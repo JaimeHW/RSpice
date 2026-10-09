@@ -306,6 +306,8 @@ fn validate_hb_producer_config(
     Ok(())
 }
 
+mod capture;
 mod payload;
+pub use capture::PreparedArtifactProducer;
 
 pub use payload::*;

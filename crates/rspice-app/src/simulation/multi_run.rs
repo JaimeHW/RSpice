@@ -10,12 +10,12 @@
 //! - Result aggregation across runs
 //! - Corner sweep automation
 
-#[cfg(test)]
-pub use rspice_simulation_contract::analysis_spec::SpPort;
-pub use rspice_simulation_contract::analysis_spec::{AnalysisSpec, PssMethod};
+pub use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 #[cfg(test)]
 pub use rspice_simulation_contract::analysis_spec::{
     EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
 };
+#[cfg(test)]
+pub use rspice_simulation_contract::analysis_spec::{PssMethod, SpPort};
 #[cfg(test)]
 pub use rspice_simulation_contract::config::FrequencySweep;

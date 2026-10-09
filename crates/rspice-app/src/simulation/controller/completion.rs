@@ -57,202 +57,13 @@ impl SimulationController {
                     .unwrap_or(AnalysisType::DcOp);
                 let target_run_id = self.target_run_id(state);
 
-                let required_artifact_waveforms = self
-                    .current_provenance
-                    .as_ref()
-                    .map(|provenance| provenance.source_instance_id())
-                    .into_iter()
-                    .flat_map(|producer| {
-                        self.pending_analyses.iter().filter_map(move |task| {
-                            let AnalysisSpec::Fourier {
-                                output_node,
-                                output_ref,
-                                additional_outputs,
-                                ..
-                            } = task.spec()
-                            else {
-                                return None;
-                            };
-                            task.dependencies().contains(&producer).then(|| {
-                                let mut required = vec![output_node.clone()];
-                                if !output_ref.trim().is_empty()
-                                    && !output_ref.trim().eq_ignore_ascii_case("0")
-                                {
-                                    required.push(output_ref.clone());
-                                }
-                                // Every further output reads the same
-                                // trajectory, so the waveforms it projects
-                                // are required of the producer too.
-                                for output in additional_outputs {
-                                    let Ok((node, reference)) =
-                                        rspice_simulation_contract::fourier_output::split_fourier_output(
-                                            output,
-                                        )
-                                    else {
-                                        continue;
-                                    };
-                                    required.push(node);
-                                    if !reference.trim().is_empty()
-                                        && !reference.trim().eq_ignore_ascii_case("0")
-                                    {
-                                        required.push(reference);
-                                    }
-                                }
-                                required
-                            })
-                        })
+                let produced_artifact = self.current_artifact_producer.as_ref()
+                    .map_or(Ok(None), |producer| {
+                        producer.capture(&sim_result, &self.pending_analyses)
                     })
-                    .flatten()
-                    .collect::<Vec<_>>();
-                // A recorded FFT reads no waveform at all: it selects the
-                // spectrum the engine already computed inside this solve.
-                let recorded_spectra_required = self
-                    .current_provenance
-                    .as_ref()
-                    .map(|provenance| provenance.source_instance_id())
-                    .is_some_and(|producer| {
-                        self.pending_analyses.iter().any(|task| {
-                            task.dependencies().contains(&producer)
-                                && matches!(task.spec(), AnalysisSpec::Fft { .. })
-                        })
-                    });
-                // Which retained state a waiting consumer asked this
-                // producer for, read off the same table the queue bound it
-                // with rather than a second list of consumer kinds: the
-                // periodic small-signal family chooses its carrier, so
-                // "does anything need a PSS state from me" and "does
-                // anything need an HB state from me" are the same question
-                // asked of two answers.
-                let artifact_consumers = |kind: ExecutionArtifactKind| {
-                    self.current_provenance
-                        .as_ref()
-                        .map(|provenance| provenance.source_instance_id())
-                        .is_some_and(|producer| {
-                            self.pending_analyses.iter().any(|task| {
-                                task.dependencies().contains(&producer)
-                                    && rspice_simulation::prepared_dependency::required_artifact_kinds(
-                                        task.spec(),
-                                        task.spec_options(),
-                                    )
-                                    .contains(&kind)
-                            })
-                        })
-                };
-                let periodic_artifact_required =
-                    artifact_consumers(ExecutionArtifactKind::PeriodicState);
-                let dc_seed_artifact_required =
-                    artifact_consumers(ExecutionArtifactKind::DcOperatingPointSeed);
-                let hb_artifact_required = artifact_consumers(ExecutionArtifactKind::HbState);
-                let qpss_artifact_required = artifact_consumers(ExecutionArtifactKind::QpssState);
-                let produced_artifact = match (
-                    self.current_spec.as_ref(),
-                    self.current_provenance.as_ref(),
-                    self.current_config_digest,
-                ) {
-                    (
-                        Some(AnalysisSpec::Transient { .. }),
-                        Some(provenance),
-                        Some(config_digest),
-                    ) if !required_artifact_waveforms.is_empty()
-                        || recorded_spectra_required =>
-                    {
-                        ExecutionArtifactEnvelope::from_transient_result(
-                            provenance.prepared_snapshot_digest(),
-                            provenance.source_instance_id(),
-                            provenance.source_revision(),
-                            config_digest,
-                            &sim_result,
-                            &required_artifact_waveforms,
-                            recorded_spectra_required,
-                        )
-                        .map_err(|error| {
-                            format!(
-                                "Transient result could not produce its authenticated dependency artifact: {error}"
-                            )
-                        })
-                    }
-                    (
-                        Some(pss_spec @ AnalysisSpec::Pss { .. }),
-                        Some(provenance),
-                        Some(config_digest),
-                    ) if periodic_artifact_required => {
-                        ExecutionArtifactEnvelope::from_periodic_result_with_environment(
-                            provenance.prepared_snapshot_digest(),
-                            provenance.source_instance_id(),
-                            provenance.source_revision(),
-                            config_digest,
-                            pss_spec,
-                            &sim_result,
-                            self.current_periodic_environment.clone(),
-                        )
-                        .map_err(|error| {
-                            format!(
-                                "PSS result could not produce its authenticated periodic-state artifact: {error}"
-                            )
-                        })
-                    }
-                    (
-                        Some(qpss_spec @ AnalysisSpec::Qpss { .. }),
-                        Some(provenance), Some(config_digest),
-                    ) if qpss_artifact_required => ExecutionArtifactEnvelope::from_qpss_result_with_environment(
-                        provenance.prepared_snapshot_digest(), provenance.source_instance_id(),
-                        provenance.source_revision(), config_digest, qpss_spec, &sim_result, self.current_periodic_environment.clone(),
-                    ).map_err(|error| format!("QPSS result could not produce its independent-tone dependency artifact: {error}")),
-                    (
-                        Some(hb_spec @ AnalysisSpec::HarmonicBalance { .. }),
-                        Some(provenance),
-                        Some(config_digest),
-                    ) if hb_artifact_required => ExecutionArtifactEnvelope::from_hb_result_with_environment(
-                        provenance.prepared_snapshot_digest(),
-                        provenance.source_instance_id(),
-                        provenance.source_revision(),
-                        config_digest,
-                        hb_spec,
-                        self.current_hb_producer_source.as_deref(),
-                        &sim_result,
-                        self.current_periodic_environment.clone(),
-                    )
-                    .map_err(|error| {
-                        format!(
-                            "HB result could not produce its authenticated spectral-state artifact: {error}"
-                        )
-                    }),
-                    (
-                        Some(AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }),
-                        Some(provenance),
-                        Some(config_digest),
-                    ) if dc_seed_artifact_required => {
-                        match (
-                            self.current_effective_source_content_digest,
-                            self.current_config.as_ref(),
-                        ) {
-                            (
-                                Some(effective_source_content_digest),
-                                Some(AnalysisConfig::DcOp(prepared_config)),
-                            ) => {
-                                ExecutionArtifactEnvelope::from_dc_operating_point_result(
-                                    provenance.prepared_snapshot_digest(),
-                                    provenance.source_instance_id(),
-                                    provenance.source_revision(),
-                                    config_digest,
-                                    effective_source_content_digest,
-                                    prepared_config,
-                                    &sim_result,
-                                )
-                                .map_err(|error| {
-                                    format!(
-                                        "Operating-point result could not produce its authenticated periodic DC seed: {error}"
-                                    )
-                                })
-                            }
-                            _ => Err(
-                                "operating-point result has no authenticated effective source and prepared configuration"
-                                    .to_owned(),
-                            ),
-                        }
-                    }
-                    _ => Ok(None),
-                };
+                    .map_err(|error| format!(
+                        "Result could not produce its authenticated dependency artifact: {error}"
+                    ));
                 let (produced_artifact, artifact_failure) = match produced_artifact {
                     Ok(artifact) => (artifact, None),
                     Err(message) => {
@@ -465,11 +276,9 @@ impl SimulationController {
                 self.current_analysis_label = None;
                 self.current_spec_options = None;
                 self.current_periodic_carrier_hz = None;
-                self.current_periodic_environment = None;
-                self.current_hb_producer_source = None;
+                self.current_artifact_producer = None;
                 self.current_provenance = None;
                 self.current_config_digest = None;
-                self.current_effective_source_content_digest = None;
                 self.current_op_effective_source_content_digest = None;
                 self.current_saved_output_contracts.clear();
                 self.current_save_policy =

@@ -24,6 +24,7 @@ use crate::simulation::execution::TouchstoneExportPolicy;
 use crate::simulation::multi_run::AnalysisSpec;
 #[cfg(test)]
 use crate::simulation::multi_run::FrequencySweep;
+#[cfg(test)]
 use crate::simulation::multi_run::PssMethod;
 #[cfg(test)]
 use crate::simulation::multi_run::SpPort;
@@ -53,7 +54,6 @@ use rspice_simulation::manual_deck;
 use rspice_simulation::output_contract::PreparedSavedOutput;
 #[cfg(test)]
 use rspice_simulation::preparation::QueuedAnalysis;
-use rspice_simulation::prepared_dependency::ExecutionArtifactKind;
 use rspice_simulation_contract::setup_state::SimulationSetup;
 
 mod analysis_commands;
@@ -148,18 +148,14 @@ pub struct SimulationController {
     /// `PeriodicStateArtifact::validate_consumer_basis` matches on; it is the
     /// wrong number to publish as the carrier a result was measured against.
     current_periodic_carrier_hz: Option<f64>,
-    current_periodic_environment:
-        Option<rspice_simulation::execution_artifact::PeriodicOperatingEnvironment>,
-    /// Exact prepared deck retained independently of the returned HB result.
-    current_hb_producer_source: Option<std::sync::Arc<str>>,
+    /// Authenticated producer context captured from the resolved dispatch.
+    current_artifact_producer:
+        Option<rspice_simulation::execution_artifact::PreparedArtifactProducer>,
     /// Frozen identity of the prepared task currently owned by the runner.
     /// Captured before the authorized dispatch token is moved into the runner.
     current_provenance: Option<AnalysisResultProvenance>,
     /// Digest of the exact prepared payload currently executing.
     current_config_digest: Option<crate::product::ContentDigest>,
-    /// Identity of the per-point circuit source before analysis-local numeric
-    /// options. Voltage-corner parameters remain in the OP seed payload.
-    current_effective_source_content_digest: Option<crate::product::ContentDigest>,
     /// Source identity extended with the exact OP voltage-corner mutation.
     current_op_effective_source_content_digest: Option<crate::product::ContentDigest>,
     /// Immutable output contracts authenticated with the current task before
@@ -228,11 +224,9 @@ impl SimulationController {
             current_analysis_label: None,
             current_spec_options: None,
             current_periodic_carrier_hz: None,
-            current_periodic_environment: None,
-            current_hb_producer_source: None,
+            current_artifact_producer: None,
             current_provenance: None,
             current_config_digest: None,
-            current_effective_source_content_digest: None,
             current_op_effective_source_content_digest: None,
             current_saved_output_contracts: Vec::new(),
             current_save_policy:
@@ -646,11 +640,9 @@ impl SimulationController {
         self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
-        self.current_periodic_environment = None;
-        self.current_hb_producer_source = None;
+        self.current_artifact_producer = None;
         self.current_provenance = None;
         self.current_config_digest = None;
-        self.current_effective_source_content_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
         self.current_save_policy =
@@ -687,11 +679,9 @@ impl SimulationController {
         self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
-        self.current_periodic_environment = None;
-        self.current_hb_producer_source = None;
+        self.current_artifact_producer = None;
         self.current_provenance = None;
         self.current_config_digest = None;
-        self.current_effective_source_content_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
         self.live_transient.clear();
@@ -837,11 +827,8 @@ impl SimulationController {
         self.current_spec = Some(spec.clone());
         self.current_analysis_label = Some(analysis_name.clone());
         self.current_spec_options = Some(next_analysis.spec_options().clone());
-        self.current_hb_producer_source = matches!(spec, AnalysisSpec::HarmonicBalance { .. })
-            .then(|| std::sync::Arc::clone(next_analysis.executable_netlist()));
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
-        self.current_effective_source_content_digest = Some(next_analysis.source_basis_digest());
         self.current_op_effective_source_content_digest = config.as_ref().and_then(|config| {
             let AnalysisConfig::DcOp(config) = config else {
                 return None;
@@ -910,25 +897,11 @@ impl SimulationController {
             .resolve_dependency_artifacts(&self.execution_artifacts)
             .map_err(|error| Box::new(SimulationError::InvalidConfig(error.to_string())))
             .and_then(|dispatch| {
-                if matches!(
-                    self.current_spec,
-                    Some(
-                        AnalysisSpec::Qpss { .. }
-                            | AnalysisSpec::HarmonicBalance { .. }
-                            | AnalysisSpec::Pss {
-                                method: PssMethod::Shooting,
-                                ..
-                            }
-                    )
-                ) {
-                    self.current_periodic_environment = Some(
-                        dispatch
-                            .dependencies()
-                            .dc_operating_point_seed()
-                            .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?
-                            .environment(),
-                    );
-                }
+                self.current_artifact_producer = Some(
+                    dispatch
+                        .artifact_producer()
+                        .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
+                );
                 // The carrier this task is about to be solved against, taken
                 // from the resolved artifact rather than from the request: the
                 // shooting solver moves an autonomous period off the authored
@@ -1472,11 +1445,9 @@ impl SimulationController {
         self.current_analysis_label = None;
         self.current_spec_options = None;
         self.current_periodic_carrier_hz = None;
-        self.current_periodic_environment = None;
-        self.current_hb_producer_source = None;
+        self.current_artifact_producer = None;
         self.current_provenance = None;
         self.current_config_digest = None;
-        self.current_effective_source_content_digest = None;
         self.current_op_effective_source_content_digest = None;
         self.current_saved_output_contracts.clear();
         self.current_save_policy =

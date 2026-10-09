@@ -647,6 +647,10 @@ impl AuthorizedRunDispatch {
 }
 
 impl AuthorizedTaskDispatch {
+    pub fn dependency_bindings(&self) -> &[PreparedDependencyBinding] {
+        &self.dependency_bindings
+    }
+
     pub const fn snapshot_digest(&self) -> ContentDigest {
         self.snapshot_digest
     }
@@ -733,6 +737,13 @@ impl AuthorizedTaskDispatch {
 }
 
 impl ResolvedTaskDispatch {
+    /// Freeze the context needed to authenticate this task's completed result.
+    pub fn artifact_producer(
+        &self,
+    ) -> Result<crate::execution_artifact::PreparedArtifactProducer, ExecutionArtifactError> {
+        crate::execution_artifact::PreparedArtifactProducer::new(&self.dispatch, &self.dependencies)
+    }
+
     /// The authenticated prerequisites resolved for this task.
     pub fn dependencies(&self) -> &ResolvedExecutionDependencies {
         &self.dependencies
