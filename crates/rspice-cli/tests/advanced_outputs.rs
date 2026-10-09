@@ -522,13 +522,16 @@ fn sensitivity_exports_table() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("sensitivity table");
-    assert!(csv.contains("dV(out)/d(rtop)"), "column header: {csv}");
+    let mut reader = csv::Reader::from_reader(common::delimited_data_text(&csv, b',').as_bytes());
+    let index = reader
+        .headers()
+        .unwrap()
+        .iter()
+        .position(|name| name == "dV(out)/d(PARAM:RTOP)")
+        .expect("qualified parameter derivative");
     // dV(out)/dRtop = -V*R2/(R1+R2)^2 = -1.25e-3 V/ohm
-    let row = common::delimited_data_text(&csv, b',')
-        .lines()
-        .nth(1)
-        .expect("data row");
-    let value: f64 = row.split(',').nth(1).unwrap().parse().unwrap();
+    let row = reader.records().next().unwrap().unwrap();
+    let value: f64 = row[index].parse().unwrap();
     assert!(
         (value + 1.25e-3).abs() < 5e-5,
         "divider sensitivity should be ~-1.25e-3, got {value}"
@@ -568,15 +571,20 @@ fn netlist_dc_sensitivity_supports_branch_current_and_device_filter() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("branch-current sensitivity table");
-    let mut lines = common::delimited_data_text(&csv, b',').lines();
-    let header = lines.next().expect("header");
-    assert_eq!(
-        header, "point,dI(V1)/d(R1)",
-        "the selected current probe and filtered parameter must retain their identities: {csv}"
+    let mut reader = csv::Reader::from_reader(common::delimited_data_text(&csv, b',').as_bytes());
+    let headers = reader.headers().unwrap();
+    assert!(
+        !headers.iter().any(|name| name.contains("R2")),
+        "R2 must be excluded: {csv}"
     );
-    let row = lines.next().expect("data row");
-    assert!(lines.next().is_none(), "single-point DC report: {csv}");
-    let derivative: f64 = row.split(',').nth(1).unwrap().parse().unwrap();
+    let index = headers
+        .iter()
+        .position(|name| name == "dI(V1)/d(R1)")
+        .expect("selected branch-current derivative");
+    let mut rows = reader.records();
+    let row = rows.next().unwrap().unwrap();
+    assert!(rows.next().is_none(), "single-point DC report: {csv}");
+    let derivative: f64 = row[index].parse().unwrap();
     // I(V1) = -10 / (R1 + R2), so dI(V1)/dR1 = +10/(R1+R2)^2.
     assert!(
         (derivative - 2.5e-6).abs() < 1e-10,
@@ -617,19 +625,18 @@ fn netlist_dc_sensitivity_parameter_filter_selects_only_matching_device() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("filtered voltage sensitivity table");
-    let header = common::delimited_data_text(&csv, b',')
-        .lines()
-        .next()
-        .expect("header");
-    assert_eq!(header, "point,dV(OUT)/d(R2)", "unexpected filters: {csv}");
-    assert!(!header.contains("R1"), "R1 must be excluded: {csv}");
-    let derivative: f64 = common::delimited_data_text(&csv, b',')
-        .lines()
-        .nth(1)
-        .and_then(|row| row.split(',').nth(1))
-        .unwrap()
-        .parse()
-        .unwrap();
+    let mut reader = csv::Reader::from_reader(common::delimited_data_text(&csv, b',').as_bytes());
+    let headers = reader.headers().unwrap();
+    assert!(
+        !headers.iter().any(|name| name.contains("R1")),
+        "R1 must be excluded: {csv}"
+    );
+    let index = headers
+        .iter()
+        .position(|name| name == "dV(OUT)/d(R2)")
+        .expect("selected parameter derivative");
+    let row = reader.records().next().unwrap().unwrap();
+    let derivative: f64 = row[index].parse().unwrap();
     assert!(
         (derivative - 2.5e-3).abs() < 1e-8,
         "expected dV(out)/dR2 = 2.5e-3 V/ohm, got {derivative}: {csv}"

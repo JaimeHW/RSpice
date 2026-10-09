@@ -15,15 +15,27 @@ const FORMATS: [(&str, &str); 6] = [
 ];
 
 fn run(directory: &Path, name: &str, circuit: &str) -> PathBuf {
+    run_format(directory, name, circuit, "json", "json", &[])
+}
+
+fn run_format(
+    directory: &Path,
+    name: &str,
+    circuit: &str,
+    format: &str,
+    extension: &str,
+    flags: &[&str],
+) -> PathBuf {
     let deck = directory.join(format!("{name}.sp"));
-    let path = directory.join(format!("{name}.json"));
+    let path = directory.join(format!("{name}.{extension}"));
     std::fs::write(&deck, circuit).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "run"])
         .arg(deck)
         .arg("-o")
         .arg(&path)
-        .args(["-f", "json"])
+        .args(["-f", format])
+        .args(flags)
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
@@ -75,6 +87,149 @@ fn column<'a>(table: &'a Value, name: &str) -> &'a Value {
         .iter()
         .find(|column| column["name"] == name)
         .unwrap_or_else(|| panic!("missing {name}: {table}"))
+}
+
+#[test]
+fn native_sensitivity_exports_retain_derivatives_context_and_missing_reasons() {
+    let directory = common::test_dir("sensitivity_native");
+    for ac in [false, true] {
+        for zero in [false, true] {
+            let sweep = if ac { " AC LIN 3 100 1000" } else { "" };
+            let circuit = if zero {
+                format!(
+                    "Zero output\nV1 out 0 DC 0 AC 0\nR1 out 0 1\n.sens V(out) V1{sweep}\n.end\n"
+                )
+            } else {
+                format!(
+                    "Divider\nV1 in 0 DC 1 AC 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1u\n.sens V(out) R1{sweep}\n.end\n"
+                )
+            };
+            let typed = run(&directory, "typed", &circuit);
+            for (format, extension) in FORMATS {
+                let native = run_format(&directory, "native", &circuit, format, extension, &[]);
+                let equal = compare(&native, &typed, &[]);
+                assert!(equal.status.success(), "{ac}/{zero}/{format}: {equal:?}");
+                if !zero {
+                    let changed = source(&directory, "changed", ac, true);
+                    let different = compare(&native, &changed, &["--variables", "dV(OUT)/d(R1)"]);
+                    assert_eq!(
+                        different.status.code(),
+                        Some(3),
+                        "{ac}/{format}: {different:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn parameter_probe_exports_use_the_same_qualified_identity_in_every_format() {
+    let directory = common::test_dir("sensitivity_parameter_native");
+    let circuit = "Divider\n.param rtop=1k\nV1 in 0 5\nR1 in out {rtop}\nR2 out 0 1k\n.op\n.end\n";
+    let flags = [
+        "--sens-output",
+        "out",
+        "--sens-param",
+        "rtop",
+        "--sens-value",
+        "1000",
+    ];
+    let typed = run_format(&directory, "typed", circuit, "json", "json", &flags);
+    for (format, extension) in FORMATS {
+        let native = run_format(&directory, "native", circuit, format, extension, &flags);
+        let equal = compare(&native, &typed, &[]);
+        assert!(equal.status.success(), "{format}: {equal:?}");
+        let decoded = directory.join("decoded.json");
+        convert(&native, &decoded, "json");
+        let table = common::read_json(&decoded);
+        assert!(column(&table, "dV(out)/d(PARAM:RTOP)")["unit"].is_null());
+        assert_eq!(
+            column(&table, "nominal(PARAM:RTOP)")["values"],
+            json!([1000.0])
+        );
+    }
+}
+
+#[test]
+fn native_sensitivity_projection_checks_its_budget_before_replacing_output() {
+    let directory = common::test_dir("sensitivity_native_admission");
+    let typed = source(&directory, "source", false, false);
+    let deck = directory.join("source.sp");
+    let config = directory.join("limits.toml");
+    let destination = directory.join("protected.csv");
+    std::fs::write(&config, "[resources]\nmax_external_data_values=6\n").unwrap();
+    std::fs::write(&destination, "previous").unwrap();
+    for (format, path) in [("csv", &destination), ("json", &typed)] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args(["--quiet", "--config"])
+            .arg(&config)
+            .arg("run")
+            .arg(&deck)
+            .arg("-o")
+            .arg(path)
+            .args(["-f", format])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(if format == "csv" { 75 } else { 0 }),
+            "{format}: {output:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "previous");
+    }
+}
+
+#[test]
+fn sensitivity_flat_step_manifests_describe_each_quantity_unit() {
+    let directory = common::test_dir("sensitivity_native_manifest");
+    for (probe, output, unit) in [("V(out)", "V(OUT)", "volt"), ("I(V1)", "I(V1)", "ampere")] {
+        for ac in [false, true] {
+            let sweep = if ac { " AC LIN 3 100 1000" } else { "" };
+            let circuit = format!(
+                "Stepped divider\n.param r=1k\nV1 in 0 DC 1 AC 1\nR1 in out {{r}}\nR2 out 0 1k\nC1 out 0 1u\n.step param r list 1k 2k\n.sens {probe} R1{sweep}\n.end\n"
+            );
+            run_format(&directory, "sweep", &circuit, "csv", "csv", &[]);
+            let manifest = common::read_json(&directory.join("sweep.step_schema.json"));
+            let schema = manifest["analyses"][0]["union_schema"].as_array().unwrap();
+            for (name, unit, value_type) in [
+                (
+                    if ac {
+                        "Nominal output".into()
+                    } else {
+                        "output_value".into()
+                    },
+                    unit,
+                    if ac { "complex" } else { "real" },
+                ),
+                (
+                    format!("d{output}/d(R1)"),
+                    "unspecified",
+                    if ac { "complex" } else { "real" },
+                ),
+                (
+                    format!("normalized(d{output}/d(R1))"),
+                    "dimensionless",
+                    if ac { "complex" } else { "real" },
+                ),
+                ("nominal(R1)".into(), "unspecified", "real"),
+            ] {
+                let descriptor = schema
+                    .iter()
+                    .find(|descriptor| descriptor["display_name"] == name)
+                    .unwrap();
+                assert_eq!(descriptor["unit"], unit, "{name}: {descriptor}");
+                assert_eq!(descriptor["value_type"], value_type, "{name}: {descriptor}");
+            }
+            assert_eq!(
+                manifest["analyses"][0]["coordinates"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+        }
+    }
 }
 
 #[test]

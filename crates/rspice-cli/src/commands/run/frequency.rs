@@ -18,6 +18,7 @@ use crate::hdf5::{
 };
 use crate::report::format_spice_exponent;
 
+mod report;
 mod table;
 
 fn map_frequency_error(
@@ -1559,65 +1560,13 @@ pub(super) fn report_pz(
 
     if let Some(output) = ctx.resolve_output("pz") {
         let analysis_id = output.analysis("pz")?;
-        use super::export::{ColumnData, ExportTable};
-        let document =
-            || rspice_core::execution::AnalysisResultDocument::from_pole_zero(analysis_id, result);
-        let mut table = ExportTable {
-            scale_unit: None,
-            analysis: "pz".to_string(),
-            plot_name: "Pole-Zero Analysis".to_string(),
-            scale_name: "point".to_string(),
-            scale_type: "index".to_string(),
-            scale: vec![0.0],
-            columns: Vec::new(),
-        };
-        if ctx.format != OutputFormat::Json {
-            let builder = document()
-                .map_err(|error| super::document::document_error(ctx, analysis_id, error))?;
-            let built = super::document::finish(ctx, analysis_id, builder)?;
-            // PZ is a scalar report with no source axes. Reuse its complete
-            // numeric payload projection while retaining native plot labels.
-            table.columns = crate::commands::waveform_io::result_document_table(
-                &output.path,
-                &built,
-                ctx.engine.config().resource_limits,
-            )?
-            .columns;
-        }
-        let schema = super::document::distinct_schema(table.columns.iter().map(|column| {
-            use rspice_core::execution::{
-                SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
-            };
-            SignalDescriptor::new(
-                &column.name,
-                &column.name,
-                SignalKind::Scalar,
-                match column.unit.as_deref() {
-                    Some("rad/s") => SignalUnit::RadianPerSecond,
-                    Some("ohm") => SignalUnit::Ohm,
-                    Some("1") => SignalUnit::Dimensionless,
-                    Some(unit) => SignalUnit::Custom(unit.into()),
-                    None => SignalUnit::Unspecified,
-                },
-                if matches!(
-                    column.data,
-                    ColumnData::Complex { .. } | ColumnData::NullableComplex(_)
-                ) {
-                    SignalValueType::Complex
-                } else {
-                    SignalValueType::Real
-                },
-                SignalShape::Scalar,
-                SignalOwner::Analysis,
-            )
-        }))?;
-        super::document::publish_table_result(
+        report::publish(
             ctx,
             &output.path,
             analysis_id,
-            schema,
-            &table,
-            document,
+            "pz",
+            "Pole-Zero Analysis",
+            || rspice_core::execution::AnalysisResultDocument::from_pole_zero(analysis_id, result),
         )?;
 
         if !ctx.quiet {
@@ -1855,40 +1804,12 @@ pub(super) fn finish_sensitivity_result(
 
             if let Some(resolved) = ctx.resolve_output("sens") {
                 let analysis_id = resolved.analysis("sens")?;
-                use super::export::{ColumnData, ExportColumn, ExportTable};
-
-                let table = ExportTable {
-                    scale_unit: None,
-                    analysis: "sens_ac".to_string(),
-                    plot_name: "AC Sensitivity".to_string(),
-                    scale_name: "frequency".to_string(),
-                    scale_type: "frequency".to_string(),
-                    scale: freqs.clone(),
-                    columns: result
-                        .sensitivities
-                        .iter()
-                        .map(|trace| ExportColumn {
-                            unit: None,
-                            name: format!("d{}/d({})", output_label, trace.vector_name),
-                            var_type: "sensitivity".to_string(),
-                            data: ColumnData::Complex {
-                                real: trace.absolute.iter().map(|value| value.re).collect(),
-                                imag: trace.absolute.iter().map(|value| value.im).collect(),
-                            },
-                        })
-                        .collect(),
-                };
-                let schema = table_schema(&table)?;
-                // The shared sensitivity payload carries a complex derivative
-                // trace per parameter beside the operating-point derivatives, so
-                // an AC sweep publishes the same typed document a DC card does;
-                // the flat table remains the projection for the other formats.
-                super::document::publish_table_result(
+                report::publish(
                     ctx,
                     &resolved.path,
                     analysis_id,
-                    schema,
-                    &table,
+                    "sens_ac",
+                    "AC Sensitivity",
                     || {
                         rspice_core::execution::AnalysisResultDocument::from_ac_sensitivity(
                             analysis_id,
@@ -1930,11 +1851,7 @@ pub(super) fn finish_sensitivity_result(
                 }
             }
 
-            let results = sensitivities
-                .iter()
-                .map(|sensitivity| (sensitivity.vector_name.clone(), sensitivity.absolute))
-                .collect::<Vec<_>>();
-            export_dc_sensitivity_result(ctx, output_label, result, &results)?;
+            export_dc_sensitivity_result(ctx, result)?;
         }
     }
     Ok(())
@@ -1956,20 +1873,17 @@ fn export_parameter_sensitivity(
     absolute: f64,
 ) -> Result<(), CliError> {
     let output_label = format!("V({output_name})");
-    let results = [(param_name.to_string(), absolute)];
     let Some(resolved) = ctx.resolve_output("sens") else {
         return Ok(());
     };
 
     let analysis_id = resolved.analysis("sens")?;
-    let table = dc_sensitivity_table(&output_label, &results);
-    let schema = table_schema(&table)?;
-    super::document::publish_table_result(
+    report::publish(
         ctx,
         &resolved.path,
         analysis_id,
-        schema,
-        &table,
+        "sens",
+        "DC Sensitivity",
         || {
             rspice_core::execution::AnalysisResultDocument::from_parameter_sensitivity(
                 analysis_id,
@@ -1992,50 +1906,22 @@ fn export_parameter_sensitivity(
     Ok(())
 }
 
-/// The flat DC sensitivity table: one row, one column per derivative, each
-/// named by the selected probe identity (`dV(out)/d(R1)`, `dI(V1)/d(R1)`).
-fn dc_sensitivity_table(output: &str, results: &[(String, f64)]) -> super::export::ExportTable {
-    use super::export::{ColumnData, ExportColumn, ExportTable};
-
-    ExportTable {
-        scale_unit: None,
-        analysis: "sens".to_string(),
-        plot_name: "DC Sensitivity".to_string(),
-        scale_name: "point".to_string(),
-        scale_type: "index".to_string(),
-        scale: vec![0.0],
-        columns: results
-            .iter()
-            .map(|(name, value)| ExportColumn {
-                unit: None,
-                name: format!("d{output}/d({name})"),
-                var_type: "sensitivity".to_string(),
-                data: ColumnData::Real(vec![*value]),
-            })
-            .collect(),
-    }
-}
-
 /// Write a complete `.SENS` result.
 fn export_dc_sensitivity_result(
     ctx: &RunContext<'_>,
-    output: &str,
     result: &rspice_core::analysis::SensitivityResult,
-    results: &[(String, f64)],
 ) -> Result<(), CliError> {
     let Some(resolved) = ctx.resolve_output("sens") else {
         return Ok(());
     };
 
     let analysis_id = resolved.analysis("sens")?;
-    let table = dc_sensitivity_table(output, results);
-    let schema = table_schema(&table)?;
-    super::document::publish_table_result(
+    report::publish(
         ctx,
         &resolved.path,
         analysis_id,
-        schema,
-        &table,
+        "sens",
+        "DC Sensitivity",
         || rspice_core::execution::AnalysisResultDocument::from_sensitivity(analysis_id, result),
     )?;
 

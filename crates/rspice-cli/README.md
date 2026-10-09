@@ -877,7 +877,7 @@ only that retained root is the intended comparison. Older documents without
 units keep those units unstated. Older root-only flat exports can verify only
 their retained roots; regenerate those baselines to check gains and evidence.
 
-Sensitivity JSON conversion retains each parameter's nominal value, absolute
+Sensitivity exports and JSON conversion retain each parameter's nominal value, absolute
 and normalized derivatives, and AC magnitude and phase derivatives. Normalized
 values are dimensionless; absolute derivatives use the analysis's native
 parameter units, which the payload does not explicitly identify. Phase
@@ -890,6 +890,10 @@ against sample validity and compared exactly, even with loose numeric
 tolerances. Known matching determinations can be compared; uncomputed gaps
 cannot establish agreement. Interpolation never invents a determination
 between retained samples.
+The `--sens-param` shortcut uses the same `PARAM:<NAME>` identity as authored
+parameter probes; for example, `dV(out)/d(PARAM:RTOP)`. Older derivative-only
+flat baselines cannot verify the nominal operating point, normalized derivatives,
+or parameter context; regenerate those baselines for complete comparisons.
 
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
