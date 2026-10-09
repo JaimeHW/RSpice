@@ -780,13 +780,15 @@ impl XyceTestRunner {
         if !netlist.options.output_time_points.is_empty()
             || netlist.options.output_interval_schedule.is_some()
         {
-            let projection = result.output_projection(
-                &netlist.options.output_time_points,
-                netlist.options.output_interval_schedule.as_ref(),
-                output_start,
-                plan.tran.stop,
-                MAX_NATIVE_TRAN_ORACLE_STEPS as usize,
-            )?;
+            let projection = result
+                .output_projection(
+                    &netlist.options.output_time_points,
+                    netlist.options.output_interval_schedule.as_ref(),
+                    output_start,
+                    plan.tran.stop,
+                    MAX_NATIVE_TRAN_ORACLE_STEPS as usize,
+                )
+                .map_err(|error| error.to_string())?;
             return Ok(projection.times().to_vec());
         }
 

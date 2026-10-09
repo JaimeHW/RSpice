@@ -24,7 +24,7 @@ pub(super) fn projection(
             period,
             limits.max_analysis_points,
         )
-        .map_err(ServiceRunError::Failure)?;
+        .map_err(ServiceRunError::from)?;
         if options.output_interval_schedule.is_some() {
             // Xyce's writer can emit a repeated terminal event, with a held
             // previous state on the first copy. A plotted periodic waveform
@@ -68,7 +68,7 @@ pub(super) fn projection(
             limits.max_analysis_points,
         )
     }
-    .map_err(ServiceRunError::Failure)?;
+    .map_err(ServiceRunError::from)?;
     let requested = projection
         .times()
         .len()
@@ -111,7 +111,16 @@ mod tests {
         .unwrap();
         let mut limits = rspice_core::ResourceLimits::default();
         limits.max_analysis_points = 10;
-        assert!(projection(&[0.0, 1e-3], &netlist.options, limits, 2, &NoAbort).is_err());
+        assert!(matches!(
+            projection(&[0.0, 1e-3], &netlist.options, limits, 2, &NoAbort),
+            Err(ServiceRunError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::AnalysisPoints,
+                    requested: 11,
+                    limit: 10,
+                }
+            ))
+        ));
         limits.max_analysis_points = 10_000;
         limits.max_result_values = 2;
         assert!(matches!(

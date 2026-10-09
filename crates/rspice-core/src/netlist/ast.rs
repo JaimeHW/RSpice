@@ -4046,6 +4046,27 @@ pub(crate) struct XyceOutputEvent {
     pub(crate) interpolation_time: Option<Value>,
 }
 
+/// Output-grid validation and policy failures retain distinct typed causes.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OutputScheduleError {
+    #[error("{0}")]
+    Invalid(String),
+    #[error(transparent)]
+    ResourceLimit(#[from] crate::resource::ResourceLimitError),
+}
+
+impl From<String> for OutputScheduleError {
+    fn from(message: String) -> Self {
+        Self::Invalid(message)
+    }
+}
+
+impl From<&str> for OutputScheduleError {
+    fn from(message: &str) -> Self {
+        Self::Invalid(message.to_owned())
+    }
+}
+
 impl XyceOutputIntervalSchedule {
     /// Replay Xyce 7.10's interval-output scheduler over accepted transient
     /// steps.
@@ -4062,7 +4083,7 @@ impl XyceOutputIntervalSchedule {
         output_start_time: Value,
         final_time: Value,
         max_points: usize,
-    ) -> Result<Vec<XyceOutputEvent>, String> {
+    ) -> Result<Vec<XyceOutputEvent>, OutputScheduleError> {
         if !output_start_time.is_finite()
             || !final_time.is_finite()
             || output_start_time < 0.0
@@ -4070,19 +4091,20 @@ impl XyceOutputIntervalSchedule {
         {
             return Err(format!(
                 "invalid Xyce interval-output window [{output_start_time}, {final_time}]"
-            ));
+            )
+            .into());
         }
         let Some(&run_initial_time) = accepted_times.first() else {
-            return Err("Xyce interval output requires accepted transient steps".to_string());
+            return Err("Xyce interval output requires accepted transient steps".into());
         };
         if !run_initial_time.is_finite() || run_initial_time < 0.0 {
-            return Err("Xyce interval output has an invalid run initial time".to_string());
+            return Err("Xyce interval output has an invalid run initial time".into());
         }
         for pair in accepted_times.windows(2) {
             if !pair[1].is_finite() || pair[1] <= pair[0] {
                 return Err(
                     "Xyce interval output requires finite, strictly increasing accepted times"
-                        .to_string(),
+                        .into(),
                 );
             }
         }
@@ -4093,10 +4115,10 @@ impl XyceOutputIntervalSchedule {
             })?;
         let first_index = accepted_times.partition_point(|time| *time < output_start_time);
         if first_index > final_index {
-            return Err("Xyce interval output selected no accepted steps".to_string());
+            return Err("Xyce interval output selected no accepted steps".into());
         }
         if !self.initial_interval.is_finite() || self.initial_interval <= 0.0 {
-            return Err("Xyce output initial interval must be finite and positive".to_string());
+            return Err("Xyce output initial interval must be finite and positive".into());
         }
         let mut previous_transition = None;
         for (index, transition) in self.intervals.iter().enumerate() {
@@ -4106,12 +4128,13 @@ impl XyceOutputIntervalSchedule {
             {
                 return Err(format!(
                     "Xyce output transition {index} time must be finite, nonnegative, and strictly increasing"
-                ));
+                ).into());
             }
             if !transition.interval.is_finite() || transition.interval <= 0.0 {
                 return Err(format!(
                     "Xyce output transition {index} interval must be finite and positive"
-                ));
+                )
+                .into());
             }
             previous_transition = Some(transition.time);
         }
@@ -4121,7 +4144,7 @@ impl XyceOutputIntervalSchedule {
                     time: Value,
                     accepted_index: usize,
                     interpolate: bool|
-         -> Result<(), String> {
+         -> Result<(), OutputScheduleError> {
             if !time.is_finite()
                 || time < accepted_times[first_index]
                 || time > final_time
@@ -4131,14 +4154,14 @@ impl XyceOutputIntervalSchedule {
             {
                 return Err(format!(
                     "Xyce interval output produced a decreasing or out-of-window time {time:.17e}s"
-                ));
+                )
+                .into());
             }
             crate::resource::ResourceLimitError::ensure(
                 crate::resource::ResourceKind::AnalysisPoints,
                 events.len().saturating_add(1),
                 max_points,
-            )
-            .map_err(|error| error.to_string())?;
+            )?;
             events.push(XyceOutputEvent {
                 output_time: time,
                 accepted_index,
@@ -4173,7 +4196,8 @@ impl XyceOutputIntervalSchedule {
                     if !next.is_finite() || next <= interpolation_time {
                         return Err(format!(
                             "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
-                        ));
+                        )
+                        .into());
                     }
                     interpolation_time = next;
                 }
@@ -4196,7 +4220,8 @@ impl XyceOutputIntervalSchedule {
                     if !next.is_finite() || next <= interpolation_time {
                         return Err(format!(
                             "Xyce output cadence cannot advance beyond {interpolation_time:.17e}s"
-                        ));
+                        )
+                        .into());
                     }
                     interpolation_time = next;
                     if let Some(next_interval) = self.intervals.get(active_index + 1)
@@ -4216,13 +4241,13 @@ impl XyceOutputIntervalSchedule {
                         crate::resource::ResourceKind::AnalysisPoints,
                         update_additions.saturating_add(1),
                         max_points,
-                    )
-                    .map_err(|error| error.to_string())?;
+                    )?;
                     let next = next_output_time + self.initial_interval;
                     if !next.is_finite() || next <= next_output_time {
                         return Err(format!(
                             "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
-                        ));
+                        )
+                        .into());
                     }
                     next_output_time = next;
                     update_additions = update_additions.saturating_add(1);
@@ -4234,13 +4259,13 @@ impl XyceOutputIntervalSchedule {
                         crate::resource::ResourceKind::AnalysisPoints,
                         update_additions.saturating_add(1),
                         max_points,
-                    )
-                    .map_err(|error| error.to_string())?;
+                    )?;
                     let next = next_output_time + self.initial_interval;
                     if !next.is_finite() || next <= next_output_time {
                         return Err(format!(
                             "Xyce output cadence cannot advance beyond {next_output_time:.17e}s"
-                        ));
+                        )
+                        .into());
                     }
                     next_output_time = next;
                     update_additions = update_additions.saturating_add(1);
@@ -4254,9 +4279,7 @@ impl XyceOutputIntervalSchedule {
                 let active = self.intervals[active_index];
                 let quotient = (current_time - active.time) / active.interval;
                 if !quotient.is_finite() || quotient < 0.0 || quotient >= f64::from(i32::MAX) {
-                    return Err(
-                        "Xyce output cadence step index exceeds its supported range".to_string()
-                    );
+                    return Err("Xyce output cadence step index exceeds its supported range".into());
                 }
                 let step = quotient as i32;
                 let candidate = active.time + f64::from(step + 1) * active.interval;

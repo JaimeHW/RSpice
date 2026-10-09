@@ -171,7 +171,7 @@ fn project(
                 *unique.last().unwrap(),
                 rspice_core::ResourceLimits::default().max_analysis_points,
             )
-            .map_err(ServiceRunError::Failure)?;
+            .map_err(ServiceRunError::from)?;
         time = projection.times().to_vec();
         for event in &mission.transitions {
             time.push(event.time);

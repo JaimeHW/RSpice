@@ -38,7 +38,7 @@ pub(super) fn configured_times(
             last,
             max_points,
         )
-        .map_err(ServiceRunError::Failure)?;
+        .map_err(ServiceRunError::from)?;
         let times =
             centered_projection_output_times(projection.times(), first, last, carriers, abort)?;
         return Ok(Some(times));

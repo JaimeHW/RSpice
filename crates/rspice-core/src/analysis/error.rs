@@ -1413,6 +1413,15 @@ impl SimulationError {
     }
 }
 
+impl From<crate::netlist::OutputScheduleError> for SimulationError {
+    fn from(error: crate::netlist::OutputScheduleError) -> Self {
+        match error {
+            crate::netlist::OutputScheduleError::Invalid(message) => Self::Circuit(message),
+            crate::netlist::OutputScheduleError::ResourceLimit(error) => Self::ResourceLimit(error),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -669,6 +669,73 @@ fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
 }
 
 #[test]
+fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
+    let root = common::test_dir("output-sampling-budget");
+    let mut document = fixture(&root);
+    let circuit = "Sampling policy\nV1 in 0 SIN(0 .1 1k)\nR1 in out 1k\nR2 out 0 1k\n.options OUTPUT INITIAL_INTERVAL=100n\n";
+    let path = root.join("circuits/divider.cir");
+    let destination = root.join("result.json");
+    std::fs::write(
+        root.join("config.toml"),
+        "[resources]\nmax_analysis_points=1024\n",
+    )
+    .unwrap();
+    std::fs::write(&destination, "previous result").unwrap();
+    document["tasks"] = json!([{ "id": "bias", "analysis": "DcOp" }, { "id": "orbit", "depends_on": ["bias"], "analysis": {"Pss": {
+        "fundamental_freq": 1000.0, "tone_sources": ["V1"],
+        "tstab_periods": 0, "points_per_period": 64,
+        "tolerance": 1e-6, "num_harmonics": 3
+    }}}]);
+    let study_path = save(&root, &document);
+    for study in [false, true] {
+        std::fs::write(
+            &path,
+            format!(
+                "{circuit}{}.end\n",
+                if study {
+                    ""
+                } else {
+                    ".tran 10u 1m\n.print tran V(out)\n"
+                }
+            ),
+        )
+        .unwrap();
+        let output = if study {
+            invoke(
+                &root,
+                &[
+                    "study",
+                    "run",
+                    study_path.to_str().unwrap(),
+                    "-o",
+                    destination.to_str().unwrap(),
+                    "--json",
+                ],
+            )
+        } else {
+            invoke(
+                &root,
+                &[
+                    "run",
+                    path.to_str().unwrap(),
+                    "-o",
+                    destination.to_str().unwrap(),
+                ],
+            )
+        };
+        assert_eq!(output.status.code(), Some(75), "study={study}: {output:?}");
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["resource"], "analysis_points", "{error}");
+        assert_eq!(error["error"]["limit"], 1024);
+        assert_eq!(error["error"]["requested"], 1025);
+        assert_eq!(
+            std::fs::read_to_string(&destination).unwrap(),
+            "previous result"
+        );
+    }
+}
+
+#[test]
 fn periodic_studies_accept_and_enforce_custom_execution_limits() {
     let root = common::test_dir("study-periodic-execution-limits");
     let mut document = fixture(&root);

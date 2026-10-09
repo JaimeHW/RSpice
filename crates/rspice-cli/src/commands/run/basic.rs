@@ -1040,7 +1040,7 @@ pub(super) fn finish_transient_result(
                 tstop,
                 ctx.engine.config().resource_limits.max_analysis_points,
             )
-            .map_err(|message| CliError::simulation_error_in(message, "Transient"))?;
+            .map_err(|error| CliError::from(rspice_core::SimulationError::from(error)))?;
         let output_time = projection.times().to_vec();
         for signal in &mut signals {
             signal.values = projection

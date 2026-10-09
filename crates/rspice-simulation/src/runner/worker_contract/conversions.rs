@@ -1053,6 +1053,7 @@ pub(super) fn pss_display_projection(
         times,
         MAX_WORKER_F64_VALUES,
     )
+    .map_err(|error| error.to_string())
 }
 
 pub(super) fn validate_pss_display_contract(

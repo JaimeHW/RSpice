@@ -12604,7 +12604,7 @@ fn interval_output_events(
                 .map(|event| (event.accepted_index, event.interpolation_time.is_some()))
                 .collect()
         })
-        .map_err(SimulationError::Circuit)
+        .map_err(SimulationError::from)
 }
 
 /// Prove that the retained grid reproduces the authored output rows exactly.

@@ -612,6 +612,17 @@ impl From<rspice_core::SimulationError> for ServiceRunError {
     }
 }
 
+impl From<rspice_core::netlist::OutputScheduleError> for ServiceRunError {
+    fn from(error: rspice_core::netlist::OutputScheduleError) -> Self {
+        match error {
+            rspice_core::netlist::OutputScheduleError::Invalid(message) => Self::Failure(message),
+            rspice_core::netlist::OutputScheduleError::ResourceLimit(error) => {
+                Self::ResourceLimit(error)
+            }
+        }
+    }
+}
+
 impl From<String> for ServiceRunError {
     fn from(error: String) -> Self {
         Self::Failure(error)

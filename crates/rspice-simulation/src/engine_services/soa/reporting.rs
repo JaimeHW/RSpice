@@ -64,7 +64,7 @@ pub(super) fn projection(
             stop,
             limits.max_analysis_points,
         )
-        .map_err(ServiceRunError::Failure)?
+        .map_err(ServiceRunError::from)?
         .times()
         .to_vec()
     } else {
@@ -92,7 +92,7 @@ pub(super) fn projection(
     requested.dedup();
     let projection =
         TransientOutputProjection::interpolate_times(time, &requested, limits.max_analysis_points)
-            .map_err(ServiceRunError::Failure)?;
+            .map_err(ServiceRunError::from)?;
     // Both the authoritative observations and the reporting view travel with
     // the result. Charge both to the output budget before allocating columns.
     let values = budget.values.saturating_add(
@@ -127,6 +127,18 @@ mod tests {
         assert!(matches!(
             projection(&time, &options, 0.2, limits, budget, &NoAbort),
             Err(ServiceRunError::ResourceLimit(_))
+        ));
+        limits = Default::default();
+        limits.max_analysis_points = 2;
+        assert!(matches!(
+            projection(&time, &options, 0.2, limits, budget, &NoAbort),
+            Err(ServiceRunError::ResourceLimit(
+                rspice_core::ResourceLimitError {
+                    resource: rspice_core::ResourceKind::AnalysisPoints,
+                    requested: 3,
+                    limit: 2,
+                }
+            ))
         ));
         let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         assert!(matches!(

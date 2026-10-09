@@ -93,7 +93,8 @@ impl SoaSourceHistory {
                 &self.time,
                 reporting_time,
                 reporting_time.len(),
-            )?;
+            )
+            .map_err(|error| error.to_string())?;
         if reporting_time.last() != self.time.last() {
             return Err("SOA reporting view must include the final observation".into());
         }
