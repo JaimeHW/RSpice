@@ -2335,3 +2335,50 @@ connectrules chosen; connect dac; endconnectrules
         }
     }
 }
+
+#[test]
+fn compatible_disciplines_preserve_loaded_connect_body_physics() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+nature LocalVoltage; units="V"; access=U; abstol=1e-8; endnature
+nature LocalCurrent; units="A"; access=J; abstol=1e-14; endnature
+discipline local_electrical; potential LocalVoltage; flow LocalCurrent; enddiscipline
+discipline drive_data; domain discrete; potential Voltage; enddiscipline
+discipline receive_data; domain discrete; potential LocalVoltage; enddiscipline
+module stimulus(output drive_data wreal q);
+ real level=1.25;
+ initial #1 level=2.75;
+ assign q=level;
+endmodule
+module stage(input drive_data wreal d, output local_electrical p);
+ analog J(p)<+(U(p)-d)/1000;
+endmodule
+connectmodule drive(input receive_data wreal d, output electrical p);
+ stage nested(d,p);
+endmodule
+module load(input local_electrical a, output electrical p);
+ analog begin J(a)<+U(a)/1000; V(p)<+U(a); end
+endmodule
+module top(output electrical p);
+ wreal receive_data value;
+ stimulus source(value);
+ load receiver(value,p);
+endmodule
+connectrules chosen; connect drive; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* compatible mixed disciplines\nX1 p top\n.va \"{}\" top module=top\n.end\n",
+        source.path(),
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+    for (time, expected) in [(0.5e-9, 0.625), (1.4e-9, 1.375)] {
+        let actual = voltage(&result, "p", time);
+        assert!(
+            (actual - expected).abs() < 1e-7,
+            "{time}: {actual} != {expected}"
+        );
+    }
+}

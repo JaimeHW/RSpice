@@ -5,6 +5,7 @@
 //! this adapter supplies typed segments and ordinary executable module bodies.
 
 mod actual;
+mod compatibility;
 mod inputs;
 mod net_arrays;
 mod packed;
@@ -265,6 +266,9 @@ fn prepare_boundaries(
             let Some(lower) = endpoint(child_source, child, &port.name) else {
                 continue;
             };
+            compatibility::check_actual(
+                analyzed, source, module, actual, &lower, &child_path, &port.name,
+            )?;
             if port.direction == PortDirection::Input
                 && lower.net_kind.is_some()
                 && !scope.contains_physical(actual)

@@ -297,6 +297,31 @@ impl ConnectRuleTable {
         &self.resolutions
     }
 
+    /// Validate a same-domain connection without replacing either declaration.
+    /// A resolution exclusion also applies when both segments are explicitly typed.
+    pub(crate) fn check_net_compatibility(
+        &self,
+        db: &DisciplineDb,
+        left: &str,
+        right: &str,
+        net: &str,
+    ) -> Result<(), ConnectError> {
+        if !db.are_compatible(left, right) {
+            return Err(ConnectError::IncompatibleNetDisciplines {
+                net: net.into(),
+                left: left.into(),
+                right: right.into(),
+            });
+        }
+        if left != right {
+            // Keep the same exact/subset precedence as discipline resolution.
+            // An ordinary result does not override an explicit declaration.
+            let found = BTreeSet::from([left.into(), right.into()]);
+            self.resolve_list(&found, net, &mut Vec::new())?;
+        }
+        Ok(())
+    }
+
     /// Section 7.8.4 rule 3: select the one connect statement a mixed port
     /// matches.
     ///
@@ -808,8 +833,8 @@ pub struct ConnectModulePlan {
 /// Section 7.8.4 narrows the work before it starts: the rules "apply only to
 /// mixed signals", and a connection element "is selected for each port where
 /// one connection is analog and the other digital". Every other port is
-/// skipped, which is why a wholly digital or wholly analog signal produces an
-/// empty plan rather than an error.
+/// checked for discipline compatibility without inserting a converter. A compatible
+/// wholly digital or wholly analog signal therefore produces an empty plan.
 pub fn plan_connect_modules(
     signal: &Signal,
     resolved: &ResolvedSignal,
@@ -830,12 +855,20 @@ pub fn plan_connect_modules(
             let Some(lower_domain) = resolved.domain(link.lower) else {
                 continue;
             };
+            let upper_discipline = resolved.discipline(upper).unwrap_or_default();
+            let lower_discipline = resolved.discipline(link.lower).unwrap_or_default();
             if upper_domain == lower_domain {
+                if !upper_discipline.is_empty() && !lower_discipline.is_empty() {
+                    table.check_net_compatibility(
+                        db,
+                        upper_discipline,
+                        lower_discipline,
+                        &segment.name,
+                    )?;
+                }
                 continue;
             }
 
-            let upper_discipline = resolved.discipline(upper).unwrap_or_default();
-            let lower_discipline = resolved.discipline(link.lower).unwrap_or_default();
             let (continuous, discrete) = if upper_domain == Domain::Continuous {
                 (upper_discipline, lower_discipline)
             } else {
@@ -1342,6 +1375,15 @@ pub enum ConnectError {
         direction: ConnectDirection,
         first: SmolStr,
         second: SmolStr,
+    },
+
+    #[error(
+        "net '{net}' connects incompatible disciplines '{left}' and '{right}' (Verilog-AMS 2023 section 3.11)"
+    )]
+    IncompatibleNetDisciplines {
+        net: SmolStr,
+        left: SmolStr,
+        right: SmolStr,
     },
 
     #[error(

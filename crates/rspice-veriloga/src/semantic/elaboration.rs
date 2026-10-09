@@ -1242,7 +1242,9 @@ impl<'a> HierarchyElaborator<'a> {
                 } else {
                     actual
                         .as_ref()
-                        .map(|actual| resolve_connection(actual, parent_scope, path, port))
+                        .map(|actual| {
+                            resolve_connection(self.analyzed, actual, parent_scope, path, port)
+                        })
                         .transpose()
                 }
             })
@@ -1430,6 +1432,7 @@ pub(super) fn bind_parameter_overrides(
 }
 
 fn resolve_connection(
+    analyzed: &AnalyzedFile,
     expression: &Expression,
     parent_scope: &ScopeMap,
     path: &str,
@@ -1457,7 +1460,7 @@ fn resolve_connection(
             expression.span(),
         ));
     }
-    let binding = parent_scope
+    let mut binding = parent_scope
         .nodes
         .get(source_name)
         .cloned()
@@ -1469,17 +1472,29 @@ fn resolve_connection(
                 expression.span(),
             )
         })?;
-    if let Some(parent_discipline) = &binding.discipline
-        && parent_discipline != &child_port.discipline
-    {
-        return Err(semantic_error(
-            SemanticErrorKind::UnsupportedFeature(format!(
-                "discipline mismatch on instance '{path}' port '{}': expected '{}', connected net uses '{}'",
-                child_port.name, child_port.discipline, parent_discipline
-            )),
-            expression.span(),
-        ));
+    if let Some(parent_discipline) = &binding.discipline {
+        analyzed
+            .connect_rules
+            .check_net_compatibility(
+                &analyzed.disciplines,
+                parent_discipline,
+                &child_port.discipline,
+                source_name,
+            )
+            .map_err(|cause| {
+                semantic_error(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "discipline mismatch on instance '{path}' port '{}': {cause}",
+                        child_port.name,
+                    )),
+                    expression.span(),
+                )
+            })?;
     }
+    // The shared physical identity does not erase this segment's declaration.
+    // Its access functions, branch natures and descendant connections use the
+    // discipline authored on the child port, including a port tied to ground.
+    binding.discipline = Some(child_port.discipline.clone());
     Ok(binding)
 }
 

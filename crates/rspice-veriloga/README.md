@@ -177,6 +177,12 @@ existing reverse-order compatibility spelling. Real nets require a discrete
 discipline; unknown and conflicting declarations diagnose before connection
 insertion. `logic` and the conventional `ddiscrete` name are built-in discrete
 disciplines; user-defined discrete disciplines participate in converter selection.
+Connected analog and digital ports accept compatible discipline names and reject
+incompatible potential/flow natures or selected `resolveto exclude` pairs. Digital
+checks cover authored scalar, array, selected and concatenated net operands before
+input assignments are prepared. Analog flattening retains each child port's local
+branch discipline while sharing the connected physical node. Schema 142 and core
+cache record 124 invalidate artifacts compiled before these checks.
 The existing `output real` variable-port form is an RSpice compatibility extension,
 not the VAMS-2023 real-net port syntax (`wreal`).
 Compatible scalar and complete bus connections to real nets resolve `wire`/`tri`

@@ -1656,3 +1656,201 @@ endmodule
         );
     }
 }
+
+const COMPATIBLE_DISCIPLINES: &str = r#"
+nature LocalVoltage; units="V"; access=U; abstol=1e-8; endnature
+nature LocalCurrent; units="A"; access=J; abstol=1e-14; endnature
+nature DerivedVoltage : Voltage; abstol=1e-9; endnature
+discipline local_electrical; potential LocalVoltage; flow LocalCurrent; enddiscipline
+discipline derived_electrical; potential DerivedVoltage; flow Current; enddiscipline
+discipline cool; domain discrete; potential Voltage; enddiscipline
+discipline warm; domain discrete; potential LocalVoltage; enddiscipline
+discipline thermal_data; domain discrete; potential Temperature; enddiscipline
+"#;
+
+#[test]
+fn compatible_hierarchy_preserves_local_branch_disciplines_and_replay() {
+    let source = format!(
+        r#"{COMPATIBLE_DISCIPLINES}
+module leaf(p,n);
+ inout p,n; local_electrical p,n;
+ analog J(p,n)<+U(p,n)/1000;
+endmodule
+module middle(inout derived_electrical p);
+ leaf child(p,0);
+endmodule
+module top(inout electrical p);
+ middle nested(p);
+endmodule
+"#
+    );
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(&source, Some("top")).unwrap();
+    let local: Vec<_> = compiled
+        .canonical_ir
+        .hir
+        .branches
+        .iter()
+        .filter(|branch| branch.discipline == "local_electrical")
+        .collect();
+    assert_eq!(local.len(), 1, "child branch lost its authored discipline");
+    // Unnamed branches use canonical endpoint order; the contribution carries its sign.
+    assert_eq!(local[0].pos_node, "0");
+    assert_eq!(local[0].neg_node, "p");
+    let replay = compiler
+        .prepare_artifact_runtime_source(&compiled.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        compiled.canonical_ir.hir.branches,
+        replay.canonical_ir.hir.branches
+    );
+    for bad in [
+        source
+            .replace(
+                "potential LocalVoltage; flow LocalCurrent",
+                "potential Temperature; flow LocalCurrent",
+            )
+            .replace("J(p,n)<+U(p,n)/1000", "J(p,n)<+Temp(p,n)/1000"),
+        source
+            .replace(
+                "potential LocalVoltage; flow LocalCurrent",
+                "potential LocalVoltage; flow Power",
+            )
+            .replace("J(p,n)", "Pwr(p,n)"),
+    ] {
+        let error = compiler
+            .compile_runtime(&bad, Some("top"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("nested.child") && error.contains("incompatible disciplines"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn discrete_port_compatibility_checks_authored_net_operands_before_preparation() {
+    let compiler = compiler();
+    for (formal, declaration, actual) in [
+        ("input cool wire a", "wire ACTUAL bus;", "bus"),
+        ("output cool wire a", "wire ACTUAL bus;", "bus"),
+        ("inout cool wire a", "wire ACTUAL [3:2] bus;", "bus[2]"),
+        ("input cool wire a", "wire ACTUAL [3:2] bus;", "bus[2]"),
+        (
+            "input cool wire [1:0] a",
+            "wire ACTUAL [3:2] bus;",
+            "bus[3:2]",
+        ),
+        (
+            "input cool wire [1:0] a",
+            "wire ACTUAL [3:2] bus;",
+            "{bus[3],bus[2]}",
+        ),
+        ("input cool wire [1:0] a", "wire ACTUAL bus;", "{2{bus}}"),
+        ("input cool wire a", "wire ACTUAL cells[3:2];", "cells[2]"),
+        ("input cool wreal a", "wreal ACTUAL bus;", "bus"),
+        ("input cool wreal a", "wreal ACTUAL cells[3:2];", "cells[2]"),
+        ("input cool wreal [1:0] a", "wreal ACTUAL [3:2] bus;", "bus"),
+    ] {
+        for (discipline, accepted) in [("warm", true), ("thermal_data", false)] {
+            let declaration = declaration.replace("ACTUAL", discipline);
+            let source = format!(
+                "{COMPATIBLE_DISCIPLINES}\nmodule sink({formal}); endmodule\nmodule top; {declaration} sink nested({actual}); endmodule\n"
+            );
+            let outcome = compiler.compile_runtime(&source, Some("top"));
+            if accepted {
+                outcome.unwrap_or_else(|error| panic!("{declaration} / {actual}: {error}"));
+            } else {
+                let error = outcome
+                    .err()
+                    .unwrap_or_else(|| panic!("accepted {declaration} / {actual}"))
+                    .to_string();
+                assert!(
+                    error.contains("instance 'nested'")
+                        && error.contains("incompatible disciplines"),
+                    "{declaration} / {actual}: {error}"
+                );
+            }
+        }
+    }
+    // A computed value is an assignment. Its read operands are not port-connected nets.
+    let computed = format!(
+        r#"{COMPATIBLE_DISCIPLINES}
+module sink(input cool wire [1:0] a); endmodule
+module top;
+ wire thermal_data [1:0] bus;
+ sink nested({{bus[1]+1'b0,bus[0]+1'b0}});
+endmodule
+"#
+    );
+    compiler.compile_runtime(&computed, Some("top")).unwrap();
+}
+
+#[test]
+fn explicit_connections_obey_exclusions_without_converter_rules() {
+    for (parent, child, declaration) in [
+        ("electrical", "local_electrical", "inout"),
+        ("cool", "warm", "inout wire"),
+    ] {
+        let source = format!(
+            r#"{COMPATIBLE_DISCIPLINES}
+module leaf(p); {declaration} p; {child} p; endmodule
+module top(p); {declaration} p; {parent} p; leaf nested(p); endmodule
+connectrules supply_limits; connect {parent}, {child} resolveto exclude; endconnectrules
+"#
+        );
+        let error = compiler()
+            .compile_runtime(&source, Some("top"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("nested") && error.contains("resolveto exclude"),
+            "{error}"
+        );
+        // The standalone planner must make the same decision for explicitly typed segments.
+        use rspice_veriloga::connect::{
+            NetSegment, PortLink, ResolutionMode, Signal, plan_connect_modules, resolve_disciplines,
+        };
+        let tokens = Lexer::new(
+            &source,
+            SourceMap::new().add_source("exclusion.vams", &source),
+        )
+        .collect_tokens()
+        .unwrap();
+        let ast = Parser::new(&tokens).parse().unwrap();
+        let analyzed = SemanticAnalyzer::new().analyze(&ast).unwrap();
+        let mut signal = Signal::default();
+        let lower = signal.push(NetSegment::new("lower").declared(child));
+        signal.push(
+            NetSegment::new("upper")
+                .declared(parent)
+                .with_child(PortLink::new(
+                    lower,
+                    rspice_veriloga::ast::PortDirection::Inout,
+                    "nested",
+                    "p",
+                )),
+        );
+        let resolved = resolve_disciplines(
+            &signal,
+            &analyzed.connect_rules,
+            &analyzed.disciplines,
+            None,
+            ResolutionMode::Basic,
+        )
+        .unwrap();
+        let error = plan_connect_modules(
+            &signal,
+            &resolved,
+            &analyzed.connect_rules,
+            &analyzed.disciplines,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("resolveto exclude"), "{error}");
+    }
+}
