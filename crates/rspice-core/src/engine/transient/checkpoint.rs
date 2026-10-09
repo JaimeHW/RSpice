@@ -407,7 +407,8 @@ impl TransientCheckpointCapability {
         &self.blockers
     }
 
-    pub(crate) fn require_resumable(&self) -> Result<(), String> {
+    /// Reject an incomplete image with the complete deterministic blocker list.
+    pub fn require_resumable(&self) -> Result<(), String> {
         if self.is_resumable() {
             return Ok(());
         }
@@ -7782,7 +7783,7 @@ impl TransientCheckpoint {
     }
 
     /// Scalar storage charged to the transient result budget, including solver caches.
-    pub(crate) fn retained_value_count(&self) -> usize {
+    pub fn retained_value_count(&self) -> usize {
         let mut count = 8_usize
             .saturating_add(
                 self.accepted_solver_state

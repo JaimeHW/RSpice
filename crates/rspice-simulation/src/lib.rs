@@ -35,6 +35,7 @@ pub mod sealed_source;
 pub mod study;
 pub mod study_document;
 pub mod sweeps;
+pub mod transient_checkpoint;
 pub mod veriloga;
 
 mod engine_bridge;

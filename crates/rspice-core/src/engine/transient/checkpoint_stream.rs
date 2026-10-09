@@ -7,6 +7,8 @@ use super::*;
 pub enum TransientCheckpointStart<'a> {
     Fresh(TransientStartupMode),
     Resume(&'a TransientCheckpoint),
+    /// Permit only the horizon/file-option changes of an authored restart deck.
+    Restart(&'a TransientCheckpoint),
 }
 
 /// A synchronous sink for an accepted snapshot. Returning an error stops the
@@ -43,9 +45,14 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
         validate_transient_window(tstop, max_step)?;
+        let resume_validation = match stream.start {
+            TransientCheckpointStart::Restart(_) => ResumeValidation::AuthoredRestart,
+            _ => ResumeValidation::ExactNetlist,
+        };
         let (resume, startup_mode, start) = match stream.start {
             TransientCheckpointStart::Fresh(mode) => (None, mode, 0.0),
-            TransientCheckpointStart::Resume(checkpoint) => {
+            TransientCheckpointStart::Resume(checkpoint)
+            | TransientCheckpointStart::Restart(checkpoint) => {
                 if !checkpoint.time.is_finite() || checkpoint.time < 0.0 || tstop <= checkpoint.time
                 {
                     return Err(SimulationError::Circuit(
@@ -88,7 +95,7 @@ impl Engine {
                 abort,
                 TransientResumePlan {
                     resume,
-                    resume_validation: ResumeValidation::ExactNetlist,
+                    resume_validation,
                     final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                     scheduled_checkpoint_times: stream.times,
                     checkpoint_observer: Some(&observe),

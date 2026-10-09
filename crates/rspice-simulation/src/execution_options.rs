@@ -2,6 +2,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct SpecExecutionOptions {
     pub study_base: Option<crate::study::StudyRunConfig>,
+    pub tran_checkpoint: Option<crate::transient_checkpoint::TransientCheckpointRequest>,
     pub mc_checkpoint: Option<crate::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     /// Histogram bins for the default all-node OP study. Configured bases carry their own.
     pub mc_histogram_bins: Option<usize>,

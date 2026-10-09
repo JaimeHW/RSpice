@@ -263,6 +263,7 @@ fn study_temperature_precedes_parameter_statistics_and_optimization_replay() {
             environment: Some(environment()),
             abort_flag: &NoAbort,
             checkpoint_observer: None,
+            transient_checkpoint_observer: None,
         },
     )
     .unwrap();

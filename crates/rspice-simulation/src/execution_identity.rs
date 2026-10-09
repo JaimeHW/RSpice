@@ -703,6 +703,13 @@ fn encode_spec_options(writer: &mut CanonicalWriter, options: &SpecExecutionOpti
             writer.digest(input.digest())
         });
     }
+    if let Some(checkpoint) = &options.tran_checkpoint {
+        writer.domain("transient-checkpoint-request/v1");
+        encode_f64_slice(writer, &checkpoint.times);
+        writer.option(checkpoint.resume.as_ref(), |writer, input| {
+            writer.digest(input.digest())
+        });
+    }
     writer.domain("spec-execution-options");
     writer.option(options.temp.as_ref(), |writer, config| {
         encode_f64_slice(writer, &config.temperatures_c);

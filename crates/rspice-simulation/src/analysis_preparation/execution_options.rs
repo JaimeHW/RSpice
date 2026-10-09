@@ -48,6 +48,7 @@ pub fn analysis_spec_execution_options(
                 mc_histogram_bins: None,
                 mc_statistics: None,
                 mc_checkpoint: None,
+                tran_checkpoint: None,
                 study_base: None,
                 temp: Some(crate::analysis_preparation::temp_run_config_from_dialog(
                     sim_setup, &temp_cfg,
@@ -77,6 +78,7 @@ pub fn analysis_spec_execution_options(
                 mc_histogram_bins: None,
                 mc_statistics: None,
                 mc_checkpoint: None,
+                tran_checkpoint: None,
                 study_base: None,
                 temp: None,
                 parametric_base: None,
@@ -149,6 +151,7 @@ pub fn analysis_spec_execution_options(
             mc_histogram_bins: None,
             mc_statistics: None,
             mc_checkpoint: None,
+            tran_checkpoint: None,
             study_base: None,
             temp: None,
             parametric_base: None,

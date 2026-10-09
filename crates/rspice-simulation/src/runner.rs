@@ -28,6 +28,8 @@ use rspice_simulation_contract::config::AnalysisConfig;
 
 #[cfg(test)]
 pub(crate) mod monte_carlo_checkpoint_tests;
+#[cfg(test)]
+mod transient_checkpoint_tests;
 use crate::live_transient::{
     LiveTransientPublisher, LiveTransientQueue, TransientSampleDelta, TransientSampleObserver,
 };
@@ -99,6 +101,7 @@ pub struct SimulationRunner {
     engine_log: Arc<Mutex<EngineLogQueue>>,
 
     monte_carlo_checkpoint: CheckpointQueue,
+    transient_checkpoint: crate::transient_checkpoint::CheckpointQueue,
 
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
@@ -126,6 +129,7 @@ impl SimulationRunner {
             transient_samples: Arc::new(Mutex::new(LiveTransientQueue::default())),
             engine_log: Arc::new(Mutex::new(EngineLogQueue::default())),
             monte_carlo_checkpoint: Arc::new(Mutex::new(None)),
+            transient_checkpoint: Arc::new(Mutex::new(None)),
             thread_handle: None,
             pending_result: None,
             #[cfg(target_arch = "wasm32")]
@@ -235,6 +239,14 @@ impl SimulationRunner {
             .take()
     }
 
+    /// Most recent complete transient state, retained even when a run is cancelled.
+    pub fn take_transient_checkpoint(&self) -> Option<Arc<[u8]>> {
+        self.transient_checkpoint
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+    }
+
     /// Abort and discard all runner-local completion/progress state.
     ///
     /// Native worker threads cannot be force-killed, but setting the shared
@@ -249,6 +261,7 @@ impl SimulationRunner {
         self.transient_samples = Arc::new(Mutex::new(LiveTransientQueue::default()));
         self.engine_log = Arc::new(Mutex::new(EngineLogQueue::default()));
         self.monte_carlo_checkpoint = Arc::new(Mutex::new(None));
+        self.transient_checkpoint = Arc::new(Mutex::new(None));
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -427,6 +440,7 @@ impl SimulationRunner {
 
         // Reset state
         self.take_monte_carlo_checkpoint();
+        self.take_transient_checkpoint();
         self.abort_flag.store(false, Ordering::SeqCst);
         match self.transient_samples.lock() {
             Ok(mut samples) => samples.clear(),
@@ -452,6 +466,7 @@ impl SimulationRunner {
         {
             let streams = RunStreams {
                 monte_carlo_checkpoint: Some(Arc::clone(&self.monte_carlo_checkpoint)),
+                transient_checkpoint: Some(Arc::clone(&self.transient_checkpoint)),
                 transient_samples,
                 engine_log: Some(RunLogSink::queued(
                     Arc::clone(&self.engine_log),
@@ -479,6 +494,7 @@ impl SimulationRunner {
                 transient_samples,
                 Arc::clone(&self.engine_log),
                 Arc::clone(&self.monte_carlo_checkpoint),
+                Arc::clone(&self.transient_checkpoint),
             )?;
         }
         Ok(())
@@ -532,6 +548,10 @@ pub(in crate::runner) struct RunStreams {
     pub(in crate::runner) engine_log: Option<RunLogSink>,
     pub(in crate::runner) monte_carlo_checkpoint: Option<CheckpointQueue>,
     pub(in crate::runner) checkpoint_observer: Option<CheckpointObserver>,
+    pub(in crate::runner) transient_checkpoint:
+        Option<crate::transient_checkpoint::CheckpointQueue>,
+    pub(in crate::runner) transient_checkpoint_observer:
+        Option<crate::transient_checkpoint::CheckpointObserver>,
 }
 
 fn lock_progress<'a>(
@@ -889,6 +909,8 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         engine_log,
         monte_carlo_checkpoint,
         checkpoint_observer,
+        transient_checkpoint,
+        transient_checkpoint_observer,
     } = streams;
 
     // Whatever the engine logs from here on belongs to this run, and only to
@@ -982,6 +1004,18 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
     };
     let checkpoint_observer = (monte_carlo_checkpoint.is_some() || checkpoint_observer.is_some())
         .then_some(&publish_checkpoint as &(dyn Fn(&[u8]) -> Result<(), SimulationError> + Sync));
+    let publish_transient_checkpoint = |bytes: &[u8]| {
+        if let Some(queue) = &transient_checkpoint {
+            crate::transient_checkpoint::replace_checkpoint(queue, Arc::from(bytes));
+        }
+        if let Some(observer) = &transient_checkpoint_observer {
+            observer(bytes)?;
+        }
+        Ok(())
+    };
+    let transient_checkpoint_observer = (transient_checkpoint.is_some()
+        || transient_checkpoint_observer.is_some())
+    .then_some(&publish_transient_checkpoint as &crate::transient_checkpoint::BorrowedObserver<'_>);
     let result = match request {
         SimulationRequest::Config(config) => {
             input
@@ -1020,6 +1054,7 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
                     environment: input.environment,
                     abort_flag: &signal,
                     checkpoint_observer,
+                    transient_checkpoint_observer,
                 },
             )?
         }

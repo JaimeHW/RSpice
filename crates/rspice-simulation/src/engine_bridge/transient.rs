@@ -19,6 +19,16 @@ impl EngineBridge {
         config: &TransientAnalysisConfig,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        self.run_transient_with_checkpoint(netlist, config, None, abort)
+    }
+
+    pub(super) fn run_transient_with_checkpoint(
+        &self,
+        netlist: &rspice_core::Netlist,
+        config: &TransientAnalysisConfig,
+        checkpoint: Option<crate::transient_checkpoint::CheckpointExecution<'_>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
         let max_step = config
             .resolved_maximum_step()
@@ -26,9 +36,66 @@ impl EngineBridge {
         let prepared_netlist = netlist_for_transient_config(netlist, config, abort)?;
         let netlist = prepared_netlist.as_ref();
         let engine = self.engine_for_netlist(netlist);
-        let tran_result = engine
-            .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
-            .map_err(|e| self.translate_error(e))?;
+        let tran_result = if let Some(execution) = checkpoint {
+            use rspice_core::engine::{
+                TransientCheckpointEncoding, TransientCheckpointStart, TransientCheckpointStream,
+            };
+            execution
+                .request
+                .validate_schedule(config.stop_time, self.resource_limits())?;
+            let resume = execution
+                .request
+                .resume
+                .as_ref()
+                .map(|input| input.decode(self.resource_limits(), abort))
+                .transpose()?;
+            let start = resume.as_ref().map_or(
+                TransientCheckpointStart::Fresh(
+                    rspice_core::engine::TransientStartupMode::from_uic(config.uic),
+                ),
+                TransientCheckpointStart::Restart,
+            );
+            let failure = std::sync::Mutex::new(None);
+            let publish = |point: &rspice_core::engine::ScheduledTransientCheckpoint| {
+                let bytes = point
+                    .checkpoint
+                    .to_persistable_bytes_with_abort(TransientCheckpointEncoding::Packed, abort)?;
+                // The receiving parser separately bounds canonical bytes and
+                // parsed backing storage; never publish an image it must refuse.
+                let result = crate::transient_checkpoint::decode_bytes(
+                    &bytes,
+                    self.resource_limits(),
+                    abort,
+                )
+                .and_then(|_| (execution.observer)(&bytes));
+                if let Err(error) = result {
+                    *failure.lock().unwrap_or_else(|p| p.into_inner()) = Some(error);
+                    return Err(rspice_core::SimulationError::Circuit(
+                        "Transient checkpoint destination failed".into(),
+                    ));
+                }
+                Ok(())
+            };
+            let result = engine.run_tran_checkpoint_stream_with_abort(
+                netlist,
+                config.stop_time,
+                max_step,
+                TransientCheckpointStream {
+                    start,
+                    times: &execution.request.times,
+                    observer: &publish,
+                },
+                abort,
+            );
+            if let Some(error) = failure.into_inner().unwrap_or_else(|p| p.into_inner()) {
+                return Err(error);
+            }
+            result.map_err(|error| self.translate_error(error))?
+        } else {
+            engine
+                .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
+                .map_err(|error| self.translate_error(error))?
+        };
         let convergence =
             rspice_results::convergence_quality::TransientConvergenceEvidence::capture(
                 engine.convergence_quality(),

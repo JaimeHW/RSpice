@@ -362,11 +362,19 @@ pub(super) fn emit_worker_transient_sample(sample: &crate::live_transient::Trans
 /// Deliver the portable checkpoint as transferred bytes before terminal success.
 #[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 fn emit_worker_monte_carlo_checkpoint(bytes: &[u8]) -> Result<(), SimulationError> {
+    emit_worker_checkpoint(bytes, "monteCarloCheckpoint")
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn emit_worker_transient_checkpoint(bytes: &[u8]) -> Result<(), SimulationError> {
+    emit_worker_checkpoint(bytes, "transientCheckpoint")
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
+fn emit_worker_checkpoint(bytes: &[u8], kind: &str) -> Result<(), SimulationError> {
     use wasm_bindgen::{JsCast as _, JsValue};
     let fail = |message: String| {
-        SimulationError::InvalidConfig(format!(
-            "Could not deliver Monte Carlo checkpoint: {message}"
-        ))
+        SimulationError::InvalidConfig(format!("Could not deliver checkpoint: {message}"))
     };
     crate::monte_carlo_checkpoint::validate_checkpoint_bytes_size(bytes.len()).map_err(&fail)?;
     let id = ACTIVE_WORKER_PROGRESS_ID
@@ -376,7 +384,7 @@ fn emit_worker_monte_carlo_checkpoint(bytes: &[u8]) -> Result<(), SimulationErro
     let view = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
     view.copy_from(bytes);
     for (key, value) in [
-        ("type", JsValue::from_str("monteCarloCheckpoint")),
+        ("type", JsValue::from_str(kind)),
         ("id", JsValue::from_f64(id as f64)),
         ("checkpoint", JsValue::from(view.clone())),
     ] {
@@ -508,6 +516,7 @@ fn run_decoded_worker_request(
             super::super::RunStreams {
                 progress_observer: Some(emit_worker_progress_snapshot),
                 checkpoint_observer: Some(Arc::new(emit_worker_monte_carlo_checkpoint)),
+                transient_checkpoint_observer: Some(Arc::new(emit_worker_transient_checkpoint)),
                 transient_sample_observer: stream_transient_samples
                     .then_some(emit_worker_transient_sample),
                 engine_log: Some(crate::engine_log::RunLogSink::observed(
@@ -694,6 +703,8 @@ pub(super) fn worker_request_from_value(
         byte_lengths.push(view.length() as usize);
     }
     validate_worker_request_checkpoint_lengths(numeric_values, &byte_lengths)
+        .map_err(|error| JsValue::from_str(&error))?;
+    validate_checkpoint_request_lengths(&request.request, numeric_values, &byte_lengths)
         .map_err(|error| JsValue::from_str(&error))?;
     let mut decoded_bytes = Vec::new();
     for index in 0..byte_buffers.length() {

@@ -190,6 +190,11 @@ impl WorkerRequestTransport {
             buffers.iter().map(Vec::len).sum(),
             &byte_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
         )?;
+        validate_checkpoint_request_lengths(
+            &request,
+            buffers.iter().map(Vec::len).sum(),
+            &byte_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
+        )?;
         Ok(Self {
             protocol: WORKER_REQUEST_TRANSPORT_PROTOCOL,
             request: WorkerRequestTransportMetadata {
@@ -226,6 +231,11 @@ impl WorkerRequestTransport {
         reject_inline_worker_request_op_previous_state(&request)?;
         validate_worker_request_transfer_buffers(&self.buffers)?;
         validate_worker_request_checkpoint_lengths(
+            self.buffers.iter().map(Vec::len).sum(),
+            &self.byte_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
+        )?;
+        validate_checkpoint_request_lengths(
+            &request,
             self.buffers.iter().map(Vec::len).sum(),
             &self.byte_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
         )?;

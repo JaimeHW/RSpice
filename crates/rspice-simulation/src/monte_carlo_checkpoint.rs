@@ -115,7 +115,7 @@ pub fn validate_checkpoint_bytes_size(length: usize) -> Result<(), String> {
     let limit = ResourceLimits::default().max_external_data_bytes;
     if length == 0 || length > limit {
         Err(format!(
-            "Monte Carlo checkpoint has {length} bytes; expected 1..={limit}"
+            "Checkpoint has {length} bytes; expected 1..={limit}"
         ))
     } else {
         Ok(())
@@ -128,7 +128,7 @@ pub fn validate_worker_request_checkpoint_lengths(
     lengths: &[usize],
 ) -> Result<(), String> {
     if lengths.len() > 1 {
-        return Err("Worker request carries more than one pooled Monte Carlo checkpoint".into());
+        return Err("Worker request carries more than one checkpoint".into());
     }
     let mut bytes = numeric_values.saturating_mul(8);
     for length in lengths {

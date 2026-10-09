@@ -28,6 +28,7 @@ fn execute(
             dependencies: &Default::default(),
             environment,
             abort_flag: &NoAbort,
+            transient_checkpoint_observer: None,
             checkpoint_observer: Some(&|bytes| {
                 publications.lock().unwrap().push(bytes.to_vec());
                 Ok(())

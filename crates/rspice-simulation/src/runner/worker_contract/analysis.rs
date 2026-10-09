@@ -50,6 +50,8 @@ pub(crate) struct WorkerSpecExecutionOptions {
     #[serde(default)]
     pub study_base: Option<WorkerStudyRunConfig>,
     #[serde(default)]
+    pub tran_checkpoint: Option<crate::transient_checkpoint::TransientCheckpointRequest>,
+    #[serde(default)]
     pub mc_checkpoint: Option<crate::monte_carlo_checkpoint::MonteCarloCheckpointRequest>,
     #[serde(default)]
     pub mc_histogram_bins: Option<usize>,
@@ -70,6 +72,7 @@ impl From<&SpecExecutionOptions> for WorkerSpecExecutionOptions {
             mc_histogram_bins: value.mc_histogram_bins,
             mc_statistics: value.mc_statistics.clone(),
             mc_checkpoint: value.mc_checkpoint.clone(),
+            tran_checkpoint: value.tran_checkpoint.clone(),
             study_base: value.study_base.as_ref().map(WorkerStudyRunConfig::from),
             temp: value.temp.as_ref().map(WorkerTempRunConfig::from),
             parametric_base: value
@@ -91,6 +94,7 @@ impl From<WorkerSpecExecutionOptions> for SpecExecutionOptions {
             mc_histogram_bins: value.mc_histogram_bins,
             mc_statistics: value.mc_statistics,
             mc_checkpoint: value.mc_checkpoint,
+            tran_checkpoint: value.tran_checkpoint,
             study_base: value.study_base.map(crate::study::StudyRunConfig::from),
             temp: value.temp.map(crate::sweeps::TempRunConfig::from),
             parametric_base: value

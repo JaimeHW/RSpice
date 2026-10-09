@@ -89,6 +89,7 @@ mod browser {
         /// own memory — posts its lines back across the contract one at a time.
         active_engine_log: Option<Arc<Mutex<EngineLogQueue>>>,
         active_checkpoint: Option<CheckpointQueue>,
+        active_transient_checkpoint: Option<(CheckpointQueue, rspice_core::ResourceLimits)>,
         pending_result: Option<Result<SimulationResult, SimulationError>>,
     }
 
@@ -179,6 +180,7 @@ mod browser {
                 state.active_transient_samples = None;
                 state.active_engine_log = None;
                 state.active_checkpoint = None;
+                state.active_transient_checkpoint = None;
             }
             result
         }
@@ -197,6 +199,7 @@ mod browser {
             state.active_transient_samples = None;
             state.active_engine_log = None;
             state.active_checkpoint = None;
+            state.active_transient_checkpoint = None;
             state.pending_result = Some(Err(SimulationError::Aborted));
             drop(state);
             drop_cached_worker(&self.worker, &self.state);
@@ -329,6 +332,7 @@ mod browser {
         transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
         engine_log: Arc<Mutex<EngineLogQueue>>,
         checkpoint: CheckpointQueue,
+        transient_checkpoint: CheckpointQueue,
     ) -> Result<(), SimulationError> {
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
@@ -347,6 +351,8 @@ mod browser {
             state.active_transient_samples = transient_samples;
             state.active_engine_log = Some(engine_log);
             state.active_checkpoint = Some(checkpoint);
+            state.active_transient_checkpoint =
+                Some((transient_checkpoint, input.execution_limits));
             state.pending_result = None;
         }
 
@@ -359,6 +365,7 @@ mod browser {
                 state.active_transient_samples = None;
                 state.active_engine_log = None;
                 state.active_checkpoint = None;
+                state.active_transient_checkpoint = None;
                 return Err(error);
             }
         };
@@ -370,6 +377,7 @@ mod browser {
             state.active_transient_samples = None;
             state.active_engine_log = None;
             state.active_checkpoint = None;
+            state.active_transient_checkpoint = None;
             drop(state);
             let message = format!(
                 "failed to post simulation request to worker: {}",
@@ -397,7 +405,8 @@ mod browser {
             "progress" => handle_progress_message(state, &data),
             "transientSample" => handle_transient_sample_message(state, &data),
             "engineLog" => handle_engine_log_message(state, &data),
-            "monteCarloCheckpoint" => handle_checkpoint_message(state, worker, &data),
+            "monteCarloCheckpoint" => handle_checkpoint_message(state, worker, &data, false),
+            "transientCheckpoint" => handle_checkpoint_message(state, worker, &data, true),
             "result" => handle_result_message(state, &data),
             "error" => {
                 let startup_error = Reflect::get(&data, &JsValue::from_str("id"))
@@ -519,6 +528,7 @@ mod browser {
         state.active_transient_samples = None;
         state.active_engine_log = None;
         state.active_checkpoint = None;
+        state.active_transient_checkpoint = None;
         state.pending_result = Some(result);
     }
 
@@ -526,6 +536,7 @@ mod browser {
         state: &Rc<RefCell<WorkerState>>,
         worker: &Rc<RefCell<Option<web_sys::Worker>>>,
         data: &JsValue,
+        transient: bool,
     ) {
         let id = numeric_property(data, "id").unwrap_or(0);
         let queue = {
@@ -533,30 +544,43 @@ mod browser {
             if stale_result(state.active_request_id, id) {
                 return;
             }
-            state.active_checkpoint.clone()
+            if transient {
+                state.active_transient_checkpoint.clone()
+            } else {
+                state
+                    .active_checkpoint
+                    .clone()
+                    .map(|q| (q, rspice_core::ResourceLimits::default()))
+            }
         };
-        let Some(queue) = queue else {
+        let Some((queue, limits)) = queue else {
             return;
         };
         let decoded = (|| -> Result<Vec<u8>, String> {
             let view = Reflect::get(data, &JsValue::from_str("checkpoint"))
                 .map_err(js_error_message)?
                 .dyn_into::<js_sys::Uint8Array>()
-                .map_err(|_| "Monte Carlo checkpoint must be a Uint8Array".to_owned())?;
-            validate_checkpoint_bytes_size(view.length() as usize)?;
+                .map_err(|_| "Checkpoint must be a Uint8Array".to_owned())?;
+            if transient {
+                crate::transient_checkpoint::validate_bytes_size(view.length() as usize, limits)
+                    .map_err(|error| error.to_string())?;
+            } else {
+                validate_checkpoint_bytes_size(view.length() as usize)?;
+            }
             let mut bytes = vec![0; view.length() as usize];
             view.copy_to(&mut bytes);
-            rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
-                &bytes, rspice_core::ResourceLimits::default(), &rspice_core::NoAbort).map_err(|error| error.to_string())?;
+            if transient {
+                crate::transient_checkpoint::decode_bytes(&bytes, limits, &rspice_core::NoAbort)
+                    .map_err(|error| error.to_string())?;
+            } else {
+                rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint::from_bytes_with_limits(
+                    &bytes, limits, &rspice_core::NoAbort).map_err(|error| error.to_string())?;
+            }
             Ok(bytes)
         })();
         match decoded {
             Ok(bytes) => replace_checkpoint(&queue, Arc::from(bytes)),
-            Err(error) => fail_worker(
-                state,
-                worker,
-                format!("Invalid Monte Carlo checkpoint stream: {error}"),
-            ),
+            Err(error) => fail_worker(state, worker, format!("Invalid checkpoint stream: {error}")),
         }
     }
 
@@ -648,6 +672,7 @@ mod browser {
         state.active_transient_samples = None;
         state.active_engine_log = None;
         state.active_checkpoint = None;
+        state.active_transient_checkpoint = None;
         state.pending_result = Some(Err(SimulationError::InvalidConfig(message)));
     }
 
@@ -672,6 +697,7 @@ mod browser {
         state.active_transient_samples = None;
         state.active_engine_log = None;
         state.active_checkpoint = None;
+        state.active_transient_checkpoint = None;
         drop(state);
         drop_cached_worker(worker, state_cell);
     }
@@ -854,6 +880,16 @@ mod browser {
         })?;
 
         validate_worker_request_checkpoint_lengths(
+            dependency_buffers
+                .iter()
+                .map(|values| values.len())
+                .sum::<usize>()
+                + op_buffers.iter().map(Vec::len).sum::<usize>(),
+            &checkpoint_buffers.iter().map(Vec::len).collect::<Vec<_>>(),
+        )
+        .map_err(SimulationError::InvalidConfig)?;
+        crate::runner::worker_contract::validate_checkpoint_request_lengths(
+            &request,
             dependency_buffers
                 .iter()
                 .map(|values| values.len())

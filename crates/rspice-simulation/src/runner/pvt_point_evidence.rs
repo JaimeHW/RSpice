@@ -291,6 +291,7 @@ pub(crate) fn run_declaration(
                     environment,
                     abort_flag: &NoAbort,
                     checkpoint_observer: None,
+                    transient_checkpoint_observer: None,
                 },
             ),
         };

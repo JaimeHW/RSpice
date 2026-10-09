@@ -76,6 +76,7 @@ pub(super) fn run_spec_request(
             environment: None,
             abort_flag,
             checkpoint_observer: None,
+            transient_checkpoint_observer: None,
         },
     )
 }
@@ -87,6 +88,7 @@ pub(super) struct SpecExecutionContext<'a> {
     pub environment: Option<AnalysisExecutionEnvironment>,
     pub abort_flag: &'a dyn AbortSignal,
     pub checkpoint_observer: Option<&'a CheckpointObserver<'a>>,
+    pub transient_checkpoint_observer: Option<&'a CheckpointObserver<'a>>,
 }
 
 pub(super) fn run_spec_request_in_context(
@@ -102,8 +104,14 @@ pub(super) fn run_spec_request_in_context(
         environment,
         abort_flag,
         checkpoint_observer,
+        transient_checkpoint_observer,
     } = context;
     ensure_not_aborted(abort_flag)?;
+    if options.tran_checkpoint.is_some()
+        && (!matches!(spec, AnalysisSpec::Transient { .. }) || options.mc_checkpoint.is_some())
+    {
+        return Err(SimulationError::InvalidConfig("Transient checkpoint requires an ordinary transient request with no Monte Carlo checkpoint".into()));
+    }
     if let Some(checkpoint) = &options.mc_checkpoint {
         if !matches!(spec, AnalysisSpec::MonteCarlo { .. }) {
             return Err(SimulationError::InvalidConfig(
@@ -144,6 +152,26 @@ pub(super) fn run_spec_request_in_context(
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
 
     if let Some(config) = config::analysis_config_from_spec(&spec) {
+        if let Some(request) = &options.tran_checkpoint {
+            let no_publication = |_bytes: &[u8]| Ok(());
+            let observer: &CheckpointObserver<'_> = match transient_checkpoint_observer {
+                Some(observer) => observer,
+                None if request.times.is_empty() => &no_publication,
+                None => {
+                    return Err(SimulationError::InvalidConfig(
+                        "Transient checkpoint request has no snapshot destination".into(),
+                    ));
+                }
+            };
+            return bridge.run_with_transient_checkpoint(
+                &config,
+                netlist,
+                source_path,
+                environment,
+                crate::transient_checkpoint::CheckpointExecution { request, observer },
+                abort_flag,
+            );
+        }
         return match environment {
             Some(environment) => bridge.run_with_abort_and_source_path_and_environment(
                 &config,

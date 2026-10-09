@@ -219,6 +219,37 @@ impl EngineBridge {
         input: SimulationInput<'_>,
         abort_flag: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
+        self.run_request_with_checkpoint(input, None, abort_flag)
+    }
+
+    pub(crate) fn run_with_transient_checkpoint(
+        &self,
+        config: &AnalysisConfig,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        environment: Option<crate::runner::AnalysisExecutionEnvironment>,
+        checkpoint: crate::transient_checkpoint::CheckpointExecution<'_>,
+        abort_flag: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.run_request_with_checkpoint(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path,
+                environment,
+                supply_corner: None,
+            },
+            Some(checkpoint),
+            abort_flag,
+        )
+    }
+
+    fn run_request_with_checkpoint(
+        &self,
+        input: SimulationInput<'_>,
+        checkpoint: Option<crate::transient_checkpoint::CheckpointExecution<'_>>,
+        abort_flag: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort_flag)?;
         input.config.validate().map_err(|errors| {
             SimulationError::InvalidConfig(format!(
@@ -317,6 +348,19 @@ impl EngineBridge {
                     ))
                 }
             })?;
+        }
+        if let Some(checkpoint) = checkpoint {
+            let AnalysisConfig::Transient(config) = input.config else {
+                return Err(SimulationError::InvalidConfig(
+                    "Transient checkpoint requires transient analysis".into(),
+                ));
+            };
+            return self.run_transient_with_checkpoint(
+                &netlist,
+                config,
+                Some(checkpoint),
+                abort_flag,
+            );
         }
         Self::run_materialized_with_abort(&self.engine, input.config, &netlist, abort_flag)
     }

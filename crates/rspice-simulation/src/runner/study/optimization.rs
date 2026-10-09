@@ -427,6 +427,7 @@ mod tests {
                     }),
                     abort_flag: &NoAbort,
                     checkpoint_observer: None,
+                    transient_checkpoint_observer: None,
                 },
             )
             .unwrap();
@@ -494,6 +495,7 @@ mod tests {
                     environment,
                     abort_flag: &NoAbort,
                     checkpoint_observer: None,
+                    transient_checkpoint_observer: None,
                 },
             )
             .unwrap();

@@ -24,7 +24,8 @@ pub struct AnalysisExecutionEnvironment {
 /// 42: remove the unsupported Reliability analysis.
 /// 43: transient dependencies retain singular voltage histories and coverage.
 /// 44: immutable execution resource policy is required in request metadata.
-pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 44;
+/// 45: transient continuation carries authenticated checkpoint bytes and a schedule.
+pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 45;
 
 /// Browser response protocol revisions.
 /// 18: transient-source convergence evidence survives result transport.

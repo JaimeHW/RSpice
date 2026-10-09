@@ -803,7 +803,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v130); states
+Resume also requires the current resolved simulation identity (v131); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -827,8 +827,17 @@ snapshot after the callback, so retaining the latest encoded image does not
 accumulate every checkpoint. Callback failures and cancellation stop delivery;
 snapshots already delivered can resume the run. This uses the same nominal-time
 coalescing and resource checks as the retained schedule API and adds no solver
-breakpoints. Worker and UI continuation require their own request and transport
-integration.
+breakpoints. `TransientCheckpointStart::Restart` admits the existing authored
+restart contract (including stop-horizon extension) while `Resume` requires the
+same netlist identity.
+
+The simulation runner accepts `SpecExecutionOptions::tran_checkpoint`, transfers
+its authenticated resume payload outside worker JSON, and retains the latest
+published packed image in a separate transient queue. Receiving run budgets
+apply to bytes and decoded state; cancelled runs preserve previously delivered
+images. Native request/transport tests cover mixed HDL-to-SPICE continuation and
+horizon extension. Browser transport is wired separately and requires browser
+runtime qualification; UI checkpoint selection and durable retention remain open.
 
 The internal HDL signal-store checkpoint retains typed signal values, each
 driver's contribution (including never-driven state), analog samples, activation
