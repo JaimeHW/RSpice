@@ -617,3 +617,44 @@ fn uic_bjt_charge_accuracy_improves_with_requested_tolerance() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ngspice_inductor_ic_requires_uic_for_linear_and_nonlinear_startup() {
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Ngspice));
+    for (circuit, dc_current, authored_current) in [
+        (
+            "V1 in 0 1\nR1 in out 10\nL1 out 0 5n IC=-.0002\n",
+            0.1,
+            -0.0002,
+        ),
+        (
+            "I1 0 out .00025\nL1 out 0 5n IC=.0002\nD1 out 0 diode\n.model diode D(IS=1e-14)\n",
+            0.00025,
+            0.0002,
+        ),
+    ] {
+        let deck = Netlist::parse(&format!(
+            "Ngspice authored winding current\n{circuit}.options GMIN=0\n.end\n"
+        ))
+        .unwrap();
+        for startup in [
+            TransientStartupMode::OperatingPoint,
+            TransientStartupMode::Uic,
+        ] {
+            let result = engine
+                .run_tran_with_startup_mode(&deck, 0.1e-9, 1e-12, startup)
+                .unwrap();
+            let current = result.try_branch_current_waveform_named("l1").unwrap()[0];
+            let expected = if startup == TransientStartupMode::Uic {
+                authored_current
+            } else {
+                dc_current
+            };
+            assert!(
+                (current - expected).abs() < 1e-14,
+                "{startup:?}: {current:e} != {expected:e}"
+            );
+        }
+    }
+}

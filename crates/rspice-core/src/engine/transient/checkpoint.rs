@@ -1295,8 +1295,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v105 corrects source and free-coordinate signs in the event voltage seed.
     // v106 preserves accepted diode displacement current through normalized restart.
     // v114 binds periodic diode projection to the resolved native M/FC law.
-    // v117 retains complete constant-linear source-event charge and flux actions.
-    hasher.update(b"rspice-transient-resolved-config-v117\0");
+    // v118 binds ngspice winding ICs to UIC startup.
+    hasher.update(b"rspice-transient-resolved-config-v118\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

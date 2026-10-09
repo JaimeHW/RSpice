@@ -5403,6 +5403,8 @@ impl Engine {
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
+        circuit.inductors.ignore_operating_point_ic =
+            self.config.spice_dialect == SpiceDialect::Ngspice;
         if netlist
             .options
             .device_pnjmaxi

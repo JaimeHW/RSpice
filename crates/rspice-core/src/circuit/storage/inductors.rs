@@ -27,6 +27,9 @@ pub struct Inductors {
     pub v_prev: Vec<Value>,
     /// Initial condition current (IC=)
     pub ic: Vec<Option<Value>>,
+    /// Ngspice uses element ICs only under UIC. Keep the authored values for
+    /// that startup mode while omitting them from operating-point equations.
+    pub ignore_operating_point_ic: bool,
 }
 
 impl Inductors {
@@ -94,6 +97,14 @@ impl Inductors {
 
     pub fn has_explicit_initial_conditions(&self) -> bool {
         self.ic.iter().any(Option::is_some)
+    }
+
+    pub(crate) fn operating_point_ic(&self, index: usize) -> Option<Value> {
+        if self.ignore_operating_point_ic {
+            None
+        } else {
+            self.ic[index]
+        }
     }
 
     /// Get equivalent resistance for trapezoidal integration
@@ -167,7 +178,7 @@ impl Inductors {
                 let np = self.node_pos[i];
                 let nn = self.node_neg[i];
                 let br = num_nodes + self.branch_indices[i];
-                let current = self.ic[i].unwrap_or(0.0);
+                let current = self.operating_point_ic(i).unwrap_or(0.0);
                 if np > 0 {
                     rhs[np - 1] -= current;
                 }
@@ -183,7 +194,7 @@ impl Inductors {
             let br_ordinal = self.branch_indices[i];
             let br = num_nodes + br_ordinal;
 
-            if let Some(current) = self.ic[i] {
+            if let Some(current) = self.operating_point_ic(i) {
                 if np > 0 {
                     rhs[np - 1] -= current;
                 }
@@ -247,9 +258,10 @@ impl Inductors {
             let nn = self.node_neg[i];
             let br_ordinal = self.branch_indices[i];
             let br = num_nodes + br_ordinal;
-            let current = self.ic[i].unwrap_or(0.0);
+            let initial_current = self.operating_point_ic(i);
+            let current = initial_current.unwrap_or(0.0);
 
-            if self.ic[i].is_some() || seed_current(i) {
+            if initial_current.is_some() || seed_current(i) {
                 if np > 0 {
                     rhs[np - 1] -= current;
                 }

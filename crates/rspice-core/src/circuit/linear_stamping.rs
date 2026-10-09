@@ -957,7 +957,7 @@ impl CircuitData {
             .zip(&self.inductors.node_neg)
             .enumerate()
         {
-            if self.inductors.ic[index].is_some() {
+            if self.inductors.operating_point_ic(index).is_some() {
                 seed_current[index] = true;
                 continue;
             }
