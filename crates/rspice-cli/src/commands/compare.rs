@@ -12,6 +12,7 @@ use crate::commands::waveform_io::{
     ImportedResult, ResultSnapshot, detect_format, load_result_selected, supports_sections,
 };
 
+mod dc_match;
 mod determinations;
 mod evidence;
 mod fft;

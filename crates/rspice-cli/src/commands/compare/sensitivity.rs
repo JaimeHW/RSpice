@@ -84,7 +84,7 @@ impl Evidence {
                             .strip_suffix(')')?;
                         let fields = state
                             .split(',')
-                            .map(decode_part)
+                            .map(crate::commands::report_identity::decode_folded_part)
                             .collect::<Option<Vec<_>>>()?;
                         let [vector, kind, element, _parameter] = fields.as_slice() else {
                             return None;
@@ -124,21 +124,4 @@ impl Evidence {
         let code = data.sample(status, row)?;
         (code != 0.0).then_some(code as u8)
     }
-}
-
-fn decode_part(value: &str) -> Option<String> {
-    let mut bytes = value.bytes();
-    let mut decoded = Vec::with_capacity(value.len());
-    while let Some(byte) = bytes.next() {
-        if byte == b'%' {
-            let high = char::from(bytes.next()?).to_digit(16)?;
-            let low = char::from(bytes.next()?).to_digit(16)?;
-            decoded.push((high * 16 + low) as u8);
-        } else if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.') {
-            decoded.push(byte);
-        } else {
-            return None;
-        }
-    }
-    String::from_utf8(decoded).ok()
 }

@@ -877,6 +877,17 @@ only that retained root is the intended comparison. Older documents without
 units keep those units unstated. Older root-only flat exports can verify only
 their retained roots; regenerate those baselines to check gains and evidence.
 
+DC mismatch JSON conversion retains each contributor's scope, instance,
+parameter, parameter sigma, sensitivity, signed contribution, and variance share.
+It also retains the output probe, sigma multiplier, evaluated and retained
+contributor counts, and applied correlation counts. Contributor quantities use
+scope-qualified names such as `contribution(mismatch:R1/RVALUE)`. Output
+contributions keep the output's stated unit; parameter sigma and sensitivity
+units remain unspecified because the payload does not declare parameter units.
+Identity fields containing delimiters use percent encoding. Changed contributors
+therefore fail comparison even when total spread is unchanged; older aggregate-only
+converted baselines must be regenerated to check these details.
+
 Sensitivity exports and JSON conversion retain each parameter's nominal value, absolute
 and normalized derivatives, and AC magnitude and phase derivatives. Normalized
 values are dimensionless; absolute derivatives use the analysis's native

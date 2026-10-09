@@ -106,5 +106,6 @@ pub(super) fn problems(data: &WaveformData) -> Vec<String> {
             problems.push("STB loop-gain analysis did not complete".into());
         }
     }
+    problems.extend(super::dc_match::problems(data));
     problems
 }

@@ -6,6 +6,7 @@ use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::commands::result_signal::qualified_name;
 use std::path::Path;
 
+mod dc_match;
 mod pole_zero;
 mod sensitivity;
 mod stability;
@@ -90,6 +91,16 @@ fn append_payload_columns(
         }
         ResultPayload::PoleZero(payload) => projection.pole_zero(payload)?,
         ResultPayload::Sensitivity(payload) => projection.sensitivity(payload)?,
+        ResultPayload::DcMatch(payload) => projection.dc_match(
+            payload,
+            document
+                .scalars()
+                .iter()
+                .find(|scalar| scalar.name() == "nominal_value")
+                .and_then(|scalar| scalar.unit())
+                .cloned()
+                .unwrap_or(SignalUnit::Unspecified),
+        )?,
         ResultPayload::Distortion(payload) => {
             if let Some(ratio) = payload.f2_over_f1 {
                 projection.constant("f2_over_f1".into(), SignalUnit::Dimensionless, ratio)?;

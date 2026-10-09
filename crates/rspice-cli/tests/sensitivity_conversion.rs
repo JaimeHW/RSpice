@@ -418,6 +418,7 @@ fn sensitivity_identity_indicators_are_checked_even_when_a_derivative_is_selecte
         "unknown_kind",
         "malformed_escape",
         "duplicate",
+        "escaped_duplicate",
         "complex",
     ] {
         let mut table = original.clone();
@@ -434,6 +435,11 @@ fn sensitivity_identity_indicators_are_checked_even_when_a_derivative_is_selecte
             "duplicate" => {
                 let mut another = marker.clone();
                 another["name"] = json!("sens:parameter(R1,capacitor,C1,C)");
+                columns.push(another);
+            }
+            "escaped_duplicate" => {
+                let mut another = marker.clone();
+                another["name"] = json!("sens:parameter(%52%31,resistor,R1,R)");
                 columns.push(another);
             }
             "complex" => {

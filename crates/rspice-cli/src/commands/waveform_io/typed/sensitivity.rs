@@ -91,7 +91,8 @@ impl PayloadProjection<'_> {
                 "sensitivity element kind is not a tag",
             ));
         };
-        let fields = [vector, &kind, element, parameter].map(identity_part);
+        let fields =
+            [vector, &kind, element, parameter].map(crate::commands::report_identity::encode_part);
         self.constant(
             format!("sens:parameter({})", fields.join(",")),
             SignalUnit::Dimensionless,
@@ -182,19 +183,4 @@ impl PayloadProjection<'_> {
         }
         Ok(())
     }
-}
-
-/// An unambiguous tuple component; ordinary SPICE identifiers stay readable.
-fn identity_part(value: &str) -> String {
-    use std::fmt::Write;
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.') {
-            encoded.push(char::from(byte));
-        } else {
-            // Writing into a String cannot fail.
-            let _ = write!(encoded, "%{byte:02X}");
-        }
-    }
-    encoded
 }
