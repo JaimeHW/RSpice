@@ -164,10 +164,10 @@ impl ChargeEventTopology {
         if incoming_q[self.nodes..]
             .iter()
             .zip(&self.branch_equations)
-            .any(|(&value, row)| value != 0.0 && row.flux_tolerance().is_none())
+            .any(|(&value, row)| value != 0.0 && row.storage_tolerance().is_none())
         {
             return Err(error(
-                "incoming non-nodal storage has no prepared flux equation",
+                "incoming non-nodal storage has no prepared flux or charge equation",
             ));
         }
         let mut trial = self.physical_probe(incoming);
@@ -300,11 +300,8 @@ impl ChargeEventTopology {
                 continue;
             };
             let impulses = self
-                .source_incidence
-                .get(row)
-                .into_iter()
-                .flatten()
-                .map(|&(column, sign)| (trial[column], sign));
+                .impulse_incidence(row)
+                .map(|(column, sign)| (trial[column], sign));
             let residual = sum([(physical.q.values[row], 1.0), (old_charge, -1.0)]
                 .into_iter()
                 .chain(impulses))?;
@@ -313,6 +310,11 @@ impl ChargeEventTopology {
             if residual.abs() > tolerance {
                 let kind = if row < self.nodes {
                     "nodal charge"
+                } else if self.branch_equations[row - self.nodes]
+                    .current_port()
+                    .is_some()
+                {
+                    "branch charge"
                 } else {
                     "branch flux"
                 };
@@ -352,11 +354,8 @@ impl ChargeEventTopology {
                     // integration reference also contains finite storage current.
                     // Neither changes the matrix or the original equation audit.
                     let reference = sum(self
-                        .source_incidence
-                        .get(row)
-                        .into_iter()
-                        .flatten()
-                        .map(|&(column, sign)| (solution[column], -sign))
+                        .impulse_incidence(row)
+                        .map(|(column, sign)| (solution[column], -sign))
                         .chain([
                             (physical.q_time[row], 1.0),
                             (currents.map_or(0.0, |currents| currents[row]), -1.0),
@@ -418,9 +417,9 @@ impl ChargeEventTopology {
             let current = sum(physical.q.rows[row]
                 .iter()
                 .map(|&(column, value)| (value, rates[column])))?;
-            let injections = self.source_incidence[row]
-                .iter()
-                .map(|&(column, sign)| (rates[column], sign));
+            let injections = self
+                .impulse_incidence(row)
+                .map(|(column, sign)| (rates[column], sign));
             let residual = sum([
                 (physical.f.values[row], 1.0),
                 (physical.q_time[row], 1.0),
@@ -469,12 +468,12 @@ impl ChargeEventTopology {
             }
         }
         let source_impulses = self
-            .sources
+            .impulse_branches
             .iter()
-            .map(|source| trial[source.branch])
+            .map(|&branch| trial[branch])
             .collect();
-        for source in &self.sources {
-            trial[source.branch] = rates[source.branch];
+        for &branch in &self.impulse_branches {
+            trial[branch] = rates[branch];
         }
         let coordinate_rates = rates
             .into_iter()

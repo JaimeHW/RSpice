@@ -47,6 +47,9 @@ impl Engine {
             // A line owns incoming waves as well as electrical coordinates;
             // an OP certificate alone does not authenticate that history.
             || !circuit.tlines.is_empty()
+            // An IC capacitor's voltage constraint is released into a
+            // dynamic current equation. Its bias is not a static balance.
+            || circuit.capacitors.ic_branch_indices.iter().any(Option::is_some)
             || !circuit.behavioral_sources.has_smooth_physical_equations()
             || contract.nodal_gmin != options.nodal_gmin
             || contract.junction_gmin.is_some_and(|gmin| {

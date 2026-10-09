@@ -145,11 +145,15 @@ fn prepare_capacitors(
         }
         capacitors.push(CapacitorAcceptedState {
             voltage: outgoing_voltage,
-            current: sum([
-                (rate(&state.coordinate_rates, p)?, c),
-                (rate(&state.coordinate_rates, n)?, -c),
-            ]
-            .into_iter())?,
+            current: if let Some(ordinal) = circuit.capacitors.ic_branch_indices[index] {
+                state.solution[circuit.num_nodes() + ordinal - 1]
+            } else {
+                sum([
+                    (rate(&state.coordinate_rates, p)?, c),
+                    (rate(&state.coordinate_rates, n)?, -c),
+                ]
+                .into_iter())?
+            },
         });
     }
     Ok(capacitors)

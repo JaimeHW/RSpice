@@ -99,6 +99,13 @@ pub(super) fn currents(
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        if let Some(ordinal) = c.ic_branch_indices[index] {
+            // This storage lives in Q_C=-C*V, not the nodal charge rows.
+            // The accepted branch is the authoritative capacitor current.
+            let row = circuit.num_nodes() + ordinal;
+            add(row, -step.incoming[row - 1])?;
+            continue;
+        }
         let voltage = Engine::differential_voltage(step.incoming, stamp.pp.row, stamp.nn.row);
         let current = coeff.capacitor_geq(c.capacitances[index], step.dt) * voltage
             - coeff.capacitor_ieq(

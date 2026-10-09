@@ -184,6 +184,11 @@ pub(super) struct ChargeEventTopology {
     roots: Vec<usize>,
     groups: Vec<Vec<usize>>,
     source_columns: Vec<bool>,
+    /// Voltage-source and capacitor branch slots used for impulse unknowns.
+    impulse_branches: Vec<usize>,
+    /// Capacitor KCL incidence and its branch identity I_C - d(C*V)/dt.
+    /// Kept separate from the compiled CCCS/voltage-source incidence.
+    capacitor_incidence: Vec<Vec<(usize, Value)>>,
     /// Sparse source incidence for nodal audits; scanning every source for
     /// every node would make validation quadratic on source-rich circuits.
     source_incidence: Arc<Vec<Vec<(usize, Value)>>>,
@@ -232,7 +237,7 @@ impl ChargeEventTopology {
     pub(in crate::engine::transient) fn source_branches(
         &self,
     ) -> impl ExactSizeIterator<Item = usize> + '_ {
-        self.sources.iter().map(|source| source.branch)
+        self.impulse_branches.iter().copied()
     }
 
     pub(super) fn new(
@@ -277,7 +282,7 @@ impl ChargeEventTopology {
                 || source.branch >= size
                 || source_columns[source.branch]
                 || branch_equations[source.branch - nodes]
-                    .flux_tolerance()
+                    .storage_tolerance()
                     .is_some()
                 || !source.valid(nodes)
             {
@@ -289,6 +294,29 @@ impl ChargeEventTopology {
                     source_incidence[node - 1].push((source.branch, sign));
                 }
             }
+        }
+        let mut impulse_branches: Vec<_> = sources.iter().map(|source| source.branch).collect();
+        let mut capacitor_incidence = Vec::new();
+        for (index, equation) in branch_equations.iter().enumerate() {
+            let Some((positive, negative)) = equation.current_port() else {
+                continue;
+            };
+            check_abort(abort)?;
+            let branch = nodes + index;
+            if positive > nodes || negative > nodes || source_columns[branch] {
+                return Err(error("invalid or duplicate capacitor-current descriptor"));
+            }
+            if capacitor_incidence.is_empty() {
+                capacitor_incidence.resize_with(size, Vec::new);
+            }
+            source_columns[branch] = true;
+            impulse_branches.push(branch);
+            for (node, sign) in [(positive, 1.0), (negative, -1.0)] {
+                if node != 0 {
+                    capacitor_incidence[node - 1].push((branch, sign));
+                }
+            }
+            capacitor_incidence[branch].push((branch, 1.0));
         }
         let mut parents: Vec<_> = (0..=nodes).collect();
         fn root(parents: &mut [usize], mut node: usize) -> usize {
@@ -366,6 +394,8 @@ impl ChargeEventTopology {
             roots,
             groups,
             source_columns,
+            impulse_branches,
+            capacitor_incidence,
             source_incidence: Arc::new(source_incidence),
             weighted: None,
             flux: None,
@@ -385,14 +415,23 @@ impl ChargeEventTopology {
         if row < self.nodes {
             Some(options.charge_tolerance)
         } else {
-            self.branch_equations[row - self.nodes].flux_tolerance()
+            self.branch_equations[row - self.nodes].storage_tolerance()
         }
+    }
+
+    fn impulse_incidence(&self, row: usize) -> impl Iterator<Item = (usize, Value)> + Clone {
+        self.source_incidence
+            .get(row)
+            .into_iter()
+            .flatten()
+            .chain(self.capacitor_incidence.get(row).into_iter().flatten())
+            .copied()
     }
 
     fn physical_probe(&self, trial: &[Value]) -> Vec<Value> {
         let mut state = trial.to_vec();
-        for source in &self.sources {
-            state[source.branch] = 0.0;
+        for &branch in &self.impulse_branches {
+            state[branch] = 0.0;
         }
         state
     }
@@ -415,13 +454,15 @@ impl ChargeEventTopology {
                 if index == 1
                     && row >= self.nodes
                     && self.branch_equations[row - self.nodes]
-                        .flux_tolerance()
+                        .storage_tolerance()
                         .is_none()
                     && (stamp.values[row] != 0.0
                         || sample.q_time[row] != 0.0
                         || entries.iter().any(|(_, value)| *value != 0.0))
                 {
-                    return Err(error("non-nodal storage has no prepared flux equation"));
+                    return Err(error(
+                        "non-nodal storage has no prepared flux or charge equation",
+                    ));
                 }
             }
         }
@@ -469,10 +510,14 @@ impl ChargeEventTopology {
                 equations.absolute[row] = self.branch_equations[row - self.nodes].jump_tolerance();
             }
         }
-        for row in 0..self.nodes {
+        for row in 0..self
+            .source_incidence
+            .len()
+            .max(self.capacitor_incidence.len())
+        {
             check_abort(abort)?;
             if !self.is_group_row(row) {
-                for &(branch, coefficient) in &self.source_incidence[row] {
+                for (branch, coefficient) in self.impulse_incidence(row) {
                     equations.add(row, branch, coefficient)?;
                     equations.add_value(row, sum([(trial[branch], coefficient)].into_iter())?)?;
                 }
@@ -548,10 +593,14 @@ impl ChargeEventTopology {
                 equations.values[row] = sample.f_time[row];
             }
         }
-        for row in 0..self.nodes {
+        for row in 0..self
+            .source_incidence
+            .len()
+            .max(self.capacitor_incidence.len())
+        {
             check_abort(abort)?;
             if !self.is_group_row(row) {
-                for &(branch, coefficient) in &self.source_incidence[row] {
+                for (branch, coefficient) in self.impulse_incidence(row) {
                     equations.add(row, branch, coefficient)?;
                 }
             }

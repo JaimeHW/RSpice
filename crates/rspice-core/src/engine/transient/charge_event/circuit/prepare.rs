@@ -137,11 +137,6 @@ impl<'a> PreparedEventCircuit<'a> {
                 .iter()
                 .all(Option::is_none)
             && circuit
-                .capacitors
-                .ic_branch_indices
-                .iter()
-                .all(Option::is_none)
-            && circuit
                 .bjts
                 .devices
                 .iter()
@@ -282,11 +277,9 @@ impl<'a> PreparedEventCircuit<'a> {
                 "thermal resistors require their event-state and time-partial owner",
             ));
         }
-        if c.value_expressions.iter().any(Option::is_some)
-            || (!use_descriptor && c.ic_branch_indices.iter().any(Option::is_some))
-        {
+        if c.value_expressions.iter().any(Option::is_some) {
             return Err(error(
-                "capacitor expressions and auxiliary current rows require their event descriptor",
+                "capacitor expressions require their event descriptor",
             ));
         }
         if r.conductances
@@ -347,9 +340,13 @@ impl<'a> PreparedEventCircuit<'a> {
             }
             terminals(stamp.pp.row, stamp.nn.row)?;
             if let Some(ordinal) = c.ic_branch_indices[index] {
-                // I_C - d(C*V)/dt is owned by the full descriptor. It is
-                // neither an algebraic voltage constraint nor a flux row.
-                claim(&mut equations, ordinal, None)?;
+                let equation = (!use_descriptor).then_some(EventBranchEquation::ChargeCurrent {
+                    positive: stamp.pp.row,
+                    negative: stamp.nn.row,
+                    charge_tolerance: options.charge_tolerance,
+                    current_tolerance: options.current_tolerance,
+                });
+                claim(&mut equations, ordinal, equation)?;
             }
             if c.capacitances[index] != 0.0 {
                 ResourceLimitError::ensure(

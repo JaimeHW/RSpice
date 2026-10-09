@@ -423,3 +423,106 @@ fn charge_event_revalidates_options_and_does_not_backtrack_structural_faults() {
     assert!(failure.to_string().contains("index outside"), "{failure}");
     assert_eq!(calls, 2);
 }
+
+#[test]
+fn capacitor_branch_charge_jump_and_finite_current_have_distinct_units() {
+    use crate::abort_signal::CountingAbort;
+    let options = options();
+    let topology = ChargeEventTopology::new(
+        2,
+        4,
+        &[(1, 2)],
+        vec![source(1, 2, 2.0, 3.0)],
+        vec![
+            EventBranchEquation::Algebraic(options.voltage_tolerance),
+            EventBranchEquation::ChargeCurrent {
+                positive: 1,
+                negative: 2,
+                charge_tolerance: options.charge_tolerance,
+                current_tolerance: options.current_tolerance,
+            },
+        ],
+        &options,
+        &NoAbort,
+    )
+    .unwrap();
+    let incoming = [1.0, 0.0, 0.0, 0.0];
+    let charge = [0.0, 0.0, 0.0, -5.0];
+    let sample = |state: &[Value], _: &dyn AbortSignal| {
+        let mut sample = EventSample::new(4, &options)?;
+        branch(&mut sample.f, state, 2, 0, 1.0);
+        sample.q.stamp(4, 1, -5.0);
+        sample.q.stamp(4, 2, 5.0);
+        sample.q.stamp_rhs(4, 5.0 * (state[0] - state[1]));
+        Ok(sample)
+    };
+    let census = CountingAbort::new(usize::MAX);
+    let state = topology
+        .solve(&incoming, &charge, &options, &census, sample)
+        .unwrap();
+    // Five farads gain one volt: 5 C flows through C and -5 C through V.
+    // The independent outgoing slope is 3 V/s, hence finite I_C=15 A.
+    for (&actual, expected) in state.solution.iter().zip([2.0, 0.0, -15.0, 15.0]) {
+        close(actual, expected, 1e-12);
+    }
+    assert_eq!(topology.source_branches().collect::<Vec<_>>(), [2, 3]);
+    for (&actual, expected) in state.source_impulses.iter().zip([-5.0, 5.0]) {
+        close(actual, expected, 1e-12);
+    }
+    close(state.coordinate_rates[0].unwrap(), 3.0, 1e-12);
+    close(state.coordinate_rates[1].unwrap(), 0.0, 1e-12);
+    assert_eq!(&state.coordinate_rates[2..], [None, None]);
+    for poll in [0, census.count() / 2, census.count() - 1] {
+        let abort = CountingAbort::new(poll);
+        assert!(matches!(
+            topology.solve(&incoming, &charge, &options, &abort, sample),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(abort.polls_after_abort(), 0);
+    }
+}
+
+#[test]
+fn capacitor_current_descriptors_validate_terminals_tolerances_and_ownership() {
+    let options = options();
+    let equation =
+        |positive, charge_tolerance, current_tolerance| EventBranchEquation::ChargeCurrent {
+            positive,
+            negative: 0,
+            charge_tolerance,
+            current_tolerance,
+        };
+    for invalid in [
+        equation(2, 1e-15, 1e-12),
+        equation(1, 0.0, 1e-12),
+        equation(1, 1e-15, Value::NAN),
+        equation(1, Value::INFINITY, 1e-12),
+    ] {
+        assert!(
+            ChargeEventTopology::new(1, 2, &[], vec![], vec![invalid], &options, &NoAbort,)
+                .is_err()
+        );
+    }
+    // A voltage constraint cannot also own the capacitor's current row.
+    assert!(
+        ChargeEventTopology::new(
+            1,
+            2,
+            &[(1, 0)],
+            vec![EventVoltageSource {
+                positive: 1,
+                negative: 0,
+                branch: 1,
+                equation: EventVoltageEquation::Affine {
+                    value: 1.0,
+                    slope: 0.0,
+                    control: None
+                },
+            }],
+            vec![equation(1, 1e-15, 1e-12)],
+            &options,
+            &NoAbort,
+        )
+        .is_err()
+    );
+}

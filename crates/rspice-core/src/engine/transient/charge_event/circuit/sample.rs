@@ -171,9 +171,14 @@ impl PreparedEventCircuit<'_> {
             let c = self.circuit.capacitors.capacitances[index];
             if let Some(ordinal) = self.circuit.capacitors.ic_branch_indices[index] {
                 let row = nodes + ordinal;
-                current_port(&mut sample.f, state, p, n, row - 1);
-                sample.f.stamp(row, row, 1.0);
-                sample.f.stamp_rhs(row, -state[row - 1]);
+                if self.equations[ordinal - 1].is_none() {
+                    // The linear descriptor retains the complete F matrix.
+                    // The nonlinear event topology instead owns this current
+                    // as an independent impulse/finite-current coordinate.
+                    current_port(&mut sample.f, state, p, n, row - 1);
+                    sample.f.stamp(row, row, 1.0);
+                    sample.f.stamp_rhs(row, -state[row - 1]);
+                }
                 sample.q.stamp(row, p, -c);
                 sample.q.stamp(row, n, c);
                 sample.q.stamp_rhs(

@@ -18,6 +18,8 @@ use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, Spic
 mod behavioral;
 #[path = "gp_phase_regimes/charge.rs"]
 mod charge;
+#[path = "gp_phase_regimes/capacitor_ic.rs"]
+mod capacitor_ic;
 #[path = "gp_phase_regimes/controlled.rs"]
 mod controlled;
 #[path = "gp_phase_regimes/coverage_gaps.rs"]

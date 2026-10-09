@@ -369,7 +369,7 @@ fn prepared_event_circuit_preserves_numeric_trial_failure_for_backtracking() {
 }
 
 #[test]
-fn prepared_event_circuit_checks_storage_budget_and_refuses_auxiliary_capacitor_rows() {
+fn prepared_event_circuit_checks_storage_budget_and_auxiliary_capacitor_ownership() {
     let mut circuit = build("capacitor event\nV1 a 0 1\nC1 a 0 1p\n.end\n");
     let mut options = options();
     options.limits.max_result_values = circuit.matrix_size() * 64;
@@ -383,7 +383,7 @@ fn prepared_event_circuit_checks_storage_budget_and_refuses_auxiliary_capacitor_
         .err()
         .unwrap();
     assert!(
-        failure.to_string().contains("auxiliary current rows"),
+        failure.to_string().contains("multiple owners"),
         "{failure}"
     );
     circuit.capacitors.ic_branch_indices[0] = None;

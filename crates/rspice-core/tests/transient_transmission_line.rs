@@ -247,3 +247,84 @@ fn native_diode_storage_has_finite_current_at_line_arrival_and_packed_restart() 
         );
     }
 }
+
+#[test]
+fn capacitor_ic_current_tracks_a_matched_line_arrival() {
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let deck = Netlist::parse("Capacitor IC at a line load\nV1 source 0 PWL(0 0 1n 0 1n 1 4n 1)\nRS source near 50\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\nC1 far 0 10p IC=0\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    for method in [
+        IntegrationMethod::Trapezoidal,
+        IntegrationMethod::Gear2,
+        IntegrationMethod::TrapGear,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+        config.integration_method = method;
+        config.convergence_config.gmin_target = 0.0;
+        config.max_timestep = 0.5e-12;
+        config.min_timestep = 0.5e-15;
+        let engine = Engine::new(config);
+        let (full, saved) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                &deck,
+                3.2e-9,
+                0.5e-12,
+                rspice_core::engine::TransientStartupMode::OperatingPoint,
+                &[2e-9, 2.3e-9],
+                &rspice_core::NoAbort,
+            )
+            .unwrap();
+        let voltage = full.try_voltage_waveform_named("far").unwrap();
+        let current = full.try_branch_current_waveform_named("c1").unwrap();
+        // The incident half-volt step arrives at 2 ns. The 50-ohm line
+        // and 50-ohm termination drive C through 25 ohms: tau=.25 ns.
+        for (i, &time) in full.time.iter().enumerate() {
+            let decay = if time < 2e-9 {
+                0.0
+            } else {
+                (-(time - 2e-9) / 0.25e-9).exp()
+            };
+            let expected = if time < 2e-9 {
+                0.0
+            } else {
+                0.5 * (1.0 - decay)
+            };
+            assert!(
+                (voltage[i] - expected).abs() < 3e-6,
+                "{method:?} at {time:e}: {} != {expected}",
+                voltage[i]
+            );
+            assert!((current[i] - 0.02 * decay).abs() < 1.2e-7);
+        }
+        let trace = full.current_impulses.as_ref().unwrap().iter().find(|trace| matches!(&trace.owner, rspice_core::CurrentImpulseOwner::Branch {branch_name} if branch_name.eq_ignore_ascii_case("c1"))).unwrap();
+        assert!(
+            trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
+            "{trace:?}"
+        );
+        for saved in saved {
+            let checkpoint = TransientCheckpoint::from_bytes(
+                &saved
+                    .checkpoint
+                    .to_bytes(rspice_core::engine::TransientCheckpointEncoding::Packed)
+                    .unwrap(),
+            )
+            .unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&deck, &checkpoint, 3.2e-9, 0.5e-12)
+                .unwrap();
+            let offset = full
+                .time
+                .iter()
+                .position(|&time| time == checkpoint.time)
+                .unwrap();
+            assert_eq!(resumed.time, full.time[offset..]);
+            for (actual, expected) in resumed
+                .voltages
+                .iter()
+                .zip(&full.voltages)
+                .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+            {
+                assert_eq!(actual, &expected[offset..]);
+            }
+        }
+    }
+}
