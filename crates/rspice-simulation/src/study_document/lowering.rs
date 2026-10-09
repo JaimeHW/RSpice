@@ -73,6 +73,12 @@ impl StudyDocument {
                 check_abort(abort)?;
                 let context = |message: String| invalid(format!("task {:?}: {message}", task.id));
                 task.analysis.validate().map_err(&context)?;
+                if matches!(task.analysis, AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner) {
+                    return Err(StudyDocumentError::UnsupportedCapability {
+                        capability: "study.structured_sweeps",
+                        detail: format!("task {:?}: structured sweep settings are not yet supported by study documents", task.id),
+                    });
+                }
                 let options = task.execution_options().map_err(&context)?;
                 let line = analysis_cards(&task.analysis).map_err(&context)?;
                 let numeric = task.effective_numeric(&self.numeric).map_err(&context)?;

@@ -246,6 +246,12 @@ fn validate_execution_policy(config: &Config) -> Result<(), CliError> {
 fn map_document_error(error: StudyDocumentError, path: &Path) -> CliError {
     match error {
         StudyDocumentError::Aborted => super::run::cancellation_cli_error(None),
+        StudyDocumentError::UnsupportedCapability { capability, detail } => {
+            rspice_core::SimulationError::UnsupportedCapability(Box::new(
+                rspice_core::UnsupportedCapabilityError::new(capability, detail),
+            ))
+            .into()
+        }
         StudyDocumentError::ResourceLimit(source) => CliError::ResourceLimit {
             path: path.into(),
             source,

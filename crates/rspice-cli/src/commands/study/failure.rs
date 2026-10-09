@@ -71,6 +71,17 @@ pub(super) fn execution(error: SimulationError, task: &str, timeout: Option<f64>
             details.requested = Some(*requested);
             details.limit = Some(*limit);
         }
+        E::ResourceFailure(rspice_simulation::error::ResourceFailure::DeviceLimit {
+            instance,
+            resource,
+            requested,
+            limit,
+        }) => {
+            details.instance_name = Some(instance.clone());
+            details.resource = resource_name(resource);
+            details.requested = Some(*requested);
+            details.limit = Some(*limit);
+        }
         E::BehavioralReference {
             owner_name,
             canonical_owner_name,
@@ -117,4 +128,31 @@ fn resource_name(name: &str) -> Option<&'static str> {
     .into_iter()
     .map(|kind| kind.as_str())
     .find(|known| *known == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_resource_failure_keeps_budget_and_instance_context() {
+        let error = execution(
+            SimulationError::ResourceFailure(
+                rspice_simulation::error::ResourceFailure::DeviceLimit {
+                    instance: "XAMP:delay".into(),
+                    resource: "transport_history_bytes".into(),
+                    requested: 5000,
+                    limit: 4000,
+                },
+            ),
+            "waveform",
+            None,
+        );
+        assert_eq!(error.exit_code() as u8, 75);
+        let details = error.details();
+        assert_eq!(details.resource, Some("transport_history_bytes"));
+        assert_eq!(details.instance_name.as_deref(), Some("XAMP:delay"));
+        assert_eq!(details.analysis_id.as_deref(), Some("waveform"));
+        assert_eq!((details.requested, details.limit), (Some(5000), Some(4000)));
+    }
 }

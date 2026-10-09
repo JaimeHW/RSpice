@@ -395,3 +395,15 @@ fn study_run_refuses_untransported_limits_and_honors_deadlines() {
     assert_eq!(output.status.code(), Some(124), "{output:?}");
     assert!(!destination.exists());
 }
+
+#[test]
+fn structured_sweep_gap_has_a_capability_exit_status() {
+    let root = common::test_dir("study-sweep-capability");
+    let mut document = fixture(&root);
+    document["tasks"] = json!([{ "id": "sweep", "analysis": "Parametric" }]);
+    let path = save(&root, &document);
+    let output = invoke(&root, &["study", "check", path.to_str().unwrap(), "--json"]);
+    assert_eq!(output.status.code(), Some(69), "{output:?}");
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"]["capability"], "study.structured_sweeps");
+}

@@ -95,6 +95,11 @@ pub enum StudyDocumentError {
     UnknownField(String),
     #[error("Unsupported study schema version {0}; supported version is 1")]
     UnsupportedVersion(u32),
+    #[error("Unsupported study capability [{capability}]: {detail}")]
+    UnsupportedCapability {
+        capability: &'static str,
+        detail: String,
+    },
     #[error("Invalid study: {0}")]
     Invalid(String),
     #[error(transparent)]

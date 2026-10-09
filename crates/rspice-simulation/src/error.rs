@@ -8,7 +8,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_results::convergence_attribution::ConvergenceAttribution;
 use rspice_results::monte_carlo_checkpoint::CheckpointError;
 use rspice_results::validation::ResultSchemaMismatch;
-use rspice_simulation_contract::resource_failure::ResourceFailure;
+pub use rspice_simulation_contract::resource_failure::ResourceFailure;
 use rspice_simulation_contract::worker_error::WorkerSimulationError;
 
 /// Errors that can occur during simulation
