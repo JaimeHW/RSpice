@@ -80,8 +80,8 @@ impl Inductor {
         matrix.stamp(self.node_pos, branch, 1.0);
         matrix.stamp(self.node_neg, branch, -1.0);
 
-        // Equivalent voltage source
-        let veq = req * self.current_prev + self.voltage_prev;
+        // v - req*i = -req*i_prev - v_prev.
+        let veq = -req * self.current_prev - self.voltage_prev;
         matrix.stamp_rhs(branch, veq);
         Ok(())
     }
@@ -138,6 +138,53 @@ mod tests {
 
         fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {
             self.rhs_stamps += 1;
+        }
+    }
+
+    #[test]
+    fn inductor_companion_preserves_current_and_voltage_history() {
+        #[derive(Default)]
+        struct BranchEquation {
+            coefficients: [Value; 4],
+            rhs: Value,
+        }
+        impl MatrixStamper for BranchEquation {
+            fn stamp(&mut self, row: NodeId, column: NodeId, value: Value) {
+                if row == 3 {
+                    self.coefficients[column] += value;
+                }
+            }
+            fn stamp_rhs(&mut self, row: NodeId, value: Value) {
+                if row == 3 {
+                    self.rhs += value;
+                }
+            }
+        }
+        for sign in [-1.0, 1.0] {
+            let mut device = Inductor::new("L1".into(), 1, 2, 1e-3);
+            device.set_branch_index(3);
+            device.set_initial_current(sign);
+            // Exact currents for piecewise-linear terminal voltage. The
+            // zero-voltage interval must preserve the initial current.
+            for (positive, negative, dt, expected) in [
+                (0.0, 0.0, 1e-3, 1.0),
+                (1.0, 0.5, 1e-3, 1.25),
+                (-0.25, 0.25, 1e-3, 1.25),
+                (0.0, 0.0, 2e-3, 0.75),
+            ] {
+                let positive = sign * positive;
+                let negative = sign * negative;
+                let mut equation = BranchEquation::default();
+                device
+                    .try_stamp_transient(&[positive, negative, 0.0], dt, &mut equation, &mut [])
+                    .unwrap();
+                let current = (equation.rhs
+                    - equation.coefficients[1] * positive
+                    - equation.coefficients[2] * negative)
+                    / equation.coefficients[3];
+                assert!((current - sign * expected).abs() < 1e-12);
+                device.step(&[positive, negative, current], dt);
+            }
         }
     }
 
