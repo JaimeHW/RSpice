@@ -226,7 +226,8 @@ pub struct Module {
     pub(crate) hierarchical_scopes: std::collections::HashMap<Vec<HierarchicalScopeKey>, HierarchicalScope>,
     pub(crate) pending_hierarchical_references: std::collections::BTreeMap<SmolStr, ScopedHierarchicalReference>,
     /// Source declarations shared by concrete reference specializations.
-    pub(crate) reference_sources: Option<std::sync::Arc<std::collections::HashMap<SmolStr, Module>>>,
+    pub(crate) reference_sources: Option<std::sync::Arc<ReferenceSourceCatalog>>,
+    pub(crate) foreign_physical: std::collections::BTreeMap<SmolStr, ForeignPhysicalReference>,
     pub(crate) hierarchical_parameter_values: std::collections::HashSet<SmolStr>,
     pub(crate) hierarchical_parameter_given: std::collections::HashSet<SmolStr>,
     /// Module attributes
@@ -321,12 +322,35 @@ impl Module {
             hierarchical_scopes: Default::default(),
             pending_hierarchical_references: Default::default(),
             reference_sources: None,
+            foreign_physical: Default::default(),
             hierarchical_parameter_values: Default::default(),
             hierarchical_parameter_given: Default::default(),
             attributes: Vec::new(),
             span,
         }
     }
+}
+
+/// Shared declaration closure, including the physical definitions used by it.
+#[derive(Clone, Debug)]
+pub(crate) struct ReferenceSourceCatalog {
+    pub modules: std::collections::HashMap<SmolStr, Module>,
+    pub disciplines: crate::disciplines::DisciplineDb,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ForeignPhysicalKind {
+    Node { is_port: bool },
+    Branch,
+}
+
+/// A borrowed declaration, resolved to existing occurrence storage before HIR.
+#[derive(Clone, Debug)]
+pub(crate) struct ForeignPhysicalReference {
+    pub path: SmolStr,
+    pub lanes: Vec<SmolStr>,
+    pub kind: ForeignPhysicalKind,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

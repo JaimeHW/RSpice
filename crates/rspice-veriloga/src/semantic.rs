@@ -580,13 +580,12 @@ impl SemanticAnalyzer {
     }
 
     pub fn analyze(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
-        let prepared = source_references::prepare(source)?;
+        self.register_physical_definitions(source)?;
+        let prepared = source_references::prepare(source, &self.disciplines)?;
         let source = prepared.as_ref();
         let mut modules = HashMap::new();
         let mut module_spans = HashMap::new();
         self.warnings.clear();
-
-        self.register_physical_definitions(source)?;
 
         // Second pass: analyze modules in declaration order while applying
         // the file-scoped default-transition and default-discipline settings.
@@ -981,7 +980,14 @@ impl SemanticAnalyzer {
         default_transition: f64,
     ) -> CompileResult<AnalyzedModule> {
         let original_source = module;
-        let (expanded, physical_nodes) = node_vectors::declarations(module, &self.disciplines)?;
+        let (expanded, mut physical_nodes) = node_vectors::declarations(module, &self.disciplines)?;
+        for (name, reference) in &module.foreign_physical {
+            if matches!(reference.kind, ForeignPhysicalKind::Node { is_port: true }) {
+                physical_nodes
+                    .external_ports
+                    .extend(physical_nodes.reference_lanes(name, false));
+            }
+        }
         self.physical_nodes = physical_nodes.clone();
         self.physical_selectors.borrow_mut().clear();
         self.analog_genvar_iterations = 0;
@@ -5251,7 +5257,8 @@ impl SemanticAnalyzer {
         let target = &resolved;
         let is_current = self.resolve_branch_access_kind(target, span)? == AccessKind::Flow;
         if matches!(target, BranchAccess::Branch { name, .. }
-            if self.symbols.lookup(name).is_some_and(|symbol| symbol.kind == SymbolKind::Port))
+            if self.symbols.lookup(name).is_some_and(|symbol| symbol.kind == SymbolKind::Port)
+                || self.physical_nodes.external_ports.contains(name))
         {
             return Err(node_vectors::error(
                 "a port flow probe cannot be a contribution target",
@@ -5392,7 +5399,8 @@ impl SemanticAnalyzer {
                 || !self
                     .symbols
                     .lookup(pos)
-                    .is_some_and(|symbol| symbol.kind == SymbolKind::Port))
+                    .is_some_and(|symbol| symbol.kind == SymbolKind::Port)
+                    && !self.physical_nodes.external_ports.contains(pos))
         {
             return Err(node_vectors::error(
                 format!("'{access}(<{pos}>)' must name a declared branch or a flow-probed port"),

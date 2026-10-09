@@ -1,13 +1,14 @@
-//! Source-level occurrence discovery for foreign parameter references. No solver
-//! storage or hidden ports are created; both domains analyze the same bound value.
+//! Source-level occurrence discovery for foreign declarations. Both domains
+//! analyze the same target context; physical aliases are linked before HIR.
 use super::elaboration::parameters::{ParameterDependencies, SourceParameters};
 
 mod functions;
+mod physical;
 use super::*;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-type Sources = Arc<HashMap<SmolStr, Module>>;
+type Sources = Arc<ReferenceSourceCatalog>;
 
 fn error(message: impl Into<String>, span: Span) -> CompileError {
     SemanticError::new(
@@ -22,7 +23,10 @@ fn error(message: impl Into<String>, span: Span) -> CompileError {
 
 /// Refresh the source closure before body checks, including configuration replay.
 /// Catalog templates have no back-reference, so sharing cannot form an Arc cycle.
-pub(crate) fn prepare(source: &SourceFile) -> CompileResult<Cow<'_, SourceFile>> {
+pub(crate) fn prepare<'a>(
+    source: &'a SourceFile,
+    disciplines: &DisciplineDb,
+) -> CompileResult<Cow<'a, SourceFile>> {
     let modules = source
         .items
         .iter()
@@ -53,13 +57,16 @@ pub(crate) fn prepare(source: &SourceFile) -> CompileResult<Cow<'_, SourceFile>>
             .into());
         }
     }
-    let catalog = Arc::new(catalog);
+    let catalog = Arc::new(ReferenceSourceCatalog {
+        modules: catalog,
+        disciplines: disciplines.clone(),
+    });
     let mut prepared = source.clone();
     for item in &mut prepared.items {
         let (Item::Module(module) | Item::ConnectModule(module)) = item else {
             continue;
         };
-        *module = catalog[&module.name].clone();
+        *module = catalog.modules[&module.name].clone();
         module.reference_sources = Some(catalog.clone());
         bind(module)?;
     }
@@ -102,6 +109,7 @@ struct Frame {
     depth: usize,
     instances: HashMap<SmolStr, usize>,
     root_members: HashSet<SmolStr>,
+    physical: Option<(Module, super::node_vectors::PhysicalNodes)>,
 }
 impl Frame {
     fn new(source: Module, path: SmolStr, depth: usize) -> Self {
@@ -118,6 +126,7 @@ impl Frame {
             depth,
             instances,
             root_members,
+            physical: None,
         }
     }
     fn member(&self, scope: &[HierarchicalScopeKey], name: &str) -> Option<SmolStr> {
@@ -285,13 +294,7 @@ impl Resolver {
         {
             self.import_function(owner, target, function, &symbol)?;
         } else {
-            return Err(error(
-                format!(
-                    "`{}.{name}` is not a parameter or analog function; foreign storage binding remains unimplemented",
-                    self.frames[target].path
-                ),
-                span,
-            ));
+            self.import_physical(owner, target, name, &symbol, span)?;
         }
         self.active_imports.remove(&key);
         Ok(symbol)
@@ -517,7 +520,7 @@ impl Resolver {
         for reference in references {
             self.reference(parent, &reference)?;
         }
-        let source = self.sources.get(&instance.module).ok_or_else(|| {
+        let source = self.sources.modules.get(&instance.module).ok_or_else(|| {
             error(
                 format!("module `{}` is not in the source closure", instance.module),
                 span,

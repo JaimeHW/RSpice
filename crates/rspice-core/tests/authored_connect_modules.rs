@@ -2909,3 +2909,88 @@ endmodule
         );
     }
 }
+
+
+#[test]
+fn foreign_physical_storage_preserves_nested_loading_and_port_currents() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module leaf(inout electrical p, output electrical q);
+ parameter real G=2;
+ electrical n;
+ branch(p) drive;
+ branch(<p>) supply;
+ analog begin I(drive)<+(V(p)-G)/1000; I(n)<+(V(n)-6)/1000; V(q)<+V(n); end
+endmodule
+module middle(inout electrical p, output electrical q,r);
+ parameter real G=2;
+ leaf #(.G(G)) inner(p,q);
+ analog begin I(inner.p)<+V(inner.p)/1000; V(r)<+1000*I(inner.supply); end
+endmodule
+module top(output electrical p,q,r,s,t);
+ parameter real BASE=2;
+ middle #(.G(BASE)) a(p,q,r);
+ real sampled=0;
+ initial #0.5 sampled=V(a.inner.n);
+ analog begin
+   I(a.inner.drive)<+1m;
+   I(a.inner.n)<+V(a.inner.n)/1000;
+   V(s)<+1000*I(<a.p>);
+   V(t)<+sampled;
+ end
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!("* shared foreign storage\nX1 p q r s t top\nX2 a b c d e top BASE=4\nR1 p 0 1k\nR2 a 0 1k\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 1.0 / 3.0),
+        ("q", 3.0),
+        ("r", -2.0 / 3.0),
+        ("s", -1.0 / 3.0),
+        ("t", 3.0),
+        ("a", 1.0),
+        ("b", 3.0),
+        ("c", -2.0),
+        ("d", -1.0),
+        ("e", 3.0),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn foreign_node_probes_keep_the_callers_unnamed_branch() {
+    let source = Source::new(
+        r#"
+module leaf(inout electrical p);
+ analog I(p)<+(V(p)-4)/1000;
+endmodule
+module middle(inout electrical p, output electrical q);
+ leaf a(p);
+ analog begin I(a.p)<+V(a.p)/2000; V(q)<+1000*I(a.p); end
+endmodule
+module top(output electrical p,q);
+ middle a(p,q);
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* caller branch ownership\nX1 p q top\nR1 p 0 1k\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [("p", 1.6), ("q", 0.8)] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}

@@ -33,6 +33,7 @@ impl NodeVector {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PhysicalNodes {
+    pub external_ports: HashSet<SmolStr>,
     pub arrays: HashMap<SmolStr, arrays::NodeArray>,
     pub real_buses: HashMap<SmolStr, real_buses::RealBus>,
     pub real_aliases: HashMap<SmolStr, DigitalElementAlias>,
@@ -43,6 +44,20 @@ pub(crate) struct PhysicalNodes {
     pub port_branches: HashMap<SmolStr, SmolStr>,
     /// One group per authored formal port, including unchanged discrete ports.
     pub ports: Vec<(SmolStr, Vec<SmolStr>)>,
+}
+
+impl PhysicalNodes {
+    pub fn reference_lanes(&self, name: &SmolStr, branch: bool) -> Vec<SmolStr> {
+        if branch {
+            self.branches.get(name).map(|vector| vector.lanes.clone())
+        } else {
+            self.arrays
+                .get(name)
+                .map(|array| array.lanes.clone())
+                .or_else(|| self.vectors.get(name).map(|vector| vector.lanes.clone()))
+        }
+        .unwrap_or_else(|| vec![name.clone()])
+    }
 }
 
 pub(super) fn error(message: impl Into<String>, span: Span) -> CompileError {

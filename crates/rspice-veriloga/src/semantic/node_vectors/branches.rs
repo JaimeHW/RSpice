@@ -19,7 +19,15 @@ pub(super) fn expand(
                 branch.span,
             ));
         }
-        if branch.is_port && !source.ports.iter().any(|port| port.name == branch.pos) {
+        if branch.is_port
+            && !source.ports.iter().any(|port| port.name == branch.pos)
+            && !source
+                .foreign_physical
+                .get(&branch.pos)
+                .is_some_and(|reference| {
+                    matches!(reference.kind, ForeignPhysicalKind::Node { is_port: true })
+                })
+        {
             return Err(error(
                 format!("port branch '{}' must name a declared port", branch.name),
                 branch.span,

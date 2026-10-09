@@ -2350,3 +2350,61 @@ endmodule
         assert!(compiler.compile_runtime(bad, Some("top")).is_err(), "{bad}");
     }
 }
+
+
+#[test]
+fn foreign_physical_shapes_share_storage_and_replay() {
+    let source = r#"
+module leaf(output electrical [3:2] p);
+ parameter integer BASE=-2;
+ electrical [BASE:BASE+1] nodes[4:5];
+ branch(nodes[4][BASE],nodes[5][BASE+1]) sense;
+ branch(p) legs[7:6];
+ analog begin
+   V(nodes[4][BASE])<+1; V(nodes[4][BASE+1])<+2;
+   V(nodes[5][BASE])<+3; V(nodes[5][BASE+1])<+4;
+   V(legs[7])<+5; V(legs[6])<+6;
+ end
+endmodule
+module top(output electrical [3:2] p,output electrical q);
+ parameter integer BASE=-2;
+ leaf #(.BASE(BASE)) a(p);
+ analog V(q)<+V(a.nodes[4][BASE])+V(a.sense)+I(a.legs[7]);
+endmodule
+"#;
+    let compiler = compiler();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .unwrap();
+    for report in [&artifact, &specialized] {
+        report.canonical_ir.validate().unwrap();
+        assert_eq!(report.canonical_ir.hir.ports.len(), 3);
+        let replay = compiler
+            .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+        assert_eq!(
+            report.canonical_ir.hir.branches,
+            replay.canonical_ir.hir.branches
+        );
+    }
+}
+
+#[test]
+fn foreign_physical_references_reject_variables_and_bad_coordinates() {
+    for expression in ["V(a.x)", "V(a.nodes[3])", "I(<a.nodes[0]>)"] {
+        let source = format!(
+            "module leaf; real x; electrical [1:0] nodes; analog begin V(nodes[0])<+1; V(nodes[1])<+2; end endmodule module top(output electrical p); leaf a(); analog V(p)<+{expression}; endmodule"
+        );
+        assert!(
+            compiler().compile_runtime(&source, Some("top")).is_err(),
+            "{expression}"
+        );
+    }
+}

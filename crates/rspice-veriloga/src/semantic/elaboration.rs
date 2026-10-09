@@ -25,6 +25,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[path = "elaboration_parameters.rs"]
 pub(super) mod parameters;
+#[path = "elaboration_references.rs"]
+mod references;
 
 /// Return the selected module itself when it has no hierarchy or retained
 /// generate structure, otherwise a faithfully flattened owned module.  Unsupported or ambiguous structure is
@@ -70,6 +72,9 @@ pub(crate) fn elaborate_executable_module<'a>(
         .collect();
     elaborator.flattened.digital.instances = hierarchy.instances;
     let root_scope = ScopeMap::for_root(root, selected);
+    let inventory = super::flow_probes::hierarchy_branches(selected);
+    elaborator.references.request(root, selected, "", &inventory);
+    elaborator.references.register(root, selected, "", &root_scope)?;
     elaborator
         .parameter_hierarchy
         .register(root, selected, &root_scope, None)?;
@@ -104,6 +109,7 @@ struct NodeBinding {
 }
 
 struct PortFlow {
+    owner: SmolStr,
     span: Span,
     terms: BTreeMap<SmolStr, i8>,
 }
@@ -128,6 +134,7 @@ struct ScopeMap {
     arrays: HashMap<SmolStr, SmolStr>,
     branches: HashMap<SmolStr, SmolStr>,
     unnamed_branches: HashMap<(SmolStr, SmolStr), AnalyzedBranch>,
+    node_reference_aliases: HashMap<SmolStr, SmolStr>,
     ground_nodes: Vec<SmolStr>,
     port_flows: HashMap<SmolStr, SmolStr>,
     port_connected: HashMap<SmolStr, bool>,
@@ -139,6 +146,8 @@ struct ScopeMap {
 
 impl ScopeMap {
     fn unnamed_branch(&self, pos: &str, neg: &str) -> Option<(&AnalyzedBranch, f64)> {
+        let pos = self.node_reference_aliases.get(pos).map_or(pos, SmolStr::as_str);
+        let neg = self.node_reference_aliases.get(neg).map_or(neg, SmolStr::as_str);
         let (pos, neg, sign) =
             super::flow_probes::canonical_node_pair(pos, neg, &self.ground_nodes);
         self.unnamed_branches
@@ -243,6 +252,8 @@ struct HierarchyElaborator<'a> {
     next_noise_process: u32,
     child_control_variables: [Vec<SmolStr>; 2],
     port_flows: BTreeMap<SmolStr, PortFlow>,
+    references: references::PhysicalReferences,
+    pending_port_terms: Vec<(SmolStr, NodeBinding, SmolStr, i8)>,
     parameter_hierarchy: parameters::ParameterHierarchy,
     specialization_modules: HashSet<SmolStr>,
     specializations:
@@ -285,6 +296,8 @@ impl<'a> HierarchyElaborator<'a> {
             next_noise_process,
             child_control_variables: Default::default(),
             port_flows: BTreeMap::new(),
+            references: Default::default(),
+            pending_port_terms: Vec::new(),
             parameter_hierarchy: Default::default(),
             specialization_modules,
             specializations: HashMap::new(),
@@ -292,6 +305,11 @@ impl<'a> HierarchyElaborator<'a> {
     }
 
     fn finish(mut self) -> CompileResult<AnalyzedModule> {
+        self.references.finish(
+            &mut self.flattened,
+            &mut self.port_flows,
+            &self.pending_port_terms,
+        )?;
         let span = self.source_modules[&self.flattened.name].span;
         self.parameter_hierarchy
             .protect(&mut self.flattened, span)?;
@@ -412,16 +430,16 @@ impl<'a> HierarchyElaborator<'a> {
             let Some(binding) = scope.nodes.get(endpoint) else {
                 continue;
             };
-            for boundary in &binding.port_boundaries {
-                let Some(port) = self.port_flows.get_mut(boundary) else {
-                    continue;
-                };
-                let coefficient = port.terms.entry(branch.clone()).or_default();
-                *coefficient += sign;
-                if *coefficient == 0 {
-                    port.terms.remove(branch);
-                }
+            if binding.port_boundaries.is_empty()
+                && scope.node_reference_aliases.is_empty()
+                && !self.references.has_node_aliases()
+            {
+                continue;
             }
+            self.pending_port_terms.push((
+                scope.instance_path.clone().unwrap_or_else(|| self.flattened.name.clone()),
+                binding.clone(), branch.clone(), sign,
+            ));
         }
     }
 
@@ -524,7 +542,12 @@ impl<'a> HierarchyElaborator<'a> {
                 .unwrap_or((child_source, child))
         };
         self.flattened.hierarchical_connections |= child.hierarchical_connections;
-        let branch_inventory = super::flow_probes::hierarchy_branches(child);
+        let mut branch_inventory = super::flow_probes::hierarchy_branches(child);
+        let node_reference_aliases = references::canonicalize_node_references(
+            child_source, child, &mut branch_inventory,
+        );
+        self.references.request(child_source, child, relative, &branch_inventory);
+        self.references.extend_inventory(relative, &mut branch_inventory);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let noise_process_base = self.next_noise_process;
         self.next_noise_process = self
@@ -536,6 +559,7 @@ impl<'a> HierarchyElaborator<'a> {
                 ))
             })?;
         let mut scope = ScopeMap {
+            node_reference_aliases,
             connections: super::node_vectors::ConnectionScope::new(child_source, child),
             parameter_locals: child.parameter_locals.clone(),
             discrete_nets: child
@@ -555,6 +579,7 @@ impl<'a> HierarchyElaborator<'a> {
             self.port_flows.insert(
                 token,
                 PortFlow {
+                    owner: path.into(),
                     span: *span,
                     terms: BTreeMap::new(),
                 },
@@ -888,7 +913,9 @@ impl<'a> HierarchyElaborator<'a> {
             scope
                 .branches
                 .insert(branch.name.clone(), mapped_name.clone());
-            if branch_inventory.conducting_named.contains(&branch.name) {
+            if branch_inventory.conducting_named.contains(&branch.name)
+                && !references::is_borrowed_branch(child_source, child, &branch.name)
+            {
                 self.record_port_flow(
                     &scope,
                     &branch.pos_node,
@@ -911,6 +938,8 @@ impl<'a> HierarchyElaborator<'a> {
                 discipline: branch.discipline.clone(),
             });
         }
+
+        self.references.register(child_source, child, relative, &scope)?;
 
         // A module owns its unnamed branches even when another instance
         // binds its ports to the same nets. Give those branches private names

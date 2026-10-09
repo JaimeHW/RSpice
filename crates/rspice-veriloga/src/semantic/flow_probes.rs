@@ -132,7 +132,8 @@ pub(super) fn hierarchy_branches(module: &AnalyzedModule) -> HierarchyBranches {
                 ..
             } = access
                 && resolver.named(name).is_none()
-                && module.ports.iter().any(|port| port.name == *name)
+                && (module.ports.iter().any(|port| port.name == *name)
+                    || module.physical_nodes.external_ports.contains(name))
             {
                 inventory.port_flows.entry(name.clone()).or_insert(*span);
             }
@@ -231,7 +232,14 @@ pub(super) fn expand_port_flows(
     };
     let rewrite =
         |expression: &mut Expression| rewrite_expression(expression, &branches, &resolver, ports);
-    rewrite_statements(&mut module.statements, &rewrite);
+    rewrite_module_expressions(module, &rewrite);
+}
+
+pub(super) fn rewrite_module_expressions(
+    module: &mut AnalyzedModule,
+    rewrite: &impl Fn(&mut Expression),
+) {
+    rewrite_statements(&mut module.statements, rewrite);
     for process in module.digital.processes.iter_mut().chain(
         module
             .digital
@@ -255,7 +263,7 @@ pub(super) fn expand_port_flows(
             rewrite(delay);
         }
     }
-    rewrite_regions(&mut module.body, &rewrite, &branches, &HashMap::new());
+    rewrite_regions(&mut module.body, rewrite, &BTreeMap::new(), &HashMap::new());
     for contribution in &mut module.contributions {
         rewrite(&mut contribution.expression);
     }
