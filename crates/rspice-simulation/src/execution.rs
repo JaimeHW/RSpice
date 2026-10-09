@@ -5,6 +5,7 @@
 //! snapshot's generation-bound permit immediately before dispatch.
 
 mod authorization;
+mod headless;
 mod headless_tasks;
 mod permit;
 pub mod preparation;
@@ -15,13 +16,18 @@ mod task_preparation;
 
 pub use crate::preparation::{PreparationError, PreparationStage};
 pub use authorization::PreparedRunAuthorization;
+pub use headless::{
+    HeadlessPreparationError, HeadlessRunInput, HeadlessSourceResolver, prepare_headless_run,
+};
 pub use headless_tasks::{HeadlessTaskRequest, prepare_headless_tasks};
 pub use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities, PSS_SPECTRUM_ROLE,
     PreparedRunSnapshot, PreparedTask, ResolvedTaskDispatch, SavePolicy, TouchstoneExportPolicy,
     result_source_domain,
 };
-pub(crate) use snapshot::{ModelSourceIdentity, PreparedRunSet, RunSourceReceipt, SnapshotParts};
+pub(crate) use snapshot::{
+    ModelSourceIdentity, PreparedRunSet, RunSourceReceipt, SnapshotParts, TaskSourcePolicy,
+};
 pub use snapshot::{PreparedRunMetadata, execution_target_supports_cancellation};
 pub(crate) use task_preparation::{attach_saved_output_contracts, prepare_manual_tasks};
 

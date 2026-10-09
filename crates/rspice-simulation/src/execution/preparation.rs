@@ -410,6 +410,7 @@ where
     )?;
 
     PreparedRunSnapshot::new(SnapshotParts {
+        task_source_policy: super::snapshot::TaskSourcePolicy::PreparedObservations,
         measurement_references,
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(plan.plan_id()),
@@ -626,6 +627,7 @@ pub fn build_prepared_manual_deck<R, A>(
     )?;
 
     PreparedRunSnapshot::new(SnapshotParts {
+        task_source_policy: super::snapshot::TaskSourcePolicy::AuthoredDeck,
         measurement_references,
         intent: SimulationRunIntent::ManualDeck,
         simulation_plan_id: None,
@@ -673,7 +675,7 @@ pub fn touchstone_export_policy<'a>(
     )
 }
 
-fn reject_unresolved_device_models(
+pub(crate) fn reject_unresolved_device_models(
     executable_netlist: &str,
     technology_in_effect: bool,
 ) -> Result<(), PreparationError> {

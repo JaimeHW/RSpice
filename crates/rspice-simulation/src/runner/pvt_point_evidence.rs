@@ -175,6 +175,7 @@ pub(crate) fn run_declaration(
         )?);
     }
     let parts = SnapshotParts {
+        task_source_policy: crate::execution::TaskSourcePolicy::PreparedObservations,
         measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(

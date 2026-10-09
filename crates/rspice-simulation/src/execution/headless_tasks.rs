@@ -180,6 +180,10 @@ fn validate_request(request: &HeadlessTaskRequest) -> ServiceRunResult<()> {
     }
     let expected_cards = match &analysis.spec {
         AnalysisSpec::Fft { request } => Some(request.to_card()),
+        AnalysisSpec::TransientNoise { .. } => Some(
+            crate::analysis_preparation::build_transient_noise_command(&analysis.spec)
+                .map_err(&context)?,
+        ),
         AnalysisSpec::AcData { table_options, .. } if !table_options.from_netlist => Some(
             crate::analysis_preparation::build_ac_data_command(&analysis.spec).map_err(&context)?,
         ),

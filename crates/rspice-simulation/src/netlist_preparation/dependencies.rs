@@ -83,7 +83,7 @@ pub fn expand_generated_dependencies_with_sealed_sources(
     }
 }
 
-fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
+pub(crate) fn absolute_source_identity(path: &Path) -> Result<PathBuf, PreparationError> {
     #[cfg(target_arch = "wasm32")]
     if rspice_model_library::is_portable_absolute_path(path) {
         return Ok(path.to_path_buf());

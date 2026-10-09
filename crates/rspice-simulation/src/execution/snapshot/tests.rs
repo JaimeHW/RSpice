@@ -262,6 +262,7 @@ fn parts() -> SnapshotParts {
     const TEST_NAMESPACE: uuid::Uuid =
         uuid::Uuid::from_u128(0xe6bc_c27a_6103_5327_b2ec_c759_b58a_8598);
     SnapshotParts {
+        task_source_policy: TaskSourcePolicy::PreparedObservations,
         measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(

@@ -762,6 +762,7 @@ impl ResolvedTaskDispatch {
 /// Constructor input kept separate so the snapshot's authoritative fields
 /// remain private after construction.
 pub(crate) struct SnapshotParts {
+    pub(crate) task_source_policy: TaskSourcePolicy,
     pub(crate) intent: SimulationRunIntent,
     pub(crate) simulation_plan_id: Option<SimulationPlanId>,
     pub(crate) project_revision: u64,
@@ -788,6 +789,18 @@ pub(crate) struct SnapshotParts {
     pub(crate) cross_probe: Option<CrossProbeSnapshot>,
     pub(crate) touchstone_export: TouchstoneExportPolicy,
     pub(crate) sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+}
+
+/// Whether analysis-owned cards are already present in an authored deck or
+/// must be materialized from the prepared graph. Source origin and card
+/// ownership are independent: a headless study owns cards over a literal deck.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskSourcePolicy {
+    AuthoredDeck,
+    /// Application generation already emitted ordinary analysis cards.
+    PreparedObservations,
+    /// A circuit-only source needs each task's lowered analysis cards too.
+    PreparedAnalyses,
 }
 
 /// Validated inputs needed to turn the Studio's global Run Set into exact
@@ -1018,8 +1031,21 @@ impl PreparedRunSnapshot {
 
         // Generated AC tables and bound FFT cards are scoped to their owners.
         // Manual decks already hold their own cards and are preserved here.
-        if parts.intent == SimulationRunIntent::SimulateRunSet {
+        if parts.task_source_policy != TaskSourcePolicy::AuthoredDeck {
             for task in &mut parts.tasks {
+                if parts.task_source_policy == TaskSourcePolicy::PreparedAnalyses
+                    && !matches!(task.task.spec, AnalysisSpec::Fft { .. })
+                    && task.authored_ac_data_cards().is_none()
+                {
+                    let deck = task
+                        .executable_netlist_override
+                        .as_deref()
+                        .unwrap_or(&parts.executable_netlist);
+                    task.executable_netlist_override = Some(splice_before_terminal_end_card(
+                        deck,
+                        &task.task.analysis_line,
+                    ));
+                }
                 if let Some(cards) = task.authored_ac_data_cards() {
                     let deck = task
                         .executable_netlist_override
@@ -1036,6 +1062,21 @@ impl PreparedRunSnapshot {
                 &parts.executable_netlist,
             );
             bound_cards::validate_bound_observation_cards(&parts.tasks)?;
+        }
+
+        if parts.task_source_policy == TaskSourcePolicy::PreparedAnalyses {
+            for task in &parts.tasks {
+                let deck = task
+                    .executable_netlist_override
+                    .as_deref()
+                    .unwrap_or(&parts.executable_netlist);
+                crate::netlist_preparation::reject_deferred_external_sources_with_project_runtimes(
+                    deck,
+                    &parts.project_veriloga_runtimes,
+                    &parts.measurement_references,
+                )?;
+                crate::netlist_preparation::validated_executable_hierarchy(deck)?;
+            }
         }
 
         monte_carlo::route_resumes(&mut parts.tasks, &parts.executable_netlist)?;
