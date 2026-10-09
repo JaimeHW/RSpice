@@ -414,6 +414,75 @@ impl<'a> DigitalCheckpointReader<'a> {
         })
     }
 
+    /// Check the source wait site for a registered base event. The host owns
+    /// the remaining occurrence count; true identifies a compiled repeat.
+    pub fn validate_event_resume(
+        &self,
+        state: &DigitalResumeState,
+        event: &DigitalWaitRequest,
+    ) -> Result<bool> {
+        if state.plan_identity != self.plan.content_identity || state.analog_instruction.is_some() {
+            return Err(invalid(
+                "event subscription has an incompatible continuation",
+            ));
+        }
+        let process = self
+            .plan
+            .process(state.process)
+            .ok_or_else(|| invalid("unknown event process"))?;
+        for block in &process.function.blocks {
+            let CfgTerminator::Wait { wait, resume, .. } = &block.terminator else {
+                continue;
+            };
+            if *resume != state.block {
+                continue;
+            }
+            let (wait, repeated) = match wait {
+                DigitalWait::Repeat { event, .. } => (event.as_ref(), true),
+                wait => (wait, false),
+            };
+            let matches = match (wait, event) {
+                (DigitalWait::Event(expected), DigitalWaitRequest::Event(actual)) => {
+                    expected == actual
+                }
+                (DigitalWait::Expressions(expected), DigitalWaitRequest::Expressions(actual)) => {
+                    actual.plan_identity == self.plan.content_identity
+                        && actual.process == state.process
+                        && expected.len() == actual.states.len()
+                        && expected.iter().zip(&actual.states).all(|(term, value)| {
+                            term.value == value.program.root
+                                && term.edge == value.edge
+                                && term.assignment == value.assignment
+                        })
+                }
+                _ => false,
+            };
+            if matches {
+                return Ok(repeated);
+            }
+        }
+        Err(invalid(
+            "event subscription differs from its continuation's compiled wait",
+        ))
+    }
+
+    /// A process left queued at an accepted boundary must have suspended at a
+    /// delay, rather than being partway through dispatching a same-time event.
+    pub fn validate_timed_resume(&self, state: &DigitalResumeState) -> Result<()> {
+        if state.plan_identity != self.plan.content_identity || state.analog_instruction.is_some() {
+            return Err(invalid("timer has an incompatible continuation"));
+        }
+        let process = self
+            .plan
+            .process(state.process)
+            .ok_or_else(|| invalid("unknown timed process"))?;
+        if !process.function.blocks.iter().any(|block| matches!(&block.terminator,
+            CfgTerminator::Wait { wait: DigitalWait::Delay(_), resume, .. } if *resume == state.block)) {
+            return Err(invalid("queued continuation is not a compiled delay"));
+        }
+        Ok(())
+    }
+
     pub fn restore_expression(
         &mut self,
         image: &DigitalExpressionCheckpoint,

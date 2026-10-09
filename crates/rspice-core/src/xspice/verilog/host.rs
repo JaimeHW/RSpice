@@ -59,6 +59,7 @@
 #[cfg(test)]
 mod analog_sample_tests;
 mod coupled;
+pub(crate) mod checkpoint;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
 
@@ -425,6 +426,8 @@ fn name_oscillating_tick(resolution: TimeResolution, error: SchedulerError) -> S
 /// A compiled digital plan, running.
 #[derive(Clone)]
 pub(crate) struct DigitalHost {
+    /// Failed settlement cannot become an accepted restart boundary.
+    checkpoint_failed: bool,
     plan: Arc<CanonicalDigitalPlan>,
     store: DigitalSignalStore,
     scheduler: EventScheduler,
@@ -556,6 +559,7 @@ impl DigitalHost {
             instance: "NBA".to_string(),
         });
         Self {
+            checkpoint_failed: false,
             nba_target,
             external_targets: Vec::new(),
             external_real_targets: Vec::new(),
@@ -962,6 +966,7 @@ impl DigitalHost {
         let outcome = self.settle_into(tick, &mut fired, participant);
         fired.clear();
         self.fired = fired;
+        self.checkpoint_failed |= outcome.is_err();
         outcome
     }
 
@@ -1324,6 +1329,7 @@ impl DigitalHost {
         let outcome = self.dispatch_into(tick, &mut drained);
         drained.clear();
         self.drained = drained;
+        self.checkpoint_failed |= outcome.is_err();
         outcome
     }
 

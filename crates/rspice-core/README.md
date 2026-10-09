@@ -811,8 +811,16 @@ clock, expression subscriptions, external bit strengths and real contributions.
 Capture requires drained writes, publications and waveform notifications. Restore
 authenticates linked topology, analog dependencies and trace bindings, rebuilds
 subscription indexes, and checks saved net values against driver resolution before
-returning a replacement store. Host process/queue ownership and complete circuit
-installation remain responsibilities of the enclosing mixed checkpoint.
+returning a replacement store.
+
+The internal HDL host checkpoint combines that store with process continuations,
+pending assignments and the exact scheduler image. Restore checks source wait
+sites, event-count ownership, one wakeup per queued process and delayed-assignment
+bucket, and one owner per expression subscription. It preserves external participant
+registration order and constructs the whole host before replacing live state.
+Failed settlements and unfinished same-time execution cannot be captured. These
+components still require circuit-level integration with accepted analog devices,
+bridges and observers before the mixed accepted-state blocker can be removed.
 
 PWL interpolation and repeat timing preserve finite nonzero knot intervals
 and positive `TSCALE` values without an absolute machine-epsilon cutoff.

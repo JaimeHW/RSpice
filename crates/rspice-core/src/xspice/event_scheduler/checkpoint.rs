@@ -82,6 +82,26 @@ struct EventImage {
     value: ValueImage,
 }
 
+#[cfg(feature = "veriloga")]
+impl SchedulerCheckpoint {
+    /// Enclosing hosts inspect relationships only after kernel validation.
+    pub(crate) fn target_count(&self) -> usize {
+        self.targets.len()
+    }
+    pub(crate) fn live_events(
+        &self,
+    ) -> impl Iterator<Item = (Instant, SchedulerRegion, TargetId, EventValue)> + '_ {
+        self.events.iter().map(|event| {
+            (
+                Instant(event.at_bits),
+                event.region,
+                TargetId(event.target),
+                (&event.value).into(),
+            )
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum ValueImage {
     Digital(DigitalValue),
@@ -150,6 +170,16 @@ fn check_budget(
 }
 
 impl EventScheduler {
+    /// Retain registration order and limits without cloning pending execution.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn checkpoint_template(&self) -> Self {
+        let mut template = Self::new(self.limits);
+        for target in &self.queues.targets {
+            template.queues.intern(target.clone());
+        }
+        template
+    }
+
     /// Capture a drained kernel between executions. The circuit owner must
     /// call this only after accepting all participants. A failed or partially
     /// executed region is rejected; future events, including causal timers

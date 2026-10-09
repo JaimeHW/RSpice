@@ -47,6 +47,17 @@ struct ExpressionCheckpoint {
 }
 
 impl DigitalSignalStore {
+    pub(crate) fn checkpoint_expression(
+        &self,
+        token: u64,
+    ) -> Option<(&DigitalExpressionWait, &DigitalEventCount)> {
+        self.expression_waits
+            .get(&token)
+            .map(|wait| (&wait.wait, &wait.remaining))
+    }
+    pub(crate) fn checkpoint_expression_tokens(&self) -> impl Iterator<Item = u64> + '_ {
+        self.expression_waits.keys().copied()
+    }
     fn analog_bindings_identity(&self) -> Result<[u8; 32], String> {
         // HashMap iteration is randomized; sort identities, preserving each
         // producer's ordered dependency list from circuit elaboration.
