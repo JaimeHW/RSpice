@@ -179,7 +179,7 @@ pub(super) fn run_spec_request_in_context(
                 checkpoint_observer,
             )
         }
-        AnalysisSpec::Fft { request } => recorded_fft::run(&request, dependencies, abort_flag),
+        AnalysisSpec::Fft { request } => recorded_fft::run(&request, dependencies, service_context),
         AnalysisSpec::AcData {
             table_name,
             frequencies,

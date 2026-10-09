@@ -447,9 +447,10 @@ fn running_study_cancellation_joins_the_solver_and_keeps_stderr_json() {
 fn study_run_refuses_unsupported_route_limits_and_honors_deadlines() {
     let root = common::test_dir("study-runtime-policy");
     let mut document = fixture(&root);
-    document["tasks"] = json!([{ "id": "spectrum", "analysis": {"Fft": {"request": {
-        "output": "V(out)", "points": 16, "window": "RECT", "start": 0.0, "stop": 0.001
-    }}} }]);
+    document["tasks"] = json!([{ "id": "spectrum", "analysis": {"Fourier": {
+        "fundamental_freq": 1000.0, "num_harmonics": 3, "output_node": "out",
+        "output_ref": "0", "start_time": 0.0, "stop_time": 0.001
+    }} }]);
     let path = save(&root, &document);
     let destination = root.join("result.json");
     std::fs::write(
@@ -959,4 +960,40 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
         assert_eq!(error["error"]["limit"], 2);
         assert_eq!(std::fs::read(&destination).unwrap(), published);
     }
+}
+
+#[test]
+fn recorded_fft_study_accepts_custom_execution_limits() {
+    let root = common::test_dir("study-recorded-fft-limits");
+    let mut document = fixture(&root);
+    document["tasks"] = json!([
+        {"id": "waveform", "analysis": {"Transient": {
+            "stop_time": 0.001, "step_time": 1e-5, "start_time": 0.0,
+            "max_timestep": 1e-5, "uic": false
+        }}},
+        {"id": "spectrum", "depends_on": ["waveform"], "analysis": {"Fft": {"request": {
+            "output": "V(out)", "points": 16, "window": "RECT", "start": 0.0, "stop": 0.001
+        }}}}
+    ]);
+    let path = save(&root, &document);
+    let destination = root.join("result.json");
+    std::fs::write(
+        root.join("config.toml"),
+        "[resources]\nmax_matrix_unknowns = 1000\n",
+    )
+    .unwrap();
+    let output = invoke(
+        &root,
+        &[
+            "study",
+            "run",
+            path.to_str().unwrap(),
+            "--output",
+            destination.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let saved: Value = serde_json::from_slice(&std::fs::read(destination).unwrap()).unwrap();
+    assert_eq!(saved["schema"], "rspice.study.results");
 }

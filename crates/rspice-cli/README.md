@@ -119,7 +119,10 @@ Execution limits are captured in the prepared snapshot and enforced for OP, DC,
 AC (including AC data), transient (including transient noise), noise, pole-zero,
 sensitivity, STB, S-parameter (including port noise), transfer-function, distortion,
 DC-mismatch, SOA, shooting PSS (including its spectrum), HB, QPSS, QPAC, QPXF,
-QPNOISE, PAC, PXF, PNOISE, PSTB, PSP, HBSP, and HBNOISE analyses.
+QPNOISE, PAC, PXF, PNOISE, PSTB, PSP, HBSP, HBNOISE, and recorded FFT analyses.
+Recorded FFT checks the selected spectrum's retained bin and scalar counts,
+including numeric convergence evidence; the producing transient enforces the
+transform's execution limits. Publishing the spectrum does not repeat the solve.
 SOA reserves room for every stress trace and up to
 one violation per rule per observation before building its histories. Remaining
 advanced routes explicitly refuse custom execution limits until they enforce

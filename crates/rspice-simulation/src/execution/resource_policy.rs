@@ -34,6 +34,7 @@ pub fn execution_resource_policy_blocker(
             | AnalysisSpec::Psp { .. }
             | AnalysisSpec::Hbsp { .. }
             | AnalysisSpec::Hbnoise { .. }
+            | AnalysisSpec::Fft { .. }
             | AnalysisSpec::Pss { .. }
             | AnalysisSpec::PssSpectrum { .. }
             | AnalysisSpec::HarmonicBalance { .. }
