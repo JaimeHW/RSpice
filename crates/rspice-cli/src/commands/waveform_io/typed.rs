@@ -272,11 +272,16 @@ pub(in crate::commands) fn result_document_table(
             })
         });
     let width = document.scalars().iter().fold(width, |width, scalar| {
-        width.saturating_add(if matches!(scalar.value(), ScalarValue::Complex { .. }) {
-            2
-        } else {
-            1
-        })
+        width.saturating_add(
+            if matches!(
+                scalar.value(),
+                ScalarValue::Complex { .. } | ScalarValue::Unavailable { .. }
+            ) {
+                2
+            } else {
+                1
+            },
+        )
     });
     enforce_table_value_limits(path, scale.len().saturating_mul(width), resource_limits)?;
 
@@ -341,6 +346,12 @@ pub(in crate::commands) fn result_document_table(
             )
         };
         let data = match scalar.value() {
+            ScalarValue::Real { value: None } | ScalarValue::Unavailable { .. } => {
+                ColumnData::optional_real(vec![None; scale.len()])
+            }
+            ScalarValue::Complex { value: None } => {
+                ColumnData::optional_complex(vec![None; scale.len()])
+            }
             ScalarValue::Real { value: Some(value) } => ColumnData::Real(vec![*value; scale.len()]),
             ScalarValue::Complex { value: Some(value) } => ColumnData::Complex {
                 real: vec![value.real; scale.len()],
@@ -374,6 +385,20 @@ pub(in crate::commands) fn result_document_table(
             },
             _ => scalar.name().to_string(),
         };
+        // A null alone cannot distinguish an uncomputed value from a proven
+        // absence, such as an unresolved crossover or infinite impedance.
+        // Keep the original metric column and a named true indicator carrying
+        // its determination. All numeric table formats retain that identity.
+        let unavailable = if let ScalarValue::Unavailable { reason } = scalar.value() {
+            Some(ExportColumn {
+                name: format!("{name}:unavailable({})", reason.tag()),
+                unit: Some("1".into()),
+                var_type: "parameter".into(),
+                data: ColumnData::Real(vec![1.0; scale.len()]),
+            })
+        } else {
+            None
+        };
         columns.push(ExportColumn {
             unit: scalar
                 .unit()
@@ -387,6 +412,7 @@ pub(in crate::commands) fn result_document_table(
                 .to_string(),
             data,
         });
+        columns.extend(unavailable);
     }
     append_payload_columns(path, document, &scale, &mut columns, resource_limits, width)?;
     if columns.is_empty() {

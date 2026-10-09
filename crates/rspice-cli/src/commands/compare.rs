@@ -12,6 +12,7 @@ use crate::commands::waveform_io::{
     ImportedResult, ResultSnapshot, detect_format, load_result_selected, supports_sections,
 };
 
+mod determinations;
 mod fft;
 mod interpolation;
 mod selection;
@@ -621,6 +622,18 @@ fn compare_waveforms(
     };
 
     let pairs = selection::pairs(result, golden, args, &mut cmp_result);
+    let result_determinations = determinations::Determinations::new(result);
+    let golden_determinations = determinations::Determinations::new(golden);
+    for (evidence, data) in [
+        (&result_determinations, result),
+        (&golden_determinations, golden),
+    ] {
+        for name in evidence.invalid_names(data) {
+            cmp_result
+                .problems
+                .push(format!("'{name}': invalid scalar unavailability evidence"));
+        }
+    }
 
     for (var_idx, golden_idx) in pairs {
         let var_name = &result.variables[var_idx];
@@ -718,7 +731,10 @@ fn compare_waveforms(
             cmp_result.problems.push(format!(
                 "'{var_name}': {undefined_mismatches} sample(s) are undefined on only one side, first at index {first}"
             ));
-        } else if defined_points == 0 {
+        } else if defined_points == 0
+            && (num_points == 0
+                || !result_determinations.agrees(var_idx, &golden_determinations, golden_idx))
+        {
             cmp_result
                 .problems
                 .push(format!("'{var_name}': no defined samples were compared"));

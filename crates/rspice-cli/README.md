@@ -870,6 +870,17 @@ undefined complex sample. RAW and HDF5 retain an explicit validity mask, so
 undefined samples remain distinct from zero through conversion, clipping and
 comparison. Entirely undefined numeric signals are retained. Validation covers
 all signals before variable selection.
+Typed real and complex scalars retain missing values as well. A scalar with a
+proven absence also exports a dimensionless indicator named
+`<name>:unavailable(<reason>)`, containing `1` at every row, beside its null
+metric column. Reasons are `positive_infinity`, `negative_infinity`,
+`no_crossover`, and `empty_domain`; uncomputed values have no such indicator.
+This preserves the distinction through CSV, TSV, JSON, RAW, and HDF5 and keeps
+different determinations distinguishable in comparisons.
+Matching determinations can pass comparison without numeric metric samples;
+matching uncomputed gaps still cannot. Indicator names use this reserved
+convention: exactly one reason, a wholly missing metric, dimensionless units,
+and values exactly equal to `1` are required. Tolerances never waive these checks.
 Legacy JSON table integer samples must be exactly representable as binary64;
 large exact integers remain supported, but rounded integer samples are refused.
 Decimal floating-point samples use correctly rounded binary64 values. Legacy
