@@ -3,10 +3,7 @@
 //! The incomplete beta evaluation uses the continued fraction in DLMF 8.17:
 //! <https://dlmf.nist.gov/8.17#v>.
 
-use super::{
-    CompensatedSum, MonteCarloResult, VariableStatistics, Xorshift128Plus,
-    statistical_location_scale,
-};
+use super::{MonteCarloResult, VariableStatistics, Xorshift128Plus, sample_mean};
 use crate::Value;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::error::SimulationError;
@@ -101,7 +98,7 @@ pub(crate) fn validate_request(
         )?;
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
-            resamples,
+            resamples.saturating_add(samples),
             limits.max_result_values,
         )?;
     }
@@ -191,7 +188,9 @@ impl MonteCarloResult {
         )?;
         let scratch = match method {
             MeanConfidenceMethod::StudentT => 0,
-            MeanConfidenceMethod::PercentileBootstrap { resamples, .. } => resamples,
+            MeanConfidenceMethod::PercentileBootstrap { resamples, .. } => {
+                resamples.saturating_add(samples)
+            }
         };
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
@@ -263,18 +262,19 @@ fn bootstrap_interval(
     abort: &dyn AbortSignal,
 ) -> Result<MeanConfidenceInterval, SimulationError> {
     let n = variable.samples.len();
-    let (anchor, scale) = statistical_location_scale(&variable.samples, variable.min, variable.max);
-    if scale == 0.0 {
-        return Ok(finite_interval(anchor, anchor));
+    if variable.min == variable.max {
+        return Ok(finite_interval(variable.min, variable.max));
     }
     let mut rng = Xorshift128Plus::new(seed);
     let mut means = Vec::with_capacity(resamples);
+    // Reuse one bounded buffer so exact summation can revisit the same draws
+    // without advancing or changing the reproducible bootstrap random stream.
+    let mut sampled_values = vec![0.0; n];
     // Rejection sampling avoids modulo bias for non-power-of-two lengths.
     let modulus = n as u64;
     let threshold = modulus.wrapping_neg() % modulus;
     for _ in 0..resamples {
-        let mut sum = CompensatedSum::default();
-        for index in 0..n {
+        for (index, value) in sampled_values.iter_mut().enumerate() {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::from_abort(abort));
             }
@@ -284,10 +284,23 @@ fn bootstrap_interval(
                     break draw;
                 }
             };
-            let value = (variable.samples[(draw % modulus) as usize] - anchor) / scale;
-            sum.add(value);
+            *value = variable.samples[(draw % modulus) as usize];
         }
-        means.push(anchor + (sum.total() / n as Value) * scale);
+        let interrupted = std::cell::Cell::new(false);
+        let mean = sample_mean(sampled_values.iter().enumerate().map(|(index, &value)| {
+            if index.is_multiple_of(64) && abort.is_aborted() {
+                interrupted.set(true);
+                // Nonfinite terms stop exact summation immediately, including
+                // its fallback pass. Cancellation is returned before publication.
+                Value::NAN
+            } else {
+                value
+            }
+        }));
+        if interrupted.get() {
+            return Err(SimulationError::from_abort(abort));
+        }
+        means.push(mean);
     }
     means.sort_by(Value::total_cmp);
     let lower_probability = (100.0 - level_pct) / 200.0;
