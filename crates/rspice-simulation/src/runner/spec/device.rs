@@ -1,9 +1,6 @@
 //! Dispatch for device-level analyses.
 
 use std::collections::HashMap;
-use std::path::Path;
-
-use rspice_core::abort_signal::AbortSignal;
 
 use crate::engine_services as svc_runner;
 use crate::error::SimulationError;
@@ -19,12 +16,11 @@ pub(super) fn run_device_spec(
     environment: Option<crate::runner::AnalysisExecutionEnvironment>,
     context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
-    let source_path = context.source_path;
     let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     match spec {
         AnalysisSpec::Optimization { .. } => {
-            run_optimization(spec, netlist, source_path, study_base, environment, abort)
+            run_optimization(spec, netlist, study_base, environment, context)
         }
         AnalysisSpec::Soa {
             import_model_voltage_ratings,
@@ -155,11 +151,11 @@ fn run_dc_mismatch(
 fn run_optimization(
     spec: AnalysisSpec,
     netlist: &str,
-    source_path: Option<&Path>,
     study_base: Option<&crate::study::StudyRunConfig>,
     environment: Option<crate::runner::AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let AnalysisSpec::Optimization {
         search,
         variables,
@@ -221,13 +217,12 @@ fn run_optimization(
     };
 
     let data = if let Some(base) = study_base {
-        crate::runner::study::run_optimization(
+        crate::runner::study::run_optimization_with_context(
             base,
             &cfg,
             netlist,
-            source_path,
             environment,
-            abort,
+            context,
         )?
     } else {
         let environment = environment.map(|point| rspice_core::engine::MonteCarloEnvironment {
@@ -236,24 +231,41 @@ fn run_optimization(
             nominal_supply_voltage: point.nominal_supply_voltage,
             supply_source_names: point.supply_source_names,
         });
-        super::run_abort_aware_service(abort, || match environment.as_ref() {
-            Some(point) => {
-                svc_runner::run_optimization_analysis_with_environment_and_source_path_and_abort(
-                    netlist,
-                    &cfg,
-                    source_path,
-                    Some(point),
-                    abort,
-                )
-            }
-            None => svc_runner::run_optimization_analysis_with_config_and_source_path_and_abort(
+        super::run_abort_aware_service(abort, || {
+            svc_runner::run_optimization_analysis_with_context(
                 netlist,
                 &cfg,
-                source_path,
-                abort,
-            ),
+                environment.as_ref(),
+                context,
+            )
         })?
     };
+
+    let result_values = data
+        .variable_traces
+        .values()
+        .fold(
+            data.iterations
+                .len()
+                .saturating_mul(2)
+                .saturating_add(data.costs.len()),
+            |count, values| {
+                count
+                    .saturating_add(data.iterations.len())
+                    .saturating_add(values.len())
+            },
+        )
+        .saturating_add(data.best_variables.len())
+        .saturating_add(1)
+        .saturating_add(data.best_objectives.len().saturating_mul(5))
+        .saturating_add(data.best_constraints.len().saturating_mul(6));
+    if result_values > context.limits.max_result_values {
+        return Err(SimulationError::ResourceLimit {
+            resource: "result_values".into(),
+            requested: result_values,
+            limit: context.limits.max_result_values,
+        });
+    }
 
     let mut waveforms = HashMap::new();
     super::ensure_not_aborted(abort)?;
@@ -430,3 +442,49 @@ fn insert_scalar_waveform(
 
 #[cfg(test)]
 mod soa_reporting_tests;
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn optimization_admits_all_published_history_columns_before_copying() {
+        let spec: AnalysisSpec = serde_json::from_value(serde_json::json!({"Optimization": {
+            "variables": [{"name": "R", "min": 1.0, "max": 2.0, "initial": 1.5}],
+            "objective_node": "out", "objective_ref": "0", "goal": "Target",
+            "target": 0.5, "algorithm": "PatternSearch", "max_iterations": 4,
+            "cost_tolerance": 1e-6, "fd_step": 1e-3, "initial_step": 0.25, "min_step": 1e-6
+        }}))
+        .unwrap();
+        let deck =
+            "Optimization projection\n.param R=1.5\nV1 in 0 1\nR1 in out {R}\nR2 out 0 1\n.end\n";
+        let mut limits = rspice_core::ResourceLimits::default();
+        let run = |limits| {
+            run_device_spec(
+                spec.clone(),
+                deck,
+                None,
+                None,
+                svc_runner::ServiceContext {
+                    source_path: None,
+                    limits,
+                    abort: &rspice_core::NoAbort,
+                },
+            )
+        };
+        let SimulationResult::Optimization { iterations, .. } = run(limits).unwrap() else {
+            panic!("optimization result")
+        };
+        let retained = iterations.len() * 5 + 2;
+        // The optimizer reserves fifteen history values. The completed plot
+        // also owns its axes and best-point scalars; the core DC solve fits.
+        assert!(retained > 15);
+        limits.max_result_values = 15;
+        let error = run(limits).unwrap_err();
+        assert!(
+            matches!(&error, SimulationError::ResourceLimit { resource, requested, limit: 15 }
+            if resource == "result_values" && *requested == retained),
+            "{error:?}, retained={retained}"
+        );
+    }
+}

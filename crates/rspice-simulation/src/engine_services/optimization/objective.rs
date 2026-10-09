@@ -10,20 +10,38 @@ use rspice_core::netlist::Netlist;
 
 use rspice_simulation_contract::optimization_expression::validate_optimization_expression;
 
+#[cfg(test)]
 pub(super) fn evaluate(
     expression: &str,
     netlist: &Netlist,
     dc: &rspice_core::SimulationResult,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<Value> {
+    evaluate_with_context(
+        expression,
+        netlist,
+        dc,
+        ServiceContext::with_defaults(None, abort),
+    )
+}
+
+pub(super) fn evaluate_with_context(
+    expression: &str,
+    netlist: &Netlist,
+    dc: &rspice_core::SimulationResult,
+    context: ServiceContext<'_>,
+) -> ServiceRunResult<Value> {
+    let abort = context.abort;
     validate_optimization_expression(expression).map_err(ServiceRunError::Failure)?;
     // The expression is one braced operand. It cannot introduce a second
     // output column or card, nor inherit an unrelated .SAVE selection.
-    let selection = parse_runner_netlist_with_abort(
-        &format!("Optimization objective\n.print op {{{expression}}}\n.end\n"),
-        None,
-        abort,
-    )?;
+    let selection = ServiceContext {
+        source_path: None,
+        ..context
+    }
+    .parse(&format!(
+        "Optimization objective\n.print op {{{expression}}}\n.end\n"
+    ))?;
     let projection = SignalProjection::from_netlist(&selection)
         .map_err(|error| ServiceRunError::from_core("Invalid optimization expression", error))?;
     let observables = operating_point_observable_series(dc);

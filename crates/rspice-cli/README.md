@@ -119,7 +119,7 @@ Execution limits are captured in the prepared snapshot and enforced for OP, DC,
 AC (including AC data), transient (including transient noise), noise, pole-zero,
 sensitivity, STB, S-parameter (including port noise), transfer-function, distortion,
 DC-mismatch, SOA, shooting PSS (including its spectrum), HB, QPSS, QPAC, QPXF,
-QPNOISE, PAC, PXF, PNOISE, PSTB, PSP, HBSP, HBNOISE, Fourier, recorded FFT, and Envelope analyses.
+QPNOISE, PAC, PXF, PNOISE, PSTB, PSP, HBSP, HBNOISE, Fourier, recorded FFT, Envelope, and optimization analyses.
 Recorded FFT checks the selected spectrum's retained bin and scalar counts,
 including numeric convergence evidence; the producing transient enforces the
 transform's execution limits. Publishing the spectrum does not repeat the solve.
@@ -128,6 +128,9 @@ waveform/window copies and impulse traces before decomposition.
 Envelope applies the captured limits to periodic initialization, transient or
 multirate solving, reporting schedules, projection workspace, and retained
 results. Full-waveform projection also retains its separate dense-work ceiling.
+Optimization preserves the captured limits through candidate materialization,
+operating-point or selected-study objectives, nested postprocessing, candidate
+counts, iteration histories, and final result publication.
 SOA reserves room for every stress trace and up to
 one violation per rule per observation before building its histories. Remaining
 advanced routes explicitly refuse custom execution limits until they enforce

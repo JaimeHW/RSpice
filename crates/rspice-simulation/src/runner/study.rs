@@ -11,7 +11,7 @@ mod periodic;
 mod pss;
 mod qpss;
 mod spectral;
-pub(crate) use optimization::run_optimization;
+pub(crate) use optimization::run_optimization_with_context;
 
 use super::AnalysisExecutionEnvironment;
 use crate::engine_bridge::EngineBridge;

@@ -444,7 +444,7 @@ fn running_study_cancellation_joins_the_solver_and_keeps_stderr_json() {
 }
 
 #[test]
-fn study_run_refuses_unsupported_route_limits_and_honors_deadlines() {
+fn optimization_study_prepares_with_custom_limits_and_honors_deadlines() {
     let root = common::test_dir("study-runtime-policy");
     let mut document = fixture(&root);
     document["tasks"] = json!([{ "id": "optimization", "analysis": {"Optimization": {
@@ -457,17 +457,12 @@ fn study_run_refuses_unsupported_route_limits_and_honors_deadlines() {
     let destination = root.join("result.json");
     std::fs::write(
         root.join("config.toml"),
-        "[resources]\nmax_matrix_unknowns = 2\n",
+        "[resources]\nmax_matrix_unknowns = 1000\n",
     )
     .unwrap();
     for command in ["check", "plan"] {
         let output = invoke(&root, &["study", command, path.to_str().unwrap(), "--json"]);
-        assert_eq!(output.status.code(), Some(69), "{output:?}");
-        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
-        assert_eq!(
-            error["error"]["capability"],
-            "study.execution_resource_overrides"
-        );
+        assert!(output.status.success(), "{output:?}");
     }
     std::fs::write(root.join("config.toml"), "").unwrap();
     let output = invoke(
@@ -1063,5 +1058,63 @@ fn envelope_studies_enforce_custom_limits_and_preserve_existing_output() {
                 "previous result"
             );
         }
+    }
+}
+
+#[test]
+fn optimization_study_enforces_candidate_history_and_solver_limits() {
+    let root = common::test_dir("study-optimization-limits");
+    let mut document = fixture(&root);
+    std::fs::write(
+        root.join("circuits/divider.cir"),
+        "Optimization policy\n.param R=1.5\nV1 in 0 1\nR1 in out {R}\nR2 out 0 1\n.end\n",
+    )
+    .unwrap();
+    document["tasks"] = json!([{ "id": "optimization", "analysis": {"Optimization": {
+        "variables": [{"name": "R", "min": 1.0, "max": 2.0, "initial": 1.5}],
+        "objective_node": "out", "objective_ref": "0", "goal": "Target",
+        "target": 0.5, "algorithm": "PatternSearch", "max_iterations": 10,
+        "cost_tolerance": 1e-6, "fd_step": 1e-3, "initial_step": 0.25, "min_step": 1e-6
+    }}}]);
+    let path = save(&root, &document);
+    let destination = root.join("result.json");
+    let args = [
+        "study",
+        "run",
+        path.to_str().unwrap(),
+        "--output",
+        destination.to_str().unwrap(),
+        "--json",
+    ];
+    std::fs::write(
+        root.join("config.toml"),
+        "[resources]\nmax_matrix_unknowns = 1000\n",
+    )
+    .unwrap();
+    let output = invoke(&root, &args);
+    assert!(output.status.success(), "{output:?}");
+    let saved: Value = serde_json::from_slice(&std::fs::read(&destination).unwrap()).unwrap();
+    assert_eq!(saved["schema"], "rspice.study.results");
+    for (setting, resource) in [
+        ("max_matrix_unknowns", "matrix_unknowns"),
+        ("max_analysis_points", "analysis_points"),
+        ("max_result_values", "result_values"),
+        ("max_batch_runs", "batch_runs"),
+    ] {
+        std::fs::write(&destination, "previous result").unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            format!("[resources]\n{setting} = 1\n"),
+        )
+        .unwrap();
+        let output = invoke(&root, &args);
+        assert_eq!(output.status.code(), Some(75), "{setting}: {output:?}");
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["resource"], resource, "{error}");
+        assert_eq!(error["error"]["limit"], 1, "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&destination).unwrap(),
+            "previous result"
+        );
     }
 }

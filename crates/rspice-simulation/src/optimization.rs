@@ -329,6 +329,14 @@ where
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
+    let points = config.max_iterations.saturating_add(1);
+    if points > limits.max_analysis_points {
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::AnalysisPoints,
+            points,
+            limits.max_analysis_points,
+        ));
+    }
     let retained = config
         .max_iterations
         .saturating_add(1)
@@ -340,6 +348,18 @@ where
             limits.max_result_values,
         ));
     }
+    let history_len = config
+        .max_iterations
+        .checked_add(1)
+        .filter(|count| *count <= isize::MAX as usize / std::mem::size_of::<Value>())
+        .filter(|count| {
+            count
+                .checked_mul(config.variables.len().saturating_add(2))
+                .is_some()
+        })
+        .ok_or_else(|| {
+            ServiceRunError::Failure("Optimization history capacity cannot be represented".into())
+        })?;
     let optimizer_config = OptimizerConfig {
         algorithm: match config.algorithm {
             OptimizationAlgorithmMode::GradientDescent => OptimizerAlgo::GradientDescent,
@@ -387,13 +407,10 @@ where
     let mut variable_traces: HashMap<String, Vec<Value>> = HashMap::new();
     for (variable_index, var) in config.variables.iter().enumerate() {
         poll_periodically(abort, variable_index)?;
-        variable_traces.insert(
-            var.name.clone(),
-            Vec::with_capacity(config.max_iterations + 1),
-        );
+        variable_traces.insert(var.name.clone(), Vec::with_capacity(history_len));
     }
-    let mut iterations = Vec::with_capacity(config.max_iterations + 1);
-    let mut costs = Vec::with_capacity(config.max_iterations + 1);
+    let mut iterations = Vec::with_capacity(history_len);
+    let mut costs = Vec::with_capacity(history_len);
 
     let evaluated_objectives = RefCell::new(Vec::new());
     let evaluated_constraints = RefCell::new(Vec::new());
@@ -757,6 +774,20 @@ mod configured_search_limits {
         .unwrap_err();
         assert!(matches!(error, ServiceRunError::ResourceLimit(_)));
         assert_eq!(calls.get(), 0);
+        let bounded = OptimizationRunConfig {
+            max_iterations: 10,
+            ..Default::default()
+        };
+        limits.max_analysis_points = 10;
+        let error = run_optimization_with_evaluator(&bounded, limits, &NoAbort, |_| {
+            calls.set(calls.get() + 1);
+            Ok(1.0)
+        })
+        .unwrap_err();
+        assert!(matches!(error, ServiceRunError::ResourceLimit(error)
+            if error.resource == rspice_core::ResourceKind::AnalysisPoints && error.requested == 11 && error.limit == 10));
+        assert_eq!(calls.get(), 0);
+        limits.max_analysis_points = 11;
         limits.max_batch_runs = 1;
         let config = OptimizationRunConfig {
             max_iterations: 10,
@@ -771,5 +802,21 @@ mod configured_search_limits {
             matches!(error, ServiceRunError::ResourceLimit(error) if error.resource == rspice_core::ResourceKind::BatchRuns)
         );
         assert_eq!(calls.get(), 1);
+        calls.set(0);
+        limits.max_analysis_points = usize::MAX;
+        limits.max_result_values = usize::MAX;
+        let config = OptimizationRunConfig {
+            max_iterations: usize::MAX,
+            ..Default::default()
+        };
+        let error = run_optimization_with_evaluator(&config, limits, &NoAbort, |_| {
+            calls.set(calls.get() + 1);
+            Ok(1.0)
+        })
+        .unwrap_err();
+        assert!(
+            matches!(error, ServiceRunError::Failure(ref message) if message.contains("cannot be represented"))
+        );
+        assert_eq!(calls.get(), 0);
     }
 }

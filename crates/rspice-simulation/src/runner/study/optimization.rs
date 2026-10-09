@@ -2,7 +2,8 @@
 
 use super::*;
 
-pub(crate) fn run_optimization(
+#[cfg(test)]
+fn run_optimization(
     base: &StudyRunConfig,
     config: &services::OptimizationRunConfig,
     source: &str,
@@ -10,6 +11,24 @@ pub(crate) fn run_optimization(
     environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<services::OptimizationData, SimulationError> {
+    run_optimization_with_context(
+        base,
+        config,
+        source,
+        environment,
+        services::ServiceContext::with_defaults(source_path, abort),
+    )
+}
+
+pub(crate) fn run_optimization_with_context(
+    base: &StudyRunConfig,
+    config: &services::OptimizationRunConfig,
+    source: &str,
+    environment: Option<AnalysisExecutionEnvironment>,
+    context: services::ServiceContext<'_>,
+) -> Result<services::OptimizationData, SimulationError> {
+    let abort = context.abort;
+    let source_path = context.source_path;
     super::super::spec::ensure_not_aborted(abort)?;
     if base.objective_terms.is_empty() && base.measurements.is_empty() {
         return Err(SimulationError::InvalidConfig(
@@ -49,7 +68,7 @@ pub(crate) fn run_optimization(
         .map_err(|errors| SimulationError::InvalidConfig(errors.join("; ")))?;
     let (analysis, environment) = resolved_study_environment(base, environment);
     let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
-    let bridge = EngineBridge::new();
+    let bridge = EngineBridge::new().with_resource_limits(context.limits);
     let circuit = bridge.parse_netlist_with_abort_and_source_path(&source, source_path, abort)?;
     validate_base_measurements(base, &circuit)?;
     for variable in &config.variables {
@@ -67,7 +86,7 @@ pub(crate) fn run_optimization(
     {
         return Err(SimulationError::InvalidConfig("Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into()));
     }
-    let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
+    let engine = rspice_core::Engine::new(context.engine_config(&circuit));
     let mut limits = engine.config().resource_limits;
     let retained_objectives = base
         .objective_terms
@@ -277,6 +296,74 @@ mod tests {
             numeric_options: ".OPTIONS RELTOL=1e-5".into(),
             measurements: vec![measurement.into()],
             histogram_bins: 20,
+        }
+    }
+
+    #[test]
+    fn configured_optimization_inherits_the_caller_limits() {
+        let deck = "Study policy\n.param RLOAD=1500\nV1 in 0 DC 1 AC 1\nR1 in out {RLOAD}\nR2 out 0 1k\n.end\n";
+        let selected = base(
+            AnalysisConfig::Ac(AcAnalysisConfig {
+                start_freq: 1000.0,
+                stop_freq: 1000.0,
+                num_points: 1,
+                sweep_type: AcSweepType::Linear,
+            }),
+            "bin:0:magnitude:V(out)",
+        );
+        let config = services::OptimizationRunConfig {
+            variables: vec![services::OptimizationVariable {
+                name: "RLOAD".into(),
+                min: 1000.0,
+                max: 2000.0,
+                initial: 1500.0,
+            }],
+            max_iterations: 20,
+            target: Some(0.5),
+            initial_step: 0.25,
+            cost_tolerance: 1e-10,
+            ..Default::default()
+        };
+        let mut limits = rspice_core::ResourceLimits::default();
+        limits.max_matrix_unknowns = 1000;
+        let run = |limits| {
+            run_optimization_with_context(
+                &selected,
+                &config,
+                deck,
+                None,
+                services::ServiceContext {
+                    source_path: None,
+                    limits,
+                    abort: &NoAbort,
+                },
+            )
+        };
+        let result = run(limits).unwrap();
+        assert!(
+            result.best_cost < 1e-10 && (result.best_variables["RLOAD"] - 1000.0).abs() < 0.1,
+            "{result:?}"
+        );
+        for resource in [
+            "matrix_unknowns",
+            "analysis_points",
+            "result_values",
+            "batch_runs",
+            "netlist_bytes",
+        ] {
+            let mut limited = limits;
+            match resource {
+                "matrix_unknowns" => limited.max_matrix_unknowns = 1,
+                "analysis_points" => limited.max_analysis_points = 1,
+                "result_values" => limited.max_result_values = 1,
+                "batch_runs" => limited.max_batch_runs = 1,
+                _ => limited.max_netlist_bytes = 1,
+            }
+            let error = run(limited).unwrap_err();
+            assert!(
+                matches!(&error, SimulationError::ResourceLimit { resource: actual, .. } if actual == resource),
+                "{error:?}"
+            );
         }
     }
 

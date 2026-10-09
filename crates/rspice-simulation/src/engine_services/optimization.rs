@@ -1,7 +1,9 @@
 //! Circuit evaluation adapter for the bounded runtime optimizer.
 
 mod objective;
-use super::{build_engine_config, is_ground_like, parse_runner_netlist_with_abort};
+use super::{ServiceContext, is_ground_like};
+#[cfg(test)]
+use super::{build_engine_config, parse_runner_netlist_with_abort};
 use crate::error::{ServiceRunError, ServiceRunResult, ensure_not_aborted, poll_periodically};
 use crate::optimization::run_optimization_with_evaluator;
 pub use crate::optimization::{
@@ -11,12 +13,13 @@ pub use crate::optimization::{
 };
 use rspice_core::{Value, abort_signal::AbortSignal, engine::Engine};
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::Path;
 
 /// Run optimization analysis with default configuration and no source path.
 ///
 /// Test-only. The shipping path is
-/// [`run_optimization_analysis_with_config_and_source_path_and_abort`], which
+/// [`run_optimization_analysis_with_context`], which
 /// the device spec calls with the configuration the user set.
 #[cfg(test)]
 pub fn run_optimization_analysis_with_abort(
@@ -34,6 +37,7 @@ pub fn run_optimization_analysis_with_abort(
 /// Run explicitly configured optimization analysis with source-path
 /// resolution and cooperative cancellation through every objective trial and
 /// outer iteration.
+#[cfg(test)]
 pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &OptimizationRunConfig,
@@ -50,6 +54,7 @@ pub fn run_optimization_analysis_with_config_and_source_path_and_abort(
 }
 
 /// Apply the Studio Run Set to every operating-point objective candidate.
+#[cfg(test)]
 pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abort(
     netlist_text: &str,
     config: &OptimizationRunConfig,
@@ -57,6 +62,22 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
     environment: Option<&rspice_core::engine::MonteCarloEnvironment>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<OptimizationData> {
+    run_optimization_analysis_with_context(
+        netlist_text,
+        config,
+        environment,
+        ServiceContext::with_defaults(source_path, abort),
+    )
+}
+
+/// Apply one captured execution policy to materialization and every candidate.
+pub(crate) fn run_optimization_analysis_with_context(
+    netlist_text: &str,
+    config: &OptimizationRunConfig,
+    environment: Option<&rspice_core::engine::MonteCarloEnvironment>,
+    context: ServiceContext<'_>,
+) -> ServiceRunResult<OptimizationData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     let objective_unit = config.operating_point_objective_unit();
@@ -76,7 +97,7 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
                 "Optimization Run Set requires a physical temperature and a complete supply/nominal pair".into(),
             ));
     }
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let netlist = context.parse(netlist_text)?;
     for variable in &config.variables {
         if netlist.params.get(&variable.name).is_none() {
             return Err(ServiceRunError::Failure(format!(
@@ -85,7 +106,7 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
             )));
         }
     }
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let engine = Engine::new(context.engine_config(&netlist));
     run_optimization_with_evaluator(config, engine.config().resource_limits, abort, |vars| {
         let candidate = materialize_optimization_candidate(
             &engine,
@@ -95,7 +116,7 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
             environment,
             abort,
         )?;
-        let value = evaluate_optimization_objective(&candidate, config, abort)?;
+        let value = evaluate_optimization_objective(&candidate, config, context)?;
         if config.objective_unit.trim().is_empty() {
             Ok(value)
         } else {
@@ -109,10 +130,11 @@ pub(crate) fn run_optimization_analysis_with_environment_and_source_path_and_abo
 fn evaluate_optimization_objective(
     netlist: &rspice_core::Netlist,
     config: &OptimizationRunConfig,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<Value> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
-    let engine = Engine::new(build_engine_config(netlist, None));
+    let engine = Engine::new(context.engine_config(netlist));
     let dc = engine
         .run_dc_op_with_abort(netlist, abort)
         .map_err(|error| {
@@ -120,7 +142,7 @@ fn evaluate_optimization_objective(
         })?;
 
     if let Some(expression) = &config.objective_expression {
-        return objective::evaluate(expression, netlist, &dc, abort);
+        return objective::evaluate_with_context(expression, netlist, &dc, context);
     }
     let node_idx =
         resolve_node_index_case_insensitive(&dc.node_names, &config.objective_node, abort)?
