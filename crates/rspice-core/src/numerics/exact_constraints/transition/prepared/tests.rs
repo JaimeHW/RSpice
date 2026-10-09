@@ -474,3 +474,28 @@ fn malformed_singular_unrepresentable_and_bounded_transitions_are_explicit() {
             .is_err()
     );
 }
+
+#[test]
+fn unchanged_picofarad_storage_does_not_create_roundoff_actions() {
+    let limits = ResourceLimits::default();
+    let (mut a, mut e) = capacitive();
+    a.push((1, 1, 0.1));
+    e[0].2 = 2e-12;
+    e[1].2 = 5e-12;
+    let prepared = PreparedTransition::new(4, &a, &e, limits, &NoAbort).unwrap();
+    let storage = [2e-12, 0.0, 0.0, 0.0];
+    assert_eq!(storage, [2e-12, 0.0, 0.0, 0.0]);
+    let result = prepared
+        .evaluate(
+            &storage,
+            |row, order| Ok(if row == 2 && order == 0 { 1.0 } else { 0.0 }),
+            limits,
+            &NoAbort,
+        )
+        .unwrap();
+    assert_eq!(result.finite(), [1.0, 0.0, 0.0, 0.0]);
+    assert!(result.rates().iter().all(|&v| v == 0.0));
+    for order in 0..prepared.impulse_orders {
+        assert!(result.impulse(order).unwrap().iter().all(|&v| v == 0.0));
+    }
+}

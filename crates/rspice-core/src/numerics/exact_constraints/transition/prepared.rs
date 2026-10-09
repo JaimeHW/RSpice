@@ -5,7 +5,7 @@ mod audit;
 pub(super) struct PreparedTransition {
     size: usize,
     impulse_orders: usize,
-    forms: Vec<Vec<(Input, Value)>>,
+    forms: Vec<ExactRow<Input>>,
     forcing_orders: Vec<usize>,
     retained_words: usize,
     audit_words: usize,
@@ -96,27 +96,44 @@ impl PreparedTransition {
                 return Err(failure("incomplete transition mapping"));
             }
             projector.check_cost(query.words().saturating_mul(3))?;
-            projector.reserve_retained_words(query.values.len().saturating_mul(6))?;
-            let mut form = Vec::with_capacity(query.values.len());
-            for (input, value) in query.values {
+            projector.reserve_retained_words(query.words().saturating_add(16))?;
+            // Retain exact projection ratios. Rounding each weight before
+            // cancellation can invent an action when incoming storage already
+            // agrees with the outgoing source (for example C=2p, Rm=3).
+            let bits = query
+                .values
+                .values()
+                .chain(std::iter::once(&query.query))
+                .map(BigInt::bits)
+                .max()
+                .unwrap_or(0);
+            audit_words = audit_words.max(
+                usize::try_from(
+                    bits.saturating_add(2098 + u64::from(usize::BITS))
+                        .div_ceil(64),
+                )
+                .unwrap_or(usize::MAX)
+                .saturating_mul(16)
+                .saturating_add(1024),
+            );
+            for input in query.values.keys() {
                 check_abort(abort)?;
-                if let Input::Forcing { row, order } = input {
+                if let Input::Forcing { row, order } = *input {
                     forcing_orders[row] = forcing_orders[row].max(order);
                 }
-                let weight = -coefficient_ratio(&value, &query.query)
-                    .ok_or_else(|| failure("transition projection exceeds finite precision"))?;
-                form.push((input, weight));
             }
-            forms.push(form);
+            forms.push(query);
         }
         let retained_words = overhead
             .saturating_add(algebraic.retained_words)
             .saturating_add(storage_constraints.retained_words)
-            .saturating_add(forms.capacity().saturating_mul(4))
+            .saturating_add(forms.capacity().saturating_mul(16))
             .saturating_add(forcing_orders.capacity())
-            .saturating_add(forms.iter().fold(0usize, |sum, form| {
-                sum.saturating_add(form.capacity().saturating_mul(4))
-            }));
+            .saturating_add(
+                forms
+                    .iter()
+                    .fold(0usize, |sum, form| sum.saturating_add(form.words())),
+            );
         ExactElimination::<Input>::ensure_words(retained_words, limits.max_result_values)?;
         Ok(Self {
             size,
@@ -178,34 +195,20 @@ impl PreparedTransition {
         let mut values = Vec::with_capacity(self.forms.len());
         for form in &self.forms {
             check_abort(abort)?;
-            let cancelled = std::cell::Cell::new(false);
-            let value = rspice_veriloga_runtime::arithmetic::sum_products(
-                form.iter()
-                    .take_while(|_| {
-                        if cancelled.get() {
-                            return false;
-                        }
-                        if abort.is_aborted() {
-                            cancelled.set(true);
-                            return false;
-                        }
-                        true
-                    })
-                    .map(|&(input, weight)| {
-                        let value = match input {
-                            Input::Storage(row) => storage[row],
-                            Input::Forcing { row, order } => jets[row][order],
-                        };
-                        (value, weight)
-                    }),
-            );
-            if cancelled.get() {
-                return Err(ConstraintError::Aborted);
+            let mut numerator = BigInt::default();
+            for (input, weight) in &form.values {
+                check_abort(abort)?;
+                let value = match *input {
+                    Input::Storage(row) => storage[row],
+                    Input::Forcing { row, order } => jets[row][order],
+                };
+                numerator += weight * integer_coefficient(value).unwrap();
             }
-            let value = value.map_err(|_| failure("unrepresentable transition evaluation"))?;
-            if !value.is_finite() {
-                return Err(failure("nonfinite transition evaluation"));
-            }
+            check_abort(abort)?;
+            // Inputs are exact integers in units of 2^-1074; divide only
+            // after the complete signed sum, rounding the output once.
+            let value = coefficient_ratio(&-numerator, &(&form.query << 1074usize))
+                .ok_or_else(|| failure("unrepresentable transition evaluation"))?;
             values.push(value);
         }
         let transition = Transition {

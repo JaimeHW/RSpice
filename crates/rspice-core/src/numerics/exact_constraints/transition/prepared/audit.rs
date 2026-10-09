@@ -76,6 +76,15 @@ fn verify(
     Ok(())
 }
 
+fn context(error: ConstraintError, context: String) -> ConstraintError {
+    match error {
+        ConstraintError::Invalid(message) => {
+            ConstraintError::Invalid(format!("{message} ({context})"))
+        }
+        error => error,
+    }
+}
+
 impl PreparedTransition {
     pub(super) fn audit_storage(&self, storage: &[Value], abort: &dyn AbortSignal) -> Result<()> {
         for (_, row) in &self.storage_constraints.rows {
@@ -110,7 +119,8 @@ impl PreparedTransition {
                     )
                     .chain([(-1.0, jets[row][0])]),
                 abort,
-            )?;
+            )
+            .map_err(|error| context(error, format!("finite equation row {row}")))?;
             equation(
                 self.e[row]
                     .iter()
@@ -122,7 +132,8 @@ impl PreparedTransition {
                             .map(move |&(column, coefficient)| (coefficient, impulse[column]))
                     })),
                 abort,
-            )?;
+            )
+            .map_err(|error| context(error, format!("charge jump row {row}")))?;
             for order in 0..self.impulse_orders {
                 let impulse = result.impulse(order).unwrap();
                 equation(
@@ -135,13 +146,14 @@ impl PreparedTransition {
                                 .map(move |&(column, coefficient)| (coefficient, next[column]))
                         })),
                     abort,
-                )?;
+                )
+                .map_err(|error| context(error, format!("action order {order}, row {row}")))?;
             }
         }
         // Original E*x' + A*x does not contain rates of every algebraic
         // current. Its hidden constraints and their derivatives must also
         // qualify the published finite jet.
-        for (_, row) in &self.constraints.rows {
+        for (ordinal, (_, row)) in self.constraints.rows.iter().enumerate() {
             for extra in 0..=1 {
                 let values = if extra == 0 {
                     result.finite()
@@ -162,7 +174,10 @@ impl PreparedTransition {
                             (coefficient, -value)
                         })),
                     abort,
-                )?;
+                )
+                .map_err(|error| {
+                    context(error, format!("constraint {ordinal}, derivative {extra}"))
+                })?;
             }
         }
         Ok(())
