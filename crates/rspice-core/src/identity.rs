@@ -52,6 +52,43 @@ pub enum AnalysisKind {
 }
 
 impl AnalysisKind {
+    /// Canonical inventory for capability discovery and persisted plan inspection.
+    /// Entries retain their identity even when a frontend cannot execute them.
+    pub const ALL: [Self; 32] = [
+        Self::ImplicitOp,
+        Self::Op,
+        Self::Dc,
+        Self::Ac,
+        Self::Tran,
+        Self::Noise,
+        Self::Sp,
+        Self::Stb,
+        Self::Distortion,
+        Self::PoleZero,
+        Self::Sensitivity,
+        Self::TransferFunction,
+        Self::Pss,
+        Self::Pac,
+        Self::Pxf,
+        Self::PNoise,
+        Self::Pstb,
+        Self::HarmonicBalance,
+        Self::Envelope,
+        Self::MonteCarlo,
+        Self::Fourier,
+        Self::Fft,
+        Self::Soa,
+        Self::Optimize,
+        Self::Psp,
+        Self::Hbsp,
+        Self::HbNoise,
+        Self::Qpss,
+        Self::Qpac,
+        Self::Qpnoise,
+        Self::Qpxf,
+        Self::DcMatch,
+    ];
+
     pub const fn tag(self) -> &'static str {
         match self {
             Self::ImplicitOp => "implicit-op",
@@ -222,6 +259,7 @@ mod tests {
             AnalysisKind::DcMatch,
         ];
 
+        assert_eq!(AnalysisKind::ALL, kinds);
         let mut tags = kinds.map(AnalysisKind::tag).to_vec();
         tags.sort_unstable();
         let distinct = tags.len();

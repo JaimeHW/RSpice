@@ -4,6 +4,48 @@ use crate::ResourceLimits;
 use crate::netlist::{NetlistParseOptions, ParseError, ParseWithAbortError};
 
 impl ControlCircuit {
+    /// Direct control command for an analysis identity, if this host executes it.
+    /// This describes the control host only, not declarative deck execution.
+    pub const fn analysis_command_name(
+        kind: crate::identity::AnalysisKind,
+    ) -> Option<&'static str> {
+        use crate::identity::AnalysisKind;
+        match kind {
+            AnalysisKind::Op => Some("op"),
+            AnalysisKind::Dc => Some("dc"),
+            AnalysisKind::Ac => Some("ac"),
+            AnalysisKind::Noise => Some("noise"),
+            AnalysisKind::Tran => Some("tran"),
+            AnalysisKind::TransferFunction => Some("tf"),
+            AnalysisKind::PoleZero => Some("pz"),
+            AnalysisKind::Sensitivity => Some("sens"),
+            AnalysisKind::Distortion => Some("disto"),
+            AnalysisKind::Stb => Some("stb"),
+            AnalysisKind::ImplicitOp
+            | AnalysisKind::Sp
+            | AnalysisKind::Pss
+            | AnalysisKind::Pac
+            | AnalysisKind::Pxf
+            | AnalysisKind::PNoise
+            | AnalysisKind::Pstb
+            | AnalysisKind::HarmonicBalance
+            | AnalysisKind::Envelope
+            | AnalysisKind::MonteCarlo
+            | AnalysisKind::Fourier
+            | AnalysisKind::Fft
+            | AnalysisKind::Soa
+            | AnalysisKind::Optimize
+            | AnalysisKind::Psp
+            | AnalysisKind::Hbsp
+            | AnalysisKind::HbNoise
+            | AnalysisKind::Qpss
+            | AnalysisKind::Qpac
+            | AnalysisKind::Qpnoise
+            | AnalysisKind::Qpxf
+            | AnalysisKind::DcMatch => None,
+        }
+    }
+
     /// Check host availability without executing a command or its arguments.
     pub fn validate_command_name(command: &ControlCommand) -> Result<(), ControlError> {
         CommandKind::parse(command).map(|_| ())
@@ -83,28 +125,28 @@ pub(super) fn identity(
     analysis: &AnalysisCommand,
     line: usize,
 ) -> Result<(&'static str, crate::identity::AnalysisKind), ControlError> {
-    Ok(match analysis {
-        AnalysisCommand::Op => ("op", crate::identity::AnalysisKind::Op),
-        AnalysisCommand::Dc { .. } => ("dc", crate::identity::AnalysisKind::Dc),
-        AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => {
-            ("ac", crate::identity::AnalysisKind::Ac)
-        }
-        AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => {
-            ("noise", crate::identity::AnalysisKind::Noise)
-        }
-        AnalysisCommand::Tran { .. } => ("tran", crate::identity::AnalysisKind::Tran),
-        AnalysisCommand::Tf { .. } => ("tf", crate::identity::AnalysisKind::TransferFunction),
-        AnalysisCommand::PoleZero { .. } => ("pz", crate::identity::AnalysisKind::PoleZero),
-        AnalysisCommand::Sensitivity { .. } => ("sens", crate::identity::AnalysisKind::Sensitivity),
-        AnalysisCommand::Disto { .. } => ("disto", crate::identity::AnalysisKind::Distortion),
-        AnalysisCommand::Stb { .. } => ("stb", crate::identity::AnalysisKind::Stb),
+    use crate::identity::AnalysisKind;
+    let kind = match analysis {
+        AnalysisCommand::Op => AnalysisKind::Op,
+        AnalysisCommand::Dc { .. } => AnalysisKind::Dc,
+        AnalysisCommand::Ac { .. } | AnalysisCommand::AcData { .. } => AnalysisKind::Ac,
+        AnalysisCommand::Noise { .. } | AnalysisCommand::NoiseData { .. } => AnalysisKind::Noise,
+        AnalysisCommand::Tran { .. } => AnalysisKind::Tran,
+        AnalysisCommand::Tf { .. } => AnalysisKind::TransferFunction,
+        AnalysisCommand::PoleZero { .. } => AnalysisKind::PoleZero,
+        AnalysisCommand::Sensitivity { .. } => AnalysisKind::Sensitivity,
+        AnalysisCommand::Disto { .. } => AnalysisKind::Distortion,
+        AnalysisCommand::Stb { .. } => AnalysisKind::Stb,
         _ => {
             return Err(command_error(
                 line,
                 "this analysis has no control-host execution handler",
             ));
         }
-    })
+    };
+    ControlCircuit::analysis_command_name(kind)
+        .map(|name| (name, kind))
+        .ok_or_else(|| command_error(line, "this analysis has no control-host execution handler"))
 }
 
 // Preserve resource failures and cooperative cancellation during grid construction.
@@ -256,6 +298,49 @@ pub(super) fn frequency_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn advertised_control_analyses_parse_and_resolve_to_their_identity() {
+        use crate::identity::AnalysisKind;
+        let fixtures = [
+            (AnalysisKind::Op, ""),
+            (AnalysisKind::Dc, "V1 0 1 0.5"),
+            (AnalysisKind::Ac, "lin 3 1 10"),
+            (AnalysisKind::Noise, "V(out) V1 lin 3 1 10"),
+            (AnalysisKind::Tran, "1n 10n"),
+            (AnalysisKind::TransferFunction, "V(out) V1"),
+            (AnalysisKind::PoleZero, "in 0 out 0 vol pz"),
+            (AnalysisKind::Sensitivity, "V(out) R1"),
+            (AnalysisKind::Distortion, "lin 3 1 10"),
+            (AnalysisKind::Stb, "lin 3 1 10 probe=Vprobe"),
+        ];
+        for (kind, arguments) in fixtures {
+            let name = ControlCircuit::analysis_command_name(kind).expect("advertised handler");
+            let command = ControlCommand {
+                line: 7,
+                name: name.into(),
+                arguments: arguments.into(),
+            };
+            let analysis = ControlCircuit::parse_analysis_command(
+                &command,
+                ResourceLimits::default(),
+                &crate::NoAbort,
+            )
+            .expect("command grammar admits advertised analysis");
+            assert_eq!(
+                identity(&analysis, 7).expect("host admits analysis"),
+                (name, kind)
+            );
+        }
+        let advertised: std::collections::BTreeSet<_> = AnalysisKind::ALL
+            .into_iter()
+            .filter(|kind| ControlCircuit::analysis_command_name(*kind).is_some())
+            .collect();
+        assert_eq!(
+            advertised,
+            fixtures.into_iter().map(|(kind, _)| kind).collect()
+        );
+    }
     use crate::analysis::FrequencyGridError;
     use crate::{SimulationErrorCategory, SimulationErrorCode};
     use std::error::Error;
