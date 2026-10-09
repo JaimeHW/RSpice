@@ -408,9 +408,18 @@ impl VectorBounds {
 /// agree about which bit `i[31]` is.
 pub const INTEGER_BOUNDS: VectorBounds = VectorBounds { msb: 31, lsb: 0 };
 
+/// A scalar view of one unpacked real-net element. The view owns no storage or
+/// drivers; elaboration binds it to the selected element's existing identity.
+#[derive(Debug, Clone)]
+pub struct DigitalElementAlias {
+    pub array: SmolStr,
+    pub offset: u32,
+}
+
 /// A declared discrete-domain net or variable.
 #[derive(Debug, Clone)]
 pub struct AnalyzedDigitalSignal {
+    pub element_alias: Option<DigitalElementAlias>,
     /// Context-free variable declaration assignment, evaluated in this instance's
     /// parameter scope and installed in discrete storage before process startup.
     pub initializer: Option<Expression>,
@@ -908,18 +917,7 @@ impl SemanticAnalyzer {
                     }
                     analyzed.arrays.insert(signal.name.clone(), layout.clone());
                     self.arrays.insert(signal.name.clone(), layout.clone());
-                    if let Err(error) = self.define_symbol(Symbol {
-                        name: signal.name.clone(),
-                        kind: SymbolKind::Variable,
-                        value_type,
-                        span: signal.span,
-                        attrs: Default::default(),
-                    }) {
-                        self.record_error_at(
-                            SemanticErrorKind::InvalidExpression(error.to_string()),
-                            signal.span,
-                        );
-                    }
+                    self.bind_discrete_read_symbol(signal, value_type);
                     layout
                 };
                 for slot in layout.base..layout.base + layout.len {
@@ -950,27 +948,7 @@ impl SemanticAnalyzer {
                     retains_input: false,
                     is_event_controlled: false,
                 });
-                // A digital port already has its header identity in the
-                // symbol table. Its numeric analog read is a state input,
-                // not a second declaration or an electrical node access.
-                if let Some(symbol) = self.symbols.lookup_mut(&signal.name)
-                    && symbol.kind == SymbolKind::Port
-                {
-                    symbol.kind = SymbolKind::Variable;
-                    symbol.value_type = value_type;
-                    symbol.attrs.is_state = true;
-                } else if let Err(error) = self.define_symbol(Symbol {
-                    name: signal.name.clone(),
-                    kind: SymbolKind::Variable,
-                    value_type,
-                    span: signal.span,
-                    attrs: Default::default(),
-                }) {
-                    self.record_error_at(
-                        SemanticErrorKind::InvalidExpression(error.to_string()),
-                        signal.span,
-                    );
-                }
+                self.bind_discrete_read_symbol(signal, value_type);
                 slot
             };
             analyzed.variables[slot].is_event_controlled = true;
@@ -979,6 +957,47 @@ impl SemanticAnalyzer {
         self.bind_discrete_validity(analyzed);
         analyzed.event_state_variables.sort_unstable();
         analyzed.event_state_variables.dedup();
+    }
+
+    /// A discrete net's discipline declaration and its numeric analog read
+    /// describe one symbol. Reuse that declaration for scalar and array reads.
+    fn bind_discrete_read_symbol(
+        &mut self,
+        signal: &AnalyzedDigitalSignal,
+        value_type: super::ValueType,
+    ) {
+        let existing_discrete = self.symbols.lookup(&signal.name).is_some_and(|symbol| {
+            symbol.kind == SymbolKind::Port
+                || (symbol.kind == SymbolKind::Node
+                    && symbol
+                        .attrs
+                        .discipline
+                        .as_ref()
+                        .and_then(|name| self.disciplines.get_discipline(name))
+                        .is_some_and(|discipline| {
+                            discipline.domain == crate::disciplines::Domain::Discrete
+                        }))
+        });
+        if existing_discrete {
+            let symbol = self
+                .symbols
+                .lookup_mut(&signal.name)
+                .expect("existing discrete symbol");
+            symbol.kind = SymbolKind::Variable;
+            symbol.value_type = value_type;
+            symbol.attrs.is_state = true;
+        } else if let Err(error) = self.define_symbol(Symbol {
+            name: signal.name.clone(),
+            kind: SymbolKind::Variable,
+            value_type,
+            span: signal.span,
+            attrs: Default::default(),
+        }) {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(error.to_string()),
+                signal.span,
+            );
+        }
     }
 
     /// Paired finite state lanes preserve availability without feeding a fake
@@ -1320,6 +1339,7 @@ impl SemanticAnalyzer {
                 }
                 seen.insert(item.name.clone(), item.span);
                 signals.push(AnalyzedDigitalSignal {
+                    element_alias: None,
                     initializer: item.init.clone(),
                     unpacked,
                     dimensions,
@@ -1492,6 +1512,7 @@ impl SemanticAnalyzer {
                 }
                 seen.insert(name.clone(), declaration.span);
                 signals.push(AnalyzedDigitalSignal {
+                    element_alias: None,
                     initializer: None,
                     unpacked: None,
                     dimensions: Vec::new(),
@@ -1532,6 +1553,7 @@ impl SemanticAnalyzer {
                 }
                 seen.insert(name.clone(), net.span);
                 signals.push(AnalyzedDigitalSignal {
+                    element_alias: None,
                     initializer: None,
                     unpacked: None,
                     dimensions: Vec::new(),
@@ -1594,10 +1616,7 @@ impl SemanticAnalyzer {
             }
         }
 
-        if !item.dimensions.is_empty()
-            && (redeclares_port
-                || matches!(class, DigitalSignalClass::Net(kind) if kind != DigitalNetKind::Wire))
-        {
+        if !item.dimensions.is_empty() && redeclares_port {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "unpacked net/port array `{}` requires array connection elaboration",
@@ -1614,6 +1633,7 @@ impl SemanticAnalyzer {
 
         seen.insert(item.name.clone(), item.span);
         signals.push(AnalyzedDigitalSignal {
+            element_alias: None,
             // VAMS-2023 8.2 initializes module variables before process
             // execution. Net declaration assignments remain ordinary drivers.
             initializer: matches!(class, DigitalSignalClass::Variable(_))

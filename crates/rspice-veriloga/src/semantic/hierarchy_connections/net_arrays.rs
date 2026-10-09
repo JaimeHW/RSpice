@@ -1,6 +1,6 @@
-//! Give a statically selected wire-array element a packed net view at ports.
-//! The view shares original drivers through bit identities, without feedback
-//! assignments or treating an unpacked coordinate as a packed bit.
+//! Bind statically selected net-array elements at ports. Four-state views share
+//! bit identities; real views share the element's complete signal identity.
+//! Neither form adds feedback drivers or confuses unpacked and packed coordinates.
 use super::*;
 use crate::array_index::UnpackedArrayLayout;
 use crate::ast::{ArrayAccessExpr, DigitalExpr, PackedSelect, PartSelectExpr};
@@ -12,8 +12,7 @@ pub(super) fn prepare(
 ) -> CompileResult<Option<Arc<SpecializedModule>>> {
     if source.instances.is_empty()
         || !module.digital.signals.iter().any(|signal| {
-            signal.unpacked.is_some()
-                && signal.class == DigitalSignalClass::Net(DigitalNetKind::Wire)
+            signal.unpacked.is_some() && matches!(signal.class, DigitalSignalClass::Net(_))
         })
     {
         return Ok(None);
@@ -22,6 +21,7 @@ pub(super) fn prepare(
     let mut prepared = source.clone();
     let mut used = declared_names(source);
     let mut aliases = module.digital.bit_aliases.clone();
+    let mut element_aliases = HashMap::new();
     let mut views: HashMap<(SmolStr, usize), SmolStr> = HashMap::new();
     for (instance_index, instance) in source.instances.iter().enumerate() {
         for (connection_index, connection) in instance.connections.iter().enumerate() {
@@ -67,7 +67,7 @@ pub(super) fn prepare(
                             super::super::SemanticAnalyzer::MAX_ARRAY_ELEMENTS,
                         )
                         .map_err(|_| {
-                            error("invalid wire array connection shape", expression.span())
+                            error("invalid net array connection shape", expression.span())
                         })?;
                         if let Ok(offset) = layout.slot(&indices, 0) {
                             let span = expression.span();
@@ -93,6 +93,15 @@ pub(super) fn prepare(
                                     declared,
                                     span,
                                 );
+                                if declared.class.is_real() {
+                                    element_aliases.insert(
+                                        view.clone(),
+                                        super::super::digital::DigitalElementAlias {
+                                            array: declared.name.clone(),
+                                            offset: offset as u32,
+                                        },
+                                    );
+                                }
                                 for bit in 0..declared.width {
                                     aliases.push(
                                         super::super::digital::ElaboratedDigitalBitAlias {
@@ -154,6 +163,11 @@ pub(super) fn prepare(
     retain_parameter_guards(module, &mut analyzed);
     analyzed.hierarchical_connections = module.hierarchical_connections;
     analyzed.digital.bit_aliases = aliases;
+    for signal in &mut analyzed.digital.signals {
+        if let Some(alias) = element_aliases.remove(&signal.name) {
+            signal.element_alias = Some(alias);
+        }
+    }
     Ok(Some(Arc::new(SpecializedModule {
         source: prepared,
         analyzed,
@@ -176,7 +190,7 @@ fn selection<'a>(
     let declared = module.digital.signals.iter().find(|signal| {
         signal.name == *name
             && signal.unpacked.is_some()
-            && signal.class == DigitalSignalClass::Net(DigitalNetKind::Wire)
+            && matches!(signal.class, DigitalSignalClass::Net(_))
     })?;
     let rank = declared.dimensions.len();
     let (indices, packed) = match expression {

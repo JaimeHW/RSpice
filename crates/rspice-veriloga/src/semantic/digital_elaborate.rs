@@ -133,7 +133,7 @@ pub(crate) fn elaborate_digital_hierarchy(
         .as_deref()
         .map(|root| (&root.source, &root.analyzed))
         .unwrap_or((root_source, root));
-    elaborator.append_instances(root_source, Scope::for_root(root, root_source))?;
+    elaborator.append_instances(root_source, Scope::for_root(root, root_source)?)?;
     Ok(ElaboratedHierarchy {
         root: prepared_root,
         instances: elaborator.instances,
@@ -261,7 +261,7 @@ struct Scope {
 }
 
 impl Scope {
-    fn for_root(root: &AnalyzedModule, source: &Module) -> Self {
+    fn for_root(root: &AnalyzedModule, source: &Module) -> CompileResult<Self> {
         let mut scope = Self {
             connections: super::node_vectors::ConnectionScope::new(source, root),
             constants: super::DigitalConstants::from_module(source),
@@ -272,7 +272,7 @@ impl Scope {
             scope.signals.insert(
                 signal.name.clone(),
                 Binding {
-                    elaborated: signal.name.clone(),
+                    elaborated: element_binding_name(signal, &root.digital.signals, "")?,
                     width: signal.width,
                     range: signal.range.unwrap_or(super::VectorBounds::SCALAR),
                     signed: signal.signedness.is_signed(),
@@ -284,8 +284,57 @@ impl Scope {
                 },
             );
         }
-        scope
+        Ok(scope)
     }
+}
+
+/// Keep the canonical element spelling through analog as well as digital
+/// hierarchy. Scalar child ports then resolve the same storage and drivers.
+fn element_binding_name(
+    signal: &super::AnalyzedDigitalSignal,
+    declarations: &[super::AnalyzedDigitalSignal],
+    path: &str,
+) -> CompileResult<SmolStr> {
+    let Some(alias) = &signal.element_alias else {
+        return Ok(if path.is_empty() {
+            signal.name.clone()
+        } else {
+            qualify(path, &signal.name)
+        });
+    };
+    let array = declarations
+        .iter()
+        .find(|item| item.name == alias.array)
+        .ok_or_else(|| {
+            internal_error(format!("array view '{}' has no source array", signal.name))
+        })?;
+    let bounds: Vec<_> = array
+        .dimensions
+        .iter()
+        .map(|axis| (axis.msb, axis.lsb))
+        .collect();
+    let layout = crate::array_index::UnpackedArrayLayout::new(
+        &bounds,
+        super::SemanticAnalyzer::MAX_ARRAY_ELEMENTS,
+    )
+    .map_err(|_| {
+        internal_error(format!(
+            "array view '{}' has an invalid source shape",
+            signal.name
+        ))
+    })?;
+    if alias.offset as usize >= layout.len() {
+        return Err(internal_error(format!(
+            "array view '{}' is outside its source array",
+            signal.name
+        )));
+    }
+    let name = if path.is_empty() {
+        alias.array.clone()
+    } else {
+        qualify(path, &alias.array)
+    };
+    Ok(crate::array_index::element_name(&name, &layout, alias.offset as usize).into())
 }
 
 struct DigitalElaborator<'a> {
@@ -802,15 +851,19 @@ impl DigitalElaborator<'_> {
         };
         for declared in &child.digital.signals {
             let binding = bindings.get(&declared.name).cloned().unwrap_or(Binding {
-                elaborated: qualify(path, &declared.name),
+                elaborated: element_binding_name(declared, &child.digital.signals, path)?,
                 width: declared.width,
                 range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                 signed: declared.signedness.is_signed(),
                 is_variable: declared.class.is_variable(),
                 is_input_port: false,
             });
+            let mut elaborated_declaration = declared.clone();
+            if let Some(alias) = &mut elaborated_declaration.element_alias {
+                alias.array = qualify(path, &alias.array);
+            }
             signals.push(ElaboratedDigitalSignal {
-                declared: declared.clone(),
+                declared: elaborated_declaration,
                 name: binding.elaborated.clone(),
             });
             scope.signals.insert(declared.name.clone(), binding);

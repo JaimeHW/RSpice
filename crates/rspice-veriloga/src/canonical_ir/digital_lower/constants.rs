@@ -69,6 +69,7 @@ fn scalar_impl(
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
     let empty_arrays = HashMap::new();
+    let empty_array_names = HashSet::new();
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
@@ -79,6 +80,7 @@ fn scalar_impl(
         time_scale,
         signals: &mut signals,
         arrays: &empty_arrays,
+        array_names: &empty_array_names,
         index: &empty_index,
         constants: resolved,
         analog_variables: &empty_analog,
@@ -438,6 +440,7 @@ fn resolve_one(
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
     let empty_arrays = HashMap::new();
+    let empty_array_names = HashSet::new();
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
@@ -448,6 +451,7 @@ fn resolve_one(
         time_scale,
         signals: &mut signals,
         arrays: &empty_arrays,
+        array_names: &empty_array_names,
         index: &empty_index,
         constants: resolved,
         analog_variables: &empty_analog,
@@ -644,6 +648,7 @@ pub(super) fn initializer(
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
     let empty_arrays = HashMap::new();
+    let empty_array_names = HashSet::new();
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
@@ -654,6 +659,7 @@ pub(super) fn initializer(
         time_scale,
         signals: &mut signals,
         arrays: &empty_arrays,
+        array_names: &empty_array_names,
         index: &empty_index,
         constants,
         analog_variables: &empty_analog,

@@ -924,3 +924,80 @@ endmodule
         assert!(error.contains(expected), "{body}: {error}");
     }
 }
+
+
+#[test]
+fn real_net_array_connections_replay_shared_element_identity() {
+    let source = r#"
+module drive(p); inout p; wrealsum p; assign p=2.0; endmodule
+module top(p);
+ parameter integer BASE=4, PICK=3;
+ output p; electrical p;
+ wrealsum cells[BASE:BASE-1][-1:0];
+ drive first(cells[PICK][-1]);
+ drive second(cells[PICK][-1]);
+ assign cells[BASE-1][-1]=1.0;
+ analog V(p)<+cells[PICK][-1];
+endmodule
+"#;
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    let check = |ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact, first_word: bool| {
+        ir.validate().unwrap();
+        let array = ir
+            .digital
+            .arrays
+            .iter()
+            .find(|array| array.name == "cells")
+            .unwrap();
+        assert_eq!(array.storage.len, 4);
+        // Both inout ports and the compiler's scalar view share existing words.
+        assert_eq!(ir.digital.signals.len(), 4);
+        assert!(ir.digital.bit_aliases.is_empty());
+        let target = array.storage.base.index() + if first_word { 0 } else { 2 };
+        assert_eq!(
+            ir.digital
+                .drivers
+                .iter()
+                .filter(|driver| driver.target.signal.index() == target)
+                .count(),
+            if first_word { 3 } else { 2 }
+        );
+    };
+    check(&compiled.canonical_ir, true);
+    let assigned = compiler
+        .specialize_mixed_runtime(
+            &compiled.canonical_ir,
+            &[("BASE", 8.0), ("PICK", 8.0)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    check(&assigned.canonical_ir, false);
+    assert_ne!(
+        compiled.canonical_ir.digital.content_identity,
+        assigned.canonical_ir.digital.content_identity
+    );
+    let replay = compiler
+        .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        assigned.canonical_ir.digital.content_identity,
+        replay.canonical_ir.digital.content_identity
+    );
+    for body in [
+        "initial cells[0]=1.0;",
+        "assign cells[0][0]=1'b1;",
+        "drive bad(cells[0][0]);",
+        "drive bad(cells[2]);",
+    ] {
+        let source = format!(
+            "module drive(p); inout p; wrealsum p; assign p=2.0; endmodule module top; wrealsum cells[0:1]; {body} endmodule"
+        );
+        assert!(
+            compiler.compile_runtime(&source, Some("top")).is_err(),
+            "accepted {body}"
+        );
+    }
+}

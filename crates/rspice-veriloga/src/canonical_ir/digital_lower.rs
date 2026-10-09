@@ -123,7 +123,7 @@ use crate::semantic::{
 };
 use crate::source::Span;
 use smol_str::SmolStr;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// Front-end select validation uses the same typed constant rules as lowering.
 /// Only the scalar index crosses this boundary; executable values remain here.
@@ -467,13 +467,18 @@ fn lower_with_analog_variables(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let (mut signals, mut arrays, root_signal_ids) = lower_signals(&digital.signals);
+    let (mut signals, mut arrays, root_signal_ids) = lower_signals(&digital.signals)?;
     let mut elaborated: HashMap<SmolStr, DigitalSignalId> = digital
         .signals
         .iter()
         .zip(&root_signal_ids)
         .map(|(signal, id)| (signal.name.clone(), *id))
         .collect();
+    elaborated.extend(
+        signals
+            .iter()
+            .map(|signal| (signal.name.clone(), signal.id)),
+    );
     let mut frame_signal_ids: Vec<Vec<DigitalSignalId>> =
         Vec::with_capacity(digital.instances.len());
     for instance in &digital.instances {
@@ -482,6 +487,16 @@ fn lower_with_analog_variables(
             let id = match elaborated.get(&signal.name) {
                 Some(existing) => *existing,
                 None => {
+                    if signal.declared.element_alias.is_some() {
+                        return Err(vec![DigitalLoweringDiagnostic::invariant(
+                            format!(
+                                "array element view '{}' has no allocated target",
+                                signal.name
+                            ),
+                            signal.declared.span.into(),
+                        )]);
+                    }
+                    let start = signals.len();
                     let id = append_signal(
                         &signal.declared,
                         signal.name.clone(),
@@ -489,6 +504,11 @@ fn lower_with_analog_variables(
                         &mut arrays,
                     );
                     elaborated.insert(signal.name.clone(), id);
+                    elaborated.extend(
+                        signals[start..]
+                            .iter()
+                            .map(|cell| (cell.name.clone(), cell.id)),
+                    );
                     id
                 }
             };
@@ -589,6 +609,14 @@ fn lower_with_analog_variables(
         .iter()
         .map(|array| (array.storage.base, array.clone()))
         .collect();
+    let module_array_names: HashSet<_> = digital
+        .signals
+        .iter()
+        .filter(|signal| signal.unpacked.is_some())
+        .map(|signal| signal.name.clone())
+        .collect();
+    let elaborated_array_names: HashSet<_> =
+        arrays.iter().map(|array| array.name.clone()).collect();
     let no_constants = ResolvedConstants::default();
     let no_analog_variables = HashMap::new();
 
@@ -607,6 +635,7 @@ fn lower_with_analog_variables(
             &array_storage,
             &mut arrays,
             &module_scope,
+            &module_array_names,
             &module_constants,
             analog_variables,
             &mut probes,
@@ -622,6 +651,7 @@ fn lower_with_analog_variables(
             &mut signals,
             &array_storage,
             &module_scope,
+            &module_array_names,
             &module_constants,
             analog_variables,
             allocate(),
@@ -639,6 +669,12 @@ fn lower_with_analog_variables(
         .zip(&frame_scopes)
         .zip(&instance_constants)
     {
+        let frame_array_names: HashSet<_> = instance
+            .signals
+            .iter()
+            .filter(|signal| signal.declared.unpacked.is_some())
+            .map(|signal| signal.declared.name.clone())
+            .collect();
         let mut frame_variables: HashMap<_, _> = instance
             .analog_variables
             .iter()
@@ -662,6 +698,7 @@ fn lower_with_analog_variables(
                 &array_storage,
                 &mut arrays,
                 scope,
+                &frame_array_names,
                 constants,
                 &frame_variables,
                 &mut probes,
@@ -677,6 +714,7 @@ fn lower_with_analog_variables(
                 &mut signals,
                 &array_storage,
                 scope,
+                &frame_array_names,
                 constants,
                 &frame_variables,
                 allocate(),
@@ -694,6 +732,7 @@ fn lower_with_analog_variables(
                 &mut signals,
                 &array_storage,
                 &elaborated_scope,
+                &elaborated_array_names,
                 &no_constants,
                 &no_analog_variables,
                 allocate(),
@@ -1007,6 +1046,7 @@ fn lower_continuous_assign(
     signals: &mut Vec<DigitalSignal>,
     arrays: &HashMap<DigitalSignalId, super::digital::DigitalArray>,
     index: &HashMap<&str, DigitalSignalId>,
+    array_names: &HashSet<SmolStr>,
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
     id: DigitalProcessId,
@@ -1023,6 +1063,7 @@ fn lower_continuous_assign(
         signals,
         arrays,
         index,
+        array_names,
         constants,
         analog_variables,
         probes,
@@ -1118,18 +1159,61 @@ fn lower_continuous_assign(
 
 fn lower_signals(
     declarations: &[AnalyzedDigitalSignal],
-) -> (
-    Vec<DigitalSignal>,
-    Vec<super::digital::DigitalArray>,
-    Vec<DigitalSignalId>,
-) {
+) -> Result<
+    (
+        Vec<DigitalSignal>,
+        Vec<super::digital::DigitalArray>,
+        Vec<DigitalSignalId>,
+    ),
+    Vec<DigitalLoweringDiagnostic>,
+> {
     let mut signals = Vec::new();
     let mut arrays = Vec::new();
-    let ids = declarations
-        .iter()
-        .map(|signal| append_signal(signal, signal.name.clone(), &mut signals, &mut arrays))
-        .collect();
-    (signals, arrays, ids)
+    let mut ids = vec![DigitalSignalId::new(0); declarations.len()];
+    let mut allocated = HashMap::new();
+    for (index, signal) in declarations.iter().enumerate() {
+        if signal.element_alias.is_none() {
+            let id = append_signal(signal, signal.name.clone(), &mut signals, &mut arrays);
+            ids[index] = id;
+            allocated.insert(signal.name.as_str(), id);
+        }
+    }
+    for (index, signal) in declarations.iter().enumerate() {
+        let Some(alias) = &signal.element_alias else {
+            continue;
+        };
+        let invalid = || {
+            vec![DigitalLoweringDiagnostic::invariant(
+                format!(
+                    "real array element view '{}' has an invalid target or type",
+                    signal.name
+                ),
+                signal.span.into(),
+            )]
+        };
+        let base = allocated.get(alias.array.as_str()).ok_or_else(invalid)?;
+        let array = arrays
+            .iter()
+            .find(|array| array.storage.base == *base)
+            .ok_or_else(invalid)?;
+        if alias.offset >= array.storage.len || signal.unpacked.is_some() {
+            return Err(invalid());
+        }
+        let id = DigitalSignalId::new(base.index() + alias.offset);
+        let actual = &signals[usize::from(id)];
+        let expected = lower_signal(signal, id, actual.name.clone());
+        if !matches!(actual.kind, DigitalSignalKind::Real(_))
+            || actual.kind != expected.kind
+            || actual.procedurally_assignable
+            || expected.procedurally_assignable
+            || expected.width != 0
+            || expected.bounds.is_some()
+        {
+            return Err(invalid());
+        }
+        ids[index] = id;
+    }
+    Ok((signals, arrays, ids))
 }
 
 fn append_signal(
@@ -1250,6 +1334,7 @@ fn lower_process(
     arrays: &HashMap<DigitalSignalId, super::digital::DigitalArray>,
     local_arrays: &mut Vec<super::digital::DigitalArray>,
     index: &HashMap<&str, DigitalSignalId>,
+    array_names: &HashSet<SmolStr>,
     constants: &ResolvedConstants,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
     probes: &mut Vec<DigitalAnalogProbe>,
@@ -1264,6 +1349,7 @@ fn lower_process(
         signals,
         arrays,
         index,
+        array_names,
         constants,
         analog_variables,
         probes,
@@ -1570,6 +1656,9 @@ struct ProcessLowerer<'a> {
     signals: &'a mut Vec<DigitalSignal>,
     arrays: &'a HashMap<DigitalSignalId, super::digital::DigitalArray>,
     index: &'a HashMap<&'a str, DigitalSignalId>,
+    /// Lexical shape is independent of identity: a scalar port can share the
+    /// first cell of an array without denoting the whole array.
+    array_names: &'a HashSet<SmolStr>,
     /// The elaboration-time constants a name in this body may denote.
     ///
     /// IEEE 1364-2005 section 12.2 fixes a parameter's value at elaboration, so
@@ -3525,6 +3614,9 @@ impl ProcessLowerer<'_> {
                 .find(|item| item.storage.base == array.base)
                 .or_else(|| self.arrays.get(&array.base));
         }
+        if !self.array_names.contains(name) {
+            return None;
+        }
         self.index.get(name).and_then(|id| self.arrays.get(id))
     }
 
@@ -3572,17 +3664,24 @@ impl ProcessLowerer<'_> {
         else {
             return Vec::new();
         };
-        self.arrays.get(&signal).map_or_else(
-            || vec![signal],
-            |array| {
-                array
-                    .storage
-                    .cell_range()
-                    .expect("validated array shape")
-                    .map(DigitalSignalId::new)
-                    .collect()
-            },
-        )
+        self.array_declaration(name)
+            .or_else(|| {
+                self.analog_variables
+                    .get(name)
+                    .and_then(|variable| variable.event_signal.as_deref())
+                    .and_then(|event| self.array_declaration(event))
+            })
+            .map_or_else(
+                || vec![signal],
+                |array| {
+                    array
+                        .storage
+                        .cell_range()
+                        .expect("validated array shape")
+                        .map(DigitalSignalId::new)
+                        .collect()
+                },
+            )
     }
 
     fn validate_analog_event_reads(&mut self, expression: &Expression) {

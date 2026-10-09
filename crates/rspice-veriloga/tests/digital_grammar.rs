@@ -2871,3 +2871,22 @@ fn computed_and_resized_input_connections_elaborate() {
     );
     plan(&resized, "top").validate().unwrap();
 }
+
+
+#[test]
+fn real_net_dimensions_do_not_consume_the_net_name_as_a_discipline() {
+    for declaration in [
+        "wreal cells[0:1];",
+        "wreal ddiscrete cells[0:1][-1:0];",
+        "wreal ddiscrete[0:1];",
+        "wreal cells[INDEX[0]:1];",
+        "wreal ddiscrete [3:0] cells;",
+        "wrealsum cells[-1:0], more[2:3];",
+    ] {
+        parse(&format!("module top; {declaration} endmodule"));
+    }
+    for declaration in ["wreal custom cells;", "wreal custom [3:0] cells;"] {
+        let error = parse_error(&format!("module top; {declaration} endmodule"));
+        assert!(error.contains("the discipline `custom`"), "{error}");
+    }
+}

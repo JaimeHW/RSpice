@@ -268,13 +268,34 @@ impl Parser<'_> {
     /// afterwards honours.
     ///
     /// A discipline is distinguished from the net's own name the way the port
-    /// grammar distinguishes them: two adjacent identifiers, or an identifier
-    /// followed by a range. `wreal w;` declares `w`; `wreal ddiscrete w;`
-    /// declares `w` in `ddiscrete`.
+    /// grammar distinguishes them: a net identifier follows the discipline,
+    /// optionally after a range. A bracket alone is ambiguous because it can
+    /// instead start the net's unpacked dimensions (`wreal cells[0:1];`).
     fn parse_wreal_discipline(&mut self) -> Result<(), ParseError> {
+        let mut next = self.pos + 1;
+        if self
+            .tokens
+            .get(next)
+            .is_some_and(|token| token.kind == TokenKind::LBracket)
+        {
+            let mut depth = 0usize;
+            for token in &self.tokens[next..] {
+                next += 1;
+                match token.kind {
+                    TokenKind::LBracket => depth += 1,
+                    TokenKind::RBracket => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         let followed_by_declaration = matches!(
-            self.tokens.get(self.pos + 1).map(|token| token.kind),
-            Some(TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::LBracket)
+            self.tokens.get(next).map(|token| token.kind),
+            Some(TokenKind::Identifier | TokenKind::EscapedIdentifier)
         );
         if !(self.check(TokenKind::Identifier) && followed_by_declaration) {
             return Ok(());

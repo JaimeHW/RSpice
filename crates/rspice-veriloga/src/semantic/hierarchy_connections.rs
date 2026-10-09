@@ -601,6 +601,24 @@ fn prepare_boundaries(
 }
 
 fn retain_parameter_guards(module: &AnalyzedModule, analyzed: &mut AnalyzedModule) {
+    // Boundary insertion reanalyzes source, which cannot encode storage aliases.
+    // Keep those identities alongside the parameter specialization guards.
+    let element_aliases: HashMap<_, _> = module
+        .digital
+        .signals
+        .iter()
+        .filter_map(|signal| {
+            signal
+                .element_alias
+                .as_ref()
+                .map(|alias| (&signal.name, alias))
+        })
+        .collect();
+    for signal in &mut analyzed.digital.signals {
+        signal.element_alias = element_aliases
+            .get(&signal.name)
+            .map(|alias| (*alias).clone());
+    }
     let original_parameters: HashMap<_, _> = module
         .parameters
         .iter()

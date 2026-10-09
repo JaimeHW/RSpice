@@ -1876,3 +1876,149 @@ Rr r 0 1k
         }
     }
 }
+
+
+#[test]
+fn real_net_array_elements_share_resolved_drivers_through_hierarchy() {
+    let model = r#"
+`timescale 1ns/1ps
+module driver(q,p);
+ parameter real DRIVE=2;
+ inout q; wrealsum q;
+ output p; electrical p;
+ assign q=DRIVE;
+ analog V(p)<+q;
+endmodule
+module producer(q);
+ output real q;
+ initial begin q=6; #1 q=10; end
+endmodule
+module observer(q,p);
+ input q; wrealsum q;
+ output p; electrical p;
+ analog V(p)<+q;
+endmodule
+module bank(p,q,r,s,t);
+ parameter integer BASE=-2;
+ output p,q,r,s,t; electrical p,q,r,s,t;
+ wrealsum cells[BASE:BASE-1][-1:0];
+ real bias=1;
+ integer row=BASE-1, column=-1;
+ initial begin #1 bias=2; #1 row=BASE; column=0; end
+ assign cells[BASE-1][-1]=bias;
+ assign cells[BASE-1][0]=0.25;
+ driver #(.DRIVE(2)) first(cells[BASE-1][-1],p);
+ driver #(.DRIVE(4)) second(cells[BASE-1][-1],q);
+ producer source(cells[BASE][0]);
+ observer selected(cells[row][column],r);
+ observer fixed(cells[BASE-1][-1],s);
+ analog V(t)<+cells[BASE][0];
+endmodule
+module top(p,q,r,s,t);
+ output p,q,r,s,t; electrical p,q,r,s,t;
+ bank #(.BASE(4)) nested(p,q,r,s,t);
+endmodule
+"#;
+    for (kind, before, after) in [
+        ("wrealsum", 7.0, 8.0),
+        ("wrealavg", 7.0 / 3.0, 8.0 / 3.0),
+        ("wrealmin", 1.0, 2.0),
+        ("wrealmax", 4.0, 4.0),
+        ("wreal", 0.0, 0.0),
+    ] {
+        let source = Source::new(&model.replace("wrealsum", kind));
+        let deck = Netlist::parse(&format!(
+            "* real array identities\nX1 p q r s t top\n.va \"{}\" top module=top\n.end\n",
+            source.path()
+        ))
+        .unwrap();
+        let outcome = Engine::default().run_tran(&deck, 2.5e-9, 50e-12);
+        if kind == "wreal" {
+            let error = outcome.unwrap_err().to_string();
+            assert!(
+                error.contains("driver") && error.contains("resolution"),
+                "{error}"
+            );
+            continue;
+        }
+        let result = outcome.unwrap();
+        for (time, resolved, produced) in [
+            (0.5e-9, before, 6.0),
+            (1.5e-9, after, 10.0),
+            (2.4e-9, after, 10.0),
+        ] {
+            for node in ["p", "q", "s"] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - resolved).abs() < 1e-7,
+                    "{kind} {node}@{time}: {actual} != {resolved}"
+                );
+            }
+            let expected = if time > 2e-9 { produced } else { resolved };
+            assert!(
+                (voltage(&result, "r", time) - expected).abs() < 1e-7,
+                "{kind} dynamic@{time}"
+            );
+            assert!(
+                (voltage(&result, "t", time) - produced).abs() < 1e-7,
+                "{kind} output@{time}"
+            );
+        }
+    }
+}
+
+#[test]
+fn real_net_array_inout_converters_preserve_feedback_and_physical_loading() {
+    let source = Source::new(
+        r#"
+`timescale 1ps/1ps
+module load(a,p);
+ inout a; electrical a;
+ output p; electrical p;
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module bank(p,q);
+ parameter integer BASE=-2;
+ output p,q; electrical p,q;
+ logic cells; wrealsum cells[BASE:BASE+1];
+ real level=1.5;
+ initial #1000 level=3.0;
+ assign cells[BASE]=level;
+ load receiver(cells[BASE],p);
+ analog V(q)<+cells[BASE];
+endmodule
+module top(p,q);
+ output p,q; electrical p,q;
+ bank #(.BASE(3)) nested(p,q);
+endmodule
+connectmodule feedback(a,r);
+ inout a; electrical a;
+ inout r; logic r; wrealsum r;
+ real sample=0, returned=0;
+ always begin #100 sample=0.25*V(a); #10 returned=sample; end
+ assign r=returned;
+ analog I(a)<+(V(a)-r)/500;
+endmodule
+connectrules chosen; connect feedback merged; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* resolved array feedback\nX1 p q top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.8e-9, 25e-12).unwrap();
+    // The selected real net sums the source and sampled return driver. The
+    // converter's 500 ohms and the child's 1k load produce V = resolved / 1.5.
+    for (time, physical) in [(50e-12, 1.0), (150e-12, 7.0 / 6.0), (250e-12, 43.0 / 36.0)] {
+        assert!(
+            (voltage(&result, "p", time) - physical).abs() < 1e-7,
+            "physical@{time}"
+        );
+        assert!(
+            (voltage(&result, "q", time) - 1.5 * physical).abs() < 1e-7,
+            "resolved@{time}"
+        );
+    }
+    assert!((voltage(&result, "p", 1.75e-9) - 2.4).abs() < 1e-5);
+}
