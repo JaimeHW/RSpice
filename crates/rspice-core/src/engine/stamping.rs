@@ -112,7 +112,7 @@ impl Engine {
     ///
     /// `deficient_rows` is the assembled matrix's own emptiness report, so a
     /// row an analog device did stamp is never a candidate.
-    fn visit_unconstrained_xspice_event_rows(
+    pub(in crate::engine) fn visit_unconstrained_xspice_event_rows(
         circuit: &CircuitData,
         deficient_rows: &[usize],
         mut pin: impl FnMut(usize),

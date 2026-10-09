@@ -8029,6 +8029,7 @@ impl Engine {
                             residual::CoreEvaluation::NewCandidate
                         },
                         0.0,
+                        uses_vbic_correction.then_some(&mut correction_rhs),
                     ));
                 }
                 nonlinear_state_matches_new_solution = true;
@@ -8067,6 +8068,8 @@ impl Engine {
                             .form_correction_rhs(vectors, previous_q, previous_static, dt, order)
                             .map_err(|error| SimulationError::Circuit(error.to_string()))?,
                     )
+                } else if uses_vbic_correction {
+                    Some(&correction_rhs)
                 } else {
                     None
                 };
@@ -8124,9 +8127,17 @@ impl Engine {
                 // performs neither globalization matrix-vector product.
                 if globalization_active && _iter > 0 {
                     let merit_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
-                    let current_merit = self
-                        .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
-                        .unwrap_or(Value::INFINITY);
+                    let current_merit = if uses_vbic_correction {
+                        self.direct_operating_point_residual_norm(
+                            &circuit,
+                            &matrix,
+                            &new_solution,
+                            &correction_rhs,
+                        )
+                    } else {
+                        self.residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
+                    }
+                    .unwrap_or(Value::INFINITY);
                     if merit_backtrack.is_none() {
                         merit_cycle_detected |=
                             globalization::NewtonMeritBacktrack::repeats_two_cycle(
@@ -8225,7 +8236,11 @@ impl Engine {
 
                 if let Some(status) = xyce_nox_status.as_mut() {
                     let (residual_inf_norm, residual_l2_norm) =
-                        matrix.raw_residual_norms(&new_solution, &rhs)?;
+                        if let Some(correction) = direct_correction_rhs {
+                            direct_xyce_dae_norms(correction)?
+                        } else {
+                            matrix.raw_residual_norms(&new_solution, &rhs)?
+                        };
                     let device_converged = core_trial_converged(&circuit)
                         && (!enforce_device_convergence
                             || !circuit.has_nonlinear_devices()
@@ -8476,14 +8491,22 @@ impl Engine {
                             if _iter == 0 && globalization_active {
                                 let seed_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                                 last_stamped_iterate.clone_from(&new_solution);
-                                last_stamped_merit = self
-                                    .residual_inf_norm(
+                                last_stamped_merit = if uses_vbic_correction {
+                                    self.direct_operating_point_residual_norm(
+                                        &circuit,
+                                        &matrix,
+                                        &last_stamped_iterate,
+                                        &correction_rhs,
+                                    )
+                                } else {
+                                    self.residual_inf_norm(
                                         &circuit,
                                         &mut matrix,
                                         &last_stamped_iterate,
                                         &rhs,
                                     )
-                                    .unwrap_or(Value::INFINITY);
+                                }
+                                .unwrap_or(Value::INFINITY);
                                 capture_transient_merit_rollback(
                                     &circuit,
                                     &vbic_snapshot_cache,
@@ -8530,6 +8553,7 @@ impl Engine {
                                     residual::CoreEvaluation::NewCandidate,
                                     0.0,
                                     crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                                    uses_vbic_correction.then_some(&mut correction_rhs),
                                 ));
                             nonlinear_state_matches_new_solution = true;
                             let (residual_inf_norm, residual_l2_norm) = if uses_direct_xyce_dae {
@@ -8570,6 +8594,8 @@ impl Engine {
                                     )
                                     .map_err(|error| SimulationError::Circuit(error.to_string()))?;
                                 direct_xyce_dae_norms(direct_rhs)?
+                            } else if uses_vbic_correction {
+                                direct_xyce_dae_norms(&correction_rhs)?
                             } else {
                                 matrix.raw_residual_norms(&new_solution, &rhs)?
                             };
@@ -8878,6 +8904,7 @@ impl Engine {
                                     classic_mos_residual_scratch
                                         .as_mut()
                                         .map(|(row_ax, row_rhs)| (row_ax, row_rhs)),
+                                    &mut correction_rhs,
                                 )?;
                             mosfet_caps_valid = residual_converged_for_acceptance
                                 && classic_mos_stamp_cache.is_some()
@@ -13393,9 +13420,9 @@ D1 D 0 DMOD
     }
 
     #[test]
-    fn v20_non_breakpoint_checkpoint_round_trips_bjt_snapshot_cache_and_exact_suffix() {
+    fn non_breakpoint_checkpoint_round_trips_promoted_bjt_history_and_exact_suffix() {
         let source = "\
-v20 non-breakpoint BJT snapshot-cache continuation
+non-breakpoint promoted BJT continuation
 VC C 0 1
 VB B 0 SIN(-0.2 0.02 100MEG)
 VD D 0 SIN(-0.25 0.01 80MEG)
@@ -13414,7 +13441,7 @@ D1 D 0 DMOD
                 ..Default::default()
             },
         )
-        .expect("v20 raw snapshot-cache deck parses");
+        .expect("promoted BJT checkpoint deck parses");
         let engine =
             Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
 
@@ -13426,7 +13453,7 @@ D1 D 0 DMOD
                 TransientStartupMode::OperatingPoint,
                 &[0.25e-9],
             )
-            .expect("non-breakpoint v20 checkpoint trajectory solves");
+            .expect("non-breakpoint checkpoint trajectory solves");
         assert_eq!(scheduled.len(), 1);
         let checkpoint = &scheduled[0].checkpoint;
         assert!(checkpoint.time < 1.0e-9);
@@ -13436,8 +13463,8 @@ D1 D 0 DMOD
         assert!(history.bjt_history.accepted_dt_prev > 0.0);
         assert!(history.diode_history.accepted_dt_prev > 0.0);
         assert!(
-            history.vbic_snapshot_cache[0].is_some(),
-            "a regular accepted legacy-BJT point must retain its reusable charge snapshot"
+            history.vbic_snapshot_cache[0].is_none(),
+            "promoted GP state is retained in the solved nodes and charge history"
         );
         match checkpoint.accepted_integration_runtime() {
             AcceptedIntegrationRuntime::Exact(runtime) => {
@@ -13449,7 +13476,7 @@ D1 D 0 DMOD
         }
 
         let serialized = TransientCheckpoint::from_text(&checkpoint.to_text())
-            .expect("raw v20 snapshot-cache checkpoint round-trips");
+            .expect("promoted BJT checkpoint round-trips");
         let continuation = serialized
             .validated_integration_continuation()
             .expect("raw checkpoint continuation validates")
@@ -13458,11 +13485,11 @@ D1 D 0 DMOD
             serialized
                 .accepted_junction_transient_history()
                 .vbic_snapshot_cache[0]
-                .is_some()
+                .is_none()
         );
         let (resumed, resumed_final) = engine
             .run_tran_resume(&netlist, &serialized, 1.0e-9, 0.25e-9)
-            .expect("raw v20 snapshot-cache checkpoint resumes");
+            .expect("promoted BJT checkpoint resumes");
         match resumed_final.accepted_integration_runtime() {
             AcceptedIntegrationRuntime::RestartNormalized(runtime) => assert!(
                 runtime.accepted_interval_count

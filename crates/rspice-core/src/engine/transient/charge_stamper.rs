@@ -28,3 +28,30 @@ impl crate::device::MatrixStamper for StaticMatrixChargeStamper<'_> {
         }
     }
 }
+
+/// BJT assembly can retain a direct correction RHS alongside the affine
+/// system. The RHS-only pass uses the same device equations and Jacobian,
+/// without adding the Jacobian a second time. Static OneStep terms alone
+/// receive their half weight.
+pub(super) struct BjtTransientStamper<'a> {
+    pub matrix: Option<&'a mut crate::solver::StaticMatrix>,
+    pub rhs: &'a mut [Value],
+    pub weight: Value,
+}
+
+impl crate::device::MatrixStamper for BjtTransientStamper<'_> {
+    fn stamp(&mut self, row: crate::NodeId, col: crate::NodeId, value: Value) {
+        if row > 0
+            && col > 0
+            && let Some(matrix) = self.matrix.as_deref_mut()
+        {
+            matrix.add(row - 1, col - 1, self.weight * value);
+        }
+    }
+
+    fn stamp_rhs(&mut self, row: crate::NodeId, value: Value) {
+        if row > 0 {
+            self.rhs[row - 1] += self.weight * value;
+        }
+    }
+}

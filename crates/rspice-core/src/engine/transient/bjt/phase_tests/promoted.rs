@@ -124,6 +124,7 @@ fn sample_cached_on_side(
         &mut [None],
         one_step,
         phase_context,
+        false,
     )
     .unwrap();
     // This checks the real builder's frozen sparsity pattern as well as values.
@@ -170,6 +171,27 @@ fn gp_phase_promoted_companion_retains_the_limited_newton_anchor() {
             let actual = sample_cached(&mut circuit, &raw, &history, &coeff, time, false);
             let mut probe = promoted_circuit(&device);
             let expected = sample(&mut probe, &limited, &history, &coeff, time, false);
+            let device = &circuit.bjts.devices[0];
+            let mut direct = vec![0.0; raw.len()];
+            let mut stamper = charge_stamper::BjtTransientStamper {
+                matrix: None,
+                rhs: &mut direct,
+                weight: 1.0,
+            };
+            device.stamp_mna_correction(&mut stamper, &raw);
+            let phase = BjtPhaseContext::default().bind(&history).unwrap();
+            Engine::stamp_promoted_bjt_companions(
+                &mut stamper,
+                device,
+                0,
+                &coeff,
+                time - 2.0 * device.legacy_excess_phase_delay(),
+                &history,
+                phase.trial(0, time),
+                false,
+                Some(&raw),
+            )
+            .unwrap();
             for row in 0..raw.len() {
                 let movement = raw
                     .iter()
@@ -178,6 +200,11 @@ fn gp_phase_promoted_companion_retains_the_limited_newton_anchor() {
                     .map(|((raw, limited), derivative)| (raw - limited) * derivative)
                     .sum::<Value>();
                 let residual = expected.residual[row] + movement;
+                assert!(
+                    (-direct[row] - residual).abs() < 1e-11 + 1e-11 * residual.abs(),
+                    "direct p={p} private={private} row={row}: {} != {residual}",
+                    -direct[row]
+                );
                 assert!(
                     (actual.residual[row] - residual).abs() < 1e-11 + 1e-11 * residual.abs(),
                     "p={p} private={private} row={row}: {} != {residual}",
@@ -503,6 +530,7 @@ fn gp_right_trial_promoted_stamp_matches_physical_current_and_tangent() {
                                 rhs: &mut rhs,
                             },
                             one_step,
+                            None,
                         )
                         .unwrap();
                     let residual = matrix.residual_vector(values, &rhs).unwrap();

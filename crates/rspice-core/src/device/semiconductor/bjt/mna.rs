@@ -1691,12 +1691,21 @@ impl Bjt {
         stamper: &mut impl MatrixStamper,
         correction: &BjtCurrentBranch,
         static_weight: Value,
+        anchor: Option<&[Value]>,
     ) -> Result<(), String> {
         if !self.mna_promoted() || !self.uses_legacy_gummel_poon() {
             return Err("GP phase correction requires a promoted GP device".into());
         }
-        let internal = self.mna_internal_state();
-        let external = self.mna_external_state();
+        let mut internal = self.mna_internal_state();
+        let mut external = self.mna_external_state();
+        if let Some(anchor) = anchor {
+            for (index, value) in internal.iter_mut().enumerate() {
+                *value -= Self::node_voltage(anchor, self.mna_internal_node(index));
+            }
+            for (value, node) in external.iter_mut().zip(self.external_terminal_nodes()) {
+                *value -= Self::node_voltage(anchor, node);
+            }
+        }
         let source = correction.linearization_dot(&internal, &external) - correction.current;
         let mut resistance_gradient = BranchLinearization::default();
         if Self::series_active(self.rbi) {

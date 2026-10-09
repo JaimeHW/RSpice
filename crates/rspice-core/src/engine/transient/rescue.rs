@@ -128,6 +128,8 @@ impl Engine {
         let mut levels = self.gmin_nonlinear_schedule();
         levels.push(0.0);
 
+        let direct = Self::requires_vbic_correction_form(circuit);
+        let mut correction_rhs = Vec::new();
         let mut iterate = seed.to_vec();
         let mut level_index = 0;
         let mut refinements = 0;
@@ -163,13 +165,19 @@ impl Engine {
                     true,
                     residual::CoreEvaluation::NewCandidate,
                     extra_gmin,
+                    direct.then_some(&mut correction_rhs),
                 )?;
                 let line_search_base_state = circuit.nonlinear_state_snapshot();
                 let line_search_vbic_cache = vbic_snapshot_cache.to_vec();
 
-                let Ok(mut sol) = matrix.solve(rhs) else {
+                let Ok(mut sol) = matrix.solve(if direct { &correction_rhs } else { rhs }) else {
                     break;
                 };
+                if direct {
+                    for (value, anchor) in sol.iter_mut().zip(&iterate) {
+                        *value += anchor;
+                    }
+                }
 
                 // Preserve finite Newton states at every scale. Device-local
                 // limiting and the deformed-system merit below govern the
@@ -217,10 +225,19 @@ impl Engine {
                     residual::CoreEvaluation::ReuseCandidate,
                     extra_gmin,
                     crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                    direct.then_some(&mut correction_rhs),
                 )?;
-                let base_merit = self
-                    .residual_inf_norm(circuit, matrix, &iterate, rhs)
-                    .unwrap_or(Value::INFINITY);
+                let base_merit = if direct {
+                    self.direct_operating_point_residual_norm(
+                        circuit,
+                        matrix,
+                        &iterate,
+                        &correction_rhs,
+                    )
+                } else {
+                    self.residual_inf_norm(circuit, matrix, &iterate, rhs)
+                }
+                .unwrap_or(Value::INFINITY);
                 let mut accepted_trial: Option<(Vec<Value>, Value)> = None;
                 let mut alpha: Value = 1.0;
                 for _trial in 0..RESCUE_LINE_SEARCH_TRIALS {
@@ -243,10 +260,19 @@ impl Engine {
                         residual::CoreEvaluation::ReuseCandidate,
                         extra_gmin,
                         crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                        direct.then_some(&mut correction_rhs),
                     )?;
-                    let trial_merit = self
-                        .residual_inf_norm(circuit, matrix, &trial, rhs)
-                        .unwrap_or(Value::INFINITY);
+                    let trial_merit = if direct {
+                        self.direct_operating_point_residual_norm(
+                            circuit,
+                            matrix,
+                            &trial,
+                            &correction_rhs,
+                        )
+                    } else {
+                        self.residual_inf_norm(circuit, matrix, &trial, rhs)
+                    }
+                    .unwrap_or(Value::INFINITY);
                     let armijo_ok = trial_merit <= 1.0
                         || trial_merit <= base_merit * (1.0 - RESCUE_LINE_SEARCH_ARMIJO_C1 * alpha);
                     if armijo_ok {
@@ -281,6 +307,7 @@ impl Engine {
                     true,
                     residual::CoreEvaluation::NewCandidate,
                     extra_gmin,
+                    direct.then_some(&mut correction_rhs),
                 )?;
 
                 let voltage_converged = Self::check_voltage_convergence_with_tolerances(
@@ -355,6 +382,7 @@ impl Engine {
             None,
             None,
             None,
+            &mut correction_rhs,
         )?;
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);

@@ -243,6 +243,7 @@ impl BjtPhaseTrial<'_> {
         bjt: &crate::device::Bjt,
         stamper: &mut impl crate::device::MatrixStamper,
         xyce_one_step_order2: bool,
+        anchor: Option<&[Value]>,
     ) -> Result<(), String> {
         let (_, internal, _) = bjt.mna_charge_state();
         let mut correction = self.correction(bjt, &internal)?;
@@ -260,7 +261,7 @@ impl BjtPhaseTrial<'_> {
         } else {
             1.0
         };
-        bjt.stamp_legacy_mna_phase_correction(stamper, &correction, weight)
+        bjt.stamp_legacy_mna_phase_correction(stamper, &correction, weight, anchor)
     }
 
     pub(in crate::engine::transient) fn correction(

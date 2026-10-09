@@ -1417,6 +1417,7 @@ impl PssCircuit {
                 &mut self.bjt_snapshot_cache,
                 false,
                 Default::default(),
+                false,
             )?;
             Engine::stamp_jfet_transient_companions(
                 super::super::transient::TransientCompanionStamp {

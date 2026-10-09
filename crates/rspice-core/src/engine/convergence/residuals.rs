@@ -407,7 +407,7 @@ impl Engine {
         }
     }
 
-    fn direct_operating_point_residual_norm(
+    pub(in crate::engine) fn direct_operating_point_residual_norm(
         &self,
         circuit: &CircuitData,
         matrix: &StaticMatrix,

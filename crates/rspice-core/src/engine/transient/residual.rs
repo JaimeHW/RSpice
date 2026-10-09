@@ -1376,6 +1376,35 @@ impl Engine {
             xyce_one_step_order2,
             xyce_static_history,
         );
+        self.transient_direct_residual_converged(circuit, matrix, solution, rhs, &residual)
+    }
+
+    /// Convergence of the directly assembled correction. Core constitutive
+    /// rows retain their branch floor and independent affine backward-error
+    /// check, while the global norm uses the physical BJT currents.
+    pub(super) fn transient_direct_residual_converged(
+        &self,
+        circuit: &crate::circuit::CircuitData,
+        matrix: &crate::solver::StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+        correction: &[Value],
+    ) -> bool {
+        if self.config.spice_dialect != SpiceDialect::Xyce {
+            return self
+                .direct_operating_point_residual_norm(circuit, matrix, solution, correction)
+                .is_some_and(|norm| norm <= 1.0);
+        }
+        if circuit.xyce_core_trial_invalid()
+            || solution.iter().any(|value| !value.is_finite())
+            || correction.iter().any(|value| !value.is_finite())
+            || crate::numerics::infinity_norm(correction) >= self.transient_nonlinear_rhstol()
+        {
+            return false;
+        }
+        if !circuit.has_xyce_core_inductors() {
+            return true;
+        }
         let rows: Vec<_> = circuit
             .xyce_core_transient_residuals
             .iter()
@@ -1388,7 +1417,7 @@ impl Engine {
                 .iter()
                 .find_map(|&(index, bound)| (index == row).then_some(bound))
                 .unwrap_or(Some(0.0));
-            residual.get(row).is_some_and(|value| {
+            correction.get(row).is_some_and(|value| {
                 value.is_finite()
                     && rounding.is_some_and(|rounding| {
                         rounding.is_finite()
@@ -1397,13 +1426,7 @@ impl Engine {
                     })
             })
         });
-        // The global RHSTOL must inspect those same physical rows; checking
-        // the rounded affine rows again would reintroduce false rejections.
-        let physical_norm = residual.iter().try_fold(0.0_f64, |norm, value| {
-            value.is_finite().then(|| norm.max(value.abs()))
-        });
         core_branch_converged
-            && physical_norm.is_some_and(|norm| norm < self.transient_nonlinear_rhstol())
             && matrix
                 .componentwise_backward_error_by_rows(solution, rhs, &rows)
                 .is_ok_and(|ratio| ratio <= 1.0)
@@ -1433,6 +1456,7 @@ impl Engine {
         refresh_nonlinear: bool,
         core_evaluation: CoreEvaluation,
         extra_diag_gmin: Value,
+        correction_rhs: Option<&mut Vec<Value>>,
     ) -> Result<(), SimulationError> {
         self.stamp_transient_system_with_generated_mode(
             circuit,
@@ -1447,6 +1471,7 @@ impl Engine {
             core_evaluation,
             extra_diag_gmin,
             crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+            correction_rhs,
         )
     }
 
@@ -1465,7 +1490,9 @@ impl Engine {
         core_evaluation: CoreEvaluation,
         extra_diag_gmin: Value,
         evaluation_mode: crate::device::veriloga_builtins::GeneratedEvaluationMode,
+        mut correction_rhs: Option<&mut Vec<Value>>,
     ) -> Result<(), SimulationError> {
+        let defer_promoted = correction_rhs.is_some();
         let num_nodes = circuit.num_nodes();
         let used_diode_attempt_cache = extra_diag_gmin == 0.0
             && !ctx.xyce_one_step_order2
@@ -1623,6 +1650,7 @@ impl Engine {
             vbic_snapshot_cache,
             ctx.xyce_one_step_order2,
             ctx.bjt_phase,
+            defer_promoted,
         )?;
         Self::stamp_jfet_transient_companions(
             TransientCompanionStamp {
@@ -1793,7 +1821,12 @@ impl Engine {
             let static_nonlinear_snapshot = ctx
                 .xyce_one_step_order2
                 .then(|| (matrix.values_mut().to_vec(), rhs.to_vec()));
-            if evaluation_mode
+            if defer_promoted {
+                circuit.try_stamp_nonlinear_deferred_vbic(
+                    matrix, rhs, solution,
+                    evaluation_mode == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                ).map_err(SimulationError::from)?;
+            } else if evaluation_mode
                 == crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe
             {
                 circuit
@@ -1885,7 +1918,74 @@ impl Engine {
                 *rhs_value -= 0.5 * previous_residual;
             }
         }
+        if let Some(correction) = correction_rhs.as_deref_mut() {
+            // Convert the other families before adding BJT J*x-I terms: those
+            // large affine terms can erase picoampere currents at small dt.
+            matrix.correction_rhs_into(rhs, solution, correction)?;
+            circuit
+                .stabilize_inductor_transient_correction_rhs(correction, solution, dt, ctx.coeff);
+            if circuit.has_xyce_core_inductors() {
+                circuit.overwrite_xyce_core_transient_correction_rhs(
+                    correction,
+                    ctx.xyce_one_step_order2,
+                    ctx.xyce_static_history,
+                );
+            }
+            let phase = ctx.bjt_phase.bind(ctx.bjt_history)?;
+            for direct in [true, false] {
+                let mut stamper = charge_stamper::BjtTransientStamper {
+                    matrix: if direct { None } else { Some(&mut *matrix) },
+                    rhs: if direct { &mut *correction } else { &mut *rhs },
+                    weight: 1.0,
+                };
+                for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
+                    if !bjt.mna_promoted() {
+                        continue;
+                    }
+                    stamper.weight = if ctx.xyce_one_step_order2 { 0.5 } else { 1.0 };
+                    if direct {
+                        bjt.stamp_mna_correction(&mut stamper, solution);
+                    } else {
+                        use crate::device::NonlinearDevice;
+                        bjt.stamp_nonlinear(solution, &mut stamper, &mut []);
+                    }
+                    stamper.weight = 1.0;
+                    let anchor = direct.then_some(solution);
+                    Self::stamp_bjt_external_bc_companion(
+                        &mut stamper,
+                        bjt,
+                        index,
+                        solution,
+                        &companion_coeff,
+                        dt,
+                        ctx.bjt_history,
+                        anchor,
+                    )?;
+                    Self::stamp_promoted_bjt_companions(
+                        &mut stamper,
+                        bjt,
+                        index,
+                        &companion_coeff,
+                        dt,
+                        ctx.bjt_history,
+                        phase.trial(index, time),
+                        ctx.xyce_one_step_order2,
+                        anchor,
+                    )?;
+                }
+            }
+        }
         if ctx.baseline_diag_gmin == 0.0 && extra_diag_gmin == 0.0 {
+            if let Some(correction) = correction_rhs
+                && circuit.xspice_event_node_matrix_rows().next().is_some()
+            {
+                let deficient = matrix.deficient_rows();
+                Self::visit_unconstrained_xspice_event_rows(circuit, &deficient, |row| {
+                    if rhs.get(row).is_some_and(|value| *value == 0.0) {
+                        correction[row] = -solution[row];
+                    }
+                });
+            }
             Self::pin_unconstrained_xspice_event_rows(circuit, matrix, rhs);
         }
         Ok(())
@@ -2538,11 +2638,13 @@ impl Engine {
         classic_mos_static_terms: Option<&[crate::device::mosfet::ClassicMosCachedStaticTerms]>,
         mut classic_mos_caps_out: Option<&mut Vec<(Value, Value, Value)>>,
         classic_mos_residual_scratch: Option<(&mut Vec<Value>, &mut Vec<Value>)>,
+        correction: &mut Vec<Value>,
     ) -> Result<bool, SimulationError> {
         if solution.iter().any(|value| !value.is_finite()) {
             return Ok(false);
         }
 
+        let direct = Self::requires_vbic_correction_form(circuit);
         let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
         if let Some(cache) = classic_mos_cache {
             require_cached_source_side(cache.attempt_source_side, ctx.source_time_side)?;
@@ -2635,7 +2737,12 @@ impl Engine {
                 CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                direct.then_some(&mut *correction),
             )?;
+        }
+        if direct {
+            return Ok(self
+                .transient_direct_residual_converged(circuit, matrix, solution, rhs, correction));
         }
         Ok(self.transient_residual_convergence_met(
             circuit,
@@ -2861,6 +2968,46 @@ mod tests {
         }
     }
 
+    fn core_affine_and_direct_converged(
+        engine: &Engine,
+        circuit: &crate::circuit::CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+        one_step_order2: bool,
+        static_history: Option<&[Value]>,
+    ) -> bool {
+        let affine = engine.transient_residual_convergence_met(
+            circuit,
+            matrix,
+            solution,
+            rhs,
+            one_step_order2,
+            static_history,
+        );
+        let mut correction = Vec::new();
+        if matrix
+            .correction_rhs_into(rhs, solution, &mut correction)
+            .is_err()
+        {
+            // Nonfinite affine inputs are rejected by assembly before a
+            // direct nonlinear proof can run.
+            assert!(!affine);
+            return false;
+        }
+        circuit.overwrite_xyce_core_transient_correction_rhs(
+            &mut correction,
+            one_step_order2,
+            static_history,
+        );
+        assert_eq!(
+            affine,
+            engine.transient_direct_residual_converged(circuit, matrix, solution, rhs, &correction),
+            "direct BJT assembly must preserve every magnetic-core convergence guard",
+        );
+        affine
+    }
+
     #[test]
     fn xyce_core_residual_preserves_branch_floor_and_other_equation_guards() {
         let (engine, mut circuit, row) = xyce_core_residual_fixture();
@@ -2872,7 +3019,8 @@ mod tests {
         let mut rhs = solution.clone();
         let floor = circuit.xyce_core_branch_residual_tolerance();
         circuit.xyce_core_transient_residuals = vec![(row, floor)];
-        assert!(engine.transient_residual_convergence_met(
+        assert!(core_affine_and_direct_converged(
+            &engine,
             &circuit,
             &mut matrix,
             &solution,
@@ -2882,7 +3030,8 @@ mod tests {
         ));
         for invalid in [floor.next_up(), Value::NAN, Value::INFINITY] {
             circuit.xyce_core_transient_residuals[0].1 = invalid;
-            assert!(!engine.transient_residual_convergence_met(
+            assert!(!core_affine_and_direct_converged(
+                &engine,
                 &circuit,
                 &mut matrix,
                 &solution,
@@ -2897,7 +3046,8 @@ mod tests {
         assert_ne!(row, 0);
         for invalid in [1.001, Value::NAN, Value::INFINITY] {
             rhs[0] = invalid;
-            assert!(!engine.transient_residual_convergence_met(
+            assert!(!core_affine_and_direct_converged(
+                &engine,
                 &circuit,
                 &mut matrix,
                 &solution,
@@ -2910,7 +3060,8 @@ mod tests {
         // Nor can it waive an inconsistent affine linearization: the
         // independently computed componentwise backward-error guard remains.
         rhs[row] = 1.001;
-        assert!(!engine.transient_residual_convergence_met(
+        assert!(!core_affine_and_direct_converged(
+            &engine,
             &circuit,
             &mut matrix,
             &solution,
@@ -2938,7 +3089,8 @@ mod tests {
             Some(Value::INFINITY),
         ] {
             circuit.xyce_core_transient_roundoff = vec![(row, bound)];
-            assert!(!engine.transient_residual_convergence_met(
+            assert!(!core_affine_and_direct_converged(
+                &engine,
                 &circuit,
                 &mut matrix,
                 &solution,
@@ -2948,7 +3100,8 @@ mod tests {
             ));
         }
         circuit.xyce_core_transient_roundoff = vec![(row, Some(floor))];
-        assert!(engine.transient_residual_convergence_met(
+        assert!(core_affine_and_direct_converged(
+            &engine,
             &circuit,
             &mut matrix,
             &solution,
@@ -2957,7 +3110,8 @@ mod tests {
             None
         ));
         circuit.xyce_core_transient_residuals[0].1 = (2.0 * floor).next_up();
-        assert!(!engine.transient_residual_convergence_met(
+        assert!(!core_affine_and_direct_converged(
+            &engine,
             &circuit,
             &mut matrix,
             &solution,
@@ -2968,7 +3122,8 @@ mod tests {
         // Even a large, finite coordinate bound cannot waive authored RHSTOL.
         circuit.xyce_core_transient_roundoff[0].1 = Some(1.0);
         circuit.xyce_core_transient_residuals[0].1 = 1e-7;
-        assert!(!engine.transient_residual_convergence_met(
+        assert!(!core_affine_and_direct_converged(
+            &engine,
             &circuit,
             &mut matrix,
             &solution,
@@ -2979,7 +3134,8 @@ mod tests {
         // A failed winding-voltage check rejects even a zero dynamic residual.
         circuit.xyce_core_transient_residuals[0].1 = 0.0;
         circuit.xyce_core_transient_roundoff[0].1 = None;
-        assert!(!engine.transient_residual_convergence_met(
+        assert!(!core_affine_and_direct_converged(
+            &engine,
             &circuit,
             &mut matrix,
             &solution,
@@ -3154,6 +3310,7 @@ D2 in out DMOD
                 CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                None,
             )
             .expect("canonical assembly succeeds");
         let canonical_values = matrix.values_mut().to_vec();
@@ -3192,6 +3349,7 @@ D2 in out DMOD
                 CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                None,
             )
             .expect("cached assembly succeeds");
 
@@ -3219,6 +3377,7 @@ D2 in out DMOD
                 CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                None,
             )
             .unwrap_err();
         assert!(error.to_string().contains("source cache has event side"));
@@ -3241,6 +3400,7 @@ D2 in out DMOD
                 None,
                 None,
                 Some((&mut proof_ax, &mut proof_rhs)),
+                &mut Vec::new(),
             )
             .unwrap_err();
         assert!(error.to_string().contains("source cache has event side"));
@@ -3377,6 +3537,7 @@ M1 d g 0 0 NM W=10u L=1u
                 CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                None,
             )
             .expect("canonical assembly succeeds");
         let canonical_values = matrix.values_mut().to_vec();
@@ -3502,6 +3663,7 @@ M1 d g 0 0 NM W=10u L=1u
                 None,
                 None,
                 Some((&mut proof_ax, &mut proof_rhs)),
+                &mut Vec::new(),
             )
             .unwrap_err();
         assert!(error.to_string().contains("source cache has event side"));
@@ -3971,6 +4133,7 @@ Q1 C B E 0 QN
                 true,
                 CoreEvaluation::NewCandidate,
                 0.0,
+                None,
             )
             .expect("base transient system stamps");
         let zeros = vec![0.0; size];
@@ -4003,6 +4166,7 @@ Q1 C B E 0 QN
                     true,
                     CoreEvaluation::NewCandidate,
                     0.0,
+                    None,
                 )
                 .expect("positive transient probe stamps");
             let f_plus = matrix
@@ -4023,6 +4187,7 @@ Q1 C B E 0 QN
                     true,
                     CoreEvaluation::NewCandidate,
                     0.0,
+                    None,
                 )
                 .expect("negative transient probe stamps");
             let f_minus = matrix
@@ -4153,6 +4318,7 @@ Q1 C B E 0 QN
                 true,
                 CoreEvaluation::NewCandidate,
                 0.0,
+                None,
             )
             .expect("static companion system stamps");
         let mut static_columns = Vec::with_capacity(size);
@@ -4180,6 +4346,7 @@ Q1 C B E 0 QN
                 true,
                 CoreEvaluation::NewCandidate,
                 0.0,
+                None,
             )
             .expect("dynamic companion system stamps");
 
@@ -4259,6 +4426,7 @@ Q1 C B E 0 QN
                 true,
                 CoreEvaluation::NewCandidate,
                 0.0,
+                None,
             )
             .expect("static matrix-vector system stamps");
         let gv = matrix
@@ -4277,6 +4445,7 @@ Q1 C B E 0 QN
                 true,
                 CoreEvaluation::NewCandidate,
                 0.0,
+                None,
             )
             .expect("dynamic matrix-vector system stamps");
         let correction = matrix.solve(&gv).expect("A solve");

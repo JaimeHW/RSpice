@@ -1773,6 +1773,10 @@ impl Engine {
         let mut new_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
         let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        // The Xyce DC update test includes branch currents and cannot accept
+        // the first Newton correction. Adding a large correction to the seed
+        // can otherwise leave cancellation error in a tiny source current.
+        let startup_seed = solution.clone();
         let max_iterations = self.continuation_iteration_budget(1, 64);
 
         for iteration in 0..max_iterations {
@@ -1827,8 +1831,13 @@ impl Engine {
             Self::reset_nonfinite_values(&mut new_solution);
             Self::enforce_node_voltage_hints(circuit, matrix, &mut new_solution, node_hints);
 
-            let voltage_converged =
-                self.node_voltage_convergence_met(&solution, &new_solution, node_count);
+            let voltage_converged = self.dc_newton_update_convergence_met(
+                &solution,
+                &new_solution,
+                &startup_seed,
+                node_count,
+                iteration,
+            );
             self.update_device_states_for_operating_point(
                 circuit,
                 OperatingPointProbe {
@@ -2211,6 +2220,10 @@ impl Engine {
         let mut raw_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
         let uses_vbic_correction = Self::requires_vbic_correction_form(circuit);
+        // The Xyce DC update test includes branch currents and cannot accept
+        // the first Newton correction. Adding a large correction to the seed
+        // can otherwise leave cancellation error in a tiny source current.
+        let startup_seed = solution.clone();
         let mut damping_state = NewtonDampingState::default();
         let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
             || self.b3soi_limiter_owns_global_damping(circuit);
@@ -2350,8 +2363,13 @@ impl Engine {
             Self::reset_nonfinite_values(new_solution);
             Self::enforce_node_voltage_hints(circuit, matrix, new_solution, node_constraints);
 
-            let voltage_converged =
-                self.node_voltage_convergence_met(&solution, new_solution, circuit.num_nodes());
+            let voltage_converged = self.dc_newton_update_convergence_met(
+                &solution,
+                new_solution,
+                &startup_seed,
+                circuit.num_nodes(),
+                iteration,
+            );
             self.update_device_states_for_operating_point(
                 circuit,
                 OperatingPointProbe {

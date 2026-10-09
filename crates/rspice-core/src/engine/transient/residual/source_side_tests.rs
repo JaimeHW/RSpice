@@ -108,6 +108,7 @@ fn source_event_sides_solve_and_prove_distinct_analog_equilibria() {
                         None,
                         None,
                         None,
+                        &mut Vec::new(),
                     )
                     .unwrap()
             );
@@ -144,6 +145,7 @@ fn source_event_sides_solve_and_prove_distinct_analog_equilibria() {
                         None,
                         None,
                         None,
+                        &mut Vec::new(),
                     )
                     .unwrap(),
                 "a root of one side must fail the opposite-side proof"

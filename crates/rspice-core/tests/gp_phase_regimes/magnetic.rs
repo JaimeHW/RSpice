@@ -278,3 +278,99 @@ fn gp_events_preserve_mutual_flux_modes_and_exact_checkpoint_continuation() {
         }
     }
 }
+
+// An ordinary flux-truncation retry can be much shorter than the output step.
+// Its BJT charge Jacobian must not erase the finite source current, including
+// when that current drives another circuit equation.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_small_step_preserves_source_current_and_cccs_feedback() {
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+        ] {
+            for polarity in [1.0, -1.0] {
+                for control in ["L1", "R1"] {
+                    let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+                    config.gp_transient_phase_model = GpTransientPhaseModel::NgspiceWeil;
+                    config.integration_method = method;
+                    config.convergence_config.gmin_target = 0.0;
+                    let engine = Engine::new(config);
+                    let source = Netlist::parse(&format!(
+                        "small-step source current\nVC c 0 {}\nVB b 0 {}\nVD drive 0 DC 0 SIN(0 {} 1G)\nR1 drive coil 1k\nL1 coil 0 1u\nF1 b 0 {control} 1\nF2 copy 0 VB 1\nR2 copy 0 1k\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=1k\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) v(copy) i(vb) i(f1) i(f2)\n.end\n",
+                        2.0*polarity, 0.7*polarity, 1e-3*polarity,
+                        if polarity > 0.0 { "NPN" } else { "PNP" },
+                    )).unwrap();
+                    let (result, checkpoints) = engine
+                        .run_tran_checkpoint_schedule_with_startup_mode(
+                            &source,
+                            50e-12,
+                            2e-12,
+                            TransientStartupMode::OperatingPoint,
+                            &[25e-12],
+                        )
+                        .unwrap_or_else(|error| {
+                            panic!("{dialect:?}/{method:?}/{polarity}/{control}: {error}")
+                        });
+                    let base = result.try_branch_current_waveform_named("vb").unwrap();
+                    let forcing = result.try_branch_current_waveform_named("f1").unwrap();
+                    let copy_current = result.try_branch_current_waveform_named("f2").unwrap();
+                    let copy_voltage = result.try_voltage_waveform_named("copy").unwrap();
+                    let voltage = result.try_voltage_waveform_named("b").unwrap();
+                    let vt = thermal_voltage(dialect);
+                    let current =
+                        polarity * (diode(0.7, vt, dialect).0 / 100.0 + diode(-1.3, vt, dialect).0);
+                    for (index, &time) in result.time.iter().enumerate() {
+                        let expected = current + forcing[index];
+                        assert!((voltage[index] - polarity * 0.7).abs() < 1e-10);
+                        assert!(
+                            (-base[index] - expected).abs() < 2e-11,
+                            "{dialect:?}/{method:?}/{polarity}/{control} t={time:e}: {} != {expected:e}",
+                            -base[index]
+                        );
+                        assert!((copy_current[index] - base[index]).abs() < 1e-15);
+                        assert!((copy_voltage[index] - 1000.0 * expected).abs() < 2e-8);
+                    }
+                    let checkpoint = TransientCheckpoint::from_bytes(
+                        &checkpoints[0]
+                            .checkpoint
+                            .to_bytes(TransientCheckpointEncoding::Packed)
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let (resumed, _) = engine
+                        .run_tran_resume(&source, &checkpoint, 50e-12, 2e-12)
+                        .unwrap();
+                    let seam = result
+                        .time
+                        .iter()
+                        .position(|&time| time == checkpoint.time)
+                        .unwrap();
+                    assert_eq!(resumed.time, result.time[seam..]);
+                    for (actual, expected) in resumed
+                        .voltages
+                        .iter()
+                        .chain(&resumed.branch_currents)
+                        .zip(result.voltages.iter().chain(&result.branch_currents))
+                    {
+                        if expected.is_empty() {
+                            assert!(actual.is_empty());
+                            continue;
+                        }
+                        assert_eq!(actual.len(), expected.len() - seam);
+                        for (&a, &e) in actual.iter().zip(&expected[seam..]) {
+                            assert_eq!(a.to_bits(), e.to_bits());
+                        }
+                    }
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                }
+            }
+        }
+    }
+}

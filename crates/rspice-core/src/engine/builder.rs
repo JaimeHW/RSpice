@@ -6975,7 +6975,12 @@ impl Engine {
                         }
                     }
 
-                    if bjt.uses_vbic_dynamic_charges() || bjt.has_intrinsic_state_unknowns() {
+                    // Transient collapsed GP states alias existing terminals;
+                    // direct charge currents need no extra matrix unknowns.
+                    if transient_stop_time.is_some()
+                        || bjt.uses_vbic_dynamic_charges()
+                        || bjt.has_intrinsic_state_unknowns()
+                    {
                         bjt.assign_mna_internal_nodes(|suffix| {
                             circuit.get_or_create_node(&format!(
                                 "{}.__{}.internal",

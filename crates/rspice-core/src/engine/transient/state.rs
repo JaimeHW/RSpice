@@ -1116,6 +1116,7 @@ impl Engine {
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
         xyce_one_step_order2: bool,
         phase_context: bjt::BjtPhaseContext<'_>,
+        defer_promoted: bool,
     ) -> Result<(), SimulationError> {
         let phase = phase_context.bind(history)?;
         let TransientCompanionStamp {
@@ -1136,91 +1137,35 @@ impl Engine {
             if charge_factor <= 0.0 {
                 continue;
             }
-            if let Some(charge) = bjt.legacy_external_bc_charge(voltages) {
-                let current = Self::jfet_companion_ccap(
+            if bjt.mna_promoted() && defer_promoted {
+                continue;
+            }
+            let mut stamper = StaticMatrixChargeStamper {
+                matrix: &mut *matrix,
+                rhs: &mut *rhs,
+            };
+            Self::stamp_bjt_external_bc_companion(
+                &mut stamper,
+                bjt,
+                idx,
+                voltages,
+                coeff,
+                dt,
+                history,
+                None,
+            )?;
+            if bjt.mna_promoted() {
+                Self::stamp_promoted_bjt_companions(
+                    &mut stamper,
+                    bjt,
+                    idx,
                     coeff,
                     dt,
-                    charge.charge,
-                    BranchChargeHistory {
-                        q_prev: history.charge_q_prev[idx][BJT_QBCX_BRANCH_INDEX],
-                        q_prev_prev: history.charge_q_prev_prev[idx][BJT_QBCX_BRANCH_INDEX],
-                        cq_prev: history.charge_cq_prev[idx][BJT_QBCX_BRANCH_INDEX],
-                    },
-                );
-                let conductance = charge_factor * charge.capacitance;
-                let source = conductance * charge.voltage - current;
-                if !conductance.is_finite() || !source.is_finite() {
-                    return Err(SimulationError::Circuit(format!(
-                        "BJT '{}' has a nonfinite external BC companion",
-                        bjt.name
-                    )));
-                }
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    charge.nodes[0],
-                    charge.nodes[1],
-                    conductance,
-                    source,
-                );
-            }
-            if bjt.mna_promoted() {
-                // Promoted BJT: per-branch charge companions on the actual
-                // internal nodes (ngspice NIintegrate discipline), evaluated
-                // and linearized at the limited bias cached by the device
-                // update for this Newton iterate.
-                let (branches, internal, external) = bjt.mna_charge_state();
-                let mut stamper = StaticMatrixChargeStamper {
-                    matrix: &mut *matrix,
-                    rhs: &mut *rhs,
-                };
-                if let Some(phase) = phase.trial(idx, time) {
-                    phase
-                        .stamp_promoted(bjt, &mut stamper, xyce_one_step_order2)
-                        .map_err(|error| {
-                            SimulationError::Circuit(format!(
-                                "BJT '{}' phase companion: {error}",
-                                bjt.name
-                            ))
-                        })?;
-                }
-                for (branch_idx, branch) in branches.iter().enumerate() {
-                    if !branch.is_active() {
-                        continue;
-                    }
-                    let cq = Self::jfet_companion_ccap(
-                        coeff,
-                        dt,
-                        branch.charge,
-                        BranchChargeHistory {
-                            q_prev: history.charge_q_prev[idx][branch_idx],
-                            q_prev_prev: history.charge_q_prev_prev[idx][branch_idx],
-                            cq_prev: history.charge_cq_prev[idx][branch_idx],
-                        },
-                    );
-                    if !cq.is_finite()
-                        || branch
-                            .d_internal
-                            .iter()
-                            .chain(&branch.d_external)
-                            .any(|value| !(charge_factor * value).is_finite())
-                    {
-                        return Err(SimulationError::Circuit(format!(
-                            "BJT '{}' transient charge {branch_idx} is nonfinite for dt={dt:e}",
-                            bjt.name,
-                        )));
-                    }
-                    let polarity = bjt.charge_branch_polarity(branch_idx);
-                    Self::stamp_vbic_mna_charge_branch(
-                        &mut stamper,
-                        bjt,
-                        branch,
-                        polarity * charge_factor,
-                        polarity * cq,
-                        &internal,
-                        &external,
-                    );
-                }
+                    history,
+                    phase.trial(idx, time),
+                    xyce_one_step_order2,
+                    None,
+                )?;
                 continue;
             }
 
@@ -1343,6 +1288,122 @@ impl Engine {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn stamp_bjt_external_bc_companion(
+        stamper: &mut impl crate::device::MatrixStamper,
+        bjt: &crate::device::Bjt,
+        idx: usize,
+        voltages: &[Value],
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &BjtTransientHistory,
+        anchor: Option<&[Value]>,
+    ) -> Result<(), SimulationError> {
+        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
+        if let Some(charge) = bjt.legacy_external_bc_charge(voltages) {
+            let current = Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                charge.charge,
+                BranchChargeHistory {
+                    q_prev: history.charge_q_prev[idx][BJT_QBCX_BRANCH_INDEX],
+                    q_prev_prev: history.charge_q_prev_prev[idx][BJT_QBCX_BRANCH_INDEX],
+                    cq_prev: history.charge_cq_prev[idx][BJT_QBCX_BRANCH_INDEX],
+                },
+            );
+            let conductance = charge_factor * charge.capacitance;
+            let voltage = charge.voltage
+                - anchor.map_or(0.0, |point| {
+                    Self::node_voltage(point, charge.nodes[0])
+                        - Self::node_voltage(point, charge.nodes[1])
+                });
+            let source = conductance * voltage - current;
+            if !conductance.is_finite() || !source.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' has a nonfinite external BC companion",
+                    bjt.name
+                )));
+            }
+            let [pos, neg] = charge.nodes;
+            stamper.stamp(pos, pos, conductance);
+            stamper.stamp(pos, neg, -conductance);
+            stamper.stamp(neg, neg, conductance);
+            stamper.stamp(neg, pos, -conductance);
+            stamper.stamp_rhs(pos, source);
+            stamper.stamp_rhs(neg, -source);
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn stamp_promoted_bjt_companions(
+        stamper: &mut impl crate::device::MatrixStamper,
+        bjt: &crate::device::Bjt,
+        idx: usize,
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &BjtTransientHistory,
+        phase_trial: Option<bjt::BjtPhaseTrial<'_>>,
+        xyce_one_step_order2: bool,
+        anchor: Option<&[Value]>,
+    ) -> Result<(), SimulationError> {
+        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
+        if charge_factor <= 0.0 {
+            return Ok(());
+        }
+        // Promoted BJT: per-branch charge companions on the actual
+        // internal nodes (ngspice NIintegrate discipline), evaluated
+        // and linearized at the limited bias cached by the device
+        // update for this Newton iterate.
+        let (branches, internal, external) = bjt.mna_charge_state();
+        if let Some(phase) = phase_trial {
+            phase
+                .stamp_promoted(bjt, stamper, xyce_one_step_order2, anchor)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!("BJT '{}' phase companion: {error}", bjt.name))
+                })?;
+        }
+        for (branch_idx, branch) in branches.iter().enumerate() {
+            if !branch.is_active() {
+                continue;
+            }
+            let cq = Self::jfet_companion_ccap(
+                coeff,
+                dt,
+                branch.charge,
+                BranchChargeHistory {
+                    q_prev: history.charge_q_prev[idx][branch_idx],
+                    q_prev_prev: history.charge_q_prev_prev[idx][branch_idx],
+                    cq_prev: history.charge_cq_prev[idx][branch_idx],
+                },
+            );
+            if !cq.is_finite()
+                || branch
+                    .d_internal
+                    .iter()
+                    .chain(&branch.d_external)
+                    .any(|value| !(charge_factor * value).is_finite())
+            {
+                return Err(SimulationError::Circuit(format!(
+                    "BJT '{}' transient charge {branch_idx} is nonfinite for dt={dt:e}",
+                    bjt.name,
+                )));
+            }
+            let polarity = bjt.charge_branch_polarity(branch_idx);
+            Self::stamp_vbic_mna_charge_branch(
+                stamper,
+                bjt,
+                branch,
+                polarity * charge_factor,
+                polarity * cq,
+                &internal,
+                &external,
+                anchor,
+            );
+        }
+        Ok(())
+    }
+
     /// Stamp one promoted BJT charge branch as a Norton companion on its
     /// actual matrix nodes. Charge branches use the standard MNA orientation:
     /// the integrated current `cq` leaves the positive node and enters the
@@ -1358,6 +1419,7 @@ impl Engine {
         cq: Value,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
         external: &[Value; BJT_EXTERNAL_STATE_DIM],
+        anchor: Option<&[Value]>,
     ) {
         let external_nodes = [
             bjt.node_collector,
@@ -1366,21 +1428,18 @@ impl Engine {
             bjt.node_substrate,
         ];
         let mut source = -cq;
-        for (derivative, voltage) in branch
-            .d_internal
-            .iter()
-            .zip(internal)
-            .take(BJT_INTERNAL_STATE_DIM)
-        {
-            source += ag0 * derivative * voltage;
+        for (index, (derivative, voltage)) in branch.d_internal.iter().zip(internal).enumerate() {
+            let offset = voltage
+                - anchor.map_or(0.0, |point| {
+                    Self::node_voltage(point, bjt.mna_internal_node(index))
+                });
+            source += ag0 * derivative * offset;
         }
-        for (derivative, voltage) in branch
-            .d_external
-            .iter()
-            .zip(external)
-            .take(BJT_EXTERNAL_STATE_DIM)
+        for ((derivative, voltage), node) in
+            branch.d_external.iter().zip(external).zip(external_nodes)
         {
-            source += ag0 * derivative * voltage;
+            let offset = voltage - anchor.map_or(0.0, |point| Self::node_voltage(point, node));
+            source += ag0 * derivative * offset;
         }
 
         let mut stamp_row = |row: crate::NodeId, sign: Value| {

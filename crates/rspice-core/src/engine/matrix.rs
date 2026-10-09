@@ -246,11 +246,19 @@ impl Engine {
             }
         }
 
-        // BJT stamps. MNA-promoted VBIC instances couple every terminal and
-        // internal node (static rows, charge companions, excess phase,
-        // thermal), so reserve their full block; legacy Gummel-Poon devices
-        // keep the reduced 4-terminal pattern.
+        // Promoted BJT instances couple terminal and internal nodes. The
+        // externalized GP base-collector charge also touches the authored
+        // base, outside that intrinsic block, in either representation.
         for bjt in &circuit.bjts.devices {
+            if let Some(nodes) = bjt.legacy_external_bc_charge_nodes() {
+                for row in nodes {
+                    for col in nodes {
+                        if row > 0 && col > 0 {
+                            triplets.push((row - 1, col - 1, 0.0));
+                        }
+                    }
+                }
+            }
             if bjt.mna_promoted() {
                 let nodes = bjt.mna_coupling_nodes();
                 for &row in &nodes {
@@ -285,15 +293,6 @@ impl Engine {
             let b = bjt.node_base;
             let e = bjt.node_emitter;
             let s = bjt.node_substrate;
-            if let Some(nodes) = bjt.legacy_external_bc_charge_nodes() {
-                for row in nodes {
-                    for col in nodes {
-                        if row > 0 && col > 0 {
-                            triplets.push((row - 1, col - 1, 0.0));
-                        }
-                    }
-                }
-            }
             for &row in &[c, b, e, s] {
                 for &col in &[c, b, e, s] {
                     if row > 0 && col > 0 {

@@ -91,6 +91,7 @@ fn check_core_evaluation_ownership(shared: bool) {
         engine
             .stamp_transient_system_with_generated_mode(
                 circuit, matrix, rhs, point, 1e-6, 1e-6, &ctx, vbic, refresh, policy, 0.0, mode,
+                None,
             )
             .unwrap();
     };
