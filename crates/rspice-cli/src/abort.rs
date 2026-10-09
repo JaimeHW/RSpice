@@ -18,8 +18,8 @@
 
 use rspice_core::abort_signal::AbortSignal;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const NONE: u8 = 0;
 const INTERRUPT: u8 = 1;
@@ -29,6 +29,9 @@ const TIMEOUT: u8 = 2;
 const COMPLETE: u8 = 3;
 
 static STATE: AtomicU8 = AtomicU8::new(NONE);
+// Like STATE, the command's timeout region is one-shot. Polling this absolute
+// deadline does not depend on when the operating system starts the timer thread.
+static DEADLINE: OnceLock<Instant> = OnceLock::new();
 // The completion latch must not make repeated Ctrl-C ineffective during
 // final diagnostics or other blocking work after the cancellable region.
 static INTERRUPT_SEEN: AtomicBool = AtomicBool::new(false);
@@ -63,10 +66,27 @@ fn should_force_exit_on_interrupt(state: &AtomicU8, interrupt_seen: &AtomicBool)
 
 /// The recorded abort reason, if any.
 pub fn reason() -> Option<AbortReason> {
-    match STATE.load(Ordering::SeqCst) {
+    match polled_state() {
         INTERRUPT => Some(AbortReason::Interrupt),
         TIMEOUT => Some(AbortReason::Timeout),
         _ => None,
+    }
+}
+
+fn claim_expired_deadline(state: &AtomicU8, deadline: Instant, now: Instant) -> bool {
+    now >= deadline && claim(state, TIMEOUT)
+}
+
+#[inline]
+fn polled_state() -> u8 {
+    let state = STATE.load(Ordering::Relaxed);
+    if state == NONE
+        && let Some(deadline) = DEADLINE.get()
+    {
+        claim_expired_deadline(&STATE, *deadline, Instant::now());
+        STATE.load(Ordering::Relaxed)
+    } else {
+        state
     }
 }
 
@@ -81,7 +101,7 @@ pub struct ProcessAbort;
 impl AbortSignal for ProcessAbort {
     #[inline]
     fn is_aborted(&self) -> bool {
-        matches!(STATE.load(Ordering::Relaxed), INTERRUPT | TIMEOUT)
+        matches!(polled_state(), INTERRUPT | TIMEOUT)
     }
 
     fn abort_reason(&self) -> rspice_core::AbortReason {
@@ -121,7 +141,7 @@ impl<'a> ProgressAbort<'a> {
 impl AbortSignal for ProgressAbort<'_> {
     #[inline]
     fn is_aborted(&self) -> bool {
-        matches!(STATE.load(Ordering::Relaxed), INTERRUPT | TIMEOUT)
+        matches!(polled_state(), INTERRUPT | TIMEOUT)
     }
 
     fn abort_reason(&self) -> rspice_core::AbortReason {
@@ -178,21 +198,23 @@ unsafe extern "system" fn windows_console_control_handler(control_type: u32) -> 
 /// Latch a timer thread can wait on and its owner can release early.
 type RetireLatch = (Mutex<bool>, Condvar);
 
-/// Wait out `duration` unless the latch is released first, then try to claim
+/// Wait until `deadline` unless the latch is released first, then try to claim
 /// `state` for the timeout.
 ///
 /// Returns whether this timer is the caller that must announce the timeout:
 /// `true` only when the deadline arrived while a run was still in progress.
 /// A retired timer, a run that finished first, and a run already stopping for
 /// Ctrl-C all return `false`, so exactly one message can ever be printed.
-fn await_deadline(state: &AtomicU8, duration: Duration, latch: &RetireLatch) -> bool {
+fn await_deadline(state: &AtomicU8, deadline: Instant, latch: &RetireLatch) -> bool {
     let (retired, wake) = latch;
     // A poisoned latch means the owner panicked while retiring the timer; the
     // run is over either way, so the timer stays silent.
     let Ok(guard) = retired.lock() else {
         return false;
     };
-    let Ok((guard, elapsed)) = wake.wait_timeout_while(guard, duration, |retired| !*retired) else {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let Ok((guard, elapsed)) = wake.wait_timeout_while(guard, remaining, |retired| !*retired)
+    else {
         return false;
     };
     // Release the latch before claiming, so retiring the timer never waits on
@@ -240,23 +262,31 @@ impl Drop for TimeoutGuard {
 /// Arm a representable deadline. The command's normal error renderer owns the
 /// timeout diagnostic, so JSON mode emits exactly one structured failure.
 pub fn arm_timeout(seconds: f64) -> Result<TimeoutGuard, crate::cli::CliError> {
-    let duration = Duration::try_from_secs_f64(seconds)
+    let started = Instant::now();
+    let deadline = Duration::try_from_secs_f64(seconds)
         .ok()
-        .filter(|duration| {
-            !duration.is_zero() && std::time::Instant::now().checked_add(*duration).is_some()
-        })
+        .filter(|duration| !duration.is_zero())
+        .and_then(|duration| started.checked_add(duration))
         .ok_or_else(|| crate::cli::CliError::InvalidArgument {
             message: "--timeout must be a positive, representable duration".to_string(),
             suggestion: Some("use a smaller positive timeout in seconds".to_string()),
+        })?;
+    DEADLINE
+        .set(deadline)
+        .map_err(|_| crate::cli::CliError::InternalError {
+            message: "the process timeout region is already armed".into(),
         })?;
     let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
     let waited = Arc::clone(&latch);
     let thread = std::thread::Builder::new()
         .name("rspice-timeout".into())
         .spawn(move || {
-            await_deadline(&STATE, duration, &waited);
+            await_deadline(&STATE, deadline, &waited);
         })
-        .map_err(crate::cli::CliError::from)?;
+        .map_err(|error| {
+            claim(&STATE, COMPLETE);
+            crate::cli::CliError::from(error)
+        })?;
     Ok(TimeoutGuard {
         timer: Some(Timer { latch, thread }),
     })
@@ -265,6 +295,22 @@ pub fn arm_timeout(seconds: f64) -> Result<TimeoutGuard, crate::cli::CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn polling_an_expired_deadline_does_not_need_a_timer_thread() {
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(1);
+        let state = AtomicU8::new(NONE);
+        assert!(!claim_expired_deadline(&state, deadline, started));
+        assert_eq!(state.load(Ordering::SeqCst), NONE);
+        assert!(claim_expired_deadline(&state, deadline, deadline));
+        assert_eq!(state.load(Ordering::SeqCst), TIMEOUT);
+        for terminal in [COMPLETE, INTERRUPT, TIMEOUT] {
+            let state = AtomicU8::new(terminal);
+            assert!(!claim_expired_deadline(&state, deadline, deadline));
+            assert_eq!(state.load(Ordering::SeqCst), terminal);
+        }
+    }
 
     #[test]
     fn repeated_interrupts_force_exit_even_after_completion() {
@@ -331,7 +377,7 @@ mod tests {
         retire(&latch);
 
         assert!(
-            !await_deadline(&state, UNREACHABLE_DEADLINE, &waited),
+            !await_deadline(&state, Instant::now() + UNREACHABLE_DEADLINE, &waited),
             "a retired timer must not announce a timeout"
         );
         assert_eq!(
@@ -347,8 +393,9 @@ mod tests {
         let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
         let waited = Arc::clone(&latch);
         let timed = Arc::clone(&state);
-        let thread =
-            std::thread::spawn(move || await_deadline(&timed, UNREACHABLE_DEADLINE, &waited));
+        let thread = std::thread::spawn(move || {
+            await_deadline(&timed, Instant::now() + UNREACHABLE_DEADLINE, &waited)
+        });
 
         retire(&latch);
 
@@ -367,7 +414,7 @@ mod tests {
         let latch: Arc<RetireLatch> = Arc::new((Mutex::new(false), Condvar::new()));
 
         assert!(
-            await_deadline(&state, Duration::ZERO, &latch),
+            await_deadline(&state, Instant::now(), &latch),
             "an expired deadline that wins the claim must announce the timeout"
         );
         assert_eq!(state.load(Ordering::SeqCst), TIMEOUT);
@@ -380,7 +427,7 @@ mod tests {
         assert!(claim(&state, COMPLETE));
 
         assert!(
-            !await_deadline(&state, Duration::ZERO, &latch),
+            !await_deadline(&state, Instant::now(), &latch),
             "a deadline that expires after the run completed must print nothing"
         );
         assert_eq!(state.load(Ordering::SeqCst), COMPLETE);
