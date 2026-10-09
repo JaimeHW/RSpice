@@ -36,6 +36,98 @@ pub struct AbsDeltaState {
 }
 
 impl AbsDeltaState {
+    /// Versioned, architecture-independent accepted history. Floating-point
+    /// lanes contain IEEE bits, including the sign of zero. No speculative
+    /// interval or unevaluated controls belong in this image.
+    pub fn checkpoint_words(self) -> [u64; 8] {
+        let sample = self.sample.map(|v| [v.time.to_bits(), v.value.to_bits()]);
+        let event = self.event.map(|v| [v.time.to_bits(), v.value.to_bits()]);
+        let flags = u64::from(sample.is_some())
+            | (u64::from(event.is_some()) << 1)
+            | (u64::from(self.enabled) << 2)
+            | (u64::from(self.pending) << 3);
+        let [sample_time, sample_value] = sample.unwrap_or([0; 2]);
+        let [event_time, event_value] = event.unwrap_or([0; 2]);
+        [
+            1,
+            flags,
+            sample_time,
+            sample_value,
+            event_time,
+            event_value,
+            match self.direction {
+                -1 => 2,
+                0 => 0,
+                1 => 1,
+                _ => unreachable!(),
+            },
+            self.extremum.to_bits(),
+        ]
+    }
+
+    /// Decode without evaluating an expression or consuming an event. The
+    /// owning circuit must separately match the observer site and accepted time.
+    pub fn from_checkpoint_words(words: &[u64]) -> Result<Self, String> {
+        let &[version, flags, st, sv, et, ev, direction, extremum] = words else {
+            return Err("absdelta checkpoint requires eight words".into());
+        };
+        if version != 1 || flags & !15 != 0 || direction > 2 {
+            return Err("invalid absdelta checkpoint schema or flags".into());
+        }
+        let sample =
+            |present: bool, time: u64, value: u64| -> Result<Option<AbsDeltaSample>, String> {
+                if !present {
+                    if time != 0 || value != 0 {
+                        return Err("absent absdelta sample has nonzero payload".into());
+                    }
+                    return Ok(None);
+                }
+                let point = AbsDeltaSample {
+                    time: f64::from_bits(time),
+                    value: f64::from_bits(value),
+                };
+                if !nonnegative(point.time) || !point.value.is_finite() {
+                    return Err("invalid absdelta checkpoint sample".into());
+                }
+                Ok(Some(point))
+            };
+        let state = Self {
+            sample: sample(flags & 1 != 0, st, sv)?,
+            event: sample(flags & 2 != 0, et, ev)?,
+            enabled: flags & 4 != 0,
+            pending: flags & 8 != 0,
+            direction: if direction == 2 { -1 } else { direction as i8 },
+            extremum: f64::from_bits(extremum),
+        };
+        if !state.extremum.is_finite()
+            || (state.enabled && state.event.is_none())
+            || (!state.enabled && (state.pending || state.direction != 0))
+        {
+            return Err("inconsistent absdelta checkpoint history".into());
+        }
+        match state.sample {
+            None if flags != 0 || direction != 0 || extremum != 0 => {
+                return Err("uninitialized absdelta checkpoint has history".into());
+            }
+            Some(sample) => {
+                // A disabled initialization can retain an older event from a
+                // prior DC sweep. Re-enabling emits a new baseline before use.
+                if state.enabled && state.event.is_some_and(|event| event.time > sample.time)
+                    || state.pending && state.event.is_some_and(|event| event.value == sample.value)
+                    || match state.direction {
+                        1 => state.extremum < sample.value,
+                        -1 => state.extremum > sample.value,
+                        _ => state.extremum.to_bits() != sample.value.to_bits(),
+                    }
+                {
+                    return Err("inconsistent absdelta checkpoint samples or extremum".into());
+                }
+            }
+            None => {}
+        }
+        Ok(state)
+    }
+
     pub fn last_sample(self) -> Option<AbsDeltaSample> {
         self.sample
     }

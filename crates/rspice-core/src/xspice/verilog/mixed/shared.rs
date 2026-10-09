@@ -3,6 +3,7 @@ use super::super::host::{DigitalActiveExchange, DigitalActiveParticipant};
 use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
 mod observations;
+pub(crate) mod checkpoint;
 use rspice_veriloga_runtime::absdelta::AbsDeltaState;
 use crate::xspice::event_scheduler::EventTarget;
 use crate::xspice::event_scheduler::SchedulerError;
@@ -227,6 +228,9 @@ pub(crate) struct MixedDigitalCoordinator {
     real_event_nodes: Vec<(usize, DigitalSignalId)>,
     resolution: TimeResolution,
     enabled: bool,
+    /// Checkpoints cannot capture or replace the wheel while a cursor owns a
+    /// speculative trial. The circuit returns that cursor on every exit.
+    trial_open: bool,
     accepted_time: Option<f64>,
     accepted_observers: Vec<AbsDeltaState>,
     accepted_observation_probes: Vec<Option<f64>>,
@@ -577,6 +581,7 @@ impl MixedDigitalCoordinator {
             real_event_nodes,
             resolution,
             enabled: false,
+            trial_open: false,
             accepted_time: None,
             analog_step_floor: 0.0,
             probes,
@@ -598,6 +603,7 @@ impl MixedDigitalCoordinator {
             real_event_nodes: self.real_event_nodes.clone(),
             resolution: self.resolution,
             enabled: false,
+            trial_open: false,
             accepted_time: None,
             analog_step_floor: self.analog_step_floor,
             probes: vec![None; self.probes.len()],
@@ -872,6 +878,11 @@ impl MixedDigitalCoordinator {
         time: f64,
         probe: bool,
     ) -> Result<SharedTrialCursor, MixedSignalError> {
+        if self.trial_open {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "circuit digital execution already has an open trial".into(),
+            });
+        }
         if !self.enabled {
             return Err(MixedSignalError::TrialProtocol {
                 detail: "circuit digital execution must start before a trial".into(),
@@ -901,7 +912,7 @@ impl MixedDigitalCoordinator {
         // the circuit trial: see `ActiveTrial::scheduled_activation`.
         let scheduled_activation = self.digital.next_tick().is_some_and(|next| next <= tick);
         let rollback = self.digital.clone();
-        Ok(SharedTrialCursor {
+        let cursor = SharedTrialCursor {
             observers: self.accepted_observers.clone(),
             observation_probes: self.accepted_observation_probes.clone(),
             observation_time: self.accepted_time,
@@ -919,7 +930,9 @@ impl MixedDigitalCoordinator {
             },
             probe,
             scheduled_activation,
-        })
+        };
+        self.trial_open = true;
+        Ok(cursor)
     }
 }
 
@@ -1459,6 +1472,7 @@ impl MixedDigitalCoordinator {
         self.accepted_time = Some(cursor.time);
         self.accepted_observers = std::mem::take(&mut cursor.observers);
         self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
+        self.trial_open = false;
         cursor.rollback = None;
     }
 
@@ -1471,5 +1485,6 @@ impl MixedDigitalCoordinator {
         if let Some(rollback) = cursor.rollback.take() {
             self.digital = rollback;
         }
+        self.trial_open = false;
     }
 }

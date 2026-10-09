@@ -38,6 +38,105 @@ fn initialized(value: f64) -> AbsDeltaState {
     consume(interval(AbsDeltaState::default(), 0.0, value, controls())).0
 }
 
+#[test]
+fn checkpoint_retains_suppressed_events_and_turning_points() {
+    let control = AbsDeltaControls {
+        time_tolerance: 1.0,
+        expression_tolerance: 0.05,
+        ..controls()
+    };
+    let (pending, events) = consume(interval(initialized(-0.0), 0.1, 1.0, control));
+    assert!(pending.pending && events.is_empty());
+    let mut original = pending;
+    let mut restored = AbsDeltaState::from_checkpoint_words(&pending.checkpoint_words()).unwrap();
+    for (time, value) in [(1.0, 1.0), (1.1, 0.98), (1.2, 0.94), (1.3, 1.2), (2.4, 1.2)] {
+        let (next, events) = consume(interval(original, time, value, control));
+        let (resumed, actual) = consume(interval(restored, time, value, control));
+        assert_eq!(events, actual);
+        assert_eq!(next.checkpoint_words(), resumed.checkpoint_words());
+        for event in &events {
+            assert_eq!(
+                AbsDeltaState::from_checkpoint_words(&event.state.checkpoint_words()).unwrap(),
+                event.state
+            );
+        }
+        original = next;
+        restored = AbsDeltaState::from_checkpoint_words(&resumed.checkpoint_words()).unwrap();
+    }
+    let zero = initialized(-0.0).checkpoint_words();
+    assert_eq!(
+        AbsDeltaState::from_checkpoint_words(&zero)
+            .unwrap()
+            .checkpoint_words(),
+        zero
+    );
+    assert_eq!(zero[3], (-0.0f64).to_bits());
+}
+
+#[test]
+fn checkpoint_retains_disabled_and_uninitialized_observers() {
+    let disabled = AbsDeltaControls {
+        enable: 0.0,
+        ..controls()
+    };
+    let (late, _) = consume(interval(initialized(0.0), 2.0, 1.0, controls()));
+    let (reset, _) = consume(
+        AbsDeltaInterval::new(
+            late,
+            AbsDeltaSample {
+                time: 0.0,
+                value: -0.0,
+            },
+            disabled,
+            1e-12,
+            true,
+        )
+        .unwrap(),
+    );
+    for state in [
+        AbsDeltaState::default(),
+        reset,
+        consume(interval(AbsDeltaState::default(), 0.0, 0.5, disabled)).0,
+    ] {
+        let restored = AbsDeltaState::from_checkpoint_words(&state.checkpoint_words()).unwrap();
+        assert_eq!(restored.checkpoint_words(), state.checkpoint_words());
+        assert_eq!(
+            consume(interval(state, 3.0, 0.3, controls())),
+            consume(interval(restored, 3.0, 0.3, controls()))
+        );
+    }
+}
+
+#[test]
+fn checkpoint_rejects_invalid_observer_histories() {
+    let good = initialized(0.0).checkpoint_words();
+    for (lane, value) in [
+        (0, 2),
+        (1, 16),
+        (2, (-1.0f64).to_bits()),
+        (3, f64::NAN.to_bits()),
+        (4, 1.0f64.to_bits()),
+        (5, f64::INFINITY.to_bits()),
+        (6, 3),
+        (7, f64::NAN.to_bits()),
+        (7, 1.0f64.to_bits()),
+        (1, 5),
+        (1, 15),
+        (1, 6),
+    ] {
+        let mut bad = good;
+        bad[lane] = value;
+        assert!(
+            AbsDeltaState::from_checkpoint_words(&bad).is_err(),
+            "{lane}: {value}"
+        );
+    }
+    assert!(AbsDeltaState::from_checkpoint_words(&good[..7]).is_err());
+    let mut bad = AbsDeltaState::default().checkpoint_words();
+    bad[3] = 1;
+    assert!(AbsDeltaState::from_checkpoint_words(&bad).is_err());
+}
+
 fn close(actual: f64, expected: f64) {
     assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
 }

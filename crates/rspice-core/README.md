@@ -814,7 +814,7 @@ cancellation and driver indexes after validation. Invalid images, incompatible
 limits/targets and decoded resource-budget violations leave the receiver unchanged.
 Capture rejects failed or partially executed slots. The enclosing file reader
 must bound input bytes before deserialization. Full mixed-circuit persistence
-still requires process/driver, bridge, observation and accepted analog state;
+still requires integrating the shared execution, bridges and accepted analog state;
 the engine's mixed accepted-state checkpoint blocker remains in force.
 
 The internal HDL signal-store checkpoint retains typed signal values, each
@@ -831,8 +831,16 @@ sites, event-count ownership, one wakeup per queued process and delayed-assignme
 bucket, and one owner per expression subscription. It preserves external participant
 registration order and constructs the whole host before replacing live state.
 Failed settlements and unfinished same-time execution cannot be captured. These
-components still require circuit-level integration with accepted analog devices,
-bridges and observers before the mixed accepted-state blocker can be removed.
+components still require circuit-level integration with accepted analog devices
+and bridges before the mixed accepted-state blocker can be removed.
+
+The shared coordinator checkpoint adds instance/port mappings, accepted physical
+time, exact observer probe samples and complete `absdelta` history, including
+turning points and suppressed events. It authenticates topology and time policy,
+checks observer controls against their saved history, and rejects digital events
+left behind accepted time or activation clocks ahead of it. Capture and restore
+refuse open trials. Restored coordinators retain the receiving resource ceilings;
+per-instance analog and bridge images must join the final circuit transaction.
 
 PWL interpolation and repeat timing preserve finite nonzero knot intervals
 and positive `TSCALE` values without an absolute machine-epsilon cutoff.

@@ -5,7 +5,7 @@ use super::*;
 use rspice_veriloga::canonical_ir::digital_eval::{DigitalScalar, checkpoint::*};
 use serde::{Deserialize, Serialize};
 
-pub(super) fn fingerprint(value: &impl Serialize) -> Result<[u8; 32], String> {
+pub(crate) fn fingerprint(value: &impl Serialize) -> Result<[u8; 32], String> {
     struct Writer(blake3::Hasher);
     impl std::io::Write for Writer {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {

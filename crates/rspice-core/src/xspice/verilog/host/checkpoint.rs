@@ -81,6 +81,19 @@ fn check_size(
 }
 
 impl DigitalHost {
+    pub(crate) fn validate_checkpoint_time(&self, accepted: f64) -> Result<(), String> {
+        use rspice_veriloga::canonical_ir::digital_eval::DigitalEnvironment;
+        if self.store.read_clock().is_some_and(|clock| clock.absolute_seconds > accepted) {
+            return Err("digital activation is later than the accepted circuit time".into());
+        }
+        if let Some(tick) = self.next_tick()
+            && self.resolution.ticks_to_seconds(tick).map_err(|e| e.to_string())? <= accepted
+        {
+            return Err("accepted circuit time has an undelivered digital event".into());
+        }
+        Ok(())
+    }
+
     fn checkpoint_boundary(&self) -> Result<(), String> {
         if !self.elaboration_closed || self.checkpoint_failed {
             return Err("host must be initialized and successfully settled before capture".into());
