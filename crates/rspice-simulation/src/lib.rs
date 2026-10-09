@@ -33,6 +33,7 @@ pub mod result_conversion;
 pub mod results;
 pub mod sealed_source;
 pub mod study;
+pub mod study_document;
 pub mod sweeps;
 pub mod veriloga;
 
