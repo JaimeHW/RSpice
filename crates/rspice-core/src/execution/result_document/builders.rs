@@ -2701,6 +2701,17 @@ impl AnalysisResultDocument {
         analysis: AnalysisInstanceId,
         result: &MonteCarloResult,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
+        Self::from_monte_carlo_with_units(analysis, result, |_| None)
+    }
+
+    /// Project Monte Carlo statistics with units supplied by the producer.
+    /// The resolver receives each exact, case-sensitive variable name once.
+    /// Unknown units should return `None`, including for legacy populations.
+    pub fn from_monte_carlo_with_units(
+        analysis: AnalysisInstanceId,
+        result: &MonteCarloResult,
+        unit_for: impl Fn(&str) -> Option<SignalUnit>,
+    ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
         const LOCATION: &str = "Monte Carlo result";
         let successful_runs = result
             .num_runs
@@ -2815,6 +2826,7 @@ impl AnalysisResultDocument {
                 ));
             }
             let samples = finite_samples(LOCATION, &name, &variable.samples)?;
+            let unit = unit_for(&name);
             if !variable.bin_edges.is_empty()
                 && variable.bin_edges.len() != variable.histogram.len() + 1
             {
@@ -2853,7 +2865,7 @@ impl AnalysisResultDocument {
                         confidence_scalars.push(ResultScalar::new(
                             format!("mean_confidence_{bound}:{variable_id}"),
                             format!("{name} mean confidence {bound}"),
-                            None,
+                            unit.clone(),
                             ScalarValue::Real { value },
                         )?);
                     }
@@ -2875,6 +2887,7 @@ impl AnalysisResultDocument {
             }
             statistics.push(MonteCarloVariableStatistics {
                 name: variable.name.clone(),
+                unit,
                 samples,
                 mean: defined_or_missing(variable.mean),
                 standard_deviation: defined_or_missing(variable.std_dev),

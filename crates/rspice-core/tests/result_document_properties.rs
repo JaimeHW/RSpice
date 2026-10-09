@@ -592,6 +592,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                 successful_trial_indices: None,
                 statistics: vec![MonteCarloVariableStatistics {
                     name: "v(out)".to_owned(),
+                    unit: None,
                     samples: shape.reals(),
                     mean: Some(shape.magnitudes[0]),
                     standard_deviation: None,

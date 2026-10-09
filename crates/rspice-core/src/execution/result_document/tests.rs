@@ -456,6 +456,88 @@ fn monte_carlo_result() -> MonteCarloResult {
 }
 
 #[test]
+fn monte_carlo_units_are_explicit_versioned_and_shared_by_confidence_bounds() {
+    use crate::analysis::monte_carlo::MeanConfidenceMethod;
+    let mut result = monte_carlo_result();
+    result.variables.insert(
+        "V(unknown)".into(),
+        VariableStatistics::from_samples("V(unknown)", vec![1.0, 2.0, 3.0], 2),
+    );
+    result.variables.insert(
+        "current".into(),
+        VariableStatistics::from_samples("current", vec![0.001, 0.002, 0.003], 2),
+    );
+    result
+        .compute_mean_confidence(
+            95.0,
+            MeanConfidenceMethod::StudentT,
+            crate::ResourceLimits::default(),
+            &NoAbort,
+        )
+        .unwrap();
+    let document = AnalysisResultDocument::from_monte_carlo_with_units(
+        instance(AnalysisKind::MonteCarlo),
+        &result,
+        |name| match name {
+            "V(out)" => Some(SignalUnit::Volt),
+            "current" => Some(SignalUnit::Ampere),
+            _ => None,
+        },
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
+    let ResultPayload::MonteCarlo(payload) = restored.payload() else {
+        panic!("MC");
+    };
+    for variable in &payload.statistics {
+        let expected = match variable.name.as_str() {
+            "V(out)" => Some(SignalUnit::Volt),
+            "current" => Some(SignalUnit::Ampere),
+            _ => None,
+        };
+        assert_eq!(variable.unit, expected);
+        let identity = super::wire::encode_hex(variable.name.as_bytes());
+        for bound in ["lower", "upper"] {
+            assert_eq!(
+                scalar_of(&restored, &format!("mean_confidence_{bound}:{identity}")).unit(),
+                expected.as_ref()
+            );
+        }
+    }
+    let mut wire: serde_json::Value = serde_json::from_str(&document.to_json().unwrap()).unwrap();
+    wire["schemaVersion"] = 17.into();
+    assert!(AnalysisResultDocument::from_json(&wire.to_string()).is_err());
+    for variable in wire["payload"]["statistics"].as_array_mut().unwrap() {
+        variable.as_object_mut().unwrap().remove("unit");
+    }
+    for scalar in wire["scalars"].as_array_mut().unwrap() {
+        if scalar["name"]
+            .as_str()
+            .unwrap()
+            .starts_with("mean_confidence_lower:")
+            || scalar["name"]
+                .as_str()
+                .unwrap()
+                .starts_with("mean_confidence_upper:")
+        {
+            scalar["unit"] = serde_json::Value::Null;
+        }
+    }
+    let legacy = AnalysisResultDocument::from_json(&wire.to_string()).unwrap();
+    let ResultPayload::MonteCarlo(payload) = legacy.payload() else {
+        panic!("MC");
+    };
+    assert!(
+        payload
+            .statistics
+            .iter()
+            .all(|variable| variable.unit.is_none())
+    );
+}
+
+#[test]
 fn monte_carlo_documents_validate_trial_accounting() {
     let analysis = instance(AnalysisKind::MonteCarlo);
     let mut result = monte_carlo_result();

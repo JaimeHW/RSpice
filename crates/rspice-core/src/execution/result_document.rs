@@ -15,7 +15,7 @@
 //! ```text
 //! {
 //!   "schema":        "rspice-analysis-result"   fixed identifier
-//!   "schemaVersion": 17                          this build's exact version
+//!   "schemaVersion": 18                          this build's exact version
 //!   "resultKind":    "op" | "dc" | "ac" | "tran" | "noise" | "sp" |
 //!                    "port-noise" | "distortion" | "tf" | "stb" |
 //!                    "sensitivity" | "pole-zero" | "fourier" | "fft" |
@@ -233,7 +233,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 17;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 18;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -289,14 +289,18 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 17;
 /// Version 17 adds separately typed node-voltage impulses and derivatives.
 /// Absent histories retain the legacy sampled-waveform contract.
 ///
+/// Version 18 adds explicit per-variable Monte Carlo output units. Earlier
+/// populations retain unstated units; a probe name never establishes a unit.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 17] =
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 18] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+];
 
 /// First version whose transient payload may declare a digital bus.
 const FIRST_DIGITAL_BUS_DOCUMENT_VERSION: u32 = 2;
@@ -731,6 +735,18 @@ impl AnalysisResultDocument {
                     detail: "pole-zero units must be present from document version 12 and absent in earlier versions".into(),
                 });
             }
+        }
+        if self.schema_version < 18
+            && let ResultPayload::MonteCarlo(payload) = &self.payload
+            && payload
+                .statistics
+                .iter()
+                .any(|variable| variable.unit.is_some())
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "Monte Carlo units",
+                detail: "Monte Carlo output units require document version 18".into(),
+            });
         }
         if self.payload.result_kind() != self.result_kind {
             return Err(ResultDocumentError::PayloadFamilyMismatch {

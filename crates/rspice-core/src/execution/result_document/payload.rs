@@ -2450,9 +2450,15 @@ impl MonteCarloPayload {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MonteCarloVariableStatistics {
     pub name: String,
-    /// One sample per completed trial. These stay in the payload because the
-    /// producing result declares no unit for an output variable, and the
-    /// document does not infer one from a probe name.
+    /// Explicit output unit when known by the producer. Legacy documents and
+    /// generic statistical results leave it unstated; names never imply units.
+    #[serde(
+        default,
+        with = "super::wire::optional_signal_unit",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unit: Option<SignalUnit>,
+    /// One sample per successful trial, in the stated output unit.
     pub samples: Vec<Option<f64>>,
     pub mean: Option<f64>,
     pub standard_deviation: Option<f64>,
