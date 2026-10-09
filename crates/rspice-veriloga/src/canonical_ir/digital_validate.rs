@@ -376,7 +376,8 @@ impl CanonicalDigitalPlan {
                     ));
                 }
                 if *occupied
-                    || !cell.procedurally_assignable
+                    || cell.procedurally_assignable != first.procedurally_assignable
+                    || (cell.local.is_some() && !cell.procedurally_assignable)
                     || Some(&cell.name)
                         != array
                             .element_name_with_layout(

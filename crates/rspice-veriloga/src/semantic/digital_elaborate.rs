@@ -680,6 +680,7 @@ impl DigitalElaborator<'_> {
                                     left: own.clone(),
                                     left_bit: declared.width - 1 - position as u32,
                                     right: outer.elaborated.clone(),
+                                    right_element: None,
                                     right_bit: outer.range.position_of(coordinate) as u32,
                                     span,
                                 });
@@ -761,6 +762,7 @@ impl DigitalElaborator<'_> {
                                     left: own.clone(),
                                     left_bit: bit,
                                     right: outer.elaborated.clone(),
+                                    right_element: None,
                                     right_bit: bit,
                                     span,
                                 });

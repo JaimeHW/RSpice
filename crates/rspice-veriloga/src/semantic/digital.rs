@@ -488,6 +488,8 @@ pub struct ElaboratedDigitalBitAlias {
     pub left: SmolStr,
     pub left_bit: u32,
     pub right: SmolStr,
+    /// Storage offset when the right-hand net is an unpacked array element.
+    pub right_element: Option<u32>,
     pub right_bit: u32,
     pub span: Span,
 }
@@ -1592,7 +1594,10 @@ impl SemanticAnalyzer {
             }
         }
 
-        if !item.dimensions.is_empty() && (!class.is_variable() || redeclares_port) {
+        if !item.dimensions.is_empty()
+            && (redeclares_port
+                || matches!(class, DigitalSignalClass::Net(kind) if kind != DigitalNetKind::Wire))
+        {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(format!(
                     "unpacked net/port array `{}` requires array connection elaboration",

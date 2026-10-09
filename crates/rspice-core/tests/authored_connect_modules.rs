@@ -1734,3 +1734,145 @@ Rf f 0 1k
         }
     }
 }
+
+#[test]
+fn wire_array_words_preserve_hierarchical_drivers_and_dynamic_reads() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module observer(d,p);
+ input [9:8] d; wire [9:8] d;
+ output p; electrical p;
+ wire [3:0] code;
+ assign code=(d===2'b01) ? 1 : (d===2'b1x) ? 2 : (d===2'bzz) ? 3 : (d===2'b10) ? 4 : 9;
+ analog V(p)<+code;
+endmodule
+module driver(p);
+ inout [0:1] p; wire [0:1] p;
+ reg [1:0] word;
+ initial begin word=2'b01; #1 word=2'b10; #1 word=2'bzz; end
+ assign p=word;
+endmodule
+module bank(p,q,r);
+ parameter integer BASE=3;
+ output p,q,r; electrical p,q,r;
+ wire [5:4] cells[BASE:BASE-1][-1:0];
+ reg [1:0] data; reg enable;
+ integer row,column;
+ initial begin
+  enable=1; data=2'b01; row=BASE; column=-1;
+  #1 data=2'b11; row=BASE-1;
+  #1 enable=0; row=BASE;
+  #1 enable=1; data=2'b10; row=BASE-1; column=0;
+ end
+ assign cells[BASE][-1]=enable ? data : 2'bzz;
+ assign {cells[BASE-1][-1][5:4],cells[BASE][0]}=4'b1001;
+ assign cells[BASE-1][0][5]=1'b0;
+ assign cells[BASE-1][0][4]=1'b1;
+ driver nested(cells[BASE][-1]);
+ observer whole(cells[BASE][-1],p);
+ observer bits({cells[BASE][-1][5],cells[BASE][-1][4]},q);
+ observer dynamic(cells[row][column],r);
+endmodule
+module top(p,q,r);
+ output p,q,r; electrical p,q,r;
+ bank #(.BASE(7)) group(p,q,r);
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* net array resolution
+X1 p q r top
+Rp p 0 1k
+Rq q 0 1k
+Rr r 0 1k
+.va \"{}\" top module=top
+.end
+",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 3.8e-9, 50e-12).unwrap();
+    for (time, code, dynamic) in [
+        (0.5e-9, 1.0, 1.0),
+        (1.5e-9, 2.0, 4.0),
+        (2.5e-9, 3.0, 3.0),
+        (3.5e-9, 4.0, 1.0),
+    ] {
+        for (node, expected) in [("p", code), ("q", code), ("r", dynamic)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wire_array_elements_connect_both_directions_through_analog_buses() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module receiver(a,p,q);
+ input [9:8] a; electrical [9:8] a;
+ output p,q; electrical p,q;
+ analog begin
+  I(a[9])<+V(a[9])/1000; I(a[8])<+V(a[8])/1000;
+  V(p)<+V(a[9]); V(q)<+V(a[8]);
+ end
+endmodule
+module producer(a);
+ output [9:8] a; electrical [9:8] a;
+ analog begin V(a[9])<+0.3; V(a[8])<+1.7; end
+endmodule
+module bank(p,q,r);
+ parameter integer BASE=-2;
+ output p,q,r; electrical p,q,r;
+ wire [2:3] words[BASE:BASE+1];
+ reg [1:0] data;
+ initial begin data=2'b10; #1 data=2'b01; end
+ assign words[BASE]=data;
+ receiver load(words[BASE],p,q);
+ producer source(words[BASE+1]);
+ analog V(r)<+words[BASE+1];
+endmodule
+module top(p,q,r);
+ output p,q,r; electrical p,q,r;
+ bank #(.BASE(4)) nested(p,q,r);
+endmodule
+connectmodule dac(d,a);
+ input d; logic d; output a; electrical a;
+ analog I(a)<+(V(a)-(d ? 3.0 : 0.0))/1000;
+endmodule
+connectmodule adc(a,d);
+ input a; electrical a; output d; logic d; reg d;
+ initial d=0;
+ always #0.1 d=V(a)>1.0;
+endmodule
+connectrules selected; connect dac merged; connect adc merged; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* net array mixed connections
+X1 p q r top
+Rp p 0 1k
+Rq q 0 1k
+Rr r 0 1k
+.va \"{}\" top module=top
+.end
+",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.8e-9, 50e-12).unwrap();
+    for (time, p, q) in [(0.5e-9, 1.5, 0.0), (1.5e-9, 0.0, 1.5)] {
+        for (node, expected) in [("p", p), ("q", q), ("r", 1.0)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}

@@ -854,3 +854,73 @@ fn branch_shapes_and_port_probe_misuse_are_rejected() {
         );
     }
 }
+
+#[test]
+fn wire_array_connections_replay_element_identity_and_reject_invalid_drives() {
+    let source = r#"
+module drive(p); inout [0:1] p; wire [0:1] p; assign p=2'b10; endmodule
+module top(p);
+ parameter integer BASE=4, PICK=4;
+ output p; electrical p;
+ wire [5:4] cells[BASE:BASE-1][-1:0];
+ wire [1:0] selected;
+ drive driver(cells[PICK][-1]);
+ assign cells[BASE][0]=2'b01;
+ assign selected=cells[PICK][-1];
+ analog V(p)<+selected;
+endmodule
+"#;
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    let check = |ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact| {
+        ir.validate().unwrap();
+        let array = ir
+            .digital
+            .arrays
+            .iter()
+            .find(|array| array.name == "cells")
+            .unwrap();
+        assert_eq!(array.storage.len, 4);
+        for offset in 0..array.storage.len {
+            assert!(
+                !ir.digital.signals[array.storage.base.index() as usize + offset as usize]
+                    .procedurally_assignable
+            );
+        }
+        assert!(ir.digital.bit_aliases.len() >= 2);
+    };
+    check(&compiled.canonical_ir);
+    let assigned = compiler
+        .specialize_mixed_runtime(
+            &compiled.canonical_ir,
+            &[("BASE", 8.0), ("PICK", 7.0)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    check(&assigned.canonical_ir);
+    assert_ne!(
+        compiled.canonical_ir.digital.content_identity,
+        assigned.canonical_ir.digital.content_identity
+    );
+    let replay = compiler
+        .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        assigned.canonical_ir.digital.content_identity,
+        replay.canonical_ir.digital.content_identity
+    );
+    for (body, expected) in [
+        ("initial cells[0]=2'b10;", "procedural"),
+        ("integer pick; assign cells[pick]=2'b10;", "constant"),
+        ("assign cells[2]=2'b10;", "in-range unpacked"),
+    ] {
+        let source = format!("module top; wire [1:0] cells[0:1]; {body} endmodule");
+        let error = match compiler.compile_runtime(&source, Some("top")) {
+            Ok(_) => panic!("accepted {body}"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains(expected), "{body}: {error}");
+    }
+}

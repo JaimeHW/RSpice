@@ -310,6 +310,7 @@ impl Connections<'_> {
                         left: proxy.clone(),
                         left_bit: position,
                         right: declaration.name.clone(),
+                        right_element: None,
                         right_bit: bounds.position_of(selected) as u32,
                         span,
                     });

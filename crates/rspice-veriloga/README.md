@@ -168,8 +168,16 @@ measure each local port's flow, including when parent connections tie ports toge
 These probes work in analog expressions and discrete processes, with custom nature
 flow access functions as well as `I`. Port probes cannot drive contributions or
 read potentials. Branch ranges and terminal selectors participate in parameter
-specialization. Artifact schema 133 and core cache record 115 invalidate models
+specialization. Artifact schema 134 and core cache record 116 invalidate models
 compiled before these checks.
+Unpacked arrays of four-state wire nets retain independent drivers per word.
+Constant element and packed bit/part targets accept continuous assignments;
+procedural writes remain invalid for nets. Statically selected elements connect
+scalar/packed input, output and inout ports through shared wire identities, including
+mixed analog buses. Multidimensional, ascending and negative coordinates use the
+same storage layout as variable arrays. Dynamic reads retain ordinary array lookup
+semantics. Unpacked real/conservative net arrays and whole-array formal ports remain
+open implementation work.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.

@@ -716,13 +716,32 @@ fn lower_with_analog_variables(
     ) {
         let (Some(&left), Some(&right)) = (
             elaborated_scope.get(alias.left.as_str()),
-            elaborated_scope.get(alias.right.as_str()),
+            if alias.right_element.is_some() {
+                elaborated.get(&alias.right)
+            } else {
+                elaborated_scope.get(alias.right.as_str())
+            },
         ) else {
             diagnostics.push(DigitalLoweringDiagnostic::invariant(
                 "wire-bit alias has no elaborated signal",
                 alias.span.into(),
             ));
             continue;
+        };
+        let right = if let Some(offset) = alias.right_element {
+            let Some(array) = array_storage
+                .get(&right)
+                .filter(|array| offset < array.storage.len)
+            else {
+                diagnostics.push(DigitalLoweringDiagnostic::invariant(
+                    "wire-bit alias has no in-range unpacked element",
+                    alias.span.into(),
+                ));
+                continue;
+            };
+            DigitalSignalId::new(array.storage.base.index() + offset)
+        } else {
+            right
         };
         bit_aliases.push(super::digital::DigitalBitAlias {
             left: super::digital::DigitalNetBit {
@@ -3023,6 +3042,24 @@ impl ProcessLowerer<'_> {
     }
 
     fn write_target(&mut self, target: &DigitalLValue) -> Option<DigitalWriteTarget> {
+        match target {
+            DigitalLValue::BitSelect { name, index, span }
+                if self.digital_array(name).is_some() =>
+            {
+                return self.array_driver_target(name, &[index.as_ref()], None, *span);
+            }
+            DigitalLValue::ArraySelect(access) => {
+                let Some((indices, packed)) = access.split(self.array_rank(&access.name)) else {
+                    self.error(
+                        "continuous array target requires all unpacked coordinates",
+                        access.span,
+                    );
+                    return None;
+                };
+                return self.array_driver_target(&access.name, &indices, packed, access.span);
+            }
+            _ => {}
+        }
         let (name, span, select) = match target {
             DigitalLValue::Identifier { name, span } => (name, *span, DigitalWriteSelect::Whole),
             DigitalLValue::BitSelect { name, index, span } => {
@@ -3046,13 +3083,7 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
-            DigitalLValue::ArraySelect(access) => {
-                self.error(
-                    "packed array elements cannot be continuous driver targets",
-                    access.span,
-                );
-                return None;
-            }
+            DigitalLValue::ArraySelect(_) => unreachable!("array target resolved above"),
             DigitalLValue::Concat { .. } => unreachable!("a concatenation is split before here"),
         };
         match self.resolved_signal(name) {
@@ -3069,6 +3100,46 @@ impl ProcessLowerer<'_> {
                 None
             }
         }
+    }
+
+    fn array_driver_target(
+        &mut self,
+        name: &str,
+        indices: &[&Expression],
+        packed: Option<&crate::ast::PackedSelect>,
+        span: Span,
+    ) -> Option<DigitalWriteTarget> {
+        let array = self.array_declaration(name)?.clone();
+        let indices: Vec<_> = indices
+            .iter()
+            .map(|index| self.constant_index(index))
+            .collect::<Option<_>>()?;
+        let layout = array.layout().ok()?;
+        let Ok(offset) = layout.slot(&indices, 0) else {
+            self.error(
+                "continuous net array target requires in-range unpacked coordinates",
+                span,
+            );
+            return None;
+        };
+        let select = match packed {
+            None => DigitalWriteSelect::Whole,
+            Some(crate::ast::PackedSelect::Bit(index)) => {
+                DigitalWriteSelect::Bit(self.constant_index(index)?)
+            }
+            Some(crate::ast::PackedSelect::Part { msb, lsb }) => {
+                let bounds =
+                    self.part_select_bounds(msb, lsb, self.declared_range_of(name), span)?;
+                DigitalWriteSelect::Part {
+                    msb: bounds.msb,
+                    lsb: bounds.lsb,
+                }
+            }
+        };
+        Some(DigitalWriteTarget {
+            signal: DigitalSignalId::new(array.storage.base.index() + offset as u32),
+            select,
+        })
     }
 
     fn lvalue_width(&mut self, target: &DigitalLValue) -> u32 {

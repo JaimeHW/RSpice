@@ -6,6 +6,7 @@
 
 mod actual;
 mod inputs;
+mod net_arrays;
 mod packed;
 
 use super::digital_elaborate::{SpecializationKey, SpecializedModule, specialize_module};
@@ -156,6 +157,21 @@ enum ConnectionTarget {
 /// physical vector lanes, packed bits and unpacked elements retain their own
 /// signal identities and connecting-scope assignments.
 pub(super) fn prepare(
+    analyzed: &AnalyzedFile,
+    sources: &HashMap<SmolStr, &Module>,
+    source: &Module,
+    module: &AnalyzedModule,
+    bodies: &mut ConnectionModules,
+) -> CompileResult<Option<Arc<SpecializedModule>>> {
+    let array_views = net_arrays::prepare(analyzed, source, module)?;
+    let (source, module) = array_views
+        .as_deref()
+        .map(|prepared| (&prepared.source, &prepared.analyzed))
+        .unwrap_or((source, module));
+    Ok(prepare_boundaries(analyzed, sources, source, module, bodies)?.or(array_views))
+}
+
+fn prepare_boundaries(
     analyzed: &AnalyzedFile,
     sources: &HashMap<SmolStr, &Module>,
     source: &Module,
@@ -482,6 +498,7 @@ pub(super) fn prepare(
                             left: private.clone(),
                             left_bit: 0,
                             right: net.clone(),
+                            right_element: None,
                             right_bit: *bit,
                             span,
                         });
@@ -574,6 +591,16 @@ pub(super) fn prepare(
     // Converter insertion replaces authored selectors with concrete lanes. Keep
     // the dependencies already recorded before that rewrite, or a scalar
     // parameter update could leave the selected topology unchanged.
+    retain_parameter_guards(module, &mut analyzed);
+    analyzed.hierarchical_connections = module.hierarchical_connections || has_boundaries;
+    analyzed.digital.bit_aliases = aliases;
+    Ok(Some(Arc::new(SpecializedModule {
+        source: prepared,
+        analyzed,
+    })))
+}
+
+fn retain_parameter_guards(module: &AnalyzedModule, analyzed: &mut AnalyzedModule) {
     let original_parameters: HashMap<_, _> = module
         .parameters
         .iter()
@@ -587,12 +614,6 @@ pub(super) fn prepare(
                 parameter.elaboration_given.or(original.elaboration_given);
         }
     }
-    analyzed.hierarchical_connections = module.hierarchical_connections || has_boundaries;
-    analyzed.digital.bit_aliases = aliases;
-    Ok(Some(Arc::new(SpecializedModule {
-        source: prepared,
-        analyzed,
-    })))
 }
 
 pub(super) fn declared_names(source: &Module) -> HashSet<SmolStr> {
