@@ -6225,7 +6225,7 @@ impl Engine {
         let mut new_solution = solution.clone();
         let mut linear_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::with_capacity(size);
-        let uses_vbic_correction = Self::requires_vbic_correction_form(&circuit);
+        let uses_direct_device_correction = Self::requires_transient_correction_form(&circuit);
         // Newton phase accounting is debug-only. In normal production runs
         // every DiagnosticTimer below avoids the underlying clock query.
         let diagnostic_timing_enabled = log::log_enabled!(log::Level::Debug);
@@ -7984,6 +7984,7 @@ impl Engine {
                                 None,
                                 None,
                                 None,
+                                uses_direct_device_correction.then_some(&mut correction_rhs),
                             ));
                     } else {
                         stamp_trial_or_reject!(self
@@ -8002,6 +8003,7 @@ impl Engine {
                                 Some(&mut mosfet_companion_terms_scratch),
                                 Some(&mut mosfet_static_terms_scratch),
                                 None,
+                                uses_direct_device_correction.then_some(&mut correction_rhs),
                             ));
                         mosfet_companion_terms_valid = reuse_sequential_classic_mos_newton_terms
                             && refresh_classic_mos_nonlinear
@@ -8025,7 +8027,7 @@ impl Engine {
                             residual::CoreEvaluation::NewCandidate
                         },
                         0.0,
-                        uses_vbic_correction.then_some(&mut correction_rhs),
+                        uses_direct_device_correction.then_some(&mut correction_rhs),
                     ));
                 }
                 nonlinear_state_matches_new_solution = true;
@@ -8064,7 +8066,7 @@ impl Engine {
                             .form_correction_rhs(vectors, previous_q, previous_static, dt, order)
                             .map_err(|error| SimulationError::Circuit(error.to_string()))?,
                     )
-                } else if uses_vbic_correction {
+                } else if uses_direct_device_correction {
                     Some(&correction_rhs)
                 } else {
                     None
@@ -8123,7 +8125,7 @@ impl Engine {
                 // performs neither globalization matrix-vector product.
                 if globalization_active && _iter > 0 {
                     let merit_phase_start = DiagnosticTimer::start(diagnostic_timing_enabled);
-                    let current_merit = if uses_vbic_correction {
+                    let current_merit = if uses_direct_device_correction {
                         self.direct_operating_point_residual_norm(
                             &circuit,
                             &matrix,
@@ -8305,12 +8307,10 @@ impl Engine {
                 // Solve and check convergence
                 let newton_solve_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                 // Xyce's DampedNewton linear system solves for a Newton search
-                // direction on every topology.  NOX, native, and ngspice keep
-                // their established algebra except where an inductor or the
-                // direct Xyce DAE path already requires correction form. VBIC
-                // also requires increments to retain small lead currents through
-                // its large series conductances.
-                let solve_produces_correction = uses_vbic_correction
+                // direction on every topology. Capacitors, inductors, promoted
+                // BJTs, and the direct Xyce DAE path also require increments to
+                // retain small physical currents through large companion terms.
+                let solve_produces_correction = uses_direct_device_correction
                     || transient_newton_uses_correction_form(
                         direct_correction_rhs.is_some(),
                         uses_inductor_correction,
@@ -8487,7 +8487,7 @@ impl Engine {
                             if _iter == 0 && globalization_active {
                                 let seed_start = DiagnosticTimer::start(diagnostic_timing_enabled);
                                 last_stamped_iterate.clone_from(&new_solution);
-                                last_stamped_merit = if uses_vbic_correction {
+                                last_stamped_merit = if uses_direct_device_correction {
                                     self.direct_operating_point_residual_norm(
                                         &circuit,
                                         &matrix,
@@ -8549,7 +8549,7 @@ impl Engine {
                                     residual::CoreEvaluation::NewCandidate,
                                     0.0,
                                     crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
-                                    uses_vbic_correction.then_some(&mut correction_rhs),
+                                    uses_direct_device_correction.then_some(&mut correction_rhs),
                                 ));
                             nonlinear_state_matches_new_solution = true;
                             let (residual_inf_norm, residual_l2_norm) = if uses_direct_xyce_dae {
@@ -8590,7 +8590,7 @@ impl Engine {
                                     )
                                     .map_err(|error| SimulationError::Circuit(error.to_string()))?;
                                 direct_xyce_dae_norms(direct_rhs)?
-                            } else if uses_vbic_correction {
+                            } else if uses_direct_device_correction {
                                 direct_xyce_dae_norms(&correction_rhs)?
                             } else {
                                 matrix.raw_residual_norms(&new_solution, &rhs)?

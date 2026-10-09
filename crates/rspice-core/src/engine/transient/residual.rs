@@ -541,9 +541,13 @@ impl Engine {
         } else {
             *coeff
         };
-        circuit
-            .capacitors
-            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        circuit.capacitors.stamp_transient_branch_companions(
+            matrix,
+            rhs,
+            dt,
+            &companion_coeff,
+            num_nodes,
+        );
         cache.capture_attempt(matrix, rhs, source_time_side);
     }
 
@@ -726,9 +730,13 @@ impl Engine {
         } else {
             *coeff
         };
-        circuit
-            .capacitors
-            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        circuit.capacitors.stamp_transient_branch_companions(
+            matrix,
+            rhs,
+            dt,
+            &companion_coeff,
+            num_nodes,
+        );
         cache.capture_attempt(matrix, rhs, source_time_side);
     }
 
@@ -752,6 +760,7 @@ impl Engine {
         mut companion_terms_out: Option<&mut Vec<MosfetCompanionBranchTerms>>,
         mut static_terms_out: Option<&mut Vec<crate::device::mosfet::ClassicMosCachedStaticTerms>>,
         mut caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
+        correction: Option<&mut Vec<Value>>,
     ) -> Result<(), SimulationError> {
         debug_assert!(circuit.has_cacheable_classic_mos_transient_base());
         debug_assert!(!ctx.xyce_one_step_order2);
@@ -904,6 +913,18 @@ impl Engine {
         } else {
             circuit.mosfets.stamp_all_cached_direct(matrix, rhs);
         }
+        if let Some(correction) = correction {
+            matrix.correction_rhs_into(rhs, solution, correction)?;
+            circuit.capacitors.stamp_transient_norton_residual(
+                correction,
+                solution,
+                dt,
+                &companion_coeff,
+            );
+        }
+        circuit
+            .capacitors
+            .stamp_transient_norton_companions(matrix, rhs, dt, &companion_coeff);
         Ok(())
     }
 
@@ -1333,6 +1354,22 @@ impl Engine {
         })
     }
 
+    pub(super) fn requires_transient_correction_form(
+        circuit: &crate::circuit::CircuitData,
+    ) -> bool {
+        Self::requires_vbic_correction_form(circuit)
+            || circuit
+                .capacitors
+                .stamps
+                .iter()
+                .enumerate()
+                .any(|(index, stamp)| {
+                    circuit.capacitors.ic_branch_indices[index].is_none()
+                        && circuit.capacitors.value_expression(index).is_none()
+                        && stamp.pp.row != stamp.nn.row
+                })
+    }
+
     /// Test the nonlinear residual with the active transient solver's native
     /// norm. Xyce 7.10 transient Newton uses an unscaled infinity norm of the
     /// assembled RHS with an independent `RHSTOL` (default `1e-2`).
@@ -1381,7 +1418,7 @@ impl Engine {
 
     /// Convergence of the directly assembled correction. Core constitutive
     /// rows retain their branch floor and independent affine backward-error
-    /// check, while the global norm uses the physical BJT currents.
+    /// check, while the global norm uses physical capacitor and BJT currents.
     pub(super) fn transient_direct_residual_converged(
         &self,
         circuit: &crate::circuit::CircuitData,
@@ -1525,6 +1562,18 @@ impl Engine {
                 refresh_nonlinear,
                 evaluation_mode,
             );
+            if let Some(correction) = correction_rhs {
+                matrix.correction_rhs_into(rhs, solution, correction)?;
+                circuit.capacitors.stamp_transient_norton_residual(
+                    correction,
+                    solution,
+                    dt,
+                    &companion_coeff,
+                );
+            }
+            circuit
+                .capacitors
+                .stamp_transient_norton_companions(matrix, rhs, dt, &companion_coeff);
             return Ok(());
         } else {
             matrix.clear_values();
@@ -1591,9 +1640,13 @@ impl Engine {
         }
         Self::refresh_jfet2_transient_linearizations(circuit, solution, dt, ctx.jfet_history);
 
-        circuit
-            .capacitors
-            .stamp_transient_companion(matrix, rhs, dt, &companion_coeff, num_nodes);
+        circuit.capacitors.stamp_transient_branch_companions(
+            matrix,
+            rhs,
+            dt,
+            &companion_coeff,
+            num_nodes,
+        );
         circuit
             .capacitors
             .stamp_solution_dependent_transient_companion(
@@ -1919,9 +1972,15 @@ impl Engine {
             }
         }
         if let Some(correction) = correction_rhs.as_deref_mut() {
-            // Convert the other families before adding BJT J*x-I terms: those
-            // large affine terms can erase picoampere currents at small dt.
+            // Convert the other families before adding capacitor and BJT
+            // affine terms, which can erase small physical currents at small dt.
             matrix.correction_rhs_into(rhs, solution, correction)?;
+            circuit.capacitors.stamp_transient_norton_residual(
+                correction,
+                solution,
+                dt,
+                &companion_coeff,
+            );
             circuit
                 .stabilize_inductor_transient_correction_rhs(correction, solution, dt, ctx.coeff);
             if circuit.has_xyce_core_inductors() {
@@ -1975,6 +2034,9 @@ impl Engine {
                 }
             }
         }
+        circuit
+            .capacitors
+            .stamp_transient_norton_companions(matrix, rhs, dt, &companion_coeff);
         if ctx.baseline_diag_gmin == 0.0 && extra_diag_gmin == 0.0 {
             if let Some(correction) = correction_rhs
                 && circuit.xspice_event_node_matrix_rows().next().is_some()
@@ -2411,6 +2473,12 @@ impl Engine {
             }
         }
 
+        // Norton charge is not part of the cached affine base. Add its
+        // centered physical current to the same inexpensive residual proof.
+        circuit
+            .capacitors
+            .stamp_transient_norton_residual(row_rhs, solution, dt, &companion_coeff);
+
         let node_rows = circuit.num_nodes().min(row_rhs.len());
         let configured_reltol = self.residual_reltol();
         let reltol = if configured_reltol.is_finite() && configured_reltol > 0.0 {
@@ -2503,6 +2571,12 @@ impl Engine {
             &cache.compact_companion_slots,
             caps_out,
         );
+
+        // Norton charge is not part of the cached affine base. Add its
+        // centered physical current to the same inexpensive residual proof.
+        circuit
+            .capacitors
+            .stamp_transient_norton_residual(row_rhs, solution, dt, &companion_coeff);
 
         let node_rows = circuit.num_nodes().min(row_rhs.len());
         let configured_reltol = self.residual_reltol();
@@ -2644,7 +2718,7 @@ impl Engine {
             return Ok(false);
         }
 
-        let direct = Self::requires_vbic_correction_form(circuit);
+        let direct = Self::requires_transient_correction_form(circuit);
         let refresh_nonlinear = !circuit.has_classic_mos_only_transient_nonlinearity();
         if let Some(cache) = classic_mos_cache {
             require_cached_source_side(cache.attempt_source_side, ctx.source_time_side)?;
@@ -2722,6 +2796,7 @@ impl Engine {
                 None,
                 None,
                 classic_mos_caps_out,
+                direct.then_some(&mut *correction),
             )?;
         } else {
             self.stamp_transient_system_with_generated_mode(
@@ -3522,6 +3597,7 @@ M1 d g 0 0 NM W=10u L=1u
         };
         let mut rhs = vec![0.0; circuit.matrix_size()];
         let mut vbic_snapshot_cache = Vec::new();
+        let mut canonical_correction = Vec::new();
 
         engine
             .stamp_transient_system_with_generated_mode(
@@ -3537,7 +3613,7 @@ M1 d g 0 0 NM W=10u L=1u
                 CoreEvaluation::ReuseCandidate,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
-                None,
+                Some(&mut canonical_correction),
             )
             .expect("canonical assembly succeeds");
         let canonical_values = matrix.values_mut().to_vec();
@@ -3577,22 +3653,21 @@ M1 d g 0 0 NM W=10u L=1u
             None,
             Some(&mut direct_caps),
         );
-        let mut canonical_ax = Vec::new();
-        matrix
-            .matrix_vector_product_with_values_into(&canonical_values, &solution, &mut canonical_ax)
-            .expect("canonical A*x succeeds");
-        for (row, (&direct, &canonical)) in direct_ax.iter().zip(&canonical_ax).enumerate() {
-            let tolerance = 128.0 * Value::EPSILON * direct.abs().max(canonical.abs()) + 1.0e-24;
+        // The direct proof omits the large affine Norton terms. Compare the
+        // complete physical residual; the sparse affine matrix and RHS still
+        // have independent bit-exact cache checks below.
+        for (row, ((&ax, &rhs), &canonical)) in direct_ax
+            .iter()
+            .zip(&direct_rhs)
+            .zip(&canonical_correction)
+            .enumerate()
+        {
+            let direct = rhs - ax;
+            let tolerance =
+                128.0 * Value::EPSILON * ax.abs().max(rhs.abs()).max(canonical.abs()) + 1.0e-24;
             assert!(
                 (direct - canonical).abs() <= tolerance,
-                "direct A*x row {row} differs: direct={direct:.17e}, canonical={canonical:.17e}"
-            );
-        }
-        for (row, (&direct, &canonical)) in direct_rhs.iter().zip(&canonical_rhs).enumerate() {
-            let tolerance = 128.0 * Value::EPSILON * direct.abs().max(canonical.abs()) + 1.0e-24;
-            assert!(
-                (direct - canonical).abs() <= tolerance,
-                "direct RHS row {row} differs: direct={direct:.17e}, canonical={canonical:.17e}"
+                "direct residual row {row} differs: direct={direct:.17e}, canonical={canonical:.17e}"
             );
         }
         assert_eq!(direct_caps.len(), circuit.mosfets.devices.len());
@@ -3607,6 +3682,7 @@ M1 d g 0 0 NM W=10u L=1u
                 &ctx,
                 false,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
+                None,
                 None,
                 None,
                 None,
@@ -3636,6 +3712,7 @@ M1 d g 0 0 NM W=10u L=1u
                 &ctx,
                 true,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
+                None,
                 None,
                 None,
                 None,
@@ -3696,6 +3773,7 @@ M1 d g 0 0 NM W=10u L=1u
                 Some(&mut newton_companion_terms),
                 Some(&mut newton_static_terms),
                 None,
+                None,
             )
             .expect("fused Newton assembly succeeds");
 
@@ -3717,6 +3795,7 @@ M1 d g 0 0 NM W=10u L=1u
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::NewtonLimited,
                 Some(&newton_companion_terms),
                 Some(&newton_static_terms),
+                None,
                 None,
                 None,
                 None,
@@ -3774,6 +3853,7 @@ M1 d g 0 0 NM W=10u L=1u
                 None,
                 None,
                 Some(&mut companion_caps),
+                None,
             )
             .expect("fused cached assembly succeeds");
 
@@ -3800,6 +3880,7 @@ M1 d g 0 0 NM W=10u L=1u
                 None,
                 None,
                 Some(&mut companion_caps),
+                None,
             )
             .expect("foreign compact pattern relinks through checked slots");
 
@@ -3899,6 +3980,7 @@ M1 d g 0 0 NM W=10u L=1u
                 None,
                 None,
                 None,
+                None,
             )
             .expect("limited canonical residual assembly succeeds");
         let limited_canonical_values = matrix.values_mut().to_vec();
@@ -3915,6 +3997,7 @@ M1 d g 0 0 NM W=10u L=1u
                 false,
                 crate::device::veriloga_builtins::GeneratedEvaluationMode::StaticProbe,
                 Some(&companion_terms),
+                None,
                 None,
                 None,
                 None,

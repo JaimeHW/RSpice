@@ -2217,8 +2217,34 @@ impl Capacitors {
         }
     }
 
+    /// Form the physical Norton residual before adding large affine companions.
+    pub(crate) fn stamp_transient_norton_residual(
+        &self,
+        rhs: &mut [Value],
+        solution: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
+        self.stamp_norton_current_rhs(rhs, |index| {
+            let stamp = &self.stamps[index];
+            let voltage = |node| if node == 0 { 0.0 } else { solution[node - 1] };
+            coeff.capacitor_current(
+                self.capacitances[index],
+                dt,
+                voltage(stamp.pp.row) - voltage(stamp.nn.row),
+                self.v_prev[index],
+                self.v_prev_prev[index],
+                self.i_prev[index],
+            )
+        });
+    }
+
     /// Use independently retained physical currents for a residual probe.
     pub(crate) fn stamp_norton_currents(&self, rhs: &mut [Value], currents: &[Value]) {
+        self.stamp_norton_current_rhs(rhs, |index| currents[index]);
+    }
+
+    fn stamp_norton_current_rhs(&self, rhs: &mut [Value], current: impl Fn(usize) -> Value) {
         for (index, stamp) in self.stamps.iter().enumerate() {
             if self.ic_branch_indices[index].is_some()
                 || self.value_expression(index).is_some()
@@ -2226,11 +2252,12 @@ impl Capacitors {
             {
                 continue;
             }
+            let current = current(index);
             if stamp.pp.row != 0 {
-                rhs[stamp.pp.row - 1] -= currents[index];
+                rhs[stamp.pp.row - 1] -= current;
             }
             if stamp.nn.row != 0 {
-                rhs[stamp.nn.row - 1] += currents[index];
+                rhs[stamp.nn.row - 1] += current;
             }
         }
     }
@@ -2269,18 +2296,14 @@ impl Capacitors {
                 0.0
             };
 
-            // geq and ieq based on history (v_prev, v_prev_prev, i_prev)
-            let geq = coeff.capacitor_geq(self.capacitances[i], dt);
-            let i_eq = coeff.capacitor_ieq(
+            let i_curr = coeff.capacitor_current(
                 self.capacitances[i],
                 dt,
+                v_curr,
                 self.v_prev[i],
                 self.v_prev_prev[i],
                 self.i_prev[i],
             );
-
-            // Compute newest current: i_{n+1} = geq * v_{n+1} - i_eq
-            let i_curr = geq * v_curr - i_eq;
 
             // Advance history
             self.v_prev_prev_prev[i] = self.v_prev_prev[i];

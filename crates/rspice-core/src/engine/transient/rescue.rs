@@ -128,7 +128,7 @@ impl Engine {
         let mut levels = self.gmin_nonlinear_schedule();
         levels.push(0.0);
 
-        let direct = Self::requires_vbic_correction_form(circuit);
+        let direct = Self::requires_transient_correction_form(circuit);
         let mut correction_rhs = Vec::new();
         let mut iterate = seed.to_vec();
         let mut level_index = 0;

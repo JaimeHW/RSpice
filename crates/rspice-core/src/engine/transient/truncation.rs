@@ -543,15 +543,14 @@ impl Engine {
             let q_prev = capacitance * circuit.capacitors.v_prev[idx];
             let q_prev_prev = capacitance * circuit.capacitors.v_prev_prev[idx];
             let q_prev_prev_prev = capacitance * circuit.capacitors.v_prev_prev_prev[idx];
-            let geq = coeff.capacitor_geq(capacitance, dt);
-            let ieq = coeff.capacitor_ieq(
+            let cq_curr = coeff.capacitor_current(
                 capacitance,
                 dt,
+                voltage,
                 circuit.capacitors.v_prev[idx],
                 circuit.capacitors.v_prev_prev[idx],
                 circuit.capacitors.i_prev[idx],
             );
-            let cq_curr = geq * voltage - ieq;
             let cq_prev = circuit.capacitors.i_prev[idx];
             if let Some(states) = accepted_states_out.as_deref_mut() {
                 let accepted_current =
@@ -845,15 +844,14 @@ impl Engine {
                         let q_prev = capacitance * v_prev[idx];
                         let q_prev_prev = capacitance * v_prev_prev[idx];
                         let q_prev_prev_prev = capacitance * v_prev_prev_prev[idx];
-                        let geq = coeff.capacitor_geq(capacitance, dt);
-                        let ieq = coeff.capacitor_ieq(
+                        let cq_curr = coeff.capacitor_current(
                             capacitance,
                             dt,
+                            voltage,
                             v_prev[idx],
                             v_prev_prev[idx],
                             i_prev[idx],
                         );
-                        let cq_curr = geq * voltage - ieq;
                         let cq_prev = i_prev[idx];
                         let accepted_current = if let Some(branch_ordinal) = ic_branch_indices[idx]
                         {
@@ -3796,10 +3794,10 @@ C1 n 0 2p\n\
             circuit.capacitors.stamps[0].pp.row,
             circuit.capacitors.stamps[0].nn.row,
         );
-        let geq = coeff.capacitor_geq(capacitance, dt);
-        let ieq = coeff.capacitor_ieq(
+        let current = coeff.capacitor_current(
             capacitance,
             dt,
+            voltage,
             circuit.capacitors.v_prev[0],
             circuit.capacitors.v_prev_prev[0],
             circuit.capacitors.i_prev[0],
@@ -3809,7 +3807,7 @@ C1 n 0 2p\n\
                 .iter()
                 .map(|state| (state.voltage.to_bits(), state.current.to_bits()))
                 .collect::<Vec<_>>(),
-            vec![(voltage.to_bits(), (geq * voltage - ieq).to_bits())],
+            vec![(voltage.to_bits(), current.to_bits())],
         );
 
         circuit.capacitors.capacitances[0] = 0.0;

@@ -997,15 +997,14 @@ impl Engine {
                     {
                         accepted_solution[num_nodes + branch_ordinal - 1]
                     } else {
-                        let geq = coeff.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
-                        let ieq = coeff.capacitor_ieq(
+                        coeff.capacitor_current(
                             circuit.capacitors.capacitances[cap_idx],
                             dt,
+                            v_new,
                             circuit.capacitors.v_prev[cap_idx],
                             circuit.capacitors.v_prev_prev[cap_idx],
                             circuit.capacitors.i_prev[cap_idx],
-                        );
-                        geq * v_new - ieq
+                        )
                     };
                     (v_new, i_new)
                 };
