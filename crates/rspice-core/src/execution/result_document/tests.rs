@@ -2,6 +2,7 @@
 
 use num_complex::Complex64;
 
+mod dc_match;
 mod distortion;
 mod json_admission;
 mod json_precision;

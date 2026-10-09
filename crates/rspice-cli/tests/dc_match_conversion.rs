@@ -217,7 +217,17 @@ fn mismatch_projection_preserves_zero_spread_trimmed_reports_and_scope_identity(
         let mut document = original.clone();
         match field {
             "output" => document["payload"][field] = json!("V(other)"),
-            "scope" => document["payload"]["contributors"][0][field] = json!("process"),
+            "scope" => {
+                // Relabel a zero-displacement contributor so the numerical
+                // scope totals remain valid and only the identity changes.
+                let entry = document["payload"]["contributors"]
+                    .as_array_mut()
+                    .unwrap()
+                    .last_mut()
+                    .unwrap();
+                assert_eq!(entry["contribution"], json!(0.0));
+                entry[field] = json!("process");
+            }
             _ => document["payload"]["contributors"][0][field] = json!("other"),
         }
         std::fs::write(&altered, document.to_string()).unwrap();
@@ -488,4 +498,52 @@ fn unrepresentable_quoted_mismatch_spread_fails_even_without_an_output_file() {
         String::from_utf8_lossy(&output.stderr).contains("quoted sigma"),
         "{output:?}"
     );
+}
+
+#[test]
+fn contradictory_mismatch_documents_cannot_be_exported_compared_or_blessed() {
+    let dir = common::test_dir("dcmatch_consistency");
+    let source = source(&dir, "source", false);
+    let original = common::read_json(&source);
+    let altered = dir.join("altered.json");
+    for case in [
+        "total",
+        "nominal",
+        "negative-sigma",
+        "displacement",
+        "false-share",
+        "duplicate",
+        "unit",
+        "quoted",
+    ] {
+        let mut document = original.clone();
+        match case {
+            "total" => document["payload"]["sigmaTotal"] = json!(1.0),
+            "nominal" => document["payload"]["nominalValue"] = json!(1.0),
+            "negative-sigma" => document["payload"]["sigmaMismatch"] = json!(-1.0),
+            "displacement" => document["payload"]["contributors"][0]["sensitivity"] = json!(0.0),
+            "false-share" => document["payload"]["contributors"][0]["share"] = json!(0.25),
+            "duplicate" => {
+                let mut entry = document["payload"]["contributors"][0].clone();
+                entry["instance"] = json!(entry["instance"].as_str().unwrap().to_ascii_lowercase());
+                document["payload"]["contributors"][1] = entry;
+            }
+            "unit" => document["scalars"][0]["unit"]["unit"] = json!("ampere"),
+            "quoted" => document["scalars"][4]["value"]["value"] = json!(0.0),
+            _ => panic!("case"),
+        }
+        std::fs::write(&altered, document.to_string()).unwrap();
+        for (format, extension) in FORMATS {
+            let destination = dir.join(format!("protected.{extension}"));
+            std::fs::write(&destination, "previous").unwrap();
+            let output = conversion(&altered, &destination, format);
+            assert_eq!(output.status.code(), Some(1), "{case}/{format}: {output:?}");
+            assert_eq!(std::fs::read_to_string(destination).unwrap(), "previous");
+        }
+        let selected = compare(&altered, &altered, &["--variables", "sigma_total"]);
+        assert_eq!(selected.status.code(), Some(1), "{case}: {selected:?}");
+        let blessed = compare(&altered, &source, &["--bless"]);
+        assert_eq!(blessed.status.code(), Some(1), "{case}: {blessed:?}");
+        assert_eq!(common::read_json(&source), original);
+    }
 }

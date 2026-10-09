@@ -894,6 +894,12 @@ in stepped report manifests. Mismatch covariance retains its exponent range
 through standard-deviation and share calculations; representable small spreads
 are not rounded to zero by squaring, and large spreads do not require a finite
 binary64 variance. An unrepresentable final quantity is reported as an error.
+Imported reports must have consistent output scalars, nonnegative sigmas,
+distinct contributor identities, and displacements matching their retained
+sensitivities and parameter sigmas. Independent scope totals and shares are checked against
+the retained contributors, allowing for explicitly trimmed tables. Correlated
+shares retain their signs; the report does not contain the covariance matrix
+needed to reconstruct them independently.
 
 Sensitivity exports and JSON conversion retain each parameter's nominal value, absolute
 and normalized derivatives, and AC magnitude and phase derivatives. Normalized

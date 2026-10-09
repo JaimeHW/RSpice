@@ -173,6 +173,7 @@
 //! a placeholder meaning.
 
 mod builders;
+mod dc_match;
 mod distortion;
 mod frequency_table;
 mod json_admission;
@@ -757,6 +758,7 @@ impl AnalysisResultDocument {
         self.validate_impulses()?;
         frequency_table::validate(self, abort)?;
         stability::validate(self, abort)?;
+        dc_match::validate(self, abort)?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
             self.validate_sensitivity_units(abort)?;
             sensitivity::validate(self, payload, abort)?;
