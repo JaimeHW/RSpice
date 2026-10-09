@@ -547,6 +547,7 @@ fn worker_spec_request_preserves_monte_carlo() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+                execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let worker =
@@ -605,6 +606,7 @@ fn worker_spec_request_preserves_structured_tf_contract() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let worker = WorkerRequest::from_runner_parts(51, &request, &input).expect("request converts");
@@ -691,6 +693,7 @@ fn worker_spec_request_preserves_pac_pxf_execution_options() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let pac_worker =
@@ -780,6 +783,7 @@ fn worker_spec_request_preserves_pnoise_pstb_execution_options() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let pnoise_worker =
@@ -841,6 +845,7 @@ fn worker_spec_request_preserves_parametric_temp_execution_options() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let worker =
@@ -922,6 +927,7 @@ fn worker_spec_request_preserves_corner_execution_options() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let worker = WorkerRequest::from_runner_parts(91, &request, &input).expect("Corner converts");
@@ -952,6 +958,7 @@ fn worker_request_from_runner_parts_preserves_payload() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: true,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let worker = WorkerRequest::from_runner_parts(41, &request, &input).expect("request converts");
@@ -1002,6 +1009,7 @@ fn worker_request_runs_dc_op() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let response = worker_response_from_request(request);
@@ -1035,6 +1043,7 @@ fn worker_request_runs_structured_tf_spec() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
     let worker = WorkerRequest::from_runner_parts(13, &request, &input).expect("request converts");
     let encoded_request = serde_json::to_vec(&worker).expect("TF request serializes");
@@ -1421,4 +1430,49 @@ fn hbnoise_source_reference_survives_the_worker_request() {
     let restored: WorkerAnalysisSpec =
         serde_json::from_str(&serde_json::to_string(&wire).unwrap()).unwrap();
     assert_eq!(AnalysisSpec::from(restored), spec);
+}
+
+#[test]
+fn worker_resource_policy_round_trip_is_required_and_enforced() {
+    let mut limits = rspice_core::ResourceLimits::default();
+    limits.max_matrix_unknowns = 1;
+    let input = NetlistInput {
+        netlist: "Worker policy\nV1 in 0 1\nR1 in 0 1k\n.op\n.end\n".into(),
+        source_path: None,
+        project_veriloga_runtimes: Default::default(),
+        measurement_references: Default::default(),
+        dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
+        execution_limits: limits,
+    };
+    let request = WorkerRequest::from_runner_parts(
+        99,
+        &SimulationRequest::Config(Box::new(AnalysisConfig::dc_op())),
+        &input,
+    )
+    .unwrap();
+    let json = serde_json::to_value(&request).unwrap();
+    let restored: WorkerRequest = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(restored.execution_limits, limits);
+    let mut packet = WorkerRequestTransport::from_request(restored).unwrap();
+    packet.request = serde_json::from_slice(&serde_json::to_vec(&packet.request).unwrap()).unwrap();
+    let restored = packet.into_request().unwrap();
+    assert_eq!(restored.execution_limits, limits);
+    let response = worker_response_from_request(restored);
+    let error = response.into_result().unwrap_err();
+    assert!(
+        matches!(error, SimulationError::ResourceLimit { ref resource, limit: 1, .. }
+        if resource == "matrix_unknowns"),
+        "{error:?}"
+    );
+    let mut missing = json.clone();
+    missing.as_object_mut().unwrap().remove("execution_limits");
+    assert!(serde_json::from_value::<WorkerRequest>(missing).is_err());
+    let mut incomplete = json;
+    incomplete["execution_limits"]
+        .as_object_mut()
+        .unwrap()
+        .remove("max_result_values");
+    assert!(serde_json::from_value::<WorkerRequest>(incomplete).is_err());
 }

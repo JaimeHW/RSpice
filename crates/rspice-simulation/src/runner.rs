@@ -70,6 +70,7 @@ pub(crate) struct NetlistInput {
     dependencies: ResolvedExecutionDependencies,
     environment: Option<AnalysisExecutionEnvironment>,
     stream_transient_samples: bool,
+    execution_limits: rspice_core::ResourceLimits,
 }
 
 /// Thread-safe simulation runner
@@ -360,6 +361,7 @@ impl SimulationRunner {
             measurement_references,
             dependencies,
             environment,
+            execution_limits,
         ) = dispatch.into_runner_parts();
         let request = match task.config {
             Some(config) => SimulationRequest::Config(Box::new(config)),
@@ -378,6 +380,7 @@ impl SimulationRunner {
                 dependencies,
                 environment,
                 stream_transient_samples,
+                execution_limits,
             },
         )
     }
@@ -408,6 +411,7 @@ impl SimulationRunner {
                 dependencies: Default::default(),
                 environment: None,
                 stream_transient_samples: false,
+                execution_limits: rspice_core::ResourceLimits::default(),
             },
         )
     }
@@ -915,9 +919,20 @@ pub(in crate::runner) fn run_simulation_thread_with_progress_observer(
         })?;
     }
 
+    if let SimulationRequest::Spec { spec, .. } = &request
+        && let Some(reason) =
+            crate::execution::execution_resource_policy_blocker(spec, input.execution_limits)
+    {
+        return Err(SimulationError::InvalidConfig(reason.into()));
+    }
+
     // Create engine bridge
-    let bridge =
-        EngineBridge::new().with_measurement_references(input.measurement_references.clone());
+    // The source is already expanded; root admission was checked in preflight.
+    let mut limits = input.execution_limits;
+    limits.max_netlist_bytes = limits.max_expanded_source_bytes;
+    let bridge = EngineBridge::new()
+        .with_resource_limits(limits)
+        .with_measurement_references(input.measurement_references.clone());
 
     // Update status: building
     {
@@ -1089,6 +1104,7 @@ mod tests {
                 dependencies,
                 environment: None,
                 stream_transient_samples: false,
+                execution_limits: rspice_core::ResourceLimits::default(),
             },
             Arc::new(Mutex::new(SimulationProgress::default())),
             Arc::new(AtomicBool::new(false)),

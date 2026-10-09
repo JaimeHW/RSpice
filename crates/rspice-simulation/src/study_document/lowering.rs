@@ -26,6 +26,7 @@ impl StudyDocument {
         let mut input = HeadlessRunInput::new(source, origin, tasks);
         input.resolver = resolver;
         input.preparation_limits = limits;
+        input.execution_limits = limits;
         input.saved_outputs = self.saved_outputs.clone();
         if let Some(policy) = self.save_policy {
             input.save_policy = SavePolicy::PlanOwned {

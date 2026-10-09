@@ -176,6 +176,7 @@ pub(crate) fn run_declaration(
     }
     let parts = SnapshotParts {
         task_source_policy: crate::execution::TaskSourcePolicy::PreparedObservations,
+        execution_limits: rspice_core::ResourceLimits::default(),
         measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
@@ -265,10 +266,11 @@ pub(crate) fn run_declaration(
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .map_err(|error| error.to_string())?;
-        let (queued, netlist, _runtimes, references, dependencies, environment) =
+        let (queued, netlist, _runtimes, references, dependencies, environment, limits) =
             resolved.into_runner_parts();
-        let bridge =
-            crate::engine_bridge::EngineBridge::new().with_measurement_references(references);
+        let bridge = crate::engine_bridge::EngineBridge::new()
+            .with_resource_limits(limits)
+            .with_measurement_references(references);
 
         let outcome = match queued.config {
             Some(config) => bridge.run_with_abort_and_source_path_and_environment(

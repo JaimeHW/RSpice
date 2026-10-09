@@ -479,7 +479,8 @@ where
 /// default.
 pub const DEFAULT_MAX_INCLUDE_DEPTH: usize = 64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ResourceLimits {
     /// Maximum bytes accepted in one root netlist and its retained typed parameter overrides.

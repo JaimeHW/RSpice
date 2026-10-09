@@ -63,6 +63,8 @@ pub struct HeadlessRunInput<'a> {
     /// Input expansion/parsing and graph limits. Execution policy is a separate
     /// contract; this field does not claim to configure a worker's solver limits.
     pub preparation_limits: ResourceLimits,
+    /// Solver and materialized-data limits carried into each worker.
+    pub execution_limits: ResourceLimits,
 }
 
 impl<'a> HeadlessRunInput<'a> {
@@ -83,6 +85,7 @@ impl<'a> HeadlessRunInput<'a> {
             save_policy: SavePolicy::RetainEngineProducedResults,
             touchstone_export: TouchstoneExportPolicy::disabled(),
             preparation_limits: ResourceLimits::default(),
+            execution_limits: ResourceLimits::default(),
         }
     }
 }
@@ -273,6 +276,7 @@ pub fn prepare_headless_run(
     let snapshot = PreparedRunSnapshot::new_with_preparation_policy(
         SnapshotParts {
             task_source_policy: TaskSourcePolicy::PreparedAnalyses,
+            execution_limits: input.execution_limits,
             // Source domain means literal netlist versus schematic generation; it
             // does not identify which frontend supplied the explicit task graph.
             intent: SimulationRunIntent::ManualDeck,

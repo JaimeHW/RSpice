@@ -411,6 +411,7 @@ where
 
     PreparedRunSnapshot::new(SnapshotParts {
         task_source_policy: super::snapshot::TaskSourcePolicy::PreparedObservations,
+        execution_limits: rspice_core::ResourceLimits::default(),
         measurement_references,
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(plan.plan_id()),
@@ -628,6 +629,7 @@ pub fn build_prepared_manual_deck<R, A>(
 
     PreparedRunSnapshot::new(SnapshotParts {
         task_source_policy: super::snapshot::TaskSourcePolicy::AuthoredDeck,
+        execution_limits: rspice_core::ResourceLimits::default(),
         measurement_references,
         intent: SimulationRunIntent::ManualDeck,
         simulation_plan_id: None,

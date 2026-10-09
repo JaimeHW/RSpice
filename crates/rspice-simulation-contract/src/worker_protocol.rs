@@ -23,7 +23,8 @@ pub struct AnalysisExecutionEnvironment {
 /// 41: Envelope can select multirate integration and its carrier/event controls.
 /// 42: remove the unsupported Reliability analysis.
 /// 43: transient dependencies retain singular voltage histories and coverage.
-pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 43;
+/// 44: immutable execution resource policy is required in request metadata.
+pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 44;
 
 /// Browser response protocol revisions.
 /// 18: transient-source convergence evidence survives result transport.

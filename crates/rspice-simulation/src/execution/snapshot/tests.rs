@@ -263,6 +263,7 @@ fn parts() -> SnapshotParts {
         uuid::Uuid::from_u128(0xe6bc_c27a_6103_5327_b2ec_c759_b58a_8598);
     SnapshotParts {
         task_source_policy: TaskSourcePolicy::PreparedObservations,
+        execution_limits: rspice_core::ResourceLimits::default(),
         measurement_references: Default::default(),
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(SimulationPlanId::from_namespace(
@@ -1558,7 +1559,7 @@ fn process_and_voltage_axes_change_the_authorized_op_execution_contract() {
         let resolved = task
             .resolve_dependency_artifacts(&HashMap::new())
             .expect("OP has no typed dependencies");
-        let (queued, source, _, _, _, _) = resolved.into_runner_parts();
+        let (queued, source, _, _, _, _, _) = resolved.into_runner_parts();
         let Some(AnalysisConfig::DcOp(config)) = queued.config else {
             panic!("OP config")
         };
@@ -1826,7 +1827,7 @@ fn authorized_tasks_own_the_exact_snapshot_netlist_after_permit_consumption() {
     let resolved = authorized
         .resolve_dependency_artifacts(&HashMap::new())
         .expect("artifact-free task resolves");
-    let (_, netlist, runtimes, _, dependencies, _) = resolved.into_runner_parts();
+    let (_, netlist, runtimes, _, dependencies, _, _) = resolved.into_runner_parts();
     assert_eq!(&*netlist, "deck\n.op\n.end\n");
     assert!(runtimes.is_empty());
     dependencies
@@ -2459,4 +2460,40 @@ fn every_corner_point_earns_its_own_reproducible_configuration_digest() {
         digests(&second),
         "the same declaration prepares to the same point identities and digests"
     );
+}
+
+#[test]
+fn execution_resource_policy_is_authenticated_and_reaches_dispatch() {
+    let baseline = PreparedRunSnapshot::new(parts()).unwrap();
+    let wire = serde_json::to_value(baseline.execution_limits()).unwrap();
+    // Discover every field from the contract so a newly added limit cannot be
+    // transported while accidentally remaining outside snapshot identity.
+    for (name, value) in wire.as_object().unwrap() {
+        let mut changed = wire.clone();
+        changed[name] = serde_json::json!(value.as_u64().unwrap() - 1);
+        let mut input = parts();
+        input.execution_limits = serde_json::from_value(changed).unwrap();
+        assert_ne!(
+            baseline.digest(),
+            PreparedRunSnapshot::new(input).unwrap().digest(),
+            "resource policy field {name} must be authenticated"
+        );
+    }
+    let mut input = parts();
+    input.execution_limits.max_matrix_unknowns = 7;
+    let expected = input.execution_limits;
+    let snapshot = PreparedRunSnapshot::new(input).unwrap();
+    assert_ne!(baseline.digest(), snapshot.digest());
+    assert_eq!(snapshot.execution_limits(), expected);
+    let dispatch = crate::execution::PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
+        .unwrap();
+    let task = dispatch
+        .into_tasks()
+        .pop_front()
+        .unwrap()
+        .resolve_dependency_artifacts(&HashMap::new())
+        .unwrap();
+    let (_, _, _, _, _, _, actual) = task.into_runner_parts();
+    assert_eq!(actual, expected);
 }

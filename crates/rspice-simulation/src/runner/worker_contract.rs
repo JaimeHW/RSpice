@@ -102,6 +102,7 @@ use rspice_results::noise::NoiseSummary;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerRequest {
+    pub execution_limits: rspice_core::ResourceLimits,
     pub id: u64,
     pub request: WorkerSimulationRequest,
     pub netlist: String,
@@ -373,6 +374,7 @@ impl WorkerRequest {
             dependencies: input.dependencies.clone(),
             environment: input.environment.clone(),
             stream_transient_samples: input.stream_transient_samples,
+            execution_limits: input.execution_limits,
         })
     }
 
@@ -387,6 +389,7 @@ impl WorkerRequest {
                 dependencies: self.dependencies,
                 environment: self.environment,
                 stream_transient_samples: self.stream_transient_samples,
+                execution_limits: self.execution_limits,
             },
         )
     }

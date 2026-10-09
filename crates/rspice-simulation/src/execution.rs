@@ -8,6 +8,8 @@ mod authorization;
 mod headless;
 mod headless_tasks;
 mod permit;
+mod resource_policy;
+pub use resource_policy::execution_resource_policy_blocker;
 pub mod preparation;
 #[cfg(test)]
 mod qpss_artifact_tests;

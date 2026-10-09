@@ -67,6 +67,14 @@ impl Default for EngineBridge {
 }
 
 impl EngineBridge {
+    pub(crate) fn with_resource_limits(mut self, limits: rspice_core::ResourceLimits) -> Self {
+        self.engine = rspice_core::Engine::new(rspice_core::SimulationConfig {
+            resource_limits: limits,
+            ..Default::default()
+        });
+        self
+    }
+
     pub(crate) fn with_measurement_references(
         mut self,
         references: crate::measurement_references::PreparedMeasurementReferences,

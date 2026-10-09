@@ -52,6 +52,7 @@ fn fixture() -> (SimulationRequest, NetlistInput) {
             dependencies: Default::default(),
             environment: None,
             stream_transient_samples: false,
+            execution_limits: rspice_core::ResourceLimits::default(),
         },
     )
 }

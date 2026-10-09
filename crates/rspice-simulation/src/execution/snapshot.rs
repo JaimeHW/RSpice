@@ -590,6 +590,7 @@ pub struct AuthorizedTaskDispatch {
     pvt_point: Option<rspice_results::provenance::AnalysisResultPvtPoint>,
     declared_point: Option<crate::point_family::DeclaredRunPoint>,
     execution_environment: Option<crate::runner::AnalysisExecutionEnvironment>,
+    execution_limits: rspice_core::ResourceLimits,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -758,6 +759,7 @@ impl ResolvedTaskDispatch {
         crate::measurement_references::PreparedMeasurementReferences,
         ResolvedExecutionDependencies,
         Option<crate::runner::AnalysisExecutionEnvironment>,
+        rspice_core::ResourceLimits,
     ) {
         (
             self.dispatch.task,
@@ -766,6 +768,7 @@ impl ResolvedTaskDispatch {
             self.dispatch.measurement_references,
             self.dependencies,
             self.dispatch.execution_environment,
+            self.dispatch.execution_limits,
         )
     }
 }
@@ -774,6 +777,7 @@ impl ResolvedTaskDispatch {
 /// remain private after construction.
 pub(crate) struct SnapshotParts {
     pub(crate) task_source_policy: TaskSourcePolicy,
+    pub(crate) execution_limits: rspice_core::ResourceLimits,
     pub(crate) intent: SimulationRunIntent,
     pub(crate) simulation_plan_id: Option<SimulationPlanId>,
     pub(crate) project_revision: u64,
@@ -839,6 +843,7 @@ impl PreparedRunSet {
 /// clones or consuming ancillary data, never a way to alter canonical state.
 #[derive(Clone)]
 pub struct PreparedRunSnapshot {
+    execution_limits: rspice_core::ResourceLimits,
     digest: ContentDigest,
     intent: SimulationRunIntent,
     simulation_plan_id: Option<SimulationPlanId>,
@@ -885,6 +890,11 @@ impl std::fmt::Debug for PreparedRunSnapshot {
 }
 
 impl PreparedRunSnapshot {
+    /// Immutable host resource policy authenticated by this snapshot.
+    pub const fn execution_limits(&self) -> rspice_core::ResourceLimits {
+        self.execution_limits
+    }
+
     pub const fn simulation_plan_id(&self) -> Option<SimulationPlanId> {
         self.simulation_plan_id
     }
@@ -905,6 +915,16 @@ impl PreparedRunSnapshot {
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<Self, PreparationError> {
         PreparationError::check_abort(abort)?;
+        for task in &parts.tasks {
+            if let Some(reason) =
+                super::execution_resource_policy_blocker(&task.task.spec, parts.execution_limits)
+            {
+                return Err(PreparationError::new(
+                    PreparationStage::AnalysisPlan,
+                    format!("Analysis {}: {reason}", task.instance_id),
+                ));
+            }
+        }
         ObjectRevision::new(parts.project_revision).map_err(|error| {
             PreparationError::new(
                 PreparationStage::Authorization,
@@ -1431,6 +1451,7 @@ impl PreparedRunSnapshot {
         let digest = snapshot_digest(&parts, &pvt_points);
 
         let snapshot = Self {
+            execution_limits: parts.execution_limits,
             digest,
             intent: parts.intent,
             simulation_plan_id: parts.simulation_plan_id,
@@ -1545,6 +1566,7 @@ impl PreparedRunSnapshot {
                     TouchstoneExportPolicy::disabled()
                 };
                 AuthorizedTaskDispatch {
+                    execution_limits: self.execution_limits,
                     snapshot_digest: self.digest,
                     instance_id: prepared.instance_id,
                     derivation: prepared.derivation,
@@ -2005,7 +2027,26 @@ fn snapshot_digest(parts: &SnapshotParts, pvt_points: &[PreparedPvtPoint]) -> Co
     let touchstone_export = &parts.touchstone_export;
     let measurement_references = &parts.measurement_references;
     let executable_netlist = parts.executable_netlist.as_str();
-    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v9");
+    let mut writer = CanonicalWriter::new("rspice.prepared-run-snapshot/v10");
+    writer.domain("execution-resource-limits");
+    writer.u64(parts.execution_limits.max_netlist_bytes as u64);
+    writer.u64(parts.execution_limits.max_netlist_lines as u64);
+    writer.u64(parts.execution_limits.max_expanded_source_bytes as u64);
+    writer.u64(parts.execution_limits.max_dependency_source_bytes as u64);
+    writer.u64(parts.execution_limits.max_external_data_bytes as u64);
+    writer.u64(parts.execution_limits.max_external_data_values as u64);
+    writer.u64(parts.execution_limits.max_shared_cache_bytes as u64);
+    writer.u64(parts.execution_limits.max_include_depth as u64);
+    writer.u64(parts.execution_limits.max_hierarchy_depth as u64);
+    writer.u64(parts.execution_limits.max_flattened_elements as u64);
+    writer.u64(parts.execution_limits.max_circuit_nodes as u64);
+    writer.u64(parts.execution_limits.max_matrix_unknowns as u64);
+    writer.u64(parts.execution_limits.max_analysis_points as u64);
+    writer.u64(parts.execution_limits.max_result_values as u64);
+    writer.u64(parts.execution_limits.max_transport_history_bytes as u64);
+    writer.u64(parts.execution_limits.max_mixed_interval_events as u64);
+    writer.u64(parts.execution_limits.max_parallel_workers as u64);
+    writer.u64(parts.execution_limits.max_batch_runs as u64);
     writer.domain("run-intent");
     writer.u8(match intent {
         SimulationRunIntent::SimulateRunSet => 0,

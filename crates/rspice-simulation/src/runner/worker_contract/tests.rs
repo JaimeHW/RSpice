@@ -49,6 +49,7 @@ fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
     let mut transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
     transport.request =
@@ -415,6 +416,7 @@ fn worker_request_round_trips_through_json() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let encoded = serde_json::to_string(&request).expect("request serializes");
@@ -698,6 +700,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         dependencies,
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
     let transfer = WorkerRequestTransport::from_request(request.clone()).unwrap();
     assert_eq!(transfer.protocol, WORKER_REQUEST_TRANSPORT_PROTOCOL);
@@ -745,6 +748,7 @@ fn standalone_connection_worker_transport_retains_selected_physics() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
     let mut old = WorkerRequestTransport::from_request(request.clone()).unwrap();
     old.protocol = 9;
@@ -835,6 +839,7 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
 
     let encoded = serde_json::to_vec(&request).unwrap();
@@ -870,6 +875,7 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
             dependencies: Default::default(),
             environment: None,
             stream_transient_samples: false,
+            execution_limits: rspice_core::ResourceLimits::default(),
         };
 
         let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
@@ -2209,6 +2215,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
+        execution_limits: rspice_core::ResourceLimits::default(),
     };
     let transport = WorkerRequestTransport::from_request(request.clone()).unwrap();
     assert_eq!(transport.buffers, vec![vec![1.25, -1.0e-3]]);
