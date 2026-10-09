@@ -3039,6 +3039,7 @@ impl<'a> Parser<'a> {
                     // Regular function call
                     let args = self.parse_arg_list()?;
                     return Ok(Expression::Call(CallExpr {
+                        resolved_builtin: false,
                         name,
                         args,
                         span: start.extend(self.previous_span()),
@@ -3115,6 +3116,7 @@ impl<'a> Parser<'a> {
                 if self.check(TokenKind::LParen) {
                     let args = self.parse_arg_list()?;
                     return Ok(Expression::Call(CallExpr {
+                        resolved_builtin: false,
                         name: name.into(),
                         args,
                         span: start.extend(self.previous_span()),

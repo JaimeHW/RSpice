@@ -236,7 +236,12 @@ overrides; dependency cycles are diagnosed. Both domains consume the same effect
 value. Retained dependencies protect parameter updates from stale folded values and
 source replay rebinds after specialization. HIR 150 / cache record 132 invalidate
 artifacts predating these source bindings.
-Cross-module storage/function binding, upward and absolute `$root` paths, foreign
+Descendant analog function calls retain the target occurrence's parameter values,
+local names, nested calls and built-in math binding. Scalar output/inout copy-out
+uses the existing function execution path. Captured values and scope indices remain
+protected through specialization and source replay. HIR 151 / cache record 133
+invalidate artifacts predating these function bindings.
+Cross-module storage binding, upward and absolute `$root` paths, foreign
 parameter arrays/strings, hierarchy-dependent generate decisions, and scope indices
 that themselves depend on hierarchical constants remain open.
 Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate

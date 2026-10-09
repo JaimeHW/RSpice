@@ -784,3 +784,98 @@ fn foreign_parameter_binding_rejects_illegal_defaults_writes_and_cycles() {
         );
     }
 }
+
+#[test]
+fn foreign_functions_rebind_captured_parameters_and_scope_indices_on_replay() {
+    let source = r#"
+module leaf;
+ parameter real G=2;
+ analog function real helper; input x; real x;
+   helper=G*x;
+ endfunction
+ analog function real calc; input x; real x; integer i;
+   begin
+     calc=helper(x);
+     for(i=0;i<2;i=i+1) calc=calc+sin(i);
+   end
+ endfunction
+endmodule
+module top(output electrical p);
+ parameter integer SELECT=0,K=3;
+ genvar i;
+ generate for(i=0;i<2;i=i+1) begin : lanes
+   leaf #(.G(K+i)) u();
+ end endgenerate
+ analog function real helper; input x; real x; helper=-99; endfunction
+ analog function real sin; inout x; real x; sin=10; endfunction
+ analog V(p)<+lanes[SELECT].u.calc(1);
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let initial = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &initial.canonical_ir,
+            &[("SELECT", 1.0), ("K", 5.0)],
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    for (report, k, selection) in [(&initial, 3.0, 0.0), (&specialized, 5.0, 1.0)] {
+        for (name, value) in [("K", k), ("SELECT", selection)] {
+            let parameter = report
+                .canonical_ir
+                .hir
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name == name)
+                .unwrap();
+            assert_eq!(parameter.elaboration_value, Some(value));
+        }
+        let replay = compiler
+            .prepare_artifact_runtime_source(
+                &report.canonical_ir,
+                &rspice_veriloga::NoPipelineControl,
+            )
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+    }
+}
+
+#[test]
+fn foreign_functions_reject_recursion_and_illegal_caller_capture() {
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for (expression, diagnostic) in [
+        ("f(x)", "recursive analog function binding"),
+        ("v+x", "cannot capture"),
+        ("missing(x)", "not declared in the target occurrence"),
+        ("ddt(x)", "analog operators are not permitted"),
+    ] {
+        let source = format!(
+            r#"
+module leaf;
+ real v=2;
+ analog function real f; input x; real x; f={expression}; endfunction
+endmodule
+module top(output electrical p);
+ real v=100;
+ analog function real missing; input x; real x; missing=100; endfunction
+ leaf u();
+ analog V(p)<+u.f(1);
+endmodule
+"#
+        );
+        let error = compiler.compile_runtime(&source, Some("top")).unwrap_err();
+        assert!(error.to_string().contains(diagnostic), "{error}");
+    }
+}

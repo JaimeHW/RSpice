@@ -337,6 +337,7 @@ impl<'a> HierarchyElaborator<'a> {
                     next.push(if let Some(right) = values.next() {
                         if task == "$bound_step" {
                             Expression::Call(CallExpr {
+                                resolved_builtin: false,
                                 name: "min".into(),
                                 args: vec![left, right],
                                 span,
@@ -1781,6 +1782,7 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
                 let mut args = rewrite_expressions(&call.args, scope)?;
                 qualify_noise_call_name(&call.name, &mut args, scope);
                 Expression::Call(CallExpr {
+                    resolved_builtin: call.resolved_builtin,
                     name: call.name.clone(),
                     args,
                     span: call.span,

@@ -2843,3 +2843,69 @@ endmodule
         );
     }
 }
+
+#[test]
+fn foreign_analog_functions_keep_target_scope_outputs_and_newton_derivatives() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module leaf;
+ parameter real G=2;
+ localparam real B=G+0.5;
+ analog function real base; input x; real x; base=G*x+B; endfunction
+ analog function real shaped;
+   input x; inout acc; real x,acc;
+   begin acc=acc+G; shaped=base(x)+sin(x)+$param_given(G); end
+ endfunction
+ genvar j;
+ generate for(j=0;j<2;j=j+1) begin : cells
+   analog function real scaled; input x; real x; scaled=base(x)+j; endfunction
+ end endgenerate
+endmodule
+module middle;
+ parameter real M=2;
+ leaf #(.G(M)) inner();
+endmodule
+module top(output electrical p,q,r,s,t);
+ parameter real BASE=2;
+ middle #(.M(BASE)) a();
+ leaf #(.G(BASE+2)) b();
+ real acc, sampled=0;
+ analog function real base; input x; real x; base=-99; endfunction
+ analog function real sin; input x; real x; sin=10; endfunction
+ initial #0.5 sampled=V(q);
+ analog begin
+   acc=1;
+   I(p)<+a.inner.base(V(p))/1000;
+   V(q)<+a.inner.shaped(0,acc);
+   V(r)<+acc+sin(0);
+   V(s)<+a.inner.cells[1].scaled(2)+b.base(0);
+   V(t)<+sampled;
+ end
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* foreign function scope\nI1 0 p 1m\nI2 0 a 1m\nX1 p q r s t top\nX2 a b c d e top BASE=4\n.va \"{}\" top module=top\n.end\n",
+        source.path(),
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", -0.75),
+        ("q", 3.5),
+        ("r", 13.0),
+        ("s", 12.0),
+        ("t", 3.5),
+        ("a", -0.875),
+        ("b", 5.5),
+        ("c", 15.0),
+        ("d", 20.0),
+        ("e", 5.5),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}

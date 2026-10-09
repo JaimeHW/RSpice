@@ -4352,6 +4352,7 @@ impl SemanticAnalyzer {
         Ok(match event {
             EventExpr::InitialStep { analyses, span } => {
                 let phase = Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "analysis".into(),
                     args: vec![Expression::StringLit(StringLit {
                         value: "__rspice_initial_step".into(),
@@ -4363,6 +4364,7 @@ impl SemanticAnalyzer {
             }
             EventExpr::FinalStep { analyses, span } => {
                 let phase = Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "analysis".into(),
                     args: vec![Expression::StringLit(StringLit {
                         value: "__rspice_final_step".into(),
@@ -4403,6 +4405,7 @@ impl SemanticAnalyzer {
                     args.push(self.lower_expression_with_side_effects(enable, module, sink)?);
                 }
                 EventLowering::Guard(Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "cross".into(),
                     args,
                     span: *span,
@@ -4412,6 +4415,7 @@ impl SemanticAnalyzer {
                 self.qualify_edge_event_operand("posedge", signal, *span)?;
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 EventLowering::Guard(Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "cross".into(),
                     args: vec![signal, Self::number_expr(1.0, *span)],
                     span: *span,
@@ -4421,6 +4425,7 @@ impl SemanticAnalyzer {
                 self.qualify_edge_event_operand("negedge", signal, *span)?;
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 EventLowering::Guard(Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "cross".into(),
                     args: vec![signal, Self::number_expr(-1.0, *span)],
                     span: *span,
@@ -4449,6 +4454,7 @@ impl SemanticAnalyzer {
                     args.push(self.lower_expression_with_side_effects(enable, module, sink)?);
                 }
                 EventLowering::Guard(Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "above".into(),
                     args,
                     span: *span,
@@ -4476,6 +4482,7 @@ impl SemanticAnalyzer {
                     args.push(self.lower_expression_with_side_effects(enable, module, sink)?);
                 }
                 EventLowering::Guard(Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "timer".into(),
                     args,
                     span: *span,
@@ -4573,6 +4580,7 @@ impl SemanticAnalyzer {
         }
 
         let analysis_filter = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "analysis".into(),
             args: analyses
                 .iter()
@@ -4841,6 +4849,7 @@ impl SemanticAnalyzer {
         {
             self.validate_builtin_call_arity(call)?;
             Expression::Call(CallExpr {
+                resolved_builtin: call.resolved_builtin,
                 name: call.name.clone(),
                 args: vec![self.lower_expression(&call.args[0])?],
                 span: call.span,
@@ -5038,6 +5047,7 @@ impl SemanticAnalyzer {
             span: call.span,
         });
         let min = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "min".into(),
             args: vec![current.clone(), bound],
             span: call.span,
@@ -5086,6 +5096,7 @@ impl SemanticAnalyzer {
                 BinaryOp::Eq,
                 degree.clone(),
                 Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "floor".into(),
                     args: vec![degree.clone()],
                     span: call.span,
@@ -5825,6 +5836,14 @@ impl SemanticAnalyzer {
         None
     }
 
+    fn user_function_for_call(&self, call: &CallExpr) -> Option<&FunctionDef> {
+        if call.resolved_builtin {
+            None
+        } else {
+            self.user_functions.get(&call.name)
+        }
+    }
+
     fn materialize_output_function_call(
         &mut self,
         expr: &Expression,
@@ -5834,7 +5853,7 @@ impl SemanticAnalyzer {
         let Expression::Call(call) = expr else {
             return Ok(None);
         };
-        let Some(func) = self.user_functions.get(&call.name).cloned() else {
+        let Some(func) = self.user_function_for_call(call).cloned() else {
             return Ok(None);
         };
         if !self.function_should_materialize(&func) {
@@ -6164,7 +6183,7 @@ impl SemanticAnalyzer {
                 {
                     return self.materialize_implicit_integrator(call, module, sink);
                 }
-                if let Some(func) = self.user_functions.get(&call.name).cloned()
+                if let Some(func) = self.user_function_for_call(call).cloned()
                     && self.function_should_materialize(&func)
                 {
                     let args = if call.args.len() == func.params.len() {
@@ -6182,6 +6201,7 @@ impl SemanticAnalyzer {
                         call.args.clone()
                     };
                     let call = Expression::Call(CallExpr {
+                        resolved_builtin: call.resolved_builtin,
                         name: call.name.clone(),
                         args,
                         span: call.span,
@@ -6199,6 +6219,7 @@ impl SemanticAnalyzer {
                         });
                 }
                 Expression::Call(CallExpr {
+                    resolved_builtin: call.resolved_builtin,
                     name: call.name.clone(),
                     args: call
                         .args
@@ -6423,9 +6444,7 @@ impl SemanticAnalyzer {
                 .any(|child| self.expression_contains_output_function_call(child)),
             Expression::Call(call) => {
                 (call.name == "idt" && call.args.len() == 1)
-                    || self
-                        .user_functions
-                        .get(&call.name)
+                    || self.user_function_for_call(call)
                         .is_some_and(|func| self.function_needs_materialization(func))
                     || call
                         .args
@@ -6837,7 +6856,7 @@ impl SemanticAnalyzer {
             }
             if let Expression::Call(call) = expression {
                 result = self.validate_builtin_call_arity(call);
-                if let Some(function) = self.user_functions.get(&call.name)
+                if let Some(function) = self.user_function_for_call(call)
                     && call.args.len() != function.params.len()
                 {
                     result = Err(CompileError::Semantic(SemanticError::new(
@@ -7039,7 +7058,7 @@ impl SemanticAnalyzer {
                     return Ok(Expression::BranchAccess(access.with_kind(kind)));
                 }
 
-                if let Some(func) = self.user_functions.get(&call.name) {
+                if let Some(func) = self.user_function_for_call(&call) {
                     if Self::is_recognized_limited_exp_function(func) {
                         let args = call
                             .args
@@ -7047,6 +7066,7 @@ impl SemanticAnalyzer {
                             .map(|a| self.lower_expression(a))
                             .collect::<CompileResult<Vec<_>>>()?;
                         return Ok(Expression::Call(CallExpr {
+                            resolved_builtin: false,
                             name: RSPICE_LIMITED_EXP_INTRINSIC.into(),
                             args,
                             span: call.span,
@@ -7086,6 +7106,7 @@ impl SemanticAnalyzer {
                         Expression::NoiseSource(noise)
                     } else {
                         Expression::Call(CallExpr {
+                            resolved_builtin: call.resolved_builtin,
                             name: call.name.clone(),
                             args,
                             span: call.span,

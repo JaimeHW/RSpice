@@ -106,6 +106,7 @@ impl SemanticAnalyzer {
             let mut residual = Self::binary_expr(
                 BinaryOp::Sub,
                 Expression::Call(CallExpr {
+                    resolved_builtin: false,
                     name: "ddt".into(),
                     args: vec![output.clone()],
                     span,

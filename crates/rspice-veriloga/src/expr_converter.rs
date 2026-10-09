@@ -2670,6 +2670,7 @@ mod tests {
             })
         } else {
             Expression::Call(CallExpr {
+                resolved_builtin: false,
                 name: name.into(),
                 args,
                 span: Span::dummy(),
@@ -2859,6 +2860,7 @@ mod tests {
         let converter = ExprConverter::new(&context);
         let arena = &mut ExprArena::new();
         let expression = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "transition".into(),
             args: vec![
                 Expression::BranchAccess(BranchAccess::Nodes {
@@ -2917,6 +2919,7 @@ mod tests {
         let arena = &mut ExprArena::new();
         let call = |numerator: Expression| {
             Expression::Call(CallExpr {
+                resolved_builtin: false,
                 name: "laplace_nd".into(),
                 args: vec![number(1.0), numerator, vector(&[1.0, 1.0], true)],
                 span: Span::dummy(),
@@ -2953,6 +2956,7 @@ mod tests {
             span: Span::dummy(),
         });
         let expression = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "laplace_nd".into(),
             args: vec![
                 number(1.0),
@@ -2970,6 +2974,7 @@ mod tests {
         assert_eq!(numerator, vec![1.0; 4]);
 
         let oversized = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "laplace_nd".into(),
             args: vec![
                 number(1.0),
@@ -2991,6 +2996,7 @@ mod tests {
         let converter = ExprConverter::new(&context);
         let arena = &mut ExprArena::new();
         let expression = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "idtmod".into(),
             args: vec![number(1.25), number(2.5), number(3.75), number(-4.0)],
             span: Span::dummy(),
@@ -3040,6 +3046,7 @@ mod tests {
             })
         };
         let expression = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "ddx".into(),
             args: vec![
                 Expression::Binary(BinaryExpr {
@@ -3074,6 +3081,7 @@ mod tests {
         let converter = ExprConverter::new(&context);
         let arena = &mut ExprArena::new();
         let expression = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "ddx".into(),
             args: vec![
                 number(1.0),
@@ -3124,6 +3132,7 @@ mod tests {
             })
         };
         let expression = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "ddx".into(),
             args: vec![current(), current()],
             span: Span::dummy(),
@@ -3154,6 +3163,7 @@ mod tests {
         let arena = &mut ExprArena::new();
         let ddx = |access: &str| {
             Expression::Call(CallExpr {
+                resolved_builtin: false,
                 name: "ddx".into(),
                 args: vec![
                     number(1.0),
@@ -3194,6 +3204,7 @@ mod tests {
         let converter = ExprConverter::new(&context);
         let arena = &mut ExprArena::new();
         let improper = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "laplace_nd".into(),
             args: vec![number(1.0), vector(&[1.0, 2.0], true), vector(&[0.5], true)],
             span: Span::dummy(),
@@ -3204,6 +3215,7 @@ mod tests {
         assert!(error.to_string().contains("improper transfer function"));
 
         let nonconjugate = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "laplace_zp".into(),
             args: vec![
                 number(1.0),
@@ -3224,6 +3236,7 @@ mod tests {
         let converter = ExprConverter::new(&context);
         let arena = &mut ExprArena::new();
         let valid = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "zi_nd".into(),
             args: vec![
                 number(2.0),
@@ -3239,6 +3252,7 @@ mod tests {
         assert!(matches!(heavy_of(arena, id), Heavy::ZiFilter { .. }));
 
         let invalid = Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: "zi_nd".into(),
             args: vec![
                 number(1.0),
@@ -3258,6 +3272,7 @@ mod tests {
     fn zi_nodes_with_dummy_spans_receive_distinct_site_ordinals() {
         let unit_zi = |input| {
             Expression::Call(CallExpr {
+                resolved_builtin: false,
                 name: "zi_nd".into(),
                 args: vec![
                     number(input),

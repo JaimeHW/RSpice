@@ -211,7 +211,9 @@ impl Effects {
     fn expression(&mut self, expression: &Expression) {
         match expression {
             Expression::Call(call) => {
-                self.calls.entry(call.name.clone()).or_insert(call.span);
+                if !call.resolved_builtin {
+                    self.calls.entry(call.name.clone()).or_insert(call.span);
+                }
                 for argument in &call.args {
                     self.expression(argument);
                 }
@@ -459,7 +461,7 @@ fn expression_may_write_variable(
     let mut writes = false;
     flow_probes::visit_expression(expression, &mut |expression| match expression {
         Expression::Call(call) => {
-            if let Some(function) = functions.get(&call.name) {
+            if !call.resolved_builtin && let Some(function) = functions.get(&call.name) {
                 writes |= function
                     .params
                     .iter()

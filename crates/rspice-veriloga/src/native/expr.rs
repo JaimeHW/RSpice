@@ -10221,6 +10221,7 @@ mod tests {
 
     fn intrinsic_call(name: &str, args: Vec<Expression>) -> Expression {
         Expression::Call(CallExpr {
+            resolved_builtin: false,
             name: name.into(),
             args,
             span: Span::dummy(),

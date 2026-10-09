@@ -1,6 +1,8 @@
 //! Source-level occurrence discovery for foreign parameter references. No solver
 //! storage or hidden ports are created; both domains analyze the same bound value.
-use super::elaboration::parameters::SourceParameters;
+use super::elaboration::parameters::{ParameterDependencies, SourceParameters};
+
+mod functions;
 use super::*;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -77,6 +79,10 @@ pub(crate) fn bind(module: &mut Module) -> CompileResult<()> {
         children: HashMap::new(),
         active: HashSet::new(),
         resolved: HashSet::new(),
+        imports: HashMap::new(),
+        active_imports: HashSet::new(),
+        next_import: 0,
+        builtins: crate::types::FunctionRegistry::new(),
     };
     let references = module
         .pending_hierarchical_references
@@ -138,6 +144,10 @@ struct Resolver {
     children: HashMap<(usize, SmolStr), usize>,
     active: HashSet<(usize, SmolStr)>,
     resolved: HashSet<(usize, SmolStr)>,
+    imports: HashMap<(usize, usize, SmolStr), SmolStr>,
+    active_imports: HashSet<(usize, usize, SmolStr)>,
+    next_import: usize,
+    builtins: crate::types::FunctionRegistry,
 }
 
 impl Resolver {
@@ -201,19 +211,110 @@ impl Resolver {
             }
         }
         let (target, name) = self.target(owner, &reference)?;
+        self.import_symbol(
+            owner,
+            target,
+            &name,
+            Some(symbol.clone()),
+            reference.source.span,
+        )?;
+        let dependencies = SourceParameters::new(&self.frames[owner].source)
+            .dependencies(reference.index_dependencies.iter())?;
+        self.retain_dependencies(owner, owner, dependencies);
+        self.active.remove(&key);
+        self.resolved.insert(key);
+        Ok(())
+    }
+
+    fn fresh_import(&mut self, owner: usize) -> SmolStr {
+        loop {
+            let name: SmolStr = format!("$rspice_import_{}", self.next_import).into();
+            self.next_import += 1;
+            let source = &self.frames[owner].source;
+            if !source.reserved_identifiers.contains(&name)
+                && !source.declared_names().contains(&name)
+                && !source.pending_hierarchical_references.contains_key(&name)
+                && !self.imports.values().any(|value| value == &name)
+            {
+                return name;
+            }
+        }
+    }
+
+    fn import_symbol(
+        &mut self,
+        owner: usize,
+        target: usize,
+        name: &SmolStr,
+        preferred: Option<SmolStr>,
+        span: Span,
+    ) -> CompileResult<SmolStr> {
+        let key = (owner, target, name.clone());
+        if self.active_imports.contains(&key) {
+            return Err(error("recursive analog function binding", span));
+        }
+        if preferred.is_none()
+            && let Some(symbol) = self.imports.get(&key)
+        {
+            return Ok(symbol.clone());
+        }
+        if self.active_imports.len() >= 256 {
+            return Err(error(
+                "function binding exceeds the dependency depth limit of 256",
+                span,
+            ));
+        }
+        let symbol = preferred.unwrap_or_else(|| self.fresh_import(owner));
+        self.active_imports.insert(key.clone());
+        // Reserve before following callees so imported names cannot collide.
+        self.imports.entry(key.clone()).or_insert(symbol.clone());
+        let source = &self.frames[target].source;
+        if let Some(declaration) = source
+            .parameters
+            .iter()
+            .chain(&source.localparams)
+            .find(|declaration| declaration.name == *name)
+            .cloned()
+        {
+            self.import_parameter(owner, target, declaration, &symbol, span)?;
+        } else if let Some(function) = source
+            .functions
+            .iter()
+            .find(|function| function.name == *name)
+            .cloned()
+        {
+            self.import_function(owner, target, function, &symbol)?;
+        } else {
+            return Err(error(
+                format!(
+                    "`{}.{name}` is not a parameter or analog function; foreign storage binding remains unimplemented",
+                    self.frames[target].path
+                ),
+                span,
+            ));
+        }
+        self.active_imports.remove(&key);
+        Ok(symbol)
+    }
+
+    fn import_parameter(
+        &mut self,
+        owner: usize,
+        target: usize,
+        declaration: ParameterDecl,
+        symbol: &SmolStr,
+        span: Span,
+    ) -> CompileResult<()> {
         let target_source = &self.frames[target].source;
-        let declaration = target_source.parameters.iter().chain(&target_source.localparams)
-            .find(|parameter| parameter.name == name).cloned()
-            .ok_or_else(|| error(format!("`{}.{name}` is not a parameter; foreign storage and function binding remain unimplemented", self.frames[target].path), reference.source.span))?;
         if !declaration.dimensions.is_empty() {
             return Err(error(
                 "foreign parameter arrays require aggregate reference binding",
-                reference.source.span,
+                span,
             ));
         }
         let query = Expression::Identifier(Identifier {
             name: declaration.name.clone(),
-            span: reference.source.span,
+            span,
         });
         let mut typed = declaration.clone();
         typed.default = Some(query.clone());
@@ -223,7 +324,7 @@ impl Resolver {
             &constants,
             target_source.time_scale,
         )
-        .map_err(|detail| error(detail, reference.source.span))?;
+        .map_err(|detail| error(detail, span))?;
         let mut dependencies = vec![&query];
         if let Some(range) = &declaration.packed_range {
             dependencies.extend([&range.msb, &range.lsb]);
@@ -236,7 +337,7 @@ impl Resolver {
         imported.is_given = false;
         imported.range = None;
         imported.attributes.clear();
-        imported.span = reference.source.span;
+        imported.span = span;
         if let Some(range) = &mut imported.packed_range {
             for expression in [&mut range.msb, &mut range.lsb] {
                 let value = crate::canonical_ir::digital_lower::elaboration_constant(
@@ -261,14 +362,22 @@ impl Resolver {
                 });
             }
         }
-        let owner_source = &self.frames[owner].source;
-        let index_dependencies = SourceParameters::new(owner_source)
-            .dependencies(reference.index_dependencies.iter())?;
-        let target_path = self.frames[target].path.clone();
-        let owner_path = self.frames[owner].path.clone();
+        self.retain_dependencies(owner, target, target_dependencies);
+        self.frames[owner].source.localparams.push(imported);
+        Ok(())
+    }
+
+    fn retain_dependencies(
+        &mut self,
+        owner: usize,
+        target: usize,
+        dependencies: ParameterDependencies,
+    ) {
+        let target_path = &self.frames[target].path;
+        let owner_path = &self.frames[owner].path;
         let relative = target_path
             .strip_prefix(owner_path.as_str())
-            .unwrap_or(&target_path)
+            .expect("reference target is a descendant")
             .trim_start_matches('.');
         let qualify = |name: SmolStr| -> SmolStr {
             if relative.is_empty() {
@@ -277,23 +386,19 @@ impl Resolver {
                 format!("{relative}.{name}").into()
             }
         };
+        let values = dependencies
+            .values
+            .into_iter()
+            .map(qualify)
+            .collect::<Vec<_>>();
+        let given = dependencies
+            .given
+            .into_iter()
+            .map(qualify)
+            .collect::<Vec<_>>();
         let source = &mut self.frames[owner].source;
-        source
-            .hierarchical_parameter_values
-            .extend(target_dependencies.values.into_iter().map(qualify));
-        source
-            .hierarchical_parameter_given
-            .extend(target_dependencies.given.into_iter().map(qualify));
-        source
-            .hierarchical_parameter_values
-            .extend(index_dependencies.values);
-        source
-            .hierarchical_parameter_given
-            .extend(index_dependencies.given);
-        source.localparams.push(imported);
-        self.active.remove(&key);
-        self.resolved.insert(key);
-        Ok(())
+        source.hierarchical_parameter_values.extend(values);
+        source.hierarchical_parameter_given.extend(given);
     }
 
     fn target(

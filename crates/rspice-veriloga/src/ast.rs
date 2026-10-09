@@ -1520,6 +1520,9 @@ pub struct ConditionalExpr {
 /// Function call expression
 #[derive(Debug, Clone)]
 pub struct CallExpr {
+    /// The declaring scope has resolved this call to a built-in. Imported
+    /// function bodies must not capture a caller's same-named user function.
+    pub resolved_builtin: bool,
     pub name: SmolStr,
     pub args: Vec<Expression>,
     pub span: Span,
