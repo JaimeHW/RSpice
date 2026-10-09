@@ -897,6 +897,11 @@ Unknown missing values remain unknown. An empty or unretained population cannot
 pass verification. Older aggregate-only converted baselines must be regenerated
 to verify the trial data.
 
+Imported reports must have consistent run counts, convergence flags, trial ranges,
+and confidence bounds, states, and units. These checks apply before conversion or
+comparison, including selective comparisons and baseline replacement. Flat-table
+integer and boolean columns must agree with their exact metadata indicators.
+
 DC mismatch exports and JSON conversion retain each contributor's scope, instance,
 parameter, parameter sigma, sensitivity, signed contribution, and variance share.
 It also retains the output probe, sigma multiplier, evaluated and retained

@@ -177,6 +177,7 @@ mod dc_match;
 mod distortion;
 mod frequency_table;
 mod json_admission;
+mod monte_carlo;
 mod numeric_count;
 mod pac;
 mod payload;
@@ -775,6 +776,7 @@ impl AnalysisResultDocument {
         frequency_table::validate(self, abort)?;
         stability::validate(self, abort)?;
         dc_match::validate(self, abort)?;
+        monte_carlo::validate(self, abort)?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
             self.validate_sensitivity_units(abort)?;
             sensitivity::validate(self, payload, abort)?;

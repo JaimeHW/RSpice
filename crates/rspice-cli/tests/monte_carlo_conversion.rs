@@ -591,3 +591,122 @@ fn native_monte_carlo_projection_respects_limits_and_publishes_manifest_units() 
         2
     );
 }
+
+#[test]
+fn contradictory_monte_carlo_reports_cannot_be_exported_compared_or_blessed() {
+    let dir = common::test_dir("mc_consistency");
+    let source = source(&dir, "source", 6, 7, "11");
+    let original = common::read_json(&source);
+    let altered = dir.join("altered.json");
+    let destination = dir.join("protected.csv");
+    for case in [
+        "failed",
+        "converged",
+        "count-type",
+        "range",
+        "conditional",
+        "bounds",
+        "unit",
+    ] {
+        let mut document = original.clone();
+        let name = match case {
+            "failed" => "failed_runs",
+            "converged" => "all_converged",
+            "count-type" => "completed_runs",
+            "conditional" => "mean_confidence_conditional_on_success",
+            _ => "mean_confidence_lower:56284f555429",
+        };
+        let scalar = document["scalars"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|scalar| scalar["name"] == name)
+            .unwrap();
+        match case {
+            "failed" => scalar["value"]["value"] = json!(999),
+            "converged" => scalar["value"]["value"] = json!(false),
+            "count-type" => scalar["value"] = json!({"representation":"real","value":6.0}),
+            "conditional" => scalar["value"]["value"] = json!(true),
+            "bounds" => scalar["value"]["value"] = json!(100.0),
+            "unit" => scalar["unit"] = json!({"unit":"ampere"}),
+            "range" => document["payload"]["successfulTrialIndices"][5] = json!(13),
+            _ => unreachable!(),
+        }
+        std::fs::write(&altered, document.to_string()).unwrap();
+        std::fs::write(&destination, "previous").unwrap();
+        let converted = convert(&altered, &destination, "csv");
+        assert_eq!(converted.status.code(), Some(1), "{case}: {converted:?}");
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "previous");
+        let output = compare(
+            &altered,
+            &altered,
+            &["--variables", "V(OUT)", "--abstol", "1e100"],
+        );
+        assert_eq!(output.status.code(), Some(1), "{case}: {output:?}");
+        let output = compare(&altered, &source, &["--bless"]);
+        assert_eq!(output.status.code(), Some(1), "{case}: {output:?}");
+        assert_eq!(common::read_json(&source), original);
+    }
+}
+
+#[test]
+fn flat_monte_carlo_counts_cannot_contradict_exact_metadata_or_population() {
+    let dir = common::test_dir("mc_flat_consistency");
+    let source = source(&dir, "source", 6, 7, "11");
+    let flat = dir.join("flat.json");
+    assert!(convert(&source, &flat, "json").status.success());
+    let original = common::read_json(&flat);
+    for case in ["numeric", "marker", "complex"] {
+        let mut table = original.clone();
+        for signal in table["signals"].as_array_mut().unwrap() {
+            if signal["name"] == "failed_runs" {
+                signal["values"] = json!(vec![999.0; 6]);
+                if case == "complex" {
+                    signal.as_object_mut().unwrap().remove("values");
+                    signal["real"] = json!(vec![999.0; 6]);
+                    signal["imag"] = json!(vec![0.0; 6]);
+                }
+            }
+            if case == "marker"
+                && signal["name"] == format!("mc:identity:count({},0)", hex("failed_runs"))
+            {
+                signal["name"] = json!(format!("mc:identity:count({},999)", hex("failed_runs")));
+            }
+        }
+        let altered = dir.join("altered.json");
+        std::fs::write(&altered, table.to_string()).unwrap();
+        let output = compare(
+            &altered,
+            &altered,
+            &[
+                "--variables",
+                "V(OUT)",
+                "--abstol",
+                "1e100",
+                "--reltol",
+                "1e100",
+            ],
+        );
+        assert_eq!(output.status.code(), Some(3), "{output:?}");
+        let output = compare(&altered, &flat, &["--bless", "--variables", "V(OUT)"]);
+        assert_eq!(output.status.code(), Some(3), "{output:?}");
+        assert_eq!(common::read_json(&flat), original);
+    }
+    // Partial convergence remains a valid, explicitly conditional population.
+    let mut partial = common::read_json(&source);
+    for scalar in partial["scalars"].as_array_mut().unwrap() {
+        match scalar["name"].as_str().unwrap() {
+            "completed_runs" => scalar["value"]["value"] = json!(8),
+            "failed_runs" => scalar["value"]["value"] = json!(2),
+            "all_converged" => scalar["value"]["value"] = json!(false),
+            "mean_confidence_conditional_on_success" => scalar["value"]["value"] = json!(true),
+            _ => {}
+        }
+    }
+    let partial_path = dir.join("partial.json");
+    std::fs::write(&partial_path, partial.to_string()).unwrap();
+    let output = convert(&partial_path, &flat, "json");
+    assert!(output.status.success(), "{output:?}");
+    let equal = compare(&flat, &partial_path, &[]);
+    assert!(equal.status.success(), "{equal:?}");
+}

@@ -2,7 +2,7 @@
 
 use super::{WaveformData, evidence::true_indicator, strip_outer_call};
 use crate::commands::report_identity::decode_exact;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub(super) fn is_population(data: &WaveformData) -> bool {
     data.variables.iter().any(|name| {
@@ -17,6 +17,13 @@ pub(super) fn is_population(data: &WaveformData) -> bool {
 pub(super) fn problems(data: &WaveformData) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut problems = Vec::new();
+    let columns: HashMap<_, _> = data
+        .variables
+        .iter()
+        .enumerate()
+        .map(|(column, name)| (name.trim().to_ascii_lowercase(), column))
+        .collect();
+    let mut exact_values = HashMap::new();
     if is_population(data) {
         let coordinates = &data.values[0];
         if coordinates.is_empty()
@@ -69,6 +76,19 @@ pub(super) fn problems(data: &WaveformData) -> Vec<String> {
                         "boolean" => matches!(*value, "true" | "false"),
                         _ => false,
                     };
+                    if valid && kind != "text" {
+                        let value = if kind == "boolean" {
+                            i128::from(*value == "true")
+                        } else {
+                            value.parse::<i128>().ok()?
+                        };
+                        let kind = match kind {
+                            "count" => "count",
+                            "integer" => "integer",
+                            _ => "boolean",
+                        };
+                        exact_values.insert(name.to_ascii_lowercase(), (kind, value));
+                    }
                     valid.then(|| format!("scalar:{}", name.to_ascii_lowercase()))
                 }
                 _ => None,
@@ -92,6 +112,65 @@ pub(super) fn problems(data: &WaveformData) -> Vec<String> {
                 && !data.variables[0].eq_ignore_ascii_case("sample_index"))
         {
             problems.push("Monte Carlo trial provenance disagrees with the coordinate axis".into());
+        }
+    }
+    for (name, (_, exact)) in &exact_values {
+        if columns.contains_key(&format!("re({name})"))
+            || columns.contains_key(&format!("im({name})"))
+        {
+            problems.push(format!(
+                "'{name}': integer and boolean Monte Carlo metadata cannot have complex columns"
+            ));
+        }
+        if let Some(&column) = columns.get(name) {
+            let numeric = *exact as f64;
+            if numeric as i128 != *exact
+                || (0..data.values[column].len())
+                    .any(|row| data.sample(column, row) != Some(numeric))
+            {
+                problems.push(format!(
+                    "'{name}': numeric values contradict the exact Monte Carlo metadata"
+                ));
+            }
+        }
+    }
+    let count = |name: &str| {
+        exact_values
+            .get(name)
+            .and_then(|&(kind, value)| (kind == "count").then_some(value))
+    };
+    let completed = count("completed_runs");
+    let failed = count("failed_runs");
+    let successful = count("successful_runs");
+    if completed
+        .zip(failed)
+        .is_some_and(|(all, failed)| failed > all)
+        || completed
+            .zip(successful)
+            .is_some_and(|(all, successful)| successful > all)
+        || completed
+            .zip(failed)
+            .zip(successful)
+            .is_some_and(|((all, failed), successful)| all - failed != successful)
+        || (is_population(data)
+            && !data.variables[0].eq_ignore_ascii_case("report")
+            && successful.is_some_and(|successful| successful != data.values[0].len() as i128))
+    {
+        problems.push("Monte Carlo run counters contradict the retained population".into());
+    }
+    if let Some(failed) = failed {
+        for (name, expected) in [
+            ("all_converged", failed == 0),
+            ("mean_confidence_conditional_on_success", failed != 0),
+        ] {
+            if exact_values
+                .get(name)
+                .is_some_and(|&(kind, value)| kind != "boolean" || value != i128::from(expected))
+            {
+                problems.push(format!(
+                    "'{name}': Monte Carlo declaration contradicts the failed run count"
+                ));
+            }
         }
     }
     problems

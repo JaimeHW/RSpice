@@ -6,6 +6,7 @@ mod dc_match;
 mod distortion;
 mod json_admission;
 mod json_precision;
+mod monte_carlo;
 mod pac;
 mod pxf;
 mod resource_counts;
