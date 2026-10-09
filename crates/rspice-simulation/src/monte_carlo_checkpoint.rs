@@ -4,7 +4,7 @@ pub mod preparation;
 
 use crate::error::SimulationError;
 use rspice_app_types::product::ContentDigest;
-use rspice_core::{NoAbort, ResourceLimits};
+use rspice_core::{NoAbort, ResourceKind, ResourceLimits, abort_signal::AbortSignal};
 use rspice_results::monte_carlo_checkpoint::{StudyMonteCarloCheckpoint, checkpoint_digest};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -41,16 +41,29 @@ impl MonteCarloCheckpointInput {
     }
 
     pub fn decode(&self) -> Result<StudyMonteCarloCheckpoint, SimulationError> {
+        self.decode_with_limits(ResourceLimits::default(), &NoAbort)
+    }
+
+    pub fn decode_with_limits(
+        &self,
+        limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<StudyMonteCarloCheckpoint, SimulationError> {
+        crate::error::ensure_not_aborted(abort)?;
+        if self.bytes.len() > limits.max_external_data_bytes {
+            return Err(SimulationError::ResourceLimit {
+                resource: ResourceKind::ExternalDataBytes.as_str().into(),
+                requested: self.bytes.len(),
+                limit: limits.max_external_data_bytes,
+            });
+        }
         if checkpoint_digest(&self.bytes) != self.digest {
             return Err(SimulationError::InvalidConfig(
                 "Monte Carlo checkpoint input does not match its frozen content identity".into(),
             ));
         }
-        let checkpoint = StudyMonteCarloCheckpoint::from_bytes_with_limits(
-            &self.bytes,
-            ResourceLimits::default(),
-            &NoAbort,
-        )?;
+        let checkpoint =
+            StudyMonteCarloCheckpoint::from_bytes_with_limits(&self.bytes, limits, abort)?;
         checkpoint.validate_for_resume()?;
         Ok(checkpoint)
     }
@@ -85,16 +98,32 @@ pub struct MonteCarloCheckpointRequest {
 
 impl MonteCarloCheckpointRequest {
     pub fn validate(&self) -> Result<(), SimulationError> {
-        let limits = ResourceLimits::default();
-        if let Some(range) = &self.trial_range
-            && (range.is_empty() || range.end - range.start > limits.max_batch_runs)
-        {
-            return Err(SimulationError::InvalidConfig(
-                "Monte Carlo checkpoint range must be nonempty and within the batch limit".into(),
-            ));
+        self.validate_with_limits(ResourceLimits::default(), &NoAbort)
+    }
+
+    pub fn validate_with_limits(
+        &self,
+        limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        crate::error::ensure_not_aborted(abort)?;
+        if let Some(range) = &self.trial_range {
+            if range.is_empty() {
+                return Err(SimulationError::InvalidConfig(
+                    "Monte Carlo checkpoint range must be nonempty".into(),
+                ));
+            }
+            let requested = range.end - range.start;
+            if requested > limits.max_batch_runs {
+                return Err(SimulationError::ResourceLimit {
+                    resource: ResourceKind::BatchRuns.as_str().into(),
+                    requested,
+                    limit: limits.max_batch_runs,
+                });
+            }
         }
         if let Some(input) = &self.resume {
-            input.decode()?;
+            input.decode_with_limits(limits, abort)?;
         }
         Ok(())
     }

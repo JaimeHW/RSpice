@@ -35,6 +35,7 @@ use rspice_core::engine::MonteCarloEnvironment;
 use rspice_core::engine::MonteCarloStudyConfig;
 use rspice_simulation_contract::config::AnalysisConfig;
 use rspice_simulation_contract::mc_draft::McVariationSource;
+#[cfg(test)]
 use std::path::Path;
 use std::sync::{
     Mutex,

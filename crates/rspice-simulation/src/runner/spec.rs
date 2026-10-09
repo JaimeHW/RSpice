@@ -118,7 +118,7 @@ pub(super) fn run_spec_request_in_context(
                 "Checkpoint continuation requires a Monte Carlo study".into(),
             ));
         }
-        checkpoint.validate()?;
+        checkpoint.validate_with_limits(bridge.resource_limits(), abort_flag)?;
         if checkpoint_observer.is_none() {
             return Err(SimulationError::InvalidConfig(
                 "Monte Carlo checkpoint request has no snapshot destination".into(),
@@ -201,9 +201,8 @@ pub(super) fn run_spec_request_in_context(
                 spec,
                 options,
                 netlist,
-                source_path,
                 environment,
-                abort_flag,
+                service_context,
                 checkpoint_observer,
             )
         }
@@ -1661,8 +1660,7 @@ R2 out 0 1k\n\
                     SpecExecutionOptions::default(),
                     "",
                     None,
-                    None,
-                    &rspice_core::abort_signal::NoAbort,
+                    svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
                     None,
                 ),
                 "AnalysisSpec::DcOp",

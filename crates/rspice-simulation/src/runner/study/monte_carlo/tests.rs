@@ -357,3 +357,79 @@ fn studio_monte_carlo_legacy_unitless_checkpoints_remain_readable_but_cannot_res
         }
     }
 }
+
+#[test]
+fn configured_monte_carlo_preserves_trial_and_population_limits() {
+    let base = base();
+    let mut limits = ResourceLimits::default();
+    limits.max_matrix_unknowns = 32;
+    limits.max_analysis_points = 7;
+    limits.max_batch_runs = 6;
+    limits.max_result_values = 1000;
+    limits.max_parallel_workers = 1;
+    let run = |limits| {
+        run_monte_carlo_with_context(
+            &base,
+            McVariationSource::ParameterTolerance,
+            SOURCE,
+            None,
+            ServiceContext {
+                source_path: None,
+                limits,
+                abort: &NoAbort,
+            },
+            None,
+        )
+    };
+    let bounded = run(limits).unwrap();
+    let ordinary = run(ResourceLimits::default()).unwrap();
+    assert_eq!(bounded.trial_measurements, ordinary.trial_measurements);
+    assert_eq!(bounded.runs_completed, 6);
+    for variable in &bounded.variables {
+        let expected = ordinary
+            .variables
+            .iter()
+            .find(|v| v.name == variable.name)
+            .unwrap();
+        assert_eq!(variable.samples, expected.samples);
+        assert_eq!(variable.mean_confidence, expected.mean_confidence);
+    }
+    for resource in [
+        "matrix_unknowns",
+        "analysis_points",
+        "batch_runs",
+        "result_values",
+        "netlist_bytes",
+    ] {
+        let mut limited = limits;
+        match resource {
+            "matrix_unknowns" => limited.max_matrix_unknowns = 1,
+            "analysis_points" => limited.max_analysis_points = 6,
+            "batch_runs" => limited.max_batch_runs = 5,
+            "result_values" => limited.max_result_values = 10,
+            "netlist_bytes" => limited.max_netlist_bytes = 1,
+            _ => unreachable!(),
+        }
+        let error = run(limited).unwrap_err();
+        assert!(
+            matches!(&error, SimulationError::ResourceLimit { resource: actual, requested, limit }
+            if actual == resource && requested > limit),
+            "{resource}: {error:?}"
+        );
+    }
+    let error = crate::study::monte_carlo::prepared_population_identity_with_context(
+        Some(&base),
+        7,
+        McVariationSource::ParameterTolerance,
+        None,
+        "invalid",
+        None,
+        ServiceContext {
+            source_path: None,
+            limits,
+            abort: &ImmediateAbort,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error, SimulationError::Aborted);
+}

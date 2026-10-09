@@ -1,8 +1,9 @@
 //! Configured Monte Carlo execution and lossless trial continuation.
 
 use super::*;
+use crate::engine_services::ServiceContext;
 use crate::runner::spec;
-use crate::study::monte_carlo::prepare_study;
+use crate::study::monte_carlo::prepare_study_with_context;
 use rspice_core::engine::MonteCarloStudyConfig;
 use rspice_results::monte_carlo_checkpoint::{StudyMonteCarloCheckpoint, failed_observations};
 use std::sync::atomic::AtomicUsize;
@@ -40,6 +41,7 @@ pub(crate) fn run_monte_carlo(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn run_monte_carlo_with_continuation(
     base: &StudyRunConfig,
     variation_source: McVariationSource,
@@ -49,15 +51,28 @@ pub(crate) fn run_monte_carlo_with_continuation(
     abort: &dyn AbortSignal,
     continuation: Option<MonteCarloContinuation<'_>>,
 ) -> Result<services::MonteCarloData, SimulationError> {
-    let (analysis, circuit, study, engine) = prepare_study(
+    run_monte_carlo_with_context(
         base,
         variation_source,
         source,
-        source_path,
         environment,
-        abort,
-    )?
-    .into_parts();
+        ServiceContext::with_defaults(source_path, abort),
+        continuation,
+    )
+}
+
+pub(crate) fn run_monte_carlo_with_context(
+    base: &StudyRunConfig,
+    variation_source: McVariationSource,
+    source: &str,
+    environment: Option<AnalysisExecutionEnvironment>,
+    context: ServiceContext<'_>,
+    continuation: Option<MonteCarloContinuation<'_>>,
+) -> Result<services::MonteCarloData, SimulationError> {
+    let abort = context.abort;
+    let (analysis, circuit, study, engine) =
+        prepare_study_with_context(base, variation_source, source, environment, context)?
+            .into_parts();
     let evaluation_identity =
         *crate::execution_identity::monte_carlo_evaluator_digest(base).as_bytes();
     run_prepared(

@@ -129,6 +129,27 @@ pub fn prepare_voltages(
     environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<PreparedVoltages, SimulationError> {
+    prepare_voltages_with_context(
+        source,
+        variation_source,
+        histogram_bins,
+        environment,
+        ServiceContext {
+            source_path,
+            limits: rspice_core::ResourceLimits::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn prepare_voltages_with_context(
+    source: &str,
+    variation_source: McVariationSource,
+    histogram_bins: usize,
+    environment: Option<AnalysisExecutionEnvironment>,
+    context: ServiceContext<'_>,
+) -> Result<PreparedVoltages, SimulationError> {
+    let abort = context.abort;
     ensure_not_aborted(abort).map_err(SimulationError::from)?;
     if histogram_bins == 0 {
         return Err(SimulationError::InvalidConfig(
@@ -145,12 +166,8 @@ pub fn prepare_voltages(
         })?,
         None => source.to_owned(),
     };
-    let circuit = crate::error::run_abort_aware_service(abort, || {
-        crate::netlist_preparation::parse_runner_netlist_with_abort(&source, source_path, abort)
-    })?;
-    let engine = rspice_core::Engine::new(crate::netlist_preparation::build_engine_config(
-        &circuit, None,
-    ));
+    let circuit = crate::error::run_abort_aware_service(abort, || context.parse(&source))?;
+    let engine = rspice_core::Engine::new(context.engine_config(&circuit));
     // Elaborate the roster without running Newton. A nonconvergent nominal OP
     // must not prevent otherwise valid randomized trials from being evaluated.
     let built = engine
@@ -217,14 +234,14 @@ pub(super) fn population_identity(
     variation_source: McVariationSource,
     histogram_bins: usize,
     environment: Option<AnalysisExecutionEnvironment>,
+    context: ServiceContext<'_>,
 ) -> Result<[u8; 32], SimulationError> {
-    let prepared = prepare_voltages(
+    let prepared = prepare_voltages_with_context(
         source,
-        None,
         variation_source,
         histogram_bins,
         environment,
-        &rspice_core::NoAbort,
+        context,
     )?;
     prepared
         .engine
@@ -232,7 +249,7 @@ pub(super) fn population_identity(
             &prepared.circuit,
             &prepared.study,
             prepared.basis.identity(),
-            &rspice_core::NoAbort,
+            context.abort,
         )
         .map(|value| value.population_identity())
         .map_err(|error| SimulationError::from_engine(&rspice_core::Engine::default(), error))

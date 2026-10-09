@@ -5,7 +5,7 @@ use std::path::Path;
 
 use rspice_core::abort_signal::AbortSignal;
 
-use crate::engine_services as svc_runner;
+use crate::engine_services::{self as svc_runner, ServiceContext};
 use crate::error::SimulationError;
 use crate::execution_options::SpecExecutionOptions;
 use crate::results::{MonteCarloVariableResult, SimulationResult, WaveformData};
@@ -16,12 +16,11 @@ pub(super) fn run_sweep_spec(
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
-    source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
     checkpoint_observer: Option<&super::CheckpointObserver<'_>>,
 ) -> Result<SimulationResult, SimulationError> {
-    super::ensure_not_aborted(abort)?;
+    super::ensure_not_aborted(context.abort)?;
     match spec {
         // The varied subset reaches the engine on the `.MC` card's `PARAMS`
         // list, which this deck already carries, so the specification's copy
@@ -40,12 +39,13 @@ pub(super) fn run_sweep_spec(
                 &options,
                 checkpoint_observer,
                 netlist,
-                source_path,
                 environment,
-                abort,
+                context,
             )
         }
-        AnalysisSpec::Parametric => run_parametric(netlist, options, source_path, abort),
+        AnalysisSpec::Parametric => {
+            run_parametric(netlist, options, context.source_path, context.abort)
+        }
         // A corner declaration is expanded into one task per declared point
         // before the run is authorized, and its plotting family is assembled
         // from those results. Nothing solves the declaration itself, so a
@@ -59,31 +59,29 @@ fn run_monte_carlo(
     options: &SpecExecutionOptions,
     checkpoint_observer: Option<&super::CheckpointObserver<'_>>,
     netlist: &str,
-    source_path: Option<&Path>,
     environment: Option<AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
     use crate::runner::study::monte_carlo::{self, MonteCarloContinuation};
+    let abort = context.abort;
     let base = options.study_base.as_ref();
     let checkpoint = options.mc_checkpoint.as_ref();
     let histogram_bins = options.mc_histogram_bins.unwrap_or(20);
     let run = |continuation| match base {
-        Some(base) => monte_carlo::run_monte_carlo_with_continuation(
+        Some(base) => monte_carlo::run_monte_carlo_with_context(
             base,
             variation_source,
             netlist,
-            source_path,
             environment.clone(),
-            abort,
+            context,
             continuation,
         ),
         None => monte_carlo::voltages::run(
             netlist,
-            source_path,
             variation_source,
             histogram_bins,
             environment.clone(),
-            abort,
+            context,
             continuation,
         ),
     };
@@ -94,14 +92,11 @@ fn run_monte_carlo(
         let mut retained = request
             .resume
             .as_ref()
-            .map(|input| input.decode())
+            .map(|input| input.decode_with_limits(context.limits, abort))
             .transpose()?;
         let publish =
             |value: &rspice_results::monte_carlo_checkpoint::StudyMonteCarloCheckpoint| {
-                let bytes = value.to_bytes_with_limits(
-                    rspice_core::ResourceLimits::default(),
-                    &rspice_core::NoAbort,
-                )?;
+                let bytes = value.to_bytes_with_limits(context.limits, &rspice_core::NoAbort)?;
                 observer(&bytes)
             };
         run(Some(MonteCarloContinuation {

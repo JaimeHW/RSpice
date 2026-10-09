@@ -237,3 +237,5 @@ fn monte_carlo_checkpoint_dispatch_preparation_identity_binds_capture_range_and_
     policy(&mut request).resume = Some(MonteCarloCheckpointInput::from_bytes(bytes).unwrap());
     assert_ne!(original, digest(&request));
 }
+
+mod resource_limits;

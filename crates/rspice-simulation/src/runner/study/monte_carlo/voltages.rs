@@ -1,23 +1,24 @@
 //! All-node OP observations share the configured-study continuation machinery.
 use super::*;
+#[cfg(test)]
 use crate::study::monte_carlo::prepare_voltages;
+use crate::study::monte_carlo::prepare_voltages_with_context;
 
 pub(crate) fn run(
     source: &str,
-    source_path: Option<&Path>,
     variation_source: McVariationSource,
     histogram_bins: usize,
     environment: Option<AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
     continuation: Option<MonteCarloContinuation<'_>>,
 ) -> Result<services::MonteCarloData, SimulationError> {
-    let (circuit, engine, study, basis) = prepare_voltages(
+    let abort = context.abort;
+    let (circuit, engine, study, basis) = prepare_voltages_with_context(
         source,
-        source_path,
         variation_source,
         histogram_bins,
         environment,
-        abort,
+        context,
     )?
     .into_parts();
     run_prepared(

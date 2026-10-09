@@ -4,6 +4,7 @@ use super::{
     StudyAnalysis, StudyRunConfig, resolved_study_environment, study_source_at_environment,
     validate_base_measurements,
 };
+use crate::engine_services::ServiceContext;
 use crate::error::{SimulationError, ensure_not_aborted};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::monte_carlo::Distribution;
@@ -15,6 +16,7 @@ use rspice_simulation_contract::worker_protocol::AnalysisExecutionEnvironment;
 use std::path::Path;
 
 mod voltages;
+pub(crate) use voltages::prepare_voltages_with_context;
 pub use voltages::{PreparedVoltages, VoltageBasis, prepare_voltages};
 
 /// Prepared study inputs; preparing them does not authorize dispatch.
@@ -47,6 +49,31 @@ pub fn prepare_study(
     environment: Option<AnalysisExecutionEnvironment>,
     abort: &dyn AbortSignal,
 ) -> Result<PreparedStudy, SimulationError> {
+    prepare_study_with_context(
+        base,
+        variation_source,
+        source,
+        environment,
+        ServiceContext {
+            source_path,
+            limits: rspice_core::ResourceLimits::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn prepare_study_with_context(
+    base: &StudyRunConfig,
+    variation_source: McVariationSource,
+    source: &str,
+    environment: Option<AnalysisExecutionEnvironment>,
+    context: ServiceContext<'_>,
+) -> Result<PreparedStudy, SimulationError> {
+    let ServiceContext {
+        source_path,
+        limits,
+        abort,
+    } = context;
     ensure_not_aborted(abort).map_err(SimulationError::from)?;
     if !base.objective_terms.is_empty() || !base.constraints.is_empty() {
         return Err(SimulationError::InvalidConfig(
@@ -61,7 +88,10 @@ pub fn prepare_study(
     // native-statistics replay observes the same analysis and solver policy.
     let (analysis, environment) = resolved_study_environment(base, environment);
     let source = study_source_at_environment(base, source, environment.as_ref(), abort)?;
-    let engine = rspice_core::Engine::default();
+    let engine = rspice_core::Engine::new(rspice_core::SimulationConfig {
+        resource_limits: limits,
+        ..Default::default()
+    });
     let circuit = crate::netlist_preparation::parse_analysis_netlist_with_abort(
         &source,
         source_path,
@@ -106,7 +136,7 @@ pub fn prepare_study(
     study.confidence_pct = command.confidence_pct;
     study.confidence_method = command.confidence_method.into();
     study.environment = environment;
-    let engine = rspice_core::Engine::default().resolved_for_netlist(&circuit);
+    let engine = engine.resolved_for_netlist(&circuit);
     Ok(PreparedStudy {
         analysis,
         circuit,
@@ -125,6 +155,31 @@ pub fn prepared_population_identity(
     source: &str,
     environment: Option<AnalysisExecutionEnvironment>,
 ) -> Result<[u8; 32], SimulationError> {
+    prepared_population_identity_with_context(
+        base,
+        histogram_bins,
+        variation_source,
+        statistics,
+        source,
+        environment,
+        ServiceContext {
+            source_path: None,
+            limits: rspice_core::ResourceLimits::default(),
+            abort: &rspice_core::NoAbort,
+        },
+    )
+}
+
+pub(crate) fn prepared_population_identity_with_context(
+    base: Option<&StudyRunConfig>,
+    histogram_bins: usize,
+    variation_source: McVariationSource,
+    statistics: Option<&rspice_simulation_contract::mc_statistics::McStatisticsConfig>,
+    source: &str,
+    environment: Option<AnalysisExecutionEnvironment>,
+    context: ServiceContext<'_>,
+) -> Result<[u8; 32], SimulationError> {
+    ensure_not_aborted(context.abort)?;
     let source = source_with_statistics(source, variation_source, statistics)?;
     let Some(base) = base else {
         return voltages::population_identity(
@@ -132,16 +187,11 @@ pub fn prepared_population_identity(
             variation_source,
             histogram_bins,
             environment,
+            context,
         );
     };
-    let prepared = prepare_study(
-        base,
-        variation_source,
-        &source,
-        None,
-        environment,
-        &rspice_core::NoAbort,
-    )?;
+    let prepared =
+        prepare_study_with_context(base, variation_source, &source, environment, context)?;
     let evaluation = *crate::execution_identity::monte_carlo_evaluator_digest(base).as_bytes();
     prepared
         .engine
@@ -149,7 +199,7 @@ pub fn prepared_population_identity(
             &prepared.circuit,
             &prepared.study,
             evaluation,
-            &rspice_core::NoAbort,
+            context.abort,
         )
         .map(|checkpoint| checkpoint.population_identity())
         .map_err(|error| SimulationError::from_engine(&rspice_core::Engine::default(), error))

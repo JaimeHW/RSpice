@@ -38,6 +38,7 @@ pub fn execution_resource_policy_blocker(
             | AnalysisSpec::Fourier { .. }
             | AnalysisSpec::Envelope { .. }
             | AnalysisSpec::Optimization { .. }
+            | AnalysisSpec::MonteCarlo { .. }
             | AnalysisSpec::Pss { .. }
             | AnalysisSpec::PssSpectrum { .. }
             | AnalysisSpec::HarmonicBalance { .. }
