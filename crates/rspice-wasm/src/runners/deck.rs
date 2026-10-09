@@ -558,8 +558,10 @@ fn execute_analysis(
                 .map_err(simulation_error)?;
             ensure_not_aborted(abort)?;
             Ok(vec![
-                AnalysisResultDocument::from_monte_carlo(id, &result)
-                    .map_err(document_projection_error)?,
+                AnalysisResultDocument::from_monte_carlo_with_units(id, &result, |_| {
+                    Some(rspice_core::execution::SignalUnit::Volt)
+                })
+                .map_err(document_projection_error)?,
             ])
         }
 

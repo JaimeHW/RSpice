@@ -101,6 +101,7 @@ pub(super) fn table(
     }
     for variable in &payload.statistics {
         let identity = encode_exact(&variable.name);
+        let unit = variable.unit.clone().unwrap_or(SignalUnit::Unspecified);
         projection.mc_identity(format!("variable({identity})"))?;
         if samples != 0 {
             let folded_name = variable.name.to_ascii_lowercase();
@@ -113,7 +114,7 @@ pub(super) fn table(
             } else {
                 variable.name.clone()
             };
-            projection.push(name, SignalUnit::Unspecified, 1, || {
+            projection.push(name, unit.clone(), 1, || {
                 ColumnData::optional_real(variable.samples.clone())
             })?;
         }
@@ -125,7 +126,7 @@ pub(super) fn table(
         ] {
             projection.mc_optional(
                 format!("mc:{metric}({identity})"),
-                SignalUnit::Unspecified,
+                unit.clone(),
                 value,
                 (samples == 0).then_some(1),
             )?;
@@ -140,7 +141,7 @@ pub(super) fn table(
         for (index, &value) in variable.bin_edges.iter().enumerate() {
             projection.constant(
                 format!("mc:bin_edge({identity},{index})"),
-                SignalUnit::Unspecified,
+                unit.clone(),
                 value,
             )?;
         }

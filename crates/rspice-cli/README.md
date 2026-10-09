@@ -489,7 +489,7 @@ shapes:
 | `.DC`, `.TRAN`, `.AC`, `.NOISE` | node/branch tables over the family's own scale |
 | Aggregated axis sweep | One row per coordinate, node voltages as columns |
 | `.FOUR` | One row per harmonic: frequency, magnitude, phase, DC component, THD |
-| Monte Carlo | Per-run samples, one column per tracked variable |
+| Monte Carlo | Per-trial samples, statistics, histograms, confidence states, and campaign context |
 | PSS | One period of the steady-state waveforms (time domain) |
 | HB | Complex spectrum per node over the harmonic frequencies |
 | `.PAC` | Complex node and branch columns per retained sideband (`V(out):sb0`), scaled by `PACMAG`, over the offset frequency. `.PRINT`/`.SAVE` selects signals at each retained sideband; `INCLUDEDC=NO` omits sideband zero. Flat exports append the fundamental and each sideband's physical frequency in Hz |
@@ -877,12 +877,15 @@ only that retained root is the intended comparison. Older documents without
 units keep those units unstated. Older root-only flat exports can verify only
 their retained roots; regenerate those baselines to check gains and evidence.
 
-Monte Carlo JSON conversion uses the recorded zero-based `trial_index` and
+Monte Carlo exports and JSON conversion use the recorded zero-based `trial_index` and
 retains every output sample, statistic, histogram bin and edge, confidence state,
 and campaign scalar. Summary values repeat alongside the trial rows. Conversion
 checks the expanded table against the configured resource limits before writing.
 Legacy populations without trial identities use `sample_index` and explicitly
-mark those identities as unknown. Trial coordinates cannot be interpolated.
+mark those identities as unknown. Trial coordinates compare exactly and cannot be
+interpolated. Native JSON retains integer trial indices without binary64 rounding;
+flat formats reject indices that cannot be represented exactly. Output units remain
+explicit where known by the producing analysis, and unstated in legacy populations.
 
 `mc:identity:` columns preserve text, integer values, units, and variable identities
 as exact named indicators. Text uses UTF-8 hexadecimal encoding so case-sensitive

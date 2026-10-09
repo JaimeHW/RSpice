@@ -1129,8 +1129,9 @@ fn a_monte_carlo_result_retains_every_trial_and_its_statistics() {
         payload
             .statistics
             .iter()
-            .all(|statistic| statistic.samples.len() == 4),
-        "every trial must be retained, not just its summary"
+            .all(|statistic| statistic.samples.len() == 4
+                && statistic.unit == Some(rspice_core::execution::SignalUnit::Volt)),
+        "every voltage trial and its unit must be retained, not just its summary"
     );
 }
 

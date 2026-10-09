@@ -567,7 +567,10 @@ pub(crate) fn run_directive(
                 engine.config().resource_limits,
                 abort,
             )?;
-            AnalysisResultDocument::from_monte_carlo(id, &result).map_err(map_result_document_error)
+            AnalysisResultDocument::from_monte_carlo_with_units(id, &result, |_| {
+                Some(rspice_core::execution::SignalUnit::Volt)
+            })
+            .map_err(map_result_document_error)
         }
         AnalysisCommand::Hb(card) => {
             let config = hb_config(netlist, card)?;

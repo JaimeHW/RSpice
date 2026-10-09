@@ -251,7 +251,7 @@ pub(super) fn run_monte_carlo(
                 }
             }
 
-            export_monte_carlo(ctx, seed, &result, &variables)?;
+            export_monte_carlo(ctx, &result)?;
             Ok(())
         }
         Err(e) => {
@@ -261,14 +261,10 @@ pub(super) fn run_monte_carlo(
     }
 }
 
-/// Write Monte Carlo results: per-run samples as the table body (one row
-/// per run, one column per tracked variable). The JSON format additionally
-/// carries the summary statistics and run metadata.
+/// Publish the complete Monte Carlo report through the conversion projection.
 fn export_monte_carlo(
     ctx: &RunContext<'_>,
-    seed: u64,
     result: &rspice_core::analysis::MonteCarloResult,
-    variables: &[&rspice_core::analysis::VariableStatistics],
 ) -> Result<(), CliError> {
     ensure_not_cancelled(ctx)?;
     let Some(resolved) = ctx.resolve_output("mc") else {
@@ -276,84 +272,23 @@ fn export_monte_carlo(
     };
     let analysis_id = resolved.analysis("mc")?;
     let output_path = resolved.path;
-
-    let num_samples = variables
-        .iter()
-        .map(|stats| stats.samples.len())
-        .max()
-        .unwrap_or(0);
-    let indices =
-        result
-            .successful_trial_indices
-            .as_ref()
-            .ok_or_else(|| CliError::InternalError {
-                message: "Monte Carlo export requires the original trial identities".into(),
-            })?;
-    if indices.len() != num_samples
-        || indices
-            .iter()
-            .any(|&index| (index as u128) > (1_u128 << 53) - 1)
-    {
-        return Err(CliError::InternalError {
-            message:
-                "Monte Carlo trial identities cannot be represented exactly in the exported table"
-                    .into(),
-        });
-    }
-    let runs: Vec<f64> = indices.iter().map(|&index| index as f64).collect();
-    let signals: Vec<crate::commands::run_signals::ScalarSignal> = variables
-        .iter()
-        .map(|stats| crate::commands::run_signals::ScalarSignal {
-            display_name: stats.name.clone(),
-            raw_name: stats.name.clone(),
-            kind: crate::commands::run_signals::SignalKind::Voltage,
-            values: stats.samples.clone(),
-        })
-        .collect();
-    // The campaign seed is run configuration rather than a result field. It is
-    // reported on the console and in the `--summary` manifest; the typed
-    // document carries the statistics the core computed.
-    let _ = seed;
-
-    super::document::publish_analysis_result(
+    super::payload_report::publish(
         ctx,
         &output_path,
         analysis_id,
-        super::document::scalar_schema(&signals)?,
-        || rspice_core::execution::AnalysisResultDocument::from_monte_carlo(analysis_id, result),
-        |path, format| match format {
-            crate::cli::OutputFormat::Hdf5 => {
-                let mut data = crate::hdf5::Hdf5SimulationData::new();
-                data.title = "Monte Carlo Samples".to_string();
-                data.identity = Some(super::document::hdf5_identity(ctx, analysis_id)?);
-                let mut sweep = crate::hdf5::Hdf5WaveformSection::new("trial_index", runs.clone());
-                for signal in &signals {
-                    sweep.add_typed_signal(
-                        signal.display_name.clone(),
-                        signal.raw_variable_type(),
-                        signal.unit_symbol(),
-                        signal.values.clone(),
-                    );
-                }
-                data.dc_sweep = Some(sweep);
-                crate::hdf5::write_hdf5(path, &data)
-                    .map_err(|err| super::shared::map_hdf5_output_error(path, err))
-            }
-            format => super::export::scalar_table(
-                "monte_carlo",
-                "Monte Carlo Samples",
-                "trial_index",
-                "index",
-                runs.clone(),
-                &signals,
+        "monte_carlo",
+        "Monte Carlo Samples",
+        || {
+            rspice_core::execution::AnalysisResultDocument::from_monte_carlo_with_units(
+                analysis_id,
+                result,
+                |_| Some(rspice_core::execution::SignalUnit::Volt),
             )
-            .write(path, format),
         },
     )?;
-
     if !ctx.quiet {
         crate::console::line(format_args!(
-            "  Monte Carlo samples exported to: {}",
+            "  Monte Carlo report exported to: {}",
             output_path.display()
         ))?;
     }

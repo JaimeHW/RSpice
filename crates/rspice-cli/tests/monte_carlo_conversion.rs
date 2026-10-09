@@ -42,6 +42,18 @@ fn convert(source: &Path, destination: &Path, format: &str) -> Output {
         .unwrap()
 }
 
+fn run(deck: &Path, destination: &Path, format: &str, extra: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "run"])
+        .arg(deck)
+        .arg("-o")
+        .arg(destination)
+        .args(["-f", format])
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
 fn compare(source: &Path, baseline: &Path, flags: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "compare"])
@@ -428,4 +440,154 @@ fn monte_carlo_retains_scalar_types_units_and_exact_metadata() {
         let output = compare(&altered, &flat, &["--abstol", "1e100", "--reltol", "1e100"]);
         assert_eq!(output.status.code(), Some(3), "{output:?}");
     }
+}
+
+#[test]
+fn native_monte_carlo_exports_retain_complete_reports_and_voltage_units() {
+    let dir = common::test_dir("mc_native_reports");
+    for (runs, bootstrap) in [(1, false), (6, false), (6, true)] {
+        let typed = source(&dir, "source", runs, 7, "18446744073709551615");
+        let deck = dir.join("source.sp");
+        if bootstrap {
+            let authored = std::fs::read_to_string(&deck).unwrap().replace(
+                "\n.end",
+                " CI BOOTSTRAP RESAMPLES 30 BOOTSEED 18446744073709551615\n.end",
+            );
+            std::fs::write(&deck, authored).unwrap();
+            let output = run(&deck, &typed, "json", &[]);
+            assert!(output.status.success(), "{output:?}");
+        }
+        let original = common::read_json(&typed);
+        assert_eq!(original["pointCount"], 0);
+        assert!(original["signals"].as_array().unwrap().is_empty());
+        for variable in original["payload"]["statistics"].as_array().unwrap() {
+            assert_eq!(variable["unit"], json!({"unit":"volt"}));
+        }
+        for (format, extension) in FORMATS {
+            let native = dir.join(format!("native.{extension}"));
+            let output = run(&deck, &native, format, &[]);
+            assert!(
+                output.status.success(),
+                "{runs}/{bootstrap}/{format}: {output:?}"
+            );
+            let equal = compare(&native, &typed, &[]);
+            assert!(
+                equal.status.success(),
+                "{runs}/{bootstrap}/{format}: {equal:?}"
+            );
+            let decoded = dir.join("decoded.json");
+            assert!(convert(&native, &decoded, "json").status.success());
+            let table = common::read_json(&decoded);
+            assert_eq!(column(&table, "V(OUT)")["unit"], "V");
+            assert_eq!(
+                column(&table, &format!("mc:mean({})", hex("V(OUT)")))["unit"],
+                "V"
+            );
+            assert_eq!(
+                column(&table, &format!("mc:histogram({},0)", hex("V(OUT)")))["unit"],
+                "1"
+            );
+        }
+    }
+}
+
+#[test]
+fn native_monte_carlo_keeps_large_trial_indices_exact_without_limiting_json() {
+    let dir = common::test_dir("mc_large_trial_indices");
+    std::fs::write(
+        dir.join("statistics.scs"),
+        "parameters p=1000\nstatistics {\n mismatch {\n vary p dist=gauss std=0\n }\n}\n",
+    )
+    .unwrap();
+    let deck = dir.join("large.sp");
+    for start in [
+        9_007_199_254_740_992_u64,
+        9_007_199_254_740_993,
+        9_007_199_254_740_994,
+    ] {
+        std::fs::write(&deck, format!("Large trial index\n.include \"statistics.scs\"\nV1 in 0 1\nR1 in 0 {{p}}\n.MC 1 START {start} SEED 11\n.end\n")).unwrap();
+        for (format, extension) in FORMATS {
+            let destination = dir.join(format!("large.{extension}"));
+            std::fs::write(&destination, "previous").unwrap();
+            let output = run(&deck, &destination, format, &[]);
+            if format == "json" {
+                assert!(output.status.success(), "{start}/{format}: {output:?}");
+                assert_eq!(
+                    common::read_json(&destination)["payload"]["successfulTrialIndices"][0]
+                        .as_u64(),
+                    Some(start)
+                );
+            } else if start.is_multiple_of(2) {
+                assert!(output.status.success(), "{start}/{format}: {output:?}");
+                let decoded = dir.join("decoded.json");
+                assert!(convert(&destination, &decoded, "json").status.success());
+                assert_eq!(
+                    common::read_json(&decoded)["scale"]["values"][0].as_f64(),
+                    Some(start as f64)
+                );
+            } else {
+                assert_eq!(
+                    output.status.code(),
+                    Some(1),
+                    "{start}/{format}: {output:?}"
+                );
+                assert!(
+                    String::from_utf8_lossy(&output.stderr)
+                        .contains("cannot be represented exactly"),
+                    "{output:?}"
+                );
+                assert_eq!(std::fs::read_to_string(destination).unwrap(), "previous");
+            }
+        }
+    }
+}
+
+#[test]
+fn native_monte_carlo_projection_respects_limits_and_publishes_manifest_units() {
+    let dir = common::test_dir("mc_native_admission");
+    let typed = source(&dir, "source", 6, 0, "11");
+    let deck = dir.join("source.sp");
+    let config = dir.join("limits.toml");
+    std::fs::write(&config, "[resources]\nmax_external_data_values=400\n").unwrap();
+    let destination = dir.join("protected.csv");
+    std::fs::write(&destination, "previous").unwrap();
+    for (format, path) in [("csv", &destination), ("json", &typed)] {
+        let output = run(&deck, path, format, &["--config", config.to_str().unwrap()]);
+        assert_eq!(
+            output.status.code(),
+            Some(if format == "csv" { 75 } else { 0 }),
+            "{format}: {output:?}"
+        );
+    }
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "previous");
+    let authored = std::fs::read_to_string(&deck)
+        .unwrap()
+        .replace(".end", ".STEP PARAM rtop LIST 1000 2000\n.end");
+    std::fs::write(&deck, authored).unwrap();
+    let output = run(&deck, &dir.join("sweep.csv"), "csv", &[]);
+    assert!(output.status.success(), "{output:?}");
+    let manifest = common::read_json(&dir.join("sweep.step_schema.json"));
+    let schema = manifest["analyses"][0]["union_schema"].as_array().unwrap();
+    for (name, unit) in [
+        ("V(OUT)".to_string(), "volt"),
+        (format!("mc:mean({})", hex("V(OUT)")), "volt"),
+        (
+            format!("mc:histogram({},0)", hex("V(OUT)")),
+            "dimensionless",
+        ),
+        ("completed_runs".into(), "dimensionless"),
+    ] {
+        let descriptor = schema
+            .iter()
+            .find(|descriptor| descriptor["display_name"] == name)
+            .unwrap_or_else(|| panic!("missing {name}: {manifest}"));
+        assert_eq!(descriptor["unit"], unit, "{name}: {descriptor}");
+    }
+    assert_eq!(
+        manifest["analyses"][0]["coordinates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
