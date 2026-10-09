@@ -70,6 +70,33 @@ pub enum ResourceKind {
 }
 
 impl ResourceKind {
+    /// Recover a known resource category from its stable machine-readable name.
+    /// Unknown names remain unknown so callers cannot misclassify a new category.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "netlist_bytes" => Some(Self::NetlistBytes),
+            "netlist_lines" => Some(Self::NetlistLines),
+            "expanded_source_bytes" => Some(Self::ExpandedSourceBytes),
+            "dependency_source_bytes" => Some(Self::DependencySourceBytes),
+            "external_data_bytes" => Some(Self::ExternalDataBytes),
+            "external_data_values" => Some(Self::ExternalDataValues),
+            "shared_cache_bytes" => Some(Self::SharedCacheBytes),
+            "include_depth" => Some(Self::IncludeDepth),
+            "hierarchy_depth" => Some(Self::HierarchyDepth),
+            "flattened_elements" => Some(Self::FlattenedElements),
+            "circuit_nodes" => Some(Self::CircuitNodes),
+            "matrix_unknowns" => Some(Self::MatrixUnknowns),
+            "analysis_points" => Some(Self::AnalysisPoints),
+            "result_values" => Some(Self::ResultValues),
+            "transport_history_bytes" => Some(Self::TransportHistoryBytes),
+            "transport_history_records" => Some(Self::TransportHistoryRecords),
+            "mixed_interval_events" => Some(Self::MixedIntervalEvents),
+            "parallel_workers" => Some(Self::ParallelWorkers),
+            "batch_runs" => Some(Self::BatchRuns),
+            _ => None,
+        }
+    }
+
     /// Stable machine-readable resource name for logs and API responses.
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -611,6 +638,35 @@ mod tests {
             "transport_history_bytes"
         );
         assert_eq!(ResourceKind::MatrixUnknowns.to_string(), "matrix_unknowns");
+    }
+
+    #[test]
+    fn resource_names_round_trip_without_accepting_unknown_categories() {
+        for resource in [
+            ResourceKind::NetlistBytes,
+            ResourceKind::NetlistLines,
+            ResourceKind::ExpandedSourceBytes,
+            ResourceKind::DependencySourceBytes,
+            ResourceKind::ExternalDataBytes,
+            ResourceKind::ExternalDataValues,
+            ResourceKind::SharedCacheBytes,
+            ResourceKind::IncludeDepth,
+            ResourceKind::HierarchyDepth,
+            ResourceKind::FlattenedElements,
+            ResourceKind::CircuitNodes,
+            ResourceKind::MatrixUnknowns,
+            ResourceKind::AnalysisPoints,
+            ResourceKind::ResultValues,
+            ResourceKind::TransportHistoryBytes,
+            ResourceKind::TransportHistoryRecords,
+            ResourceKind::MixedIntervalEvents,
+            ResourceKind::ParallelWorkers,
+            ResourceKind::BatchRuns,
+        ] {
+            assert_eq!(ResourceKind::from_name(resource.as_str()), Some(resource));
+        }
+        assert_eq!(ResourceKind::from_name("future_resource"), None);
+        assert_eq!(ResourceKind::from_name("RESULT_VALUES"), None);
     }
 
     #[test]
