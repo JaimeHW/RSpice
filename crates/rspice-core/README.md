@@ -1562,7 +1562,10 @@ charge projection and rate reconstruction. Independent public tests cover
 nonlinear feedback, finite source currents, source charge impulses and CCCS
 fanout, OP/UIC startup, and packed continuation across three dialects. Local
 voltage seeding backtracks invalid trial values; the coupled physical solve
-still verifies charge, flux, rank and current balance. Behavioral voltage
+still verifies charge, flux, rank and current balance. Constant independent
+voltage clamps retain algebraic CCCS fanout into resistive loads when every
+constitutive charge input is fixed. Original charge audits still reject
+inconsistent incoming storage that would require a voltage impulse. Behavioral voltage
 branch controls, ideal-source and zero-impedance current controls, coupled
 inductance controls, switched and stateful behavioral equations, CCVS voltage
 impulses, and remaining device providers require further implementation.

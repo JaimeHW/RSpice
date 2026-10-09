@@ -18,20 +18,6 @@ pub(in crate::engine::transient) struct OperatingPointStartup {
 #[path = "startup_contract_tests.rs"]
 mod contract_tests;
 
-fn constant_source(spec: &crate::netlist::SourceSpec) -> bool {
-    use crate::netlist::SourceSpec as S;
-    match spec {
-        S::Dc(_) | S::Ac { .. } | S::DcAc { .. } => true,
-        S::Distortion { inner, .. } => constant_source(inner),
-        S::DcTransient { transient, .. }
-        | S::AcTransient { transient, .. }
-        | S::DcAcTransient { transient, .. } => constant_source(transient),
-        // RF annotations can add a transient tone. Noise and even apparently
-        // flat sampled waveforms need their own forcing proof.
-        _ => false,
-    }
-}
-
 impl Engine {
     fn physical_startup_operating_point(
         &self,
@@ -95,7 +81,9 @@ impl Engine {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            stationary &= spec.as_ref().is_none_or(constant_source);
+            stationary &= spec
+                .as_ref()
+                .is_none_or(crate::netlist::SourceSpec::is_constant_in_transient);
         }
         Ok(Some(OperatingPointStartup { stationary }))
     }

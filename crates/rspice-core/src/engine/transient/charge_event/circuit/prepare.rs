@@ -7,6 +7,71 @@ fn aligned(name: &str, count: usize, lengths: &[usize]) -> Result<()> {
     Ok(())
 }
 
+/// Nodes fixed for the entire transient by independent constant voltage
+/// constraints. This is an authored topology proof, not a zero sampled slope.
+/// It is used only to reduce charge incidence; physical Q and its audits stay.
+fn constant_voltage_nodes(
+    circuit: &crate::CircuitData,
+    options: &EventOptions,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<usize>> {
+    check_abort(abort)?;
+    let nodes = circuit.num_nodes();
+    ResourceLimitError::ensure(
+        ResourceKind::ResultValues,
+        circuit
+            .matrix_size()
+            .saturating_mul(64)
+            .saturating_add(nodes.saturating_add(1))
+            .saturating_add(
+                circuit
+                    .bjts
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Bjt>().div_ceil(8)),
+            ),
+        options.limits.max_result_values,
+    )?;
+    let mut roots = Vec::new();
+    roots
+        .try_reserve_exact(nodes + 1)
+        .map_err(|source| SimulationError::Allocation {
+            object: "constant event voltage constraints",
+            source,
+        })?;
+    roots.extend(0..=nodes);
+    fn root(roots: &mut [usize], mut node: usize) -> usize {
+        while roots[node] != node {
+            roots[node] = roots[roots[node]];
+            node = roots[node];
+        }
+        node
+    }
+    let sources = &circuit.voltage_sources;
+    for index in 0..sources.len() {
+        check_abort(abort)?;
+        let p = sources.node_pos[index];
+        let n = sources.node_neg[index];
+        if p > nodes || n > nodes {
+            return Err(error(
+                "constant voltage terminal outside the prepared circuit",
+            ));
+        }
+        if sources.source_specs[index]
+            .as_ref()
+            .is_none_or(crate::netlist::SourceSpec::is_constant_in_transient)
+        {
+            let p = root(&mut roots, p);
+            let n = root(&mut roots, n);
+            roots[p.max(n)] = p.min(n);
+        }
+    }
+    for node in 0..=nodes {
+        check_abort(abort)?;
+        roots[node] = root(&mut roots, node);
+    }
+    Ok(roots)
+}
+
 impl<'a> PreparedEventCircuit<'a> {
     /// Nodal inputs and genuinely constitutive current coordinates are finite
     /// at this event boundary. Ideal-source/zero-impedance currents may carry
@@ -361,6 +426,12 @@ impl<'a> PreparedEventCircuit<'a> {
             return Err(error("nonfinite prepared circuit coefficient"));
         }
         let mut ports = Vec::new();
+        // Constant clamps can make charge identically invariant. Retaining
+        // those ports in the free-charge basis would wrongly discard finite
+        // algebraic KCL, e.g. a CCCS sensing a clamped BJT's base current and
+        // driving a resistor. The full Q rows still conserve startup charge
+        // and reject transitions that require an unsupported voltage impulse.
+        let fixed = constant_voltage_nodes(circuit, options, abort)?;
         let mut equations = vec![None; size - nodes];
         let mut constant_sources = Vec::new();
         let mut ccvs_current_rows = Vec::new();
@@ -416,7 +487,11 @@ impl<'a> PreparedEventCircuit<'a> {
                 });
                 claim(&mut equations, ordinal, equation)?;
             }
-            if c.capacitances[index] != 0.0 {
+            if c.capacitances[index] != 0.0
+                && (c.value_expressions[index].is_some()
+                    || fixed[stamp.pp.row] != 0
+                    || fixed[stamp.nn.row] != 0)
+            {
                 ResourceLimitError::ensure(
                     ResourceKind::ResultValues,
                     size.saturating_mul(64)
@@ -435,7 +510,9 @@ impl<'a> PreparedEventCircuit<'a> {
                     diode.name
                 )));
             }
-            if diode.has_charge_storage() {
+            if diode.has_charge_storage()
+                && (fixed[diode.node_anode] != 0 || fixed[diode.node_cathode] != 0)
+            {
                 ResourceLimitError::ensure(
                     ResourceKind::ResultValues,
                     size.saturating_mul(64)
@@ -775,9 +852,19 @@ impl<'a> PreparedEventCircuit<'a> {
                 ),
                 options.limits.max_result_values,
             )?;
-            ports.extend(model.charge_storage_nodes().into_iter().flatten());
+            // GP forward charge can depend on collector bias even when its
+            // incidence is only base/emitter. Prove every constitutive node
+            // fixed, including promoted internal nodes, before reducing it.
+            if model
+                .mna_coupling_nodes()
+                .iter()
+                .any(|&node| fixed[node] != 0)
+            {
+                ports.extend(model.charge_storage_nodes().into_iter().flatten());
+            }
             models.push(model);
         }
+        drop(fixed);
         coupling::validate(circuit, options, abort)?;
         let equations = equations
             .into_iter()

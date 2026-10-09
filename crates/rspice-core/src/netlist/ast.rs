@@ -1916,6 +1916,19 @@ pub enum SourceSpec {
 }
 
 impl SourceSpec {
+    /// An authored constant transient waveform, independently of its value
+    /// or derivative at any sampled time. RF annotations may add a tone.
+    pub(crate) fn is_constant_in_transient(&self) -> bool {
+        match self {
+            Self::Dc(_) | Self::Ac { .. } | Self::DcAc { .. } => true,
+            Self::Distortion { inner, .. } => inner.is_constant_in_transient(),
+            Self::DcTransient { transient, .. }
+            | Self::AcTransient { transient, .. }
+            | Self::DcAcTransient { transient, .. } => transient.is_constant_in_transient(),
+            _ => false,
+        }
+    }
+
     /// Whether the DC/AC fields captured by the parameter reader completely
     /// describe this source's direction for the requested analysis. An AC-only
     /// wrapper uses its waveform's initial value for DC bias; that waveform

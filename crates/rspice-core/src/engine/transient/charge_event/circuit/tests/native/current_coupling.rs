@@ -1,6 +1,121 @@
 use super::*;
 
 #[test]
+fn constant_bias_charge_preserves_resistive_current_fanout() {
+    for (storage, bias) in [
+        ("", "VB b 0 .7"),
+        ("C1 b 0 1p", "VB b bias .5\nVX bias 0 .2"),
+        (
+            "D1 b 0 dm\n.model dm D IS=1e-16 CJO=2p",
+            "VB b 0 DC .7 AC 1",
+        ),
+    ] {
+        let (circuit, incoming) = dc(&format!(
+            "constant bias current fanout\nVC c 0 2\n{bias}\n{storage}\nI1 b 0 PWL(0 0 1 0 1 1u 2 3u)\nF1 copy 0 VB -2\nR1 copy 0 1k\nQ1 c b 0 qm\n.model qm NPN IS=1e-16 BF=100 TF=1n PTF=30\n.end\n",
+        ));
+        let options = options();
+        let mut sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        let input = sampler.forward_inputs(&incoming, &NoAbort).unwrap()[0].unwrap();
+        let mut history = DelayBuffer::new(0);
+        history
+            .restore_checkpoint(&DelayCheckpoint {
+                event_orders: Vec::new(),
+                configuration: Some(DelayConfiguration::Fixed {
+                    delay: sampler.models()[0].legacy_excess_phase_delay(),
+                }),
+                samples: vec![(0.0, input)],
+                left_limits: vec![],
+            })
+            .unwrap();
+        let phase = [Some(EventPhase {
+            history: &history,
+            endpoint: input,
+        })];
+        let left = sampler
+            .sample(
+                1.0,
+                SourceTimeSide::LeftLimit,
+                &incoming,
+                &phase,
+                &options,
+                &NoAbort,
+            )
+            .unwrap();
+        let topology = sampler
+            .topology(1.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+            .unwrap();
+        let trial = topology.physical_probe(&incoming);
+        let physical = sampler
+            .sample(
+                1.0,
+                SourceTimeSide::RightLimit,
+                &trial,
+                &phase,
+                &options,
+                &NoAbort,
+            )
+            .unwrap();
+        topology
+            .jump_equations(&trial, &left.q.values, &physical, &options, &NoAbort)
+            .unwrap()
+            .solve(&options, &NoAbort)
+            .expect("nonsingular jump constraints for constant-bias fanout");
+        let outgoing = topology
+            .solve(
+                &incoming,
+                &left.q.values,
+                &options,
+                &NoAbort,
+                |state, abort| {
+                    sampler.sample(
+                        1.0,
+                        SourceTimeSide::RightLimit,
+                        state,
+                        &phase,
+                        &options,
+                        abort,
+                    )
+                },
+            )
+            .unwrap();
+        let copy = circuit.get_node_by_name("copy").unwrap() - 1;
+        close(outgoing.solution[copy] - incoming[copy], -2e-3, 1e-12);
+        close(outgoing.coordinate_rates[copy].unwrap(), -4e-3, 1e-12);
+        assert!(outgoing.source_impulses.iter().all(|q| q.abs() < 1e-25));
+        // Inconsistent incoming charge would send an impulse through the CCCS
+        // into a resistor. The finite-voltage reduction must still reject it.
+        let mut changed_charge = left.q.values;
+        changed_charge[circuit.get_node_by_name("b").unwrap() - 1] += 1e-12;
+        let failure = topology
+            .solve(
+                &incoming,
+                &changed_charge,
+                &options,
+                &NoAbort,
+                |state, abort| {
+                    sampler.sample(
+                        1.0,
+                        SourceTimeSide::RightLimit,
+                        state,
+                        &phase,
+                        &options,
+                        abort,
+                    )
+                },
+            )
+            .err()
+            .unwrap();
+        assert!(
+            failure
+                .to_string()
+                .contains("nodal charge conservation failed"),
+            "{failure}"
+        );
+    }
+}
+
+#[test]
 fn current_event_coupling_gp_delay_has_storage_and_algebraic_feedback_cases() {
     for (kind, polarity) in [("NPN", 1.0), ("PNP", -1.0)] {
         for cjc in ["0", ".2p"] {

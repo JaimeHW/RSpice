@@ -9,6 +9,92 @@ fn trace<'a>(result: &'a TransientResult, name: &str) -> &'a CurrentImpulseTrace
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_constant_bias_current_fanout_preserves_resistive_output_and_restart() {
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.gp_transient_phase_model = GpTransientPhaseModel::ExactDelay;
+        config.integration_method = IntegrationMethod::BackwardEuler;
+        config.convergence_config.gmin_target = 0.0;
+        let engine = Engine::new(config);
+        // Refine the first-order Xyce trajectory to the same 10-pA oracle
+        // gate. Its coarse-grid RL error is unchanged by adding this fanout.
+        let max_step = if dialect == SpiceDialect::Xyce {
+            25e-15
+        } else {
+            2e-12
+        };
+        for polarity in [1.0, -1.0] {
+            for threshold in [2.0, 1000.0] {
+                let source = Netlist::parse(&format!(
+                    "constant bias GP current fanout\nVC c 0 {}\nVB b 0 {}\nVD drive 0 DC 0 SIN(0 {} 1G)\nR1 drive coil 1k\nL1 coil 0 1u\nF1 b 0 L1 1\nF2 copy 0 VB 1\nR2 copy 0 1k\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol={threshold}\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) v(copy) i(vb) i(f2) i(l1)\n.end\n",
+                    2.0 * polarity, 0.7 * polarity, 1e-3 * polarity,
+                    if polarity > 0.0 { "NPN" } else { "PNP" }
+                )).unwrap();
+                let (result, checkpoints) = engine
+                    .run_tran_checkpoint_schedule_with_startup_mode(
+                        &source,
+                        50e-12,
+                        max_step,
+                        TransientStartupMode::OperatingPoint,
+                        &[25e-12],
+                    )
+                    .unwrap_or_else(|error| panic!("{dialect:?}/{polarity}/{threshold}: {error}"));
+                let voltage = result.try_voltage_waveform_named("copy").unwrap();
+                let base = result.try_branch_current_waveform_named("vb").unwrap();
+                let copy = result.try_branch_current_waveform_named("f2").unwrap();
+                let winding = result.try_branch_current_waveform_named("l1").unwrap();
+                let vt = thermal_voltage(dialect);
+                let bias = diode(0.7, vt, dialect).0 / 100.0 + diode(-1.3, vt, dialect).0;
+                let omega = std::f64::consts::TAU * 1e9;
+                let reactance = omega * 1e-6;
+                for (index, &time) in result.time.iter().enumerate() {
+                    let current = 1e-3
+                        * (1000.0 * (omega * time).sin() - reactance * (omega * time).cos()
+                            + reactance * (-time / 1e-9).exp())
+                        / (1e6 + reactance * reactance);
+                    assert!(
+                        (polarity * winding[index] - current).abs() < 1e-11,
+                        "{dialect:?}/{polarity}/{threshold}: RL at {time:e}: actual={:e}, expected={current:e}, points={}",
+                        polarity * winding[index],
+                        result.time.len()
+                    );
+                    assert!(
+                        (-polarity * base[index] - bias - current).abs() < 2e-11,
+                        "{dialect:?}/{polarity}/{threshold}: base at {time:e}"
+                    );
+                    assert!((copy[index] - base[index]).abs() < 1e-16);
+                    assert!((voltage[index] + 1000.0 * copy[index]).abs() < 1e-10);
+                }
+                assert_eq!(result.time.last(), Some(&50e-12));
+                assert!(trace(&result, "f2").complete);
+                assert!(
+                    trace(&result, "f2")
+                        .points
+                        .iter()
+                        .all(|point| point.charge_coulombs.abs() < 1e-25)
+                );
+                for checkpoint in checkpoints {
+                    exact_restart(
+                        &engine,
+                        &source,
+                        &result,
+                        &checkpoint.checkpoint,
+                        50e-12,
+                        max_step,
+                    );
+                }
+                assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_finite_behavioral_current_controls_preserve_rl_law_and_packed_restart() {
     for dialect in [
         SpiceDialect::Ngspice,
