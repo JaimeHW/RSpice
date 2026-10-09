@@ -166,6 +166,9 @@ impl Engine {
                 )
                 .map_err(|error| match error {
                     crate::netlist::SpectreStatisticsError::Aborted => SimulationError::Aborted,
+                    crate::netlist::SpectreStatisticsError::ResourceLimit(error) => {
+                        SimulationError::ResourceLimit(error)
+                    }
                     error => SimulationError::Circuit(error.to_string()),
                 })
         };

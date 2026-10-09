@@ -157,6 +157,8 @@ pub struct SpectreStatisticalCoordinate {
 pub enum SpectreStatisticsError {
     #[error("statistical moment integration cancelled")]
     Aborted,
+    #[error(transparent)]
+    ResourceLimit(#[from] crate::ResourceLimitError),
     #[error("line {line}: {message}")]
     InvalidDeclaration { line: usize, message: String },
     #[error("invalid internal Spectre statistics encoding: {0}")]

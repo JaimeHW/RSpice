@@ -298,7 +298,7 @@ fn bounded_moments_handle_tails_limits_and_cancellation() {
         max_analysis_points: 512,
         ..Default::default()
     };
-    assert!(
+    assert!(matches!(
         plan.scope_moments_with_abort(
             SpectreVariationScope::Process,
             &params,
@@ -306,7 +306,11 @@ fn bounded_moments_handle_tails_limits_and_cancellation() {
             StatisticalMomentOptions::default(),
             limits,
             &NoAbort
-        )
-        .is_err()
-    );
+        ),
+        Err(SpectreStatisticsError::ResourceLimit(ResourceLimitError {
+            resource: ResourceKind::AnalysisPoints,
+            requested: 1024,
+            limit: 512,
+        }))
+    ));
 }

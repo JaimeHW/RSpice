@@ -8,8 +8,8 @@
 //! See https://people.cs.kuleuven.be/~dirk.nuyens/mcqmc2014_proceedings_preprints/223.pdf.
 
 use super::*;
-use crate::ResourceLimits;
 use crate::abort_signal::AbortSignal;
+use crate::{ResourceKind, ResourceLimitError, ResourceLimits};
 
 const REPLICATES: usize = 8;
 
@@ -81,22 +81,18 @@ impl SpectreStatisticsPlan {
     ) -> Result<SpectreScopeMoments, SpectreStatisticsError> {
         options.validate()?;
         check_abort(abort)?;
-        let variations = self.resolve_scope(scope, params, process)?;
-        let count = variations.len();
-        if count > limits.max_result_values {
-            return Err(invalid(
-                0,
-                "Statistical moment vector exceeds the result-value limit".into(),
-            ));
-        }
+        let count = self.variations.iter().filter(|v| v.scope == scope).count();
+        ResourceLimitError::ensure(ResourceKind::ResultValues, count, limits.max_result_values)?;
         let correlated = self.correlations.iter().any(|entry| entry.scope == scope);
         // Independent scopes remain linear in storage, even with many bounds.
-        if correlated && count.saturating_mul(count).saturating_mul(32) > limits.max_result_values {
-            return Err(invalid(
-                0,
-                "Statistical moment matrices exceed the result-value limit".into(),
-            ));
+        if correlated {
+            ResourceLimitError::ensure(
+                ResourceKind::ResultValues,
+                count.saturating_mul(count).saturating_mul(32),
+                limits.max_result_values,
+            )?;
         }
+        let variations = self.resolve_scope(scope, params, process)?;
         let mut target = if correlated {
             let target = self.target_correlation_matrix(scope, &variations, params)?;
             SpectreCorrelationMatrix::new(target.clone())?;
@@ -119,7 +115,6 @@ impl SpectreStatisticsPlan {
                 .collect(),
             ..Default::default()
         };
-        let budget = options.max_points.min(limits.max_analysis_points);
         for mut group in groups {
             check_abort(abort)?;
             // Constrain early coordinates first to reduce integration variance.
@@ -162,8 +157,8 @@ impl SpectreStatisticsPlan {
             let (moments, error) = integrate(
                 &local,
                 &factor.lower,
-                options.relative_tolerance,
-                budget,
+                options,
+                limits.max_analysis_points,
                 &mut result.evaluated_points,
                 abort,
             )?;
@@ -419,11 +414,12 @@ fn primes(count: usize) -> Vec<usize> {
 fn integrate(
     variations: &[ResolvedVariation<'_>],
     lower: &[Vec<Value>],
-    tolerance: Value,
-    budget: usize,
+    options: StatisticalMomentOptions,
+    point_limit: usize,
     evaluated: &mut usize,
     abort: &dyn AbortSignal,
 ) -> Result<(WeightedMoments, Value), SpectreStatisticsError> {
+    let budget = options.max_points.min(point_limit);
     let count = variations.len();
     let bounds = variations.iter().map(score_bounds).collect::<Vec<_>>();
     let mut independent = vec![(Value::NEG_INFINITY, Value::INFINITY); count];
@@ -480,7 +476,13 @@ fn integrate(
     let mut end = 65usize;
     loop {
         let work = (end - first).saturating_mul(REPLICATES);
-        if evaluated.saturating_add(work) > budget {
+        let requested = evaluated.saturating_add(work);
+        if requested > budget {
+            // A caller's hard ceiling is distinct from exhausting the authored
+            // convergence budget. Preserve its structured diagnostic.
+            if point_limit < options.max_points {
+                ResourceLimitError::ensure(ResourceKind::AnalysisPoints, requested, point_limit)?;
+            }
             return Err(invalid(
                 0,
                 format!(
@@ -559,7 +561,7 @@ fn integrate(
                 .all(|(index, variation)| variation.spread == 0.0 || covariance[index][index] > 0.0)
             {
                 let error = relative_error(&pooled, &replicas, previous.as_ref());
-                if error <= tolerance {
+                if error <= options.relative_tolerance {
                     return Ok((pooled, error));
                 }
             }

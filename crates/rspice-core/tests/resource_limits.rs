@@ -848,3 +848,106 @@ fn dcmatch_bounds_all_candidate_contributors_before_report_truncation() {
         assert!(result.sigma_total.is_finite() && result.sigma_total > 0.0);
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dcmatch_preserves_statistical_moment_resource_errors() {
+    use rspice_core::netlist::{
+        AnalysisCommand, SpectreCorrelation, SpectreDistribution, SpectreSpread,
+        SpectreStatisticsPlan, SpectreVariation, SpectreVariationBounds, SpectreVariationScope,
+    };
+    for scope in [
+        SpectreVariationScope::Mismatch,
+        SpectreVariationScope::Process,
+    ] {
+        for case in ["vector", "matrix", "points"] {
+            let mut netlist = Netlist::parse(
+                "Moments\n.param r=100 s=0 t=0\nI1 0 out 10m\nR1 out 0 {r+s+t}\n.dcmatch OUT=V(out)\n.end",
+            ).unwrap();
+            netlist.spectre_statistics = SpectreStatisticsPlan {
+                variations: ["r", "s", "t"]
+                    .into_iter()
+                    .map(|name| SpectreVariation {
+                        bounds: (case == "points").then(|| SpectreVariationBounds {
+                            sigma_cutoff: Some("2".into()),
+                            ..Default::default()
+                        }),
+                        line: 1,
+                        scope,
+                        parameter: name.into(),
+                        distribution: SpectreDistribution::Gaussian,
+                        spread: SpectreSpread::StandardDeviation("10".into()),
+                        percent: false,
+                    })
+                    .collect(),
+                correlations: if case == "matrix" {
+                    vec![SpectreCorrelation {
+                        line: 1,
+                        scope,
+                        parameters: vec!["r".into(), "s".into()],
+                        coefficient: "0.5".into(),
+                    }]
+                } else {
+                    vec![]
+                },
+            };
+            let AnalysisCommand::DcMatch(mut card) = netlist.analyses[0].clone() else {
+                panic!("DCMATCH card")
+            };
+            card.process = scope == SpectreVariationScope::Process;
+            card.mismatch = !card.process;
+            let mut config = SimulationConfig::default();
+            let expected = match case {
+                "vector" => {
+                    config.resource_limits.max_result_values = 2;
+                    ResourceLimitError {
+                        resource: ResourceKind::ResultValues,
+                        requested: 3,
+                        limit: 2,
+                    }
+                }
+                "matrix" => {
+                    config.resource_limits.max_result_values = 128;
+                    ResourceLimitError {
+                        resource: ResourceKind::ResultValues,
+                        requested: 288,
+                        limit: 128,
+                    }
+                }
+                _ => {
+                    config.resource_limits.max_analysis_points = 1;
+                    ResourceLimitError {
+                        resource: ResourceKind::AnalysisPoints,
+                        requested: 512,
+                        limit: 1,
+                    }
+                }
+            };
+            let engine = Engine::new(config);
+            assert!(
+                matches!(engine.run_dc_match(&netlist, &card), Err(SimulationError::ResourceLimit(error)) if error == expected),
+                "{scope:?}/{case}"
+            );
+            assert_eq!(engine.convergence_quality().total_iterations, 0);
+
+            // The same valid circuit remains executable with sufficient quota.
+            // V=I*R is linear in all three independent 10-ohm variations;
+            // the matrix case adds one pair's 0.5 correlation.
+            let mut admitted = SimulationConfig::default();
+            if case == "matrix" {
+                admitted.resource_limits.max_result_values = 288;
+            }
+            let result = Engine::new(admitted).run_dc_match(&netlist, &card).unwrap();
+            assert!((result.nominal_value - 1.0).abs() < 1e-12);
+            let sigma = match case {
+                "matrix" => 0.2,
+                // Standard normal conditioned on [-2, 2].
+                "points" => 0.1 * 3.0_f64.sqrt() * 0.8796256610342398,
+                _ => 0.1 * 3.0_f64.sqrt(),
+            };
+            assert!(
+                (result.sigma_total - sigma).abs() < if case == "points" { 3e-5 } else { 1e-12 }
+            );
+        }
+    }
+}
