@@ -371,6 +371,16 @@ impl BodePoint {
             loop_gain,
         }
     }
+
+    /// Continue the same defined phase run; a zero gain starts a new run.
+    pub(crate) fn unwrap_after(&mut self, previous: Option<Value>) {
+        if let (Some(previous), Some(phase)) = (previous, self.phase_deg) {
+            self.phase_deg = Some(
+                previous
+                    + super::phase::difference(previous, phase, 360.0).expect("finite Bode phases"),
+            );
+        }
+    }
 }
 
 //=============================================================================
@@ -516,12 +526,7 @@ impl StbResult {
                 return Err(invalid(index, "invalid frequency or complex loop gain"));
             }
             let mut expected = BodePoint::from_loop_gain(point.frequency, point.loop_gain);
-            if let (Some(previous), Some(phase)) = (previous_phase, expected.phase_deg) {
-                expected.phase_deg = Some(
-                    previous
-                        + super::phase::difference(previous, phase, 360.0).expect("finite phases"),
-                );
-            }
+            expected.unwrap_after(previous_phase);
             previous_phase = expected.phase_deg;
             if !close(point.magnitude, expected.magnitude, 0.0)
                 || !close(point.magnitude_db, expected.magnitude_db, 1.0)
@@ -543,8 +548,7 @@ impl StbResult {
                 ));
             }
         }
-        let expected =
-            StbAnalyzer::new(StbConfig::new()).extract_margins(&self.bode_points, abort)?;
+        let expected = StbAnalyzer::extract_margins(self.bode_points.iter().cloned(), abort)?;
         for (actual, expected) in [
             (self.margins.gain_margin, expected.gain_margin),
             (self.margins.phase_margin, expected.phase_margin),
@@ -849,13 +853,7 @@ impl StbAnalyzer {
                     reason: "loop gain must have finite components",
                 });
             }
-            if let (Some(previous), Some(phase)) = (previous_phase, point.phase_deg) {
-                point.phase_deg = Some(
-                    previous
-                        + super::phase::difference(previous, phase, 360.0)
-                            .expect("validated finite phases"),
-                );
-            }
+            point.unwrap_after(previous_phase);
             previous_phase = point.phase_deg;
             result.bode_points.push(point);
         }
@@ -872,7 +870,7 @@ impl StbAnalyzer {
         }
 
         // Extract margins
-        result.margins = self.extract_margins(&result.bode_points, abort)?;
+        result.margins = Self::extract_margins(result.bode_points.iter().cloned(), abort)?;
 
         // Report multiple observed unity crossings without a stability claim
         if result.margins.num_crossovers > 1 {
@@ -887,22 +885,24 @@ impl StbAnalyzer {
 
     /// Extract measured margins over every resolved crossing. Frequency and
     /// ordinate are interpolated together on the same log-frequency segment.
-    fn extract_margins(
-        &self,
-        points: &[BodePoint],
+    pub(crate) fn extract_margins(
+        points: impl IntoIterator<Item = BodePoint>,
         abort: &dyn AbortSignal,
     ) -> Result<StabilityMargins, StbAnalysisError> {
         ensure_not_aborted(abort)?;
         let mut phase_margin = None;
         let mut gain_margin = None;
         let mut count = 0;
-        for (index, point) in points.iter().enumerate() {
+        let mut preceding: Option<BodePoint> = None;
+        for (index, point) in points.into_iter().enumerate() {
             poll_abort(abort, index)?;
+            let previous = preceding.replace(point.clone());
+            let previous = previous.as_ref();
             if let (Some(m1), Some(p1)) = (point.magnitude_db, point.phase_deg) {
                 if m1 == 0.0 {
                     // A sampled unity plateau is one connected crossing, but
                     // its least phase margin may occur anywhere along it.
-                    if index == 0 || points[index - 1].magnitude_db != Some(0.0) {
+                    if previous.is_none_or(|point| point.magnitude_db != Some(0.0)) {
                         count += 1;
                     }
                     retain_binding_margin(
@@ -915,7 +915,7 @@ impl StbAnalyzer {
                     retain_binding_margin(&mut gain_margin, -m1, point.frequency);
                 }
             }
-            let Some(previous) = index.checked_sub(1).map(|i| &points[i]) else {
+            let Some(previous) = previous else {
                 continue;
             };
             let (Some(m0), Some(p0), Some(m1), Some(p1)) = (
@@ -930,7 +930,7 @@ impl StbAnalyzer {
                 let (nonzero, zero_at_end) = if previous.magnitude_db.is_some() {
                     (previous, true)
                 } else {
-                    (point, false)
+                    (&point, false)
                 };
                 if let (Some(db), Some(phase)) = (nonzero.magnitude_db, nonzero.phase_deg)
                     && db > 0.0
