@@ -294,6 +294,14 @@ every corner runs nominal models and the sweep only checks convergence.
 sampling, so statistics match a serial sweep exactly. Non-converging runs are
 dropped from the statistics and counted; all runs failing is an error.
 
+`--seed N` overrides the sampling seed of `--monte-carlo` or every authored
+Monte Carlo card while preserving each card's run count, starting trial,
+distribution, parameter selection, and confidence settings. A seed override
+requires an executed Monte Carlo analysis in every run; it is rejected before
+execution if another mode or a retained control script replaces those cards.
+Under a run axis, the override supplies the seed from which each coordinate's
+random stream is derived.
+
 `.PREPROCESS ADDRESISTORS` writes its derived Xyce-compatible deck alongside
 the input as `<input>_xyce.cir`. It needs a file-backed netlist, and it is
 rejected in a multi-run deck, where one sibling name cannot represent several

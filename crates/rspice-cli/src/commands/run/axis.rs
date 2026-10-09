@@ -165,6 +165,7 @@ pub(super) fn preflight_step_coordinates(
                     ),
                 )
             })?;
+        super::deck::validate_seed_usage(materialized.netlist(), args)?;
         super::sources::protect(materialized.netlist(), engine, args.timeout)?;
         let label = compose_run_label(run_label, Some(&canonical_coordinate.stable_tag()));
         super::restart::protect_planned_inputs(

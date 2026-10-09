@@ -256,10 +256,35 @@ pub(super) fn step_analysis_signature(netlist: &Netlist) -> Vec<&'static str> {
         .collect()
 }
 
+/// Seed-only overrides apply to authored studies, but must never be ignored
+/// because a control script or an explicit analysis mode replaces those cards.
+pub(super) fn validate_seed_usage(netlist: &Netlist, args: &RunArgs) -> Result<(), CliError> {
+    if args.seed.is_none() || args.monte_carlo.is_some() {
+        return Ok(());
+    }
+    let runs_authored_monte_carlo = requested_mode_name(args)
+        .is_none_or(|mode| mode == "--corners")
+        && netlist.control_script.is_none()
+        && netlist
+            .analyses
+            .iter()
+            .any(|analysis| matches!(analysis, AnalysisCommand::MonteCarlo(_)));
+    if runs_authored_monte_carlo {
+        return Ok(());
+    }
+    Err(CliError::InvalidArgument {
+        message: "--seed requires an executed Monte Carlo analysis in every run".into(),
+        suggestion: Some(
+            "use --monte-carlo N or an authored .MC card without an overriding analysis mode or control script, or remove --seed".into(),
+        ),
+    })
+}
+
 pub(super) fn validate_step_frontend_compatibility(
     netlist: &Netlist,
     args: &RunArgs,
 ) -> Result<(), CliError> {
+    validate_seed_usage(netlist, args)?;
     let transient_option =
         args.checkpoint.is_some() || args.resume.is_some() || args.tran_stop.is_some();
     let runs_authored_transient = netlist

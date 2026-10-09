@@ -449,8 +449,8 @@ pub struct RunArgs {
     #[arg(long, value_name = "N")]
     pub monte_carlo: Option<usize>,
 
-    /// Random seed for Monte Carlo analysis
-    #[arg(long, value_name = "SEED", requires = "monte_carlo")]
+    /// Override the random seed for --monte-carlo or authored Monte Carlo cards
+    #[arg(long, value_name = "SEED")]
     pub seed: Option<u64>,
 
     /// Monte Carlo parameter distribution (default: gaussian)
