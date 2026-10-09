@@ -3,12 +3,17 @@
 //! The incomplete beta evaluation uses the continued fraction in DLMF 8.17:
 //! <https://dlmf.nist.gov/8.17#v>.
 
-use super::{MonteCarloResult, VariableStatistics, Xorshift128Plus, sample_mean};
+use super::{
+    MonteCarloResult, VariableStatistics, Xorshift128Plus, sample_mean, standard_deviation,
+    statistical_location_scale,
+};
 use crate::Value;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::error::SimulationError;
 use crate::config::SimulationConfigError;
 use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
+use rspice_veriloga_runtime::arithmetic::ScaledValue;
+use std::cell::Cell;
 
 /// Estimator for a two-sided confidence interval on the population mean.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -215,11 +220,11 @@ impl MonteCarloResult {
                 MeanConfidenceInterval::InsufficientSamples
             } else {
                 match method {
-                    MeanConfidenceMethod::StudentT => {
-                        let half_width = (variable.std_dev / (samples as Value).sqrt())
-                            * critical.expect("Student-t quantile was resolved");
-                        finite_interval(variable.mean - half_width, variable.mean + half_width)
-                    }
+                    MeanConfidenceMethod::StudentT => student_interval(
+                        variable,
+                        critical.expect("Student-t quantile was resolved"),
+                        abort,
+                    )?,
                     MeanConfidenceMethod::PercentileBootstrap { resamples, seed } => {
                         bootstrap_interval(variable, level_pct, resamples, seed, abort)?
                     }
@@ -254,6 +259,79 @@ fn finite_interval(lower: Value, upper: Value) -> MeanConfidenceInterval {
     }
 }
 
+/// Stop exact summation on cancellation, including any recovery pass. Callers
+/// must return the abort error before publishing the resulting NaN sentinel.
+fn cancellable_samples<'a>(
+    samples: &'a [Value],
+    abort: &'a dyn AbortSignal,
+    interrupted: &'a Cell<bool>,
+) -> impl ExactSizeIterator<Item = Value> + Clone + 'a {
+    samples.iter().enumerate().map(|(index, &value)| {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            interrupted.set(true);
+            Value::NAN
+        } else {
+            value
+        }
+    })
+}
+
+fn student_interval(
+    variable: &VariableStatistics,
+    critical: Value,
+    abort: &dyn AbortSignal,
+) -> Result<MeanConfidenceInterval, SimulationError> {
+    let samples = &variable.samples;
+    let (mut min, mut max) = (Value::INFINITY, Value::NEG_INFINITY);
+    for chunk in samples.chunks(64) {
+        if abort.is_aborted() {
+            return Err(SimulationError::from_abort(abort));
+        }
+        for &value in chunk {
+            min = min.min(value);
+            max = max.max(value);
+        }
+    }
+    let (anchor, scale) = statistical_location_scale(samples, min, max);
+    let spread = standard_deviation(samples, anchor, scale, abort)?;
+    let count = ScaledValue::new(samples.len() as Value);
+    let one = ScaledValue::new(1.0);
+    let interrupted = Cell::new(false);
+    let offset = ScaledValue::sum_triple_products_ratio(
+        cancellable_samples(samples, abort, &interrupted)
+            .map(|value| [ScaledValue::new(value - anchor), one, one]),
+        [[count, one, one]].into_iter(),
+    );
+    if interrupted.get() {
+        return Err(SimulationError::from_abort(abort));
+    }
+    let Ok(offset) = offset else {
+        return Ok(MeanConfidenceInterval::Unrepresentable);
+    };
+    let half_width = spread
+        .divide(count.sqrt())
+        .multiply(ScaledValue::new(critical));
+    // Preserve the center's offset from the anchor until adding the width.
+    // Rounding the mean first can collapse an interval between adjacent values.
+    let bound = |width| {
+        ScaledValue::sum_triple_products_ratio(
+            [
+                [ScaledValue::new(anchor), one, one],
+                [offset, one, one],
+                [width, one, one],
+            ]
+            .into_iter(),
+            [[one, one, one]].into_iter(),
+        )
+        .map(|value| value.binary64())
+        .unwrap_or(Value::NAN)
+    };
+    Ok(finite_interval(
+        bound(half_width.negated()),
+        bound(half_width),
+    ))
+}
+
 fn bootstrap_interval(
     variable: &VariableStatistics,
     level_pct: Value,
@@ -286,17 +364,8 @@ fn bootstrap_interval(
             };
             *value = variable.samples[(draw % modulus) as usize];
         }
-        let interrupted = std::cell::Cell::new(false);
-        let mean = sample_mean(sampled_values.iter().enumerate().map(|(index, &value)| {
-            if index.is_multiple_of(64) && abort.is_aborted() {
-                interrupted.set(true);
-                // Nonfinite terms stop exact summation immediately, including
-                // its fallback pass. Cancellation is returned before publication.
-                Value::NAN
-            } else {
-                value
-            }
-        }));
+        let interrupted = Cell::new(false);
+        let mean = sample_mean(cancellable_samples(&sampled_values, abort, &interrupted));
         if interrupted.get() {
             return Err(SimulationError::from_abort(abort));
         }

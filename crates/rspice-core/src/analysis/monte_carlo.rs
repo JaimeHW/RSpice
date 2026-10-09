@@ -30,49 +30,10 @@ use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 use std::collections::{BTreeMap, HashMap};
 
 mod confidence;
+mod moments;
 pub(crate) use confidence::validate_request as validate_mean_confidence_request;
 pub use confidence::{MeanConfidenceInterval, MeanConfidenceMethod, MonteCarloConfidence};
-
-#[derive(Default)]
-struct CompensatedSum {
-    sum: Value,
-    correction: Value,
-}
-
-impl CompensatedSum {
-    fn add(&mut self, value: Value) {
-        crate::numerics::compensated_add(&mut self.sum, &mut self.correction, value);
-    }
-
-    fn total(self) -> Value {
-        self.sum + self.correction
-    }
-}
-
-fn sample_mean(samples: impl ExactSizeIterator<Item = Value> + Clone) -> Value {
-    let count = samples.len() as Value;
-    // Scaling each input first can erase a representable remainder when large
-    // terms cancel. Sum the original values exactly and round only the ratio.
-    // A nonempty finite population always has a representable mean; invalid
-    // inputs remain unavailable rather than publishing a partial estimate.
-    rspice_veriloga_runtime::arithmetic::sum_products_ratio(
-        samples.map(|value| (value, 1.0)),
-        std::iter::once((count, 1.0)),
-    )
-    .unwrap_or(Value::NAN)
-}
-
-fn statistical_location_scale(samples: &[Value], min: Value, max: Value) -> (Value, Value) {
-    // Center only a tightly clustered, single-sign population. Those
-    // differences are exact by Sterbenz's lemma; centering a population that
-    // spans zero can erase small values before compensation can recover them.
-    let anchor = if (min > 0.0 && min >= max * 0.5) || (max < 0.0 && max <= min * 0.5) {
-        samples[0]
-    } else {
-        0.0
-    };
-    (anchor, (min - anchor).abs().max((max - anchor).abs()))
-}
+use moments::{sample_mean, standard_deviation, statistical_location_scale};
 
 //=============================================================================
 // Distribution Types
@@ -292,8 +253,6 @@ impl VariableStatistics {
             };
         }
 
-        let n = samples.len() as Value;
-
         // Min/max
         let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -302,21 +261,9 @@ impl VariableStatistics {
         // their low bits; scale before squaring to protect extreme moments.
         let (anchor, scale) = statistical_location_scale(&samples, min, max);
         let mean = sample_mean(samples.iter().copied());
-        let std_dev = if scale == 0.0 {
-            0.0
-        } else {
-            let mut sum = CompensatedSum::default();
-            for value in &samples {
-                sum.add((value - anchor) / scale);
-            }
-            let normalized_mean = sum.total() / n;
-            let mut sum = CompensatedSum::default();
-            for value in &samples {
-                sum.add(((value - anchor) / scale - normalized_mean).powi(2));
-            }
-            let normalized_variance = sum.total() / (n - 1.0).max(1.0);
-            normalized_variance.sqrt() * scale
-        };
+        let std_dev = standard_deviation(&samples, anchor, scale, &NoAbort)
+            .map(|value| value.binary64())
+            .unwrap_or(Value::NAN);
 
         // Histogram
         let (histogram, bin_edges) = Self::compute_histogram(&samples, num_bins, min, max);
