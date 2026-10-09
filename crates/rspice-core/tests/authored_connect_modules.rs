@@ -2505,3 +2505,64 @@ connectrules chosen; connect gain; connect sense; endconnectrules
         }
     }
 }
+
+#[test]
+fn implicit_and_generated_nets_keep_independent_loaded_mixed_channels() {
+    let policy = Source::new("`default_nettype none\n");
+    let source = Source::new(&format!(
+        r#"
+`timescale 1ns/1ps
+`include "{}"
+module analog_source(output electrical a);
+ parameter real LEVEL=2.5;
+ analog I(a)<+(V(a)-LEVEL)/1000;
+endmodule
+module load(input electrical a,output electrical p);
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module real_source(output logic wreal value);
+ real level=1.75; initial #1 level=2.75; assign value=level;
+endmodule
+module real_reader(input logic wreal value,output electrical p);
+ analog V(p)<+value;
+endmodule
+`default_nettype tri
+module top(output electrical [1:0] p,q,output electrical r);
+ genvar i;
+ generate for(i=0;i<2;i=i+1) begin : channels
+   // Separate implicit analog nets in each iteration.
+   analog_source #(.LEVEL(i+2.5)) a(middle);
+   load b(middle,p[i]);
+   // Explicit generated arrays must retain their local shape and discipline.
+   electrical local_nodes[i:i];
+   analog_source #(.LEVEL(i+5.5)) c(local_nodes[i]);
+   load d(local_nodes[i],q[i]);
+ end endgenerate
+ real_source digital_source(real_link);
+ real_reader digital_load(real_link,r);
+endmodule
+"#,
+        policy.path()
+    ));
+    let deck = Netlist::parse(&format!(
+        "* scoped implicit interconnect\nX1 p1 p0 q1 q0 r top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+    for (time, r) in [(0.5e-9, 1.75), (1.4e-9, 2.75)] {
+        for (node, expected) in [
+            ("p0", 1.25),
+            ("p1", 1.75),
+            ("q0", 2.75),
+            ("q1", 3.25),
+            ("r", r),
+        ] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}

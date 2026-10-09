@@ -12,6 +12,7 @@ use smol_str::SmolStr;
 
 mod digital;
 mod generate;
+mod implicit_nets;
 
 /// Declared attributes carried forward to the bare names that follow a typed
 /// port in an ANSI port list.
@@ -31,6 +32,7 @@ pub struct Parser<'a> {
     /// [`DigitalProcessId`]s in declaration order.
     next_process_id: u32,
     time_scale: crate::time_scale::ModuleTimeScale,
+    net_defaults: Vec<(u32, bool)>,
 }
 
 impl<'a> Parser<'a> {
@@ -41,6 +43,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             next_process_id: 0,
             time_scale: crate::time_scale::ModuleTimeScale::default(),
+            net_defaults: Vec::new(),
         }
     }
 
@@ -53,6 +56,11 @@ impl<'a> Parser<'a> {
             // Skip directives for now (handled by preprocessor)
             if self.check(TokenKind::Directive) {
                 self.skip_directive()?;
+                continue;
+            }
+
+            if self.check_identifier_text("__rspice_default_nettype") {
+                self.parse_default_nettype()?;
                 continue;
             }
 
@@ -133,6 +141,21 @@ impl<'a> Parser<'a> {
 
     fn check_identifier_text(&self, expected: &str) -> bool {
         self.check(TokenKind::Identifier) && self.current().text.as_deref() == Some(expected)
+    }
+
+    fn parse_default_nettype(&mut self) -> Result<(), ParseError> {
+        let start = self.current_span().start;
+        self.advance();
+        self.expect(TokenKind::LParen)?;
+        let enabled = implicit_nets::default_type(
+            self.current().text.as_deref().unwrap_or(""),
+            self.current_span(),
+        )?;
+        self.advance();
+        self.expect(TokenKind::RParen)?;
+        self.expect(TokenKind::Semicolon)?;
+        self.net_defaults.push((start, enabled));
+        Ok(())
     }
 
     fn parse_time_scale(&mut self) -> Result<(), ParseError> {
@@ -411,6 +434,8 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Endmodule)?;
         module.span = start.extend(self.previous_span());
 
+        implicit_nets::declare(&mut module, &self.net_defaults)?;
+
         // IEEE 1364-2005 section 12.4 elaborates a generate region into module
         // items, once, from constants. Doing it here means every later pass
         // reads the module the author would have had to write by hand, and
@@ -608,6 +633,18 @@ impl<'a> Parser<'a> {
 
     /// Parse a module item (declaration or statement)
     fn parse_module_item(&mut self, module: &mut Module) -> Result<(), ParseError> {
+        if self.check_identifier_text("__rspice_default_nettype") {
+            return self.parse_default_nettype();
+        }
+        if self.check(TokenKind::Directive) {
+            if matches!(
+                self.current().text.as_deref(),
+                Some("`default_nettype" | "`resetall")
+            ) {
+                return self.skip_directive();
+            }
+            return Err(self.unsupported_current("module item"));
+        }
         // Attribute instances may precede any declaration
         let attributes = self.parse_attributes()?;
 
@@ -701,8 +738,7 @@ impl<'a> Parser<'a> {
                 module.genvars.push(declaration);
             }
             TokenKind::Generate => {
-                let constructs = self.parse_generate_region()?;
-                module.generates.extend(constructs);
+                self.parse_generate_region(module)?;
             }
             // An `endgenerate` with no region open. Refused by name rather than
             // as an unrecognized module item, which would blame the keyword
@@ -3539,7 +3575,28 @@ impl<'a> Parser<'a> {
     /// parse `wire` as a top-level item.
     fn skip_directive(&mut self) -> Result<(), ParseError> {
         let directive = self.current_span();
+        let name = self.current().text.clone();
         self.advance();
+        if name.as_deref() == Some("`default_nettype") {
+            if self.at_end() || self.current_span().start >= directive.end {
+                return Err(self.error(ParseErrorKind::UnexpectedToken(
+                    "missing default net type".into(),
+                )));
+            }
+            let enabled = implicit_nets::default_type(
+                self.current().text.as_deref().unwrap_or(""),
+                self.current_span(),
+            )?;
+            self.advance();
+            if !self.at_end() && self.current_span().start < directive.end {
+                return Err(self.error(ParseErrorKind::UnexpectedToken(
+                    "extra default_nettype operand".into(),
+                )));
+            }
+            self.net_defaults.push((directive.start, enabled));
+        } else if name.as_deref() == Some("`resetall") {
+            self.net_defaults.push((directive.start, true));
+        }
         while !self.at_end() && self.current_span().start < directive.end {
             self.advance();
         }

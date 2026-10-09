@@ -381,18 +381,6 @@ fn unelaborated_generate_constructs_refuse_by_name() {
             vec!["not declared `genvar`", "12.1.3.2"],
         ),
         (
-            "an unnamed generate loop block",
-            design(
-                "    genvar i;\n\
-             \x20   generate\n\
-             \x20     for (i = 0; i < 4; i = i + 1) begin\n\
-             \x20       leaf u (y[i], a[i]);\n\
-             \x20     end\n\
-             \x20   endgenerate",
-            ),
-            vec!["unnamed generate block", "12.4.1"],
-        ),
-        (
             "a header that advances the wrong name",
             design(
                 "    genvar i, k;\n\
@@ -417,20 +405,6 @@ fn unelaborated_generate_constructs_refuse_by_name() {
              \x20   endgenerate",
             ),
             vec!["reusing the genvar `i`"],
-        ),
-        (
-            "a declaration inside a generate block",
-            design(
-                "    genvar i;\n\
-             \x20   generate\n\
-             \x20     for (i = 0; i < 4; i = i + 1) begin : gen\n\
-             \x20       wire t;\n\
-             \x20       leaf u (t, a[i]);\n\
-             \x20     end\n\
-             \x20   endgenerate\n\
-             \x20   assign y = a;",
-            ),
-            vec!["a `wire` declaration", "12.4.2"],
         ),
         (
             "a reopened region inside a region",
@@ -487,4 +461,52 @@ fn an_empty_region_and_a_bare_genvar_contribute_nothing() {
      \x20   assign y = ~a;",
     ));
     assert_eq!(shape(&plain), shape(&decorated));
+}
+
+#[test]
+fn scoped_generated_nets_keep_default_names_and_process_shadows() {
+    let source = r#"
+module leaf(input wire a,output wire y); assign y=a; endmodule
+module top(input wire [3:0] a,output wire [3:0] y);
+ parameter integer genblk1=0;
+ genvar i;
+ generate for(i=0;i<4;i=i+1) begin
+   wire t=a[i];
+   leaf first(t,implicit_link);
+   leaf second(implicit_link,y[i]);
+   initial begin : locals
+     reg t; integer i;
+     t=0; i=3;
+   end
+ end endgenerate
+endmodule
+"#;
+    let plan = plan(source);
+    for index in 0..4 {
+        for name in ["t", "implicit_link"] {
+            let name = format!("genblk01[{index}].{name}");
+            assert!(
+                plan.signals.iter().any(|signal| signal.name == name),
+                "{name}"
+            );
+        }
+    }
+    assert_eq!(plan.processes.len(), 20); // Also includes each selected output-port binding.
+}
+
+#[test]
+fn plain_generate_region_items_keep_the_surrounding_scope() {
+    let plan = plan(
+        r#"
+module top(output wire result);
+ generate
+   assign middle=1'b1;
+   assign result=middle;
+ endgenerate
+endmodule
+"#,
+    );
+    assert_eq!(plan.signals.len(), 2);
+    assert!(plan.signals.iter().any(|signal| signal.name == "middle"));
+    assert!(plan.signals.iter().any(|signal| signal.name == "result"));
 }

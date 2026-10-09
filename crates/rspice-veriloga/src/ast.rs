@@ -11,6 +11,10 @@ use crate::four_state::FourStateLiteral;
 use crate::source::Span;
 use smol_str::SmolStr;
 
+#[path = "ast_walk.rs"]
+mod walk;
+pub(crate) use walk::visit_expression;
+
 /// A complete Verilog-A source file
 #[derive(Debug, Clone)]
 pub struct SourceFile {
@@ -221,6 +225,45 @@ pub struct Module {
 }
 
 impl Module {
+    /// Names declared in this lexical module or generate-item scope.
+    pub(crate) fn declared_names(&self) -> std::collections::HashSet<SmolStr> {
+        self.ports
+            .iter()
+            .map(|port| port.name.clone())
+            .chain(self.nets.iter().flat_map(|net| net.names.clone()))
+            .chain(
+                self.digital_nets
+                    .iter()
+                    .flat_map(|net| net.items.iter().map(|item| item.name.clone())),
+            )
+            .chain(
+                self.digital_variables
+                    .iter()
+                    .flat_map(|net| net.items.iter().map(|item| item.name.clone())),
+            )
+            .chain(
+                self.variables
+                    .iter()
+                    .flat_map(|net| net.items.iter().map(|item| item.name.clone())),
+            )
+            .chain(
+                self.parameters
+                    .iter()
+                    .chain(&self.localparams)
+                    .map(|parameter| parameter.name.clone()),
+            )
+            .chain(
+                self.genvars
+                    .iter()
+                    .flat_map(|declaration| declaration.names.iter().cloned()),
+            )
+            .chain(self.aliasparams.iter().map(|alias| alias.alias.clone()))
+            .chain(self.branches.iter().map(|branch| branch.name.clone()))
+            .chain(self.functions.iter().map(|function| function.name.clone()))
+            .chain(self.instances.iter().map(|instance| instance.name.clone()))
+            .collect()
+    }
+
     /// Whether the module declares anything from the discrete half of
     /// Verilog-AMS.
     pub fn has_digital_content(&self) -> bool {

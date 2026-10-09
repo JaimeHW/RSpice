@@ -684,51 +684,7 @@ fn retain_parameter_guards(module: &AnalyzedModule, analyzed: &mut AnalyzedModul
 }
 
 pub(super) fn declared_names(source: &Module) -> HashSet<SmolStr> {
-    source
-        .ports
-        .iter()
-        .map(|port| port.name.clone())
-        .chain(source.nets.iter().flat_map(|net| net.names.clone()))
-        .chain(
-            source
-                .digital_nets
-                .iter()
-                .flat_map(|net| net.items.iter().map(|item| item.name.clone())),
-        )
-        .chain(
-            source
-                .digital_variables
-                .iter()
-                .flat_map(|net| net.items.iter().map(|item| item.name.clone())),
-        )
-        .chain(
-            source
-                .variables
-                .iter()
-                .flat_map(|net| net.items.iter().map(|item| item.name.clone())),
-        )
-        .chain(
-            source
-                .parameters
-                .iter()
-                .chain(&source.localparams)
-                .map(|parameter| parameter.name.clone()),
-        )
-        .chain(source.aliasparams.iter().map(|alias| alias.alias.clone()))
-        .chain(source.branches.iter().map(|branch| branch.name.clone()))
-        .chain(
-            source
-                .functions
-                .iter()
-                .map(|function| function.name.clone()),
-        )
-        .chain(
-            source
-                .instances
-                .iter()
-                .map(|instance| instance.name.clone()),
-        )
-        .collect()
+    source.declared_names()
 }
 
 pub(super) fn analyze_occurrence(

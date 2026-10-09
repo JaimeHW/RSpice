@@ -199,7 +199,19 @@ computed connection values retain discrete storage. Lexical locals do not change
 the domain of a same-named module wire. Physical boundaries stop real-net type
 promotion, and entirely physical structural subtrees require no digital runtime.
 Schema 144 and cache record 126 invalidate artifacts compiled before this change.
-Undeclared implicit nets and detailed top-down domain resolution remain open.
+Structural module connections and continuous-assignment targets now create implicit
+scalar wire nets in their lexical scope. The same domain/type resolver handles these
+nets, including real-valued interconnect and physical analog loading. `default_nettype`
+wire/tri/none is retained across includes, macro expansion, inactive source and resetall;
+none rejects missing net declarations at their source positions. Reads in arbitrary
+behavioral code do not introduce nets. Analog behavioral access still requires a
+declared nature (VAMS-2023 3.6.3–3.6.5).
+Generate blocks retain separate explicit and implicit net declarations, packed ranges,
+unpacked dimensions and local shadowing. Unnamed blocks use collision-checked genblk
+names, preserved through specialization and source replay. Generated local variables,
+parameters/functions and analog blocks still require further scoped elaboration.
+Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
+artifacts produced before scoped implicit-net construction.
 The existing `output real` variable-port form is an RSpice compatibility extension,
 not the VAMS-2023 real-net port syntax (`wreal`).
 Compatible scalar and complete bus connections to real nets resolve `wire`/`tri`

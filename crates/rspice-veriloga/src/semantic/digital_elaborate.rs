@@ -78,8 +78,7 @@
 //! * output/inout connection forms not normalized by mixed-boundary preparation
 //!   that are neither declared nets nor bit/part selections (section 12.3.9);
 //! * a connection naming something that is not a declared discrete-domain
-//!   signal, because this compiler does not create implicit nets (section
-//!   4.5);
+//!   signal after structural implicit-net creation (section 4.5);
 //! * an output/inout net collapse whose widths differ; input conversions and
 //!   variable outputs instead use assignment sizing (section 12.3.9);
 //! * an `input` or `inout` port declared as a variable (section 12.3.3);

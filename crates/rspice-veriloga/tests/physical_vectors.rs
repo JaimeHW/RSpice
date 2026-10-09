@@ -2123,3 +2123,114 @@ connectrules chosen; connect sense; endconnectrules
             .any(|signal| signal.name == "x")
     );
 }
+
+#[test]
+fn implicit_physical_nets_in_generated_scopes_specialize_and_replay() {
+    let source = r#"
+module source(output electrical a);
+ parameter real LEVEL=2.5;
+ analog I(a)<+(V(a)-LEVEL)/1000;
+endmodule
+module load(input electrical a,output electrical p);
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module top(output electrical [BASE:BASE+1] p);
+ parameter integer BASE=-2;
+ genvar i;
+ generate for(i=BASE;i<BASE+2;i=i+1) begin
+   source #(.LEVEL(i+7.5)) producer(link);
+   load consumer(link,p[i]);
+ end endgenerate
+endmodule
+"#;
+    let compiler = VerilogACompiler::default();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 4.0)], &NoPipelineControl)
+        .unwrap();
+    for report in [&artifact, &specialized] {
+        report.canonical_ir.validate().unwrap();
+        assert!(report.canonical_ir.digital.signals.is_empty());
+        let replay = compiler
+            .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+    }
+}
+
+#[test]
+fn implicit_net_defaults_follow_source_position_macros_and_reset() {
+    let source = r#"
+module leaf(input wire a); endmodule
+`define NET_POLICY none
+`default_nettype `NET_POLICY
+`ifdef INACTIVE
+`default_nettype wire
+`endif
+module explicit(input wire a); leaf instance(a); endmodule
+`resetall
+module top;
+ leaf first(created);
+`default_nettype none
+ leaf second(created);
+endmodule
+"#;
+    let compiler = compiler();
+    let report = compiler.compile_runtime(source, Some("top")).unwrap();
+    assert_eq!(
+        report
+            .canonical_ir
+            .digital
+            .signals
+            .iter()
+            .filter(|signal| signal.name == "created")
+            .count(),
+        1
+    );
+    let replay = compiler
+        .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        report.canonical_ir.runtime_source_identity(),
+        replay.canonical_ir.runtime_source_identity()
+    );
+    for (bad, name) in [
+        (
+            source.replace(
+                "leaf second(created);",
+                "leaf second(missing);\n`default_nettype wire",
+            ),
+            "missing",
+        ),
+        (
+            source.replace("input wire a); leaf instance", "input a); leaf instance"),
+            "a",
+        ),
+    ] {
+        let error = compiler
+            .compile_runtime(&bad, Some("top"))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("default_nettype none") && error.contains(name),
+            "{error}"
+        );
+    }
+    // A behavioral read alone does not declare a net, and implicit physical
+    // connectivity does not supply declared natures to analog behavioral code.
+    for bad in [
+        "module top; reg q; initial q=missing; endmodule",
+        "module top;\n`UNKNOWN discard_this\nendmodule",
+        "module leaf(input electrical a); endmodule module top(output electrical p); leaf l(x); analog V(p)<+V(x); endmodule",
+    ] {
+        assert!(compiler.compile_runtime(bad, Some("top")).is_err(), "{bad}");
+    }
+}

@@ -1064,8 +1064,33 @@ impl Preprocessor {
                                 line_num + 1,
                             );
                             if directive == "resetall" {
-                                output.push_source(&format!("__rspice_default_discipline (); __rspice_default_transition ({});", crate::semantic::SemanticAnalyzer::SIMULATOR_DEFAULT_TRANSITION), &current_path, line_num + 1);
+                                output.push_source(&format!("__rspice_default_nettype (wire); __rspice_default_discipline (); __rspice_default_transition ({});", crate::semantic::SemanticAnalyzer::SIMULATOR_DEFAULT_TRANSITION), &current_path, line_num + 1);
                             }
+                        }
+                        output.push_source("\n", &current_path, line_num + 1);
+                    }
+                    "default_nettype" => {
+                        if include_line {
+                            let operand = self.expand_macros_at(
+                                rest.trim(),
+                                line_num + 1,
+                                provider.limits().max_expanded_bytes,
+                            )?;
+                            let operand = operand.trim();
+                            if !matches!(operand, "wire" | "tri" | "none") {
+                                return Err(PreprocessorError::new(
+                                    format!(
+                                        "unsupported `default_nettype {operand}`; supported net defaults are wire, tri and none"
+                                    ),
+                                    self.current_file.clone(),
+                                    line_num + 1,
+                                ));
+                            }
+                            output.push_source(
+                                &format!("__rspice_default_nettype ({operand});"),
+                                &current_path,
+                                line_num + 1,
+                            );
                         }
                         output.push_source("\n", &current_path, line_num + 1);
                     }
@@ -1212,6 +1237,7 @@ impl Preprocessor {
                 | "endif"
                 | "timescale"
                 | "resetall"
+                | "default_nettype"
                 | "default_transition"
                 | "default_discipline"
         )

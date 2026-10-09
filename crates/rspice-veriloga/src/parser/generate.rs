@@ -34,24 +34,15 @@
 //!
 //! A continuous assignment gets no name at all, because it never had one. It
 //! is a driver on whatever net its target names, and that net is outside the
-//! block — see the refusal list below.
+//! block or a net in its concrete generated scope.
 //!
 //! # What is refused, and why the list is short
 //!
-//! A generate block may not *declare* anything here: no net, no variable, no
-//! parameter, no function, no analog block. Section 12.4.2 gives such a
-//! declaration a hierarchical name of its own (`bit_slice[3].carry`), which
-//! means every reference to it inside the block has to be rewritten to that
-//! name and every reference from outside has to be able to reach it. That is a
-//! scoping mechanism, not a copying one, and this pass copies. Refusing it by
-//! name leaves an author with a diagnostic naming the clause; unrolling it
-//! without the renaming would silently merge N iterations' `carry` into one
-//! net.
-//!
-//! Everything else a module item can be — an instance, a continuous
-//! assignment, a gate primitive (which is already a continuous assignment by
-//! the time it gets here), a process — copies faithfully, because all it
-//! references is the enclosing scope plus the genvar.
+//! Nets declared explicitly or inferred structurally inside a generate block
+//! acquire a separate name in every concrete scope. Ranges, dimensions and uses
+//! retain genvar substitution and lexical process-local shadowing. Local variable,
+//! parameter and function declarations and analog blocks still require additional
+//! scoped elaboration and diagnose until that implementation is complete.
 
 use super::Parser;
 use crate::ast::*;
@@ -93,14 +84,26 @@ impl Parser<'_> {
     }
 
     /// `generate <generate item>* endgenerate`
-    pub(super) fn parse_generate_region(&mut self) -> Result<Vec<GenerateConstruct>, ParseError> {
+    pub(super) fn parse_generate_region(&mut self, module: &mut Module) -> Result<(), ParseError> {
         self.expect(TokenKind::Generate)?;
-        let mut constructs = Vec::new();
         while !self.check(TokenKind::Endgenerate) && !self.at_end() {
-            constructs.push(self.parse_generate_construct()?);
+            match self.current().kind {
+                TokenKind::For | TokenKind::If | TokenKind::Case | TokenKind::Begin => {
+                    module.generates.push(self.parse_generate_construct()?);
+                }
+                TokenKind::Generate => return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: "generate region".into(),
+                        found: "IEEE 1364-2005 section 12.4 nests generate constructs directly, without reopening a region".into(),
+                    }, self.current_span(),
+                )),
+                // A region is not a lexical scope. Only its generated blocks
+                // introduce scopes; direct module items retain the owner scope.
+                _ => self.parse_module_item(module)?,
+            }
         }
         self.expect(TokenKind::Endgenerate)?;
-        Ok(constructs)
+        Ok(())
     }
 
     /// One generate item.
@@ -326,6 +329,7 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
         constants,
         time_scale: module.time_scale,
         bindings: HashMap::new(),
+        net_names: HashMap::new(),
         next_process_id,
     };
     let mut expanded = Module::new(module.name.clone(), module.span);
@@ -352,8 +356,12 @@ fn absorb(module: &mut Module, expanded: Module) {
         instances,
         continuous_assigns,
         digital_processes,
+        digital_nets,
+        nets,
         ..
     } = expanded;
+    module.digital_nets.extend(digital_nets);
+    module.nets.extend(nets);
     module.instances.extend(instances);
     module.continuous_assigns.extend(continuous_assigns);
     module.digital_processes.extend(digital_processes);
@@ -366,6 +374,8 @@ struct Unroller<'a> {
     time_scale: crate::time_scale::ModuleTimeScale,
     /// The genvars currently bound, innermost loop last.
     bindings: HashMap<SmolStr, i64>,
+    /// Concrete names of nets declared in enclosing generate scopes.
+    net_names: HashMap<SmolStr, SmolStr>,
     next_process_id: &'a mut u32,
 }
 
@@ -426,7 +436,8 @@ impl Unroller<'_> {
                 loop_.span,
             ));
         }
-        // Section 12.4.1: the loop's generate block is named, and the name plus
+        // Source preparation gives unnamed blocks their standard genblk name.
+        // The block name plus
         // the index is what distinguishes one iteration's items from the next's.
         // Without it two iterations would produce two instances of one name.
         let Some(block_name) = &loop_.body.name else {
@@ -513,6 +524,61 @@ impl Unroller<'_> {
         out: &mut Module,
     ) -> Result<(), ParseError> {
         reject_declarations(&block.items)?;
+        let local_nets: Vec<_> = block
+            .items
+            .digital_nets
+            .iter()
+            .flat_map(|declaration| declaration.items.iter().map(|item| item.name.clone()))
+            .chain(
+                block
+                    .items
+                    .nets
+                    .iter()
+                    .flat_map(|declaration| declaration.names.iter().cloned()),
+            )
+            .collect();
+        let mut shadows = Vec::new();
+        for name in local_nets {
+            let qualified = format!("{prefix}{name}").into();
+            let previous = self.net_names.insert(name.clone(), qualified);
+            shadows.push((name, previous));
+        }
+        for declaration in &block.items.digital_nets {
+            let mut copy = declaration.clone();
+            if let Some(range) = &mut copy.range {
+                self.substitute(&mut range.msb);
+                self.substitute(&mut range.lsb);
+            }
+            for item in &mut copy.items {
+                self.rename_net(&mut item.name);
+                for dimension in &mut item.dimensions {
+                    self.substitute(&mut dimension.start);
+                    self.substitute(&mut dimension.end);
+                }
+                if let Some(value) = &mut item.init {
+                    self.substitute(value);
+                }
+            }
+            out.digital_nets.push(copy);
+        }
+        for declaration in &block.items.nets {
+            let mut copy = declaration.clone();
+            for name in &mut copy.names {
+                self.rename_net(name);
+            }
+            if let Some(range) = &mut copy.range {
+                self.substitute(&mut range.msb);
+                self.substitute(&mut range.lsb);
+            }
+            for (name, dimensions) in &mut copy.dimensions {
+                self.rename_net(name);
+                for dimension in dimensions {
+                    self.substitute(&mut dimension.start);
+                    self.substitute(&mut dimension.end);
+                }
+            }
+            out.nets.push(copy);
+        }
 
         for instance in &block.items.instances {
             let mut copy = instance.clone();
@@ -553,6 +619,13 @@ impl Unroller<'_> {
         for nested in &block.nested {
             self.construct(nested, prefix, out)?;
         }
+        for (name, previous) in shadows.into_iter().rev() {
+            if let Some(previous) = previous {
+                self.net_names.insert(name, previous);
+            } else {
+                self.net_names.remove(&name);
+            }
+        }
         Ok(())
     }
 
@@ -587,6 +660,8 @@ impl Unroller<'_> {
 
     /// A genvar initializer/update has the assignment context of an integer.
     fn genvar_assignment(&self, expression: &Expression, context: &str) -> Result<i64, ParseError> {
+        let mut expression = expression.clone();
+        self.substitute(&mut expression);
         let declaration = ParameterDecl {
             is_given: false,
             param_type: ParamType::Integer,
@@ -621,9 +696,11 @@ impl Unroller<'_> {
 
     /// The constant value of an elaboration-time expression.
     fn value(&self, expression: &Expression, context: &str) -> Result<i64, ParseError> {
+        let mut expression = expression.clone();
+        self.substitute(&mut expression);
         let environment = self.constant_environment(expression.span());
         crate::canonical_ir::digital_lower::elaboration_constant(
-            expression,
+            &expression,
             &environment,
             self.time_scale,
         )
@@ -646,11 +723,19 @@ impl Unroller<'_> {
         })
     }
 
-    /// Replace every bound genvar in `expression` with its value.
+    fn rename_net(&self, name: &mut SmolStr) {
+        if let Some(qualified) = self.net_names.get(name) {
+            *name = qualified.clone();
+        }
+    }
+
+    /// Bind scoped net names and replace bound genvars with their values.
     fn substitute(&self, expression: &mut Expression) {
         match expression {
             Expression::Identifier(identifier) => {
-                if let Some(value) = self.bindings.get(&identifier.name) {
+                if self.net_names.contains_key(&identifier.name) {
+                    self.rename_net(&mut identifier.name);
+                } else if let Some(value) = self.bindings.get(&identifier.name) {
                     *expression = Expression::Number(NumberLit {
                         value: *value as f64,
                         raw: format!("32'sb{:032b}", *value as i32 as u32).into(),
@@ -679,6 +764,7 @@ impl Unroller<'_> {
                 }
             }
             Expression::ArrayAccess(access) => {
+                self.rename_net(&mut access.array);
                 for child in access.children_mut() {
                     self.substitute(child);
                 }
@@ -689,10 +775,16 @@ impl Unroller<'_> {
                 }
             }
             Expression::BranchAccess(BranchAccess::Nodes {
+                pos,
+                neg,
                 pos_indices,
                 neg_indices,
                 ..
             }) => {
+                self.rename_net(pos);
+                if let Some(neg) = neg {
+                    self.rename_net(neg);
+                }
                 for index in pos_indices.iter_mut().chain(neg_indices.iter_mut()) {
                     self.substitute(index);
                 }
@@ -715,11 +807,13 @@ impl Unroller<'_> {
         match digital {
             DigitalExpr::FourState(_) => {}
             DigitalExpr::ArraySelect(select) => {
+                self.rename_net(&mut select.name);
                 for child in select.children_mut() {
                     self.substitute(child);
                 }
             }
             DigitalExpr::PartSelect(select) => {
+                self.rename_net(&mut select.name);
                 self.substitute(&mut select.msb);
                 self.substitute(&mut select.lsb);
             }
@@ -753,14 +847,19 @@ impl Unroller<'_> {
 
     fn substitute_lvalue(&self, target: &mut DigitalLValue) {
         match target {
-            DigitalLValue::Identifier { .. } => {}
+            DigitalLValue::Identifier { name, .. } => self.rename_net(name),
             DigitalLValue::ArraySelect(select) => {
+                self.rename_net(&mut select.name);
                 for child in select.children_mut() {
                     self.substitute(child);
                 }
             }
-            DigitalLValue::BitSelect { index, .. } => self.substitute(index),
-            DigitalLValue::PartSelect { msb, lsb, .. } => {
+            DigitalLValue::BitSelect { name, index, .. } => {
+                self.rename_net(name);
+                self.substitute(index);
+            }
+            DigitalLValue::PartSelect { name, msb, lsb, .. } => {
+                self.rename_net(name);
                 self.substitute(msb);
                 self.substitute(lsb);
             }
@@ -772,10 +871,26 @@ impl Unroller<'_> {
         }
     }
 
-    fn substitute_statement(&self, statement: &mut DigitalStatement) {
+    fn substitute_statement(&mut self, statement: &mut DigitalStatement) {
         match statement {
             DigitalStatement::Null(_) => {}
             DigitalStatement::Block(block) => {
+                let names: Vec<_> = block
+                    .variables
+                    .iter()
+                    .flat_map(|declaration| declaration.items.iter().map(|item| item.name.clone()))
+                    .chain(block.digital_variables.iter().flat_map(|declaration| {
+                        declaration.items.iter().map(|item| item.name.clone())
+                    }))
+                    .collect();
+                let shadows: Vec<_> = names
+                    .into_iter()
+                    .map(|name| {
+                        let net = self.net_names.remove(&name);
+                        let index = self.bindings.remove(&name);
+                        (name, net, index)
+                    })
+                    .collect();
                 for declaration in &mut block.variables {
                     for item in &mut declaration.items {
                         if let Some(init) = &mut item.init {
@@ -792,6 +907,14 @@ impl Unroller<'_> {
                 }
                 for inner in &mut block.statements {
                     self.substitute_statement(inner);
+                }
+                for (name, net, index) in shadows.into_iter().rev() {
+                    if let Some(net) = net {
+                        self.net_names.insert(name.clone(), net);
+                    }
+                    if let Some(index) = index {
+                        self.bindings.insert(name, index);
+                    }
                 }
             }
             DigitalStatement::BlockingAssign(assign)
@@ -879,25 +1002,28 @@ fn reject_declarations(items: &Module) -> Result<(), ParseError> {
                 context: "generate block".to_string(),
                 found: format!(
                     "{what}; IEEE 1364-2005 section {clause} gives a name declared inside a \
-                     generate block a hierarchical name of its own, which this compiler does \
-                     not synthesize — declare it outside the region instead"
+                     generate block a hierarchical name of its own, whose scoped lowering is \
+                     not implemented for this declaration"
                 ),
             },
             span,
         ))
     };
 
-    if let Some(declaration) = items.digital_nets.first() {
-        return refusal("a `wire` declaration", "12.4.2", declaration.span);
+    if let Some(declaration) = items.port_declarations.first() {
+        return refusal("a port declaration", "12.4.2", declaration.span);
+    }
+    if let Some(declaration) = items.branches.first() {
+        return refusal("a branch declaration", "12.4.2", declaration.span);
+    }
+    if let Some(declaration) = items.aliasparams.first() {
+        return refusal("a parameter alias declaration", "12.4.2", declaration.span);
     }
     if let Some(declaration) = items.digital_variables.first() {
         return refusal("a `reg` declaration", "12.4.2", declaration.span);
     }
     if let Some(declaration) = items.variables.first() {
         return refusal("a variable declaration", "12.4.2", declaration.span);
-    }
-    if let Some(declaration) = items.nets.first() {
-        return refusal("a net declaration", "12.4.2", declaration.span);
     }
     if let Some(declaration) = items.parameters.first().or(items.localparams.first()) {
         return refusal("a parameter declaration", "12.4.2", declaration.span);

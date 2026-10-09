@@ -1926,8 +1926,8 @@ fn unelaborated_instance_constructs_refuse_by_name() {
         ),
         (
             "an undeclared connection name",
-            hierarchy(NAND2, "    wire a, b;\n     nand2 g1(y, a, b);"),
-            vec!["not a declared discrete-domain signal", "section 4.5"],
+            hierarchy(NAND2, "`default_nettype none\n    wire a, b;\n     nand2 g1(y, a, b);"),
+            vec!["implicit net", "default_nettype none"],
         ),
         (
             "an input port declared a variable",
@@ -1981,7 +1981,7 @@ fn unelaborated_instance_constructs_refuse_by_name() {
                  endmodule\n",
                 "    wire x, z;\n     loop g1(z, x);",
             ),
-            vec!["Circular dependency", "loop -> loop"],
+            vec!["Circular dependency", "specialization repeats ancestor"],
         ),
         (
             "a continuous port connected directly to a discrete net",
