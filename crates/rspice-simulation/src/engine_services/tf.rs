@@ -4,10 +4,7 @@
 //! point. It is not an AC sweep: gain, input resistance, and output
 //! resistance are produced by the engine's zero-hertz linearized solves.
 
-use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, is_ground_like,
-    parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult, is_ground_like};
 use crate::error::ensure_not_aborted;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
@@ -15,6 +12,7 @@ use rspice_core::abort_signal::AbortSignal;
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::ElementKind;
+#[cfg(test)]
 use std::path::Path;
 
 /// Post-solve normalization applied to the signed transfer derivative.
@@ -145,7 +143,7 @@ pub struct TfData {
 /// failures as strings.
 ///
 /// Test-only; the shipping path is
-/// [`run_tf_analysis_with_config_and_abort`], which keeps the typed error.
+/// [`run_tf_analysis_with_context`], which keeps the typed error.
 #[cfg(test)]
 pub fn run_tf_analysis_with_config(
     netlist_text: &str,
@@ -168,24 +166,39 @@ pub fn run_tf_analysis_with_config_and_abort(
 
 /// Run transfer-function analysis with source-path resolution and
 /// cooperative cancellation through parsing, solving, and result conversion.
+#[cfg(test)]
 pub fn run_tf_analysis_with_config_and_source_path_and_abort(
     netlist_text: &str,
     config: &TfRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<TfData> {
+    run_tf_analysis_with_context(
+        netlist_text,
+        config,
+        super::ServiceContext::with_defaults(source_path, abort),
+    )
+}
+
+/// Execute with the caller's source, cancellation, and resource policy.
+pub fn run_tf_analysis_with_context(
+    netlist_text: &str,
+    config: &TfRunConfig,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<TfData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
-    let parsed_netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let parsed_netlist = context.parse(netlist_text)?;
     let probe = TfOutputProbe::parse(&config.output_expression)?;
     ensure_not_aborted(abort)?;
 
     let input_quantity = input_quantity(&parsed_netlist, config.input_source.trim())?;
     let output_quantity = probe.quantity();
     let engine_config =
-        apply_accuracy_policy(build_engine_config(&parsed_netlist, None), config.accuracy);
+        apply_accuracy_policy(context.engine_config(&parsed_netlist), config.accuracy);
     let engine = Engine::try_new(engine_config).map_err(|error| {
         ServiceRunError::Failure(format!("Invalid TF numerical policy: {error}"))
     })?;

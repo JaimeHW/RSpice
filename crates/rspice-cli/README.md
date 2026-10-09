@@ -114,7 +114,8 @@ PAC/PXF/PNOISE/PSTB additionally require a matching `periodic` object containing
 model binding, and conversion of saved study artifacts are not exposed yet.
 Execution limits are captured in the prepared snapshot and enforced for OP, DC,
 AC (including AC data), transient (including transient noise), noise, pole-zero,
-and sensitivity analyses. Advanced analysis routes still explicitly refuse custom
+sensitivity, STB, S-parameter (including port noise), transfer-function, distortion,
+and DC-mismatch analyses. Remaining advanced routes explicitly refuse custom
 execution limits until they enforce the same policy. The seven source limits (`max_netlist_bytes`, `max_netlist_lines`,
 `max_expanded_source_bytes`, `max_dependency_source_bytes`, `max_include_depth`,
 `max_hierarchy_depth`, and `max_flattened_elements`) remain configurable.

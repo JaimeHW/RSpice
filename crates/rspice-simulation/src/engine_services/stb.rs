@@ -8,14 +8,14 @@
 //! the pair; there is no second method behind a flag, and no configuration
 //! selects one.
 
-use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
 #[cfg(test)]
 use rspice_core::Value;
+#[cfg(test)]
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::Engine;
+#[cfg(test)]
 use std::path::Path;
 
 /// Complete core stability evidence, including missing quantities and diagnostics.
@@ -24,7 +24,7 @@ pub type StbData = rspice_core::analysis::stb::StbResult;
 /// Run STB analysis over a decade sweep with cooperative cancellation.
 ///
 /// Test-only. The shipping path is
-/// [`run_stb_analysis_with_sweep_and_source_path_and_abort`].
+/// [`run_stb_analysis_with_context`].
 #[cfg(test)]
 pub fn run_stb_analysis_with_abort(
     netlist_text: &str,
@@ -79,15 +79,30 @@ pub fn run_stb_analysis_with_source_path_and_abort(
 /// feedback loop; the engine measures the true loop gain at that break via
 /// Tian's double-injection method. An unknown probe is a hard error — there is
 /// no meaningful fallback quantity.
+#[cfg(test)]
 pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
     netlist_text: &str,
     stb_config: rspice_core::analysis::stb::StbConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<StbData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    run_stb_analysis_with_context(
+        netlist_text,
+        stb_config,
+        super::ServiceContext::with_defaults(source_path, abort),
+    )
+}
+
+/// Execute with the caller's source, cancellation, and resource policy.
+pub fn run_stb_analysis_with_context(
+    netlist_text: &str,
+    stb_config: rspice_core::analysis::stb::StbConfig,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<StbData> {
+    let abort = context.abort;
+    let netlist = context.parse(netlist_text)?;
     ensure_not_aborted(abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let engine = Engine::new(context.engine_config(&netlist));
 
     let analysis = engine
         .run_stb_with_abort(&netlist, stb_config, abort)

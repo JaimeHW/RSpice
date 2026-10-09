@@ -455,3 +455,118 @@ fn study_run_enforces_captured_execution_limits_without_replacing_output() {
         );
     }
 }
+
+#[test]
+fn standalone_advanced_studies_inherit_solver_and_frequency_budgets() {
+    let root = common::test_dir("study-advanced-execution-limits");
+    let mut document = fixture(&root);
+    let circuit = root.join("circuits/divider.cir");
+    let destination = root.join("result.json");
+    let statistics = rspice_core::library::adapt_spectre_model_library(
+        Path::new("statistics.scs"),
+        "parameters rval=1000\nstatistics {\n mismatch {\n  vary rval dist=gauss std=10\n }\n}\n",
+    )
+    .unwrap();
+    let mismatch_source =
+        format!("Mismatch policy\n{statistics}V1 in 0 1\nR1 in out {{rval}}\nR2 out 0 1k\n.end\n");
+    let cases = [
+        (
+            "tf",
+            "Transfer policy\nV1 in 0 1\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+            json!({"Tf": {
+                "input_source": "V1", "output_expression": "V(out)",
+                "transfer_gain": true, "input_resistance": true, "output_resistance": true,
+                "normalization": "none", "accuracy": "balanced"
+            }}),
+            false,
+        ),
+        (
+            "stb",
+            "Stability policy\nE1 eo 0 n3 0 -1000\nVPROBE eo x 0\nR1 x n1 1k\nC1 n1 0 159.154943091895n\nE2 b1 0 n1 0 1\nR2 b1 n2 1k\nC2 n2 0 159.154943091895n\nE3 b2 0 n2 0 1\nR3 b2 n3 1k\nC3 n3 0 159.154943091895n\n.end\n",
+            json!({"Stb": {
+                "probe_node": "VPROBE", "start_freq": 100.0, "stop_freq": 100000.0,
+                "sweep": "Decade", "points_per_decade": 20, "compute_nyquist": true
+            }}),
+            true,
+        ),
+        (
+            "sp",
+            "Scattering policy\nR1 in out 50\nR2 out 0 50\n.end\n",
+            json!({"SParameter": {
+                "start_freq": 10.0, "stop_freq": 1000.0, "points_per_unit": 3,
+                "sweep": "Linear", "z0": 50.0, "do_noise": true,
+                "ports": [{"node_pos": "in", "node_neg": "0", "z0": null},
+                          {"node_pos": "out", "node_neg": "0", "z0": null}]
+            }}),
+            true,
+        ),
+        (
+            "disto",
+            "Distortion policy\nV1 in 0 DC 0.2 DISTOF1 1 0\nR1 in out 1k\nD1 out 0 dm\n.model dm D(IS=1e-12 N=1)\n.end\n",
+            json!({"Disto": {
+                "start_freq": 10.0, "stop_freq": 1000.0, "points_per_unit": 3,
+                "sweep": "Linear", "f2_over_f1": null
+            }}),
+            true,
+        ),
+        (
+            "dcmatch",
+            mismatch_source.as_str(),
+            json!({"DcMismatch": {
+                "output_expression": "V(out)", "sigma_multiplier": 1.0, "contributor_limit": 0,
+                "include_process": false, "include_mismatch": true, "normalized_contributions": true
+            }}),
+            false,
+        ),
+    ];
+    for (name, source, analysis, swept) in cases {
+        std::fs::write(&circuit, source).unwrap();
+        document["tasks"] = json!([{ "id": name, "analysis": analysis }]);
+        let path = save(&root, &document);
+        std::fs::write(
+            root.join("config.toml"),
+            "[resources]\nmax_matrix_unknowns = 100\n",
+        )
+        .unwrap();
+        let run = || {
+            invoke(
+                &root,
+                &[
+                    "study",
+                    "run",
+                    path.to_str().unwrap(),
+                    "--output",
+                    destination.to_str().unwrap(),
+                    "--json",
+                ],
+            )
+        };
+        let success = run();
+        assert!(success.status.success(), "{name}: {success:?}");
+        let published = std::fs::read(&destination).unwrap();
+        for (setting, resource, limit) in [
+            ("max_matrix_unknowns", "matrix_unknowns", 1),
+            ("max_result_values", "result_values", 1),
+            ("max_analysis_points", "analysis_points", 2),
+        ] {
+            if setting == "max_analysis_points" && !swept {
+                continue;
+            }
+            std::fs::write(
+                root.join("config.toml"),
+                format!("[resources]\n{setting} = {limit}\n"),
+            )
+            .unwrap();
+            let failure = run();
+            assert_eq!(
+                failure.status.code(),
+                Some(75),
+                "{name} {setting}: {failure:?}"
+            );
+            let error: Value = serde_json::from_slice(&failure.stderr).unwrap();
+            assert_eq!(error["error"]["resource"], resource, "{name}: {error}");
+            assert_eq!(error["error"]["limit"], limit, "{name}: {error}");
+            assert_eq!(std::fs::read(&destination).unwrap(), published);
+        }
+    }
+}

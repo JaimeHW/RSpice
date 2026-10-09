@@ -21,6 +21,11 @@ pub fn execution_resource_policy_blocker(
             | AnalysisSpec::Noise { .. }
             | AnalysisSpec::PoleZero { .. }
             | AnalysisSpec::Sensitivity { .. }
+            | AnalysisSpec::Stb { .. }
+            | AnalysisSpec::SParameter { .. }
+            | AnalysisSpec::Tf { .. }
+            | AnalysisSpec::Disto { .. }
+            | AnalysisSpec::DcMismatch { .. }
     ) {
         return None;
     }

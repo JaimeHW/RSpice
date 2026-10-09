@@ -67,6 +67,10 @@ impl Default for EngineBridge {
 }
 
 impl EngineBridge {
+    pub(crate) fn resource_limits(&self) -> rspice_core::ResourceLimits {
+        self.engine.config().resource_limits
+    }
+
     pub(crate) fn with_resource_limits(mut self, limits: rspice_core::ResourceLimits) -> Self {
         self.engine = rspice_core::Engine::new(rspice_core::SimulationConfig {
             resource_limits: limits,

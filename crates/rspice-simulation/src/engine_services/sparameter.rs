@@ -3,15 +3,14 @@
 //! Sweeps frequency and extracts the scattering matrix between the declared
 //! ports, with the port impedances the run configuration sets.
 
-use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
-    parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
 use rspice_core::Value;
+#[cfg(test)]
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 use rspice_core::engine::Engine;
+#[cfg(test)]
 use std::path::Path;
 
 /// Sweep type for S-parameter analysis.
@@ -109,23 +108,39 @@ pub fn run_sparameter_analysis_with_abort(
 
 /// Run N-port S-parameter analysis with source-path resolution and
 /// cooperative cancellation through parsing, solving, and matrix conversion.
+#[cfg(test)]
 pub fn run_sparameter_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: &SParameterRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<rspice_core::engine::SParameterRun> {
+    run_sparameter_analysis_with_context(
+        netlist_text,
+        config,
+        super::ServiceContext::with_defaults(source_path, abort),
+    )
+}
+
+/// Execute with the caller's source, cancellation, and resource policy.
+pub fn run_sparameter_analysis_with_context(
+    netlist_text: &str,
+    config: &SParameterRunConfig,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<rspice_core::engine::SParameterRun> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
+    let netlist = context.parse(netlist_text)?;
 
-    let frequencies = generate_freq_points_with_abort(
+    let frequencies = super::helpers::generate_freq_points_with_limit_and_abort(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
+        context.limits.max_analysis_points,
         abort,
     )?;
 
@@ -141,7 +156,7 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
         })
         .collect::<Vec<_>>();
     ensure_not_aborted(abort)?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let engine = Engine::new(context.engine_config(&netlist));
     let run = engine
         .run_sp_over_grid_with_default_ports_and_abort(
             &netlist,

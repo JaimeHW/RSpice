@@ -4,8 +4,12 @@
 
 use rspice_core::engine::Engine;
 
+mod context;
+pub use context::ServiceContext;
 mod dcmatch;
+pub use dcmatch::run_dc_mismatch_analysis_with_context;
 mod disto;
+pub use disto::run_disto_analysis_with_context;
 mod envelope_fourier;
 mod hb;
 mod hbnoise;
@@ -33,18 +37,18 @@ pub(crate) use qpss::{
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_abort;
 mod soa;
 mod sparameter;
+pub use sparameter::run_sparameter_analysis_with_context;
 mod stb;
+pub use stb::run_stb_analysis_with_context;
 mod sweeps;
 mod tf;
+pub use tf::run_tf_analysis_with_context;
 mod transient;
 // Each analysis re-exports the request types a caller must construct and the
 // entry point it calls. Result types are not re-exported: callers receive them
 // from the entry point and never name them here.
 pub use crate::error::{ServiceRunError, ServiceRunResult};
-pub use dcmatch::run_dc_mismatch_analysis_with_source_path_and_abort;
-pub use disto::{
-    DistoFrequencySweep, DistoRunConfig, run_disto_analysis_with_source_path_and_abort,
-};
+pub use disto::{DistoFrequencySweep, DistoRunConfig};
 #[cfg(test)]
 pub(crate) use envelope_fourier::run_fourier_from_signal_with_abort;
 #[cfg(test)]
@@ -123,19 +127,12 @@ pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 // module is the RF and advanced layer. Duplicates of all four once sat here
 // unreachable; adding a fifth would mean the same thing again.
 pub use soa::{SoaRunConfig, run_soa_analysis_with_config_and_source_path_and_abort};
-pub use sparameter::{
-    SParameterPort, SParameterRunConfig, SParameterSweep,
-    run_sparameter_analysis_with_source_path_and_abort,
-};
-pub use stb::run_stb_analysis_with_sweep_and_source_path_and_abort;
+pub use sparameter::{SParameterPort, SParameterRunConfig, SParameterSweep};
 pub use sweeps::{
     run_parametric_analysis_with_base_and_source_path_and_abort,
     run_parametric_analysis_with_source_path_and_abort,
 };
-pub use tf::{
-    TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, infer_tf_run_config,
-    run_tf_analysis_with_config_and_source_path_and_abort,
-};
+pub use tf::{TfAccuracy, TfNormalization, TfQuantity, TfRunConfig, infer_tf_run_config};
 pub use transient::TransientData;
 #[cfg(test)]
 pub use transient::run_transient_analysis_with_source_path_and_abort;

@@ -162,6 +162,11 @@ pub(super) fn run_spec_request_in_context(
         };
     }
 
+    let service_context = svc_runner::ServiceContext {
+        source_path,
+        limits: bridge.resource_limits(),
+        abort: abort_flag,
+    };
     match spec {
         AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
             sweeps::run_sweep_spec(
@@ -192,10 +197,9 @@ pub(super) fn run_spec_request_in_context(
         | AnalysisSpec::DcMismatch { .. } => device::run_device_spec(
             spec,
             netlist,
-            source_path,
             options.study_base.as_ref(),
             environment,
-            abort_flag,
+            service_context,
         ),
         AnalysisSpec::Pss { .. }
         | AnalysisSpec::PssSpectrum { .. }
@@ -210,7 +214,7 @@ pub(super) fn run_spec_request_in_context(
         | AnalysisSpec::Hbsp { .. }
         | AnalysisSpec::Hbnoise { .. }
         | AnalysisSpec::Psp { .. } => {
-            periodic::run_periodic_spec(spec, netlist, source_path, dependencies, abort_flag)
+            periodic::run_periodic_spec(spec, netlist, dependencies, service_context)
         }
         AnalysisSpec::SParameter { .. }
         | AnalysisSpec::Tf { .. }
@@ -218,14 +222,9 @@ pub(super) fn run_spec_request_in_context(
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Stb { .. }
-        | AnalysisSpec::Pstb => frequency::run_frequency_spec(
-            spec,
-            options,
-            netlist,
-            source_path,
-            dependencies,
-            abort_flag,
-        ),
+        | AnalysisSpec::Pstb => {
+            frequency::run_frequency_spec(spec, options, netlist, dependencies, service_context)
+        }
         AnalysisSpec::LegacyDcOp
         | AnalysisSpec::DcOp { .. }
         | AnalysisSpec::DcSweep { .. }
@@ -1646,8 +1645,7 @@ R2 out 0 1k\n\
                     "",
                     None,
                     None,
-                    None,
-                    &rspice_core::abort_signal::NoAbort,
+                    svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
                 ),
                 "AnalysisSpec::DcOp",
             ),
@@ -1656,9 +1654,8 @@ R2 out 0 1k\n\
                 periodic::run_periodic_spec(
                     AnalysisSpec::dc_op(),
                     "",
-                    None,
                     &ResolvedExecutionDependencies::default(),
-                    &rspice_core::abort_signal::NoAbort,
+                    svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
                 ),
                 "AnalysisSpec::DcOp",
             ),
@@ -1668,9 +1665,8 @@ R2 out 0 1k\n\
                     AnalysisSpec::dc_op(),
                     SpecExecutionOptions::default(),
                     "",
-                    None,
                     &ResolvedExecutionDependencies::default(),
-                    &rspice_core::abort_signal::NoAbort,
+                    svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
                 ),
                 "AnalysisSpec::DcOp",
             ),

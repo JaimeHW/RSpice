@@ -20,10 +20,11 @@ use rspice_simulation_contract::options::IntegrationMethod;
 pub(super) fn run_periodic_spec(
     spec: AnalysisSpec,
     netlist: &str,
-    source_path: Option<&Path>,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     match spec {
         spec @ AnalysisSpec::Qpnoise { .. } => {
@@ -187,8 +188,7 @@ pub(super) fn run_periodic_spec(
                 sweep,
                 f2_over_f1,
             },
-            source_path,
-            abort,
+            context,
         ),
         AnalysisSpec::Psp {
             start_freq,
@@ -1237,9 +1237,9 @@ struct DistoRunRequest {
 fn run_disto(
     netlist: &str,
     request: DistoRunRequest,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let DistoRunRequest {
         start_freq,
         stop_freq,
@@ -1260,7 +1260,7 @@ fn run_disto(
         f2_over_f1,
     };
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_disto_analysis_with_source_path_and_abort(netlist, &cfg, source_path, abort)
+        svc_runner::run_disto_analysis_with_context(netlist, &cfg, context)
     })?;
     let frequencies = data.frequencies;
 

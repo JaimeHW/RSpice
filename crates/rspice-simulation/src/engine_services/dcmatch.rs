@@ -17,16 +17,11 @@
 //! what this service adds — only when the design really does declare no
 //! variation — is the sentence that says where a Studio project gets one.
 
-use std::path::Path;
-
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::dcmatch::DcMatchResult;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, DcMatchCard};
 
-use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
 
 /// What one `.DCMATCH` task produced, with the card it actually ran.
@@ -48,19 +43,19 @@ pub struct DcMismatchData {
 const STATISTICS_REMEDY: &str = " Attach a Spectre model library whose bound section declares one, \
                                  or include a Spectre file that does.";
 
-/// Run the card `card_line` spells against the design in `netlist_text`.
-pub fn run_dc_mismatch_analysis_with_source_path_and_abort(
+/// Execute with the caller's source, cancellation, and resource policy.
+pub fn run_dc_mismatch_analysis_with_context(
     netlist_text: &str,
     card_line: &str,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: super::ServiceContext<'_>,
 ) -> ServiceRunResult<DcMismatchData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
-    let card = studio_card(card_line, abort)?;
+    let card = studio_card(card_line, context)?;
     ensure_not_aborted(abort)?;
 
-    let parsed = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let engine = Engine::try_new(build_engine_config(&parsed, None)).map_err(|error| {
+    let parsed = context.parse(netlist_text)?;
+    let engine = Engine::try_new(context.engine_config(&parsed)).map_err(|error| {
         ServiceRunError::Failure(format!("Invalid DC mismatch numerical policy: {error}"))
     })?;
     let result = engine
@@ -91,16 +86,22 @@ pub fn run_dc_mismatch_analysis_with_source_path_and_abort(
 /// one `.DCMATCH` request is refused by name rather than run: it would mean
 /// the writer and the parser had stopped agreeing, which is the defect a
 /// string comparison between them cannot see.
-fn studio_card(card_line: &str, abort: &dyn AbortSignal) -> ServiceRunResult<DcMatchCard> {
+fn studio_card(
+    card_line: &str,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<DcMatchCard> {
     let carrier = format!("RSpice DC mismatch card\n{}\n.end\n", card_line.trim());
-    let parsed =
-        parse_runner_netlist_with_abort(&carrier, None, abort).map_err(|error| match error {
-            ServiceRunError::Failure(message) => ServiceRunError::Failure(format!(
-                "the DC mismatch card the Studio wrote did not read back as one .DCMATCH card: \
+    let context = super::ServiceContext {
+        source_path: None,
+        ..context
+    };
+    let parsed = context.parse(&carrier).map_err(|error| match error {
+        ServiceRunError::Failure(message) => ServiceRunError::Failure(format!(
+            "the DC mismatch card the Studio wrote did not read back as one .DCMATCH card: \
                  {message}"
-            )),
-            typed => typed,
-        })?;
+        )),
+        typed => typed,
+    })?;
     match parsed.analyses.as_slice() {
         [AnalysisCommand::DcMatch(card)] => Ok((**card).clone()),
         other => Err(ServiceRunError::Failure(format!(

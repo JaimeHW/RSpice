@@ -153,7 +153,7 @@ fn mapping(status: MappingStatus) -> Value {
     })
 }
 
-const STUDY_SUPPORT: &str = "study check/plan/run prepare and execute version 1 typed task graphs with retained result JSON. Custom execution limits are enforced by basic analyses; advanced routes reject overrides. Structured sweeps, external compiled model binding, and saved-study-result conversion are not exposed yet.";
+const STUDY_SUPPORT: &str = "study check/plan/run prepare and execute version 1 typed task graphs with retained result JSON. Custom execution limits are enforced by basic analyses, STB, S-parameter, TF, distortion, and DC mismatch; remaining advanced routes reject overrides. Structured sweeps, external compiled model binding, and saved-study-result conversion are not exposed yet.";
 
 const WORKFLOW_GAPS: [(&str, &str); 5] = [
     (

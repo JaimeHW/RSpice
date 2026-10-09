@@ -17,10 +17,11 @@ pub(super) fn run_frequency_spec(
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
-    source_path: Option<&Path>,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     match spec {
         AnalysisSpec::SParameter {
@@ -42,8 +43,7 @@ pub(super) fn run_frequency_spec(
                 ports,
                 do_noise,
             },
-            source_path,
-            abort,
+            context,
         ),
         AnalysisSpec::Tf {
             input_source,
@@ -87,8 +87,7 @@ pub(super) fn run_frequency_spec(
             },
             normalization,
             accuracy,
-            source_path,
-            abort,
+            context,
         ),
         AnalysisSpec::Pac => run_pac(netlist, source_path, options, dependencies, abort),
         AnalysisSpec::Pxf => run_pxf(netlist, source_path, options, dependencies, abort),
@@ -107,8 +106,7 @@ pub(super) fn run_frequency_spec(
                 .with_sweep_type(stb_sweep_type(sweep))
                 .with_probe(&probe_node)
                 .with_nyquist(compute_nyquist),
-            source_path,
-            abort,
+            context,
         ),
         AnalysisSpec::Pstb => run_pstb(netlist, source_path, options, dependencies, abort),
         other => Err(super::misrouted_spec_error("frequency", &other)),
@@ -128,9 +126,9 @@ struct SParameterRequest {
 fn run_sparameter(
     netlist: &str,
     request: SParameterRequest,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let sweep = match request.sweep {
         FrequencySweep::Decade => svc_runner::SParameterSweep::Decade,
         FrequencySweep::Octave => svc_runner::SParameterSweep::Octave,
@@ -155,12 +153,7 @@ fn run_sparameter(
         do_noise: request.do_noise,
     };
     let run = super::run_abort_aware_service(abort, || {
-        svc_runner::run_sparameter_analysis_with_source_path_and_abort(
-            netlist,
-            &cfg,
-            source_path,
-            abort,
-        )
+        svc_runner::run_sparameter_analysis_with_context(netlist, &cfg, context)
     })?;
     let data = run.scattering;
     let mut frequencies = Vec::with_capacity(data.data.len());
@@ -254,16 +247,11 @@ fn run_tf(
     config: svc_runner::TfRunConfig,
     normalization: rspice_simulation_contract::analysis_spec::TfNormalization,
     accuracy: rspice_simulation_contract::analysis_spec::TfAccuracy,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_tf_analysis_with_config_and_source_path_and_abort(
-            netlist,
-            &config,
-            source_path,
-            abort,
-        )
+        svc_runner::run_tf_analysis_with_context(netlist, &config, context)
     })?;
     super::ensure_not_aborted(abort)?;
 
@@ -856,16 +844,11 @@ fn pnoise_phase_contributor_shares_are_measurements_not_density_curves() {
 fn run_stb(
     netlist: &str,
     config: rspice_core::analysis::stb::StbConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_stb_analysis_with_sweep_and_source_path_and_abort(
-            netlist,
-            config,
-            source_path,
-            abort,
-        )
+        svc_runner::run_stb_analysis_with_context(netlist, config, context)
     })?;
 
     super::ensure_not_aborted(abort)?;
@@ -1441,9 +1424,8 @@ R2 out 0 1k
             tf_spec(),
             SpecExecutionOptions::default(),
             DIVIDER,
-            None,
             &ResolvedExecutionDependencies::default(),
-            &NoAbort,
+            svc_runner::ServiceContext::with_defaults(None, &NoAbort),
         )
         .expect("TF runner succeeds");
 
@@ -1486,9 +1468,8 @@ R2 out 0 1k
             tf_spec(),
             SpecExecutionOptions::default(),
             "not a netlist",
-            None,
             &ResolvedExecutionDependencies::default(),
-            &ImmediateAbort,
+            svc_runner::ServiceContext::with_defaults(None, &ImmediateAbort),
         );
 
         assert!(matches!(result, Err(SimulationError::Aborted)));
@@ -1611,8 +1592,7 @@ fn stability_margin_units_survive_execution_and_retention() {
             .with_sweep_type(stb_sweep_type(FrequencySweep::Decade))
             .with_probe("VPROBE")
             .with_nyquist(true),
-        None,
-        &rspice_core::NoAbort,
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
     )
     .unwrap();
     let SimulationResult::Stb {
@@ -1711,8 +1691,7 @@ fn stability_missing_margins_retain_availability_and_units() {
             .with_sweep(10.0, 1000.0, 1)
             .with_sweep_type(stb_sweep_type(FrequencySweep::Linear))
             .with_probe("VP"),
-        None,
-        &rspice_core::NoAbort,
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
     ).unwrap();
     let worker = WorkerSimulationResult::try_from(result).unwrap();
     let received: WorkerSimulationResult =

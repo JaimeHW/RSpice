@@ -15,11 +15,12 @@ use rspice_simulation_contract::analysis_spec::OptimizationGoal;
 pub(super) fn run_device_spec(
     spec: AnalysisSpec,
     netlist: &str,
-    source_path: Option<&Path>,
     study_base: Option<&crate::study::StudyRunConfig>,
     environment: Option<crate::runner::AnalysisExecutionEnvironment>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     match spec {
         AnalysisSpec::Optimization { .. } => {
@@ -63,7 +64,7 @@ pub(super) fn run_device_spec(
         // here: the card is written by the one writer the Analyses page also
         // displays, so the run cannot ask for a study the page did not state.
         ref dc_mismatch @ AnalysisSpec::DcMismatch { .. } => {
-            run_dc_mismatch(netlist, dc_mismatch, source_path, abort)
+            run_dc_mismatch(netlist, dc_mismatch, context)
         }
         other => Err(super::misrouted_spec_error("device", &other)),
     }
@@ -73,9 +74,9 @@ pub(super) fn run_device_spec(
 fn run_dc_mismatch(
     netlist: &str,
     spec: &AnalysisSpec,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let AnalysisSpec::DcMismatch {
         normalized_contributions,
         ..
@@ -86,12 +87,7 @@ fn run_dc_mismatch(
     let card_line = crate::analysis_preparation::build_dc_mismatch_command(spec)
         .map_err(SimulationError::InvalidConfig)?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_dc_mismatch_analysis_with_source_path_and_abort(
-            netlist,
-            &card_line,
-            source_path,
-            abort,
-        )
+        svc_runner::run_dc_mismatch_analysis_with_context(netlist, &card_line, context)
     })?;
     super::ensure_not_aborted(abort)?;
 

@@ -1,9 +1,6 @@
 //! Small-signal Volterra distortion analysis.
 
-use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, generate_freq_points_with_abort,
-    parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
 use num_complex::Complex64;
 use rspice_core::Value;
@@ -12,6 +9,7 @@ use rspice_core::analysis::DistortionProduct;
 use rspice_core::engine::Engine;
 use std::collections::HashSet;
 use std::fmt;
+#[cfg(test)]
 use std::path::Path;
 
 /// Sweep type for DISTO analysis.
@@ -169,7 +167,7 @@ fn poll_disto_periodically(abort: &dyn AbortSignal, index: usize) -> Result<(), 
 /// Run DISTO analysis with cooperative cancellation.
 ///
 /// Test-only. The shipping path is
-/// [`run_disto_analysis_with_source_path_and_abort`], reached from
+/// [`run_disto_analysis_with_context`], reached from
 /// `simulation::runner::spec::frequency`. Execution retains the dedicated
 /// circuit-wide Volterra solver's second- and third-order products. Excitation comes only from authored
 /// `DISTOF1`/`DISTOF2` source annotations.
@@ -184,46 +182,61 @@ pub fn run_disto_analysis_with_abort(
 
 /// Run DISTO analysis with source-path resolution and cooperative
 /// cancellation through every nonlinear solve.
+#[cfg(test)]
 pub fn run_disto_analysis_with_source_path_and_abort(
     netlist_text: &str,
     config: &DistoRunConfig,
     source_path: Option<&Path>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<DistoData> {
-    run_disto_analysis_typed(netlist_text, config, source_path, abort)
-        .map_err(DistoRunError::into_service)
+    run_disto_analysis_with_context(
+        netlist_text,
+        config,
+        super::ServiceContext::with_defaults(source_path, abort),
+    )
+}
+
+/// Execute distortion analysis under an explicit host resource policy.
+pub fn run_disto_analysis_with_context(
+    netlist_text: &str,
+    config: &DistoRunConfig,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<DistoData> {
+    run_disto_analysis_typed(netlist_text, config, context).map_err(DistoRunError::into_service)
 }
 
 fn run_disto_analysis_typed(
     netlist_text: &str,
     config: &DistoRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: super::ServiceContext<'_>,
 ) -> Result<DistoData, DistoRunError> {
+    let abort = context.abort;
     ensure_disto_not_aborted(abort)?;
     let validation = config.validate();
     ensure_disto_not_aborted(abort)?;
     validation?;
 
-    run_disto_analysis_volterra(netlist_text, config, source_path, abort)
+    run_disto_analysis_volterra(netlist_text, config, context)
 }
 
 fn run_disto_analysis_volterra(
     netlist_text: &str,
     config: &DistoRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
+    context: super::ServiceContext<'_>,
 ) -> Result<DistoData, DistoRunError> {
+    let abort = context.abort;
     ensure_disto_not_aborted(abort)?;
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)
+    let netlist = context
+        .parse(netlist_text)
         .map_err(|error| DistoRunError::from_service(error, DistoRunError::Parse))?;
-    let engine = Engine::new(build_engine_config(&netlist, None));
+    let engine = Engine::new(context.engine_config(&netlist));
 
-    let frequencies = generate_freq_points_with_abort(
+    let frequencies = super::helpers::generate_freq_points_with_limit_and_abort(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
+        context.limits.max_analysis_points,
         abort,
     )
     .map_err(|error| DistoRunError::from_service(error, DistoRunError::Data))?;
