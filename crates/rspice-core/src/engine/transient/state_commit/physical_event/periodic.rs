@@ -65,10 +65,7 @@ impl Engine {
         for (line, prepared) in circuit.tlines.iter_mut().zip(point.lines) {
             line.commit_history_event(prepared.sample);
         }
-        for (index, value) in point.capacitors.into_iter().enumerate() {
-            circuit.capacitors.v_prev[index] = value.voltage;
-            circuit.capacitors.i_prev[index] = value.current;
-        }
+        commit_capacitors(circuit, &point.capacitors);
         for (index, winding) in point.windings.into_iter().enumerate() {
             circuit.inductors.i_prev[index] = winding.current;
             circuit.inductors.v_prev[index] = winding.voltage;
@@ -221,5 +218,47 @@ mod tests {
         assert!((diode.cqd_prev[0] - 0.2e-12).abs() < 1e-26);
         assert_eq!(diode.qd_prev_prev, diode.qd_prev);
         assert_eq!(diode.qd_prev_prev_prev, diode.qd_prev);
+    }
+    #[test]
+    fn pss_boundary_commits_prescribed_capacitor_charge_and_finite_current() {
+        let engine = Engine::new(
+            crate::SimulationConfig::default().with_spice_dialect(crate::SpiceDialect::Xyce),
+        );
+        let deck = Netlist::parse("Capacitor periodic boundary\nV1 n 0 DC 1 PWL(0 1 1 1 1 2 2 2)\nC1 n 0 C={2p*(1+.5*sin(2*pi*time))}\n.end\n").unwrap();
+        let mut circuit = engine.build_circuit(&deck).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let incoming = engine
+            .solve_dc_operating_point(&deck, &mut circuit, &mut matrix)
+            .unwrap();
+        let old =
+            Engine::initialize_bjt_history(&circuit, &incoming, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
+        let mut history = old.clone();
+        let outgoing = engine
+            .transition_pss_boundary(
+                &mut circuit,
+                &mut history,
+                &mut DiodeTransientHistory::default(),
+                &old,
+                &incoming,
+                1.0,
+                0.25,
+                Default::default(),
+                &NoAbort,
+            )
+            .unwrap();
+        let node = circuit.get_node_by_name("n").unwrap() - 1;
+        assert!((outgoing[node] - 2.0).abs() < 1e-14);
+        let caps = &circuit.capacitors;
+        let state = caps.value_expression_states[0].as_ref().unwrap();
+        assert!((state.c_prev - 2e-12).abs() < 1e-25);
+        assert!((state.q_prev - 4e-12).abs() < 1e-25);
+        assert_eq!(state.q_prev_prev, state.q_prev);
+        assert_eq!(state.charge_increment_prev, 0.0);
+        assert!(state.dcdx_prev.is_empty() && state.dqdx_prev.is_empty());
+        assert_eq!(caps.v_prev, caps.v_prev_prev);
+        assert_eq!(caps.v_prev, caps.v_prev_prev_prev);
+        assert!((caps.i_prev[0] - 4e-12 * std::f64::consts::PI).abs() < 1e-24);
     }
 }

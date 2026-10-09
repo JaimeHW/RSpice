@@ -81,8 +81,16 @@ pub(super) fn prepare(
     };
     let mut device_impulses =
         PhysicalDeviceImpulses::prepare(false, circuit.capacitors.len(), 0, 0)?;
-    let capacitors =
-        prepare_capacitors(circuit, step, &state, startup, &mut device_impulses, abort)?;
+    let capacitors = prepare_capacitors(
+        circuit,
+        sampler,
+        options,
+        step,
+        &state,
+        startup,
+        &mut device_impulses,
+        abort,
+    )?;
     let windings = prepare_windings(circuit, &state.solution, options, abort)?;
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);

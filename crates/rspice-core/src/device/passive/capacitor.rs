@@ -383,6 +383,20 @@ impl SolutionDependentCapacitor {
             .filter_map(|binding| *binding)
     }
 
+    /// Smooth prescribed C(t) has physical charge C(t)*V. Circuit-controlled
+    /// and stateful capacitance laws need their own event coordinates.
+    pub(crate) fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
+        crate::device::behavioral::prepare_physical_time_program(
+            &self.ast,
+            (!self.is_solution_dependent() && self.program.sdt_count == 0).then(|| {
+                (
+                    &self.program,
+                    self.periodicity_context().with_frequency(0.0),
+                )
+            }),
+        )
+    }
+
     /// Whether the expression reads a circuit node voltage or branch current.
     pub fn is_solution_dependent(&self) -> bool {
         !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()

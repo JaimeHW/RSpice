@@ -54,12 +54,11 @@ fn smooth(expr: &Expr, context: &Context<'_>, nodal: bool) -> bool {
     }
 }
 
-fn prepared<'a>(
+pub(crate) fn prepared<'a>(
     ast: &Expr,
     prescribed: Option<(&'a CompiledExpr, Context<'a>)>,
 ) -> Option<(&'a CompiledExpr, Context<'a>)> {
     let (program, context) = prescribed?;
-    let context = context.with_frequency(0.0).with_ieee_logarithm();
     (TimeDerivatives::supports(program) && smooth(ast, &context, false))
         .then_some((program, context))
 }
@@ -177,7 +176,12 @@ macro_rules! physical_source {
                 })
             }
             pub(crate) fn physical_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
-                prepared(&self.ast, self.prescribed_time_program())
+                prepared(
+                    &self.ast,
+                    self.prescribed_time_program().map(|(program, context)| {
+                        (program, context.with_frequency(0.0).with_ieee_logarithm())
+                    }),
+                )
             }
 
             pub(crate) fn physical_time_is_stationary(&self) -> bool {

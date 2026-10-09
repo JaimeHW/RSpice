@@ -1298,8 +1298,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v105 corrects source and free-coordinate signs in the event voltage seed.
     // v106 preserves accepted diode displacement current through normalized restart.
     // v114 binds periodic diode projection to the resolved native M/FC law.
-    // v125 uses product charge for prescribed time-only capacitance.
-    hasher.update(b"rspice-transient-resolved-config-v125\0");
+    // v126 retains prescribed capacitor charge and finite current across physical events.
+    hasher.update(b"rspice-transient-resolved-config-v126\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

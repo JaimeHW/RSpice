@@ -38,7 +38,7 @@ pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     time: Value,
     dt: Value,
     pub(super) bjt: PreparedBjtHistory,
-    pub(super) capacitors: Vec<CapacitorAcceptedState>,
+    pub(super) capacitors: Vec<AcceptedCapacitor>,
     pub(super) windings: Vec<AcceptedWinding>,
     pub(super) diodes: Vec<diodes::AcceptedDiode>,
     pub(super) lines: Vec<lines::PreparedLineEvent>,
@@ -47,6 +47,35 @@ pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     device_impulses: PhysicalDeviceImpulses,
     /// Coefficients of delta and its derivatives for every MNA coordinate.
     descriptor_impulses: Option<Vec<Vec<Value>>>,
+}
+
+pub(super) struct AcceptedCapacitor {
+    pub(super) voltage: Value,
+    pub(super) current: Value,
+    // Effective C and absolute product charge, prepared without mutating history.
+    expression: Option<(Value, Value)>,
+}
+
+pub(super) fn commit_capacitors(circuit: &mut crate::CircuitData, states: &[AcceptedCapacitor]) {
+    let caps = &mut circuit.capacitors;
+    for (index, state) in states.iter().enumerate() {
+        caps.v_prev[index] = state.voltage;
+        caps.v_prev_prev[index] = state.voltage;
+        caps.v_prev_prev_prev[index] = state.voltage;
+        caps.i_prev[index] = state.current;
+        if let Some((capacitance, charge)) = state.expression {
+            let history = caps.value_expression_states[index]
+                .as_mut()
+                .expect("validated physical capacitor state");
+            history.c_prev = capacitance;
+            history.q_prev = charge;
+            history.q_prev_prev = charge;
+            history.charge_increment_prev = 0.0;
+            history.dcdx_prev.clear();
+            history.dqdx_prev.clear();
+            caps.effective_capacitances[index] = capacitance;
+        }
+    }
 }
 
 pub(super) struct AcceptedWinding {
@@ -116,14 +145,25 @@ fn prepare_windings(
     Ok(prepared)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_capacitors(
     circuit: &crate::CircuitData,
+    sampler: &PreparedEventCircuit<'_>,
+    options: &charge_event::EventOptions,
     step: &PhysicalEventStep<'_>,
     state: &charge_event::ChargeEventState,
     startup: bool,
     device_impulses: &mut PhysicalDeviceImpulses,
     abort: &dyn AbortSignal,
-) -> Result<Vec<CapacitorAcceptedState>, SimulationError> {
+) -> Result<Vec<AcceptedCapacitor>, SimulationError> {
+    crate::resource::ResourceLimitError::ensure(
+        crate::resource::ResourceKind::ResultValues,
+        circuit
+            .matrix_size()
+            .saturating_mul(64)
+            .saturating_add(circuit.capacitors.len().saturating_mul(6)),
+        options.limits.max_result_values,
+    )?;
     let mut capacitors = Vec::with_capacity(circuit.capacitors.len());
     for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
         if abort.is_aborted() {
@@ -131,7 +171,7 @@ fn prepare_capacitors(
         }
         let p = stamp.pp.row;
         let n = stamp.nn.row;
-        let c = circuit.capacitors.capacitances[index];
+        let [c, dc_dt] = sampler.capacitor_values(index, step.time, options, abort)?;
         let outgoing_voltage = Engine::differential_voltage(&state.solution, p, n);
         if let PhysicalDeviceImpulses::Jumps { capacitors, .. } = device_impulses {
             let incoming_voltage = if startup {
@@ -143,14 +183,20 @@ fn prepare_capacitors(
                 [(c, outgoing_voltage), (-c, incoming_voltage)].into_iter()
             )?);
         }
-        capacitors.push(CapacitorAcceptedState {
+        capacitors.push(AcceptedCapacitor {
             voltage: outgoing_voltage,
+            expression: if circuit.capacitors.value_expressions[index].is_some() {
+                Some((c, sum([(c, outgoing_voltage)].into_iter())?))
+            } else {
+                None
+            },
             current: if let Some(ordinal) = circuit.capacitors.ic_branch_indices[index] {
                 state.solution[circuit.num_nodes() + ordinal - 1]
             } else {
                 sum([
                     (rate(&state.coordinate_rates, p)?, c),
                     (rate(&state.coordinate_rates, n)?, -c),
+                    (outgoing_voltage, dc_dt),
                 ]
                 .into_iter())?
             },
@@ -395,6 +441,7 @@ impl Engine {
                 history,
                 step.diode_history,
                 &sampler,
+                options,
                 abort,
             )?)
         } else {
@@ -548,8 +595,16 @@ impl Engine {
             circuit.bjts.len(),
             circuit.diodes.len(),
         )?;
-        let capacitors =
-            prepare_capacitors(circuit, &step, &state, startup, &mut device_impulses, abort)?;
+        let capacitors = prepare_capacitors(
+            circuit,
+            &sampler,
+            options,
+            &step,
+            &state,
+            startup,
+            &mut device_impulses,
+            abort,
+        )?;
         let diodes = diodes::prepare(
             circuit,
             &step,

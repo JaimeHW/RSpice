@@ -242,3 +242,153 @@ fn gp_capacitor_ic_shares_nonlinear_junction_charge_without_double_counting() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_prescribed_capacitor_events_keep_product_charge_current_and_restart() {
+    for sign in [1.0, -1.0] {
+        let terminals = if sign > 0.0 {
+            "a reference"
+        } else {
+            "reference a"
+        };
+        for (startup, ic) in [
+            (TransientStartupMode::OperatingPoint, false),
+            (TransientStartupMode::Uic, false),
+            (TransientStartupMode::Uic, true),
+        ] {
+            let initial = if ic {
+                format!("IC={}", sign * 0.25)
+            } else {
+                String::new()
+            };
+            let deck = Netlist::parse(&format!(
+                "Prescribed charge at GP events\nVb b 0 .65\nVc c 0 2\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=80 TF=1n PTF=30 CJE=2p CJC=.2p)\nVref reference 0 .125\nV1 a reference PWL(0 .25 1n .25 1n .75 2.4n .75)\nC1 {terminals} C={{1p*(1+time/1n)}} M=3 {initial}\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n"
+            )).unwrap();
+            for method in [
+                IntegrationMethod::BackwardEuler,
+                IntegrationMethod::Trapezoidal,
+                IntegrationMethod::Gear2,
+                IntegrationMethod::TrapGear,
+            ] {
+                let engine = xyce_engine(method, 5e-12);
+                let (result, checkpoints) = engine
+                    .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                        &deck,
+                        2.4e-9,
+                        5e-12,
+                        startup,
+                        &[1e-9, 1.6e-9],
+                        &rspice_core::NoAbort,
+                    )
+                    .unwrap_or_else(|error| panic!("{sign}/{startup:?}/{ic}/{method:?}: {error}"));
+                let current = result.try_branch_current_waveform_named("c1").unwrap();
+                let source = result.try_branch_current_waveform_named("v1").unwrap();
+                // Q=3 pF*(1+t/ns)*V. On each plateau I=3 mA/V*V;
+                // at 1 ns the voltage jump transfers 6 pF*.5 V=3 pC.
+                for (i, &time) in result.time.iter().enumerate() {
+                    let voltage = if time < 1e-9 { 0.25 } else { 0.75 };
+                    let expected = sign * 3e-3 * voltage;
+                    assert!(
+                        (current[i] - expected).abs() < 2e-10,
+                        "{sign}/{startup:?}/{ic}/{method:?} t={time:e}: {} != {expected}",
+                        current[i]
+                    );
+                    assert!((source[i] + sign * current[i]).abs() < 2e-10);
+                }
+                let trace = actions(&result, "c1");
+                assert!(trace.complete && trace.derivatives.is_empty(), "{trace:?}");
+                let startup_charge = startup == TransientStartupMode::Uic && !ic;
+                assert_eq!(
+                    trace.points.len(),
+                    if startup_charge { 2 } else { 1 },
+                    "{trace:?}"
+                );
+                for point in &trace.points {
+                    let expected = if point.time == 0.0 {
+                        sign * 0.75e-12
+                    } else {
+                        assert_eq!(point.time, 1e-9);
+                        sign * 3e-12
+                    };
+                    assert!(
+                        (point.charge_coulombs - expected).abs() < 2e-23,
+                        "{point:?}"
+                    );
+                }
+                for saved in checkpoints {
+                    let checkpoint = TransientCheckpoint::from_bytes(
+                        &saved
+                            .checkpoint
+                            .to_bytes(TransientCheckpointEncoding::Packed)
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let (resumed, _) = engine
+                        .run_tran_resume(&deck, &checkpoint, 2.4e-9, 5e-12)
+                        .unwrap();
+                    let offset = result
+                        .time
+                        .iter()
+                        .position(|&time| time == checkpoint.time)
+                        .unwrap();
+                    assert_eq!(resumed.time, result.time[offset..]);
+                    for (actual, full) in resumed
+                        .voltages
+                        .iter()
+                        .zip(&result.voltages)
+                        .chain(resumed.branch_currents.iter().zip(&result.branch_currents))
+                    {
+                        assert_eq!(actual, &full[offset..], "{method:?} at {}", checkpoint.time);
+                    }
+                    let mut expected = result.current_impulses.clone().unwrap();
+                    for trace in &mut expected {
+                        trace.points.retain(|point| point.time > checkpoint.time);
+                        trace
+                            .derivatives
+                            .retain(|point| point.time > checkpoint.time);
+                    }
+                    assert_eq!(resumed.current_impulses, Some(expected));
+                }
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_prescribed_capacitor_rc_decay_obeys_product_charge() {
+    let deck = Netlist::parse("Variable C decay\nVb b 0 .65\nVc c 0 2\nQ1 c b 0 qm\n.model qm NPN(IS=1e-16 BF=80 TF=1n PTF=30 CJE=2p CJC=.2p)\nR1 out 0 500\nC1 out 0 C={2p*(1+time/1n)} IC=.5\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    for method in [
+        IntegrationMethod::Trapezoidal,
+        IntegrationMethod::Gear2,
+        IntegrationMethod::TrapGear,
+    ] {
+        for startup in [
+            TransientStartupMode::OperatingPoint,
+            TransientStartupMode::Uic,
+        ] {
+            let result = xyce_engine(method, 1e-12)
+                .run_tran_with_startup_mode(&deck, 2e-9, 1e-12, startup)
+                .unwrap();
+            let voltage = result.try_voltage_waveform_named("out").unwrap();
+            let current = result.try_branch_current_waveform_named("c1").unwrap();
+            // d(CV)/dt=-V/R with C=C0*(1+t/T), R*C0=T.
+            // Thus V=V0/(1+t/T)^2, including the finite outgoing rate.
+            for (i, time) in result.time.iter().enumerate() {
+                let expected = 0.5 / (1.0 + time / 1e-9).powi(2);
+                assert!(
+                    (voltage[i] - expected).abs() < 3e-6,
+                    "{method:?}/{startup:?} t={time:e}: {} != {expected}",
+                    voltage[i]
+                );
+                assert!((current[i] + voltage[i] / 500.0).abs() < 1e-11);
+            }
+            let trace = actions(&result, "c1");
+            assert!(
+                trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
+                "{trace:?}"
+            );
+        }
+    }
+}

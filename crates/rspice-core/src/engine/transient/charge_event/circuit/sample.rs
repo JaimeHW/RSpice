@@ -168,7 +168,9 @@ impl PreparedEventCircuit<'_> {
             }
             let p = stamp.pp.row;
             let n = stamp.nn.row;
-            let c = self.circuit.capacitors.capacitances[index];
+            let [c, dc_dt] = self.capacitor_values(index, time, options, abort)?;
+            let q_time =
+                sum([(voltage(state, p), dc_dt), (voltage(state, n), -dc_dt)].into_iter())?;
             if let Some(ordinal) = self.circuit.capacitors.ic_branch_indices[index] {
                 let row = nodes + ordinal;
                 if self.equations[ordinal - 1].is_none() {
@@ -179,6 +181,8 @@ impl PreparedEventCircuit<'_> {
                     sample.f.stamp(row, row, 1.0);
                     sample.f.stamp_rhs(row, -state[row - 1]);
                 }
+                sample.q_time[row - 1] =
+                    sum([(sample.q_time[row - 1], 1.0), (q_time, -1.0)].into_iter())?;
                 sample.q.stamp(row, p, -c);
                 sample.q.stamp(row, n, c);
                 sample.q.stamp_rhs(
@@ -187,6 +191,12 @@ impl PreparedEventCircuit<'_> {
                 );
             } else {
                 branch(&mut sample.q, state, p, n, c);
+                for (row, sign) in [(p, 1.0), (n, -1.0)] {
+                    if row != 0 {
+                        sample.q_time[row - 1] =
+                            sum([(sample.q_time[row - 1], 1.0), (q_time, sign)].into_iter())?;
+                    }
+                }
             }
         }
         let rb = &self.circuit.resistor_branches;

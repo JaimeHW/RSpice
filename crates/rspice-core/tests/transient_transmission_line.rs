@@ -328,3 +328,75 @@ fn capacitor_ic_current_tracks_a_matched_line_arrival() {
         }
     }
 }
+
+#[test]
+fn prescribed_capacitor_load_preserves_the_analytic_line_arrival() {
+    // A matched source absorbs the reflection. After the 1 ns arrival the
+    // line is a 1 V Thevenin drive with R=50 ohms. For C=C0*(1+t/T),
+    // d(CV)/dt=(1-V)/R gives V=(1-(2/(1+t/T))^11)/1.1.
+    let deck = Netlist::parse("Time capacitor on matched line\nV1 input 0 PWL(0 0 0 1 3n 1)\nR1 input near 50\nT1 near 0 out 0 Z0=50 TD=1n\nC1 out 0 C={2p*(1+time/1n)} IC=0\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+    config.max_timestep = 0.25e-12;
+    config.min_timestep = 1e-16;
+    config.convergence_config.gmin_target = 0.0;
+    let engine = Engine::new(config);
+    let (result, checkpoints) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+            &deck,
+            2.4e-9,
+            0.25e-12,
+            rspice_core::engine::TransientStartupMode::Uic,
+            &[1e-9, 1.6e-9],
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+    let voltage = result.try_voltage_waveform_named("out").unwrap();
+    let current = result.try_branch_current_waveform_named("c1").unwrap();
+    for (i, &time) in result.time.iter().enumerate() {
+        let arrived = time >= 1e-9;
+        let expected = if arrived {
+            (1.0 - (2.0 / (1.0 + time / 1e-9)).powi(11)) / 1.1
+        } else {
+            0.0
+        };
+        assert!(
+            (voltage[i] - expected).abs() < 3e-6,
+            "t={time:e}: {} != {expected}",
+            voltage[i]
+        );
+        let expected_current = if arrived {
+            (1.0 - voltage[i]) / 50.0
+        } else {
+            0.0
+        };
+        assert!(
+            (current[i] - expected_current).abs() < 1e-10,
+            "t={time:e}: {} != {expected_current}",
+            current[i]
+        );
+    }
+    for saved in checkpoints {
+        let bytes = saved
+            .checkpoint
+            .to_bytes(rspice_core::engine::TransientCheckpointEncoding::Packed)
+            .unwrap();
+        let checkpoint = TransientCheckpoint::from_bytes(&bytes).unwrap();
+        let (resumed, _) = engine
+            .run_tran_resume(&deck, &checkpoint, 2.4e-9, 0.25e-12)
+            .unwrap();
+        let offset = result
+            .time
+            .iter()
+            .position(|&time| time == checkpoint.time)
+            .unwrap();
+        assert_eq!(resumed.time, result.time[offset..]);
+        for (actual, full) in resumed
+            .voltages
+            .iter()
+            .zip(&result.voltages)
+            .chain(resumed.branch_currents.iter().zip(&result.branch_currents))
+        {
+            assert_eq!(actual, &full[offset..]);
+        }
+    }
+}

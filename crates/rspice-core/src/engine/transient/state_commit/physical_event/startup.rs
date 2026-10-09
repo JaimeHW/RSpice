@@ -124,7 +124,9 @@ pub(super) fn linear_storage_terms<'a>(
     let l = &circuit.inductors;
     let nodes = circuit.num_nodes();
     let caps = c.stamps.iter().enumerate().flat_map(move |(i, stamp)| {
-        if let Some(ordinal) = c.ic_branch_indices[i] {
+        if c.value_expressions[i].is_some() {
+            [(0, 0.0, 0.0); 2]
+        } else if let Some(ordinal) = c.ic_branch_indices[i] {
             [
                 (nodes + ordinal, -c.capacitances[i], c.v_prev[i]),
                 (0, 0.0, 0.0),
@@ -203,6 +205,7 @@ pub(super) fn seed(
     history: &BjtTransientHistory,
     diode_history: &DiodeTransientHistory,
     sampler: &PreparedEventCircuit<'_>,
+    options: &charge_event::EventOptions,
     abort: &dyn AbortSignal,
 ) -> Result<StartupSeed, SimulationError> {
     aligned(
@@ -247,6 +250,19 @@ pub(super) fn seed(
             return Err(SimulationError::Aborted);
         }
         add(row, sum([(coefficient, coordinate)].into_iter())?)?;
+    }
+    for (index, expression) in circuit.capacitors.value_expressions.iter().enumerate() {
+        if expression.is_some() {
+            let [capacitance, _] = sampler.capacitor_values(index, 0.0, options, abort)?;
+            let charge = sum([(capacitance, circuit.capacitors.v_prev[index])].into_iter())?;
+            if let Some(ordinal) = circuit.capacitors.ic_branch_indices[index] {
+                add(circuit.num_nodes() + ordinal, -charge)?;
+            } else {
+                let stamp = circuit.capacitors.stamps[index];
+                add(stamp.pp.row, charge)?;
+                add(stamp.nn.row, -charge)?;
+            }
+        }
     }
     diodes::validate_history(circuit, diode_history)?;
     for (diode, &charge) in circuit.diodes.devices.iter().zip(&diode_history.qd_prev) {
@@ -468,12 +484,7 @@ impl Engine {
         for (line, prepared) in circuit.tlines.iter_mut().zip(point.lines) {
             line.commit_history_event(prepared.sample);
         }
-        for (index, value) in point.capacitors.into_iter().enumerate() {
-            circuit.capacitors.v_prev[index] = value.voltage;
-            circuit.capacitors.v_prev_prev[index] = value.voltage;
-            circuit.capacitors.v_prev_prev_prev[index] = value.voltage;
-            circuit.capacitors.i_prev[index] = value.current;
-        }
+        commit_capacitors(circuit, &point.capacitors);
         for (index, winding) in point.windings.into_iter().enumerate() {
             circuit.inductors.i_prev[index] = winding.current;
             circuit.inductors.i_prev_prev[index] = winding.current;

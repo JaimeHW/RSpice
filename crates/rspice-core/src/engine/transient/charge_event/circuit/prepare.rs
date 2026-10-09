@@ -135,7 +135,11 @@ impl<'a> PreparedEventCircuit<'a> {
                 .capacitors
                 .value_expressions
                 .iter()
-                .all(Option::is_none)
+                .all(|expression| {
+                    expression
+                        .as_ref()
+                        .is_none_or(|value| value.physical_time_program().is_some())
+                })
             && circuit
                 .bjts
                 .devices
@@ -238,6 +242,12 @@ impl<'a> PreparedEventCircuit<'a> {
                 c.stamps.len(),
                 c.capacitances.len(),
                 c.value_expressions.len(),
+                c.value_expression_states.len(),
+                c.effective_capacitances.len(),
+                c.v_prev.len(),
+                c.v_prev_prev.len(),
+                c.v_prev_prev_prev.len(),
+                c.i_prev.len(),
                 c.ic_branch_indices.len(),
             ],
         )?;
@@ -277,10 +287,23 @@ impl<'a> PreparedEventCircuit<'a> {
                 "thermal resistors require their event-state and time-partial owner",
             ));
         }
-        if c.value_expressions.iter().any(Option::is_some) {
-            return Err(error(
-                "capacitor expressions require their event descriptor",
-            ));
+        for (index, expression) in c.value_expressions.iter().enumerate() {
+            check_abort(abort)?;
+            if let Some(expression) = expression {
+                if expression.physical_time_program().is_none() {
+                    return Err(error(format!(
+                        "capacitor '{}' requires a smooth prescribed event equation; solution-controlled, switched and stateful capacitance need their event descriptor",
+                        c.names[index]
+                    )));
+                }
+                if c.value_expression_states
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .is_none()
+                {
+                    return Err(error("missing prescribed capacitor accepted state"));
+                }
+            }
         }
         if r.conductances
             .iter()

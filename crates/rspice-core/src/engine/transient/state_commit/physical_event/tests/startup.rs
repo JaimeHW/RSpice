@@ -590,9 +590,15 @@ fn physical_startup_seed_charge_matches_all_physical_gp_storage_ports() {
             let mut sampler =
                 PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
                     .unwrap();
-            let seed =
-                super::super::startup::seed(&circuit, &history, &EMPTY_DIODES, &sampler, &NoAbort)
-                    .unwrap();
+            let seed = super::super::startup::seed(
+                &circuit,
+                &history,
+                &EMPTY_DIODES,
+                &sampler,
+                &options(),
+                &NoAbort,
+            )
+            .unwrap();
             let phases = [Some(EventPhase {
                 history: history.phase[0].as_ref().unwrap(),
                 endpoint: seed.inputs[0].unwrap(),

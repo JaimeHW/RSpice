@@ -304,3 +304,102 @@ fn nodal_voltage_seed_backtracks_overflow_and_conserves_incoming_charge() {
         1e-17,
     );
 }
+
+#[test]
+fn prescribed_capacitor_physical_charge_partials_and_sampling_contract() {
+    let engine = crate::Engine::new(
+        crate::SimulationConfig::default().with_spice_dialect(crate::SpiceDialect::Xyce),
+    );
+    for ic in ["", "IC=.25"] {
+        let deck = crate::Netlist::parse(&format!(
+            "Time capacitor\nVp p 0 2\nVn n 0 .5\nC1 p n C={{2*(1+time^2)}} M=3 {ic}\n.end\n"
+        ))
+        .unwrap();
+        let circuit = engine.build_circuit(&deck).unwrap();
+        let options = options();
+        let before = format!("{:?}", circuit.capacitors);
+        let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        assert!(sampler.linear_descriptor().is_none());
+        let mut state = vec![0.0; circuit.matrix_size()];
+        let p = circuit.get_node_by_name("p").unwrap() - 1;
+        let n = circuit.get_node_by_name("n").unwrap() - 1;
+        state[p] = 2.0;
+        state[n] = 0.5;
+        let sample = sampler
+            .sample(
+                0.5,
+                SourceTimeSide::RightLimit,
+                &state,
+                &[],
+                &options,
+                &NoAbort,
+            )
+            .unwrap();
+        // C=.6e1*(1+.5^2)=7.5 F, C'=6 F/s; V=1.5 V.
+        // An IC row carries -Q; a Norton row carries the signed terminal Q.
+        let row = circuit.capacitors.ic_branch_indices[0]
+            .map_or(p, |ordinal| circuit.num_nodes() + ordinal - 1);
+        let sign = if ic.is_empty() { 1.0 } else { -1.0 };
+        close(sample.q.values[row], sign * 11.25, 1e-13);
+        close(sample.q_time[row], sign * 9.0, 1e-13);
+        let partial = |column| {
+            sample.q.rows[row]
+                .iter()
+                .filter(|(i, _)| *i == column)
+                .map(|(_, v)| v)
+                .sum::<Value>()
+        };
+        close(partial(p), sign * 7.5, 1e-13);
+        close(partial(n), -sign * 7.5, 1e-13);
+        let mut small = options.clone();
+        small.limits.max_result_values = 32_000;
+        assert!(
+            matches!(sampler.capacitor_values(0, 0.5, &small, &NoAbort), Err(SimulationError::ResourceLimit(error)) if error.requested>error.limit && error.limit==32_000)
+        );
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Cancel(AtomicUsize);
+        impl crate::abort_signal::AbortSignal for Cancel {
+            fn is_aborted(&self) -> bool {
+                self.0.fetch_add(1, Ordering::SeqCst) + 1 >= 6
+            }
+        }
+        let cancel = Cancel(AtomicUsize::new(0));
+        assert!(matches!(
+            sampler.capacitor_values(0, 0.5, &options, &cancel),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(cancel.0.load(Ordering::SeqCst), 6);
+        assert_eq!(
+            sampler
+                .capacitor_values(0, 0.5, &options, &NoAbort)
+                .unwrap(),
+            [7.5, 6.0]
+        );
+        assert_eq!(before, format!("{:?}", circuit.capacitors));
+    }
+    for expression in ["1+v(p)", "1+sdt(time)", "1+abs(time)"] {
+        let deck = crate::Netlist::parse(&format!(
+            "Unowned capacitor\nVp p 0 2\nC1 p 0 C={{{expression}}}\n.end\n"
+        ))
+        .unwrap();
+        let circuit = engine.build_circuit(&deck).unwrap();
+        let failure = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort)
+            .err()
+            .unwrap();
+        assert!(
+            failure.to_string().contains("event descriptor"),
+            "{failure}"
+        );
+    }
+    let deck =
+        crate::Netlist::parse("Negative capacitor\nVp p 0 2\nC1 p 0 C={1-time}\n.end\n").unwrap();
+    let circuit = engine.build_circuit(&deck).unwrap();
+    let sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+    assert!(
+        sampler
+            .capacitor_values(0, 2.0, &options(), &NoAbort)
+            .unwrap_err()
+            .to_string()
+            .contains("negative capacitance")
+    );
+}

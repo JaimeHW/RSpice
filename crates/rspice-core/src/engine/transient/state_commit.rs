@@ -965,34 +965,36 @@ impl Engine {
             bsim4_trnqs_coeff,
         } = step;
         let num_nodes = circuit.num_nodes();
-        let capacitor_accepted_states = physical_event
-            .map(|event| event.capacitors.as_slice())
-            .or(capacitor_accepted_states)
-            .filter(|states| states.len() == circuit.capacitors.stamps.len());
-        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-            if circuit
-                .capacitors
-                .value_expressions
-                .get(cap_idx)
-                .and_then(Option::as_ref)
-                .is_some()
-            {
-                continue;
-            }
-            let (v_new, i_new) = if let Some(states) = capacitor_accepted_states {
-                let state = states[cap_idx];
-                (state.voltage, state.current)
-            } else {
-                let np = cap.pp.row;
-                let nn = cap.nn.row;
-                let v_new = Self::differential_voltage(accepted_solution, np, nn);
+        if let Some(event) = physical_event {
+            physical_event::commit_capacitors(circuit, &event.capacitors);
+        } else {
+            let capacitor_accepted_states = capacitor_accepted_states
+                .filter(|states| states.len() == circuit.capacitors.stamps.len());
+            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+                if circuit
+                    .capacitors
+                    .value_expressions
+                    .get(cap_idx)
+                    .and_then(Option::as_ref)
+                    .is_some()
+                {
+                    continue;
+                }
+                let (v_new, i_new) = if let Some(states) = capacitor_accepted_states {
+                    let state = states[cap_idx];
+                    (state.voltage, state.current)
+                } else {
+                    let np = cap.pp.row;
+                    let nn = cap.nn.row;
+                    let v_new = Self::differential_voltage(accepted_solution, np, nn);
 
-                // An IC capacitor's MNA branch is its physical lead current
-                // and is numerically authoritative. Ordinary Norton
-                // companions have no branch, so reconstruct those from OLD
-                // history before rotating it.
-                let i_new =
-                    if let Some(branch_ordinal) = circuit.capacitors.ic_branch_indices[cap_idx] {
+                    // An IC capacitor's MNA branch is its physical lead current
+                    // and is numerically authoritative. Ordinary Norton
+                    // companions have no branch, so reconstruct those from OLD
+                    // history before rotating it.
+                    let i_new = if let Some(branch_ordinal) =
+                        circuit.capacitors.ic_branch_indices[cap_idx]
+                    {
                         accepted_solution[num_nodes + branch_ordinal - 1]
                     } else {
                         let geq = coeff.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
@@ -1005,24 +1007,26 @@ impl Engine {
                         );
                         geq * v_new - ieq
                     };
-                (v_new, i_new)
-            };
+                    (v_new, i_new)
+                };
 
-            let v_old = circuit.capacitors.v_prev[cap_idx];
-            circuit.capacitors.v_prev_prev_prev[cap_idx] = circuit.capacitors.v_prev_prev[cap_idx];
-            circuit.capacitors.v_prev_prev[cap_idx] = v_old;
-            circuit.capacitors.v_prev[cap_idx] = v_new;
-            circuit.capacitors.i_prev[cap_idx] = i_new;
+                let v_old = circuit.capacitors.v_prev[cap_idx];
+                circuit.capacitors.v_prev_prev_prev[cap_idx] =
+                    circuit.capacitors.v_prev_prev[cap_idx];
+                circuit.capacitors.v_prev_prev[cap_idx] = v_old;
+                circuit.capacitors.v_prev[cap_idx] = v_new;
+                circuit.capacitors.i_prev[cap_idx] = i_new;
+            }
+            circuit
+                .capacitors
+                .update_solution_dependent_state_with_coefficients(
+                    accepted_solution,
+                    accepted_time,
+                    dt,
+                    coeff,
+                    num_nodes,
+                );
         }
-        circuit
-            .capacitors
-            .update_solution_dependent_state_with_coefficients(
-                accepted_solution,
-                accepted_time,
-                dt,
-                coeff,
-                num_nodes,
-            );
 
         for l_idx in 0..circuit.inductors.names.len() {
             let br = circuit.inductors.branch_indices[l_idx];
