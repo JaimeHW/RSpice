@@ -183,8 +183,11 @@ Compatible scalar and complete bus connections to real nets resolve `wire`/`tri`
 interconnect to the real net's type before driver and expression lowering. Resolution
 is per concrete instance and propagates across hierarchy, including authored connect
 bodies; unrelated uses of the same module retain their original type. A wire bus
-resolves as a complete bus before a selected part can carry real values. Promotion
-of individual elements of unpacked wire arrays remains open implementation work.
+resolves as a complete bus before a selected part can carry real values. Structural
+concatenations and bounded input replications propagate the same net-type constraints
+through nested groups and selected real-array cells. Repetition retains the original
+driver contributions. Promotion of individual elements of unpacked wire arrays
+remains open implementation work.
 Unpacked arrays of four-state wire nets retain independent drivers per word.
 Constant element and packed bit/part targets accept continuous assignments;
 procedural writes remain invalid for nets. Statically selected elements connect

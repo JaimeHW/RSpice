@@ -1,5 +1,7 @@
 //! Resolve real-net types over concrete port-connected occurrences before lowering.
 //! Templates stay immutable: only occurrences whose wire type changes are rebuilt.
+mod connections;
+
 use super::digital_elaborate::{
     SpecializationKey, SpecializedModule, check_hierarchy_capacity, digital_subtrees,
     specialize_module,
@@ -207,25 +209,25 @@ pub(super) fn resolve(
             let (Some(&lower_net), Some(actual)) = (lower.nets.get(formal), actual) else {
                 continue;
             };
-            if let Expression::Identifier(id) = actual {
-                if let Some(&upper_net) = upper.nets.get(&id.name) {
-                    if nets[upper_net].width == nets[lower_net].width {
-                        join(&mut parents, upper_net, lower_net);
-                    }
-                }
-            } else if let Some((kind, width)) = selected_real_type(&upper.module, actual) {
-                if width == nets[lower_net].width {
-                    selected_types.push((lower_net, kind));
-                }
-            } else if let Some((name, width, complete)) = selected_wire(&upper.module, actual) {
-                if let Some(&upper_net) = upper.nets.get(name) {
-                    if width == nets[lower_net].width {
-                        if complete {
-                            join(&mut parents, upper_net, lower_net);
-                        } else {
-                            selected_links.push((upper_net, lower_net, actual.span()));
-                        }
-                    }
+            let Some(group) = connections::collect(upper, &nets, actual) else {
+                continue;
+            };
+            if group.width != nets[lower_net].width {
+                continue;
+            }
+            for segment in group.segments {
+                match segment {
+                    connections::Segment::Net {
+                        node,
+                        complete: true,
+                        ..
+                    } => join(&mut parents, node, lower_net),
+                    connections::Segment::Net {
+                        node,
+                        complete: false,
+                        span,
+                    } => selected_links.push((node, lower_net, span)),
+                    connections::Segment::Real(kind) => selected_types.push((lower_net, kind)),
                 }
             }
         }

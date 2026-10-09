@@ -1536,3 +1536,123 @@ endmodule
     let bad = source.replace("module sink(inout tri", "module sink(inout wrealavg");
     assert!(compiler().compile_runtime(&bad, Some("top")).is_err());
 }
+
+
+#[test]
+fn concatenated_interconnect_types_preserve_separate_real_driver_groups() {
+    let source = r#"
+module leaf(inout logic wrealsum [1:0] value);
+ assign value[1]=2.5; assign value[0]=4.75;
+endmodule
+module monitor(input tri [5:4] value,output electrical p);
+ analog V(p)<+10*value[5]+value[4];
+endmodule
+module top(p,q);
+ parameter integer COPIES=2;
+ output p,q; electrical p,q;
+ wire a,b;
+ assign a=0.25; assign b=0.5;
+ leaf drive({a,{b}});
+ monitor readback({a,b},p);
+ monitor repeated({COPIES{a}},q);
+endmodule
+"#;
+    let compiler = compiler();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let check = |artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact| {
+        artifact.validate().unwrap();
+        let plan = &artifact.digital;
+        let representatives = plan.real_net_representatives().unwrap();
+        let a = plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == "a")
+            .unwrap();
+        let b = plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == "b")
+            .unwrap();
+        assert!(matches!(
+            a.kind,
+            rspice_veriloga::canonical_ir::digital::DigitalSignalKind::Real(_)
+        ));
+        assert!(matches!(
+            b.kind,
+            rspice_veriloga::canonical_ir::digital::DigitalSignalKind::Real(_)
+        ));
+        let a = representatives[usize::from(a.id)];
+        let b = representatives[usize::from(b.id)];
+        assert_ne!(a, b);
+        for representative in [a, b] {
+            assert_eq!(
+                plan.drivers
+                    .iter()
+                    .filter(
+                        |driver| representatives[usize::from(driver.id.signal)] == representative
+                    )
+                    .count(),
+                2
+            );
+        }
+    };
+    check(&artifact.canonical_ir);
+    let replay = compiler
+        .prepare_artifact_runtime_source(&artifact.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    check(&replay.canonical_ir);
+    for (bad, expected) in [
+        (
+            source.replace("wire a,b;", "wrealsum a; wrealavg b;"),
+            "same real resolution",
+        ),
+        (
+            source.replace("leaf drive({a,{b}});", "leaf drive({2{a}});"),
+            "replicated concatenations",
+        ),
+    ] {
+        let error = match compiler.compile_runtime(&bad, Some("top")) {
+            Ok(_) => panic!("accepted {expected}"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains(expected), "{expected}: {error}");
+    }
+    let oversized = source.replace(
+        "parameter integer COPIES=2;",
+        "parameter integer COPIES=65537;",
+    );
+    assert!(compiler.compile_runtime(&oversized, Some("top")).is_err());
+}
+
+#[test]
+fn real_array_cell_concatenations_resolve_wire_formals_through_nested_views() {
+    let source = r#"
+module word(inout tri [4:3] x,output electrical p);
+ analog V(p)<+x[4]+2*x[3];
+endmodule
+module top(p,q);
+ output p,q; electrical p,q;
+ wrealsum cells[-2:-1];
+ wrealsum [5:4] bus;
+ assign cells[-2]=1.25; assign cells[-1]=2.5;
+ assign bus[5]=3.75; assign bus[4]=4.25;
+ word first({cells[-1],cells[-2]},p);
+ word second({bus[4],bus[5]},q);
+endmodule
+"#;
+    let artifact = compiler().compile_runtime(source, Some("top")).unwrap();
+    artifact.canonical_ir.validate().unwrap();
+    for name in ["first.x", "second.x"] {
+        assert!(
+            artifact
+                .canonical_ir
+                .digital
+                .arrays
+                .iter()
+                .any(|array| array.name == name),
+            "missing {name}"
+        );
+    }
+}

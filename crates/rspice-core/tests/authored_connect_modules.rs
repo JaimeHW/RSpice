@@ -2278,3 +2278,60 @@ connectrules chosen; connect dac; endconnectrules
         }
     }
 }
+
+
+#[test]
+fn real_concatenations_preserve_loaded_lanes_and_repeated_input_driver_identity() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module leaf(inout logic wrealsum [1:0] value);
+ assign value[1]=2.5; assign value[0]=4.75;
+endmodule
+module monitor(input tri [5:4] value,output electrical p);
+ analog V(p)<+10*value[5]+value[4];
+endmodule
+module load(input electrical [0:1] a,output electrical p,q);
+ analog begin
+  I(a[0])<+V(a[0])/1000; I(a[1])<+V(a[1])/2000;
+  V(p)<+V(a[0]); V(q)<+V(a[1]);
+ end
+endmodule
+module top(p,q,r,s);
+ output p,q,r,s; electrical p,q,r,s;
+ wire a,b;
+ real level=0.25;
+ initial #1 level=0.75;
+ assign a=level; assign b=0.5;
+ leaf drive({a,{b}});
+ monitor readback({a,b},r);
+ monitor repeated({2{a}},s);
+ load loaded({a,b},p,q);
+endmodule
+connectmodule dac(input logic wrealsum value,output electrical a);
+ analog I(a)<+(V(a)-value)/1000;
+endmodule
+connectrules chosen; connect dac; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* real concatenated interconnect\nX1 p q r s top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 25e-12).unwrap();
+    for (time, a) in [(0.5e-9, 2.75), (1.4e-9, 3.25)] {
+        for (node, expected) in [
+            ("p", a / 2.0),
+            ("q", 3.5),
+            ("r", 10.0 * a + 5.25),
+            ("s", 11.0 * a),
+        ] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}

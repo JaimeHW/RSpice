@@ -334,7 +334,8 @@ use super::*;
 // Version 114 preserves computed expressions in mixed packed inputs (HIR 132).
 // Version 121 preserves conservative array topology and ranged grounds (HIR 139).
 // Version 122 resolves wire/tri connections to real net types per occurrence (HIR 140).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 122;
+// Version 123 retains resolved net types through structural concatenations (HIR 141).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 123;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
