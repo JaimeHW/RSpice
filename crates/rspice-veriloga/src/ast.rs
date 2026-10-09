@@ -576,6 +576,8 @@ pub struct ArrayDimension {
 /// Net declaration (nodes, wires, etc.)
 #[derive(Debug, Clone)]
 pub struct NetDecl {
+    /// Post-name array dimensions, retained separately for each declared net.
+    pub dimensions: Vec<(SmolStr, Vec<ArrayDimension>)>,
     /// Authored physical/discrete vector range, resolved after parameters.
     pub range: Option<VectorRange>,
     /// Explicit discipline (electrical, thermal, etc.). An untyped ground
@@ -594,6 +596,9 @@ pub struct NetDecl {
 /// Branch declaration
 #[derive(Debug, Clone)]
 pub struct BranchDecl {
+    /// Array coordinates preceding the terminal's final selection.
+    pub pos_prefix: Vec<Expression>,
+    pub neg_prefix: Vec<Expression>,
     /// Branch name
     pub name: SmolStr,
     /// Positive terminal
@@ -693,10 +698,10 @@ pub enum BranchAccess {
         kind: Option<AccessKind>,
         /// Positive node
         pos: SmolStr,
-        /// Authored vector coordinate; cleared after physical lane resolution.
-        pos_index: Option<Box<Expression>>,
-        /// Authored negative-terminal vector coordinate.
-        neg_index: Option<Box<Expression>>,
+        /// Authored node coordinates; cleared after physical lane resolution.
+        pos_indices: Vec<Expression>,
+        /// Authored negative-terminal node coordinates.
+        neg_indices: Vec<Expression>,
         /// Negative node (None for single-ended)
         neg: Option<SmolStr>,
         /// Source span

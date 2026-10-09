@@ -10208,8 +10208,8 @@ mod tests {
 
     fn voltage_expr() -> Expression {
         Expression::BranchAccess(BranchAccess::Nodes {
-            pos_index: None,
-            neg_index: None,
+            pos_indices: Vec::new(),
+            neg_indices: Vec::new(),
             access: "V".into(),
             kind: Some(AccessKind::Potential),
             pos: "p".into(),
@@ -10850,8 +10850,8 @@ endmodule
             Expression::Binary(BinaryExpr {
                 op: BinaryOp::Shl,
                 left: Box::new(Expression::BranchAccess(BranchAccess::Nodes {
-                    pos_index: None,
-                    neg_index: None,
+                    pos_indices: Vec::new(),
+                    neg_indices: Vec::new(),
                     access: "V".into(),
                     kind: Some(AccessKind::Potential),
                     pos: "p".into(),

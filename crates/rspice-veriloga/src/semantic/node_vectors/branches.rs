@@ -11,7 +11,7 @@ pub(super) fn expand(
 ) -> CompileResult<()> {
     expanded.branches.clear();
     let mut namespace = super::super::hierarchy_connections::declared_names(expanded);
-    namespace.extend(nodes.vectors.keys().cloned());
+    namespace.extend(nodes.vectors.keys().chain(nodes.arrays.keys()).cloned());
     for branch in &source.branches {
         if !namespace.insert(branch.name.clone()) {
             return Err(error(
@@ -27,6 +27,7 @@ pub(super) fn expand(
         }
         let (pos, pos_vector) = terminal(
             &branch.pos,
+            &branch.pos_prefix,
             branch.pos_select.as_ref(),
             nodes,
             constants,
@@ -35,6 +36,7 @@ pub(super) fn expand(
         )?;
         let (neg, neg_vector) = terminal(
             &branch.neg,
+            &branch.neg_prefix,
             branch.neg_select.as_ref(),
             nodes,
             constants,
@@ -103,6 +105,8 @@ pub(super) fn expand(
                 nodes.port_branches.insert(name.clone(), pos.clone());
             }
             expanded.branches.push(BranchDecl {
+                pos_prefix: Vec::new(),
+                neg_prefix: Vec::new(),
                 name,
                 pos,
                 neg,
@@ -119,12 +123,22 @@ pub(super) fn expand(
 
 fn terminal(
     name: &SmolStr,
+    prefix: &[Expression],
     select: Option<&PackedSelect>,
     nodes: &PhysicalNodes,
     constants: &DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
     span: Span,
 ) -> CompileResult<(Vec<SmolStr>, bool)> {
+    if let Some(array) = nodes.arrays.get(name) {
+        return array.select(prefix, select, constants, time_scale, span);
+    }
+    if !prefix.is_empty() {
+        return Err(error(
+            "physical vector terminal has too many coordinates",
+            span,
+        ));
+    }
     let vector = nodes.vectors.get(name);
     let Some(select) = select else {
         return Ok(vector.map_or_else(|| (vec![name.clone()], false), |v| (v.lanes.clone(), true)));

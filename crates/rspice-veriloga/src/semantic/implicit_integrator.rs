@@ -169,8 +169,8 @@ fn expand_static_guard(
 
 fn integrator_output(node: SmolStr, span: Span) -> Expression {
     Expression::BranchAccess(BranchAccess::Nodes {
-        pos_index: None,
-        neg_index: None,
+        pos_indices: Vec::new(),
+        neg_indices: Vec::new(),
         access: "V".into(),
         kind: Some(AccessKind::Potential),
         pos: node,

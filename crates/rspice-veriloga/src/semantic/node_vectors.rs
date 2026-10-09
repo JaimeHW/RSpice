@@ -1,4 +1,5 @@
 //! Physical vector declarations and the scalar lanes shared by both domains.
+mod arrays;
 mod branches;
 mod connections;
 mod real_buses;
@@ -31,6 +32,7 @@ impl NodeVector {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PhysicalNodes {
+    pub arrays: HashMap<SmolStr, arrays::NodeArray>,
     pub real_buses: HashMap<SmolStr, real_buses::RealBus>,
     pub real_aliases: HashMap<SmolStr, DigitalElementAlias>,
     pub real_input_buses: HashSet<SmolStr>,
@@ -91,7 +93,9 @@ pub(super) fn declarations<'a>(
             .is_some_and(|discipline| discipline.domain == Domain::Continuous)
     };
     for net in &module.nets {
-        if net.discipline.as_ref().is_some_and(continuous) {
+        if net.discipline.as_ref().is_some_and(continuous)
+            || (net.is_ground && (net.range.is_some() || !net.dimensions.is_empty()))
+        {
             physical.extend(net.names.iter().cloned());
         }
     }
@@ -100,6 +104,14 @@ pub(super) fn declarations<'a>(
             physical.extend(port.names.iter().cloned());
         }
     }
+    let array_names: HashSet<_> = module
+        .nets
+        .iter()
+        .flat_map(|net| &net.dimensions)
+        .map(|(name, _)| name)
+        .filter(|name| physical.contains(*name))
+        .cloned()
+        .collect();
     let mut ranges: BTreeMap<SmolStr, Option<VectorBounds>> = BTreeMap::new();
     for (names, range, span) in module
         .port_declarations
@@ -109,11 +121,14 @@ pub(super) fn declarations<'a>(
             module
                 .nets
                 .iter()
-                .filter(|net| !net.is_ground)
+                .filter(|net| !net.is_ground || net.range.is_some())
                 .map(|decl| (&decl.names, decl.range.as_ref(), decl.span)),
         )
     {
-        for name in names.iter().filter(|name| physical.contains(*name)) {
+        for name in names
+            .iter()
+            .filter(|name| physical.contains(*name) && !array_names.contains(*name))
+        {
             let resolved = range
                 .map(|range| bounds(range, &constants, module.time_scale))
                 .transpose()?;
@@ -171,6 +186,7 @@ pub(super) fn declarations<'a>(
         .map(|port| (port.name.clone(), names(&port.name)))
         .collect();
     if nodes.vectors.is_empty()
+        && array_names.is_empty()
         && module.branches.is_empty()
         && !module
             .digital_nets
@@ -215,6 +231,15 @@ pub(super) fn declarations<'a>(
             declaration.range = None;
         }
     }
+    count = arrays::expand(
+        module,
+        &mut expanded,
+        &mut nodes,
+        &constants,
+        &mut used,
+        db,
+        count,
+    )?;
     branches::expand(
         module,
         &mut expanded,
@@ -239,20 +264,21 @@ impl SemanticAnalyzer {
             BranchAccess::Nodes {
                 pos,
                 neg,
-                pos_index,
-                neg_index,
+                pos_indices,
+                neg_indices,
                 span,
                 ..
             } => {
-                self.resolve_physical_operand(pos, pos_index, neg.is_none(), *span)?;
+                self.resolve_physical_operand(pos, pos_indices, neg.is_none(), *span)?;
                 if let Some(neg) = neg {
-                    self.resolve_physical_operand(neg, neg_index, false, *span)?;
+                    self.resolve_physical_operand(neg, neg_indices, false, *span)?;
                 }
             }
             BranchAccess::Branch {
                 name, index, span, ..
             } => {
-                self.resolve_physical_operand(name, index, true, *span)?;
+                let mut indices: Vec<_> = index.take().into_iter().map(|value| *value).collect();
+                self.resolve_physical_operand(name, &mut indices, true, *span)?;
             }
         }
         let alias = match &resolved {
@@ -285,7 +311,7 @@ impl SemanticAnalyzer {
     fn resolve_physical_operand(
         &self,
         name: &mut SmolStr,
-        index: &mut Option<Box<Expression>>,
+        indices: &mut Vec<Expression>,
         allow_branch: bool,
         span: Span,
     ) -> CompileResult<()> {
@@ -307,7 +333,10 @@ impl SemanticAnalyzer {
                 .then(|| self.physical_nodes.branches.get(name))
                 .flatten()
         });
-        if (vector.is_some() || self.physical_nodes.port_branches.contains_key(name))
+        let array = self.physical_nodes.arrays.get(name);
+        if (vector.is_some()
+            || array.is_some()
+            || self.physical_nodes.port_branches.contains_key(name))
             && self.symbols.lookup(name).is_some_and(|symbol| {
                 !matches!(
                     symbol.kind,
@@ -320,26 +349,38 @@ impl SemanticAnalyzer {
                 span,
             ));
         }
-        if let Some(index) = index.take() {
-            let vector = vector.ok_or_else(|| {
-                error(
+        if !indices.is_empty() {
+            let mut coordinates = Vec::with_capacity(indices.len());
+            for index in std::mem::take(indices) {
+                let index = self.substitute_physical_selector(&index);
+                self.check_physical_selector_scope(&index)?;
+                coordinates.push(integer(
+                    &index,
+                    &self.digital_selector_constants,
+                    self.current_time_scale,
+                )?);
+                self.physical_selectors.borrow_mut().push(index);
+            }
+            *name = if let Some(array) = array {
+                array.lane(&coordinates, span)?
+            } else if let Some(vector) = vector {
+                if coordinates.len() != 1 {
+                    return Err(error(
+                        "physical vector access requires exactly one coordinate",
+                        span,
+                    ));
+                }
+                vector.lane(coordinates[0], span)?
+            } else {
+                return Err(error(
                     format!("'{name}' is not a physical vector node or branch"),
                     span,
-                )
-            })?;
-            let index = self.substitute_physical_selector(&index);
-            self.check_physical_selector_scope(&index)?;
-            let coordinate = integer(
-                &index,
-                &self.digital_selector_constants,
-                self.current_time_scale,
-            )?;
-            *name = vector.lane(coordinate, span)?;
-            self.physical_selectors.borrow_mut().push(index);
-        } else if vector.is_some() {
+                ));
+            };
+        } else if vector.is_some() || array.is_some() {
             return Err(error(
                 format!(
-                    "physical vector '{name}' requires a scalar coordinate in an access function"
+                    "physical vector or array '{name}' requires a scalar coordinate for every dimension in an access function"
                 ),
                 span,
             ));
@@ -355,27 +396,36 @@ impl SemanticAnalyzer {
             return None;
         }
         let operand = |expression: &Expression| match expression {
-            Expression::Identifier(id) => Some((id.name.clone(), None)),
+            Expression::Identifier(id) => Some((id.name.clone(), Vec::new())),
             Expression::ArrayAccess(access) => {
-                Some((access.array.clone(), Some(access.index.clone())))
+                Some((access.array.clone(), vec![*access.index.clone()]))
             }
-            Expression::Number(number) if number.value == 0.0 => Some(("0".into(), None)),
+            Expression::Digital(DigitalExpr::ArraySelect(access)) => {
+                let PackedSelect::Bit(last) = &access.select else {
+                    return None;
+                };
+                let mut indices = vec![*access.index.clone()];
+                indices.extend(access.additional_indices.clone());
+                indices.push(*last.clone());
+                Some((access.name.clone(), indices))
+            }
+            Expression::Number(number) if number.value == 0.0 => Some(("0".into(), Vec::new())),
             _ => None,
         };
-        let (pos, pos_index) = operand(&call.args[0])?;
-        let (neg, neg_index) = if let Some(value) = call.args.get(1) {
+        let (pos, pos_indices) = operand(&call.args[0])?;
+        let (neg, neg_indices) = if let Some(value) = call.args.get(1) {
             let (name, index) = operand(value)?;
             (Some(name), index)
         } else {
-            (None, None)
+            (None, Vec::new())
         };
         Some(BranchAccess::Nodes {
             access: call.name.clone(),
             kind: None,
             pos,
             neg,
-            pos_index,
-            neg_index,
+            pos_indices,
+            neg_indices,
             span: call.span,
         })
     }
@@ -402,7 +452,15 @@ impl SemanticAnalyzer {
             .flat_map(|range| [&range.msb, &range.lsb])
             .chain(selectors.iter())
             .collect();
+        for net in &source.nets {
+            for (_, dimensions) in &net.dimensions {
+                for axis in dimensions {
+                    expressions.extend([&axis.start, &axis.end]);
+                }
+            }
+        }
         for branch in &source.branches {
+            expressions.extend(branch.pos_prefix.iter().chain(&branch.neg_prefix));
             if let Some(range) = &branch.range {
                 expressions.extend([&range.msb, &range.lsb]);
             }

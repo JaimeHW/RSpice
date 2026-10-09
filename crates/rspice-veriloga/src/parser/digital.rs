@@ -279,7 +279,7 @@ impl Parser<'_> {
     /// Distinguish an optional discipline from the declared net name. A range
     /// after a name can instead be an unpacked dimension, so look through it
     /// and require a following declaration name before consuming a discipline.
-    fn parse_discrete_discipline(
+    pub(super) fn parse_discrete_discipline(
         &mut self,
         signedness_follows: bool,
     ) -> Result<Option<SmolStr>, ParseError> {
@@ -337,6 +337,7 @@ impl Parser<'_> {
     ) {
         if let Some(discipline) = discipline {
             module.nets.push(NetDecl {
+                dimensions: Vec::new(),
                 discipline: Some(discipline),
                 range: range.clone(),
                 names: items.iter().map(|item| item.name.clone()).collect(),

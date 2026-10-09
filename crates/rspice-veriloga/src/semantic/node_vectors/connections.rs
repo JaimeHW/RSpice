@@ -16,6 +16,7 @@ struct DigitalShape {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConnectionScope {
     nodes: HashMap<SmolStr, NodeVector>,
+    arrays: HashMap<SmolStr, super::arrays::NodeArray>,
     real_buses: HashMap<SmolStr, super::real_buses::RealBus>,
     physical: HashSet<SmolStr>,
     digital: HashMap<SmolStr, DigitalShape>,
@@ -51,6 +52,7 @@ impl ConnectionScope {
             .collect();
         Self {
             nodes: analyzed.physical_nodes.vectors.clone(),
+            arrays: analyzed.physical_nodes.arrays.clone(),
             real_buses: analyzed.physical_nodes.real_buses.clone(),
             physical,
             digital,
@@ -76,12 +78,15 @@ impl ConnectionScope {
                 Expression::Identifier(id) => &id.name,
                 Expression::ArrayAccess(access) => &access.array,
                 Expression::Digital(DigitalExpr::PartSelect(select)) => &select.name,
+                Expression::Digital(DigitalExpr::ArraySelect(select)) => &select.name,
                 Expression::ArrayLiteral(concat) => {
                     return elements(scope, &concat.elements, depth + 1);
                 }
                 _ => return false,
             };
-            scope.nodes.contains_key(name) || scope.physical.contains(name)
+            scope.nodes.contains_key(name)
+                || scope.arrays.contains_key(name)
+                || scope.physical.contains(name)
         }
         contains(self, actual, 0)
     }
@@ -120,6 +125,52 @@ impl ConnectionScope {
         }
     }
 
+    fn append_array(
+        &self,
+        actual: &Expression,
+        output: &mut Vec<Expression>,
+    ) -> CompileResult<bool> {
+        let (name, prefix, select) = match actual {
+            Expression::Identifier(id) => (&id.name, Vec::new(), None),
+            Expression::ArrayAccess(access) => (
+                &access.array,
+                Vec::new(),
+                Some(PackedSelect::Bit(access.index.clone())),
+            ),
+            Expression::Digital(DigitalExpr::PartSelect(select)) => (
+                &select.name,
+                Vec::new(),
+                Some(PackedSelect::Part {
+                    msb: select.msb.clone(),
+                    lsb: select.lsb.clone(),
+                }),
+            ),
+            Expression::Digital(DigitalExpr::ArraySelect(access)) => {
+                let mut prefix = vec![*access.index.clone()];
+                prefix.extend(access.additional_indices.clone());
+                (&access.name, prefix, Some(access.select.clone()))
+            }
+            _ => return Ok(false),
+        };
+        let Some(array) = self.arrays.get(name) else {
+            return Ok(false);
+        };
+        let (lanes, _) = array.select(
+            &prefix,
+            select.as_ref(),
+            &self.constants,
+            self.time_scale,
+            actual.span(),
+        )?;
+        output.extend(lanes.into_iter().map(|name| {
+            Expression::Identifier(Identifier {
+                name,
+                span: actual.span(),
+            })
+        }));
+        Ok(true)
+    }
+
     fn append(
         &self,
         actual: &Expression,
@@ -133,7 +184,7 @@ impl ConnectionScope {
             ));
         }
         let span = actual.span();
-        if !self.append_digital(actual, output)? {
+        if !self.append_array(actual, output)? && !self.append_digital(actual, output)? {
             match actual {
                 Expression::Identifier(id) => {
                     if let Some(vector) = self.nodes.get(&id.name) {

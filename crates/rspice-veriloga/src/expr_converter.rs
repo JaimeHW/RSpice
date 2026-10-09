@@ -2862,8 +2862,8 @@ mod tests {
             name: "transition".into(),
             args: vec![
                 Expression::BranchAccess(BranchAccess::Nodes {
-                    pos_index: None,
-                    neg_index: None,
+                    pos_indices: Vec::new(),
+                    neg_indices: Vec::new(),
                     access: "V".into(),
                     kind: Some(AccessKind::Potential),
                     pos: "p".into(),
@@ -3030,8 +3030,8 @@ mod tests {
         let arena = &mut ExprArena::new();
         let voltage = || {
             Expression::BranchAccess(BranchAccess::Nodes {
-                pos_index: None,
-                neg_index: None,
+                pos_indices: Vec::new(),
+                neg_indices: Vec::new(),
                 access: "V".into(),
                 kind: Some(AccessKind::Potential),
                 pos: "p".into(),
@@ -3078,8 +3078,8 @@ mod tests {
             args: vec![
                 number(1.0),
                 Expression::BranchAccess(BranchAccess::Nodes {
-                    pos_index: None,
-                    neg_index: None,
+                    pos_indices: Vec::new(),
+                    neg_indices: Vec::new(),
                     access: "I".into(),
                     kind: Some(AccessKind::Flow),
                     pos: "p".into(),
@@ -3114,8 +3114,8 @@ mod tests {
         let arena = &mut ExprArena::new();
         let current = || {
             Expression::BranchAccess(BranchAccess::Nodes {
-                pos_index: None,
-                neg_index: None,
+                pos_indices: Vec::new(),
+                neg_indices: Vec::new(),
                 access: "I".into(),
                 kind: Some(AccessKind::Flow),
                 pos: "p".into(),
@@ -3158,8 +3158,8 @@ mod tests {
                 args: vec![
                     number(1.0),
                     Expression::BranchAccess(BranchAccess::Nodes {
-                        pos_index: None,
-                        neg_index: None,
+                        pos_indices: Vec::new(),
+                        neg_indices: Vec::new(),
                         access: access.into(),
                         kind: Some(if access == "Phi" {
                             AccessKind::Flow

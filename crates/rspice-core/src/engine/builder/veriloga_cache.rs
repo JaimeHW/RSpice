@@ -332,7 +332,8 @@ use super::*;
 // Version 107 preserves physical vector lanes and topology-bound selectors (HIR 125).
 // Version 113 preserves local packed net views through positional aliases (HIR 131).
 // Version 114 preserves computed expressions in mixed packed inputs (HIR 132).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 120;
+// Version 121 preserves conservative array topology and ranged grounds (HIR 139).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 121;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

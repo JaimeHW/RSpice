@@ -1546,20 +1546,24 @@ impl SemanticAnalyzer {
                     }
                     continue;
                 }
-                seen.insert(name.clone(), net.span);
-                signals.push(AnalyzedDigitalSignal {
-                    element_alias: None,
-                    initializer: None,
-                    unpacked: None,
-                    dimensions: Vec::new(),
+                let item = DigitalDeclItem {
                     name: name.clone(),
-                    class: DigitalSignalClass::Net(DigitalNetKind::Wire),
-                    signedness: Signedness::Unsigned,
-                    range: bounds,
-                    width: bounds.map_or(1, VectorBounds::width),
-                    redeclares_port: module.ports.iter().any(|port| port.name == *name),
+                    dimensions: net
+                        .dimensions
+                        .iter()
+                        .find(|(target, _)| target == name)
+                        .map_or_else(Vec::new, |(_, dimensions)| dimensions.clone()),
+                    init: None,
                     span: net.span,
-                });
+                };
+                self.push_digital_signal(
+                    signals,
+                    seen,
+                    &item,
+                    DigitalSignalClass::Net(DigitalNetKind::Wire),
+                    Signedness::Unsigned,
+                    bounds,
+                );
             }
         }
     }

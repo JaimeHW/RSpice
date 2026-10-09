@@ -1287,3 +1287,128 @@ endmodule
     assert!(ir.digital.bit_aliases.is_empty());
     assert_eq!(ir.digital.real_aliases.len(), 4);
 }
+
+
+#[test]
+fn conservative_arrays_preserve_custom_probes_branches_and_specialized_replay() {
+    let source = r#"
+nature Effort; units="V"; access=U; abstol=1e-6; endnature
+nature Rate; units="A"; access=J; abstol=1e-12; endnature
+discipline custom; potential Effort; flow Rate; enddiscipline
+module top(p);
+ parameter integer BASE=3;
+ output p; electrical p;
+ custom [2:1] grid[BASE:BASE+1][-2:-1];
+ ground custom [2:1] reference[BASE:BASE+1][-2:-1];
+ branch(grid[BASE][-1],reference[BASE][-1]) leg[4:5];
+ analog begin
+  J(leg[4])<+U(leg[4])/1000;
+  J(leg[5])<+U(leg[5])/2000;
+  V(p)<+U(grid[BASE][-1][2],reference[BASE][-1][2]);
+ end
+endmodule
+"#;
+    let compiler = compiler();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    artifact.canonical_ir.validate().unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &artifact.canonical_ir,
+            &[("BASE", -5.0)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    specialized.canonical_ir.validate().unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&specialized.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        specialized.canonical_ir.runtime_source_identity(),
+        replay.canonical_ir.runtime_source_identity()
+    );
+    for (bad, expected) in [
+        (
+            source.replace("U(grid[BASE][-1][2]", "U(grid[BASE][-1][3]"),
+            "in-range constant coordinate",
+        ),
+        (
+            source.replace("U(grid[BASE][-1][2]", "U(grid[BASE][-1]"),
+            "every dimension",
+        ),
+        (
+            source.replace("branch(grid[BASE][-1]", "branch(grid[BASE][-1][1:2]"),
+            "declared bounds or direction",
+        ),
+        (
+            source.replace(
+                " ground custom",
+                " custom [2:1] grid[BASE:BASE+2][-2:-1];\n ground custom",
+            ),
+            "inconsistent declarations",
+        ),
+    ] {
+        let error = match compiler.compile_runtime(&bad, Some("top")) {
+            Ok(_) => panic!("accepted {expected}"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains(expected), "{expected}: {error}");
+    }
+}
+
+#[test]
+fn conservative_array_lanes_and_ranged_grounds_keep_distinct_source_identities() {
+    let source = r#"
+module sink(inout electrical [8:9] p); endmodule
+module scalar(inout electrical p); endmodule
+module top(p);
+ output p; electrical p;
+ electrical [3:2] cells[-2:-1][4:5], vector;
+ electrical scalar_cells[1:0], \cells[-2][4][3] ;
+ ground [3:2] references;
+ ground electrical array_ground[1:0];
+ sink bus(cells[-1][5][3:2]);
+ sink joined({cells[-2][4][3],cells[-1][4][2]});
+ scalar one(scalar_cells[1]);
+ analog begin
+  I(cells[-2][4][3])<+V(cells[-2][4][3]);
+  I(\cells[-2][4][3] )<+V(\cells[-2][4][3] );
+  V(p)<+V(scalar_cells[0],array_ground[1])+V(references[2]);
+ end
+endmodule
+"#;
+    let tokens = Lexer::new(source, SourceMap::new().add_source("arrays.vams", source))
+        .collect_tokens()
+        .unwrap();
+    let ast = Parser::new(&tokens).parse().unwrap();
+    let analyzed = SemanticAnalyzer::new().analyze(&ast).unwrap();
+    let module = &analyzed.modules["top"];
+    let names: std::collections::HashSet<_> = module
+        .internal_nodes
+        .iter()
+        .map(|node| node.name.as_str())
+        .collect();
+    assert!(names.contains("cells[-2][4][3]"));
+    assert!(names.contains("cells[-2][4][3]_"));
+    assert!(names.contains("cells[-1][5][2]"));
+    assert!(names.contains("scalar_cells[0]"));
+    assert!(names.contains("vector[3]"));
+    for name in [
+        "references[3]",
+        "references[2]",
+        "array_ground[1]",
+        "array_ground[0]",
+    ] {
+        assert!(
+            module.ground_nodes.iter().any(|node| node == name),
+            "missing {name}"
+        );
+    }
+    compiler()
+        .compile_runtime(source, Some("top"))
+        .unwrap()
+        .canonical_ir
+        .validate()
+        .unwrap();
+}

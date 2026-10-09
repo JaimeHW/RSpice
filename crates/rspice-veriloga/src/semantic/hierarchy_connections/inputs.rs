@@ -109,6 +109,7 @@ pub(super) fn temporary_net(
         span,
     });
     prepared.nets.push(NetDecl {
+        dimensions: Vec::new(),
         range: range.clone(),
         discipline: formal.segment.declared.clone(),
         names: vec![name.clone()],

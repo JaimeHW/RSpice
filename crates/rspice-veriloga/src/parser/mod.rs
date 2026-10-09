@@ -951,18 +951,18 @@ impl<'a> Parser<'a> {
         self.advance();
         self.expect(TokenKind::LParen)?;
         let is_port = self.match_token(TokenKind::Lt);
-        let (pos, pos_select) = if is_port {
-            (self.expect_identifier("port")?.into(), None)
+        let (pos, pos_prefix, pos_select) = if is_port {
+            (self.expect_identifier("port")?.into(), Vec::new(), None)
         } else {
             self.parse_branch_terminal()?
         };
-        let (neg, neg_select) = if is_port {
+        let (neg, neg_prefix, neg_select) = if is_port {
             self.expect(TokenKind::Gt)?;
-            (SmolStr::default(), None)
+            (SmolStr::default(), Vec::new(), None)
         } else if self.match_token(TokenKind::Comma) {
             self.parse_branch_terminal()?
         } else {
-            (SmolStr::default(), None)
+            (SmolStr::default(), Vec::new(), None)
         };
         self.expect(TokenKind::RParen)?;
         let mut branches = Vec::new();
@@ -970,6 +970,8 @@ impl<'a> Parser<'a> {
             let name = self.expect_identifier("branch name")?;
             let range = self.parse_optional_vector_range()?;
             branches.push(BranchDecl {
+                pos_prefix: pos_prefix.clone(),
+                neg_prefix: neg_prefix.clone(),
                 name: name.into(),
                 pos: pos.clone(),
                 neg: neg.clone(),
@@ -987,24 +989,31 @@ impl<'a> Parser<'a> {
         Ok(branches)
     }
 
-    fn parse_branch_terminal(&mut self) -> Result<(SmolStr, Option<PackedSelect>), ParseError> {
+    fn parse_branch_terminal(
+        &mut self,
+    ) -> Result<(SmolStr, Vec<Expression>, Option<PackedSelect>), ParseError> {
         let name = self.expect_branch_endpoint("branch terminal")?.into();
-        let select = if self.match_token(TokenKind::LBracket) {
+        let mut prefix = Vec::new();
+        let mut select = None;
+        while self.match_token(TokenKind::LBracket) {
+            if let Some(previous) = select.take() {
+                let PackedSelect::Bit(index) = previous else {
+                    return Err(self.error(ParseErrorKind::InvalidExpression));
+                };
+                prefix.push(*index);
+            }
             let msb = Box::new(self.parse_expression()?);
-            let select = if self.match_token(TokenKind::Colon) {
+            select = Some(if self.match_token(TokenKind::Colon) {
                 PackedSelect::Part {
                     msb,
                     lsb: Box::new(self.parse_expression()?),
                 }
             } else {
                 PackedSelect::Bit(msb)
-            };
+            });
             self.expect(TokenKind::RBracket)?;
-            Some(select)
-        } else {
-            None
-        };
-        Ok((name, select))
+        }
+        Ok((name, prefix, select))
     }
 
     /// Parse port declaration: `input/output/inout [discipline] names;`
@@ -1509,60 +1518,70 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse net declaration: discipline node1, node2;
+    fn parse_net_names(
+        &mut self,
+        context: &str,
+    ) -> Result<(Vec<SmolStr>, Vec<(SmolStr, Vec<ArrayDimension>)>), ParseError> {
+        let mut names = Vec::new();
+        let mut dimensions = Vec::new();
+        loop {
+            let name: SmolStr = self.expect_identifier(context)?.into();
+            let mut axes = Vec::new();
+            while self.match_token(TokenKind::LBracket) {
+                let start = self.previous_span();
+                let left = self.parse_expression()?;
+                self.expect(TokenKind::Colon)?;
+                let right = self.parse_expression()?;
+                self.expect(TokenKind::RBracket)?;
+                axes.push(ArrayDimension {
+                    start: left,
+                    end: right,
+                    span: start.extend(self.previous_span()),
+                });
+            }
+            if !axes.is_empty() {
+                dimensions.push((name.clone(), axes));
+            }
+            names.push(name);
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        Ok((names, dimensions))
+    }
+
+    /// Preserve both a bus range and per-name unpacked axes until elaboration.
     fn parse_net_decl(&mut self) -> Result<NetDecl, ParseError> {
         let start = self.current_span();
         let discipline = self.expect_identifier("discipline")?;
         let range = self.parse_optional_vector_range()?;
-
-        let mut names = Vec::new();
-        loop {
-            names.push(self.expect_identifier("node name")?.into());
-            if !self.match_token(TokenKind::Comma) {
-                break;
-            }
-        }
-
+        let (names, dimensions) = self.parse_net_names("node name")?;
         self.expect(TokenKind::Semicolon)?;
         Ok(NetDecl {
+            dimensions,
             range,
             discipline: Some(discipline.into()),
             names,
             is_ground: false,
-            is_internal: false, // Will be determined after parsing completes
+            is_internal: false,
             span: start.extend(self.previous_span()),
         })
     }
 
-    /// Parse ground declaration
     fn parse_ground_decl(&mut self) -> Result<NetDecl, ParseError> {
         let start = self.current_span();
-        self.advance(); // consume 'ground'
-
-        // Two adjacent identifiers distinguish a typed scalar ground from
-        // an untyped list. Resolve the discipline name in semantic analysis.
-        let discipline = if (self.check(TokenKind::Identifier) || self.is_discipline_keyword())
-            && self.peek_is(TokenKind::Identifier)
-        {
-            Some(self.expect_identifier("ground discipline")?.into())
-        } else {
-            None
-        };
-        let mut names = Vec::new();
-        loop {
-            names.push(self.expect_identifier("ground name")?.into());
-            if !self.match_token(TokenKind::Comma) {
-                break;
-            }
-        }
-
+        self.advance();
+        let discipline = self.parse_discrete_discipline(false)?;
+        let range = self.parse_optional_vector_range()?;
+        let (names, dimensions) = self.parse_net_names("ground name")?;
         self.expect(TokenKind::Semicolon)?;
         Ok(NetDecl {
-            range: None,
+            dimensions,
+            range,
             discipline,
             names,
             is_ground: true,
-            is_internal: false, // Ground nodes are never internal
+            is_internal: false,
             span: start.extend(self.previous_span()),
         })
     }
@@ -2365,7 +2384,7 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LParen)?;
         if self.match_token(TokenKind::Lt) {
-            let (name, index) = self.parse_node_operand()?;
+            let (name, index) = self.parse_port_branch_operand()?;
             self.expect(TokenKind::Gt)?;
             self.expect(TokenKind::RParen)?;
             return Ok(BranchAccess::Branch {
@@ -2377,18 +2396,18 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let (pos, pos_index) = self.parse_node_operand()?;
-        let (neg, neg_index) = if self.match_token(TokenKind::Comma) {
+        let (pos, pos_indices) = self.parse_node_operand()?;
+        let (neg, neg_indices) = if self.match_token(TokenKind::Comma) {
             let (name, index) = self.parse_node_operand()?;
             (Some(name), index)
         } else {
-            (None, None)
+            (None, Vec::new())
         };
         self.expect(TokenKind::RParen)?;
 
         Ok(BranchAccess::Nodes {
-            pos_index,
-            neg_index,
+            pos_indices,
+            neg_indices,
             access: access.into(),
             kind: None,
             pos,
@@ -2397,16 +2416,24 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_node_operand(&mut self) -> Result<(SmolStr, Option<Box<Expression>>), ParseError> {
+    fn parse_port_branch_operand(
+        &mut self,
+    ) -> Result<(SmolStr, Option<Box<Expression>>), ParseError> {
+        let (name, mut indices) = self.parse_node_operand()?;
+        if indices.len() > 1 {
+            return Err(self.error(ParseErrorKind::InvalidExpression));
+        }
+        Ok((name, indices.pop().map(Box::new)))
+    }
+
+    fn parse_node_operand(&mut self) -> Result<(SmolStr, Vec<Expression>), ParseError> {
         let name = self.expect_branch_endpoint("node")?.into();
-        let index = if self.match_token(TokenKind::LBracket) {
-            let index = self.parse_expression()?;
+        let mut indices = Vec::new();
+        while self.match_token(TokenKind::LBracket) {
+            indices.push(self.parse_expression()?);
             self.expect(TokenKind::RBracket)?;
-            Some(Box::new(index))
-        } else {
-            None
-        };
-        Ok((name, index))
+        }
+        Ok((name, indices))
     }
 
     // Expression parsing (Pratt parser / precedence climbing)
@@ -2915,7 +2942,7 @@ impl<'a> Parser<'a> {
                         // Branch access
                         self.expect(TokenKind::LParen)?;
                         if self.match_token(TokenKind::Lt) {
-                            let (branch, index) = self.parse_node_operand()?;
+                            let (branch, index) = self.parse_port_branch_operand()?;
                             self.expect(TokenKind::Gt)?;
                             self.expect(TokenKind::RParen)?;
                             return Ok(Expression::BranchAccess(BranchAccess::Branch {
@@ -2927,17 +2954,17 @@ impl<'a> Parser<'a> {
                             }));
                         }
 
-                        let (pos, pos_index) = self.parse_node_operand()?;
-                        let (neg, neg_index) = if self.match_token(TokenKind::Comma) {
+                        let (pos, pos_indices) = self.parse_node_operand()?;
+                        let (neg, neg_indices) = if self.match_token(TokenKind::Comma) {
                             let (name, index) = self.parse_node_operand()?;
                             (Some(name), index)
                         } else {
-                            (None, None)
+                            (None, Vec::new())
                         };
                         self.expect(TokenKind::RParen)?;
                         return Ok(Expression::BranchAccess(BranchAccess::Nodes {
-                            pos_index,
-                            neg_index,
+                            pos_indices,
+                            neg_indices,
                             access: name.into(),
                             kind: None,
                             pos,

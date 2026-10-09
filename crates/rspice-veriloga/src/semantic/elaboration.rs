@@ -1829,14 +1829,16 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
         }
         Expression::BranchAccess(access) => {
             if let BranchAccess::Nodes {
-                pos_index: None,
-                neg_index: None,
+                pos_indices,
+                neg_indices,
                 access: name,
                 kind,
                 pos,
                 neg,
                 span,
             } = access
+                && pos_indices.is_empty()
+                && neg_indices.is_empty()
                 && !(neg.is_none() && scope.branches.contains_key(pos))
                 && let Some((branch, sign)) =
                     scope.unnamed_branch(pos, neg.as_deref().unwrap_or("0"))
@@ -1996,13 +1998,16 @@ fn rewrite_expressions(
 }
 
 fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResult<BranchAccess> {
-    if matches!(access, BranchAccess::Nodes { pos_index: Some(_), .. } | BranchAccess::Nodes { neg_index: Some(_), .. }) {
-        return Err(internal_error("unresolved physical vector selector reached hierarchy rewriting".into()));
+    if matches!(access, BranchAccess::Nodes { pos_indices, neg_indices, .. } if !pos_indices.is_empty() || !neg_indices.is_empty())
+    {
+        return Err(internal_error(
+            "unresolved physical vector selector reached hierarchy rewriting".into(),
+        ));
     }
     Ok(match access {
         BranchAccess::Nodes {
-            pos_index: _,
-            neg_index: _,
+            pos_indices: _,
+            neg_indices: _,
             access,
             kind,
             pos,
@@ -2016,16 +2021,16 @@ fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResu
             index: None,
         },
         BranchAccess::Nodes {
-            pos_index: _,
-            neg_index: _,
+            pos_indices: _,
+            neg_indices: _,
             access,
             kind,
             pos,
             neg,
             span,
         } => BranchAccess::Nodes {
-            pos_index: None,
-            neg_index: None,
+            pos_indices: Vec::new(),
+            neg_indices: Vec::new(),
             access: access.clone(),
             kind: *kind,
             pos: if neg.is_none() {

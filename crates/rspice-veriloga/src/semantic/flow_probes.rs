@@ -521,8 +521,8 @@ pub(crate) fn lower<'a>(
                             index: None,
                         },
                         BranchKey::Nodes(pos, neg) => BranchAccess::Nodes {
-                            pos_index: None,
-                            neg_index: None,
+                            pos_indices: Vec::new(),
+                            neg_indices: Vec::new(),
                             access: "I".into(),
                             kind: Some(AccessKind::Flow),
                             pos: pos.clone(),
@@ -646,8 +646,8 @@ pub(crate) fn lower<'a>(
 
 fn potential(pos: &str, neg: &str, span: Span) -> Expression {
     Expression::BranchAccess(BranchAccess::Nodes {
-        pos_index: None,
-        neg_index: None,
+        pos_indices: Vec::new(),
+        neg_indices: Vec::new(),
         access: "V".into(),
         kind: Some(AccessKind::Potential),
         pos: pos.into(),
@@ -954,14 +954,14 @@ pub(super) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
                 pending.extend(expr.children().into_iter().map(Pending::Expression))
             }
             Expression::BranchAccess(BranchAccess::Nodes {
-                pos_index,
-                neg_index,
+                pos_indices,
+                neg_indices,
                 ..
             }) => {
                 pending.extend(
-                    pos_index
+                    pos_indices
                         .iter()
-                        .chain(neg_index)
+                        .chain(neg_indices)
                         .map(|value| Pending::Expression(value)),
                 );
             }
@@ -1046,11 +1046,11 @@ pub(super) fn for_child_mut<'a>(
             }
         },
         Expression::BranchAccess(BranchAccess::Nodes {
-            pos_index,
-            neg_index,
+            pos_indices,
+            neg_indices,
             ..
         }) => {
-            for value in pos_index.iter_mut().chain(neg_index) {
+            for value in pos_indices.iter_mut().chain(neg_indices) {
                 visit(value);
             }
         }

@@ -689,11 +689,11 @@ impl Unroller<'_> {
                 }
             }
             Expression::BranchAccess(BranchAccess::Nodes {
-                pos_index,
-                neg_index,
+                pos_indices,
+                neg_indices,
                 ..
             }) => {
-                for index in pos_index.iter_mut().chain(neg_index.iter_mut()) {
+                for index in pos_indices.iter_mut().chain(neg_indices.iter_mut()) {
                     self.substitute(index);
                 }
             }

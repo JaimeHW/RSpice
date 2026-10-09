@@ -199,8 +199,11 @@ Whole buses, constant lane/part selections, concatenations, and selected bus wor
 in multidimensional arrays preserve declaration order across ascending, descending,
 and different formal bounds. Dynamic scalar reads use the ordinary array evaluator.
 Specialization and source replay rebuild the bus shape and its lane connections.
-Unpacked conservative net arrays and whole unpacked-array formal ports remain open
-implementation work.
+Conservative net arrays retain multidimensional physical node identities, with an
+optional bus range on each element. Constant scalar probes, branch terminals,
+bus-word and part connections, and ranged grounds resolve to the same scalar
+physical equations. Bounds and selections are rebuilt during specialization and
+source replay. Whole unpacked-array formal ports remain open implementation work.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.

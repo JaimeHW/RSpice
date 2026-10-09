@@ -149,6 +149,7 @@ pub(super) fn expand(
             });
             if let Some(discipline) = discipline {
                 expanded.nets.push(NetDecl {
+                    dimensions: Vec::new(),
                     discipline: Some(discipline),
                     names: lanes.clone(),
                     range: None,

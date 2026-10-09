@@ -2152,3 +2152,62 @@ connectrules chosen; connect dac; endconnectrules
         }
     }
 }
+
+
+#[test]
+fn multidimensional_physical_arrays_share_loaded_branches_and_sampled_values() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module word(output logic [1:0] q);
+ reg [1:0] q;
+ initial begin q=2'b10; #1 q=2'b01; end
+endmodule
+module load(inout electrical [8:9] x);
+ analog begin I(x[8])<+V(x[8])/1000; I(x[9])<+V(x[9])/2000; end
+endmodule
+module top(p,q,r,s);
+ output p,q,r,s; electrical p,q,r,s;
+ electrical [3:2] a[-2:-1][5:5],g[-2:-1][5:5];
+ ground [3:2] g[-2:-1][5:5];
+ branch(a[-1][5],g[-1][5]) leg[0:1];
+ word source(a[-1][5]);
+ load active(a[-1][5]);
+ real sampled=0;
+ always begin #0.2 sampled=V(a[-1][5][3]); end
+ analog begin
+  V(a[-2][5][3])<+0; V(a[-2][5][2])<+0;
+  I(leg[0])<+V(leg[0])/1000;
+  I(leg[1])<+V(leg[1])/2000;
+  V(p)<+V(a[-1][5][3]);
+  V(q)<+V(a[-1][5][2]);
+  V(r)<+sampled;
+  V(s)<+1000*I(leg[0]);
+ end
+endmodule
+connectmodule dac(input logic d,output electrical a);
+ analog I(a)<+(V(a)-3*d)/1000;
+endmodule
+connectrules chosen; connect dac; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* multidimensional physical connectivity\nX1 p q r s top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 25e-12).unwrap();
+    // Each selected physical node has both a child load and a branch load.
+    // The 1k source therefore produces 1V into two 1k loads, or 1.5V into two 2k loads.
+    for (time, expected) in [
+        (0.5e-9, [1.0, 0.0, 1.0, 1.0]),
+        (1.4e-9, [0.0, 1.5, 0.0, 0.0]),
+    ] {
+        for (node, expected) in ["p", "q", "r", "s"].into_iter().zip(expected) {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}

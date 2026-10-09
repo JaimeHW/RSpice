@@ -471,6 +471,7 @@ fn prepare_boundaries(
                 insertion.continuous.clone()
             };
             prepared.nets.push(NetDecl {
+                dimensions: Vec::new(),
                 range: None,
                 discipline: Some(lower_discipline),
                 names: vec![private.clone()],
@@ -536,6 +537,7 @@ fn prepare_boundaries(
                     tap = format!("{tap}_").into();
                 }
                 prepared.nets.push(NetDecl {
+                    dimensions: Vec::new(),
                     range: None,
                     discipline: Some(insertion.discrete.clone()),
                     names: vec![tap.clone()],
