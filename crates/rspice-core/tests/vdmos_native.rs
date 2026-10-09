@@ -1003,10 +1003,9 @@ fn xyce_level18_vdmos_rejects_unresolved_native_model_params() {
         .to_string();
 
     assert!(
-        message.contains("VDMOS")
-            && message.contains("VTO")
-            && message.contains("unresolved")
-            && message.contains("finite numeric literal"),
+        message.contains("Model 'IRF130'")
+            && message.contains("parameter 'VTO'")
+            && message.contains("Undefined parameter: MISSING_VTO"),
         "unexpected unresolved VDMOS VTO error: {message}"
     );
 }
