@@ -1,4 +1,4 @@
-//! Apply bottom-up discipline resolution to declared digital interconnects.
+//! Apply bottom-up domain and discipline resolution to structural interconnects.
 //! Physical endpoints constrain mixed boundaries; their declarations are retained.
 use super::*;
 use crate::connect::{
@@ -37,6 +37,7 @@ impl Graph {
             }
         };
         let mut names = HashMap::new();
+        let behavioral = super::behavior::used(module);
         for signal in &analyzed.digital.signals {
             if signal.element_alias.is_some() {
                 continue;
@@ -49,13 +50,17 @@ impl Graph {
                 .clone()
                 .unwrap_or_else(|| "logic".into());
             let mut segment = NetSegment::new(qualify(&signal.name))
-                .digital_behavioral()
                 .with_default_discipline(default.clone())
                 .with_value_kind(if signal.class.is_real() {
                     ConnectValueKind::Real
                 } else {
                     ConnectValueKind::FourState
                 });
+            // A wire used only as interconnect follows its child domains.
+            // Real nets, variables and behavioral values remain discrete.
+            segment.digital_behavioral = signal.class
+                != DigitalSignalClass::Net(DigitalNetKind::Wire)
+                || behavioral.contains(&signal.name);
             segment.declared = declared.clone();
             let index = self.push(segment, signal.span);
             if let Some(occurrence) = occurrence.filter(|_| declared.is_none()) {
@@ -243,7 +248,7 @@ pub(super) fn resolve(
     for (occurrence, name, index, default) in graph.editable {
         if let Some(discipline) = resolved
             .discipline(index)
-            .filter(|discipline| *discipline != default.as_str())
+            .filter(|discipline| *discipline != default.as_str() || continuous(file, discipline))
         {
             assignments
                 .entry(occurrence)
@@ -254,13 +259,62 @@ pub(super) fn resolve(
     Ok(assignments)
 }
 
-pub(super) fn apply(source: &mut Module, assignments: &BTreeMap<SmolStr, (SmolStr, Span)>) {
+pub(super) fn continuous(file: &AnalyzedFile, discipline: &str) -> bool {
+    file.disciplines
+        .get_discipline(discipline)
+        .is_some_and(|discipline| discipline.domain == crate::disciplines::Domain::Continuous)
+}
+
+pub(super) fn apply(
+    file: &AnalyzedFile,
+    source: &mut Module,
+    assignments: &BTreeMap<SmolStr, (SmolStr, Span)>,
+) {
+    let physical: std::collections::HashSet<_> = assignments
+        .iter()
+        .filter(|(_, (discipline, _))| continuous(file, discipline))
+        .map(|(name, _)| name.clone())
+        .collect();
+    let mut shapes = HashMap::new();
+    for declaration in &mut source.digital_nets {
+        declaration.items.retain(|item| {
+            if !physical.contains(&item.name) {
+                return true;
+            }
+            shapes.insert(
+                item.name.clone(),
+                (declaration.range.clone(), item.dimensions.clone()),
+            );
+            false
+        });
+    }
+    source
+        .digital_nets
+        .retain(|declaration| !declaration.items.is_empty());
     for (name, (discipline, span)) in assignments {
+        let (range, dimensions) = if physical.contains(name) {
+            shapes.remove(name).unwrap_or_else(|| {
+                (
+                    source
+                        .port_declarations
+                        .iter()
+                        .find(|port| port.names.contains(name))
+                        .and_then(|port| port.range.clone()),
+                    Vec::new(),
+                )
+            })
+        } else {
+            (None, Vec::new())
+        };
         source.nets.push(NetDecl {
             discipline: Some(discipline.clone()),
             names: vec![name.clone()],
-            range: None,
-            dimensions: Vec::new(),
+            range,
+            dimensions: if dimensions.is_empty() {
+                Vec::new()
+            } else {
+                vec![(name.clone(), dimensions)]
+            },
             is_ground: false,
             is_internal: false,
             span: *span,

@@ -1,5 +1,6 @@
 //! Resolve net types and disciplines over concrete port-connected occurrences.
 //! Templates stay immutable: only changed occurrences are rebuilt before lowering.
+mod behavior;
 mod connections;
 mod disciplines;
 
@@ -139,13 +140,19 @@ pub(super) fn resolve(
         }
         cursor += 1;
     }
+    let inherited = disciplines::resolve(file, sources, &occurrences, specializations, warnings)?;
     let mut nets = Vec::new();
     for (index, occurrence) in occurrences.iter_mut().enumerate() {
         for signal in &occurrence.module.analyzed.digital.signals {
             let DigitalSignalClass::Net(kind) = signal.class else {
                 continue;
             };
-            if signal.element_alias.is_some() {
+            if signal.element_alias.is_some()
+                || inherited
+                    .get(&index)
+                    .and_then(|values| values.get(&signal.name))
+                    .is_some_and(|(discipline, _)| disciplines::continuous(file, discipline))
+            {
                 continue;
             }
             let bus = occurrence
@@ -168,7 +175,6 @@ pub(super) fn resolve(
             });
         }
     }
-    let inherited = disciplines::resolve(file, sources, &occurrences, specializations, warnings)?;
     let mut parents: Vec<_> = (0..nets.len()).collect();
     let mut selected_types = Vec::new();
     let mut selected_links = Vec::new();
@@ -288,7 +294,7 @@ pub(super) fn resolve(
             promote(&mut source, types);
         }
         if let Some(disciplines) = inherited.get(&index) {
-            disciplines::apply(&mut source, disciplines);
+            disciplines::apply(file, &mut source, disciplines);
         }
         let previous = &occurrence.module.analyzed;
         let analyzed = super::hierarchy_connections::analyze_occurrence(

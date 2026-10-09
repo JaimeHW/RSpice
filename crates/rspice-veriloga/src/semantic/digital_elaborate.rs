@@ -149,6 +149,18 @@ pub(crate) fn elaborate_digital_hierarchy(
         .map(|root| (&root.source, &root.analyzed))
         .unwrap_or((root_source, root));
     elaborator.append_instances(root_source, Scope::for_root(root, root_source)?)?;
+    // Domain resolution may turn an entire structural subtree into physical
+    // connectivity. Empty frames must not force a digital runtime for that tree.
+    elaborator.instances.retain(|frame| {
+        !frame.signals.is_empty()
+            || !frame.processes.is_empty()
+            || !frame.continuous_assigns.is_empty()
+            || !frame.port_drivers.is_empty()
+            || !frame.bit_aliases.is_empty()
+            || !frame.analog_events.is_empty()
+            || !frame.event_assigned_variables.is_empty()
+            || !frame.immutable_analog_variables.is_empty()
+    });
     Ok(ElaboratedHierarchy {
         warnings: elaborator.connections.warnings,
         root: prepared_root,

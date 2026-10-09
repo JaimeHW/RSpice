@@ -191,6 +191,15 @@ array and concatenated connections share this pass, including parameterized gene
 occurrences and authored connect bodies. Ambiguous resolution rules retain the required
 source-order warning in runtime reports and file diagnostics. Schema 143 and cache
 record 125 invalidate artifacts compiled before inherited resolution.
+Structural `wire`/`tri` interconnects now follow continuous-domain child ports under
+basic domain resolution. Packed ranges and unpacked dimensions become physical
+node shapes; converters are inserted only at the resulting domain boundaries.
+Process reads/writes, assignment operands, initializers, numeric analog reads and
+computed connection values retain discrete storage. Lexical locals do not change
+the domain of a same-named module wire. Physical boundaries stop real-net type
+promotion, and entirely physical structural subtrees require no digital runtime.
+Schema 144 and cache record 126 invalidate artifacts compiled before this change.
+Undeclared implicit nets and detailed top-down domain resolution remain open.
 The existing `output real` variable-port form is an RSpice compatibility extension,
 not the VAMS-2023 real-net port syntax (`wreal`).
 Compatible scalar and complete bus connections to real nets resolve `wire`/`tri`

@@ -2243,7 +2243,8 @@ module top(p,q,r,s,t);
  bus_source bus_producer(values);
  bus_tap bus_consumer(values,s);
  tap selected_lane(values[9],t);
- tri real_path,logic_path;
+ // Keep the RNM interconnect discrete across the analog load boundary.
+ tri logic real_path; tri logic_path;
  bridge producer(real_path);
  assign logic_path=1'b1;
  tap real_use(real_path,p);
@@ -2435,6 +2436,67 @@ connectrules chosen; connect low_gain; connect high_gain; endconnectrules
     let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
     for (time, p, q) in [(0.5e-9, 5.0, 10.5), (1.4e-9, 9.0, 16.5)] {
         for (node, expected) in [("p", p), ("q", q)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn structural_wire_domains_preserve_physical_loading_and_real_conversion_boundaries() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module source(output electrical a);
+ parameter real LEVEL=2.5;
+ analog I(a)<+(V(a)-LEVEL)/1000;
+endmodule
+module pair(output wire [1:0] a);
+ source #(.LEVEL(2.5)) first(a[1]);
+ source #(.LEVEL(4.5)) second(a[0]);
+endmodule
+module bank(output wire [3:2] a);
+ pair nested(a);
+endmodule
+module real_source(output logic wreal value);
+ real level=1.75; initial #1 level=2.75; assign value=level;
+endmodule
+module load(input electrical [1:0] a,output electrical p);
+ analog begin I(a[1])<+V(a[1])/1000; I(a[0])<+V(a[0])/1000; V(p)<+V(a[1])+V(a[0]); end
+endmodule
+module observer(input logic d,output electrical p);
+ analog V(p)<+d;
+endmodule
+module top(output electrical p,q,r);
+ wire [5:4] bus;
+ tri words[-2:-1];
+ bank nested(bus);
+ source #(.LEVEL(6.5)) first(words[-2]);
+ real_source second(words[-1]);
+ load packed_load(bus,p),array_load({words[-2],words[-1]},q);
+ observer monitor(bus[5],r);
+endmodule
+connectmodule gain(input logic wreal value,output electrical a);
+ analog I(a)<+(V(a)-2*value)/1000;
+endmodule
+connectmodule sense(input electrical a,output logic d);
+ reg d;
+ initial d=0; always #0.1 d=V(a)>1;
+endmodule
+connectrules chosen; connect gain; connect sense; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* structural wires retain loading\nX1 p q r top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 50e-12).unwrap();
+    for (time, q) in [(0.5e-9, 5.0), (1.4e-9, 6.0)] {
+        for (node, expected) in [("p", 3.5), ("q", q), ("r", 1.0)] {
             let actual = voltage(&result, node, time);
             assert!(
                 (actual - expected).abs() < 1e-7,

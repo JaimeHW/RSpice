@@ -2012,3 +2012,114 @@ endconnectrules
         assert!(error.contains(expected), "{expected}: {error}");
     }
 }
+
+#[test]
+fn structural_wires_resolve_to_physical_shapes_without_a_digital_runtime() {
+    let source = r#"
+module source(output electrical a);
+ analog I(a)<+(V(a)-2.5)/1000;
+endmodule
+module pair(output wire [1:0] a);
+ source first(a[1]),second(a[0]);
+endmodule
+module bank(output wire [3:2] a);
+ parameter integer UNUSED=2;
+ pair nested(a);
+endmodule
+module load(input electrical [0:1] a,output electrical p);
+ analog begin I(a[0])<+V(a[0])/1000; I(a[1])<+V(a[1])/1000; V(p)<+V(a[0])+V(a[1]); end
+endmodule
+module top(output electrical p,q);
+ parameter integer BASE=-2;
+ wire [5:4] bus;
+ tri words[BASE:BASE+1];
+ bank nested(bus);
+ source first(words[BASE]),second(words[BASE+1]);
+ load packed_load(bus,p),array_load({words[BASE],words[BASE+1]},q);
+endmodule
+"#;
+    // Pure physical connectivity must also compile with AMS execution disabled.
+    let compiler = VerilogACompiler::default();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .unwrap();
+    for report in [&artifact, &specialized] {
+        report.canonical_ir.validate().unwrap();
+        assert!(report.canonical_ir.digital.signals.is_empty());
+        assert!(report.canonical_ir.digital.processes.is_empty());
+        assert!(report.canonical_ir.digital.drivers.is_empty());
+        let replay = compiler
+            .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+    }
+}
+
+#[test]
+fn behavioral_wire_uses_remain_discrete_but_lexical_shadows_do_not() {
+    let template = r#"
+`timescale 1ns/1ps
+module source(output electrical a);
+ analog I(a)<+(V(a)-2.5)/1000;
+endmodule
+module receiver(input logic d); endmodule
+module top(output electrical p);
+ wire x;
+ source producer(x);
+ BODY
+endmodule
+connectmodule sense(input electrical a,output logic d);
+ reg d;
+ initial d=0;
+ always #0.1 d=V(a)>1;
+endmodule
+connectrules chosen; connect sense; endconnectrules
+"#;
+    for (body, discrete) in [
+        ("reg sample; initial sample=x;", true),
+        ("initial begin : local_init reg sample=x; end", true),
+        ("reg [1:0] bits; initial bits[x]=1;", true),
+        ("wire [1:0] words; receiver observer(words[x]);", true),
+        ("reg sample; always @(x) sample=1;", true),
+        ("wire copy; assign copy=x;", true),
+        ("wire copy=x;", true),
+        ("assign x=1'b1;", true),
+        ("analog V(p)<+x;", true),
+        ("receiver observer(x+1'b0);", true),
+        (
+            "initial begin : local_scope reg x; reg sample; x=1; sample=x; end",
+            false,
+        ),
+        ("receiver observer(x);", false),
+    ] {
+        let source = template.replace("BODY", body);
+        let report = compiler()
+            .compile_runtime(&source, Some("top"))
+            .unwrap_or_else(|error| panic!("{body}: {error}"));
+        let has_digital_x = report
+            .canonical_ir
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "x");
+        assert_eq!(has_digital_x, discrete, "{body}");
+    }
+    let explicit = template
+        .replace("wire x;", "wire logic x;")
+        .replace("BODY", "");
+    let report = compiler().compile_runtime(&explicit, Some("top")).unwrap();
+    assert!(
+        report
+            .canonical_ir
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "x")
+    );
+}

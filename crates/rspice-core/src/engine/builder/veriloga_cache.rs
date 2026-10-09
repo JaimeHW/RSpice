@@ -337,7 +337,8 @@ use super::*;
 // Version 123 retains resolved net types through structural concatenations (HIR 141).
 // Version 124 validates connected disciplines and preserves local branch natures (HIR 142).
 // Version 125 resolves inherited digital-net disciplines before conversion selection (HIR 143).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 125;
+// Version 126 resolves structural wire domains before real-net promotion (HIR 144).
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 126;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

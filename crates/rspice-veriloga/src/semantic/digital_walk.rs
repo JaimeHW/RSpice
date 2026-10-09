@@ -8,6 +8,14 @@ pub(super) fn visit_roots(body: &DigitalStatement, visit: &mut impl FnMut(&Expre
     walk_roots(body, &Default::default(), false, &mut |expr, _| visit(expr));
 }
 
+/// Every read root with the lexical locals that shadow module declarations.
+pub(super) fn visit_scoped_roots(
+    body: &DigitalStatement,
+    visit: &mut impl FnMut(&Expression, &std::collections::BTreeSet<smol_str::SmolStr>),
+) {
+    walk_roots(body, &Default::default(), false, visit);
+}
+
 /// Read roots contributing to an implicit event control, with lexical shadows
 /// resolved before the caller selects module storage. Declarations initialize
 /// once, and explicit nested sensitivity terms do not extend the outer read set.
