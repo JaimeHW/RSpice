@@ -16,6 +16,7 @@ cargo build --release -p rspice-cli
 | Command | Purpose |
 | :--- | :--- |
 | `run` | Execute the analyses a netlist requests, or one requested from the command line |
+| `study` | Check, inspect, and execute a typed study with explicit task dependencies |
 | `check` | Validate netlist and control syntax, analysis requests, output symbols, topology, and native/XSPICE/Verilog-A construction |
 | `info` | Summarize a netlist without simulating it |
 | `models` | List the shipped SPICE model packs and look up parts in them |
@@ -87,11 +88,35 @@ Study requests and circuit options own solver settings; `.rspicerc` simulation
 defaults belong to the existing `run` command. Resource configuration bounds
 study/source ingestion and preparation.
 
+Run the prepared study with
+`rspice study run study.json --output study-results.json --json`.
+`--progress-json` emits versioned task-start, progress, and completion records on
+stderr; it also selects JSON logs and errors so stderr remains machine-readable.
+The final `rspice.study.run` summary is separate on stdout. Ctrl-C and
+`--timeout` cancel through the shared runner and preserve exit codes 130 and 124.
+Solver failures and failed measurements return nonzero statuses. Result
+publication happens only after every task and result validation succeeds;
+failures leave an existing output unchanged. Output may not replace the study,
+circuit, include files, or configuration files.
+
+The version-1 `rspice.study.results` JSON artifact embeds the typed study,
+preparation report, exact executed task netlists, and the shared versioned
+retained-results representation under `results`. This retains native payloads,
+complex samples, units, result digests, and the prepared-run receipt. An explicit
+`save_policy.maximum_storage_bytes` bounds both retained evidence and the final
+serialized document. A successful invocation produces one dataset; it does not
+maintain or prune a historical result directory. Waveform live delivery and
+partial failure datasets are not published by this command.
+
 The typed analysis representation is shared with application execution.
 PAC/PXF/PNOISE/PSTB additionally require a matching `periodic` object containing
-`kind` and complete typed `settings`. Structured sweep settings and `study run`
-are not exposed yet. Successful preparation is not evidence of convergence or
-numerical qualification.
+`kind` and complete typed `settings`. Structured sweep settings, external compiled
+model binding, and conversion of saved study artifacts are not exposed yet.
+Custom execution resource limits are refused explicitly until the shared runner
+transports them. The seven source limits (`max_netlist_bytes`, `max_netlist_lines`,
+`max_expanded_source_bytes`, `max_dependency_source_bytes`, `max_include_depth`,
+`max_hierarchy_depth`, and `max_flattened_elements`) remain configurable.
+Successful preparation is not evidence of convergence or numerical qualification.
 
 ## Inspecting a netlist
 
@@ -151,8 +176,8 @@ These combinations remain explicitly unsupported:
 | :--- | :--- |
 | Strict Verilog-A LRM checking | `compile-va --strict` returns an unsupported-capability error until strict checking is implemented |
 | Partial-spectrum conversion | `convert --variables`/`--start`/`--stop` cannot represent a complete typed transform and are rejected |
-| SOA and optimization studies | Shared application services exist, but no CLI execution route is exposed |
-| PSP, HBSP, and dedicated HB-noise studies | No complete CLI execution/result route is exposed |
+| SOA and optimization studies | Typed `study run` routes exist; declarative-run adapters and dedicated verdict/report options remain incomplete |
+| PSP, HBSP, and dedicated HB-noise studies | Typed `study run` retains native evidence; declarative-run and flat-format adapters remain incomplete |
 | Advanced control-script execution | The control host accepts fewer analyses than declarative decks; inspect `capabilities` for each route |
 | Saved-result post-processing | Conversion and comparison exist; standalone remeasurement, expressions, FFT computation, and plotting do not |
 | Persistent campaigns | Parallel variants/corners exist; durable multi-netlist manifests and selective retry do not |

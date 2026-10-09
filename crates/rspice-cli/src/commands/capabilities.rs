@@ -119,8 +119,8 @@ fn execution_support(kind: AnalysisKind) -> Support {
         | AnalysisKind::Optimize
         | AnalysisKind::Psp
         | AnalysisKind::Hbsp
-        | AnalysisKind::HbNoise => Support::unsupported(
-            "The CLI has no execution route for this analysis; application or engine services do not imply CLI support.",
+        | AnalysisKind::HbNoise => Support::partial(
+            "Available through typed study run requests and retained study result JSON; declarative run and flat-format adapters are not exposed.",
         ),
         _ => Support::unsupported(
             "This CLI build has no declared execution route for this identity.",
@@ -153,7 +153,7 @@ fn mapping(status: MappingStatus) -> Value {
     })
 }
 
-const STUDY_SUPPORT: &str = "study check and study plan validate version 1 typed task graphs; study execution and structured sweep settings are not exposed yet.";
+const STUDY_SUPPORT: &str = "study check/plan/run prepare and execute version 1 typed task graphs with retained result JSON. Structured sweeps, custom execution resource limits, external compiled model binding, and saved-study-result conversion are not exposed yet.";
 
 const WORKFLOW_GAPS: [(&str, &str); 5] = [
     (

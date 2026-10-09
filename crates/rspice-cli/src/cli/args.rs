@@ -206,7 +206,7 @@ pub enum Commands {
     /// Describe available CLI execution routes and result representations
     Capabilities(CapabilitiesArgs),
 
-    /// Validate and inspect a versioned study over named analysis tasks
+    /// Prepare and execute a versioned study over named analysis tasks
     Study(StudyArgs),
 
     /// Display netlist information without simulating
@@ -300,6 +300,8 @@ pub enum StudyCommands {
     Check(StudyInspectArgs),
     /// Show the prepared execution order and source/configuration identities
     Plan(StudyInspectArgs),
+    /// Execute the prepared graph and atomically publish typed retained results
+    Run(StudyRunArgs),
 }
 
 #[derive(Args, Debug)]
@@ -310,9 +312,21 @@ pub struct StudyInspectArgs {
     /// Emit one versioned JSON document, including validation failures
     #[arg(long)]
     pub json: bool,
-    /// Stop preparation after this many seconds
+    /// Stop preparation or execution after this many seconds
     #[arg(long, value_name = "SECONDS")]
     pub timeout: Option<f64>,
+}
+
+#[derive(Args, Debug)]
+pub struct StudyRunArgs {
+    #[command(flatten)]
+    pub study: StudyInspectArgs,
+    /// Destination for the versioned study result JSON document
+    #[arg(short, long, value_name = "FILE")]
+    pub output: PathBuf,
+    /// Emit versioned task/progress events as JSON lines on stderr
+    #[arg(long)]
+    pub progress_json: bool,
 }
 
 /// Parsing options shared by simulation, validation and inspection.

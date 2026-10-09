@@ -12,10 +12,14 @@ use serde_json::{Value, json};
 
 use crate::cli::{CliError, Config, NetlistOptions, StudyArgs, StudyCommands, StudyInspectArgs};
 
+mod failure;
+mod run;
+
 pub fn execute(args: StudyArgs, config: &Config, quiet: bool) -> Result<(), CliError> {
     match args.command {
         StudyCommands::Check(args) => inspect(args, config, quiet, false),
         StudyCommands::Plan(args) => inspect(args, config, quiet, true),
+        StudyCommands::Run(args) => run::execute(args, config, quiet),
     }
 }
 
@@ -178,6 +182,7 @@ fn prepare(path: &Path, config: &Config) -> Result<PreparedStudy, CliError> {
         &crate::abort::ProcessAbort,
     )
     .map_err(|error| map_document_error(error, &path))?;
+    validate_execution_policy(config)?;
     let circuit_path = path
         .parent()
         .expect("absolute file has parent")
@@ -212,6 +217,30 @@ fn prepare(path: &Path, config: &Config) -> Result<PreparedStudy, CliError> {
         snapshot,
         names,
     })
+}
+
+fn validate_execution_policy(config: &Config) -> Result<(), CliError> {
+    // These seven limits govern captured source preparation. The shared
+    // runner still owns default execution limits; accepting any other custom
+    // ceiling here would silently execute a different policy from the request.
+    let defaults = rspice_core::ResourceLimits::default();
+    let mut execution = config.resources.limits();
+    execution.max_netlist_bytes = defaults.max_netlist_bytes;
+    execution.max_netlist_lines = defaults.max_netlist_lines;
+    execution.max_expanded_source_bytes = defaults.max_expanded_source_bytes;
+    execution.max_dependency_source_bytes = defaults.max_dependency_source_bytes;
+    execution.max_include_depth = defaults.max_include_depth;
+    execution.max_hierarchy_depth = defaults.max_hierarchy_depth;
+    execution.max_flattened_elements = defaults.max_flattened_elements;
+    if execution != defaults {
+        return Err(rspice_core::SimulationError::UnsupportedCapability(
+            Box::new(rspice_core::UnsupportedCapabilityError::new(
+                "study.execution_resource_overrides",
+                "study dispatch does not yet transport custom execution limits; use default execution resource settings. Source preparation limits remain configurable.",
+            )),
+        ).into());
+    }
+    Ok(())
 }
 
 fn map_document_error(error: StudyDocumentError, path: &Path) -> CliError {

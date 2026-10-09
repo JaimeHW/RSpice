@@ -190,7 +190,15 @@ fn main() -> ExitCode {
             return error.exit_code().into();
         }
     };
-    let error_format = cli.error_format;
+    let study_progress_json = matches!(
+        &cli.command,
+        Commands::Study(cli::StudyArgs { command: cli::StudyCommands::Run(args) }) if args.progress_json
+    );
+    let error_format = if study_progress_json {
+        cli::ErrorFormat::Json
+    } else {
+        cli.error_format
+    };
     observability::set_machine_diagnostics(error_format == cli::ErrorFormat::Json);
 
     // Quiet execution has no observable log records, so avoid constructing

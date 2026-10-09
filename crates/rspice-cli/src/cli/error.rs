@@ -65,7 +65,7 @@ pub struct ErrorDetails {
 }
 
 impl ErrorDetails {
-    fn new(code: &'static str, category: &'static str, retryable: bool) -> Self {
+    pub(crate) fn new(code: &'static str, category: &'static str, retryable: bool) -> Self {
         Self {
             code,
             category,

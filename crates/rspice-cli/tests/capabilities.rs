@@ -50,7 +50,7 @@ fn discovery_includes_unexposed_analyses_and_separates_control_support() {
     assert_eq!(ids, expected.into_iter().collect());
     for id in ["soa", "optimize", "psp", "hbsp", "hbnoise"] {
         let entry = row(&document, id);
-        assert_eq!(entry["execution"]["status"], "unsupported");
+        assert_eq!(entry["execution"]["status"], "partial");
         assert!(
             entry["execution"]["reason"]
                 .as_str()
