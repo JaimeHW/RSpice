@@ -866,6 +866,16 @@ complex response is retained, its crossings must reproduce the stated margins
 and crossover count. Partial projections keep missing samples explicitly and
 are checked against the source evidence that remains.
 
+Pole-zero JSON conversion retains `dc_gain`, `high_frequency_gain`, complex
+`pole(N)`/`zero(N)` columns, input/output identities, and root-set qualification
+and certificate values. Roots are ordered by real then imaginary part so a
+reordered spectrum still compares equally. `pz:` evidence indicators distinguish
+qualified, approximate, unrequested, and legacy unknown root sets independently
+of numeric tolerances. Missing gains remain missing; they cannot establish
+numerical agreement. Use an explicit `--variables 'pole(1)'` selection when
+only that retained root is the intended comparison. Older documents without
+units keep those units unstated.
+
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
 real/imag arrays in JSON and HDF5). One sample is a result: an operating point

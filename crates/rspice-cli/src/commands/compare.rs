@@ -13,10 +13,10 @@ use crate::commands::waveform_io::{
 };
 
 mod determinations;
+mod evidence;
 mod fft;
 mod interpolation;
 mod selection;
-mod stability;
 use selection::{parse_variable_name, variable_name_matches};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -625,8 +625,8 @@ fn compare_waveforms(
     let pairs = selection::pairs(result, golden, args, &mut cmp_result);
     let result_determinations = determinations::Determinations::new(result);
     let golden_determinations = determinations::Determinations::new(golden);
-    cmp_result.problems.extend(stability::problems(result));
-    cmp_result.problems.extend(stability::problems(golden));
+    cmp_result.problems.extend(evidence::problems(result));
+    cmp_result.problems.extend(evidence::problems(golden));
     for (evidence, data) in [
         (&result_determinations, result),
         (&golden_determinations, golden),

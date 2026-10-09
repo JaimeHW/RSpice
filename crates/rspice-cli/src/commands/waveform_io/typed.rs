@@ -6,6 +6,7 @@ use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::commands::result_signal::qualified_name;
 use std::path::Path;
 
+mod pole_zero;
 mod stability;
 pub(in crate::commands) use stability::append_stability_columns;
 
@@ -86,6 +87,7 @@ fn append_payload_columns(
         ResultPayload::Stb(payload) => {
             projection.stability(payload.success, &payload.circuit_poles)?;
         }
+        ResultPayload::PoleZero(payload) => projection.pole_zero(payload)?,
         ResultPayload::Distortion(payload) => {
             if let Some(ratio) = payload.f2_over_f1 {
                 projection.constant("f2_over_f1".into(), SignalUnit::Dimensionless, ratio)?;
