@@ -1,12 +1,13 @@
 //! Capture literal circuit sources and prepare an explicit headless task graph.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rspice_app_types::product::{ObjectRevision, ProcessCorner};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::netlist::{
-    IncludeProcessor, NetlistParseOptions, ParseError, ParseWithAbortError, SealedSourceBundle,
-    StatisticalParamMode,
+    IncludeProcessor, NetlistParseOptions, ParseError, ParseWithAbortError,
+    ResolvedIncludeDependency, SealedSourceBundle, SealedSourceEdge, StatisticalParamMode,
 };
 use rspice_core::{ResourceKind, ResourceLimitError, ResourceLimits};
 use rspice_simulation_contract::saved_output::SavedOutput;
@@ -125,6 +126,12 @@ impl From<ParseWithAbortError> for HeadlessPreparationError {
     }
 }
 
+impl From<ParseError> for HeadlessPreparationError {
+    fn from(error: ParseError) -> Self {
+        Self::from(ParseWithAbortError::Parse(error))
+    }
+}
+
 impl From<ServiceRunError> for HeadlessPreparationError {
     fn from(error: ServiceRunError) -> Self {
         match error {
@@ -170,8 +177,15 @@ pub fn prepare_headless_run(
     // an executable deck governed by the expanded-source budget.
     let mut expanded_limits = limits;
     expanded_limits.max_netlist_bytes = limits.max_expanded_source_bytes;
-    let parsed = rspice_core::Netlist::parse_with_options_and_abort(
-        &expanded,
+    // Validate the authored file boundaries and source locations using only
+    // captured bytes. Parsing the rendered expansion loses include ownership
+    // and can even allow a scope opened in one file to close in another.
+    let sources =
+        captured_source_bundle(input.source, &origin, &sealed_source_dependencies, abort)?;
+    let parsed = rspice_core::Netlist::parse_with_path_and_sealed_sources_and_options_and_abort(
+        input.source,
+        &origin,
+        sources,
         NetlistParseOptions {
             retain_control_script: true,
             statistical_mode: StatisticalParamMode::Nominal,
@@ -327,6 +341,39 @@ fn source_processor(
             Ok((origin, processor))
         }
     }
+}
+
+fn captured_source_bundle(
+    root_source: &str,
+    origin: &Path,
+    dependencies: &[ResolvedIncludeDependency],
+    abort: &dyn AbortSignal,
+) -> Result<SealedSourceBundle, HeadlessPreparationError> {
+    let mut sources = BTreeMap::from([(origin.to_path_buf(), root_source.to_owned())]);
+    let mut edges = Vec::with_capacity(dependencies.len());
+    for dependency in dependencies {
+        check_abort(abort)?;
+        let path = dependency.resolved_path();
+        if let Some(source) = sources.get(path) {
+            if source != dependency.source() {
+                return Err(source_error(format!(
+                    "Source {} changed while capturing the dependency closure",
+                    path.display()
+                )));
+            }
+        } else {
+            sources.insert(path.to_path_buf(), dependency.source().to_owned());
+        }
+        // Multiple library sections can share one file. Retain each edge,
+        // while supplying that file's complete contents only once.
+        edges.push(SealedSourceEdge {
+            owner: dependency.owner_path().to_path_buf(),
+            requested_path: dependency.requested_path().to_owned(),
+            target: path.to_path_buf(),
+        });
+    }
+    check_abort(abort)?;
+    Ok(SealedSourceBundle::try_new_with_edges(sources, edges)?)
 }
 
 fn source_error(message: impl Into<String>) -> HeadlessPreparationError {

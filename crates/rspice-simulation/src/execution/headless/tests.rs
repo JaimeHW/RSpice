@@ -368,6 +368,106 @@ fn captured_includes_use_the_expanded_budget_after_root_admission() {
 }
 
 #[test]
+fn captured_include_errors_keep_the_authored_file_and_line() {
+    let fixture = NativeFixture::new();
+    let path = fixture.0.join("circuit.cir");
+    let included = fixture.0.join("divider.inc");
+    let source = "Mapped diagnostics\n* root line two\n.include divider.inc\n.end\n";
+    let contents = "* child line one\nR1 out 0 1k FIRST SECOND\n";
+    std::fs::write(&included, contents).unwrap();
+    let included = included.canonicalize().unwrap();
+    for native in [false, true] {
+        let mut input = HeadlessRunInput::new(source, &path, vec![op()]);
+        input.resolver = if native {
+            HeadlessSourceResolver::Native {
+                include_search_paths: Vec::new(),
+            }
+        } else {
+            HeadlessSourceResolver::Sealed(
+                SealedSourceBundle::try_new_with_edges(
+                    [
+                        (path.clone(), source.into()),
+                        (included.clone(), contents.into()),
+                    ],
+                    [SealedSourceEdge {
+                        owner: path.clone(),
+                        requested_path: "divider.inc".into(),
+                        target: included.clone(),
+                    }],
+                )
+                .unwrap(),
+            )
+        };
+        let Err(HeadlessPreparationError::Parse(ParseError::Syntax { line, message })) =
+            prepare_headless_run(input, &NoAbort)
+        else {
+            panic!("malformed included resistor must fail with a source-mapped syntax error");
+        };
+        assert_eq!(line, 2, "native={native}: {message}");
+        assert!(
+            message.starts_with(&format!("{}:2: ", included.display())),
+            "native={native}: {message}"
+        );
+    }
+}
+
+#[test]
+fn a_subcircuit_opened_in_an_include_cannot_close_in_the_root() {
+    let path = origin();
+    let included = path.with_file_name("cell.inc");
+    let source = "Scope ownership\n.include cell.inc\n.ends cell\nV1 in 0 1\nX1 in 0 cell\n.end\n";
+    let contents = ".subckt cell a b\nR1 a b 1k\n";
+    let mut input = HeadlessRunInput::new(source, &path, vec![op()]);
+    input.resolver = HeadlessSourceResolver::Sealed(
+        SealedSourceBundle::try_new_with_edges(
+            [
+                (path.clone(), source.into()),
+                (included.clone(), contents.into()),
+            ],
+            [SealedSourceEdge {
+                owner: path.clone(),
+                requested_path: "cell.inc".into(),
+                target: included.clone(),
+            }],
+        )
+        .unwrap(),
+    );
+    let Err(HeadlessPreparationError::Parse(ParseError::MissingSubcircuitEnds(error))) =
+        prepare_headless_run(input, &NoAbort)
+    else {
+        panic!("include EOF must reject its unterminated subcircuit");
+    };
+    assert_eq!(error.detected_at.path.as_deref(), Some(included.as_path()));
+}
+
+#[test]
+fn multiple_captured_library_sections_share_one_source_member() {
+    let path = origin();
+    let library = path.with_file_name("divider.lib");
+    let source =
+        "Shared library\n.lib divider.lib upper\n.lib divider.lib lower\nV1 in 0 1\n.end\n";
+    let contents = ".lib upper\nR1 in out 1k\n.endl upper\n.lib lower\nR2 out 0 1k\n.endl lower\n";
+    let mut input = HeadlessRunInput::new(source, &path, vec![op()]);
+    input.resolver = HeadlessSourceResolver::Sealed(
+        SealedSourceBundle::try_new_with_edges(
+            [
+                (path.clone(), source.into()),
+                (library.clone(), contents.into()),
+            ],
+            [SealedSourceEdge {
+                owner: path.clone(),
+                requested_path: "divider.lib".into(),
+                target: library,
+            }],
+        )
+        .unwrap(),
+    );
+    let prepared = prepare_headless_run(input, &NoAbort).unwrap();
+    assert_eq!(prepared.metadata().sealed_source_dependencies.len(), 2);
+    assert!((voltage(&execute(prepared)[0]) - 0.5).abs() < 1e-10);
+}
+
+#[test]
 fn hierarchy_and_generated_task_decks_obey_preparation_limits() {
     let path = origin();
     let hierarchical =
