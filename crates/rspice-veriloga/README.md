@@ -168,7 +168,7 @@ measure each local port's flow, including when parent connections tie ports toge
 These probes work in analog expressions and discrete processes, with custom nature
 flow access functions as well as `I`. Port probes cannot drive contributions or
 read potentials. Branch ranges and terminal selectors participate in parameter
-specialization. Artifact schema 136 and core cache record 118 invalidate models
+specialization. Artifact schema 137 and core cache record 119 invalidate models
 compiled before these checks.
 Inline discipline names on `wreal`, `wire`, and module-level `reg` declarations
 retain the same semantic identity as separate discipline declarations. ANSI and
@@ -189,6 +189,12 @@ semantics. Unpacked real-net arrays (`wreal` and the supported resolved RNM type
 share each selected element's complete signal identity through scalar input, output
 and inout connections. Original drivers retain their resolution policy through
 hierarchy and authored converters, including physical loading and return feedback.
+Canonical real-net aliases can also join separately stored views through the same
+resolver. Linking relocates their identities, validates the combined driver count,
+and retains them in artifact identity. Runtime publication updates the entire group
+before computed event expressions run; external drivers and trial/reset state use
+the same topology. This is the runtime prerequisite for real bus port views; those
+source-level declarations and connection forms are still pending.
 Unpacked conservative net arrays, real buses declared with a range before the net
 name, and whole-array formal ports remain open implementation work.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports

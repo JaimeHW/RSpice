@@ -146,6 +146,17 @@ impl CanonicalDigitalPlan {
         Ok(self)
     }
 
+    /// Add real-net connections to an already validated plan, then validate the
+    /// combined driver ownership and refresh its artifact identity.
+    pub fn with_real_aliases(
+        mut self,
+        aliases: impl IntoIterator<Item = super::digital::DigitalRealAlias>,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        self.validate()?;
+        self.real_aliases.extend(aliases);
+        self.seal()
+    }
+
     /// Validate decoded or edited plans before sharing them with a runtime.
     /// The runtime may then compare the stored identity at constant cost.
     pub fn validate(&self) -> IrValidationResult {
@@ -184,6 +195,7 @@ impl CanonicalDigitalPlan {
                 &self.signals,
                 &self.arrays,
                 &self.bit_aliases,
+                &self.real_aliases,
                 &self.processes,
                 &self.drivers,
                 &self.analog_probes,
@@ -315,6 +327,8 @@ impl CanonicalDigitalPlan {
                 }
             }
         }
+
+        let real_representatives = self.real_net_representatives().map_err(error)?;
 
         let mut arrays = HashSet::new();
         let mut array_cells = vec![false; self.signals.len()];
@@ -499,6 +513,7 @@ impl CanonicalDigitalPlan {
         }
         let mut drivers = BTreeMap::new();
         let mut driver_counts = vec![0u32; self.signals.len()];
+        let mut real_driver_counts = vec![0usize; self.signals.len()];
         for driver in &self.drivers {
             let Some(signal) = self.signal(driver.id.signal) else {
                 return Err(error("digital driver names an undeclared signal"));
@@ -520,6 +535,18 @@ impl CanonicalDigitalPlan {
                 ));
             }
             *count += 1;
+            if signal.kind.is_real() {
+                let representative = real_representatives[usize::from(signal.id)];
+                let real_count = &mut real_driver_counts[usize::from(representative)];
+                *real_count += 1;
+                if signal.kind == DigitalSignalKind::Real(DigitalRealResolution::Single)
+                    && *real_count > 1
+                {
+                    return Err(error(
+                        "connected single-driver real net has multiple independent drivers",
+                    ));
+                }
+            }
             drivers.insert(driver.id, driver);
         }
         let check_terms = |terms: &[DigitalSensitivityTerm]| {

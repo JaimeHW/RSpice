@@ -821,6 +821,15 @@ pub struct DigitalBitAlias {
     pub span: SourceSpanRef,
 }
 
+/// Two views of one real-valued net. Original drivers resolve together;
+/// the connection does not add a continuous-assignment driver.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalRealAlias {
+    pub left: DigitalSignalId,
+    pub right: DigitalSignalId,
+    pub span: SourceSpanRef,
+}
+
 /// The discrete-domain half of a module, lowered.
 ///
 /// Lifted out beside the analog body rather than folded into it, for the same
@@ -846,6 +855,8 @@ pub struct CanonicalDigitalPlan {
     pub arrays: Vec<DigitalArray>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bit_aliases: Vec<DigitalBitAlias>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub real_aliases: Vec<DigitalRealAlias>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processes: Vec<CfgDigitalProcess>,
     /// Every continuous driver in the module, in declaration order.
@@ -884,10 +895,46 @@ impl CanonicalDigitalPlan {
         !self.signals.is_empty()
             || !self.arrays.is_empty()
             || !self.bit_aliases.is_empty()
+            || !self.real_aliases.is_empty()
             || !self.processes.is_empty()
             || !self.drivers.is_empty()
             || !self.analog_probes.is_empty()
             || !self.absdelta.is_empty()
+    }
+
+    /// Stable representatives for real-net views, including transitive and
+    /// repeated connections. Validate endpoint types before unioning them so
+    /// decoded artifacts and the runtime use exactly the same identity rules.
+    pub fn real_net_representatives(&self) -> Result<Vec<DigitalSignalId>, &'static str> {
+        let mut parents: Vec<_> = (0..self.signals.len()).collect();
+        fn root(parents: &mut [usize], mut index: usize) -> usize {
+            while parents[index] != index {
+                parents[index] = parents[parents[index]];
+                index = parents[index];
+            }
+            index
+        }
+        for alias in &self.real_aliases {
+            let left = self
+                .signal(alias.left)
+                .ok_or("real-net alias names an unknown signal")?;
+            let right = self
+                .signal(alias.right)
+                .ok_or("real-net alias names an unknown signal")?;
+            if !left.kind.is_real()
+                || left.kind != right.kind
+                || left.procedurally_assignable
+                || right.procedurally_assignable
+            {
+                return Err("real-net aliases require nets with the same real resolution");
+            }
+            let a = root(&mut parents, usize::from(alias.left));
+            let b = root(&mut parents, usize::from(alias.right));
+            parents[a.max(b)] = a.min(b);
+        }
+        Ok((0..parents.len())
+            .map(|index| DigitalSignalId::from(root(&mut parents, index)))
+            .collect())
     }
 
     /// The probe an id names.

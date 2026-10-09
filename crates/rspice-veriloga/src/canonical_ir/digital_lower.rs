@@ -949,6 +949,7 @@ fn lower_with_analog_variables(
             .collect(),
         arrays,
         bit_aliases,
+        real_aliases: Vec::new(),
         signals,
         processes,
         drivers,

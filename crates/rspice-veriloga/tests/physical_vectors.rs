@@ -1042,3 +1042,119 @@ endmodule
             .any(|signal| signal.name == "cells[5]")
     );
 }
+
+#[test]
+fn real_net_alias_artifacts_preserve_identity_validate_and_link_transitively() {
+    use rspice_veriloga::canonical_ir::digital::{
+        DigitalRealAlias, DigitalRealResolution, DigitalSignalKind,
+    };
+    use rspice_veriloga::canonical_ir::digital_link::{
+        DigitalLinkDirection, DigitalLinkInstance, DigitalLinkNet, DigitalLinkPort,
+        link_digital_plans,
+    };
+    let artifact = compiler()
+        .compile_runtime(
+            "module top(a,b); inout a,b; wrealsum a,b; assign a=2.0; endmodule",
+            Some("top"),
+        )
+        .unwrap();
+    let plan = artifact.canonical_ir.digital.clone();
+    let a = plan.signals.iter().find(|s| s.name == "a").unwrap().id;
+    let b = plan.signals.iter().find(|s| s.name == "b").unwrap().id;
+    let alias = DigitalRealAlias {
+        left: a,
+        right: b,
+        span: plan.signal(a).unwrap().span,
+    };
+    let plan = plan.with_real_aliases([alias]).unwrap();
+    assert_ne!(
+        artifact.canonical_ir.digital.content_identity,
+        plan.content_identity
+    );
+    let encoded = serde_json::to_vec(&plan).unwrap();
+    let decoded: rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan =
+        serde_json::from_slice(&encoded).unwrap();
+    decoded.validate().unwrap();
+    assert_eq!(decoded, plan);
+    let ports = [DigitalLinkPort {
+        name: "b".into(),
+        signal: b,
+        direction: DigitalLinkDirection::Inout,
+    }];
+    let nets = [DigitalLinkNet {
+        name: "joined".into(),
+        ports: vec![("first".into(), "b".into()), ("second".into(), "b".into())],
+    }];
+    let linked = link_digital_plans(
+        &[
+            DigitalLinkInstance {
+                name: "first",
+                plan: &plan,
+                ports: &ports,
+            },
+            DigitalLinkInstance {
+                name: "second",
+                plan: &plan,
+                ports: &ports,
+            },
+        ],
+        &nets,
+        &NoPipelineControl,
+    )
+    .unwrap();
+    let representatives = linked.plan.real_net_representatives().unwrap();
+    assert!(
+        representatives
+            .iter()
+            .all(|representative| *representative == representatives[0])
+    );
+    assert_eq!(linked.plan.drivers.len(), 2);
+    for invalid in 0..3 {
+        let mut changed = plan.clone();
+        match invalid {
+            0 => {
+                changed.real_aliases[0].right =
+                    rspice_veriloga::canonical_ir::DigitalSignalId::new(999)
+            }
+            1 => changed.signals[usize::from(b)].procedurally_assignable = true,
+            _ => {
+                changed.signals[usize::from(b)].kind =
+                    DigitalSignalKind::Real(DigitalRealResolution::Average)
+            }
+        }
+        assert!(changed.validate().is_err());
+    }
+    let single = compiler()
+        .compile_runtime(
+            "module top(a,b); inout a,b; wreal a,b; assign a=2.0; endmodule",
+            Some("top"),
+        )
+        .unwrap()
+        .canonical_ir
+        .digital;
+    let alias = DigitalRealAlias {
+        left: a,
+        right: b,
+        span: single.signal(a).unwrap().span,
+    };
+    let single = single.with_real_aliases([alias]).unwrap();
+    assert!(
+        link_digital_plans(
+            &[
+                DigitalLinkInstance {
+                    name: "first",
+                    plan: &single,
+                    ports: &ports
+                },
+                DigitalLinkInstance {
+                    name: "second",
+                    plan: &single,
+                    ports: &ports
+                },
+            ],
+            &nets,
+            &NoPipelineControl
+        )
+        .is_err()
+    );
+}

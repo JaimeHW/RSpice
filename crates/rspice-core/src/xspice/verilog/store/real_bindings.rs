@@ -1,7 +1,7 @@
 //! External real drivers contribute to the authored HDL net resolver.
 use super::*;
-use crate::xspice::event_scheduler::EventTarget;
 use crate::xspice::DigitalValue;
+use crate::xspice::event_scheduler::EventTarget;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ExternalRealDriverId(pub(super) usize);
@@ -39,7 +39,7 @@ impl ExternalNetChange {
             } => starts_publication,
         }
     }
-    fn set_start(&mut self, start: bool) {
+    pub(super) fn set_start(&mut self, start: bool) {
         match self {
             Self::Bits(change) => change.starts_publication = start,
             Self::DriverInput {
@@ -48,6 +48,47 @@ impl ExternalNetChange {
             | Self::Real {
                 starts_publication, ..
             } => *starts_publication = start,
+        }
+    }
+}
+
+/// Local signal views retain array coordinates while sharing one resolved net.
+/// This immutable topology is shared by trial clones and rebuilt from the plan
+/// for reset/restart; driver values remain in the ordinary store.
+#[derive(Clone)]
+pub(super) struct RealConnections {
+    representatives: Vec<DigitalSignalId>,
+    members: Vec<Vec<DigitalSignalId>>,
+}
+impl RealConnections {
+    pub(super) fn new(plan: &CanonicalDigitalPlan) -> Self {
+        let representatives = plan
+            .real_net_representatives()
+            .expect("validated real-net aliases");
+        let mut members = vec![Vec::new(); plan.signals.len()];
+        for (index, representative) in representatives.iter().enumerate() {
+            if index == usize::from(*representative) {
+                continue;
+            }
+            let group = &mut members[usize::from(*representative)];
+            if group.is_empty() {
+                group.push(*representative);
+            }
+            group.push(DigitalSignalId::from(index));
+        }
+        Self {
+            representatives,
+            members,
+        }
+    }
+    pub(super) fn members(&self, signal: DigitalSignalId) -> &[DigitalSignalId] {
+        let representative = &self.representatives[usize::from(signal)];
+        let members = &self.members[usize::from(*representative)];
+        if members.is_empty() {
+            // Unconnected signals do not allocate a one-element member vector.
+            std::slice::from_ref(representative)
+        } else {
+            members
         }
     }
 }
@@ -73,6 +114,13 @@ impl ExternalReals {
 }
 
 impl DigitalSignalStore {
+    pub(super) fn real_members<'a>(&'a self, signal: &'a DigitalSignalId) -> &'a [DigitalSignalId] {
+        self.connected_reals.as_ref().map_or_else(
+            || std::slice::from_ref(signal),
+            |topology| topology.members(*signal),
+        )
+    }
+
     pub(crate) fn attach_external_reals(
         &mut self,
         observed: &[DigitalSignalId],
@@ -107,13 +155,21 @@ impl DigitalSignalStore {
         }
         for &signal in &observed {
             let index = usize::from(signal);
+            let driver_count: usize = self
+                .real_members(&signal)
+                .iter()
+                .map(|member| {
+                    let member = usize::from(*member);
+                    self.spans[member].count + by_signal[member].len()
+                })
+                .sum();
             if self.kinds[index].resolution() == Some(DigitalRealResolution::Single)
-                && self.spans[index].count + by_signal[index].len() > 1
+                && driver_count > 1
             {
                 return Err(format!(
                     "wreal net '{}' requires one driver; HDL and external outputs declare {}",
                     self.plan.signal(signal).unwrap().name,
-                    self.spans[index].count + by_signal[index].len()
+                    driver_count
                 ));
             }
             by_signal[index].sort_unstable_by(|a, b| drivers[*a].1.cmp(&drivers[*b].1));

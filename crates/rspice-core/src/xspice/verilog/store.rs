@@ -84,9 +84,11 @@ pub(crate) use traces::TraceSource;
 mod bindings;
 use bindings::ConnectedBits;
 pub(crate) use bindings::{DigitalBitChange, DigitalBitConnection, ExternalBitDriverId};
+#[cfg(test)]
+mod real_alias_tests;
 mod real_bindings;
 pub(crate) use real_bindings::{ExternalNetChange, ExternalRealDriverId};
-use real_bindings::ExternalReals;
+use real_bindings::{ExternalReals, RealConnections};
 
 use rspice_veriloga::canonical_ir::VectorBounds;
 use rspice_veriloga::canonical_ir::digital::{
@@ -331,6 +333,7 @@ pub(crate) struct DigitalSignalStore {
     plan: Arc<CanonicalDigitalPlan>,
     connected: Option<ConnectedBits>,
     external_reals: Option<ExternalReals>,
+    connected_reals: Option<Arc<RealConnections>>,
     external_changes: Vec<ExternalNetChange>,
     external_batch: Option<Vec<(DigitalSignalId, TransitionValues)>>,
     expression_waits: BTreeMap<u64, ExpressionSubscription>,
@@ -577,7 +580,10 @@ impl DigitalSignalStore {
             });
         }
 
+        let connected_reals =
+            (!plan.real_aliases.is_empty()).then(|| Arc::new(RealConnections::new(&plan)));
         let mut store = Self {
+            connected_reals,
             values,
             reals,
             kinds,
@@ -773,7 +779,13 @@ impl DigitalSignalStore {
         if !self.is_real(signal) {
             return Err(StoreError::FourStatePortDrivenWithAReal { signal, name });
         }
-        let drivers = self.spans[index].count;
+        let drivers = self
+            .real_members(&signal)
+            .iter()
+            .map(|member| {
+                self.spans[usize::from(*member)].count + self.external_real_values(*member).count()
+            })
+            .sum();
         if drivers > 0 {
             return Err(StoreError::ExternallyDrivenNetHasDrivers {
                 signal,
@@ -917,6 +929,36 @@ impl DigitalSignalStore {
     /// A signed-zero bit change also reaches computed subscriptions such as
     /// `@($realtobits(r))`; dispatch still rejects it for a direct `@(r)`.
     fn publish_real(&mut self, signal: DigitalSignalId, value: f64) {
+        let Some(topology) = self.connected_reals.as_ref().map(Arc::clone) else {
+            self.publish_real_member(signal, value);
+            return;
+        };
+        let members = topology.members(signal);
+        if members.len() == 1 {
+            self.publish_real_member(signal, value);
+            return;
+        }
+        // Install every alias value before computed subscriptions inspect any
+        // one of them; r0-r1 must never observe a transient alias disagreement.
+        let own_batch = self.external_batch.is_none();
+        if own_batch {
+            self.external_batch = Some(Vec::new());
+        }
+        let start = self.external_changes.len();
+        for &member in members {
+            self.publish_real_member(member, value);
+        }
+        if own_batch {
+            for (index, change) in self.external_changes[start..].iter_mut().enumerate() {
+                change.set_start(index == 0);
+            }
+            for (member, values) in self.external_batch.take().unwrap() {
+                self.record_transition(member, values);
+            }
+        }
+    }
+
+    fn publish_real_member(&mut self, signal: DigitalSignalId, value: f64) {
         let index = usize::from(signal);
         if self.reals[index].to_bits() == value.to_bits() {
             return;
@@ -989,9 +1031,13 @@ impl DigitalSignalStore {
     /// driver means.
     fn resolve_real(&self, signal: DigitalSignalId) -> f64 {
         let index = usize::from(signal);
-        let span = self.spans[index];
-        let mut contributions = self.contributions[span.start..span.start + span.count]
+        let members = self.real_members(&signal);
+        let mut contributions = members
             .iter()
+            .flat_map(|member| {
+                let span = self.spans[usize::from(*member)];
+                self.contributions[span.start..span.start + span.count].iter()
+            })
             .map(|contribution| match contribution.value {
                 // A driver that has not run has produced nothing, and section
                 // 3.7 makes the value of a real net with nothing driving it
@@ -1000,7 +1046,11 @@ impl DigitalSignalStore {
                 ContributionValue::Real(value) => value.unwrap_or(0.0),
                 ContributionValue::FourState(_) => 0.0,
             })
-            .chain(self.external_real_values(signal))
+            .chain(
+                members
+                    .iter()
+                    .flat_map(|member| self.external_real_values(*member)),
+            )
             .peekable();
 
         // Section 3.7: "If no driver is connected to a wreal net, its value

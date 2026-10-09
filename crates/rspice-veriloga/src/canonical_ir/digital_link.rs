@@ -181,6 +181,7 @@ pub fn link_digital_plans(
             .chain(instance.plan.processes.iter().map(|item| item.span))
             .chain(instance.plan.drivers.iter().map(|item| item.span))
             .chain(instance.plan.bit_aliases.iter().map(|item| item.span))
+            .chain(instance.plan.real_aliases.iter().map(|item| item.span))
             .chain(instance.plan.analog_probes.iter().map(|item| item.span))
         {
             files.insert(span.source_file_id);
@@ -400,6 +401,13 @@ pub fn link_digital_plans(
             alias.right.signal = layout.map.signals[usize::from(alias.right.signal)];
             relocate_span(&mut alias.span, &layout.map);
             plan.bit_aliases.push(alias);
+        }
+        for alias in &source.real_aliases {
+            let mut alias = alias.clone();
+            alias.left = layout.map.signals[usize::from(alias.left)];
+            alias.right = layout.map.signals[usize::from(alias.right)];
+            relocate_span(&mut alias.span, &layout.map);
+            plan.real_aliases.push(alias);
         }
         for observer in &source.absdelta {
             let mut observer = observer.clone();
