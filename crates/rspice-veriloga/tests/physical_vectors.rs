@@ -2521,3 +2521,203 @@ fn foreign_explicit_branch_terminals_reject_nested_branch_calls() {
             .is_err()
     );
 }
+
+#[test]
+fn foreign_upward_scopes_preserve_shadowing_generate_context_and_replay() {
+    let source = r#"
+module leaf(output electrical p);
+ analog V(p)<+top.K+$root.top.BASE+peer.K;
+endmodule
+module constants;
+ parameter integer K=99;
+endmodule
+module wrapper(output electrical p);
+ parameter integer K=3;
+ constants #(.K(K)) top();
+ generate begin : group
+   constants #(.K(K+1)) peer();
+   leaf l(p);
+ end endgenerate
+endmodule
+module top(output electrical p,q);
+ parameter integer BASE=2;
+ wrapper #(.K(BASE)) a(p);
+ wrapper b(q);
+endmodule
+module unused;
+ analog begin $display($root.other.VALUE); end
+endmodule
+"#;
+    let compiler = compiler();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .unwrap();
+    for report in [&artifact, &specialized] {
+        report.canonical_ir.validate().unwrap();
+        let replay = compiler
+            .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+        assert_eq!(
+            report.canonical_ir.hir.branches,
+            replay.canonical_ir.hir.branches
+        );
+    }
+    // Both executable frontends receive the selected design, including bytecode.
+    compiler.compile_module(source, Some("top")).unwrap();
+}
+
+#[test]
+fn foreign_upward_resolution_rejects_shadowed_paths_wrong_roots_and_cycles() {
+    for (source, diagnostic) in [
+        (
+            "module leaf(output electrical p); analog V(p)<+$root.other.P; endmodule module top(output electrical p); leaf a(p); endmodule",
+            "selected top-level",
+        ),
+        (
+            "module leaf(output electrical p); parameter real top=2; analog V(p)<+top.P; endmodule module top(output electrical p); parameter P=1; leaf a(p); endmodule",
+            "not a module",
+        ),
+        (
+            "module leaf(output electrical p); parameter P=top.P; analog V(p)<+P; endmodule module top(output electrical p); parameter P=1; leaf a(p); endmodule",
+            "parameter declaration cannot reference outside",
+        ),
+        (
+            "module leaf; parameter P=1; endmodule module top; leaf #(.P(b.P)) a(); leaf #(.P(a.P)) b(); endmodule",
+            "cyclic parameter",
+        ),
+        (
+            "module leaf; leaf a(); analog $display($root.top.P); endmodule module top; parameter P=1; leaf a(); endmodule",
+            "recursive module hierarchy",
+        ),
+    ] {
+        let error = compiler()
+            .compile_runtime(source, Some("top"))
+            .err()
+            .expect("invalid selected hierarchy")
+            .to_string();
+        assert!(
+            error.contains(diagnostic),
+            "expected {diagnostic}: {error} for {source}"
+        );
+    }
+}
+
+#[test]
+fn foreign_root_overrides_do_not_replace_recursive_instance_defaults() {
+    let source = r#"
+module tree(inout electrical p);
+ parameter integer N=0;
+ generate if(N>0) begin : nested
+   tree a(p);
+ end else begin : terminal
+   analog I(p)<+V(p)/1000;
+ end endgenerate
+ analog $display($root.tree.N);
+endmodule
+"#;
+    let compiler = compiler();
+    let artifact = compiler.compile_runtime(source, Some("tree")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("N", 1.0)], &NoPipelineControl)
+        .unwrap();
+    specialized.canonical_ir.validate().unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&specialized.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        specialized.canonical_ir.hir.branches,
+        replay.canonical_ir.hir.branches
+    );
+}
+
+#[test]
+fn foreign_inactive_generate_references_bind_after_virtual_module_selection() {
+    use rspice_veriloga::{VirtualCompileLimits, VirtualSourceBundle, VirtualSourceFile};
+    let source = r#"
+module leaf(output electrical p);
+ parameter integer ENABLE=0;
+ generate if(ENABLE) begin : active
+   analog V(p)<+$root.top.G;
+ end else begin : inactive
+   analog V(p)<+0;
+ end endgenerate
+endmodule
+module top(output electrical p);
+ parameter real G=3;
+ leaf #(.ENABLE(1)) a(p);
+endmodule
+"#;
+    let bundle =
+        VirtualSourceBundle::new("top.vams", [VirtualSourceFile::new("top.vams", source)]).unwrap();
+    let compiler = compiler();
+    let prepared = compiler
+        .prepare_virtual_runtime_source(&bundle, VirtualCompileLimits::default())
+        .unwrap();
+    assert_eq!(prepared.module_names().collect::<Vec<_>>(), ["leaf", "top"]);
+    assert!(prepared.connect_specification().declares_module);
+    let report = prepared.compile_runtime("top").unwrap();
+    report.runtime.canonical_ir.validate().unwrap();
+    let direct = compiler.compile_runtime(source, Some("top")).unwrap();
+    assert_eq!(
+        direct.canonical_ir.hir.branches,
+        report.runtime.canonical_ir.hir.branches
+    );
+    let library = VirtualSourceBundle::from_sources(
+        "rules.vams",
+        [(
+            "rules.vams",
+            r#"
+connectmodule drive(input logic d,output electrical a);
+ analog V(a)<+d;
+endmodule
+connectrules selected; connect drive; endconnectrules
+"#,
+        )],
+    )
+    .unwrap();
+    let library = compiler
+        .prepare_virtual_runtime_source(&library, VirtualCompileLimits::default())
+        .unwrap();
+    let configuration = library.connection_configuration("selected").unwrap();
+    let configured = prepared
+        .compile_runtime_with_connections("top", &configuration, &NoPipelineControl)
+        .unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &configured.runtime.canonical_ir,
+            &[("G", 6.0)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&specialized.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        specialized.canonical_ir.runtime_source_identity(),
+        replay.canonical_ir.runtime_source_identity()
+    );
+}
+
+#[test]
+fn foreign_selected_connect_module_can_reference_its_root() {
+    let source = r#"
+discipline logic; domain discrete; enddiscipline
+connectmodule drive(input logic d,output electrical a);
+ parameter real G=2;
+ analog V(a)<+($root.drive.G+d);
+endmodule
+"#;
+    let artifact = compiler().compile_runtime(source, Some("drive")).unwrap();
+    artifact.canonical_ir.validate().unwrap();
+}

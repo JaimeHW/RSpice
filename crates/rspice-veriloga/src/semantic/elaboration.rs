@@ -1,7 +1,7 @@
 //! Executable elaboration of structural Verilog-A module instances.
 //!
-//! Semantic analysis deliberately keeps every module independent.  This pass
-//! selects a top module and flattens its instance tree into one analyzed model
+//! Semantic analysis retains concrete source context where hierarchy references
+//! require it. This pass flattens the selected instance tree into one analyzed model
 //! before either executable backend sees it.  Keeping the pass here gives the
 //! bytecode and canonical-IR paths exactly the same ports, parameters, state,
 //! nodes, and equations.
@@ -45,7 +45,10 @@ pub(crate) fn elaborate_executable_module<'a>(
             selected.name
         ))
     })?;
-    if root.instances.is_empty() && root.generate_template.is_none() {
+    if root.instances.is_empty()
+        && root.generate_template.is_none()
+        && root.foreign_physical.is_empty()
+    {
         return Ok(Cow::Borrowed(selected));
     }
 
@@ -70,11 +73,33 @@ pub(crate) fn elaborate_executable_module<'a>(
         .enumerate()
         .map(|(index, frame)| (frame.path.clone(), index))
         .collect();
+    // Upward and sibling requests must be known before their targets allocate
+    // branches and boundary-current identities, regardless of traversal order.
+    let mut occurrences: Vec<_> = elaborator.shared_occurrences.iter().collect();
+    occurrences.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    for (path, occurrence) in occurrences {
+        let inventory = super::flow_probes::hierarchy_branches(&occurrence.analyzed);
+        elaborator
+            .references
+            .request(&occurrence.source, &occurrence.analyzed, path, &inventory);
+    }
+    let mut root_scope = ScopeMap::for_root(root, selected);
+    let mut inventory = super::flow_probes::hierarchy_branches(selected);
+    root_scope.node_reference_aliases =
+        references::canonicalize_node_references(root, selected, &mut inventory);
+    elaborator
+        .references
+        .request(root, selected, "", &inventory);
+    elaborator
+        .references
+        .extend_inventory(root, selected, "", &mut inventory);
+    if root.reference_context.is_some() {
+        elaborator.bind_root_branches(&mut root_scope, &inventory)?;
+    }
+    elaborator
+        .references
+        .register(root, selected, "", &root_scope)?;
     elaborator.flattened.digital.instances = hierarchy.instances;
-    let root_scope = ScopeMap::for_root(root, selected);
-    let inventory = super::flow_probes::hierarchy_branches(selected);
-    elaborator.references.request(root, selected, "", &inventory);
-    elaborator.references.register(root, selected, "", &root_scope)?;
     elaborator
         .parameter_hierarchy
         .register(root, selected, &root_scope, None)?;
@@ -158,6 +183,7 @@ impl ScopeMap {
     fn for_root(source: &Module, module: &AnalyzedModule) -> Self {
         let mut scope = Self {
             connections: super::node_vectors::ConnectionScope::new(source, module),
+            ground_nodes: module.ground_nodes.clone(),
             parameter_locals: module.parameter_locals.clone(),
             discrete_nets: module
                 .digital
@@ -168,6 +194,11 @@ impl ScopeMap {
             ..Self::default()
         };
         for port in &module.ports {
+            // Root port currents are expanded from the complete flattened
+            // circuit by flow lowering, including descendant contributions.
+            scope
+                .port_flows
+                .insert(port.name.clone(), port.name.clone());
             if scope.discrete_nets.contains(&port.name) {
                 continue;
             }
@@ -208,6 +239,9 @@ impl ScopeMap {
                 discipline: None,
             },
         );
+        for port in &module.physical_nodes.external_ports {
+            scope.port_flows.insert(port.clone(), port.clone());
+        }
         for parameter in &module.parameters {
             scope
                 .parameters
@@ -302,6 +336,89 @@ impl<'a> HierarchyElaborator<'a> {
             specialization_modules,
             specializations: HashMap::new(),
         }
+    }
+
+    fn bind_root_branches(
+        &mut self,
+        scope: &mut ScopeMap,
+        inventory: &super::flow_probes::HierarchyBranches,
+    ) -> CompileResult<()> {
+        for ((pos, neg), span) in &inventory.unnamed {
+            let branch = AnalyzedBranch {
+                name: self.fresh_name("branch"),
+                pos_node: mapped_node_name(scope, pos, *span)?,
+                neg_node: mapped_node_name(scope, neg, *span)?,
+                discipline: scope
+                    .nodes
+                    .get(pos)
+                    .and_then(|node| node.discipline.clone())
+                    .or_else(|| {
+                        scope
+                            .nodes
+                            .get(neg)
+                            .and_then(|node| node.discipline.clone())
+                    })
+                    .unwrap_or_else(|| "electrical".into()),
+            };
+            scope
+                .unnamed_branches
+                .insert((pos.clone(), neg.clone()), branch.clone());
+            self.flattened.branches.push(branch);
+        }
+        // Only physical identities change at the root. Preserve public parameter,
+        // process-local, task and noise names and all existing analog site IDs.
+        let failure = std::cell::RefCell::new(None);
+        let rewrite = |expression: &mut Expression| {
+            if failure.borrow().is_none() {
+                if let Err(error) = rewrite_digital_probes(expression, scope) {
+                    *failure.borrow_mut() = Some(error);
+                } else {
+                    references::repair_derivative_axes(expression);
+                }
+            }
+        };
+        super::flow_probes::rewrite_module_expressions(&mut self.flattened, &rewrite);
+        let contribution = |c: &mut AnalyzedContribution, flat: bool| {
+            if c.declared_branch.is_none() {
+                let (pos, neg) = c.branch.split_once(',').unwrap_or((&c.branch, "0"));
+                if let Some((branch, sign)) = scope.unnamed_branch(pos, neg) {
+                    c.branch = format!("{},{}", branch.pos_node, branch.neg_node).into();
+                    c.declared_branch = Some(branch.name.clone());
+                    if sign < 0.0 {
+                        super::flow_probes::negate_contribution(c, flat);
+                    }
+                }
+            }
+            if let Some(abstol) = &mut c.equation_abstol {
+                rewrite(abstol);
+            }
+        };
+        for c in &mut self.flattened.contributions {
+            contribution(c, true);
+        }
+        let mut pending = vec![self.flattened.body.as_mut_slice()];
+        while let Some(body) = pending.pop() {
+            for region in body {
+                match region {
+                    AnalyzedRegion::Contribution(c) => contribution(c, false),
+                    AnalyzedRegion::Conditional {
+                        then_body,
+                        else_body,
+                        ..
+                    } => {
+                        pending.push(then_body);
+                        pending.push(else_body);
+                    }
+                    AnalyzedRegion::Loop { body, .. }
+                    | AnalyzedRegion::Initialization { body, .. } => pending.push(body),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(error) = failure.into_inner() {
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn finish(mut self) -> CompileResult<AnalyzedModule> {

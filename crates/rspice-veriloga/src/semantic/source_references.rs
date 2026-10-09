@@ -2,6 +2,7 @@
 //! analyze the same target context; physical aliases are linked before HIR.
 use super::elaboration::parameters::{ParameterDependencies, SourceParameters};
 
+pub(super) mod context;
 mod functions;
 mod physical;
 mod unnamed;
@@ -22,168 +23,13 @@ fn error(message: impl Into<String>, span: Span) -> CompileError {
     .into()
 }
 
-/// Refresh the source closure before body checks, including configuration replay.
-/// Catalog templates have no back-reference, so sharing cannot form an Arc cycle.
-pub(crate) fn prepare<'a>(
-    source: &'a SourceFile,
-    disciplines: &DisciplineDb,
-) -> CompileResult<Cow<'a, SourceFile>> {
-    let modules = source
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            Item::Module(module) | Item::ConnectModule(module) => Some(module),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if !modules
-        .iter()
-        .any(|module| !module.pending_hierarchical_references.is_empty())
-    {
-        return Ok(Cow::Borrowed(source));
-    }
-    let mut catalog = HashMap::new();
-    for module in modules {
-        let mut raw = module.clone();
-        raw.reference_sources = None;
-        crate::parser::expand_specialized_generates(&mut raw)?;
-        if let Some(previous) = catalog.insert(raw.name.clone(), raw) {
-            return Err(SemanticError::new(
-                SemanticErrorKind::DuplicateSymbol {
-                    name: module.name.clone(),
-                    first_defined: previous.span,
-                },
-                module.span,
-            )
-            .into());
-        }
-    }
-    let catalog = Arc::new(ReferenceSourceCatalog {
-        modules: catalog,
-        disciplines: disciplines.clone(),
-    });
-    let mut prepared = source.clone();
-    for item in &mut prepared.items {
-        let (Item::Module(module) | Item::ConnectModule(module)) = item else {
-            continue;
-        };
-        *module = catalog.modules[&module.name].clone();
-        module.reference_sources = Some(catalog.clone());
-        bind(module)?;
-    }
-    Ok(Cow::Owned(prepared))
+fn has_references(module: &Module) -> bool {
+    !module.hierarchical_names.is_empty() || !module.pending_hierarchical_references.is_empty()
 }
 
-pub(crate) fn bind(module: &mut Module) -> CompileResult<()> {
-    if module.pending_hierarchical_references.is_empty() {
-        return Ok(());
-    }
-    let Some(sources) = module.reference_sources.clone() else {
-        return Ok(());
-    };
-    let mut resolver = Resolver {
-        sources,
-        frames: vec![Frame::new(module.clone(), "".into(), 0)],
-        children: HashMap::new(),
-        active: HashSet::new(),
-        resolved: HashSet::new(),
-        imports: HashMap::new(),
-        active_imports: HashSet::new(),
-        next_import: 0,
-        builtins: crate::types::FunctionRegistry::new(),
-    };
-    let references = module
-        .pending_hierarchical_references
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
-    for symbol in references {
-        resolver.reference(0, &symbol)?;
-    }
-    *module = resolver.frames.remove(0).source;
-    Ok(())
-}
-
-struct Frame {
-    source: Module,
-    path: SmolStr,
-    depth: usize,
-    instances: HashMap<SmolStr, usize>,
-    root_members: HashSet<SmolStr>,
-    physical: Option<(Module, super::node_vectors::PhysicalNodes)>,
-}
-impl Frame {
-    fn new(source: Module, path: SmolStr, depth: usize) -> Self {
-        let instances = source
-            .instances
-            .iter()
-            .enumerate()
-            .map(|(index, item)| (item.name.clone(), index))
-            .collect();
-        let root_members = source.declared_names();
-        Self {
-            source,
-            path,
-            depth,
-            instances,
-            root_members,
-            physical: None,
-        }
-    }
-    fn member(&self, scope: &[HierarchicalScopeKey], name: &str) -> Option<SmolStr> {
-        if let Some(scope) = self.source.hierarchical_scopes.get(scope) {
-            return scope.members.get(name).cloned();
-        }
-        if scope.is_empty() && self.root_members.contains(name) {
-            Some(name.into())
-        } else {
-            None
-        }
-    }
-    fn has_scope(&self, scope: &[HierarchicalScopeKey], first: &str) -> bool {
-        self.source
-            .hierarchical_scopes
-            .get(scope)
-            .is_some_and(|scope| scope.children.contains(first))
-    }
-}
-
-struct Resolver {
-    sources: Sources,
-    frames: Vec<Frame>,
-    children: HashMap<(usize, SmolStr), usize>,
-    active: HashSet<(usize, SmolStr)>,
-    resolved: HashSet<(usize, SmolStr)>,
-    imports: HashMap<(usize, usize, SmolStr), SmolStr>,
-    active_imports: HashSet<(usize, usize, SmolStr)>,
-    next_import: usize,
-    builtins: crate::types::FunctionRegistry,
-}
-
-impl Resolver {
-    fn reference(&mut self, owner: usize, symbol: &SmolStr) -> CompileResult<()> {
-        let key = (owner, symbol.clone());
-        if self.resolved.contains(&key) {
-            return Ok(());
-        }
-        let reference = self.frames[owner].source.pending_hierarchical_references[symbol].clone();
-        if !self.active.insert(key.clone()) {
-            return Err(error(
-                "cyclic parameter/instance binding",
-                reference.source.span,
-            ));
-        }
-        if self.active.len() > 256 {
-            return Err(error(
-                "parameter binding exceeds the dependency depth limit of 256",
-                reference.source.span,
-            ));
-        }
-        let declarations = self.frames[owner]
-            .source
-            .parameters
-            .iter()
-            .chain(&self.frames[owner].source.localparams);
+fn validate_parameter_references(source: &Module) -> CompileResult<()> {
+    for (symbol, reference) in &source.pending_hierarchical_references {
+        let declarations = source.parameters.iter().chain(&source.localparams);
         for declaration in declarations {
             let mut forbidden = false;
             let mut expressions: Vec<_> = declaration.default.iter().collect();
@@ -219,6 +65,209 @@ impl Resolver {
                     reference.source.span,
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Refresh the source closure before body checks, including configuration replay.
+/// Catalog templates have no back-reference, so sharing cannot form an Arc cycle.
+pub(crate) fn prepare<'a>(
+    source: &'a SourceFile,
+    disciplines: &DisciplineDb,
+    selected: Option<&str>,
+) -> CompileResult<Cow<'a, SourceFile>> {
+    let modules = source
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Module(module) | Item::ConnectModule(module) => Some(module),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !modules.iter().any(|module| has_references(module)) {
+        return Ok(Cow::Borrowed(source));
+    }
+    let root = selected
+        .and_then(|name| modules.iter().find(|module| module.name == name))
+        .map(|module| {
+            let mut root = module
+                .reference_sources
+                .as_ref()
+                .and_then(|sources| {
+                    sources
+                        .design
+                        .as_ref()
+                        .filter(|design| Some(design.root.as_str()) == selected)
+                        .map(|design| &design.root_source)
+                        .or_else(|| sources.modules.get(&module.name))
+                })
+                .unwrap_or(module)
+                .clone();
+            root.reference_sources = None;
+            root.reference_context = None;
+            root
+        });
+    let mut catalog = HashMap::new();
+    for module in modules {
+        let mut raw = module
+            .reference_sources
+            .as_ref()
+            .and_then(|sources| sources.modules.get(&module.name))
+            .unwrap_or(module)
+            .clone();
+        raw.reference_sources = None;
+        raw.reference_context = None;
+        if let Some(defaults) = raw.unspecialized_parameters.take() {
+            raw.parameters = defaults;
+        }
+        // Diagnose illegal declaration references before constant processing can
+        // encounter their still-unbound private names.
+        validate_parameter_references(&raw)?;
+        crate::parser::expand_specialized_generates(&mut raw)?;
+        validate_parameter_references(&raw)?;
+        if let Some(previous) = catalog.insert(raw.name.clone(), raw) {
+            if previous.span == module.span && Some(module.name.as_str()) == selected {
+                continue;
+            }
+            return Err(SemanticError::new(
+                SemanticErrorKind::DuplicateSymbol {
+                    name: module.name.clone(),
+                    first_defined: previous.span,
+                },
+                module.span,
+            )
+            .into());
+        }
+    }
+    let catalog = Arc::new(ReferenceSourceCatalog {
+        modules: catalog,
+        disciplines: disciplines.clone(),
+        design: None,
+    });
+    if let Some(mut root) = root {
+        crate::parser::expand_specialized_generates(&mut root)?;
+        return context::prepare(source, catalog, root).map(Cow::Owned);
+    }
+    let mut prepared = source.clone();
+    for item in &mut prepared.items {
+        let (Item::Module(module) | Item::ConnectModule(module)) = item else {
+            continue;
+        };
+        *module = catalog.modules[&module.name].clone();
+        module.reference_sources = Some(catalog.clone());
+        bind(module)?;
+    }
+    Ok(Cow::Owned(prepared))
+}
+
+pub(crate) fn bind(module: &mut Module) -> CompileResult<()> {
+    if module.pending_hierarchical_references.is_empty() {
+        return Ok(());
+    }
+    let Some(sources) = module.reference_sources.clone() else {
+        return Ok(());
+    };
+    let (mut resolver, owner) = context::resolver(sources, module)?;
+    let references = module
+        .pending_hierarchical_references
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    for symbol in references {
+        resolver.reference(owner, &symbol)?;
+    }
+    let sources = module.reference_sources.clone();
+    *module = resolver.frames.swap_remove(owner).source;
+    module.reference_sources = sources;
+    Ok(())
+}
+
+struct Frame {
+    source: Module,
+    path: SmolStr,
+    depth: usize,
+    parent: Option<usize>,
+    parent_scope: Vec<HierarchicalScopeKey>,
+    instance_name: SmolStr,
+    specialization: Vec<(usize, String)>,
+    instances: HashMap<SmolStr, usize>,
+    root_members: HashSet<SmolStr>,
+    physical: Option<(Module, super::node_vectors::PhysicalNodes)>,
+}
+impl Frame {
+    fn new(source: Module, path: SmolStr, depth: usize) -> Self {
+        let instances = source
+            .instances
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.name.clone(), index))
+            .collect();
+        let root_members = source.declared_names();
+        let instance_name = source.name.clone();
+        Self {
+            source,
+            path,
+            depth,
+            parent: None,
+            parent_scope: Vec::new(),
+            instance_name,
+            specialization: Vec::new(),
+            instances,
+            root_members,
+            physical: None,
+        }
+    }
+    fn member(&self, scope: &[HierarchicalScopeKey], name: &str) -> Option<SmolStr> {
+        if let Some(scope) = self.source.hierarchical_scopes.get(scope) {
+            return scope.members.get(name).cloned();
+        }
+        if scope.is_empty() && self.root_members.contains(name) {
+            Some(name.into())
+        } else {
+            None
+        }
+    }
+    fn has_scope(&self, scope: &[HierarchicalScopeKey], first: &str) -> bool {
+        self.source
+            .hierarchical_scopes
+            .get(scope)
+            .is_some_and(|scope| scope.children.contains(first))
+    }
+}
+
+struct Resolver {
+    sources: Sources,
+    selected: bool,
+    building: HashSet<(usize, SmolStr)>,
+    frames: Vec<Frame>,
+    children: HashMap<(usize, SmolStr), usize>,
+    active: HashSet<(usize, SmolStr)>,
+    resolved: HashSet<(usize, SmolStr)>,
+    imports: HashMap<(usize, usize, SmolStr), SmolStr>,
+    active_imports: HashSet<(usize, usize, SmolStr)>,
+    next_import: usize,
+    builtins: crate::types::FunctionRegistry,
+}
+
+impl Resolver {
+    fn reference(&mut self, owner: usize, symbol: &SmolStr) -> CompileResult<()> {
+        let key = (owner, symbol.clone());
+        if self.resolved.contains(&key) {
+            return Ok(());
+        }
+        let reference = self.frames[owner].source.pending_hierarchical_references[symbol].clone();
+        if !self.active.insert(key.clone()) {
+            return Err(error(
+                "cyclic parameter/instance binding",
+                reference.source.span,
+            ));
+        }
+        if self.active.len() > 256 {
+            return Err(error(
+                "parameter binding exceeds the dependency depth limit of 256",
+                reference.source.span,
+            ));
         }
         if let Some(branch) = &reference.source.branch {
             let (target, scope) = self.target_scope(owner, &reference)?;
@@ -388,12 +437,7 @@ impl Resolver {
         target: usize,
         dependencies: ParameterDependencies,
     ) {
-        let target_path = &self.frames[target].path;
-        let owner_path = &self.frames[owner].path;
-        let relative = target_path
-            .strip_prefix(owner_path.as_str())
-            .expect("reference target is a descendant")
-            .trim_start_matches('.');
+        let relative = self.reference_path(owner, target);
         let qualify = |name: SmolStr| -> SmolStr {
             if relative.is_empty() {
                 name
@@ -444,31 +488,8 @@ impl Resolver {
         reference: &ScopedHierarchicalReference,
     ) -> CompileResult<(usize, Vec<HierarchicalScopeKey>)> {
         let span = reference.source.span;
-        if reference.source.absolute {
-            return Err(error(
-                "absolute $root paths require selected-design occurrence binding",
-                span,
-            ));
-        }
-        let first = &reference.scopes[0];
-        let mut scope = (0..=reference.origin.len())
-            .rev()
-            .map(|depth| reference.origin[..depth].to_vec())
-            .find(|scope| {
-                self.frames[owner].member(scope, &first.name).is_some()
-                    || self.frames[owner].has_scope(scope, &first.name)
-            })
-            .ok_or_else(|| {
-                error(
-                    format!(
-                        "scope `{}` is not declared in this module or its generated ancestors",
-                        first.name
-                    ),
-                    span,
-                )
-            })?;
-        let mut frame = owner;
-        for key in &reference.scopes {
+        let (mut frame, mut scope, consumed) = self.start_scope(owner, reference)?;
+        for key in &reference.scopes[consumed..] {
             if let Some(member) = self.frames[frame].member(&scope, &key.name) {
                 let instance = self.frames[frame]
                     .instances
@@ -518,6 +539,23 @@ impl Resolver {
         if let Some(index) = self.children.get(&identity) {
             return Ok(*index);
         }
+        if !self.building.insert(identity.clone()) {
+            return Err(error(
+                format!(
+                    "cyclic parameter binding while constructing instance `{}`",
+                    instance.name
+                ),
+                span,
+            ));
+        }
+        let child = self.build_child(parent, ordinal, span)?;
+        self.building.remove(&identity);
+        self.children.insert(identity, child);
+        Ok(child)
+    }
+
+    fn build_child(&mut self, parent: usize, ordinal: usize, span: Span) -> CompileResult<usize> {
+        let instance = self.frames[parent].source.instances[ordinal].clone();
         // Overrides can read another occurrence's parameter. Resolve those reads
         // first and detect cycles rather than depending on declaration order.
         let mut references = std::collections::BTreeSet::new();
@@ -583,6 +621,7 @@ impl Resolver {
         let parent_source = &self.frames[parent].source;
         let constants = DigitalConstants::from_module(parent_source);
         let mut child = source.clone();
+        let mut specialization = Vec::new();
         for (index, expression) in overrides {
             let value = super::instance_parameters::close_override(
                 &source.parameters[index],
@@ -591,15 +630,59 @@ impl Resolver {
                 parent_source.time_scale,
             )
             .map_err(|detail| error(format!("instance `{path}`: {detail}"), span))?;
+            specialization.push((
+                index,
+                super::instance_parameters::override_identity(&value)
+                    .map_err(|detail| error(detail, span))?,
+            ));
             child.parameters[index].default = Some(value);
             child.parameters[index].is_given = true;
         }
         child.reference_sources = None;
         crate::parser::expand_specialized_generates(&mut child)?;
+        validate_parameter_references(&child)?;
         let index = self.frames.len();
-        self.frames
-            .push(Frame::new(child, path, self.frames[parent].depth + 1));
-        self.children.insert(identity, index);
+        if self.selected {
+            child.reference_context = Some(path.clone());
+        }
+        let mut frame = Frame::new(child, path, self.frames[parent].depth + 1);
+        frame.parent = Some(parent);
+        frame.specialization = specialization;
+        frame.instance_name = instance.name.clone();
+        if let Some((scope, name)) = self.frames[parent]
+            .source
+            .hierarchical_scopes
+            .iter()
+            .find_map(|(scope, declarations)| {
+                declarations
+                    .members
+                    .iter()
+                    .find(|(_, concrete)| **concrete == instance.name)
+                    .map(|(name, _)| (scope.clone(), name.clone()))
+            })
+        {
+            frame.parent_scope = scope;
+            frame.instance_name = name;
+        }
+        if self.selected {
+            let mut ancestor = Some(parent);
+            while let Some(i) = ancestor {
+                let previous = &self.frames[i];
+                if previous.source.name == frame.source.name
+                    && previous.specialization == frame.specialization
+                {
+                    return Err(error(
+                        format!(
+                            "recursive module hierarchy at instance `{}` repeats ancestor `{}`",
+                            frame.path, previous.path
+                        ),
+                        span,
+                    ));
+                }
+                ancestor = previous.parent;
+            }
+        }
+        self.frames.push(frame);
         Ok(index)
     }
 }

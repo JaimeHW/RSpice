@@ -14,6 +14,7 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 154 binds upward and absolute references in concrete selected occurrences.
 /// Version 153 binds explicit hierarchical unnamed branches and contribution restrictions.
 /// Version 152 binds descendant physical references to shared occurrence storage.
 /// Version 148 preserves generated analog order and directly nested scope identities.
@@ -141,7 +142,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 153;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 154;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

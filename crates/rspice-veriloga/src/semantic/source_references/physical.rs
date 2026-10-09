@@ -36,12 +36,7 @@ impl Resolver {
         }
         let (expanded, nodes) = self.frames[target].physical.as_ref().unwrap();
         let source = &self.frames[target].source;
-        let path: SmolStr = self.frames[target]
-            .path
-            .strip_prefix(self.frames[owner].path.as_str())
-            .expect("descendant reference")
-            .trim_start_matches('.')
-            .into();
+        let path = self.reference_path(owner, target);
         if let Some(mut branch) = source.branches.iter().find(|b| b.name == *name).cloned() {
             let lanes = nodes.reference_lanes(name, true);
             let constants = DigitalConstants::from_module(source);

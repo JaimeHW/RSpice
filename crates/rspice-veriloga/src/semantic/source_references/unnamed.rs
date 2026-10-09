@@ -47,12 +47,7 @@ impl Resolver {
                     )
                 })
                 .collect();
-            let path = self.frames[target]
-                .path
-                .strip_prefix(self.frames[owner].path.as_str())
-                .expect("descendant branch owner")
-                .trim_start_matches('.')
-                .into();
+            let path = self.reference_path(owner, target);
             self.frames[owner].source.foreign_physical.insert(
                 symbol.clone(),
                 ForeignPhysicalReference {
@@ -193,12 +188,7 @@ impl Resolver {
             scale,
             span,
         )?;
-        let path: SmolStr = self.frames[target]
-            .path
-            .strip_prefix(self.frames[branch_owner].path.as_str())
-            .expect("descendant endpoint")
-            .trim_start_matches('.')
-            .into();
+        let path = self.reference_path(branch_owner, target);
         let nodes = lanes
             .into_iter()
             .map(|name| {

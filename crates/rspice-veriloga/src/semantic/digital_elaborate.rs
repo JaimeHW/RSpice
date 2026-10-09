@@ -176,8 +176,9 @@ pub(super) struct ElaboratedHierarchy {
     pub occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
 }
 
-/// Include analog containers of digital descendants, including currently inactive
-/// generate arms. Pure analog subtrees keep their symbolic parameter-array path.
+/// Include analog containers of digital descendants and all concrete source
+/// occurrences needed by hierarchical references, including inactive templates.
+/// Other pure analog subtrees retain their symbolic parameter-array path.
 pub(super) fn digital_subtrees(
     analyzed: &AnalyzedFile,
     sources: &HashMap<SmolStr, &Module>,
@@ -188,7 +189,8 @@ pub(super) fn digital_subtrees(
     for (name, source) in sources {
         let mut modules = vec![*source];
         while let Some(module) = modules.pop() {
-            if module.has_digital_content()
+            if module.reference_context.is_some()
+                || module.has_digital_content()
                 || module
                     .nets
                     .iter()
@@ -412,14 +414,31 @@ const MAX_DIGITAL_HIERARCHY_INSTANCES: usize = 65_536;
 pub(super) struct SpecializationKey {
     module: SmolStr,
     overrides: Vec<(usize, String)>,
+    context: Option<SmolStr>,
 }
 
 impl SpecializationKey {
-    pub(super) fn root(module: SmolStr) -> Self {
-        Self {
-            module,
-            overrides: Vec::new(),
-        }
+    pub(super) fn same_specialization(&self, other: &Self) -> bool {
+        self.module == other.module && self.overrides == other.overrides
+    }
+    pub(super) fn root(source: &Module) -> CompileResult<Self> {
+        let overrides = source
+            .parameters
+            .iter()
+            .enumerate()
+            .filter(|(_, parameter)| parameter.is_given)
+            .filter_map(|(index, parameter)| parameter.default.as_ref().map(|value| (index, value)))
+            .map(|(index, value)| {
+                super::instance_parameters::override_identity(value)
+                    .map(|identity| (index, identity))
+                    .map_err(internal_error)
+            })
+            .collect::<CompileResult<Vec<_>>>()?;
+        Ok(Self {
+            module: source.name.clone(),
+            overrides,
+            context: source.reference_context.clone(),
+        })
     }
 }
 
@@ -434,10 +453,7 @@ struct HierarchyFrame {
 impl DigitalElaborator<'_> {
     fn append_instances(&mut self, source: &Module, scope: Scope) -> CompileResult<()> {
         let mut stack = vec![HierarchyFrame {
-            key: SpecializationKey {
-                module: source.name.clone(),
-                overrides: Vec::new(),
-            },
+            key: SpecializationKey::root(source)?,
             path: "".into(),
             scope,
             pending: source.instances.clone().into_iter(),
@@ -512,7 +528,10 @@ impl DigitalElaborator<'_> {
             parent_scope.time_scale,
             path,
         )?;
-        if let Some(first) = ancestors.iter().position(|frame| frame.key == key) {
+        if let Some(first) = ancestors
+            .iter()
+            .position(|frame| frame.key.same_specialization(&key))
+        {
             let mut cycle: Vec<_> = ancestors[first..]
                 .iter()
                 .map(|frame| frame.key.module.as_str())
@@ -602,6 +621,8 @@ impl DigitalElaborator<'_> {
         let (signals, mut scope, port_drivers, bit_aliases) =
             self.bind_ports(instance, child, parent_scope, path, &borrowed)?;
         scope.connections = super::node_vectors::ConnectionScope::new(child_source, child);
+        scope.constants = super::DigitalConstants::from_module(child_source);
+        scope.time_scale = child_source.time_scale;
 
         // A continuous assignment driving one of the child's own `input` ports
         // is *not* checked here. Semantic analysis refuses it on the module
@@ -972,12 +993,14 @@ pub(super) fn specialize_module(
     time_scale: crate::time_scale::ModuleTimeScale,
     path: &str,
 ) -> CompileResult<(SpecializationKey, Option<std::sync::Arc<SpecializedModule>>)> {
-    if instance.parameters.is_empty() {
+    let occurrence = super::source_references::context::occurrence(source, path);
+    if instance.parameters.is_empty() && occurrence.is_none() {
         validate_parameter_ranges(source, path)?;
         return Ok((
             SpecializationKey {
                 module: instance.module.clone(),
                 overrides: Vec::new(),
+                context: None,
             },
             None,
         ));
@@ -1015,17 +1038,21 @@ pub(super) fn specialize_module(
     let key = SpecializationKey {
         module: instance.module.clone(),
         overrides: key,
+        context: occurrence.as_ref().map(|_| path.into()),
     };
     if let Some(specialized) = cache.get(&key) {
         return Ok((key, Some(specialized.clone())));
     }
-    let mut source = source.clone();
-    for (index, value) in values {
-        source.parameters[index].default = Some(value);
-        source.parameters[index].is_given = true;
+    let has_occurrence = occurrence.is_some();
+    let mut source = occurrence.unwrap_or_else(|| source.clone());
+    if !has_occurrence {
+        for (index, value) in values {
+            source.parameters[index].default = Some(value);
+            source.parameters[index].is_given = true;
+        }
+        crate::parser::expand_specialized_generates(&mut source)?;
     }
     validate_parameter_ranges(&source, path)?;
-    crate::parser::expand_specialized_generates(&mut source)?;
     let mut analyzer = super::SemanticAnalyzer::new();
     analyzer.disciplines = analyzed.disciplines.clone();
     analyzer.current_default_transition = child.default_transition;

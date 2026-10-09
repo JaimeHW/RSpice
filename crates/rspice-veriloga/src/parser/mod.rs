@@ -4567,6 +4567,8 @@ pub(crate) fn expand_specialized_generates(module: &mut Module) -> crate::error:
     let mut expanded = template.module.clone();
     expanded.parameters = module.parameters.clone();
     expanded.reference_sources = module.reference_sources.clone();
+    expanded.reference_context = module.reference_context.clone();
+    expanded.unspecialized_parameters = module.unspecialized_parameters.clone();
     let mut next_process_id = template.next_process_id;
     generate::expand(&mut expanded, &mut next_process_id)?;
     expanded.generate_template = Some(template.clone());

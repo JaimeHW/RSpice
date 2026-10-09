@@ -13,12 +13,12 @@ pub(super) struct UnnamedReferences {
     targets: BTreeMap<Key, (SmolStr, i8)>,
 }
 
-fn qualify_node(owner: &str, node: &ForeignPhysicalNode) -> ForeignPhysicalNode {
+fn qualify_node(source: &Module, owner: &str, node: &ForeignPhysicalNode) -> ForeignPhysicalNode {
     if node.name == "0" && node.path.is_empty() {
         return node.clone();
     }
     ForeignPhysicalNode {
-        path: qualify(owner, &node.path),
+        path: reference_path(source, owner, &node.path),
         name: node.name.clone(),
     }
 }
@@ -50,7 +50,7 @@ fn local_aliases(
             aliases.insert(
                 lane,
                 ForeignPhysicalNode {
-                    path: qualify(owner, &reference.path),
+                    path: reference_path(source, owner, &reference.path),
                     name: target.clone(),
                 },
             );
@@ -92,7 +92,7 @@ impl UnnamedReferences {
             let ForeignPhysicalKind::Unnamed { pairs } = &reference.kind else {
                 continue;
             };
-            let path = qualify(owner, &reference.path);
+            let path = reference_path(source, owner, &reference.path);
             self.owners.insert(path.clone());
             for (alias, (pos, neg)) in module
                 .physical_nodes
@@ -100,7 +100,11 @@ impl UnnamedReferences {
                 .iter()
                 .zip(pairs)
             {
-                let (key, _) = key(&path, qualify_node(&path, pos), qualify_node(&path, neg));
+                let (key, _) = key(
+                    &path,
+                    qualify_node(source, &path, pos),
+                    qualify_node(source, &path, neg),
+                );
                 let entry = self.requested.entry(key).or_insert((reference.span, false));
                 entry.1 |= inventory.conducting_named.contains(alias);
             }
@@ -153,9 +157,13 @@ impl UnnamedReferences {
                     "foreign unnamed branch changed shape".into(),
                 ));
             }
-            let path = qualify(owner, &reference.path);
+            let path = reference_path(source, owner, &reference.path);
             for (alias, (pos, neg)) in aliases.iter().zip(pairs) {
-                let (key, sign) = key(&path, qualify_node(&path, pos), qualify_node(&path, neg));
+                let (key, sign) = key(
+                    &path,
+                    qualify_node(source, &path, pos),
+                    qualify_node(source, &path, neg),
+                );
                 let name = scope
                     .branches
                     .get(alias)

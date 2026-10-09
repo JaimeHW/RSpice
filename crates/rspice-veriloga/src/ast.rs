@@ -227,6 +227,10 @@ pub struct Module {
     pub(crate) pending_hierarchical_references: std::collections::BTreeMap<SmolStr, ScopedHierarchicalReference>,
     /// Source declarations shared by concrete reference specializations.
     pub(crate) reference_sources: Option<std::sync::Arc<ReferenceSourceCatalog>>,
+    /// Concrete path below the selected HDL root, when analyzed in a design.
+    pub(crate) reference_context: Option<SmolStr>,
+    /// Authored defaults before an external override selects this module as root.
+    pub(crate) unspecialized_parameters: Option<Vec<ParameterDecl>>,
     pub(crate) foreign_physical: std::collections::BTreeMap<SmolStr, ForeignPhysicalReference>,
     pub(crate) hierarchical_parameter_values: std::collections::HashSet<SmolStr>,
     pub(crate) hierarchical_parameter_given: std::collections::HashSet<SmolStr>,
@@ -322,6 +326,8 @@ impl Module {
             hierarchical_scopes: Default::default(),
             pending_hierarchical_references: Default::default(),
             reference_sources: None,
+            reference_context: None,
+            unspecialized_parameters: None,
             foreign_physical: Default::default(),
             hierarchical_parameter_values: Default::default(),
             hierarchical_parameter_given: Default::default(),
@@ -336,6 +342,15 @@ impl Module {
 pub(crate) struct ReferenceSourceCatalog {
     pub modules: std::collections::HashMap<SmolStr, Module>,
     pub disciplines: crate::disciplines::DisciplineDb,
+    pub design: Option<ReferenceDesign>,
+}
+
+/// Bound source occurrences, without back-references to their owning catalog.
+#[derive(Clone, Debug)]
+pub(crate) struct ReferenceDesign {
+    pub root: SmolStr,
+    pub root_source: Module,
+    pub occurrences: std::collections::HashMap<SmolStr, Module>,
 }
 
 #[derive(Clone, Debug)]
@@ -354,6 +369,7 @@ impl ForeignPhysicalKind {
 /// A net identity before connections collapse module boundaries.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ForeignPhysicalNode {
+    /// Root-relative in a selected context, otherwise relative to the branch owner.
     pub path: SmolStr,
     pub name: SmolStr,
 }
@@ -361,6 +377,7 @@ pub(crate) struct ForeignPhysicalNode {
 /// A borrowed declaration, resolved to existing occurrence storage before HIR.
 #[derive(Clone, Debug)]
 pub(crate) struct ForeignPhysicalReference {
+    /// Root-relative in a selected context, otherwise relative to the caller.
     pub path: SmolStr,
     pub lanes: Vec<SmolStr>,
     pub kind: ForeignPhysicalKind,

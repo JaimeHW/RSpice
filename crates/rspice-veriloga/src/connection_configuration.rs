@@ -104,12 +104,12 @@ impl ConnectionConfiguration {
             measurements.checkpoint(PipelinePhase::Parse)?;
             let mut library = Parser::new(&tokens).parse()?;
             measurements.checkpoint(PipelinePhase::Semantic)?;
-            let library_analysis = SemanticAnalyzer::new().analyze(&library)?;
-            library_analysis
-                .connect_rules
+            let (library_disciplines, library_rules) =
+                SemanticAnalyzer::new().connection_definitions(&library)?;
+            library_rules
                 .select_block(&self.block)
                 .map_err(|error| CompileError::ModuleSelection(error.to_string()))?;
-            compatible_physics(&analyzed.disciplines, &library_analysis.disciplines)?;
+            compatible_physics(&analyzed.disciplines, &library_disciplines)?;
             retain_selected_rules(&mut library.items, &self.block);
             let mut combined = analyzed.source.clone();
             // The selected external library owns connection declarations. The
@@ -167,7 +167,8 @@ impl ConnectionConfiguration {
                 }
                 combined.items.push(item);
             }
-            SemanticAnalyzer::new().analyze(&combined)?
+            SemanticAnalyzer::new()
+                .analyze_selected(&combined, analyzed.selected_root.as_deref())?
         };
         configured.source_specialization = analyzed.source_specialization.clone();
         configured.connection_configuration = Some(Box::new(self.clone()));

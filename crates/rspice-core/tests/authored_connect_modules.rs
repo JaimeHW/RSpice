@@ -3061,3 +3061,119 @@ endmodule
         );
     }
 }
+
+#[test]
+fn foreign_upward_values_use_each_occurrence_and_the_selected_root() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module constants;
+ parameter real K=99;
+endmodule
+module leaf(output electrical p,q,r,s);
+ real sampled=0;
+ initial #0.5 sampled=parent.G+sibling.K+$root.top.BASE;
+ analog begin
+   V(p)<+parent.G;
+   V(q)<+sibling.K;
+   V(r)<+parent.scale(2);
+   V(s)<+sampled;
+ end
+endmodule
+module parent(output electrical p,q,r,s);
+ parameter real G=5;
+ analog function real scale;
+   input x; real x;
+   begin scale=x+G; end
+ endfunction
+ constants #(.K(G+1)) sibling();
+ leaf l(p,q,r,s);
+endmodule
+module top(output electrical p,q,r,s,t,u,v,w);
+ parameter real BASE=2;
+ parent #(.G(BASE)) a(p,q,r,s);
+ parent b(t,u,v,w);
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* occurrence-relative values\nX1 p q r s t u v w top\nX2 a b c d e f g h top BASE=4\n.va \"{}\" top module=top\n.end\n", source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 2.0),
+        ("q", 3.0),
+        ("r", 4.0),
+        ("s", 7.0),
+        ("t", 5.0),
+        ("u", 6.0),
+        ("v", 7.0),
+        ("w", 13.0),
+        ("a", 4.0),
+        ("b", 5.0),
+        ("c", 6.0),
+        ("d", 13.0),
+        ("e", 5.0),
+        ("f", 6.0),
+        ("g", 7.0),
+        ("h", 15.0),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}
+
+#[test]
+fn foreign_upward_physical_references_share_root_branches_and_boundary_current() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module observer(output electrical q,r,s,t,u);
+ real sampled=0;
+ initial #0.5 sampled=1000*I($root.top.branch(p));
+ analog begin
+   I(top.branch(p))<+0.5m;
+   I(top.supply)<+1m;
+   V(q)<+1000*I(top.supply);
+   V(r)<+1000*I($root.top.branch(0,p));
+   V(s)<+1000*I(<top.p>);
+   V(t)<+sampled;
+   V(u)<+ddx(V(top.branch(0,p))*V(top.branch(0,p)),V(top.branch(0,p)));
+ end
+endmodule
+module top(output electrical p,q,r,s,t,u);
+ parameter real BASE=4;
+ branch(p) supply;
+ observer o(q,r,s,t,u);
+ analog begin I(p)<+(V(p)-BASE)/1000; I(supply)<+V(p)/2000; end
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* upward shared physical state\nX1 p q r s t u top\nX2 a b c d e f top BASE=8\nR1 p 0 1k\nR2 a 0 1k\n.va \"{}\" top module=top\n.end\n", source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 1.0),
+        ("q", 1.5),
+        ("r", 2.5),
+        ("s", -1.0),
+        ("t", -2.5),
+        ("u", -2.0),
+        ("a", 2.6),
+        ("b", 2.3),
+        ("c", 4.9),
+        ("d", -2.6),
+        ("e", -4.9),
+        ("f", -5.2),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}

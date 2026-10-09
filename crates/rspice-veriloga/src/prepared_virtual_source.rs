@@ -9,11 +9,12 @@ use crate::{
     VirtualSourceInclude,
 };
 
-/// An immutable, analyzed virtual root with its exact active dependency graph.
+/// An immutable virtual source closure with its exact active dependency graph.
 ///
 /// This supports standalone connection libraries with no ordinary modules.
-/// Repeated module emission reuses the same analyzed tree, compiler options,
-/// source identities and diagnostic map, without reprocessing the bundle.
+/// Module emission reuses parsing, compiler options, source identities and the
+/// diagnostic map without reprocessing the bundle. Bodies needing occurrence
+/// context are analyzed after selecting the executable module.
 /// Keep this object scoped to elaboration rather than a global cache.
 #[derive(Debug)]
 pub struct PreparedVirtualSource {
@@ -181,6 +182,10 @@ impl PreparedVirtualSource {
             control,
         );
         *measurements.metrics_mut() = self.prepared.metrics.clone();
+        let selected = self
+            .prepared
+            .analysis_for_module(module_name, &mut measurements)
+            .map_err(|error| self.diagnose(error))?;
         let configured;
         let analyzed = if let Some(configuration) = configuration {
             measurements
@@ -207,15 +212,11 @@ impl PreparedVirtualSource {
             measurements.metrics_mut().preprocessed_bytes =
                 crate::metrics::usize_to_u64(expanded_bytes);
             configured = configuration
-                .apply(
-                    &self.prepared.source,
-                    &self.prepared.analyzed,
-                    &mut measurements,
-                )
+                .apply(&self.prepared.source, &selected, &mut measurements)
                 .map_err(|error| self.diagnose_with_connections(error, Some(configuration)))?;
             &configured
         } else {
-            &self.prepared.analyzed
+            &selected
         };
         let runtime = compiler
             .compile_runtime_analyzed_measured(
@@ -314,7 +315,12 @@ impl VerilogACompiler {
         measurements.metrics_mut().dependency_count =
             crate::metrics::usize_to_u64(dependency_closure.len());
         let analyzed = self
-            .analyze_preprocessed(bundle.root_path(), &preprocessed.source, &mut measurements)
+            .analyze_preprocessed(
+                bundle.root_path(),
+                &preprocessed.source,
+                None,
+                &mut measurements,
+            )
             .map_err(|error| {
                 VirtualRuntimeCompileFailure::from_compiler(
                     error,

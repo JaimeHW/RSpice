@@ -1139,7 +1139,7 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<(CompiledModel, Vec<CompileDiagnostic>)> {
-        let analyzed = self.analyze_preprocessed("<input>", source, measurements)?;
+        let analyzed = self.analyze_preprocessed("<input>", source, module_name, measurements)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
 
         // Phase 4 & 5: IR generation and code generation
@@ -1166,9 +1166,16 @@ impl VerilogACompiler {
         &self,
         source_package: &str,
         source: &str,
+        module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<semantic::AnalyzedFile> {
-        self.analyze_preprocessed_with_parameters(source_package, source, None, &[], measurements)
+        self.analyze_preprocessed_with_parameters(
+            source_package,
+            source,
+            module_name,
+            &[],
+            measurements,
+        )
     }
 
     fn analyze_preprocessed_with_parameters(
@@ -1228,6 +1235,7 @@ impl VerilogACompiler {
                         "parameter specialization requires a selected module".into(),
                     )
                 })?;
+            selected.unspecialized_parameters = Some(selected.parameters.clone());
             let mut seen = std::collections::HashSet::new();
             for (name, value) in parameters {
                 let canonical = selected
@@ -1272,7 +1280,11 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::Semantic)?;
         trace_compiler_phase(trace, &target, "semantic", None, None);
         let phase_started = web_time::Instant::now();
-        let mut analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+        let mut analyzed = if module_name.is_some() {
+            SemanticAnalyzer::new().analyze_selected(&source_file, module_name)?
+        } else {
+            SemanticAnalyzer::new().prepare_source(&source_file)?
+        };
         analyzed.source_specialization = source_specialization;
         measurements.record(PipelinePhase::Semantic, phase_started.elapsed())?;
         measurements.metrics_mut().module_count = metrics::usize_to_u64(analyzed.modules.len());
@@ -1295,7 +1307,8 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         measurements: &mut metrics::MetricsRecorder,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
-        let analyzed = self.analyze_preprocessed(source_package, source, measurements)?;
+        let analyzed =
+            self.analyze_preprocessed(source_package, source, module_name, measurements)?;
         self.build_canonical_ir_artifact(
             source_package,
             source,
@@ -1504,7 +1517,7 @@ impl VerilogACompiler {
             source
                 .items
                 .insert(index + 1, ast::Item::Module(module.clone()));
-            let mut promoted = SemanticAnalyzer::new().analyze(&source)?;
+            let mut promoted = SemanticAnalyzer::new().analyze_selected(&source, Some(name))?;
             promoted.connection_configuration = analyzed.connection_configuration.clone();
             promoted.source_specialization = analyzed.source_specialization.clone();
             let selected = self.select_analyzed_module(&promoted, Some(name))?;
@@ -1655,15 +1668,17 @@ impl VerilogACompiler {
                 disciplines: SemanticAnalyzer::new().physical_definitions(&source_file)?,
             });
         }
-        let mut analyzer = SemanticAnalyzer::new();
-        let analyzed = analyzer.analyze(&source_file)?;
+        let (disciplines, rules) = SemanticAnalyzer::new().connection_definitions(&source_file)?;
         Ok(ConnectSpecification {
             source_identity: canonical_ir::source_identity(source),
             source: Some(std::sync::Arc::from(source)),
             builtin_delegations: connect::library::equivalent_declarations(source, &source_file),
-            declares_module: !analyzed.modules.is_empty(),
-            rules: analyzed.connect_rules,
-            disciplines: analyzed.disciplines,
+            declares_module: source_file
+                .items
+                .iter()
+                .any(|item| matches!(item, ast::Item::Module(_))),
+            rules,
+            disciplines,
         })
     }
 
@@ -1886,8 +1901,12 @@ impl VerilogACompiler {
         // identical source package does not change the canonical artifact.
         let diagnostic_source = source_package_path.display().to_string();
         let source_package = self.logical_file_source_package(&source_package_path);
-        let analyzed =
-            self.analyze_preprocessed(&diagnostic_source, &preprocessed, &mut measurements)?;
+        let analyzed = self.analyze_preprocessed(
+            &diagnostic_source,
+            &preprocessed,
+            module_name,
+            &mut measurements,
+        )?;
         let artifact = self.build_canonical_ir_artifact(
             &source_package,
             &preprocessed,
@@ -2029,7 +2048,12 @@ impl VerilogACompiler {
         let diagnostic_source = source_package_path.display().to_string();
         let source_package = self.logical_file_source_package(&source_package_path);
         let analyzed = self
-            .analyze_preprocessed(&diagnostic_source, &preprocessed.source, &mut measurements)
+            .analyze_preprocessed(
+                &diagnostic_source,
+                &preprocessed.source,
+                None,
+                &mut measurements,
+            )
             .map_err(|source| ProviderCompileError::Compile {
                 diagnostics: source_diagnostics::provider_diagnostics(
                     &source,
@@ -2078,21 +2102,15 @@ impl VerilogACompiler {
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         // External libraries may add helper modules. Resolve an implicit root
         // against the device closure before those helpers enter its namespace.
-        let module_name = match module_name {
-            Some(name) => Some(name),
-            None => Some(
-                self.select_analyzed_module(&prepared.analyzed, None)?
-                    .name
-                    .as_str(),
-            ),
-        };
+        let module_name = Some(prepared.resolved_module(module_name)?);
+        let selected = prepared.analysis_for_module(module_name.unwrap(), &mut measurements)?;
         let analyzed = match configuration {
             Some(configuration) => std::borrow::Cow::Owned(configuration.apply(
                 &prepared.source,
-                &prepared.analyzed,
+                &selected,
                 &mut measurements,
             )?),
-            None => std::borrow::Cow::Borrowed(&prepared.analyzed),
+            None => selected,
         };
         let executable = self.select_executable_module(&analyzed, module_name)?;
         let source_digest = canonical_ir::StableDigest::from_text(&prepared.source).as_hex();

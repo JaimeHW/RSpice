@@ -285,9 +285,21 @@ impl ParameterHierarchy {
         // Foreign constant reads are immutable in this occurrence's body. Their
         // dependencies must propagate through the target's override edges too.
         self.foreign_roots
-            .extend(source.hierarchical_parameter_values.iter().map(qualify));
+            .extend(source.hierarchical_parameter_values.iter().map(|name| {
+                if source.reference_context.is_some() {
+                    name.clone()
+                } else {
+                    qualify(name)
+                }
+            }));
         self.foreign_given_roots
-            .extend(source.hierarchical_parameter_given.iter().map(qualify));
+            .extend(source.hierarchical_parameter_given.iter().map(|name| {
+                if source.reference_context.is_some() {
+                    name.clone()
+                } else {
+                    qualify(name)
+                }
+            }));
         // Re-expanded generate structure is also immutable in a compiled device.
         if let Some(template) = &source.generate_template {
             let dependencies =

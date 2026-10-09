@@ -16,12 +16,13 @@ pub struct PreparedSourceDependency {
     pub content_identity: [u8; 32],
 }
 
-/// A source closure analyzed once, before selecting executable modules.
+/// A sealed source closure with reusable parsing and declaration analysis.
 ///
 /// This can describe a standalone connect library with no ordinary module.
 /// Preparation freezes the source, macros, physical definitions and compiler
 /// options. Compiling further modules does not consult the filesystem again.
-/// Keep preparation scoped to elaboration; it retains the analyzed syntax tree.
+/// Bodies needing occurrence context are analyzed after module selection.
+/// Keep preparation scoped to elaboration; it retains the parsed syntax tree.
 #[derive(Debug)]
 pub struct PreparedRuntimeSource {
     pub(crate) source_package: String,
@@ -43,21 +44,7 @@ impl PreparedRuntimeSource {
 
     /// Input identity for a selected runtime, including preserved assignments.
     pub fn runtime_source_identity(&self, module: Option<&str>) -> CompileResult<[u8; 32]> {
-        let compiler = VerilogACompiler::new(self.compiler_options.clone());
-        let selected = self.selected_module(module)?;
-        let name = match selected {
-            Some(name) if self.analyzed.source.items.iter().any(|item| {
-                matches!(item, crate::ast::Item::ConnectModule(module) if module.name == name)
-            }) => {
-                if self.analyzed.modules.contains_key(name) {
-                    return Err(crate::CompileError::ModuleSelection(format!(
-                        "'{name}' names both an ordinary module and a connect module"
-                    )));
-                }
-                name
-            }
-            _ => compiler.select_analyzed_module(&self.analyzed, selected)?.name.as_str(),
-        };
+        let name = self.resolved_module(module)?;
         Ok(runtime_source_identity(
             &crate::canonical_ir::source_identity(&self.source),
             name,
@@ -80,8 +67,67 @@ impl PreparedRuntimeSource {
         Ok(module.or(self.replay_module.as_deref()))
     }
 
+    pub(crate) fn resolved_module<'a>(
+        &'a self,
+        requested: Option<&'a str>,
+    ) -> CompileResult<&'a str> {
+        let requested = self.selected_module(requested)?;
+        let ordinary: Vec<_> = self.module_names().collect();
+        if let Some(name) = requested {
+            let connect = self.analyzed.source.items.iter().any(|item| matches!(item, crate::ast::Item::ConnectModule(module) if module.name == name));
+            if connect && ordinary.contains(&name) {
+                return Err(crate::CompileError::ModuleSelection(format!(
+                    "'{name}' names both an ordinary module and a connect module"
+                )));
+            }
+            if connect || ordinary.contains(&name) {
+                return Ok(name);
+            }
+            return Err(crate::CompileError::ModuleSelection(format!(
+                "module '{name}' not found; the file declares: {}",
+                ordinary.join(", ")
+            )));
+        }
+        match ordinary.as_slice() {
+            [name] => Ok(*name),
+            [] => Err(crate::CompileError::ModuleSelection(
+                "no modules found in source".into(),
+            )),
+            names => Err(crate::CompileError::ModuleSelection(format!(
+                "the file declares multiple modules: {}; select one by name",
+                names.join(", ")
+            ))),
+        }
+    }
+
+    pub(crate) fn analysis_for_module(
+        &self,
+        name: &str,
+        measurements: &mut crate::metrics::MetricsRecorder,
+    ) -> CompileResult<std::borrow::Cow<'_, crate::semantic::AnalyzedFile>> {
+        let contextual = self.analyzed.source.items.iter().any(|item| {
+            matches!(item,
+            crate::ast::Item::Module(module) | crate::ast::Item::ConnectModule(module)
+            if module.reference_sources.is_some())
+        });
+        if !self.analyzed.deferred_hierarchy
+            && (!contextual || self.analyzed.selected_root.as_deref() == Some(name))
+        {
+            return Ok(std::borrow::Cow::Borrowed(&self.analyzed));
+        }
+        measurements.checkpoint(crate::PipelinePhase::Semantic)?;
+        let started = web_time::Instant::now();
+        let mut analyzed = crate::semantic::SemanticAnalyzer::new()
+            .analyze_selected(&self.analyzed.source, Some(name))?;
+        analyzed.source_specialization = self.analyzed.source_specialization.clone();
+        measurements.record(crate::PipelinePhase::Semantic, started.elapsed())?;
+        measurements.metrics_mut().module_count =
+            crate::metrics::usize_to_u64(analyzed.modules.len());
+        Ok(std::borrow::Cow::Owned(analyzed))
+    }
+
     pub fn is_connect_library(&self) -> bool {
-        self.analyzed.modules.is_empty()
+        self.module_names().next().is_none()
             && self.analyzed.source.items.iter().any(|item| {
                 matches!(
                     item,
@@ -129,7 +175,7 @@ impl PreparedRuntimeSource {
             ),
             rules: self.analyzed.connect_rules.clone(),
             disciplines: self.analyzed.disciplines.clone(),
-            declares_module: !self.analyzed.modules.is_empty(),
+            declares_module: self.module_names().next().is_some(),
         }
     }
 

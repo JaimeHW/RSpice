@@ -580,8 +580,56 @@ impl SemanticAnalyzer {
     }
 
     pub fn analyze(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
+        self.analyze_selected(source, None)
+    }
+
+    /// Freeze declarations when body semantics need a root the caller has not
+    /// selected yet. Reuse the parsed closure for concrete analysis at selection.
+    pub(crate) fn prepare_source(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
+        let ordinary = source
+            .items
+            .iter()
+            .filter(|item| matches!(item, Item::Module(_)))
+            .count();
+        let hierarchical = source.items.iter().any(|item| match item {
+            Item::Module(module) | Item::ConnectModule(module) => {
+                !module.pending_hierarchical_references.is_empty()
+            }
+            _ => false,
+        });
+        if !hierarchical || ordinary == 1 {
+            return self.analyze(source);
+        }
+        let (disciplines, connect_rules) = Self::new().connection_definitions(source)?;
+        Ok(AnalyzedFile {
+            source: source.clone(),
+            selected_root: None,
+            deferred_hierarchy: true,
+            source_specialization: Vec::new(),
+            disciplines,
+            connect_rules,
+            modules: HashMap::new(),
+            warnings: Vec::new(),
+            connection_configuration: None,
+        })
+    }
+
+    pub(crate) fn analyze_selected(
+        &mut self,
+        source: &SourceFile,
+        selected: Option<&str>,
+    ) -> CompileResult<AnalyzedFile> {
+        let ordinary: Vec<_> = source
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Module(module) => Some(module.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        let selected = selected.or_else(|| (ordinary.len() == 1).then(|| ordinary[0]));
         self.register_physical_definitions(source)?;
-        let prepared = source_references::prepare(source, &self.disciplines)?;
+        let prepared = source_references::prepare(source, &self.disciplines, selected)?;
         let source = prepared.as_ref();
         let mut modules = HashMap::new();
         let mut module_spans = HashMap::new();
@@ -648,6 +696,14 @@ impl SemanticAnalyzer {
                         module.span,
                     )));
                 }
+                if module
+                    .reference_sources
+                    .as_ref()
+                    .is_some_and(|sources| sources.design.is_some())
+                    && module.reference_context.is_none()
+                {
+                    continue;
+                }
                 self.symbols = SymbolTable::new();
                 self.errors.clear();
                 self.user_functions.clear();
@@ -698,6 +754,8 @@ impl SemanticAnalyzer {
         Ok(AnalyzedFile {
             source: source.clone(),
             source_specialization: Vec::new(),
+            selected_root: selected.map(Into::into),
+            deferred_hierarchy: false,
             disciplines: self.disciplines.clone(),
             modules,
             warnings: std::mem::take(&mut self.warnings),
@@ -733,6 +791,22 @@ impl SemanticAnalyzer {
     ) -> CompileResult<DisciplineDb> {
         self.register_physical_definitions(source)?;
         Ok(self.disciplines)
+    }
+
+    pub(crate) fn connection_definitions(
+        mut self,
+        source: &SourceFile,
+    ) -> CompileResult<(DisciplineDb, crate::connect::ConnectRuleTable)> {
+        self.register_physical_definitions(source)?;
+        let rules = crate::connect::build_connect_rule_table(source, &self.disciplines).map_err(
+            |error| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::ConnectRules(Box::new(error)),
+                    connect_rules_span(source),
+                ))
+            },
+        )?;
+        Ok((self.disciplines, rules))
     }
 
     fn register_physical_definitions(&mut self, source: &SourceFile) -> CompileResult<()> {

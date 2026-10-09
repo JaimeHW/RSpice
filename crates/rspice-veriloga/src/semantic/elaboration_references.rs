@@ -32,6 +32,14 @@ fn qualify(owner: &str, target: &str) -> SmolStr {
     }
 }
 
+fn reference_path(source: &Module, owner: &str, target: &str) -> SmolStr {
+    if source.reference_context.is_some() {
+        target.into()
+    } else {
+        qualify(owner, target)
+    }
+}
+
 pub(super) fn canonicalize_node_references(
     source: &Module,
     module: &AnalyzedModule,
@@ -100,7 +108,7 @@ impl PhysicalReferences {
             if matches!(reference.kind, ForeignPhysicalKind::Unnamed { .. }) {
                 continue;
             }
-            let path = qualify(owner, &reference.path);
+            let path = reference_path(source, owner, &reference.path);
             let branch = reference.kind.is_branch();
             let aliases = module.physical_nodes.reference_lanes(name, branch);
             for (alias, lane) in aliases.iter().zip(&reference.lanes) {
@@ -175,7 +183,7 @@ impl PhysicalReferences {
             if matches!(reference.kind, ForeignPhysicalKind::Unnamed { .. }) {
                 continue;
             }
-            let path = qualify(&owner, &reference.path);
+            let path = reference_path(source, &owner, &reference.path);
             let branch = reference.kind.is_branch();
             let aliases = module.physical_nodes.reference_lanes(name, branch);
             if aliases.len() != reference.lanes.len() {
@@ -507,7 +515,7 @@ fn validate_contributions(
 
 /// A reversed branch probe is a negative expression. ddx requires a bare probe
 /// for its axis, so transfer that sign to the derivative result after binding.
-fn repair_derivative_axes(expression: &mut Expression) {
+pub(super) fn repair_derivative_axes(expression: &mut Expression) {
     let mut pending = vec![expression];
     while let Some(expression) = pending.pop() {
         let args = match expression {

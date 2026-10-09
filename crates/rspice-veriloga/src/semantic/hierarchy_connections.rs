@@ -234,6 +234,11 @@ fn prepare_boundaries(
         let Some(child_source) = sources.get(&instance.module) else {
             continue;
         };
+        let child_path = if path.is_empty() {
+            instance.name.to_string()
+        } else {
+            format!("{path}.{}", instance.name)
+        };
         let (_, specialized) = specialize_module(
             analyzed,
             &mut bodies.specializations,
@@ -242,17 +247,12 @@ fn prepare_boundaries(
             child,
             &constants,
             source.time_scale,
-            &format!("{}.{}", source.name, instance.name),
+            &child_path,
         )?;
         let (child_source, child) = specialized
             .as_deref()
             .map(|module| (&module.source, &module.analyzed))
             .unwrap_or((child_source, child));
-        let child_path = if path.is_empty() {
-            instance.name.to_string()
-        } else {
-            format!("{path}.{}", instance.name)
-        };
         let resolved = bodies.resolved_types.get(child_path.as_str()).cloned();
         let (child_source, child) = resolved
             .as_deref()

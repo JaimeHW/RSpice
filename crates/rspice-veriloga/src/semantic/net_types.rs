@@ -71,7 +71,7 @@ pub(super) fn resolve(
     let mut occurrences = vec![Occurrence {
         path: "".into(),
         parent: None,
-        key: SpecializationKey::root(source.name.clone()),
+        key: SpecializationKey::root(source)?,
         module: root,
         nets: HashMap::new(),
     }];
@@ -108,7 +108,7 @@ pub(super) fn resolve(
             let mut depth = 0;
             let mut ancestor = Some(cursor);
             while let Some(index) = ancestor {
-                if occurrences[index].key == key {
+                if occurrences[index].key.same_specialization(&key) {
                     return Err(crate::error::SemanticError::new(
                         crate::error::SemanticErrorKind::CircularDependency(format!("digital module hierarchy at instance '{path}': specialization repeats ancestor '{}'", occurrences[index].path)),
                         instance.span).into());
