@@ -803,7 +803,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v128); states
+Resume also requires the current resolved simulation identity (v129); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -813,9 +813,13 @@ digital strengths, real payload bits and slot accounting; restore rebuilds
 cancellation and driver indexes after validation. Invalid images, incompatible
 limits/targets and decoded resource-budget violations leave the receiver unchanged.
 Capture rejects failed or partially executed slots. The enclosing file reader
-must bound input bytes before deserialization. Full mixed-circuit persistence
-still requires integrating the shared execution, bridges and accepted analog state;
-the engine's mixed accepted-state checkpoint blocker remains in force.
+must bound input bytes before deserialization. Checkpoint format 57 carries the
+shared HDL execution, mixed analog/bridge participants, and qualified XSPICE
+context/dispatch/event state. Restore validates every component before installing
+it and publishes the resume seam only after the saved state is authoritative.
+The gate and bridge families declare portable context state; other code models
+need an explicit capability contract. Live host resources and legacy mixed
+images without complete execution state remain refused.
 
 The internal HDL signal-store checkpoint retains typed signal values, each
 driver's contribution (including never-driven state), analog samples, activation
@@ -830,9 +834,9 @@ pending assignments and the exact scheduler image. Restore checks source wait
 sites, event-count ownership, one wakeup per queued process and delayed-assignment
 bucket, and one owner per expression subscription. It preserves external participant
 registration order and constructs the whole host before replacing live state.
-Failed settlements and unfinished same-time execution cannot be captured. These
-components still require circuit-level integration with accepted analog devices
-and bridges before the mixed accepted-state blocker can be removed.
+Failed settlements and unfinished same-time execution cannot be captured. The
+enclosing mixed image couples these components to the accepted analog devices,
+bridges, and XSPICE runtime before installation in the transient engine.
 
 The shared coordinator checkpoint adds instance/port mappings, accepted physical
 time, exact observer probe samples and complete `absdelta` history, including

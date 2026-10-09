@@ -16,6 +16,10 @@ use crate::xspice::{
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 
+/// Change with incompatible native context, dispatch or coupled restore semantics.
+/// The outer resolved simulation identity binds this alongside source identity.
+pub(crate) const MIXED_RUNTIME_CHECKPOINT_ABI: u32 = 1;
+
 #[derive(Clone, Copy)]
 pub(crate) struct MixedCheckpointLimits {
     pub max_bytes: usize,
@@ -111,6 +115,13 @@ fn count_instances(circuit: &CircuitData, limits: MixedCheckpointLimits) -> Resu
 }
 
 impl CircuitData {
+    pub(crate) fn mixed_checkpoint_resume_blockers(&self) -> Vec<String> {
+        self.xspice_instances
+            .iter()
+            .filter_map(|instance| instance.runtime_checkpoint_resume_blocker())
+            .collect()
+    }
+
     fn validate_mixed_checkpoint_idle(&self) -> Result<(), String> {
         if self.xspice_evaluation_error.is_some()
             || self

@@ -15,13 +15,9 @@
 //! for. Four attacks, one per engine path that could take a copy of, restart,
 //! or abandon a running module:
 //!
-//! * **Checkpoint and resume.** A mixed transient has no checkpoint to resume:
-//!   the format carries no digital state, so a run that asks for one is refused
-//!   before it solves anything, naming the state it cannot carry. Before this
-//!   suite it was not refused at all — a module with no pending self-scheduled
-//!   activation resumed with its `initial` blocks run again at time zero and
-//!   produced a plausible, inverted trace. The refusal is pinned here at the
-//!   capability, which is where it now happens.
+//! * **Checkpoint and resume.** Persisted mixed state continues without replaying
+//!   initial blocks. Both externally clocked and self-scheduled designs must keep
+//!   their digital values, pending work and accepted analog trajectory.
 //! * **Circuit clones.** Every analysis that hands a worker thread its own
 //!   `CircuitData` refuses a mixed module first, by name, before any clone.
 //! * **Swept re-runs.** A `.STEP` expansion runs one deck many times through one
@@ -59,7 +55,7 @@ use determinism_fingerprint::{
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{
-    TransientCheckpointBlockerSource, TransientResult, TransientStartupMode,
+    TransientCheckpoint, TransientCheckpointEncoding, TransientResult, TransientStartupMode,
 };
 use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
 use rspice_core::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
@@ -232,7 +228,7 @@ fn digital_points(result: &TransientResult, net: &str) -> Vec<(f64, String)> {
 /// publications the trace keeps.
 const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     (
-        "a_mixed_checkpoint_schedule_is_refused_before_solving_by_naming_the_state_it_cannot_carry",
+        "a_mixed_checkpoint_restores_external_clock_state_without_initial_replay",
         "hardening_external_toggle",
         Fingerprint {
             points: 508,
@@ -503,157 +499,158 @@ fn external_toggle_deck(model: &ModelFile) -> String {
 // Attack 1 — checkpoint and resume
 //=============================================================================
 
-/// The refusal every checkpoint-asking entry point owes a mixed deck.
-///
-/// Typed, so a frontend can route it as a capability gap rather than parse a
-/// sentence, and specific, so the sentence still names the state.
-fn assert_mixed_checkpoint_refusal(entry: &str, error: &SimulationError) {
-    let SimulationError::UnsupportedCapability(refusal) = error else {
-        panic!("{entry} must be refused as a capability, got {error}");
-    };
-    assert_eq!(
-        refusal.capability, "analysis.tran.checkpoint_capability",
-        "{entry} must be refused by the checkpoint capability boundary"
-    );
-    let lowered = error.to_string().to_lowercase();
+/// Exercise public persisted restart, including its accepted seam and the
+/// exact future analog trajectory and digital transitions.
+fn assert_mixed_persisted_restart(deck: &str, signal: &str) {
+    let netlist = Netlist::parse(deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
     assert!(
-        lowered.contains("mixed verilog-ams") && lowered.contains("digital state"),
-        "{entry} must name the state the checkpoint cannot carry: {error}"
+        engine
+            .preflight_transient_checkpoint(&netlist)
+            .unwrap()
+            .is_resumable()
+    );
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            200e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &[100e-9],
+        )
+        .unwrap();
+    let saved = &scheduled[0].checkpoint;
+    let seam = baseline
+        .time
+        .iter()
+        .position(|t| t.to_bits() == saved.time.to_bits())
+        .unwrap();
+    let text = saved
+        .to_bytes(TransientCheckpointEncoding::Unpacked)
+        .unwrap();
+    let sequence = MODEL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "rspice_mixed_restart_{}_{sequence}.chk",
+        std::process::id()
+    ));
+    saved.save_with_encoding(&path, TransientCheckpointEncoding::Packed).unwrap();
+    let loaded = TransientCheckpoint::load(&path);
+    std::fs::remove_file(&path).unwrap();
+    let restored = loaded.unwrap();
+    assert_eq!(restored, TransientCheckpoint::from_bytes(&text).unwrap());
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &restored, 200e-9, 1e-9)
+        .unwrap();
+    assert_eq!(resumed.node_names, baseline.node_names);
+    for (actual, expected) in std::iter::once((&resumed.time, &baseline.time))
+        .chain(resumed.voltages.iter().zip(&baseline.voltages))
+        .chain(
+            resumed
+                .branch_currents
+                .iter()
+                .zip(&baseline.branch_currents),
+        )
+    {
+        if expected.is_empty() {
+            assert!(actual.is_empty());
+            continue;
+        }
+        assert_eq!(actual.len(), expected.len() - seam);
+        for (index, (actual, expected)) in actual.iter().zip(&expected[seam..]).enumerate() {
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "restart differs at sample {index}: {actual} vs {expected}"
+            );
+        }
+    }
+    let expected = digital_points(&baseline, signal);
+    let actual = digital_points(&resumed, signal);
+    let held = expected
+        .iter()
+        .rev()
+        .find(|(at, _)| *at <= saved.time)
+        .unwrap();
+    assert_eq!(actual[0], (saved.time, held.1.clone()));
+    assert_eq!(
+        actual
+            .iter()
+            .filter(|(at, _)| *at > saved.time)
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .filter(|(at, _)| *at > saved.time)
+            .collect::<Vec<_>>()
+    );
+
+    // A legacy image never silently restarts initial blocks beside an accepted
+    // analog solution, even if its old capability inventory is missing the gap.
+    let legacy = String::from_utf8(text)
+        .unwrap()
+        .lines()
+        .take_while(|line| !line.starts_with("mixed_runtime_image "))
+        .map(|line| {
+            if line.starts_with("RSPICE-CHECKPOINT ") {
+                "RSPICE-CHECKPOINT 56"
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let legacy = TransientCheckpoint::from_text(&legacy).unwrap();
+    assert!(
+        engine
+            .run_tran_resume(&netlist, &legacy, 200e-9, 1e-9)
+            .is_err()
     );
 }
 
-/// **Attack 1.** A mixed deck that asks for a checkpoint is refused before the
-/// solver runs, and the refusal says which state cannot be carried.
-///
-/// The checkpoint format is a numeric store: solutions, histories, limiter
-/// anchors, per-instance vectors. A mixed module's accepted state is not that.
-/// It is a running digital design — an event queue, every process's resumption
-/// point, every `reg`, the resolved drivers, the boundary values — and
-/// `MixedSignalHost::checkpoint` captures all of it into an image that holds a
-/// compiled analog device and a live scheduler, which is not a thing this
-/// format writes.
-///
-/// So there is no such checkpoint to take, and the request for one is answered
-/// at `t = 0` rather than at `tstop`: the only consumer of a checkpoint is a
-/// resume, so a run that solved to the end and *then* said the image was
-/// unusable would have spent the whole run to deliver the same answer. What
-/// makes this a *hardening* pin rather than a statement of a limitation is what
-/// it replaced: a module with nothing pending checkpointed and resumed,
-/// restarted its `initial` blocks at time zero, and produced a trace inverted
-/// against the baseline from the checkpoint onward, with nothing saying so.
-/// This test is written against that specific deck, so a change that removes
-/// the refusal has to remove this too — including the unsegmented run below,
-/// which is what proves the module had live state to lose.
 #[test]
-fn a_mixed_checkpoint_schedule_is_refused_before_solving_by_naming_the_state_it_cannot_carry() {
+fn a_mixed_checkpoint_restores_external_clock_state_without_initial_replay() {
     let model = ModelFile::new("checkpoint_external", EXTERNAL_TOGGLE);
     let deck = external_toggle_deck(&model);
-    let netlist = Netlist::parse(&deck).expect("the deck parses");
-    let engine = Engine::new(SimulationConfig::default());
-
-    // Unsegmented, the deck runs, and the module moves several times before
-    // the time a checkpoint was being asked for. That is the state a resume
-    // would have restarted, so the refusal is protecting something real.
-    let baseline = run(&deck, 200.0e-9, 1.0e-9);
+    let baseline = run(&deck, 200e-9, 1e-9);
     pin_fixture("hardening_external_toggle", &baseline);
-    let before: Vec<_> = digital_points(&baseline, "qs")
-        .into_iter()
-        .filter(|(time, _)| *time < 100.0e-9)
-        .collect();
     assert!(
-        before.len() >= 4,
-        "the module must toggle several times before the checkpoint time, saw {before:?}"
+        digital_points(&baseline, "qs")
+            .iter()
+            .filter(|(t, _)| *t < 100e-9)
+            .count()
+            >= 4
     );
-
-    let capability = engine
-        .preflight_transient_checkpoint(&netlist)
-        .expect("the capability preflight elaborates this deck rather than running it");
-    assert!(
-        !capability.is_resumable(),
-        "a mixed deck has no resumable checkpoint"
-    );
-    let blockers = capability.blockers();
-    assert_eq!(
-        blockers.len(),
-        1,
-        "the mixed host is the only thing blocking this deck's checkpoint: {blockers:?}"
-    );
-    assert_eq!(
-        blockers[0].source,
-        TransientCheckpointBlockerSource::ExtensionState,
-        "the digital half is owned by an extension runtime, not by the integrator"
-    );
-    assert_eq!(
-        blockers[0].message,
-        "mixed Verilog-AMS accepted digital state is not checkpointed"
-    );
-
-    let Err(scheduled) = engine.run_tran_checkpoint_schedule_with_startup_mode(
-        &netlist,
-        200.0e-9,
-        1.0e-9,
-        TransientStartupMode::OperatingPoint,
-        &[100.0e-9],
-    ) else {
-        panic!("a scheduled mixed checkpoint must be refused, not produced")
-    };
-    assert_mixed_checkpoint_refusal("a scheduled mixed checkpoint", &scheduled);
-
-    let Err(retained) = engine.run_tran_checkpointed(&netlist, 200.0e-9, 1.0e-9) else {
-        panic!("a retained mixed checkpoint must be refused, not produced")
-    };
-    assert_mixed_checkpoint_refusal("a retained mixed checkpoint", &retained);
+    assert_mixed_persisted_restart(&deck, "qs");
 }
 
-/// **Attack 1, self-scheduled half.** The same refusal reaches a module whose
-/// event wheel is not empty, and it is still the capability's.
-///
-/// This deck used to be refused on resume by `MissedDigitalBreakpoint` — the
-/// rebuilt module still held the activation its `initial` block placed at time
-/// zero, and the first trial at the resume time stepped past it. That is a
-/// guard noticing a symptom, and it fires only for modules that happen to have
-/// something pending. The refusal has to be the capability's, so it arrives for
-/// every mixed deck; and it now arrives before any step is taken, so the guard
-/// is not even reachable on this path. Both halves are asserted: the message is
-/// the capability's, and it is not the guard's.
 #[test]
-fn a_self_scheduling_module_is_refused_by_the_preflight_not_by_a_missed_breakpoint() {
+fn a_mixed_checkpoint_restores_self_scheduled_events_without_initial_replay() {
     let model = ModelFile::new("checkpoint_divider", CLOCK_DIVIDER);
-    let deck = divider_deck(&model, 200);
-    let netlist = Netlist::parse(&deck).expect("the deck parses");
-    let engine = Engine::new(SimulationConfig::default());
-
-    let Err(error) = engine.run_tran_checkpoint_schedule_with_startup_mode(
-        &netlist,
-        200.0e-9,
-        1.0e-9,
-        TransientStartupMode::OperatingPoint,
-        &[100.0e-9],
-    ) else {
-        panic!("a scheduled mixed checkpoint must be refused, not produced")
-    };
-    assert_mixed_checkpoint_refusal("a self-scheduling mixed checkpoint", &error);
-    assert!(
-        !error.to_string().to_lowercase().contains("stepped past"),
-        "the missed-breakpoint guard must not be what refuses this; no step is taken: {error}"
-    );
+    assert_mixed_persisted_restart(&divider_deck(&model, 200), "qdiv");
 }
 
-/// **Attack 1, control.** An analog-only `.VERILOGA` deck still checkpoints and
-/// resumes.
-///
-/// Without this the refusal above could be a refusal of the whole `.VERILOGA`
-/// route, which would be a regression dressed as a fix. A Verilog-A *device*
-/// has serialized accepted state (`runtime_veriloga_instance_states`), and it
-/// keeps working — so the blocker has to be about the mixed host's digital
-/// half and nothing else.
-///
-/// What is asserted is that the resume happens and where it starts, not what
-/// trajectory it takes. Trajectory agreement across a resume is
-/// `tests/transient_checkpoint.rs`'s contract and it owns the bound; a control
-/// test that restated it would become a second owner of somebody else's
-/// property and would fail for reasons that have nothing to do with the
-/// refusal it is controlling for.
+#[test]
+fn a_mixed_checkpoint_restores_pending_xspice_events_through_disk() {
+    let clock = ModelFile::new("restart_clock", CEIL_CLOCK);
+    let divider = ModelFile::new("restart_divider", CEIL_DIVIDER);
+    // The 100ns clock edge has committed at capture, while its off-grid
+    // inverter response and the consequent HDL activation are still pending.
+    let deck = format!(
+        "HDL and XSPICE disk continuation\n\
+         Xclock clk ceil_clock\n\
+         Ainv clk fromx inverter\n\
+         .model inverter d_inverter (rise_delay=100.4p fall_delay=100.4p)\n\
+         Xdivider fromx qdiv ceil_divider\n\
+         R1 qdiv out 1k\nC1 out 0 10p\n\
+         .va \"{}\" ceil_clock\n.va \"{}\" ceil_divider\n.end\n",
+        clock.deck_path(),
+        divider.deck_path()
+    );
+    assert_mixed_persisted_restart(&deck, "qdiv");
+}
+
+/// Analog-only Verilog-A checkpoint compatibility remains intact alongside the
+/// mixed runtime extension.
 #[test]
 fn an_analog_only_veriloga_deck_still_resumes() {
     const ANALOG_ONLY: &str = r#"
@@ -678,9 +675,6 @@ endmodule
     );
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    // The refusal above is decided by the capability preflight, so the control
-    // has to clear that same preflight — otherwise the schedule below would be
-    // refused for the reason this test exists to rule out.
     assert!(
         engine
             .preflight_transient_checkpoint(&netlist)

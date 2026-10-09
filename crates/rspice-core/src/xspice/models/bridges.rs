@@ -4,7 +4,7 @@ use super::analog::smooth_discontinuity;
 use crate::Value;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
-    EvaluationPhase, ParamSpec, PortDirection, PortSpec, PortType,
+    EvaluationPhase, ParamSpec, PortDirection, PortSpec, PortType, XspiceCheckpointSupport,
 };
 
 const OFFICIAL_BRIDGE_TIMING_MIN: Value = 1.0e-12;
@@ -110,6 +110,10 @@ fn adc_bridge_delay_for_transition(
 pub struct AdcBridge;
 
 impl CodeModel for AdcBridge {
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn name(&self) -> &str {
         "adc_bridge"
     }
@@ -218,6 +222,10 @@ pub(crate) struct MixedAdcBridge;
 
 #[cfg(feature = "veriloga")]
 impl CodeModel for MixedAdcBridge {
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn name(&self) -> &str {
         "__rspice_mixed_adc"
     }
@@ -320,6 +328,10 @@ fn mixed_bridge_timing(ctx: &CmContext, name: &str) -> CmResult<Value> {
 
 #[cfg(feature = "veriloga")]
 impl CodeModel for MixedDacBridge {
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn name(&self) -> &str {
         "__rspice_mixed_dac"
     }
@@ -1356,6 +1368,10 @@ fn dac_bridge_out_undef(ctx: &CmContext, out_low: Value, out_high: Value) -> CmR
 }
 
 impl CodeModel for DacBridge {
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn name(&self) -> &str {
         "dac_bridge"
     }
@@ -1568,6 +1584,10 @@ fn evaluate_dac_bridge(
 }
 
 impl CodeModel for BidiBridge {
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn name(&self) -> &str {
         "bidi_bridge"
     }

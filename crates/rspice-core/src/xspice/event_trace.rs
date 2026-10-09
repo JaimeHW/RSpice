@@ -21,6 +21,7 @@ pub(crate) struct EventTraceJournal {
 impl EventTraceJournal {
     /// Trace retention is immutable checkpoint identity. Publications belong
     /// to the result sink and must be delivered before capture or replacement.
+    #[cfg(any(feature = "veriloga", test))]
     pub(crate) fn checkpoint_retention(&self) -> Result<&[bool], String> {
         if !self.points.is_empty() {
             return Err("event waveform publications must be drained before checkpointing".into());

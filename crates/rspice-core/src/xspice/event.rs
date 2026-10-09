@@ -15,6 +15,7 @@ use crate::{NodeId, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+#[cfg(any(feature = "veriloga", test))]
 pub(crate) mod checkpoint;
 
 //=============================================================================

@@ -83,13 +83,16 @@ struct EventImage {
 }
 
 impl SchedulerCheckpoint {
+    #[cfg(any(feature = "veriloga", test))]
     pub(crate) fn targets(&self) -> &[EventTarget] {
         &self.targets
     }
     /// Enclosing hosts inspect relationships only after kernel validation.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn target_count(&self) -> usize {
         self.targets.len()
     }
+    #[cfg(any(feature = "veriloga", test))]
     pub(crate) fn live_events(
         &self,
     ) -> impl Iterator<Item = (Instant, SchedulerRegion, TargetId, EventValue)> + '_ {

@@ -12,6 +12,7 @@ use super::{
 };
 use crate::{Complex64, Value};
 
+#[cfg(any(feature = "veriloga", test))]
 pub(crate) mod checkpoint;
 
 /// The non-scalar instance parameters a code model can be given. Each list is
@@ -2266,6 +2267,7 @@ impl XspiceInstance {
     /// Enumerate original digital output identities, including vector element
     /// indices and inverted connections. Inversion belongs to schedule_events;
     /// an observer or an input alias is never an additional driver.
+    #[cfg(any(feature = "veriloga", test))]
     pub(crate) fn for_each_digital_output_driver(
         &self,
         visit: impl FnMut(super::event_scheduler::EventTarget),
@@ -2273,6 +2275,7 @@ impl XspiceInstance {
         self.for_each_typed_event_output_driver(false, visit);
     }
 
+    #[cfg(any(feature = "veriloga", test))]
     pub(crate) fn for_each_real_output_driver(
         &self,
         visit: impl FnMut(super::event_scheduler::EventTarget),
@@ -2280,6 +2283,7 @@ impl XspiceInstance {
         self.for_each_typed_event_output_driver(true, visit);
     }
 
+    #[cfg(any(feature = "veriloga", test))]
     fn for_each_typed_event_output_driver(
         &self,
         real: bool,

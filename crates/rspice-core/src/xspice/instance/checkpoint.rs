@@ -85,6 +85,19 @@ impl std::io::Write for HashWriter {
 }
 
 impl XspiceInstance {
+    pub(crate) fn runtime_checkpoint_resume_blocker(&self) -> Option<String> {
+        self.require_runtime_checkpoint_support()
+            .and_then(|()| {
+                if self.context.has_checkpoint_host_resources() {
+                    Err("live host resources have no portable checkpoint contract".into())
+                } else {
+                    Ok(())
+                }
+            })
+            .err()
+            .map(|reason| format!("{}({}): {reason}", self.name, self.model_name()))
+    }
+
     /// Resolve receiving-circuit loads without evaluating model inputs or body.
     pub(crate) fn prepare_checkpoint_loads(
         &mut self,

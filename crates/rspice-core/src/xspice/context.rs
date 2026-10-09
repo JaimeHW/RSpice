@@ -16,6 +16,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::vec::Drain;
 
+#[cfg(any(feature = "veriloga", test))]
 pub(crate) mod checkpoint;
 
 //=============================================================================

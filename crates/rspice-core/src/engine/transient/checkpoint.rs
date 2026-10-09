@@ -46,6 +46,7 @@ mod bsim3;
 mod bsim4;
 mod capacitor_sdt;
 mod mosfet;
+mod mixed;
 #[cfg(test)]
 mod record_limit_tests;
 mod solver_state;
@@ -204,7 +205,8 @@ fn checkpoint_operation_result<T>(
 /// Version 54 retains classic-MOS limiter, capacitance, charge, and lead-current history.
 /// Version 55 retains both limits and one-sided slopes of scalar-line events.
 /// Version 56 retains expression-capacitor charge increments before rounding Q.
-const FORMAT_VERSION: u32 = 56;
+/// Version 57 retains the unified accepted mixed-runtime image.
+const FORMAT_VERSION: u32 = mixed::FORMAT_VERSION;
 const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
 const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
@@ -354,14 +356,8 @@ pub(super) struct AcceptedTransientRuntime {
     pub accepted_integration_runtime: AcceptedIntegrationRuntime,
 }
 
-/// The mixed Verilog-AMS host's accepted-state blocker, spelled once.
-///
-/// `Engine::exact_integration_runtime_resume_blockers` folds this message into
-/// the flat string list a checkpoint stores and a resume compares, and the
-/// capability layer reads the same message back out to classify it under the
-/// extension runtime that owns the state. Both sides have to agree on the
-/// exact bytes — the resume comparison is a string equality over the stored
-/// list — so this is one constant rather than two literals.
+/// Historical blocker retained for classifying older checkpoint inventories.
+/// New mixed images carry the accepted digital design and do not add this entry.
 pub(crate) const MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER: &str =
     "mixed Verilog-AMS accepted digital state is not checkpointed";
 
@@ -665,6 +661,7 @@ pub struct TransientCheckpoint {
     xspice_instances: Vec<String>,
     xspice_resume_blockers: Vec<String>,
     xspice_instance_states: Vec<XspiceInstanceCheckpoint>,
+    mixed_runtime_image: Option<mixed::Image>,
     generated_veriloga_state_available: bool,
     generated_veriloga_instance_states: Vec<GeneratedVerilogAInstanceCheckpoint>,
     runtime_veriloga_state_available: bool,
@@ -1301,7 +1298,14 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v126 retains prescribed capacitor charge and finite current across physical events.
     // v127 resolves XSPICE driver banks in stable instance/port/element order.
     // v128 includes finite CCVS sensing-cutset equations in physical events.
-    hasher.update(b"rspice-transient-resolved-config-v128\0");
+    // v129 binds the unified mixed-runtime checkpoint ABI.
+    hasher.update(b"rspice-transient-resolved-config-v129\0");
+    #[cfg(feature = "veriloga")]
+    hash_field(
+        &mut hasher,
+        "mixed_runtime_checkpoint_abi",
+        crate::circuit::mixed_checkpoint::MIXED_RUNTIME_CHECKPOINT_ABI,
+    );
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",
@@ -5794,6 +5798,12 @@ impl TransientCheckpoint {
         &self,
         mut budget: Option<&mut CheckpointParseBudget>,
     ) -> Result<(), String> {
+        if let Some(image) = &self.mixed_runtime_image {
+            image.validate(self.time, self.solution.len())?;
+            if !self.xspice_instance_states.is_empty() || !self.xspice_resume_blockers.is_empty() {
+                return Err("mixed runtime image conflicts with legacy XSPICE state".into());
+            }
+        }
         behavioral::validate(self.behavioral_states.as_deref(), self.time, &mut budget)?;
         capacitor_sdt::validate(self.capacitor_sdt_states.as_deref(), self.time, &mut budget)?;
         if !self.time.is_finite() || self.time < 0.0 {
@@ -6701,8 +6711,17 @@ impl TransientCheckpoint {
             .iter()
             .map(|instance| format!("{}({})", instance.name, instance.model_name()))
             .collect();
-        let xspice_resume_blockers = circuit.xspice_checkpoint_resume_blockers();
-        let xspice_instance_states = if xspice_resume_blockers.is_empty() {
+        #[cfg(feature = "veriloga")]
+        let mixed_runtime_image = circuit.has_mixed_signal_hosts()
+            .then(|| mixed::Image::capture(circuit, time)).transpose()?;
+        #[cfg(not(feature = "veriloga"))]
+        let mixed_runtime_image: Option<mixed::Image> = None;
+        let xspice_resume_blockers = if mixed_runtime_image.is_some() {
+            Vec::new()
+        } else {
+            circuit.xspice_checkpoint_resume_blockers()
+        };
+        let xspice_instance_states = if mixed_runtime_image.is_none() && xspice_resume_blockers.is_empty() {
             circuit.xspice_checkpoint_instance_states()
         } else {
             Vec::new()
@@ -6829,6 +6848,7 @@ impl TransientCheckpoint {
             xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
+            mixed_runtime_image,
             generated_veriloga_state_available: true,
             generated_veriloga_instance_states: circuit.generated_veriloga_checkpoint_states()?,
             runtime_veriloga_state_available: true,
@@ -7010,7 +7030,12 @@ impl TransientCheckpoint {
             .behavioral_sources
             .validate_accepted_history(self.behavioral_states.as_deref(), self.time)?;
         capacitor_sdt::validate_target(circuit, self.capacitor_sdt_states.as_deref())?;
-        circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
+        #[cfg(feature = "veriloga")]
+        let restored_mixed = self.mixed_runtime_image.as_ref()
+            .map(|image| image.prepare(circuit, self.time)).transpose()?;
+        if self.mixed_runtime_image.is_none() {
+            circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
+        }
         circuit.validate_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
             self.generated_veriloga_state_available,
@@ -7048,27 +7073,9 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
-        // The same refusal `exact_integration_runtime_resume_blockers` states,
-        // made here as well and for the reason the coupled transmission line's
-        // is made here: the blocker set is validated against the *rebuilt*
-        // runtime, and a resume can reach the first trial before that
-        // comparison. A mixed module with a self-scheduled activation does —
-        // the rebuilt wheel still holds the event its `initial` block placed at
-        // time zero, so the first trial at the resume time trips
-        // `MissedDigitalBreakpoint` and the user is told the stepper skipped a
-        // breakpoint rather than that the checkpoint never carried the module's
-        // digital state. A time-zero checkpoint is exempt for the reason it is
-        // exempt there: nothing has advanced, so rebuilding reconstructs it.
         #[cfg(feature = "veriloga")]
-        if circuit.has_mixed_signal_hosts() && self.time > 0.0 {
-            return Err(
-                "transient checkpoint does not contain mixed Verilog-AMS accepted digital state: \
-                 the module's event queue, process resumption points, registers and boundary \
-                 values are a running digital design rather than a numeric store, and resuming \
-                 without them restarts the design at time zero beside an analog solution that \
-                 continues. Re-run the transient from t=0"
-                    .to_string(),
-            );
+        if circuit.has_mixed_signal_hosts() && self.mixed_runtime_image.is_none() {
+            return Err("legacy transient checkpoint does not contain mixed Verilog-AMS accepted digital state; re-run from t=0".into());
         }
         if self.tline_states.len() != circuit.tlines.len() {
             return Err(format!(
@@ -7306,7 +7313,9 @@ impl TransientCheckpoint {
             .behavioral_sources
             .restore_accepted_history(self.behavioral_states.as_deref(), self.time)?;
         capacitor_sdt::restore(circuit, self.capacitor_sdt_states.as_deref());
-        circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
+        if self.mixed_runtime_image.is_none() {
+            circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
+        }
         circuit.restore_generated_veriloga_checkpoint_states(
             &self.generated_veriloga_instance_states,
             self.generated_veriloga_state_available,
@@ -7317,6 +7326,8 @@ impl TransientCheckpoint {
             self.runtime_veriloga_state_available,
         )?;
         circuit.tlines = restored_tlines;
+        #[cfg(feature = "veriloga")]
+        if let Some(restored) = restored_mixed { restored.install(circuit); }
         Ok(())
     }
 
@@ -8029,6 +8040,9 @@ impl TransientCheckpoint {
                 .saturating_add(state.forward_history.len().saturating_mul(3))
                 .saturating_add(state.backward_history.len().saturating_mul(3))
                 .saturating_add(state.events.len().saturating_mul(9));
+        }
+        if let Some(image) = &self.mixed_runtime_image {
+            count = count.saturating_add(image.retained_values());
         }
         for instance in &self.xspice_instance_states {
             count = count
@@ -8807,6 +8821,7 @@ impl TransientCheckpoint {
         }
         #[cfg(not(feature = "veriloga"))]
         out.push_str("runtime_veriloga_states 0\n");
+        mixed::write(&mut out, self.mixed_runtime_image.as_ref(), abort)?;
         check_checkpoint_abort(abort)?;
         Ok(out)
     }
@@ -9648,6 +9663,7 @@ impl TransientCheckpoint {
                 ));
             }
         }
+        let mixed_runtime_image = mixed::read(lines, version, budget)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -9708,6 +9724,7 @@ impl TransientCheckpoint {
             xspice_instances,
             xspice_resume_blockers,
             xspice_instance_states,
+            mixed_runtime_image,
             generated_veriloga_state_available,
             generated_veriloga_instance_states,
             runtime_veriloga_state_available,
@@ -11918,6 +11935,7 @@ mod tests {
             xspice_instances: Vec::new(),
             xspice_resume_blockers: Vec::new(),
             xspice_instance_states: Vec::new(),
+            mixed_runtime_image: None,
             generated_veriloga_state_available: true,
             generated_veriloga_instance_states: vec![GeneratedVerilogAInstanceCheckpoint {
                 instance_name: "xgen1".to_string(),
@@ -12128,6 +12146,18 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < mixed::FORMAT_VERSION && line.starts_with("mixed_runtime_image ") {
+                if line == "mixed_runtime_image 1" {
+                    let bytes = parse_count_header(lines.next().unwrap(), "mixed_runtime_bytes").unwrap();
+                    let mut consumed = 0;
+                    while consumed < bytes {
+                        consumed += lines.next().unwrap().strip_prefix("mixed_runtime ").unwrap().len();
+                    }
+                    assert_eq!(consumed, bytes);
+                }
+                continue;
+            }
+
             if version < CAPACITOR_INCREMENT_FORMAT_VERSION {
                 if line.starts_with("solution_dependent_capacitor_increment_available ") {
                     continue;

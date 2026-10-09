@@ -205,6 +205,7 @@ impl DigitalHost {
 
     /// All decoding, ownership and scheduling checks precede the only live swap.
     /// Input bytes must be bounded by the enclosing circuit file reader.
+    #[cfg(test)]
     pub(crate) fn restore_checkpoint(
         &mut self,
         image: &HostCheckpoint,

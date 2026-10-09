@@ -1231,6 +1231,7 @@ impl EventScheduler {
         }
     }
 
+    #[cfg(any(feature = "veriloga", test))]
     pub(crate) fn limits(&self) -> SchedulerLimits {
         self.limits
     }

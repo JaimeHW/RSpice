@@ -3682,45 +3682,16 @@ impl Engine {
             !circuit.iswitches.is_empty(),
             "current-controlled switch accepted hysteresis state is not checkpointed",
         );
-        // Extension runtimes own the rest of this inventory. A mixed
-        // Verilog-AMS module's accepted state is a running digital design —
-        // the event queue, every process's resumption point, every `reg`, the
-        // resolved drivers and the boundary values — and none of it reaches
-        // the checkpoint file. `MixedSignalHost::checkpoint` produces an exact
-        // restart image of all of it, but that image holds a compiled analog
-        // device and a live scheduler rather than the numbers this format
-        // writes, so it is not the thing a `.cir`-adjacent text or packed
-        // encoding can carry.
-        //
-        // `Engine::transient_checkpoint_capability_for_circuit` reads this
-        // inventory off the elaborated circuit before any solver work, so a
-        // run that asked for a checkpoint at all — scheduled or retained — is
-        // refused at t=0 naming the owners that block it. Nothing downstream
-        // has to cope with a mixed checkpoint, because none is produced.
-        //
-        // The same message stays in the stored list a resume compares, for the
-        // images that reach resume by another route: files written by an older
-        // build, and the synthetic-origin state HB and PSS hand to a
-        // continuation. Without it such a resume rebuilds the module from the
-        // netlist, which restarts its `initial` blocks at time zero, and then
-        // advances it from the checkpoint's analog time. That is not a slightly
-        // worse answer: it is the design's state machine started over while the
-        // circuit around it continues, and the trace it produces is plausible.
-        // Measured on a deck whose module toggles on an external clock, a
-        // resume produced a `q` trace inverted against the baseline's from the
-        // checkpoint onward, with nothing reporting a problem. A module that
-        // happens to have a pending self-scheduled activation is caught by
-        // `MixedSignalError::MissedDigitalBreakpoint` instead, which is an
-        // accident of that guard rather than a contract — it fires only because
-        // the restarted wheel still holds an event dated behind the resume time.
-        let mut extension = Vec::new();
+        // The mixed image owns both the HDL design and all code-model state.
+        // Native models must explicitly declare a portable context contract.
         #[cfg(feature = "veriloga")]
-        block_if_present(
-            &mut extension,
-            circuit.has_mixed_signal_hosts(),
-            checkpoint::MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER,
-        );
-        extension.extend(circuit.xspice_checkpoint_resume_blockers());
+        let extension = if circuit.has_mixed_signal_hosts() {
+            circuit.mixed_checkpoint_resume_blockers()
+        } else {
+            circuit.xspice_checkpoint_resume_blockers()
+        };
+        #[cfg(not(feature = "veriloga"))]
+        let extension = circuit.xspice_checkpoint_resume_blockers();
         (blockers, extension)
     }
 
@@ -4425,7 +4396,7 @@ impl Engine {
             self.config.spice_dialect,
             self.config.resource_limits,
         );
-        circuit.set_xspice_transient_context(source_step_hint, tstop);
+        circuit.set_xspice_transient_context(source_basis.tstep, source_basis.tstop);
 
         // `.TRAN ... UIC` skips the operating point: integration starts
         // from zero everywhere except user-supplied .IC node voltages
@@ -5419,77 +5390,7 @@ impl Engine {
         let mut real_snapshot = Vec::new();
         let mut digital_trace_indices = HashMap::new();
         let mut real_trace_indices = HashMap::new();
-        if record_xspice_event_traces {
-            circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-            fill_digital_event_codes(&digital_snapshot, &mut digital_event_codes);
-            result.record_digital_snapshot(
-                resume_time,
-                &digital_snapshot,
-                &mut digital_trace_indices,
-                &capture_plan.event_nodes,
-            );
-            circuit.fill_xspice_real_snapshot(&mut real_snapshot);
-            result.record_real_snapshot(
-                resume_time,
-                &real_snapshot,
-                &mut real_trace_indices,
-                &capture_plan.event_nodes,
-            );
-        }
-        // Initial values use the same retained-node contract as later changes.
-        for &(node, value) in &digital_snapshot {
-            if node > 0
-                && capture_plan
-                    .event_nodes
-                    .get(node - 1)
-                    .copied()
-                    .unwrap_or(false)
-            {
-                event_changes.push(crate::abort_signal::TransientEventChange {
-                    time: resume_time,
-                    node,
-                    value: crate::abort_signal::TransientEventValue::Digital(
-                        crate::abort_signal::DigitalEventCode(value.event_code()),
-                    ),
-                });
-            }
-        }
-        for &(node, value) in &real_snapshot {
-            if node > 0
-                && capture_plan
-                    .event_nodes
-                    .get(node - 1)
-                    .copied()
-                    .unwrap_or(false)
-            {
-                event_changes.push(crate::abort_signal::TransientEventChange {
-                    time: resume_time,
-                    node,
-                    value: crate::abort_signal::TransientEventValue::Real(value),
-                });
-            }
-        }
         let mut retained_result_values = Self::transient_result_value_count(&result);
-        if let Some(trace) = integral_trace {
-            let mut trace = trace.borrow_mut();
-            trace.initialize(&circuit);
-            self.ensure_result_values(retained_result_values.saturating_add(trace.names.len()))?;
-            retained_result_values = retained_result_values.saturating_add(trace.record(&circuit)?);
-        }
-        self.ensure_transient_result_limits(&result, retained_result_values)?;
-        if !circuit
-            .bjts
-            .devices
-            .iter()
-            .any(|bjt| bjt.legacy_excess_phase_delay() != 0.0)
-        {
-            abort.observe_transient_sample(result.observable_sample(
-                &digital_event_codes,
-                &sample_buses,
-                &real_snapshot,
-                Some(&event_changes),
-            ));
-        }
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.transient_voltage_lte_excluded_nodes();
@@ -5896,6 +5797,78 @@ impl Engine {
                     *current = circuit.capacitors.i_prev[capacitor];
                 }
             }
+        }
+
+        if record_xspice_event_traces {
+            circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+            fill_digital_event_codes(&digital_snapshot, &mut digital_event_codes);
+            result.record_digital_snapshot(
+                resume_time,
+                &digital_snapshot,
+                &mut digital_trace_indices,
+                &capture_plan.event_nodes,
+            );
+            circuit.fill_xspice_real_snapshot(&mut real_snapshot);
+            result.record_real_snapshot(
+                resume_time,
+                &real_snapshot,
+                &mut real_trace_indices,
+                &capture_plan.event_nodes,
+            );
+        }
+        // Initial values use the same retained-node contract as later changes.
+        for &(node, value) in &digital_snapshot {
+            if node > 0
+                && capture_plan
+                    .event_nodes
+                    .get(node - 1)
+                    .copied()
+                    .unwrap_or(false)
+            {
+                event_changes.push(crate::abort_signal::TransientEventChange {
+                    time: resume_time,
+                    node,
+                    value: crate::abort_signal::TransientEventValue::Digital(
+                        crate::abort_signal::DigitalEventCode(value.event_code()),
+                    ),
+                });
+            }
+        }
+        for &(node, value) in &real_snapshot {
+            if node > 0
+                && capture_plan
+                    .event_nodes
+                    .get(node - 1)
+                    .copied()
+                    .unwrap_or(false)
+            {
+                event_changes.push(crate::abort_signal::TransientEventChange {
+                    time: resume_time,
+                    node,
+                    value: crate::abort_signal::TransientEventValue::Real(value),
+                });
+            }
+        }
+        retained_result_values = Self::transient_result_value_count(&result);
+        if let Some(trace) = integral_trace {
+            let mut trace = trace.borrow_mut();
+            trace.initialize(&circuit);
+            self.ensure_result_values(retained_result_values.saturating_add(trace.names.len()))?;
+            retained_result_values = retained_result_values.saturating_add(trace.record(&circuit)?);
+        }
+        self.ensure_transient_result_limits(&result, retained_result_values)?;
+        if !circuit
+            .bjts
+            .devices
+            .iter()
+            .any(|bjt| bjt.legacy_excess_phase_delay() != 0.0)
+        {
+            abort.observe_transient_sample(result.observable_sample(
+                &digital_event_codes,
+                &sample_buses,
+                &real_snapshot,
+                Some(&event_changes),
+            ));
         }
 
         // OneStep's qHistory[0] is the accepted MutIndNonLin2 LOI vector,
