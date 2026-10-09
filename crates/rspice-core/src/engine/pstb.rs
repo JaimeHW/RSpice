@@ -87,12 +87,24 @@ impl Engine {
             )));
         }
 
+        let engine = self.resolved_for_netlist(netlist);
+        let order = operating_point.analysis().monodromy.len();
+        // A cached carrier can bypass circuit construction. Admit the actual
+        // eigenproblem and its complete retained spectrum before that fast path
+        // allocates the matrix, eigenvectors, or probe-participation result.
+        engine.ensure_matrix_unknowns(order)?;
+        engine.ensure_analysis_points(order)?;
+        let result_values = order
+            .saturating_mul(order.saturating_mul(3).saturating_add(7))
+            .saturating_add(16);
+        // Real monodromy + complex eigenvectors, multiplier/exponent pairs,
+        // participation and sparse probe coordinates, and scalar evidence.
+        engine.ensure_result_values(result_values)?;
         let probe =
-            self.resolve_pstb_probe(netlist, operating_point, &card.probe_instance, abort)?;
+            engine.resolve_pstb_probe(netlist, operating_point, &card.probe_instance, abort)?;
         ensure_not_aborted(abort)?;
 
         let pss = operating_point.analysis();
-        let order = pss.monodromy.len();
         for (index, row) in pss.monodromy.iter().enumerate() {
             poll_periodically(abort, index)?;
             if row.len() != order {
