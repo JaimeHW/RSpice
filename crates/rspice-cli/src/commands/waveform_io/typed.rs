@@ -7,6 +7,7 @@ use crate::commands::result_signal::qualified_name;
 use std::path::Path;
 
 mod dc_match;
+mod monte_carlo;
 mod pole_zero;
 mod sensitivity;
 mod stability;
@@ -255,6 +256,10 @@ pub(in crate::commands) fn result_document_table(
     use rspice_core::execution::result_document::{
         AxisValues, ResultPayload, ScalarValue, SeriesValues,
     };
+
+    if let ResultPayload::MonteCarlo(payload) = document.payload() {
+        return monte_carlo::table(path, document, payload, resource_limits);
+    }
 
     if document.axes().len() > 1 && document.frequency_table().is_none() {
         return Err(conversion_error(

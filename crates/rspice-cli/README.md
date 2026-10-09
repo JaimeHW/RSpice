@@ -877,6 +877,23 @@ only that retained root is the intended comparison. Older documents without
 units keep those units unstated. Older root-only flat exports can verify only
 their retained roots; regenerate those baselines to check gains and evidence.
 
+Monte Carlo JSON conversion uses the recorded zero-based `trial_index` and
+retains every output sample, statistic, histogram bin and edge, confidence state,
+and campaign scalar. Summary values repeat alongside the trial rows. Conversion
+checks the expanded table against the configured resource limits before writing.
+Legacy populations without trial identities use `sample_index` and explicitly
+mark those identities as unknown. Trial coordinates cannot be interpolated.
+
+`mc:identity:` columns preserve text, integer values, units, and variable identities
+as exact named indicators. Text uses UTF-8 hexadecimal encoding so case-sensitive
+metadata cannot alias in case-insensitive file formats. Large integer seeds remain
+exact in these indicators even when they cannot also be shown as binary64 numeric
+columns. Missing confidence bounds retain their reason in `:monte_carlo_status`
+columns (1: empty population, 2: insufficient samples, 3: unrepresentable result).
+Unknown missing values remain unknown. An empty or unretained population cannot
+pass verification. Older aggregate-only converted baselines must be regenerated
+to verify the trial data.
+
 DC mismatch exports and JSON conversion retain each contributor's scope, instance,
 parameter, parameter sigma, sensitivity, signed contribution, and variance share.
 It also retains the output probe, sigma multiplier, evaluated and retained

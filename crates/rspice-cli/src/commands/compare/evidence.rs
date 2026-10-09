@@ -107,5 +107,6 @@ pub(super) fn problems(data: &WaveformData) -> Vec<String> {
         }
     }
     problems.extend(super::dc_match::problems(data));
+    problems.extend(super::monte_carlo::problems(data));
     problems
 }

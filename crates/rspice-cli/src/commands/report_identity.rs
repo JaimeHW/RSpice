@@ -34,3 +34,27 @@ pub(super) fn decode_folded_part(value: &str) -> Option<String> {
         .ok()
         .map(|value| value.to_ascii_lowercase())
 }
+
+/// Preserve case-sensitive metadata even in formats with case-insensitive names.
+pub(super) fn encode_exact(value: &str) -> String {
+    use std::fmt::Write;
+    let mut encoded = String::with_capacity(value.len().saturating_mul(2));
+    for byte in value.bytes() {
+        let _ = write!(encoded, "{byte:02x}");
+    }
+    encoded
+}
+
+pub(super) fn decode_exact(value: &str) -> Option<String> {
+    if !value.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes = value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            Some((char::from(pair[0]).to_digit(16)? * 16 + char::from(pair[1]).to_digit(16)?) as u8)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    String::from_utf8(bytes).ok()
+}

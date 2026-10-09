@@ -12,13 +12,14 @@ use crate::commands::waveform_io::{
     ImportedResult, ResultSnapshot, detect_format, load_result_selected, supports_sections,
 };
 
+mod availability;
 mod dc_match;
 mod determinations;
 mod evidence;
 mod fft;
 mod interpolation;
+mod monte_carlo;
 mod selection;
-mod sensitivity;
 use selection::{parse_variable_name, variable_name_matches};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -605,11 +606,17 @@ fn compare_waveforms(
     golden: &WaveformData,
     args: &CompareArgs,
 ) -> Result<CompareResult, CliError> {
+    let discrete_population =
+        monte_carlo::is_population(result) || monte_carlo::is_population(golden);
+    if args.interpolate && discrete_population && result.values.first() != golden.values.first() {
+        return Err(CliError::VerificationFailed {
+            message: "Monte Carlo trial identities cannot be interpolated; compare the recorded trials directly".into(),
+        });
+    }
     // The imported files are already bounded and shape-checked. Interpolate
     // only matched samples, borrowing both grids instead of allocating the
     // result-column by golden-row cross product (including unused probes).
-    let interpolation = args
-        .interpolate
+    let interpolation = (args.interpolate && !discrete_population)
         .then(|| interpolation::Interpolation::new(result, golden))
         .transpose()?;
     let mut cmp_result = CompareResult {
@@ -629,14 +636,14 @@ fn compare_waveforms(
     let golden_determinations = determinations::Determinations::new(golden);
     cmp_result.problems.extend(evidence::problems(result));
     cmp_result.problems.extend(evidence::problems(golden));
-    let result_sensitivity = sensitivity::Evidence::new(result);
-    let golden_sensitivity = sensitivity::Evidence::new(golden);
+    let result_availability = availability::Evidence::new(result);
+    let golden_availability = availability::Evidence::new(golden);
     cmp_result
         .problems
-        .extend(result_sensitivity.problems.iter().cloned());
+        .extend(result_availability.problems.iter().cloned());
     cmp_result
         .problems
-        .extend(golden_sensitivity.problems.iter().cloned());
+        .extend(golden_availability.problems.iter().cloned());
     let exact_args = CompareArgs {
         abstol: 0.0,
         reltol: 0.0,
@@ -714,7 +721,7 @@ fn compare_waveforms(
         let mut determined_points = 0usize;
         let mut first_reason_mismatch = None;
         let status =
-            result_sensitivity.is_status(var_idx) || golden_sensitivity.is_status(golden_idx);
+            result_availability.is_status(var_idx) || golden_availability.is_status(golden_idx);
         for i in 0..num_points {
             let rv = if let Some(interpolation) = &interpolation {
                 if var_idx == 0 {
@@ -746,7 +753,11 @@ fn compare_waveforms(
                         gv,
                         var_name,
                         i,
-                        if status { &exact_args } else { args },
+                        if status || (discrete_population && var_idx == 0) {
+                            &exact_args
+                        } else {
+                            args
+                        },
                     ) && args.fail_fast
                     {
                         return Ok(cmp_result);
@@ -757,8 +768,8 @@ fn compare_waveforms(
                         .as_ref()
                         .map_or(Some(i), |plan| plan.observed_index(i));
                     let left = result_index
-                        .and_then(|row| result_sensitivity.reason(result, var_idx, row));
-                    let right = golden_sensitivity.reason(golden, golden_idx, i);
+                        .and_then(|row| result_availability.reason(result, var_idx, row));
+                    let right = golden_availability.reason(golden, golden_idx, i);
                     if left.is_some() || right.is_some() {
                         if left == right {
                             determined_points += 1;
@@ -781,7 +792,7 @@ fn compare_waveforms(
         }
         if let Some(first) = first_reason_mismatch {
             cmp_result.problems.push(format!(
-                "'{var_name}': sensitivity unavailability reasons differ at index {first}"
+                "'{var_name}': unavailability reasons differ at index {first}"
             ));
         }
         if let Some(first) = first_undefined_mismatch {

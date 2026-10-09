@@ -1,10 +1,10 @@
-//! Validate sensitivity identities and the reasons for missing derivative samples.
+//! Validate report availability and sensitivity identities.
 
 use super::{WaveformData, parse_variable_name, strip_outer_call};
 use std::collections::{HashMap, HashSet};
 
 pub(super) struct Evidence {
-    statuses: Vec<Option<usize>>,
+    statuses: Vec<Option<(usize, &'static str)>>,
     markers: HashSet<usize>,
     pub problems: Vec<String>,
 }
@@ -18,7 +18,9 @@ impl Evidence {
         };
         if !data.variables.iter().any(|name| {
             let name = name.to_ascii_lowercase();
-            name.contains("sens:") || name.contains(":sensitivity_status")
+            name.contains("sens:")
+                || name.contains(":sensitivity_status")
+                || name.contains(":monte_carlo_status")
         }) {
             return result;
         }
@@ -33,7 +35,15 @@ impl Evidence {
         for (column, name) in data.variables.iter().enumerate() {
             let component = strip_outer_call(name, "Re").or_else(|| strip_outer_call(name, "Im"));
             let normalized = component.unwrap_or(name).trim().to_ascii_lowercase();
-            if let Some(quantity) = normalized.strip_suffix(":sensitivity_status") {
+            let availability = normalized
+                .strip_suffix(":sensitivity_status")
+                .map(|quantity| (quantity, "sensitivity"))
+                .or_else(|| {
+                    normalized
+                        .strip_suffix(":monte_carlo_status")
+                        .map(|quantity| (quantity, "Monte Carlo"))
+                });
+            if let Some((quantity, family)) = availability {
                 result.markers.insert(column);
                 let metric = indices.get(&parse_variable_name(quantity).key).copied();
                 let real = indices
@@ -65,12 +75,12 @@ impl Evidence {
                     });
                 if valid {
                     for metric in metrics {
-                        result.statuses[metric] = Some(column);
+                        result.statuses[metric] = Some((column, family));
                     }
                 } else {
-                    result.problems.push(format!(
-                        "'{name}': invalid sensitivity availability evidence"
-                    ));
+                    result
+                        .problems
+                        .push(format!("'{name}': invalid {family} availability evidence"));
                 }
             } else if normalized.starts_with("sens:") {
                 let identity = normalized
@@ -119,9 +129,14 @@ impl Evidence {
         self.markers.contains(&column)
     }
 
-    pub fn reason(&self, data: &WaveformData, column: usize, row: usize) -> Option<u8> {
-        let status = self.statuses.get(column).copied().flatten()?;
+    pub fn reason(
+        &self,
+        data: &WaveformData,
+        column: usize,
+        row: usize,
+    ) -> Option<(&'static str, u8)> {
+        let (status, family) = self.statuses.get(column).copied().flatten()?;
         let code = data.sample(status, row)?;
-        (code != 0.0).then_some(code as u8)
+        (code != 0.0).then_some((family, code as u8))
     }
 }
