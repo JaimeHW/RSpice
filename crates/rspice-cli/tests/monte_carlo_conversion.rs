@@ -16,6 +16,66 @@ const FORMATS: [(&str, &str); 6] = [
     ("hdf5", "h5"),
 ];
 
+#[test]
+fn native_monte_carlo_preserves_tiny_confidence_percentages_through_exports() {
+    let dir = common::test_dir("mc_tiny_confidence");
+    for level in ["5e-324", "1e-320"] {
+        let deck = dir.join("tiny.sp");
+        std::fs::write(&deck, format!("Tiny confidence\n.param rval=1k\nV1 out 0 1\nR1 out 0 {{rval}}\n.mc 2 SEED 11 CONFIDENCE {level} PARAMS rval\n.end\n")).unwrap();
+        let native = dir.join("native.json");
+        let output = run(&deck, &native, "json", &[]);
+        assert!(output.status.success(), "{level}: {output:?}");
+        let document = common::read_json(&native);
+        let scalar = |name: &str| {
+            &document["scalars"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|scalar| scalar["name"] == name)
+                .unwrap()["value"]["value"]
+        };
+        let expected = level.parse::<f64>().unwrap();
+        assert_eq!(
+            scalar("mean_confidence_level_pct")
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            expected.to_bits()
+        );
+        for bound in ["lower", "upper"] {
+            assert_eq!(
+                scalar(&format!("mean_confidence_{bound}:{}", hex("V(OUT)"))),
+                &json!(1.0)
+            );
+        }
+        for (format, extension) in FORMATS {
+            let output = dir.join(format!("converted.{extension}"));
+            let converted = convert(&native, &output, format);
+            assert!(
+                converted.status.success(),
+                "{level}, {format}: {converted:?}"
+            );
+            let decoded = dir.join("decoded.json");
+            let converted = convert(&output, &decoded, "json");
+            assert!(
+                converted.status.success(),
+                "{level}, {format}: {converted:?}"
+            );
+            let table = common::read_json(&decoded);
+            for value in column(&table, "mean_confidence_level_pct")["values"]
+                .as_array()
+                .unwrap()
+            {
+                assert_eq!(
+                    value.as_f64().unwrap().to_bits(),
+                    expected.to_bits(),
+                    "{format}"
+                );
+            }
+        }
+    }
+}
+
 fn source(dir: &Path, name: &str, runs: usize, start: usize, seed: &str) -> PathBuf {
     let deck = dir.join(format!("{name}.sp"));
     std::fs::write(&deck, format!("Monte Carlo divider\nV1 in 0 5\nR1 in out {{rtop}}\nR2 out 0 1k\n.param rtop=1k\n.MC {runs} START {start} SEED {seed}\n.end\n")).unwrap();

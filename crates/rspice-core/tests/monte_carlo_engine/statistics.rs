@@ -3,8 +3,11 @@ use rspice_core::analysis::monte_carlo::{
 };
 use rspice_core::analysis::{MonteCarloConfig, MonteCarloRunner};
 
-fn student_interval(samples: [f64; 2], confidence_pct: f64) -> MeanConfidenceInterval {
-    let mut config = MonteCarloConfig::new(2).with_seed(1);
+fn student_interval<const N: usize>(
+    samples: [f64; N],
+    confidence_pct: f64,
+) -> MeanConfidenceInterval {
+    let mut config = MonteCarloConfig::new(N).with_seed(1);
     config.histogram_bins = 1;
     config.confidence_pct = confidence_pct;
     let mut samples = samples.into_iter();
@@ -19,6 +22,48 @@ fn student_interval(samples: [f64; 2], confidence_pct: f64) -> MeanConfidenceInt
         .variables["out"]
         .mean_confidence
         .unwrap()
+}
+
+#[test]
+fn student_limits_preserve_valid_tiny_confidence_percentages() {
+    for level in [f64::from_bits(1), f64::from_bits(64), 1e-320, 1e-307] {
+        for scale in [f64::MAX, 1e300] {
+            for (interval, width) in [
+                (
+                    student_interval([-scale, scale], level),
+                    (scale * level) * (std::f64::consts::PI / 200.0),
+                ),
+                (
+                    student_interval([-scale, 0.0, scale], level),
+                    (scale * level) * ((2.0_f64 / 3.0).sqrt() / 100.0),
+                ),
+            ] {
+                // At these levels higher-order terms are far below binary64
+                // precision: df=1 has q = tan(pi*p/2); df=2 has
+                // q = p*sqrt(2/(1-p*p)), from the integrated t density:
+                // https://www.itl.nist.gov/div898/handbook/eda/section3/eda3664.htm
+                let MeanConfidenceInterval::Available { lower, upper } = interval else {
+                    panic!("finite limits lost at {level}%: {interval:?}");
+                };
+                assert!(
+                    (lower / -width - 1.0).abs() < 2e-14,
+                    "{level}%: {lower} vs {}",
+                    -width
+                );
+                assert!(
+                    (upper / width - 1.0).abs() < 2e-14,
+                    "{level}%: {upper} vs {width}"
+                );
+            }
+        }
+        assert_eq!(
+            student_interval([1.0; 2], level),
+            MeanConfidenceInterval::Available {
+                lower: 1.0,
+                upper: 1.0
+            }
+        );
+    }
 }
 
 #[test]

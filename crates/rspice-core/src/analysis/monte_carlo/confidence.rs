@@ -278,7 +278,7 @@ fn cancellable_samples<'a>(
 
 fn student_interval(
     variable: &VariableStatistics,
-    critical: Value,
+    critical: ScaledValue,
     abort: &dyn AbortSignal,
 ) -> Result<MeanConfidenceInterval, SimulationError> {
     let samples = &variable.samples;
@@ -308,9 +308,7 @@ fn student_interval(
     let Ok(offset) = offset else {
         return Ok(MeanConfidenceInterval::Unrepresentable);
     };
-    let half_width = spread
-        .divide(count.sqrt())
-        .multiply(ScaledValue::new(critical));
+    let half_width = spread.divide(count.sqrt()).multiply(critical);
     // Preserve the center's offset from the anchor until adding the width.
     // Rounding the mean first can collapse an interval between adjacent values.
     let bound = |width| {
@@ -396,25 +394,36 @@ fn bootstrap_interval(
 }
 
 /// Positive Student-t quantile enclosing level_pct of the central population.
-fn student_t_critical(level_pct: Value, degrees: usize) -> Option<Value> {
+fn student_t_critical(level_pct: Value, degrees: usize) -> Option<ScaledValue> {
+    if !level_pct.is_finite() || level_pct <= 0.0 || level_pct >= 100.0 || degrees == 0 {
+        return None;
+    }
     let nu = degrees as Value;
     let central = level_pct / 100.0;
     let tail = (100.0 - level_pct) / 100.0;
-    if central <= 0.0 || tail <= 0.0 || degrees == 0 {
-        return None;
+    if central < 1e-6 {
+        let slope = if degrees == 1 {
+            std::f64::consts::FRAC_PI_2
+        } else {
+            0.5 * nu.sqrt() * log_beta_half(0.5 * nu).exp()
+        };
+        // A positive percentage can round to zero as a binary64 probability.
+        // Retain the leading quantile's exponent until it scales the spread;
+        // only its negligible cubic correction may safely underflow to zero.
+        let first = ScaledValue::new(level_pct)
+            .divide(ScaledValue::new(100.0))
+            .multiply(ScaledValue::new(slope));
+        let correction = ((nu + 1.0) / (6.0 * nu)) * first.binary64().powi(2);
+        return Some(first.multiply(ScaledValue::new(1.0 + correction)));
     }
     if degrees == 1 {
-        return Some(if level_pct < 50.0 {
+        return Some(ScaledValue::new(if level_pct < 50.0 {
             (std::f64::consts::FRAC_PI_2 * central).tan()
         } else {
             1.0 / (std::f64::consts::FRAC_PI_2 * tail).tan()
-        });
+        }));
     }
     let log_beta = log_beta_half(0.5 * nu);
-    if central < 1e-6 {
-        let first = central * (0.5 * nu.sqrt() * log_beta.exp());
-        return Some(first * (1.0 + ((nu + 1.0) / (6.0 * nu)) * first * first));
-    }
     let below_target = |t: Value| -> Option<bool> {
         let square = t * t;
         if level_pct < 50.0 {
@@ -439,7 +448,7 @@ fn student_t_critical(level_pct: Value, degrees: usize) -> Option<Value> {
     for _ in 0..128 {
         let midpoint = lower + (upper - lower) * 0.5;
         if midpoint == lower || midpoint == upper {
-            return Some(midpoint);
+            return Some(ScaledValue::new(midpoint));
         }
         if below_target(midpoint)? {
             lower = midpoint;
@@ -547,7 +556,9 @@ mod tests {
             (7, 50.0, 0.7111417780817864),
             (7, 99.9999, 15.767009437405942),
         ] {
-            let actual = student_t_critical(level, degrees).expect("quantile converges");
+            let actual = student_t_critical(level, degrees)
+                .expect("quantile converges")
+                .binary64();
             assert!(
                 (actual / expected - 1.0).abs() < 3e-11,
                 "df={degrees}, level={level}: {actual}, expected {expected}"
