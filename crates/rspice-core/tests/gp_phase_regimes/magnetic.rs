@@ -1,5 +1,42 @@
 //! Coupled-winding event epochs against the two exact RL decay modes.
 use super::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_small_steps_preserve_constant_bias_charge_current() {
+    let dialect = SpiceDialect::BestAvailable;
+    let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+    config.gp_transient_phase_model = GpTransientPhaseModel::ExactDelay;
+    config.integration_method = IntegrationMethod::BackwardEuler;
+    config.convergence_config.gmin_target = 0.0;
+    let engine = Engine::new(config);
+    for polarity in [1.0, -1.0] {
+        let source = Netlist::parse(&format!(
+            "constant GP charge at small steps\nVC c 0 {}\nVB b 0 {}\nVD drive 0 DC 0 SIN(0 {} 1G)\nR1 drive coil 1k\nL1 coil 0 1u\nF1 b 0 L1 1\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) i(vb) i(l1)\n.end\n",
+            2.0 * polarity, 0.7 * polarity, 1e-3 * polarity,
+            if polarity > 0.0 { "NPN" } else { "PNP" }
+        )).unwrap();
+        let result = engine.run_tran(&source, 50e-12, 2e-12).unwrap();
+        let voltage = result.try_voltage_waveform_named("b").unwrap();
+        let base = result.try_branch_current_waveform_named("vb").unwrap();
+        let winding = result.try_branch_current_waveform_named("l1").unwrap();
+        let vt = thermal_voltage(dialect);
+        let bias = diode(0.7, vt, dialect).0 / 100.0 + diode(-1.3, vt, dialect).0;
+        for (index, &time) in result.time.iter().enumerate() {
+            assert_eq!(polarity * voltage[index], 0.7);
+            // Both junction biases, hence every physical GP charge, stay
+            // constant. Only the independent RL current changes base KCL.
+            assert!(
+                (-polarity * (base[index] + winding[index]) - bias).abs() < 2e-14,
+                "polarity={polarity}, time={time:e}: base={:e}, winding={:e}, bias={bias:e}",
+                base[index],
+                winding[index]
+            );
+        }
+        assert_eq!(result.time.last(), Some(&50e-12));
+        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+    }
+}
 use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

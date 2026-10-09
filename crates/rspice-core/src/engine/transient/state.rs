@@ -1970,7 +1970,6 @@ impl Engine {
         };
 
         if !suppress_gate_charge && !mos.uses_legacy_bsim() {
-            let unit_geq = Self::jfet_companion_geq(coeff, 1.0, dt);
             let (cgs_half, cgd_half, cgb_half) = if let Some(constants) = constants {
                 mos.transient_capacitance_halves_with_constants(
                     vgs_eval, vds_eval, vbs_eval, constants,
@@ -1988,10 +1987,9 @@ impl Engine {
             let cgd = cgd_half + history.capgd_prev_half[idx] + cgd_ov;
             let cgb = cgb_half + history.capgb_prev_half[idx] + cgb_ov;
 
-            let (geq_gs, ieq_gs, qgs, cqgs) = Self::jfet_companion_terms_with_unit_geq(
+            let (geq_gs, ieq_gs, qgs, cqgs) = Self::jfet_companion_terms(
                 coeff,
                 dt,
-                unit_geq,
                 cgs,
                 vgs,
                 history.vgs_prev[idx],
@@ -2006,10 +2004,9 @@ impl Engine {
                 charges[0] = (qgs, cqgs);
             }
 
-            let (geq_gd, ieq_gd, qgd, cqgd) = Self::jfet_companion_terms_with_unit_geq(
+            let (geq_gd, ieq_gd, qgd, cqgd) = Self::jfet_companion_terms(
                 coeff,
                 dt,
-                unit_geq,
                 cgd,
                 vgd,
                 history.vgd_prev[idx],
@@ -2024,10 +2021,9 @@ impl Engine {
                 charges[1] = (qgd, cqgd);
             }
 
-            let (geq_gb, ieq_gb, qgb, cqgb) = Self::jfet_companion_terms_with_unit_geq(
+            let (geq_gb, ieq_gb, qgb, cqgb) = Self::jfet_companion_terms(
                 coeff,
                 dt,
-                unit_geq,
                 cgb,
                 vgb,
                 history.vgb_prev[idx],

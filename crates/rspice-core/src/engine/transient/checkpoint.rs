@@ -1300,8 +1300,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v127 resolves XSPICE driver banks in stable instance/port/element order.
     // v128 includes finite CCVS sensing-cutset equations in physical events.
     // v129 binds the unified mixed-runtime checkpoint ABI.
-    // v132 admits smooth behavioral currents with finite branch-coordinate inputs.
-    hasher.update(b"rspice-transient-resolved-config-v132\0");
+    // v133 centers semiconductor charge currents before timestep scaling.
+    hasher.update(b"rspice-transient-resolved-config-v133\0");
     #[cfg(feature = "veriloga")]
     hash_field(
         &mut hasher,
