@@ -139,7 +139,7 @@ impl Bindings {
         let mut deferred = BTreeMap::new();
         for pending in &state.pending {
             let mut target = None;
-            if !pending.source.absolute {
+            if !pending.source.absolute && pending.source.branch.is_none() {
                 for level in (0..=pending.origin.len()).rev() {
                     let parent = &pending.origin[..level];
                     let first = &pending.scopes[0];
@@ -235,6 +235,31 @@ impl Unroller<'_> {
                 index,
             });
         }
+        let mut source = source.clone();
+        if let Some(branch) = &mut source.branch {
+            for terminal in std::iter::once(&mut branch.pos).chain(branch.neg.iter_mut()) {
+                let mut expressions = terminal.prefix.iter_mut().collect::<Vec<_>>();
+                expressions.extend(
+                    terminal
+                        .name
+                        .segments
+                        .iter_mut()
+                        .filter_map(|s| s.index.as_mut()),
+                );
+                if let Some(select) = &mut terminal.select {
+                    match select {
+                        PackedSelect::Bit(index) => expressions.push(index.as_mut()),
+                        PackedSelect::Part { msb, lsb } => {
+                            expressions.extend([msb.as_mut(), lsb.as_mut()])
+                        }
+                    }
+                }
+                for expression in expressions {
+                    self.substitute(expression);
+                    index_dependencies.push(expression.clone());
+                }
+            }
+        }
         let mut state = self.hierarchy.state.borrow_mut();
         let symbol = state.fresh();
         state.pending.push(Pending {
@@ -242,7 +267,7 @@ impl Unroller<'_> {
             origin: self.scope_path.clone(),
             scopes,
             terminal: source.segments.last().unwrap().name.clone(),
-            source: source.clone(),
+            source,
             index_dependencies,
         });
         *name = symbol;

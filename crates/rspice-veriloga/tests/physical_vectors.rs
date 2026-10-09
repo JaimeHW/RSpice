@@ -2408,3 +2408,116 @@ fn foreign_physical_references_reject_variables_and_bad_coordinates() {
         );
     }
 }
+
+
+#[test]
+fn foreign_explicit_branch_selectors_specialize_in_caller_scope_and_replay() {
+    let source = r#"
+module leaf(inout electrical [2:1] p);
+ parameter integer IDX=999;
+ analog begin I(p[2])<+(V(p[2])-4)/1000; I(p[1])<+(V(p[1])-2)/1000; end
+endmodule
+module top(output electrical [2:1] p,output electrical q);
+ parameter integer IDX=1;
+ genvar j;
+ generate for(j=0;j<2;j=j+1) begin : cells
+   leaf a(p);
+ end endgenerate
+ analog V(q)<+V(cells[1].a.branch(p[IDX]))+I(cells[0].a.branch(0,p[2]))+I(cells[1].a.branch(<p[IDX]>));
+endmodule
+"#;
+    let compiler = VerilogACompiler::default();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("IDX", 2.0)], &NoPipelineControl)
+        .unwrap();
+    for report in [&artifact, &specialized] {
+        report.canonical_ir.validate().unwrap();
+        assert_eq!(report.canonical_ir.hir.ports.len(), 3);
+        let replay = compiler
+            .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+        assert_eq!(
+            report.canonical_ir.hir.branches,
+            replay.canonical_ir.hir.branches
+        );
+    }
+}
+
+#[test]
+fn foreign_explicit_branches_reject_missing_or_incompatible_targets() {
+    for (declarations, body, usage, diagnostic) in [
+        (
+            "branch(p) b;",
+            "I(b)<+V(b)/1000;",
+            "V(q)<+I(a.branch(p));",
+            "no existing unnamed branch",
+        ),
+        (
+            "branch(p) b;",
+            "I(b)<+V(b)/1000;",
+            "V(q)<+I(a.branch(b));",
+            "terminals must be nets",
+        ),
+        (
+            "electrical n;",
+            "I(p)<+V(p)/1000;",
+            "V(q)<+I(a.branch(<n>));",
+            "must name a port",
+        ),
+        (
+            "",
+            "I(p)<+V(p)/1000;",
+            "V(a.branch(p))<+1;",
+            "switch branch",
+        ),
+        (
+            "branch(p) b;",
+            "I(b)<+V(b)/1000;",
+            "V(a.b)<+1;",
+            "switch branch",
+        ),
+        (
+            "",
+            "V(p):V(p)==1;",
+            "I(a.branch(p))<+1m;",
+            "indirectly constrained",
+        ),
+        (
+            "",
+            "I(p)<+V(p)/1000;",
+            "V(a.branch(p)):V(p)==1;",
+            "hierarchical indirect",
+        ),
+    ] {
+        let source = format!(
+            "module leaf(inout electrical p); {declarations} analog {body} endmodule module top(inout electrical p,output electrical q); leaf a(p); analog begin {usage} end endmodule"
+        );
+        let error = VerilogACompiler::default()
+            .compile_runtime(&source, Some("top"))
+            .err()
+            .expect("invalid target must fail")
+            .to_string();
+        assert!(error.contains(diagnostic), "{usage}: {error}");
+    }
+}
+
+
+#[test]
+fn foreign_explicit_branch_terminals_reject_nested_branch_calls() {
+    let expression = format!("{}p{}", "a.branch(".repeat(64), ")".repeat(64));
+    let source = format!(
+        "module leaf(inout electrical p); analog I(p)<+V(p)/1000; endmodule module top(output electrical p,q); leaf a(p); analog V(q)<+I({expression}); endmodule"
+    );
+    assert!(
+        VerilogACompiler::default()
+            .compile_runtime(&source, Some("top"))
+            .is_err()
+    );
+}

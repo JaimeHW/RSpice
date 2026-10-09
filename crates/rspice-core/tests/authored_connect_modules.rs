@@ -2994,3 +2994,70 @@ endmodule
         );
     }
 }
+
+
+#[test]
+fn foreign_explicit_branches_preserve_sources_direction_derivatives_and_boundaries() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module leaf(inout electrical p);
+ parameter real G=4;
+ analog I(p)<+(V(p)-G)/1000;
+endmodule
+module middle(inout electrical p,output electrical q,r,s,t);
+ parameter real G=4;
+ leaf #(.G(G)) a(p);
+ analog begin
+   I(a.p)<+V(a.p)/2000;
+   V(q)<+1000*I(a.p);
+   V(r)<+1000*I(a.branch(p));
+   V(s)<+1000*I(a.branch(<p>));
+   V(t)<+ddx(V(a.branch(0,p))*V(a.branch(0,p)),V(a.branch(0,p)));
+ end
+endmodule
+module top(output electrical p,q,r,s,t,u,v,w,x);
+ parameter real BASE=4;
+ middle #(.G(BASE)) m(p,q,r,s,t);
+ real sampled=0;
+ initial #0.5 sampled=1000*I(m.a.branch(0,p));
+ analog begin
+   I(m.a.branch(p))<+1m;
+   I(m.branch(a.p))<+0.5m;
+   V(u)<+1000*I(m.branch(a.p));
+   V(v)<+1000*I(m.branch(0,a.p));
+   V(w)<+sampled;
+   V(x)<+1000*I(m.branch(<p>));
+ end
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!("* explicit hierarchy branches\nX1 p q r s t u v w x top\nX2 a b c d e f g h i top BASE=8\nR1 p 0 1k\nR2 a 0 1k\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 1.0),
+        ("q", 1.0),
+        ("r", -2.0),
+        ("s", -2.0),
+        ("t", -2.0),
+        ("u", 1.0),
+        ("v", -1.0),
+        ("w", 2.0),
+        ("x", -1.0),
+        ("a", 2.6),
+        ("b", 1.8),
+        ("c", -4.4),
+        ("d", -4.4),
+        ("e", -5.2),
+        ("f", 1.8),
+        ("g", -1.8),
+        ("h", 4.4),
+        ("i", -2.6),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}

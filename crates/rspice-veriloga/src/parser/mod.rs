@@ -1058,7 +1058,7 @@ impl<'a> Parser<'a> {
     fn parse_branch_terminal(
         &mut self,
     ) -> Result<(SmolStr, Vec<Expression>, Option<PackedSelect>), ParseError> {
-        let name = self.parse_reference_endpoint("branch terminal")?;
+        let name = self.parse_reference_endpoint("branch terminal", false)?;
         let mut prefix = Vec::new();
         let mut select = None;
         while self.match_token(TokenKind::LBracket) {
@@ -2490,7 +2490,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_node_operand(&mut self) -> Result<(SmolStr, Vec<Expression>), ParseError> {
-        let name = self.parse_reference_endpoint("node")?;
+        let name = self.parse_reference_endpoint("node", true)?;
         let mut indices = Vec::new();
         while self.match_token(TokenKind::LBracket) {
             indices.push(self.parse_expression()?);

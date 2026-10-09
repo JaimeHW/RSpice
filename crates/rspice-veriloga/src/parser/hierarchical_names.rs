@@ -9,16 +9,25 @@ impl Parser<'_> {
     pub(super) fn parse_reference_endpoint(
         &mut self,
         context: &str,
+        allow_branch: bool,
     ) -> Result<SmolStr, ParseError> {
         if self.check(TokenKind::IntegerLiteral) {
             return Ok(self.expect_branch_endpoint(context)?.into());
         }
-        self.parse_reference_name(context)
+        self.parse_reference_path(context, allow_branch)
     }
 
     /// Consume only scope selectors. A selector on the final name belongs to the
     /// expression/lvalue grammar and is left for its caller.
     pub(super) fn parse_reference_name(&mut self, context: &str) -> Result<SmolStr, ParseError> {
+        self.parse_reference_path(context, true)
+    }
+
+    fn parse_reference_path(
+        &mut self,
+        context: &str,
+        allow_branch: bool,
+    ) -> Result<SmolStr, ParseError> {
         let start = self.current_span();
         let absolute = self.is_root_reference();
         if absolute {
@@ -26,8 +35,38 @@ impl Parser<'_> {
             self.expect(TokenKind::Dot)?;
         }
         let mut segments = Vec::new();
+        let mut branch = None;
         loop {
             let span = self.current_span();
+            if !segments.is_empty()
+                && self.check(TokenKind::Identifier)
+                && self.current().text.as_deref() == Some("branch")
+                && self.peek_is(TokenKind::LParen)
+            {
+                if !allow_branch {
+                    return Err(self.error(ParseErrorKind::InvalidExpression));
+                }
+                self.advance();
+                self.expect(TokenKind::LParen)?;
+                let is_port = self.match_token(TokenKind::Lt);
+                let pos = self.parse_hierarchical_branch_terminal()?;
+                let neg = if is_port {
+                    self.expect(TokenKind::Gt)?;
+                    None
+                } else if self.match_token(TokenKind::Comma) {
+                    Some(self.parse_hierarchical_branch_terminal()?)
+                } else {
+                    None
+                };
+                self.expect(TokenKind::RParen)?;
+                branch = Some(Box::new(HierarchicalBranch { pos, neg, is_port }));
+                segments.push(HierarchicalSegment {
+                    name: "branch".into(),
+                    index: None,
+                    span,
+                });
+                break;
+            }
             let name = self.expect_identifier(context)?.into();
             let index = if self.scope_selector_follows() {
                 self.expect(TokenKind::LBracket)?;
@@ -66,10 +105,40 @@ impl Parser<'_> {
             HierarchicalName {
                 absolute,
                 segments,
+                branch,
                 span,
             },
         );
         Ok(symbol)
+    }
+
+    fn parse_hierarchical_branch_terminal(
+        &mut self,
+    ) -> Result<HierarchicalBranchTerminal, ParseError> {
+        let span = self.current_span();
+        let (name, prefix, select) = self.parse_branch_terminal()?;
+        let name = self
+            .hierarchical_names
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| HierarchicalName {
+                absolute: false,
+                segments: vec![HierarchicalSegment {
+                    name,
+                    index: None,
+                    span,
+                }],
+                branch: None,
+                span,
+            });
+        if name.branch.is_some() {
+            return Err(self.error(ParseErrorKind::InvalidExpression));
+        }
+        Ok(HierarchicalBranchTerminal {
+            name,
+            prefix,
+            select,
+        })
     }
 
     fn scope_selector_follows(&self) -> bool {

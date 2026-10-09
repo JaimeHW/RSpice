@@ -6,6 +6,7 @@ mod continuous_nets;
 mod real_buses;
 use super::*;
 pub(super) use connections::{ConnectionScope, bind as bind_connections};
+pub(super) use branches::terminal as reference_terminal;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 

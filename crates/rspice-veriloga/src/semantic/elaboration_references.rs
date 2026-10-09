@@ -3,11 +3,15 @@
 use super::*;
 use crate::ast::ForeignPhysicalKind;
 
+#[path = "elaboration_references/unnamed.rs"]
+mod unnamed;
+
 type Key = (SmolStr, SmolStr);
 type Pending = BTreeMap<SmolStr, (Key, Span)>;
 
 #[derive(Default)]
 pub(super) struct PhysicalReferences {
+    unnamed: unnamed::UnnamedReferences,
     nodes: BTreeMap<Key, NodeBinding>,
     branches: BTreeMap<Key, SmolStr>,
     ports: BTreeMap<Key, SmolStr>,
@@ -71,7 +75,7 @@ pub(super) fn canonicalize_node_references(
 
 pub(super) fn is_borrowed_branch(source: &Module, module: &AnalyzedModule, lane: &SmolStr) -> bool {
     source.foreign_physical.iter().any(|(name, reference)| {
-        matches!(reference.kind, ForeignPhysicalKind::Branch)
+        reference.kind.is_branch()
             && module
                 .physical_nodes
                 .reference_lanes(name, true)
@@ -91,9 +95,13 @@ impl PhysicalReferences {
         owner: &str,
         inventory: &super::super::flow_probes::HierarchyBranches,
     ) {
+        self.unnamed.request(source, module, owner, inventory);
         for (name, reference) in &source.foreign_physical {
+            if matches!(reference.kind, ForeignPhysicalKind::Unnamed { .. }) {
+                continue;
+            }
             let path = qualify(owner, &reference.path);
-            let branch = matches!(reference.kind, ForeignPhysicalKind::Branch);
+            let branch = reference.kind.is_branch();
             let aliases = module.physical_nodes.reference_lanes(name, branch);
             for (alias, lane) in aliases.iter().zip(&reference.lanes) {
                 let key = (path.clone(), lane.clone());
@@ -117,9 +125,13 @@ impl PhysicalReferences {
 
     pub(super) fn extend_inventory(
         &self,
+        source: &Module,
+        module: &AnalyzedModule,
         path: &str,
         inventory: &mut super::super::flow_probes::HierarchyBranches,
     ) {
+        self.unnamed
+            .extend_inventory(source, module, path, inventory);
         for ((owner, name), span) in &self.requested_ports {
             if owner == path {
                 inventory.port_flows.insert(name.clone(), *span);
@@ -139,6 +151,7 @@ impl PhysicalReferences {
         owner: &str,
         scope: &ScopeMap,
     ) -> CompileResult<()> {
+        self.unnamed.register(source, module, owner, scope)?;
         let owner: SmolStr = owner.into();
         for (name, node) in &scope.nodes {
             let key = (owner.clone(), name.clone());
@@ -159,8 +172,11 @@ impl PhysicalReferences {
             }
         }
         for (name, reference) in &source.foreign_physical {
+            if matches!(reference.kind, ForeignPhysicalKind::Unnamed { .. }) {
+                continue;
+            }
             let path = qualify(&owner, &reference.path);
-            let branch = matches!(reference.kind, ForeignPhysicalKind::Branch);
+            let branch = reference.kind.is_branch();
             let aliases = module.physical_nodes.reference_lanes(name, branch);
             if aliases.len() != reference.lanes.len() {
                 return Err(internal_error(
@@ -170,6 +186,7 @@ impl PhysicalReferences {
             for (alias, lane) in aliases.iter().zip(&reference.lanes) {
                 let key = (path.clone(), lane.clone());
                 match reference.kind {
+                    ForeignPhysicalKind::Unnamed { .. } => unreachable!("handled above"),
                     ForeignPhysicalKind::Branch => {
                         let name = scope
                             .branches
@@ -212,8 +229,10 @@ impl PhysicalReferences {
         ports: &mut BTreeMap<SmolStr, PortFlow>,
         terms: &[(SmolStr, NodeBinding, SmolStr, i8)],
     ) -> CompileResult<()> {
+        let unnamed = self.unnamed.resolve()?;
         let mut nodes = BTreeMap::new();
-        if self.node_aliases.is_empty()
+        if unnamed.is_empty()
+            && self.node_aliases.is_empty()
             && self.branch_aliases.is_empty()
             && self.port_aliases.is_empty()
         {
@@ -254,21 +273,28 @@ impl PhysicalReferences {
                 );
             }
         }
+        for (alias, (name, _)) in &unnamed {
+            names.insert(alias.clone(), name.clone());
+        }
+        validate_contributions(module, &names)?;
         let rename = |name: &mut SmolStr| {
             if let Some(bound) = nodes.get(name) {
                 *name = bound.name.clone();
             }
         };
         let rewrite = |expression: &mut Expression| {
-            let mut pending = vec![expression];
+            let mut pending = vec![&mut *expression];
             while let Some(expression) = pending.pop() {
+                let mut sign = 1;
                 if let Expression::BranchAccess(access) = expression {
                     match access {
                         BranchAccess::Nodes { pos, neg, .. } => {
                             if neg.is_none()
-                                && self.branch_aliases.contains_key(pos)
+                                && (self.branch_aliases.contains_key(pos)
+                                    || unnamed.contains_key(pos))
                                 && let Some(branch) = names.get(pos)
                             {
+                                sign = unnamed.get(pos).map_or(1, |(_, sign)| *sign);
                                 *pos = branch.clone();
                             } else {
                                 rename(pos);
@@ -279,18 +305,38 @@ impl PhysicalReferences {
                         }
                         BranchAccess::Branch { name, .. } => {
                             if let Some(bound) = names.get(name) {
+                                sign = unnamed.get(name).map_or(1, |(_, sign)| *sign);
                                 *name = bound.clone();
                             }
                         }
                     }
                 }
+                if sign < 0 {
+                    *expression = super::super::flow_probes::signed(expression.clone(), -1.0);
+                }
                 super::super::flow_probes::for_child_mut(expression, &mut |child| {
                     pending.push(child)
                 });
             }
+            repair_derivative_axes(expression);
         };
         super::super::flow_probes::rewrite_module_expressions(module, &rewrite);
-        let contribution = |c: &mut AnalyzedContribution| {
+        let branch_nodes: HashMap<SmolStr, SmolStr> = module
+            .branches
+            .iter()
+            .filter(|b| !names.contains_key(&b.name))
+            .map(|b| {
+                let mut pos = b.pos_node.clone();
+                let mut neg = b.neg_node.clone();
+                rename(&mut pos);
+                rename(&mut neg);
+                (
+                    b.name.clone(),
+                    format!("{pos},{}", if neg.is_empty() { "0" } else { neg.as_str() }).into(),
+                )
+            })
+            .collect();
+        let contribution = |c: &mut AnalyzedContribution, flat: bool| {
             let (pos, neg) = c
                 .branch
                 .split_once(',')
@@ -304,23 +350,31 @@ impl PhysicalReferences {
             } else {
                 pos
             };
+            let mut sign = 1;
             if let Some(name) = &mut c.declared_branch
                 && let Some(bound) = names.get(name)
             {
+                sign = unnamed.get(name).map_or(1, |(_, sign)| *sign);
                 *name = bound.clone();
+                if let Some(nodes) = branch_nodes.get(bound) {
+                    c.branch = nodes.clone();
+                }
+            }
+            if sign < 0 {
+                super::super::flow_probes::negate_contribution(c, flat);
             }
             if let Some(abstol) = &mut c.equation_abstol {
                 rewrite(abstol);
             }
         };
         for c in &mut module.contributions {
-            contribution(c);
+            contribution(c, true);
         }
         let mut pending = vec![module.body.as_mut_slice()];
         while let Some(body) = pending.pop() {
             for region in body {
                 match region {
-                    AnalyzedRegion::Contribution(c) => contribution(c),
+                    AnalyzedRegion::Contribution(c) => contribution(c, false),
                     AnalyzedRegion::Conditional {
                         then_body,
                         else_body,
@@ -344,9 +398,9 @@ impl PhysicalReferences {
         module
             .ground_nodes
             .retain(|name| !self.node_aliases.contains_key(name));
-        module
-            .branches
-            .retain(|branch| !self.branch_aliases.contains_key(&branch.name));
+        module.branches.retain(|branch| {
+            !self.branch_aliases.contains_key(&branch.name) && !unnamed.contains_key(&branch.name)
+        });
         for branch in &mut module.branches {
             rename(&mut branch.pos_node);
             rename(&mut branch.neg_node);
@@ -387,6 +441,89 @@ fn record_terms(
                 port.terms.remove(branch);
             }
         }
+    }
+}
+
+/// An external contribution may augment a source, but cannot introduce a
+/// potential/flow switch or contribute to an indirectly constrained branch.
+fn validate_contributions(
+    module: &AnalyzedModule,
+    names: &BTreeMap<SmolStr, SmolStr>,
+) -> CompileResult<()> {
+    let targets: HashSet<_> = names.values().collect();
+    let mut kinds: BTreeMap<SmolStr, (u8, u8, bool, Option<Span>)> = BTreeMap::new();
+    for contribution in &module.contributions {
+        let Some(branch) = &contribution.declared_branch else {
+            continue;
+        };
+        let external = names.get(branch);
+        let target = external.unwrap_or(branch);
+        if !targets.contains(target) {
+            continue;
+        }
+        let entry = kinds.entry(target.clone()).or_default();
+        let kind = if contribution.is_current { 1 } else { 2 };
+        if external.is_some() {
+            if contribution.indirect {
+                return Err(semantic_error(
+                    SemanticErrorKind::InvalidContribution(
+                        "hierarchical indirect contributions are not permitted".into(),
+                    ),
+                    contribution.span,
+                ));
+            }
+            entry.1 |= kind;
+            entry.3 = Some(contribution.span);
+        } else {
+            entry.0 |= kind;
+        }
+        entry.2 |= contribution.indirect;
+    }
+    for (_, (local, external, indirect, span)) in kinds {
+        let Some(span) = span else {
+            continue;
+        };
+        if indirect {
+            return Err(semantic_error(
+                SemanticErrorKind::InvalidContribution(
+                    "a hierarchical contribution cannot target an indirectly constrained branch"
+                        .into(),
+                ),
+                span,
+            ));
+        }
+        if local != 3 && (local | external) == 3 {
+            return Err(semantic_error(
+                SemanticErrorKind::InvalidContribution(
+                    "a hierarchical contribution cannot change the target into a switch branch"
+                        .into(),
+                ),
+                span,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A reversed branch probe is a negative expression. ddx requires a bare probe
+/// for its axis, so transfer that sign to the derivative result after binding.
+fn repair_derivative_axes(expression: &mut Expression) {
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        let args = match expression {
+            Expression::Call(call) if call.name == "ddx" => Some(&mut call.args),
+            Expression::SystemFunction(call) if call.name == "ddx" => Some(&mut call.args),
+            _ => None,
+        };
+        if let Some(args) = args
+            && args.len() == 2
+            && matches!(&args[1], Expression::Unary(unary) if unary.op == UnaryOp::Neg)
+            && let Expression::Unary(unary) = args.remove(1)
+        {
+            args.push(*unary.operand);
+            *expression = super::super::flow_probes::signed(expression.clone(), -1.0);
+        }
+        super::super::flow_probes::for_child_mut(expression, &mut |child| pending.push(child));
     }
 }
 

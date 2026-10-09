@@ -4,6 +4,7 @@ use super::elaboration::parameters::{ParameterDependencies, SourceParameters};
 
 mod functions;
 mod physical;
+mod unnamed;
 use super::*;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -219,14 +220,25 @@ impl Resolver {
                 ));
             }
         }
-        let (target, name) = self.target(owner, &reference)?;
-        self.import_symbol(
-            owner,
-            target,
-            &name,
-            Some(symbol.clone()),
-            reference.source.span,
-        )?;
+        if let Some(branch) = &reference.source.branch {
+            let (target, scope) = self.target_scope(owner, &reference)?;
+            if !scope.is_empty() {
+                return Err(error(
+                    "branch() must select a module instance",
+                    reference.source.span,
+                ));
+            }
+            self.import_unnamed(owner, target, branch, symbol, reference.source.span)?;
+        } else {
+            let (target, name) = self.target(owner, &reference)?;
+            self.import_symbol(
+                owner,
+                target,
+                &name,
+                Some(symbol.clone()),
+                reference.source.span,
+            )?;
+        }
         let dependencies = SourceParameters::new(&self.frames[owner].source)
             .dependencies(reference.index_dependencies.iter())?;
         self.retain_dependencies(owner, owner, dependencies);
@@ -409,6 +421,28 @@ impl Resolver {
         owner: usize,
         reference: &ScopedHierarchicalReference,
     ) -> CompileResult<(usize, SmolStr)> {
+        let (frame, scope) = self.target_scope(owner, reference)?;
+        let span = reference.source.span;
+        let terminal = &reference
+            .source
+            .segments
+            .last()
+            .expect("parsed terminal")
+            .name;
+        let name = self.frames[frame].member(&scope, terminal).ok_or_else(|| {
+            error(
+                format!("`{terminal}` is not declared in the selected scope"),
+                span,
+            )
+        })?;
+        Ok((frame, name))
+    }
+
+    fn target_scope(
+        &mut self,
+        owner: usize,
+        reference: &ScopedHierarchicalReference,
+    ) -> CompileResult<(usize, Vec<HierarchicalScopeKey>)> {
         let span = reference.source.span;
         if reference.source.absolute {
             return Err(error(
@@ -475,19 +509,7 @@ impl Resolver {
                 }
             }
         }
-        let terminal = &reference
-            .source
-            .segments
-            .last()
-            .expect("parsed terminal")
-            .name;
-        let name = self.frames[frame].member(&scope, terminal).ok_or_else(|| {
-            error(
-                format!("`{terminal}` is not declared in the selected scope"),
-                span,
-            )
-        })?;
-        Ok((frame, name))
+        Ok((frame, scope))
     }
 
     fn child(&mut self, parent: usize, ordinal: usize, span: Span) -> CompileResult<usize> {

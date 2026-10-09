@@ -547,7 +547,7 @@ impl<'a> HierarchyElaborator<'a> {
             child_source, child, &mut branch_inventory,
         );
         self.references.request(child_source, child, relative, &branch_inventory);
-        self.references.extend_inventory(relative, &mut branch_inventory);
+        self.references.extend_inventory(child_source, child, relative, &mut branch_inventory);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let noise_process_base = self.next_noise_process;
         self.next_noise_process = self
@@ -939,8 +939,6 @@ impl<'a> HierarchyElaborator<'a> {
             });
         }
 
-        self.references.register(child_source, child, relative, &scope)?;
-
         // A module owns its unnamed branches even when another instance
         // binds its ports to the same nets. Give those branches private names
         // before endpoint substitution can erase that ownership.
@@ -970,6 +968,8 @@ impl<'a> HierarchyElaborator<'a> {
             scope.unnamed_branches.insert((pos, neg), branch.clone());
             self.flattened.branches.push(branch);
         }
+
+        self.references.register(child_source, child, relative, &scope)?;
 
         // One base for both spaces, taken before anything is appended, so the
         // two lowerings of an inlined instance keep naming each other.

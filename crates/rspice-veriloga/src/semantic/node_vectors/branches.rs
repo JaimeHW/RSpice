@@ -129,7 +129,7 @@ pub(super) fn expand(
     Ok(())
 }
 
-fn terminal(
+pub(in crate::semantic) fn terminal(
     name: &SmolStr,
     prefix: &[Expression],
     select: Option<&PackedSelect>,

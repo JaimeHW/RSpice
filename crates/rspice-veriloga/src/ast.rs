@@ -342,6 +342,20 @@ pub(crate) struct ReferenceSourceCatalog {
 pub(crate) enum ForeignPhysicalKind {
     Node { is_port: bool },
     Branch,
+    Unnamed { pairs: Vec<(ForeignPhysicalNode, ForeignPhysicalNode)> },
+}
+
+impl ForeignPhysicalKind {
+    pub fn is_branch(&self) -> bool {
+        matches!(self, Self::Branch | Self::Unnamed { .. })
+    }
+}
+
+/// A net identity before connections collapse module boundaries.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct ForeignPhysicalNode {
+    pub path: SmolStr,
+    pub name: SmolStr,
 }
 
 /// A borrowed declaration, resolved to existing occurrence storage before HIR.
@@ -380,7 +394,22 @@ pub(crate) struct ScopedHierarchicalReference {
 pub struct HierarchicalName {
     pub absolute: bool,
     pub segments: Vec<HierarchicalSegment>,
+    pub branch: Option<Box<HierarchicalBranch>>,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HierarchicalBranch {
+    pub pos: HierarchicalBranchTerminal,
+    pub neg: Option<HierarchicalBranchTerminal>,
+    pub is_port: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct HierarchicalBranchTerminal {
+    pub name: HierarchicalName,
+    pub prefix: Vec<Expression>,
+    pub select: Option<PackedSelect>,
 }
 
 #[derive(Debug, Clone)]

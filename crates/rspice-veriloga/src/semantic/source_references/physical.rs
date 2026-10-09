@@ -2,7 +2,7 @@
 //! aliases to the existing occurrence before allocating executable storage.
 use super::*;
 
-fn literal(value: i64, span: Span) -> Expression {
+pub(super) fn literal(value: i64, span: Span) -> Expression {
     Expression::Number(NumberLit {
         value: value as f64,
         raw: value.to_string().into(),
