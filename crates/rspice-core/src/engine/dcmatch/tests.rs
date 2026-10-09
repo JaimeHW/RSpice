@@ -68,6 +68,38 @@ fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
 
+#[test]
+fn a_linear_mismatch_probe_preserves_representable_extreme_spreads() {
+    for scale in [1e-200, 1.0, 1e200] {
+        let netlist = deck(
+            &plan(vec![variation(
+                1,
+                SpectreVariationScope::Mismatch,
+                "p",
+                "10",
+            )]),
+            &format!(".param p=1000\nB1 out 0 V={{{scale:e}*p}}\nR1 out 0 1k"),
+        );
+        let result = engine()
+            .run_dc_match(
+                &netlist,
+                &all_contributors(&DcMatchCard::voltage_probe("OUT")),
+            )
+            .unwrap();
+        assert!(
+            (result.sigma_total / (10.0 * scale) - 1.0).abs() < 2e-13,
+            "{scale}: {result:?}"
+        );
+        let active = result
+            .contributors
+            .iter()
+            .find(|entry| entry.instance == "B1")
+            .unwrap();
+        assert!((active.sensitivity / scale - 1.0).abs() < 2e-13);
+        assert_eq!(active.share, 1.0);
+    }
+}
+
 const DIVIDER_SOURCE: Value = 1.0;
 const DIVIDER_R1: Value = 1.0e3;
 const DIVIDER_R2: Value = 2.0e3;

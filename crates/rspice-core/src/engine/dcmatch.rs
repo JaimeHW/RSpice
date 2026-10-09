@@ -15,7 +15,8 @@
 //! the correlation the design's own `statistics` block declares between them.
 //! A design that declares no `correlate` statement has `R = I`, the cross
 //! terms vanish, and this is the sum of squares the analysis has always
-//! formed — that path is kept literally, and builds no matrix.
+//! formed, without building a matrix. Products and sums retain their exponent
+//! until standard deviations and shares are ready to publish.
 //!
 //! A mismatch variable is drawn once per instance, so each instance is its own
 //! group: its variables are correlated with each other as declared and with no
@@ -40,7 +41,7 @@
 //! Each contributor's share of the variance is its Euler allocation
 //! `c_i * (R c)_i / sigma_out^2`. The shares sum to exactly one and reduce to
 //! `c_i^2 / sigma_out^2` when `R = I`, so an uncorrelated design reports the
-//! numbers it always did. A share **can** be negative: a variable whose
+//! usual independent-variance fractions. A share **can** be negative: a variable whose
 //! correlated partner cancels it removes variance from the total, and that is
 //! what the design says. The sign is kept, and the ranking compares
 //! magnitudes.
@@ -76,6 +77,9 @@
 //! [`SpectreStatisticsPlan::scope_moments_with_abort`]: crate::netlist::SpectreStatisticsPlan::scope_moments_with_abort
 
 use std::collections::{BTreeMap, BTreeSet};
+
+mod moments;
+use moments::{assemble, central_difference, contributor};
 
 use super::core::DcOpStartup;
 use super::{Engine, SimulationError};
@@ -265,8 +269,8 @@ impl Engine {
                 PROCESS_OWNER.to_owned(),
                 sigma.parameter.clone(),
                 sigma.standard_deviation,
-                central_difference(up, down, sigma.standard_deviation),
-            ));
+                central_difference(up, down, sigma.standard_deviation)?,
+            )?);
         }
 
         if !mismatch_sigmas.is_empty() {
@@ -309,8 +313,8 @@ impl Engine {
                         instance.clone(),
                         sigma.parameter.clone(),
                         sigma.standard_deviation,
-                        central_difference(up, down, sigma.standard_deviation),
-                    ));
+                        central_difference(up, down, sigma.standard_deviation)?,
+                    )?);
                 }
             }
         }
@@ -321,7 +325,14 @@ impl Engine {
              {warm_start_iterations} Newton assembly/assemblies in total",
             contributors.len()
         );
-        assemble(card, label, nominal_value, contributors, &correlations)
+        assemble(
+            card,
+            label,
+            nominal_value,
+            contributors,
+            &correlations,
+            abort,
+        )
     }
 
     /// Resolve the card's probe against the elaborated design.
@@ -472,34 +483,6 @@ fn probe_label(card: &DcMatchCard) -> String {
     }
 }
 
-/// `(up - down) / (2 * sigma)`.
-fn central_difference(up: Value, down: Value, sigma: Value) -> Value {
-    (up - down) / (2.0 * sigma)
-}
-
-/// One contributor with its share left unset; the total is not known yet.
-fn contributor(
-    scope: DcMatchScope,
-    instance: String,
-    parameter: String,
-    sigma_parameter: Value,
-    sensitivity: Value,
-) -> DcMatchContributor {
-    DcMatchContributor {
-        instance,
-        parameter,
-        scope,
-        sigma_parameter,
-        sensitivity,
-        contribution: sensitivity * sigma_parameter,
-        share: 0.0,
-    }
-}
-
-/// How far below zero a quadratic form may land before it is a defect rather
-/// than cancellation, relative to the same sum with every correlation dropped.
-const CANCELLATION_TOLERANCE: Value = 1.0e-12;
-
 /// One scope's declared correlation, with the order its rows are in.
 struct ScopeCorrelation {
     /// How many `correlate` statements of this scope the result applied.
@@ -524,20 +507,6 @@ impl ScopeCorrelation {
                     scope.tag()
                 ))
             })
-    }
-
-    /// `R c`, in the matrix's own row order.
-    fn correlate(&self, contributions: &[Value]) -> Vec<Value> {
-        self.matrix
-            .values()
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .zip(contributions)
-                    .map(|(coefficient, contribution)| coefficient * contribution)
-                    .fold(0.0, |sum, term| sum + term)
-            })
-            .collect()
     }
 }
 
@@ -605,162 +574,6 @@ fn scope_tag(scope: SpectreVariationScope) -> &'static str {
         SpectreVariationScope::Process => DcMatchScope::Process.tag(),
         SpectreVariationScope::Mismatch => DcMatchScope::Mismatch.tag(),
     }
-}
-
-/// One scope's variance, and each of its contributors' allocation of it.
-///
-/// Without a declared correlation this is the sum of squares the analysis has
-/// always formed, term by term in contributor order and folded from `+0.0`:
-/// no matrix is built and no number moves.
-///
-/// With one it is `c^T R c` per independently drawn group — every mismatch
-/// instance draws on its own, so each instance is its own quadratic form and
-/// the forms add; the process scope is one design-wide group. Each
-/// contributor's allocation is its Euler term `c_i * (R c)_i`, which sums to
-/// the group's variance exactly and is `c_i^2` when `R = I`.
-fn scope_variance(
-    scope: DcMatchScope,
-    contributors: &[DcMatchContributor],
-    correlation: Option<&ScopeCorrelation>,
-    allocations: &mut [Value],
-) -> Result<Value, SimulationError> {
-    // Folded from +0.0: an empty `f64` sum is -0.0, and its square root is a
-    // standard deviation every artifact would carry as "-0".
-    let mut variance = 0.0;
-    let Some(correlation) = correlation else {
-        for (index, entry) in contributors.iter().enumerate() {
-            if entry.scope != scope {
-                continue;
-            }
-            let term = entry.contribution * entry.contribution;
-            allocations[index] = term;
-            variance += term;
-        }
-        return positive_variance(scope, variance, variance);
-    };
-
-    // The scale the cancellation below happens at: the same sum with every
-    // correlation dropped, which is non-negative by construction.
-    let mut magnitude = 0.0;
-    let mut groups = BTreeMap::<&str, Vec<usize>>::new();
-    for (index, entry) in contributors.iter().enumerate() {
-        if entry.scope != scope {
-            continue;
-        }
-        magnitude += entry.contribution * entry.contribution;
-        groups
-            .entry(entry.instance.as_str())
-            .or_default()
-            .push(index);
-    }
-    for members in groups.values() {
-        // A variable the scope declares but this group has no contributor for
-        // — one whose standard deviation is zero, skipped before its operating
-        // points were solved — enters with a contribution of exactly zero,
-        // which is what it is.
-        let mut vector = vec![0.0; correlation.order.len()];
-        for &index in members {
-            vector[correlation.row(scope, &contributors[index].parameter)?] =
-                contributors[index].contribution;
-        }
-        let correlated = correlation.correlate(&vector);
-        for &index in members {
-            let row = correlation.row(scope, &contributors[index].parameter)?;
-            let allocation = contributors[index].contribution * correlated[row];
-            allocations[index] = allocation;
-            variance += allocation;
-        }
-    }
-    positive_variance(scope, variance, magnitude)
-}
-
-/// A variance a validated `R` cannot make negative, made non-negative.
-///
-/// `c^T R c` is non-negative for every positive semidefinite `R`, and the
-/// matrix was validated as one. What floating point can still produce is a
-/// value a few rounding errors below zero when the contributions cancel on the
-/// boundary of that semidefiniteness — a unit coefficient with two equal and
-/// opposite contributions is exactly that case. Those clamp to `+0.0`. A
-/// larger negative value is not rounding, and it is named rather than hidden
-/// behind an `abs` or a `max`: there is no reading of it that is a standard
-/// deviation.
-fn positive_variance(
-    scope: DcMatchScope,
-    variance: Value,
-    magnitude: Value,
-) -> Result<Value, SimulationError> {
-    if variance > 0.0 {
-        return Ok(variance);
-    }
-    if -variance <= CANCELLATION_TOLERANCE * magnitude {
-        return Ok(0.0);
-    }
-    Err(SimulationError::Circuit(format!(
-        ".DCMATCH formed a negative {} variance ({variance}) from a validated correlation matrix \
-         over contributions of squared magnitude {magnitude}; this is an internal error",
-        scope.tag()
-    )))
-}
-
-/// Sum the variances, rank the contributors and apply the card's limits.
-fn assemble(
-    card: &DcMatchCard,
-    output: String,
-    nominal_value: Value,
-    mut contributors: Vec<DcMatchContributor>,
-    correlations: &ScopeCorrelations,
-) -> Result<DcMatchResult, SimulationError> {
-    let mut allocations = vec![0.0; contributors.len()];
-    let mismatch_variance = scope_variance(
-        DcMatchScope::Mismatch,
-        &contributors,
-        correlations.for_scope(DcMatchScope::Mismatch),
-        &mut allocations,
-    )?;
-    let process_variance = scope_variance(
-        DcMatchScope::Process,
-        &contributors,
-        correlations.for_scope(DcMatchScope::Process),
-        &mut allocations,
-    )?;
-    let total_variance = mismatch_variance + process_variance;
-    if total_variance > 0.0 {
-        for (entry, allocation) in contributors.iter_mut().zip(&allocations) {
-            entry.share = allocation / total_variance;
-        }
-    }
-    // Largest share first, by magnitude: a correlated contributor's share can
-    // be negative, and one that cancels a tenth of the variance is as much of
-    // an answer to "which device owns this spread" as one that adds a tenth.
-    // Without a correlation every share is non-negative and this is the order
-    // it always was. Ties break on scope, instance and parameter so a report is
-    // a function of the design rather than of evaluation order.
-    contributors.sort_by(|left, right| {
-        right
-            .share
-            .abs()
-            .total_cmp(&left.share.abs())
-            .then_with(|| left.scope.tag().cmp(right.scope.tag()))
-            .then_with(|| left.instance.cmp(&right.instance))
-            .then_with(|| left.parameter.cmp(&right.parameter))
-    });
-    let evaluated_contributors = contributors.len();
-    contributors.retain(|entry| entry.share.abs() >= card.threshold);
-    if card.contributor_limit > 0 {
-        contributors.truncate(card.contributor_limit);
-    }
-    Ok(DcMatchResult {
-        output,
-        nominal_value,
-        sigma_multiplier: card.sigma_multiplier,
-        sigma_total: libm::sqrt(total_variance),
-        sigma_mismatch: libm::sqrt(mismatch_variance),
-        sigma_process: libm::sqrt(process_variance),
-        contributors,
-        evaluated_contributors,
-        applied_correlations_mismatch: correlations.statements(DcMatchScope::Mismatch),
-        applied_correlations_process: correlations.statements(DcMatchScope::Process),
-    })
 }
 
 #[cfg(test)]

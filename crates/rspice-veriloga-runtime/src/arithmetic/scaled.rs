@@ -229,6 +229,22 @@ impl ScaledValue {
         }
     }
 
+    /// Take a square root before narrowing an extended-range intermediate.
+    /// A finite standard deviation need not have a variance representable in
+    /// binary64. Split odd exponents before taking the root.
+    pub fn sqrt(self) -> Self {
+        if self.exponent == 0 || self.value <= 0.0 || !self.value.is_finite() {
+            return Self::new(self.value.sqrt());
+        }
+        let (value, exponent) = self.normalized();
+        let value = if exponent.rem_euclid(2) == 0 {
+            value
+        } else {
+            value * 2.0
+        };
+        Self::scaled(value.sqrt(), exponent.div_euclid(2))
+    }
+
     #[inline]
     pub fn plus(self, other: Self) -> Self {
         if self.exponent == 0 && other.exponent == 0 {
@@ -362,6 +378,42 @@ impl ScaledValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn square_roots_recover_finite_scales_before_narrowing_variances() {
+        for value in [
+            f64::from_bits(1),
+            f64::MIN_POSITIVE,
+            1e-200,
+            1e-100,
+            1.0,
+            2.0,
+            1e100,
+            1e200,
+            f64::MAX,
+        ] {
+            let scaled = ScaledValue::new(value);
+            let root = scaled.multiply(scaled).sqrt().binary64();
+            assert!(
+                (root / value - 1.0).abs() <= 2.0 * f64::EPSILON,
+                "{value}: {root}"
+            );
+        }
+        for exponent in [-2147, -2001, -1025, 1025, 2001] {
+            let root = ScaledValue::scaled(1.0, exponent).sqrt();
+            let square = root.multiply(root);
+            assert!(
+                (square.divide(ScaledValue::scaled(1.0, exponent)).binary64() - 1.0).abs()
+                    <= 4.0 * f64::EPSILON
+            );
+        }
+        assert_eq!(ScaledValue::new(0.0).sqrt().binary64(), 0.0);
+        assert!(ScaledValue::scaled(-1.0, -2000).sqrt().binary64().is_nan());
+        assert_eq!(
+            ScaledValue::new(f64::INFINITY).sqrt().binary64(),
+            f64::INFINITY
+        );
+    }
 
     #[test]
     fn quotient_recovery_retains_distant_canceling_terms() {
