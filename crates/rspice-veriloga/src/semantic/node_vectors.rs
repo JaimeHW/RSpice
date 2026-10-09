@@ -1,4 +1,5 @@
 //! Physical vector declarations and the scalar lanes shared by both domains.
+mod branches;
 mod connections;
 use super::*;
 pub(super) use connections::{ConnectionScope, bind as bind_connections};
@@ -30,6 +31,9 @@ impl NodeVector {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PhysicalNodes {
     pub vectors: HashMap<SmolStr, NodeVector>,
+    pub branches: HashMap<SmolStr, NodeVector>,
+    /// Scalar aliases resolve to the original local port before hierarchy collapse.
+    pub port_branches: HashMap<SmolStr, SmolStr>,
     /// One group per authored formal port, including unchanged discrete ports.
     pub ports: Vec<(SmolStr, Vec<SmolStr>)>,
 }
@@ -162,7 +166,7 @@ pub(super) fn declarations<'a>(
         .iter()
         .map(|port| (port.name.clone(), names(&port.name)))
         .collect();
-    if nodes.vectors.is_empty() {
+    if nodes.vectors.is_empty() && module.branches.is_empty() {
         return Ok((Cow::Borrowed(module), nodes));
     }
     let mut expanded = module.clone();
@@ -201,6 +205,14 @@ pub(super) fn declarations<'a>(
             declaration.range = None;
         }
     }
+    branches::expand(
+        module,
+        &mut expanded,
+        &mut nodes,
+        &constants,
+        &mut used,
+        count,
+    )?;
     Ok((Cow::Owned(expanded), nodes))
 }
 
@@ -212,45 +224,116 @@ impl SemanticAnalyzer {
         access: &BranchAccess,
     ) -> CompileResult<BranchAccess> {
         let mut resolved = access.clone();
-        if let BranchAccess::Nodes {
-            pos,
-            neg,
-            pos_index,
-            neg_index,
-            span,
-            ..
-        } = &mut resolved
-        {
-            for (name, index) in
-                std::iter::once((pos, pos_index)).chain(neg.as_mut().map(|name| (name, neg_index)))
-            {
-                if let Some(index) = index.take() {
-                    let Some(vector) = self.physical_nodes.vectors.get(name) else {
-                        return Err(error(
-                            format!("'{name}' is not a physical vector node"),
-                            *span,
-                        ));
-                    };
-                    let index = self.substitute_physical_selector(&index);
-                    self.check_physical_selector_scope(&index)?;
-                    let coordinate = integer(
-                        &index,
-                        &self.digital_selector_constants,
-                        self.current_time_scale,
-                    )?;
-                    *name = vector.lane(coordinate, *span)?;
-                    self.physical_selectors.borrow_mut().push(index);
-                } else if self.physical_nodes.vectors.contains_key(name) {
-                    return Err(error(
-                        format!(
-                            "physical vector '{name}' requires a scalar coordinate in an access function"
-                        ),
-                        *span,
-                    ));
+        match &mut resolved {
+            BranchAccess::Nodes {
+                pos,
+                neg,
+                pos_index,
+                neg_index,
+                span,
+                ..
+            } => {
+                self.resolve_physical_operand(pos, pos_index, neg.is_none(), *span)?;
+                if let Some(neg) = neg {
+                    self.resolve_physical_operand(neg, neg_index, false, *span)?;
                 }
             }
+            BranchAccess::Branch {
+                name, index, span, ..
+            } => {
+                self.resolve_physical_operand(name, index, true, *span)?;
+            }
+        }
+        let alias = match &resolved {
+            BranchAccess::Nodes {
+                access,
+                pos,
+                neg: None,
+                span,
+                ..
+            } => Some((access, pos, span)),
+            BranchAccess::Branch {
+                access, name, span, ..
+            } => Some((access, name, span)),
+            _ => None,
+        };
+        if let Some((access, name, span)) = alias
+            && let Some(port) = self.physical_nodes.port_branches.get(name)
+        {
+            return Ok(BranchAccess::Branch {
+                access: access.clone(),
+                kind: None,
+                name: port.clone(),
+                index: None,
+                span: *span,
+            });
         }
         Ok(resolved)
+    }
+
+    fn resolve_physical_operand(
+        &self,
+        name: &mut SmolStr,
+        index: &mut Option<Box<Expression>>,
+        allow_branch: bool,
+        span: Span,
+    ) -> CompileResult<()> {
+        // Check the authored base name before scalar normalization can hide it.
+        if self
+            .digital_scopes
+            .iter()
+            .any(|scope| scope.iter().any(|local| &local.name == name))
+        {
+            return Err(error(
+                format!(
+                    "analog access names process-local storage '{name}', not a continuous net or branch"
+                ),
+                span,
+            ));
+        }
+        let vector = self.physical_nodes.vectors.get(name).or_else(|| {
+            allow_branch
+                .then(|| self.physical_nodes.branches.get(name))
+                .flatten()
+        });
+        if (vector.is_some() || self.physical_nodes.port_branches.contains_key(name))
+            && self.symbols.lookup(name).is_some_and(|symbol| {
+                !matches!(
+                    symbol.kind,
+                    SymbolKind::Port | SymbolKind::Node | SymbolKind::Branch
+                )
+            })
+        {
+            return Err(error(
+                format!("analog access '{name}' is shadowed by a nonphysical declaration"),
+                span,
+            ));
+        }
+        if let Some(index) = index.take() {
+            let vector = vector.ok_or_else(|| {
+                error(
+                    format!("'{name}' is not a physical vector node or branch"),
+                    span,
+                )
+            })?;
+            let index = self.substitute_physical_selector(&index);
+            self.check_physical_selector_scope(&index)?;
+            let coordinate = integer(
+                &index,
+                &self.digital_selector_constants,
+                self.current_time_scale,
+            )?;
+            *name = vector.lane(coordinate, span)?;
+            self.physical_selectors.borrow_mut().push(index);
+        } else if vector.is_some() {
+            return Err(error(
+                format!(
+                    "physical vector '{name}' requires a scalar coordinate in an access function"
+                ),
+                span,
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn physical_access_call(&self, call: &CallExpr) -> Option<BranchAccess> {
@@ -308,6 +391,22 @@ impl SemanticAnalyzer {
             .flat_map(|range| [&range.msb, &range.lsb])
             .chain(selectors.iter())
             .collect();
+        for branch in &source.branches {
+            if let Some(range) = &branch.range {
+                expressions.extend([&range.msb, &range.lsb]);
+            }
+            for select in [&branch.pos_select, &branch.neg_select]
+                .into_iter()
+                .flatten()
+            {
+                match select {
+                    PackedSelect::Bit(index) => expressions.push(index),
+                    PackedSelect::Part { msb, lsb } => {
+                        expressions.extend([msb.as_ref(), lsb.as_ref()])
+                    }
+                }
+            }
+        }
         expressions.extend(
             source
                 .instances

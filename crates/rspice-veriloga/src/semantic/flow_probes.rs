@@ -518,6 +518,7 @@ pub(crate) fn lower<'a>(
                             kind: Some(AccessKind::Flow),
                             name: name.clone(),
                             span: branch.span,
+                            index: None,
                         },
                         BranchKey::Nodes(pos, neg) => BranchAccess::Nodes {
                             pos_index: None,
@@ -964,11 +965,13 @@ pub(super) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
                         .map(|value| Pending::Expression(value)),
                 );
             }
+            Expression::BranchAccess(BranchAccess::Branch { index, .. }) => {
+                pending.extend(index.iter().map(|value| Pending::Expression(value)));
+            }
             Expression::Number(_)
             | Expression::StringLit(_)
             | Expression::Identifier(_)
             | Expression::NullArgument(_)
-            | Expression::BranchAccess(BranchAccess::Branch { .. })
             | Expression::AnalogOperator(AnalogOperator::LimiterArgument { .. }) => {}
         }
     }
@@ -1051,11 +1054,15 @@ pub(super) fn for_child_mut<'a>(
                 visit(value);
             }
         }
+        Expression::BranchAccess(BranchAccess::Branch { index, .. }) => {
+            if let Some(index) = index {
+                visit(index);
+            }
+        }
         Expression::Number(_)
         | Expression::StringLit(_)
         | Expression::Identifier(_)
         | Expression::NullArgument(_)
-        | Expression::BranchAccess(BranchAccess::Branch { .. })
         | Expression::AnalogOperator(AnalogOperator::LimiterArgument { .. }) => {}
     }
 }

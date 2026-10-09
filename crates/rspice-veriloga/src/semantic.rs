@@ -1255,6 +1255,40 @@ impl SemanticAnalyzer {
                 self.validate_node(&branch.neg, branch.span)?;
             }
             self.validate_distinct_branch_nodes(&branch.pos, &branch.neg, branch.span)?;
+            let mut terminal_discipline: Option<&str> = None;
+            for terminal in [&branch.pos, &branch.neg] {
+                if terminal.is_empty()
+                    || is_global_ground_name(terminal)
+                    || ground_names.contains(terminal)
+                {
+                    continue;
+                }
+                let symbol = self
+                    .symbols
+                    .lookup(terminal)
+                    .expect("validated branch terminal");
+                let discipline = symbol.attrs.discipline.as_deref().unwrap_or("electrical");
+                if symbol.kind == SymbolKind::Branch
+                    || self
+                        .disciplines
+                        .get_discipline(discipline)
+                        .is_none_or(|discipline| discipline.domain != Domain::Continuous)
+                {
+                    return Err(node_vectors::error(
+                        "branch terminals must name continuous nets",
+                        branch.span,
+                    ));
+                }
+                if terminal_discipline
+                    .is_some_and(|previous| !self.disciplines.are_compatible(previous, discipline))
+                {
+                    return Err(node_vectors::error(
+                        "branch terminals have incompatible disciplines",
+                        branch.span,
+                    ));
+                }
+                terminal_discipline = Some(discipline);
+            }
             let discipline_node = if ground_names.contains(&branch.pos) {
                 &branch.neg
             } else {
@@ -1266,12 +1300,14 @@ impl SemanticAnalyzer {
                 .and_then(|s| s.attrs.discipline.clone())
                 .unwrap_or_else(|| "electrical".into());
 
-            analyzed.branches.push(AnalyzedBranch {
-                name: branch.name.clone(),
-                pos_node: branch.pos.clone(),
-                neg_node: branch.neg.clone(),
-                discipline: discipline.clone(),
-            });
+            if !branch.is_port {
+                analyzed.branches.push(AnalyzedBranch {
+                    name: branch.name.clone(),
+                    pos_node: branch.pos.clone(),
+                    neg_node: branch.neg.clone(),
+                    discipline: discipline.clone(),
+                });
+            }
 
             self.define_symbol(Symbol {
                 name: branch.name.clone(),
@@ -5179,6 +5215,14 @@ impl SemanticAnalyzer {
         let resolved = self.resolve_vector_access(target)?;
         let target = &resolved;
         let is_current = self.resolve_branch_access_kind(target, span)? == AccessKind::Flow;
+        if matches!(target, BranchAccess::Branch { name, .. }
+            if self.symbols.lookup(name).is_some_and(|symbol| symbol.kind == SymbolKind::Port))
+        {
+            return Err(node_vectors::error(
+                "a port flow probe cannot be a contribution target",
+                span,
+            ));
+        }
         match target {
             BranchAccess::Nodes { pos, neg, .. } => {
                 // V(name)/I(name) where `name` is a declared branch resolves
@@ -5304,6 +5348,22 @@ impl SemanticAnalyzer {
                     span,
                 ))
             })?;
+        if matches!(access_expr, BranchAccess::Branch { .. })
+            && !self
+                .symbols
+                .lookup(pos)
+                .is_some_and(|symbol| symbol.kind == SymbolKind::Branch)
+            && (kind != AccessKind::Flow
+                || !self
+                    .symbols
+                    .lookup(pos)
+                    .is_some_and(|symbol| symbol.kind == SymbolKind::Port))
+        {
+            return Err(node_vectors::error(
+                format!("'{access}(<{pos}>)' must name a declared branch or a flow-probed port"),
+                span,
+            ));
+        }
         // Existing compact models use V(n,n) as a zero-valued read. Retain
         // that compatibility without accepting undefined self-flow probes.
         if kind == AccessKind::Flow

@@ -688,10 +688,20 @@ impl Unroller<'_> {
                     self.substitute_concat_element(element);
                 }
             }
-            Expression::BranchAccess(BranchAccess::Nodes { pos_index, neg_index, .. }) => {
-                for index in pos_index.iter_mut().chain(neg_index.iter_mut()) { self.substitute(index); }
+            Expression::BranchAccess(BranchAccess::Nodes {
+                pos_index,
+                neg_index,
+                ..
+            }) => {
+                for index in pos_index.iter_mut().chain(neg_index.iter_mut()) {
+                    self.substitute(index);
+                }
             }
-            Expression::BranchAccess(BranchAccess::Branch { .. }) => {}
+            Expression::BranchAccess(BranchAccess::Branch { index, .. }) => {
+                if let Some(index) = index {
+                    self.substitute(index);
+                }
+            }
             Expression::Digital(digital) => self.substitute_digital(digital),
             Expression::Number(_)
             | Expression::StringLit(_)

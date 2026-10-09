@@ -712,3 +712,145 @@ connectrules selected; connect sample split; endconnectrules
         "{error}"
     );
 }
+
+#[test]
+fn vector_branches_retain_terminal_order_ranges_and_specialization() {
+    let source = r#"
+module top(p,n,q);
+ parameter integer BASE=2, PICK=2, FIRST=-2;
+ inout [BASE:BASE+1] p; electrical [BASE:BASE+1] p;
+ inout n,q; electrical n,q;
+ branch(p,n) load[FIRST:FIRST+1], spare;
+ branch(n,p[BASE:BASE+1]) reverse[8:7];
+ branch(p[PICK],0) chosen;
+ branch(<p>) probe;
+ real sampled;
+ analog begin
+  I(load[FIRST])<+V(load[FIRST])/1000;
+  I(load[FIRST+1])<+V(load[FIRST+1])/2000;
+  V(q)<+1000*(I(probe[0])+I(<p[BASE+1]>))+sampled;
+ end
+ initial begin #1; sampled=I(load[FIRST+1])+I(probe[1])+I(<p[BASE]>); end
+endmodule
+"#;
+    let tokens = Lexer::new(source, SourceMap::new().add_source("branches.vams", source))
+        .collect_tokens()
+        .unwrap();
+    let ast = Parser::new(&tokens).parse().unwrap();
+    let analyzed = SemanticAnalyzer::new().analyze(&ast).unwrap();
+    let module = &analyzed.modules["top"];
+    let endpoints = |name: &str| {
+        let branch = module
+            .branches
+            .iter()
+            .find(|branch| branch.name == name)
+            .unwrap();
+        (branch.pos_node.as_str(), branch.neg_node.as_str())
+    };
+    assert_eq!(endpoints("load[-2]"), ("p[2]", "n"));
+    assert_eq!(endpoints("load[-1]"), ("p[3]", "n"));
+    assert_eq!(endpoints("spare[0]"), ("p[2]", "n"));
+    assert_eq!(endpoints("spare[1]"), ("p[3]", "n"));
+    assert_eq!(endpoints("reverse[8]"), ("n", "p[2]"));
+    assert_eq!(endpoints("reverse[7]"), ("n", "p[3]"));
+    assert_eq!(endpoints("chosen"), ("p[2]", "0"));
+    assert!(
+        !module
+            .branches
+            .iter()
+            .any(|branch| branch.name.starts_with("probe"))
+    );
+    for (name, value) in [("BASE", 2.0), ("PICK", 2.0), ("FIRST", -2.0)] {
+        assert_eq!(
+            module
+                .parameters
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .elaboration_value,
+            Some(value)
+        );
+    }
+    let compiler = compiler();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    let assigned = compiler
+        .specialize_mixed_runtime(
+            &compiled.canonical_ir,
+            &[("BASE", 5.0), ("PICK", 6.0), ("FIRST", 8.0)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    assigned.canonical_ir.validate().unwrap();
+    assert_ne!(
+        compiled.canonical_ir.runtime_source_identity(),
+        assigned.canonical_ir.runtime_source_identity()
+    );
+    let replay = compiler
+        .prepare_artifact_runtime_source(&assigned.canonical_ir, &NoPipelineControl)
+        .unwrap();
+    let rebuilt = replay.compile_runtime(None).unwrap();
+    assert_eq!(
+        assigned.canonical_ir.runtime_source_identity(),
+        rebuilt.canonical_ir.runtime_source_identity()
+    );
+}
+
+#[test]
+fn branch_shapes_and_port_probe_misuse_are_rejected() {
+    let cases = [
+        (
+            "electrical [1:0] a; electrical [2:0] b; branch(a,b) x;",
+            "equal widths",
+        ),
+        (
+            "electrical [0:0] a; electrical [2:0] b; branch(a,b) x;",
+            "equal widths",
+        ),
+        (
+            "electrical [1:0] a; branch(a) x[4:2];",
+            "terminals require 2",
+        ),
+        (
+            "electrical [1:0] a; branch(a[0:1]) x;",
+            "direction disagrees",
+        ),
+        ("electrical [1:0] a; branch(a[2]) x;", "outside [1:0]"),
+        ("electrical a; branch(a) x; branch(x) y;", "continuous nets"),
+        ("electrical a; branch(<a>) x;", "declared port"),
+        ("branch(<p>) x; analog V(q)<+V(x[0]);", "flow-probed port"),
+        (
+            "branch(<p>) x; analog I(x[0])<+1;",
+            "cannot be a contribution target",
+        ),
+        ("analog I(<p[0]>)<+1;", "cannot be a contribution target"),
+        ("analog V(q)<+V(<p[0]>);", "flow-probed port"),
+        ("integer k; initial k=I(<p[k]>);", "integer at elaboration"),
+        (
+            "branch(p) x; analog V(q)<+I(x);",
+            "requires a scalar coordinate",
+        ),
+        ("branch(p) x,x;", "duplicate branch declaration"),
+        ("branch(p) p;", "duplicate branch declaration"),
+        (
+            "branch(<p>) x; real result; initial begin : local_scope integer x=0; result=I(x[0]); end",
+            "process-local storage",
+        ),
+        (
+            "real result; initial begin : local_scope integer p=0; result=I(<p[0]>); end",
+            "process-local storage",
+        ),
+    ];
+    for (body, expected) in cases {
+        let source = format!(
+            "module top(p,q); inout [0:1] p; electrical [0:1] p; inout q; electrical q; {body} endmodule"
+        );
+        let error = match compiler().compile_runtime(&source, Some("top")) {
+            Ok(_) => panic!("accepted {body}"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            error.contains(expected),
+            "{body}: expected {expected}, got {error}"
+        );
+    }
+}

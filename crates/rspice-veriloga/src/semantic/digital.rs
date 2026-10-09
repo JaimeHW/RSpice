@@ -2998,6 +2998,7 @@ impl SemanticAnalyzer {
                                 kind: Some(kind),
                                 name: pos.clone(),
                                 span: *span,
+                                index: None,
                             }
                         }
                         _ => access.clone().with_kind(kind),

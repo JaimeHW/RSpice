@@ -159,8 +159,17 @@ can drive whole physical input vectors through per-lane authored converters;
 selected physical lanes can connect to scalar digital formals. Scalar potential
 and flow accesses resolve constant coordinates, including analog `genvar` loops
 and custom nature accesses. Shape and selector dependencies require source
-specialization when their parameters change. Artifact schema 132 and core cache
-record 114 invalidate models compiled before these checks.
+specialization when their parameters change. Named branch declarations also accept
+whole physical vectors and constant terminal bit/part selections. Explicit branch
+ranges retain their coordinates; an omitted vector branch range starts at zero.
+Corresponding vector lanes connect in declaration order, and a scalar terminal is
+shared by all lanes. `branch (<p>) probe;` aliases and selected `I(<p[k]>)` reads
+measure each local port's flow, including when parent connections tie ports together.
+These probes work in analog expressions and discrete processes, with custom nature
+flow access functions as well as `I`. Port probes cannot drive contributions or
+read potentials. Branch ranges and terminal selectors participate in parameter
+specialization. Artifact schema 133 and core cache record 115 invalidate models
+compiled before these checks.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.

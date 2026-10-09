@@ -392,6 +392,7 @@ impl<'a> HierarchyElaborator<'a> {
                                 kind: Some(AccessKind::Flow),
                                 name: branch,
                                 span: port.span,
+                                index: None,
                             }),
                             f64::from(sign),
                         )
@@ -1846,6 +1847,7 @@ fn rewrite_expression(expression: &Expression, scope: &ScopeMap) -> CompileResul
                         kind: *kind,
                         name: branch.name.clone(),
                         span: *span,
+                        index: None,
                     }),
                     sign,
                 )
@@ -2011,6 +2013,7 @@ fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResu
             kind: *kind,
             name: scope.branches[pos].clone(),
             span: *span,
+            index: None,
         },
         BranchAccess::Nodes {
             pos_index: _,
@@ -2046,7 +2049,9 @@ fn rewrite_branch_access(access: &BranchAccess, scope: &ScopeMap) -> CompileResu
             kind,
             name,
             span,
+            index: _,
         } => BranchAccess::Branch {
+            index: None,
             access: access.clone(),
             kind: *kind,
             name: scope

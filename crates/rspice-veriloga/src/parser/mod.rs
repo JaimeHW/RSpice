@@ -987,37 +987,66 @@ impl<'a> Parser<'a> {
         Ok(connections)
     }
 
-    /// Parse a named branch declaration: branch (a [, b]) name1 [, name2] ;
+    /// Parse scalar/vector named branches and aliases for port flows.
     fn parse_branch_decl(&mut self) -> Result<Vec<BranchDecl>, ParseError> {
         let start = self.current_span();
-        self.advance(); // consume 'branch'
+        self.advance();
         self.expect(TokenKind::LParen)?;
-
-        let pos = self.expect_identifier("branch terminal")?;
-        let neg = if self.match_token(TokenKind::Comma) {
-            Some(self.expect_identifier("branch terminal")?)
+        let is_port = self.match_token(TokenKind::Lt);
+        let (pos, pos_select) = if is_port {
+            (self.expect_identifier("port")?.into(), None)
         } else {
-            None
+            self.parse_branch_terminal()?
+        };
+        let (neg, neg_select) = if is_port {
+            self.expect(TokenKind::Gt)?;
+            (SmolStr::default(), None)
+        } else if self.match_token(TokenKind::Comma) {
+            self.parse_branch_terminal()?
+        } else {
+            (SmolStr::default(), None)
         };
         self.expect(TokenKind::RParen)?;
-
         let mut branches = Vec::new();
         loop {
             let name = self.expect_identifier("branch name")?;
+            let range = self.parse_optional_vector_range()?;
             branches.push(BranchDecl {
                 name: name.into(),
-                pos: pos.clone().into(),
-                // Single-terminal branch references the global reference node
-                neg: neg.clone().map(SmolStr::from).unwrap_or_default(),
+                pos: pos.clone(),
+                neg: neg.clone(),
+                pos_select: pos_select.clone(),
+                neg_select: neg_select.clone(),
+                range,
+                is_port,
                 span: start.extend(self.previous_span()),
             });
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
         }
-
         self.expect(TokenKind::Semicolon)?;
         Ok(branches)
+    }
+
+    fn parse_branch_terminal(&mut self) -> Result<(SmolStr, Option<PackedSelect>), ParseError> {
+        let name = self.expect_branch_endpoint("branch terminal")?.into();
+        let select = if self.match_token(TokenKind::LBracket) {
+            let msb = Box::new(self.parse_expression()?);
+            let select = if self.match_token(TokenKind::Colon) {
+                PackedSelect::Part {
+                    msb,
+                    lsb: Box::new(self.parse_expression()?),
+                }
+            } else {
+                PackedSelect::Bit(msb)
+            };
+            self.expect(TokenKind::RBracket)?;
+            Some(select)
+        } else {
+            None
+        };
+        Ok((name, select))
     }
 
     /// Parse port declaration: `input/output/inout [discipline] names;`
@@ -2371,13 +2400,14 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LParen)?;
         if self.match_token(TokenKind::Lt) {
-            let name = self.expect_identifier("branch")?;
+            let (name, index) = self.parse_node_operand()?;
             self.expect(TokenKind::Gt)?;
             self.expect(TokenKind::RParen)?;
             return Ok(BranchAccess::Branch {
                 access: access.into(),
                 kind: None,
-                name: name.into(),
+                name,
+                index,
                 span: start.extend(self.previous_span()),
             });
         }
@@ -2916,17 +2946,18 @@ impl<'a> Parser<'a> {
 
                 // Check if it's a function call or branch access
                 if self.check(TokenKind::LParen) {
-                    if name == "V" || name == "I" {
+                    if name == "V" || name == "I" || self.peek_is(TokenKind::Lt) {
                         // Branch access
                         self.expect(TokenKind::LParen)?;
                         if self.match_token(TokenKind::Lt) {
-                            let branch = self.expect_identifier("branch")?;
+                            let (branch, index) = self.parse_node_operand()?;
                             self.expect(TokenKind::Gt)?;
                             self.expect(TokenKind::RParen)?;
                             return Ok(Expression::BranchAccess(BranchAccess::Branch {
                                 access: name.into(),
                                 kind: None,
-                                name: branch.into(),
+                                name: branch,
+                                index,
                                 span: start.extend(self.previous_span()),
                             }));
                         }

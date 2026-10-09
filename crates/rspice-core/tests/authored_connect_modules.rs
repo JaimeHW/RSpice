@@ -1634,3 +1634,103 @@ connectrules selected; connect sample {mode}; endconnectrules
         }
     }
 }
+
+#[test]
+fn vector_branch_and_port_currents_execute_through_tied_hierarchy() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+nature Heat; access=Temp; units="K"; abstol=1e-6; endnature
+nature Flux; access=Pwr; units="W"; abstol=1e-12; endnature
+discipline thermal; potential Heat; flow Flux; enddiscipline
+module electrical_load(p,n,a,b,c,d);
+ inout [3:2] p; electrical [3:2] p;
+ inout n,a,b,c,d; electrical n,a,b,c,d;
+ branch(p,n) load[8:9], extra[1:0];
+ branch(p[3:2],n) shunt;
+ branch(p[3],0) ground_load;
+ branch(<p>) port_probe[-2:-1];
+ genvar k;
+ real sample0,sample1;
+ analog begin
+  for(k=0;k<2;k=k+1) begin
+   I(load[8+k])<+V(load[8+k])/(1000*(k+1));
+   I(extra[1-k])<+V(extra[1-k])/4000;
+   I(shunt[k])<+V(shunt[k])/4000;
+  end
+  I(ground_load)<+V(ground_load)/2000;
+  V(a)<+1000*I(port_probe[-2]);
+  V(b)<+1000*I(<p[2]>);
+  V(c)<+sample0+10*sample1;
+  V(d)<+1000*(I(load[8])+I(<shunt[1]>)+I(ground_load));
+ end
+ always #0.2 begin
+  sample0=1000*I(<p[3]>); sample1=1000*I(port_probe[-1]);
+ end
+endmodule
+module thermal_load(t,a,b);
+ inout [4:5] t; thermal [4:5] t;
+ inout a,b; electrical a,b;
+ branch(t) loss[9:8];
+ branch(<t>) port_probe;
+ real sample;
+ analog begin
+  Pwr(loss[9])<+Temp(loss[9])/1000;
+  Pwr(loss[8])<+Temp(loss[8])/2000;
+  V(a)<+1000*(Pwr(port_probe[0])+Pwr(<t[5]>));
+  V(b)<+sample;
+ end
+ always #0.2 sample=1000*(Pwr(<t[4]>)+Pwr(port_probe[1]));
+endmodule
+module middle(p0,p1,a,b,c,d,e,f);
+ inout p0,p1,a,b,c,d,e,f; electrical p0,p1,a,b,c,d,e,f;
+ thermal [4:5] t;
+ electrical_load nested({p0,p1},0,a,b,c,d);
+ thermal_load heater(t,e,f);
+ analog begin Temp(t[4])<+2; Temp(t[5])<+3; end
+endmodule
+module top(p0,p1,a,b,c,d,e,f);
+ inout p0,p1,a,b,c,d,e,f; electrical p0,p1,a,b,c,d,e,f;
+ middle parent(p0,p1,a,b,c,d,e,f);
+endmodule
+"#,
+    );
+    for tied in [false, true] {
+        let second = if tied { "p0" } else { "p1" };
+        let deck = format!(
+            "* vector branch/port flows
+.va \"{}\" top module=top
+X1 p0 {second} a b c d e f top
+V0 p0 0 PWL(0 2 1n 2 1.1n 4 3n 4)
+V1 p1 0 3
+Ra a 0 1k
+Rb b 0 1k
+Rc c 0 1k
+Rd d 0 1k
+Re e 0 1k
+Rf f 0 1k
+.end
+",
+            source.path()
+        );
+        let netlist = Netlist::parse(&deck).unwrap();
+        let result = Engine::default().run_tran(&netlist, 3e-9, 0.05e-9).unwrap();
+        for (time, p0) in [(0.6e-9, 2.0), (2.1e-9, 4.0)] {
+            let p1 = if tied { p0 } else { 3.0 };
+            for (node, expected) in [
+                ("a", 2.0 * p0),
+                ("b", p1),
+                ("c", 2.0 * p0 + 10.0 * p1),
+                ("d", 1.5 * p0 + 0.25 * p1),
+                ("e", 3.5),
+                ("f", 3.5),
+            ] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "tied={tied}, {node}@{time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}

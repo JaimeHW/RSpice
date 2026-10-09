@@ -598,8 +598,15 @@ pub struct BranchDecl {
     pub name: SmolStr,
     /// Positive terminal
     pub pos: SmolStr,
-    /// Negative terminal
+    /// Negative terminal (empty for the reference node).
     pub neg: SmolStr,
+    /// Constant terminal selections, resolved before solver allocation.
+    pub pos_select: Option<PackedSelect>,
+    pub neg_select: Option<PackedSelect>,
+    /// Authored branch coordinates; omitted vector ranges start at zero.
+    pub range: Option<VectorRange>,
+    /// A port branch measures flow through the module boundary.
+    pub is_port: bool,
     /// Source span
     pub span: Span,
 }
@@ -701,8 +708,10 @@ pub enum BranchAccess {
         access: SmolStr,
         /// Resolved by semantic analysis, never inferred from the spelling.
         kind: Option<AccessKind>,
-        /// Branch name
+        /// Branch or port name.
         name: SmolStr,
+        /// Authored vector coordinate, cleared during physical resolution.
+        index: Option<Box<Expression>>,
         /// Source span
         span: Span,
     },
