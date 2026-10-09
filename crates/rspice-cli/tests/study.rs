@@ -447,9 +447,8 @@ fn running_study_cancellation_joins_the_solver_and_keeps_stderr_json() {
 fn study_run_refuses_unsupported_route_limits_and_honors_deadlines() {
     let root = common::test_dir("study-runtime-policy");
     let mut document = fixture(&root);
-    document["tasks"] = json!([{ "id": "spectrum", "analysis": {"Fourier": {
-        "fundamental_freq": 1000.0, "num_harmonics": 3, "output_node": "out",
-        "output_ref": "0", "start_time": 0.0, "stop_time": 0.001
+    document["tasks"] = json!([{ "id": "envelope", "analysis": {"Envelope": {
+        "fundamental_freq": 1000.0, "num_harmonics": 1, "stop_time": 0.001
     }} }]);
     let path = save(&root, &document);
     let destination = root.join("result.json");
@@ -963,7 +962,7 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
 }
 
 #[test]
-fn recorded_fft_study_accepts_custom_execution_limits() {
+fn spectral_study_accepts_custom_execution_limits() {
     let root = common::test_dir("study-recorded-fft-limits");
     let mut document = fixture(&root);
     document["tasks"] = json!([
@@ -973,7 +972,12 @@ fn recorded_fft_study_accepts_custom_execution_limits() {
         }}},
         {"id": "spectrum", "depends_on": ["waveform"], "analysis": {"Fft": {"request": {
             "output": "V(out)", "points": 16, "window": "RECT", "start": 0.0, "stop": 0.001
-        }}}}
+        }}}},
+        {"id": "harmonics", "depends_on": ["waveform"], "analysis": {"Fourier": {
+            "fundamental_freq": 1000.0, "num_harmonics": 3, "output_node": "out",
+            "output_ref": "0", "additional_outputs": ["V(in)"],
+            "start_time": 0.0, "stop_time": 0.001, "compute_thd": false
+        }}}
     ]);
     let path = save(&root, &document);
     let destination = root.join("result.json");

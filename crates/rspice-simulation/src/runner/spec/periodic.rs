@@ -178,12 +178,12 @@ pub(super) fn run_periodic_spec(
             source_path,
             abort,
         ),
-        spec @ AnalysisSpec::Fourier { .. } => run_spectral_from_trajectory(
+        spec @ AnalysisSpec::Fourier { .. } => run_spectral_from_trajectory_with_context(
             spec,
             dependencies
                 .transient_trajectory()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
-            abort,
+            context,
         ),
         AnalysisSpec::Disto {
             start_freq,
@@ -1090,8 +1090,9 @@ fn run_fourier(
     fundamental_freq: f64,
     request: FourierRunRequest,
     trajectory: &TransientTrajectoryArtifact,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let FourierRunRequest {
         num_harmonics,
 
@@ -1104,7 +1105,39 @@ fn run_fourier(
         compute_thd,
         normalize,
     } = request;
-    let mut projections = Vec::with_capacity(1 + additional_outputs.len());
+    let harmonics = num_harmonics.saturating_add(1);
+    let outputs = additional_outputs.len().saturating_add(1);
+    // The result owns the common axis, each complex plot's axis and values,
+    // and two coordinates per DC/THD readout. Reserve all selected outputs.
+    let values = harmonics
+        .saturating_add(
+            harmonics
+                .saturating_mul(3)
+                .saturating_add(2 + 2 * usize::from(compute_thd))
+                .saturating_mul(outputs),
+        )
+        .saturating_add(
+            trajectory
+                .convergence()
+                .map_or(0, |evidence| evidence.transfer_value_count()),
+        );
+    for (resource, requested, limit) in [
+        (
+            "analysis_points",
+            harmonics.max(trajectory.time().len()),
+            context.limits.max_analysis_points,
+        ),
+        ("result_values", values, context.limits.max_result_values),
+    ] {
+        if requested > limit {
+            return Err(SimulationError::ResourceLimit {
+                resource: resource.into(),
+                requested,
+                limit,
+            });
+        }
+    }
+    let mut projections = Vec::with_capacity(outputs);
     projections.push((output_node, output_ref));
     for (index, output) in additional_outputs.iter().enumerate() {
         super::ensure_not_aborted(abort)?;
@@ -1137,7 +1170,7 @@ fn run_fourier(
             normalize,
         };
         cfg.validate().map_err(SimulationError::InvalidConfig)?;
-        let data = fourier_from_transient_artifact(trajectory, &cfg, abort)?;
+        let data = fourier_from_transient_artifact(trajectory, &cfg, context)?;
 
         let mut real = Vec::with_capacity(data.response.len());
         let mut imaginary = Vec::with_capacity(data.response.len());
@@ -1205,8 +1238,9 @@ fn run_fourier(
 fn fourier_from_transient_artifact(
     trajectory: &TransientTrajectoryArtifact,
     config: &svc_runner::FourierRunConfig,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<svc_runner::FourierData, SimulationError> {
+    let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     let node_values = trajectory.waveform(&config.output_node).ok_or_else(|| {
         SimulationError::InvalidConfig(format!(
@@ -1230,12 +1264,6 @@ fn fourier_from_transient_artifact(
             })
         })
         .transpose()?;
-
-    let mut signal = Vec::with_capacity(trajectory.time().len());
-    for (index, &value) in node_values.iter().enumerate() {
-        poll_periodically(abort, index)?;
-        signal.push(reference_values.map_or(value, |reference| value - reference[index]));
-    }
 
     let mut impulses = Vec::new();
     if config
@@ -1268,6 +1296,30 @@ fn fourier_from_transient_artifact(
             impulses.push((rspice_core::ImpulseTraceRef::Voltage(trace), -1.0));
         }
     }
+    // One differential signal and its clipped time/value window, including
+    // interpolation endpoints, plus the impulse traces copied by decomposition.
+    let copied_values = impulses.iter().fold(
+        trajectory.time().len().saturating_mul(3).saturating_add(4),
+        |total, (trace, _)| {
+            total.saturating_add(match trace {
+                rspice_core::ImpulseTraceRef::Current(trace) => trace.numeric_value_count(),
+                rspice_core::ImpulseTraceRef::Voltage(trace) => trace.numeric_value_count(),
+            })
+        },
+    );
+    if copied_values > context.limits.max_result_values {
+        return Err(SimulationError::ResourceLimit {
+            resource: "result_values".into(),
+            requested: copied_values,
+            limit: context.limits.max_result_values,
+        });
+    }
+    let mut signal = Vec::with_capacity(trajectory.time().len());
+    for (index, &value) in node_values.iter().enumerate() {
+        poll_periodically(abort, index)?;
+        signal.push(reference_values.map_or(value, |reference| value - reference[index]));
+    }
+
     super::run_abort_aware_service(abort, || {
         svc_runner::run_fourier_from_impulses_with_abort(
             trajectory.time(),
@@ -1584,7 +1636,23 @@ pub(in crate::runner) fn run_spectral_from_trajectory(
     trajectory: &TransientTrajectoryArtifact,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    super::ensure_not_aborted(abort)?;
+    run_spectral_from_trajectory_with_context(
+        spec,
+        trajectory,
+        svc_runner::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+fn run_spectral_from_trajectory_with_context(
+    spec: AnalysisSpec,
+    trajectory: &TransientTrajectoryArtifact,
+    context: svc_runner::ServiceContext<'_>,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(context.abort)?;
     match spec {
         AnalysisSpec::Fourier {
             fundamental_freq,
@@ -1612,10 +1680,15 @@ pub(in crate::runner) fn run_spectral_from_trajectory(
                 normalize,
             },
             trajectory,
-            abort,
+            context,
         ),
         AnalysisSpec::Fft { request } => {
-            super::recorded_fft::run_from_trajectory(&request, trajectory, abort)
+            super::recorded_fft::run_from_trajectory_with_resource_limits(
+                &request,
+                trajectory,
+                context.limits,
+                context.abort,
+            )
         }
         _ => Err(SimulationError::InvalidConfig(
             "A spectral study requires Fourier or FFT".into(),

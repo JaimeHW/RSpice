@@ -29,15 +29,7 @@ pub(super) fn run(
     run_from_trajectory_with_resource_limits(request, trajectory, context.limits, abort)
 }
 
-pub(super) fn run_from_trajectory(
-    request: &FftRequest,
-    trajectory: &crate::execution_artifact::TransientTrajectoryArtifact,
-    abort: &dyn AbortSignal,
-) -> Result<SimulationResult, SimulationError> {
-    run_from_trajectory_with_resource_limits(request, trajectory, ResourceLimits::default(), abort)
-}
-
-fn run_from_trajectory_with_resource_limits(
+pub(super) fn run_from_trajectory_with_resource_limits(
     request: &FftRequest,
     trajectory: &crate::execution_artifact::TransientTrajectoryArtifact,
     limits: ResourceLimits,

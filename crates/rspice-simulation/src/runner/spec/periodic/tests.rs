@@ -198,7 +198,7 @@ fn an_authored_fourier_run_reports_every_output() {
         1.0,
         request(vec!["V(mid)".to_owned()]),
         artifact.trajectory().unwrap(),
-        &rspice_core::abort_signal::NoAbort,
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort),
     )
     .unwrap()
     else {
@@ -234,7 +234,7 @@ fn an_authored_fourier_run_reports_every_output() {
         1.0,
         request(Vec::new()),
         artifact.trajectory().unwrap(),
-        &rspice_core::abort_signal::NoAbort,
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort),
     )
     .unwrap() else {
         panic!("a Fourier run reports a spectrum");
@@ -250,7 +250,7 @@ fn an_authored_fourier_run_reports_every_output() {
             1.0,
             request(vec!["V(out)".to_owned()]),
             artifact.trajectory().unwrap(),
-            &rspice_core::abort_signal::NoAbort,
+            svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort),
         ),
         Err(SimulationError::InvalidConfig(_))
     ));
@@ -313,7 +313,7 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
             normalize: false,
         },
         artifact.trajectory().unwrap(),
-        &rspice_core::abort_signal::NoAbort,
+        svc_runner::ServiceContext::with_defaults(None, &rspice_core::abort_signal::NoAbort),
     )
     .unwrap();
     assert_eq!(spectrum.transient_convergence(), Some(&quality));
@@ -333,5 +333,111 @@ fn convergence_fourier_retains_its_source_quality_through_native_conversion() {
             .unwrap()
             .force_accepted_times_s,
         [10.0 / 64.0]
+    );
+}
+
+#[test]
+fn fourier_limits_cover_source_copies_and_every_selected_output() {
+    use rspice_core::{NoAbort, ResourceLimits};
+    let time: Vec<_> = (0..=64).map(|index| f64::from(index) / 64.0).collect();
+    let names: Vec<_> = (0..14).map(|index| format!("n{index}")).collect();
+    let waveforms = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let values = time
+                .iter()
+                .map(|t| (index + 1) as f64 * (std::f64::consts::TAU * t).sin())
+                .collect();
+            (
+                name.clone(),
+                WaveformData::new_time_domain(name, time.clone(), values),
+            )
+        })
+        .collect();
+    let transient = SimulationResult::Transient {
+        time,
+        waveforms,
+        spectra: Vec::new(),
+        measurements: Vec::new(),
+        periodic_state: None,
+        convergence: None,
+        events: Default::default(),
+    };
+    let trajectory = TransientTrajectoryArtifact::from_result(&transient, &names, false)
+        .unwrap()
+        .unwrap();
+    let spec = AnalysisSpec::Fourier {
+        fundamental_freq: 1.0,
+        num_harmonics: 3,
+        num_periods: 1,
+        output_node: "n0".into(),
+        output_ref: "0".into(),
+        additional_outputs: names
+            .iter()
+            .skip(1)
+            .map(|name| format!("V({name})"))
+            .collect(),
+        start_time: 0.0,
+        stop_time: 1.0,
+        compute_thd: true,
+        normalize: false,
+    };
+    let run = |spec, limits| {
+        run_spectral_from_trajectory_with_context(
+            spec,
+            &trajectory,
+            svc_runner::ServiceContext {
+                source_path: None,
+                limits,
+                abort: &NoAbort,
+            },
+        )
+    };
+    let mut limits = ResourceLimits::default();
+    limits.max_matrix_unknowns = 1;
+    limits.max_analysis_points = 65;
+    limits.max_result_values = 228;
+    let SimulationResult::Ac {
+        waveforms,
+        frequencies,
+        ..
+    } = run(spec.clone(), limits).unwrap()
+    else {
+        panic!("Fourier result");
+    };
+    assert_eq!(frequencies, [0.0, 1.0, 2.0, 3.0]);
+    assert_eq!(waveforms.len(), 42);
+    let fundamental = &waveforms["V(n0) Spectrum"];
+    assert!(
+        (fundamental.y_values[1].hypot(fundamental.y_imag.as_ref().unwrap()[1]) - 1.0).abs()
+            < 0.002
+    );
+    let mut fewer_points = limits;
+    fewer_points.max_analysis_points = 64;
+    assert!(
+        matches!(run(spec.clone(), fewer_points), Err(SimulationError::ResourceLimit {
+        resource, requested: 65, limit: 64,
+    }) if resource == "analysis_points")
+    );
+    let mut fewer_values = limits;
+    fewer_values.max_result_values = 227;
+    assert!(
+        matches!(run(spec.clone(), fewer_values), Err(SimulationError::ResourceLimit {
+        resource, requested: 228, limit: 227,
+    }) if resource == "result_values")
+    );
+    let mut one_output = spec;
+    if let AnalysisSpec::Fourier {
+        additional_outputs, ..
+    } = &mut one_output
+    {
+        additional_outputs.clear();
+    }
+    fewer_values.max_result_values = 198;
+    assert!(
+        matches!(run(one_output, fewer_values), Err(SimulationError::ResourceLimit {
+        resource, requested: 199, limit: 198,
+    }) if resource == "result_values")
     );
 }
