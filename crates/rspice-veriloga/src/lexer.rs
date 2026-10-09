@@ -364,7 +364,7 @@ impl TokenKind {
             "continuous" => TokenKind::Continuous,
 
             // Nets
-            "wire" => TokenKind::Wire,
+            "wire" | "tri" => TokenKind::Wire,
             "reg" => TokenKind::Reg,
             // Verilog-AMS LRM 2.4 section 3.7's real net, and the four
             // resolved spellings RSpice implements beside it as a named
@@ -462,7 +462,6 @@ impl TokenKind {
             "supply0" => TokenKind::AmsDigital,
             "supply1" => TokenKind::AmsDigital,
             "time" => TokenKind::AmsDigital,
-            "tri" => TokenKind::AmsDigital,
             "tri0" => TokenKind::AmsDigital,
             "tri1" => TokenKind::AmsDigital,
             "triand" => TokenKind::AmsDigital,

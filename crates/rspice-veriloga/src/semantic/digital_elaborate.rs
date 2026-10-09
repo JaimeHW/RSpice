@@ -122,13 +122,27 @@ pub(crate) fn elaborate_digital_hierarchy(
         required: digital_subtrees(analyzed, source_modules),
         connections: Default::default(),
     };
+    elaborator.connections.resolved_types = super::net_types::resolve(
+        analyzed,
+        source_modules,
+        root_source,
+        root,
+        &mut elaborator.connections.specializations,
+    )?;
+    let resolved_root = elaborator.connections.resolved_types.get("").cloned();
+    let (root_source, root) = resolved_root
+        .as_deref()
+        .map(|root| (&root.source, &root.analyzed))
+        .unwrap_or((root_source, root));
     let prepared_root = super::hierarchy_connections::prepare(
         analyzed,
         source_modules,
         root_source,
         root,
         &mut elaborator.connections,
-    )?;
+        "",
+    )?
+    .or(resolved_root.clone());
     let (root_source, root) = prepared_root
         .as_deref()
         .map(|root| (&root.source, &root.analyzed))
@@ -150,7 +164,7 @@ pub(super) struct ElaboratedHierarchy {
 
 /// Include analog containers of digital descendants, including currently inactive
 /// generate arms. Pure analog subtrees keep their symbolic parameter-array path.
-fn digital_subtrees(
+pub(super) fn digital_subtrees(
     analyzed: &AnalyzedFile,
     sources: &HashMap<SmolStr, &Module>,
 ) -> HashSet<SmolStr> {
@@ -346,7 +360,7 @@ struct DigitalElaborator<'a> {
     required: HashSet<SmolStr>,
 }
 
-fn check_hierarchy_capacity(
+pub(super) fn check_hierarchy_capacity(
     depth: usize,
     instances: usize,
     path: &str,
@@ -384,6 +398,15 @@ const MAX_DIGITAL_HIERARCHY_INSTANCES: usize = 65_536;
 pub(super) struct SpecializationKey {
     module: SmolStr,
     overrides: Vec<(usize, String)>,
+}
+
+impl SpecializationKey {
+    pub(super) fn root(module: SmolStr) -> Self {
+        Self {
+            module,
+            overrides: Vec::new(),
+        }
+    }
 }
 
 struct HierarchyFrame {
@@ -500,7 +523,39 @@ impl DigitalElaborator<'_> {
             .map(|specialized| (&specialized.source, &specialized.analyzed))
             .unwrap_or((child_source, child));
 
-        let connected = if let Some(prepared) = self.connections.prepared.get(&key) {
+        if connection.is_some() {
+            // Authored connect bodies become concrete modules only after boundary
+            // selection. Resolve their internal hierarchy with the same contract.
+            let resolved = super::net_types::resolve(
+                self.analyzed,
+                self.source_modules,
+                child_source,
+                child,
+                &mut self.connections.specializations,
+            )?;
+            for (relative, module) in resolved {
+                let name = if relative.is_empty() {
+                    path.into()
+                } else {
+                    qualify(path, &relative)
+                };
+                self.connections.resolved_types.insert(name, module);
+            }
+        }
+        let resolved = self.connections.resolved_types.get(path).cloned();
+        let (child_source, child) = resolved
+            .as_deref()
+            .map(|module| (&module.source, &module.analyzed))
+            .unwrap_or((child_source, child));
+        let preparation_key = (
+            key.clone(),
+            if self.connections.resolved_types.is_empty() {
+                SmolStr::default()
+            } else {
+                path.into()
+            },
+        );
+        let connected = if let Some(prepared) = self.connections.prepared.get(&preparation_key) {
             prepared.clone()
         } else {
             let prepared = super::hierarchy_connections::prepare(
@@ -509,10 +564,12 @@ impl DigitalElaborator<'_> {
                 child_source,
                 child,
                 &mut self.connections,
-            )?;
+                path,
+            )?
+            .or(resolved.clone());
             self.connections
                 .prepared
-                .insert(key.clone(), prepared.clone());
+                .insert(preparation_key, prepared.clone());
             prepared
         };
         let (child_source, child) = connected

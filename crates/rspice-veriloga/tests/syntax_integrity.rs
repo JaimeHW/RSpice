@@ -197,7 +197,6 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         ("wreal4state", "wreal4state w;"),
         ("wand", "wand w;"),
         ("wor", "wor w;"),
-        ("tri", "tri t;"),
         ("tri0", "tri0 t;"),
         ("tri1", "tri1 t;"),
         ("triand", "triand t;"),

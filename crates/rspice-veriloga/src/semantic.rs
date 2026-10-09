@@ -387,6 +387,7 @@ mod constant_dependencies;
 mod digital;
 mod digital_elaborate;
 mod hierarchy_connections;
+mod net_types;
 mod node_vectors;
 mod digital_walk;
 mod discrete_projection;

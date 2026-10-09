@@ -1844,7 +1844,7 @@ impl WrealResolution {
 
 /// Net type keyword.
 ///
-/// `wire` is IEEE 1364-2005's; [`Self::Wreal`] is Verilog-AMS LRM 2.4 section
+/// `wire` / `tri` are IEEE 1364-2005's; [`Self::Wreal`] is Verilog-AMS LRM 2.4 section
 /// 3.7's real net. The remaining IEEE 1364 net types are still refused by name
 /// at the keyword.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2211,3 +2211,70 @@ connectrules chosen; connect dac; endconnectrules
         }
     }
 }
+
+
+#[test]
+fn promoted_wire_hierarchies_keep_real_values_and_select_loaded_real_converters() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module source(output wreal value);
+ real level=2.75;
+ initial #1 level=4.25;
+ assign value=level;
+endmodule
+module bridge(output tri value); source nested(value); endmodule
+module tap(inout wire value,output electrical p); analog V(p)<+value; endmodule
+module load(input electrical a,output electrical p);
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module helper(input wire value,output electrical a);
+ analog I(a)<+(V(a)-value)/1000;
+endmodule
+module bus_source(output logic wrealsum [2:3] values);
+ assign values[2]=1.25; assign values[3]=2.5;
+endmodule
+module bus_tap(inout tri [5:4] values,output electrical p);
+ analog V(p)<+10*values[5]+values[4];
+endmodule
+module top(p,q,r,s,t);
+ output p,q,r,s,t; electrical p,q,r,s,t;
+ wire [8:9] values;
+ bus_source bus_producer(values);
+ bus_tap bus_consumer(values,s);
+ tap selected_lane(values[9],t);
+ tri real_path,logic_path;
+ bridge producer(real_path);
+ assign logic_path=1'b1;
+ tap real_use(real_path,p);
+ tap logic_use(logic_path,q);
+ load loaded(real_path,r);
+endmodule
+connectmodule dac(input logic wreal value,output electrical a);
+ helper body(value,a);
+endmodule
+connectrules chosen; connect dac; endconnectrules
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* promoted real interconnect\nX1 p q r s t top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1.5e-9, 25e-12).unwrap();
+    for (time, level) in [(0.5e-9, 2.75), (1.4e-9, 4.25)] {
+        for (node, expected) in [
+            ("p", level),
+            ("q", 1.0),
+            ("r", level / 2.0),
+            ("s", 15.0),
+            ("t", 2.5),
+        ] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}

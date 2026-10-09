@@ -1412,3 +1412,127 @@ endmodule
         .validate()
         .unwrap();
 }
+
+
+#[test]
+fn real_net_types_propagate_per_occurrence_and_replay_after_specialization() {
+    let source = r#"
+module source(output wreal value);
+ parameter real LEVEL=2.75;
+ assign value=LEVEL;
+endmodule
+module bridge(output wire value);
+ parameter real LEVEL=2.75;
+ source #(.LEVEL(LEVEL)) nested(value);
+endmodule
+module tap(inout tri value,output electrical p);
+ analog V(p)<+value;
+endmodule
+module top(p,q);
+ parameter real LEVEL=2.75;
+ output p,q; electrical p,q;
+ tri real_path,logic_path;
+ bridge #(.LEVEL(LEVEL)) producer(real_path);
+ assign logic_path=1'b1;
+ tap real_use(real_path,p);
+ tap logic_use(logic_path,q);
+endmodule
+"#;
+    let compiler = compiler();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let check = |artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact| {
+        artifact.validate().unwrap();
+        let signals = &artifact.digital.signals;
+        let real = signals
+            .iter()
+            .find(|signal| signal.name == "real_path")
+            .unwrap();
+        let logic = signals
+            .iter()
+            .find(|signal| signal.name == "logic_path")
+            .unwrap();
+        assert!(matches!(
+            real.kind,
+            rspice_veriloga::canonical_ir::digital::DigitalSignalKind::Real(_)
+        ));
+        assert!(!matches!(
+            logic.kind,
+            rspice_veriloga::canonical_ir::digital::DigitalSignalKind::Real(_)
+        ));
+        assert_eq!(
+            artifact
+                .digital
+                .drivers
+                .iter()
+                .filter(|driver| driver.id.signal == real.id)
+                .count(),
+            1
+        );
+    };
+    check(&artifact.canonical_ir);
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &artifact.canonical_ir,
+            &[("LEVEL", 4.25)],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    check(&specialized.canonical_ir);
+    let replay = compiler
+        .prepare_artifact_runtime_source(&specialized.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    check(&replay.canonical_ir);
+    assert_eq!(
+        specialized.canonical_ir.runtime_source_identity(),
+        replay.canonical_ir.runtime_source_identity()
+    );
+    for (extra, expected) in [
+        ("assign real_path=1.0;", "2 drivers"),
+        ("initial real_path=1;", "procedural assignment"),
+    ] {
+        let invalid = source.replace(
+            "assign logic_path=1'b1;",
+            &format!("{extra} assign logic_path=1'b1;"),
+        );
+        let error = match compiler.compile_runtime(&invalid, Some("top")) {
+            Ok(_) => panic!("accepted {extra}"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn whole_wire_buses_acquire_real_types_without_changing_local_coordinates() {
+    let source = r#"
+module source(output logic wrealsum [2:3] value);
+ assign value[2]=1.25; assign value[3]=2.5;
+endmodule
+module sink(inout tri [5:4] value,output electrical p);
+ analog V(p)<+value[5]+value[4];
+endmodule
+module top(p,q);
+ output p,q; electrical p,q;
+ wire [8:9] bus;
+ source producer(bus);
+ sink consumer(bus,p);
+ sink selected(bus[8:9],q);
+endmodule
+"#;
+    // A complete vector join resolves the source declaration before parts and
+    // local body selections are lowered as real bus coordinates.
+    let artifact = compiler().compile_runtime(source, Some("top")).unwrap();
+    artifact.canonical_ir.validate().unwrap();
+    assert!(
+        artifact
+            .canonical_ir
+            .digital
+            .arrays
+            .iter()
+            .any(|array| array.name == "bus")
+    );
+    let bad = source.replace("module sink(inout tri", "module sink(inout wrealavg");
+    assert!(compiler().compile_runtime(&bad, Some("top")).is_err());
+}

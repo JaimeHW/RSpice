@@ -30,7 +30,8 @@ use std::sync::Arc;
 #[derive(Default)]
 pub(super) struct ConnectionModules {
     pub specializations: HashMap<SpecializationKey, Arc<SpecializedModule>>,
-    pub prepared: HashMap<SpecializationKey, Option<Arc<SpecializedModule>>>,
+    pub prepared: HashMap<(SpecializationKey, SmolStr), Option<Arc<SpecializedModule>>>,
+    pub resolved_types: HashMap<SmolStr, Arc<SpecializedModule>>,
     pub modules: HashMap<SmolStr, Arc<SpecializedModule>>,
     identities: HashMap<String, SmolStr>,
 }
@@ -182,13 +183,14 @@ pub(super) fn prepare(
     source: &Module,
     module: &AnalyzedModule,
     bodies: &mut ConnectionModules,
+    path: &str,
 ) -> CompileResult<Option<Arc<SpecializedModule>>> {
     let array_views = net_arrays::prepare(analyzed, source, module)?;
     let (source, module) = array_views
         .as_deref()
         .map(|prepared| (&prepared.source, &prepared.analyzed))
         .unwrap_or((source, module));
-    Ok(prepare_boundaries(analyzed, sources, source, module, bodies)?.or(array_views))
+    Ok(prepare_boundaries(analyzed, sources, source, module, bodies, path)?.or(array_views))
 }
 
 fn prepare_boundaries(
@@ -197,6 +199,7 @@ fn prepare_boundaries(
     source: &Module,
     module: &AnalyzedModule,
     bodies: &mut ConnectionModules,
+    path: &str,
 ) -> CompileResult<Option<Arc<SpecializedModule>>> {
     if source.instances.is_empty() {
         return Ok(None);
@@ -231,6 +234,16 @@ fn prepare_boundaries(
             &format!("{}.{}", source.name, instance.name),
         )?;
         let (child_source, child) = specialized
+            .as_deref()
+            .map(|module| (&module.source, &module.analyzed))
+            .unwrap_or((child_source, child));
+        let child_path = if path.is_empty() {
+            instance.name.to_string()
+        } else {
+            format!("{path}.{}", instance.name)
+        };
+        let resolved = bodies.resolved_types.get(child_path.as_str()).cloned();
+        let (child_source, child) = resolved
             .as_deref()
             .map(|module| (&module.source, &module.analyzed))
             .unwrap_or((child_source, child));
@@ -704,7 +717,7 @@ pub(super) fn declared_names(source: &Module) -> HashSet<SmolStr> {
         .collect()
 }
 
-fn analyze_occurrence(
+pub(super) fn analyze_occurrence(
     file: &AnalyzedFile,
     source: &Module,
     transition: f64,
