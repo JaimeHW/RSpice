@@ -85,6 +85,8 @@ pub mod spice_value;
 pub mod stability;
 pub mod studio_presentation;
 pub mod transfer_function;
+#[cfg(feature = "engine-evidence")]
+pub mod transient_checkpoint;
 pub mod validation;
 pub mod viewer_catalog;
 pub mod visualization_document;

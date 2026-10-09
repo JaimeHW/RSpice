@@ -81,7 +81,7 @@ fn project_roundtrip_preserves_unavailable_samples_and_binds_their_identity() {
     legacy_dense.schema_version = 42;
     legacy_dense.migrate_to_current(ProjectId::new()).unwrap();
     legacy_dense.validate().unwrap();
-    assert_eq!(legacy_dense.schema_version, 43);
+    assert_eq!(legacy_dense.schema_version, 44);
     assert_eq!(legacy_dense.runs[0].dataset_content_digest, digest);
 }
 

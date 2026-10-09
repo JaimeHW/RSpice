@@ -28,6 +28,9 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
     /// fields exist they must describe one coherent execution.
     pub fn validate_retained_evidence(&self) -> Result<(), String> {
         self.validate_native_scalar_units()?;
+        if let Some(checkpoint) = &self.transient_checkpoint {
+            checkpoint.validate_for(self)?;
+        }
         if let Some(checkpoint) = &self.monte_carlo_checkpoint {
             checkpoint.validate_for(self.into())?;
         }

@@ -18,6 +18,7 @@ struct CachedResults {
     history: RunHistoryRevision,
     decks: ExecutedDeckArchive,
     imported_checkpoints: crate::state::MonteCarloCheckpointLibrary,
+    imported_transient_checkpoints: rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     next_run_id: u64,
     retained_dataset_limit: Option<usize>,
     active_run_idx: Option<usize>,
@@ -35,6 +36,7 @@ impl CachedResults {
                     runs,
                     executed_decks,
                     imported_monte_carlo_checkpoints,
+                    imported_transient_checkpoints,
                     next_run_id,
                     retained_dataset_limit,
                     yield_evidence: _,
@@ -71,6 +73,9 @@ impl CachedResults {
             && self
                 .imported_checkpoints
                 .shares_content_with(imported_monte_carlo_checkpoints)
+            && self
+                .imported_transient_checkpoints
+                .shares_content_with(imported_transient_checkpoints)
             && self.next_run_id == *next_run_id
             && self.retained_dataset_limit == *retained_dataset_limit
             && self.active_run_idx == *active_run_idx
@@ -90,6 +95,7 @@ impl ResultCache {
             history: state.retained.runs.revision(),
             decks: state.retained.executed_decks.clone(),
             imported_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
+            imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
             next_run_id: state.retained.next_run_id,
             retained_dataset_limit: state.retained.retained_dataset_limit,
             active_run_idx: state.view.active_run_idx,

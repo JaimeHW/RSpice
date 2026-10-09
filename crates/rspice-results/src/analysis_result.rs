@@ -64,6 +64,8 @@ pub struct AnalysisResult<W = RetainedWaveform> {
     /// Portable committed trials retained even when the task is interrupted.
     /// This is never a substitute for a completed statistical result.
     pub monte_carlo_checkpoint: Option<MonteCarloCheckpointEvidence>,
+    /// Last complete accepted continuation state, independent of displayed output.
+    pub transient_checkpoint: Option<crate::transient_checkpoint::TransientCheckpointEvidence>,
     /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
     pub measurements: Vec<rspice_core::MeasureResult>,
     /// Authenticated application receipts for plan-owned saved-output
@@ -131,6 +133,7 @@ impl<W> AnalysisResult<W> {
             result_payload,
             native_scalar_units,
             monte_carlo_checkpoint,
+            transient_checkpoint,
             measurements,
             saved_output_receipts,
             success,
@@ -153,6 +156,7 @@ impl<W> AnalysisResult<W> {
             result_payload,
             native_scalar_units,
             monte_carlo_checkpoint,
+            transient_checkpoint,
             measurements,
             saved_output_receipts,
             success,
@@ -275,6 +279,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             result_payload: None,
             native_scalar_units: None,
             monte_carlo_checkpoint: None,
+            transient_checkpoint: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: true,
@@ -307,6 +312,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             result_payload: None,
             native_scalar_units: None,
             monte_carlo_checkpoint: None,
+            transient_checkpoint: None,
             measurements: Vec::new(),
             saved_output_receipts: Vec::new(),
             success: false,
@@ -420,6 +426,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             measurements: &self.measurements,
             saved_output_receipts: &self.saved_output_receipts,
             monte_carlo_checkpoint: self.monte_carlo_checkpoint.as_ref(),
+            transient_checkpoint: self.transient_checkpoint.as_ref(),
             native_scalar_units: self.native_scalar_units.as_ref(),
         }
     }

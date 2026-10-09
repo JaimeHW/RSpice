@@ -275,6 +275,8 @@ impl SimulationController {
                 self.current_spec = None;
                 self.current_analysis_label = None;
                 self.current_spec_options = None;
+                self.current_execution_limits = None;
+                self.current_transient_checkpoint_error = None;
                 self.current_periodic_carrier_hz = None;
                 self.current_artifact_producer = None;
                 self.current_provenance = None;

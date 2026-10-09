@@ -1214,6 +1214,7 @@ fn failed_prerequisite_skips_dependent_prepared_task_with_exact_provenance() {
 
 mod completion_paths;
 mod monte_carlo_checkpoint;
+mod transient_checkpoint;
 
 #[test]
 fn production_runner_surface_exposes_only_the_opaque_prepared_start() {

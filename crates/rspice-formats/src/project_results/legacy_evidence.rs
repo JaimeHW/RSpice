@@ -157,6 +157,7 @@ pub fn validate_result_fields_for_source_schema(
     run: &ProjectSimulationRun,
     source_schema: u32,
 ) -> Result<(), String> {
+    reject_transient_checkpoints_before_schema_v44(run, source_schema)?;
     reject_voltage_impulses_before_schema_v41(run, source_schema)?;
     reject_import_coordinates_before_schema_v42(run, source_schema)?;
     reject_waveform_gaps_before_schema_v43(run, source_schema)?;
@@ -396,6 +397,21 @@ pub(super) fn reject_voltage_impulses_before_schema_v41(
         })
     {
         return Err("result schemas before v41 cannot contain voltage impulse histories".into());
+    }
+    Ok(())
+}
+
+pub(super) fn reject_transient_checkpoints_before_schema_v44(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema < TRANSIENT_CHECKPOINT_RESULTS_SCHEMA_VERSION
+        && run
+            .analyses
+            .iter()
+            .any(|analysis| analysis.transient_checkpoint.is_present())
+    {
+        return Err("result schemas before v44 cannot contain transient checkpoints".into());
     }
     Ok(())
 }

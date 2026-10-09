@@ -56,6 +56,8 @@ pub struct RetainedSimulationState {
 
     /// Imported resume inputs, preserved independently of dataset pruning.
     pub imported_monte_carlo_checkpoints: MonteCarloCheckpointLibrary,
+    pub imported_transient_checkpoints:
+        rspice_results::transient_checkpoint::TransientCheckpointLibrary,
 
     /// The exact deck every point of a recent run executed.
     ///

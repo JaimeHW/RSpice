@@ -236,6 +236,7 @@ pub struct AnalysisResultDataRef<'a, W> {
     pub measurements: &'a [rspice_core::MeasureResult],
     pub saved_output_receipts: &'a [SavedOutputReceipt],
     pub monte_carlo_checkpoint: Option<&'a MonteCarloCheckpointEvidence>,
+    pub transient_checkpoint: Option<&'a crate::transient_checkpoint::TransientCheckpointEvidence>,
     pub native_scalar_units: Option<&'a BTreeMap<String, rspice_core::analysis::MeasurementUnit>>,
 }
 
@@ -412,6 +413,17 @@ where
             && let Some(checkpoint) = self.monte_carlo_checkpoint
         {
             writer.string("monte-carlo-checkpoint/v1");
+            writer.digest(checkpoint.digest());
+            writer.usize(checkpoint.bytes().len());
+            writer.retained_bytes = writer
+                .retained_bytes
+                .saturating_add(checkpoint.bytes().len() as u64);
+        }
+
+        if version >= ResultDigestEncoding::V16
+            && let Some(checkpoint) = self.transient_checkpoint
+        {
+            writer.string("transient-checkpoint/v1");
             writer.digest(checkpoint.digest());
             writer.usize(checkpoint.bytes().len());
             writer.retained_bytes = writer

@@ -803,7 +803,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v131); states
+Resume also requires the current resolved simulation identity (v132); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 

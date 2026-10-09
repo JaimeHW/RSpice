@@ -100,6 +100,12 @@ pub struct ProjectSimulationResultsData {
     )]
     pub imported_monte_carlo_checkpoints:
         rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+    #[serde(
+        default,
+        skip_serializing_if = "rspice_results::transient_checkpoint::TransientCheckpointLibrary::is_empty"
+    )]
+    pub imported_transient_checkpoints:
+        rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     /// Last allocated display sequence, retained even after all runs are cleared.
     #[serde(default)]
     pub next_run_id: u64,
@@ -139,6 +145,7 @@ impl Default for ProjectSimulationResultsData {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: Vec::new(),
             imported_monte_carlo_checkpoints: Default::default(),
+            imported_transient_checkpoints: Default::default(),
             next_run_id: 0,
             retained_dataset_limit: None,
             active_run_stable_id: None,
@@ -157,6 +164,7 @@ impl ProjectSimulationResultsData {
     pub fn is_empty(&self) -> bool {
         self.runs.is_empty()
             && self.imported_monte_carlo_checkpoints.is_empty()
+            && self.imported_transient_checkpoints.is_empty()
             && self.next_run_id == 0
             && self.active_run_stable_id.is_none()
             && self.active_dataset_id.is_none()
@@ -171,7 +179,15 @@ impl ProjectSimulationResultsData {
 
     fn migrate_to_current_in_place(&mut self, project_id: ProjectId) -> Result<(), String> {
         let source_schema = self.schema_version;
+        if source_schema < TRANSIENT_CHECKPOINT_RESULTS_SCHEMA_VERSION
+            && !self.imported_transient_checkpoints.is_empty()
+        {
+            return Err(
+                "result schemas before v44 cannot contain imported transient checkpoints".into(),
+            );
+        }
         for run in &self.runs {
+            legacy_evidence::reject_transient_checkpoints_before_schema_v44(run, source_schema)?;
             legacy_evidence::reject_voltage_impulses_before_schema_v41(run, source_schema)?;
             legacy_evidence::reject_import_coordinates_before_schema_v42(run, source_schema)?;
             legacy_evidence::reject_waveform_gaps_before_schema_v43(run, source_schema)?;
@@ -181,6 +197,7 @@ impl ProjectSimulationResultsData {
             SAMPLED_NOISE_RESULTS_SCHEMA_VERSION
                 | VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION
                 | IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION
+                | NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION
         ) {
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -1371,6 +1388,8 @@ impl ProjectSimulationRun {
                 if analysis.is_live_partial() {
                     analysis.error_message = Some(if analysis.monte_carlo_checkpoint.is_some() {
                         "Monte Carlo was interrupted; committed trials are retained in its checkpoint"
+                    } else if analysis.transient_checkpoint.is_some() {
+                        "Transient was interrupted; accepted state is retained in its checkpoint"
                     } else {
                         "Simulation was interrupted before completion; retained waveforms are accepted partial samples"
                     }.to_owned());
@@ -1731,6 +1750,10 @@ pub struct ProjectAnalysisResult {
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub monte_carlo_checkpoint:
         PersistedField<rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointEvidence>,
+    /// Accepted transient continuation state, introduced in result schema v44.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub transient_checkpoint:
+        PersistedField<rspice_results::transient_checkpoint::TransientCheckpointEvidence>,
     #[serde(default)]
     pub measurements: Vec<ProjectMeasurement>,
     /// Authenticated outcomes for the immutable saved-output contracts that
@@ -1907,6 +1930,12 @@ impl ProjectAnalysisResult {
                 self.id
             ));
         }
+        if self.transient_checkpoint.is_null() {
+            return Err(format!(
+                "analysis sequence {} has an explicitly null transient checkpoint",
+                self.id
+            ));
+        }
         if self.monte_carlo_checkpoint.is_null() {
             return Err(format!(
                 "analysis sequence {} has an explicitly null Monte Carlo checkpoint",
@@ -1961,6 +1990,7 @@ impl ProjectAnalysisResult {
             result_payload: self.result_payload.into_value(),
             native_scalar_units: self.native_scalar_units.into_value(),
             monte_carlo_checkpoint: self.monte_carlo_checkpoint.into_value(),
+            transient_checkpoint: self.transient_checkpoint.into_value(),
             measurements: self
                 .measurements
                 .into_iter()
@@ -2135,6 +2165,10 @@ impl ProjectAnalysisResult {
                 .result_payload
                 .clone()
                 .map_or(PersistedField::Missing, PersistedField::Value),
+            transient_checkpoint: analysis
+                .transient_checkpoint
+                .clone()
+                .map_or(PersistedField::Missing, PersistedField::Value),
             monte_carlo_checkpoint: analysis
                 .monte_carlo_checkpoint
                 .clone()
@@ -2293,7 +2327,8 @@ const SAMPLED_NOISE_RESULTS_SCHEMA_VERSION: u32 = 40;
 const VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 41;
 const IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION: u32 = 42;
 const NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION: u32 = 43;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION;
+const TRANSIENT_CHECKPOINT_RESULTS_SCHEMA_VERSION: u32 = 44;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = TRANSIENT_CHECKPOINT_RESULTS_SCHEMA_VERSION;
 
 const LEGACY_RESULT_RUN_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0xe515_12ea_10c0_58c8_8bd7_ea31_003f_f6cf);

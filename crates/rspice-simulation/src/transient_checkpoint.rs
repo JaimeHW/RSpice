@@ -22,22 +22,24 @@ pub(crate) fn check_limit(
     }
 }
 
-pub fn checkpoint_digest(bytes: &[u8]) -> ContentDigest {
-    rspice_app_types::canonical::content_digest("rspice.transient-checkpoint/v1", bytes)
+pub use rspice_results::transient_checkpoint::checkpoint_digest;
+
+fn translate_checkpoint_error(
+    error: rspice_results::transient_checkpoint::TransientCheckpointError,
+) -> SimulationError {
+    match error {
+        rspice_results::transient_checkpoint::TransientCheckpointError::Invalid(message) => {
+            SimulationError::InvalidConfig(message)
+        }
+        rspice_results::transient_checkpoint::TransientCheckpointError::Engine(error) => {
+            SimulationError::from(error)
+        }
+    }
 }
 
 pub fn validate_bytes_size(length: usize, limits: ResourceLimits) -> Result<(), SimulationError> {
-    if length == 0 {
-        return Err(SimulationError::InvalidConfig(
-            "Transient checkpoint is empty".into(),
-        ));
-    }
-    check_limit(
-        rspice_core::ResourceKind::ExternalDataBytes,
-        length,
-        limits.max_external_data_bytes,
-    )
-    .map_err(|error| SimulationError::from(rspice_core::SimulationError::from(error)))
+    rspice_results::transient_checkpoint::validate_bytes_size(length, limits)
+        .map_err(translate_checkpoint_error)
 }
 
 pub fn decode_bytes(
@@ -45,25 +47,8 @@ pub fn decode_bytes(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<TransientCheckpoint, SimulationError> {
-    crate::error::ensure_not_aborted(abort)?;
-    validate_bytes_size(bytes.len(), limits)?;
-    let checkpoint = TransientCheckpoint::from_bytes_with_limit_and_abort(
-        bytes,
-        limits.max_external_data_bytes,
-        abort,
-    )
-    .map_err(SimulationError::from)?;
-    checkpoint
-        .capability()
-        .require_resumable()
-        .map_err(SimulationError::InvalidConfig)?;
-    check_limit(
-        rspice_core::ResourceKind::ResultValues,
-        checkpoint.retained_value_count(),
-        limits.max_result_values,
-    )
-    .map_err(|error| SimulationError::from(rspice_core::SimulationError::from(error)))?;
-    Ok(checkpoint)
+    rspice_results::transient_checkpoint::decode_bytes(bytes, limits, abort)
+        .map_err(translate_checkpoint_error)
 }
 
 /// Bytes are detached from worker JSON and authenticated again after transfer.

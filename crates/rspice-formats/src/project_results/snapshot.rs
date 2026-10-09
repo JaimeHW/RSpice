@@ -30,6 +30,8 @@ pub struct RestoredProjectSimulationResults<A> {
     pub executed_decks: rspice_results::executed_deck::ExecutedDeckArchive,
     pub imported_monte_carlo_checkpoints:
         rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+    pub imported_transient_checkpoints:
+        rspice_results::transient_checkpoint::TransientCheckpointLibrary,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -133,6 +135,7 @@ impl ProjectSimulationResults {
             overlay_dataset_ids: data.overlay_dataset_ids,
             executed_decks,
             imported_monte_carlo_checkpoints: data.imported_monte_carlo_checkpoints,
+            imported_transient_checkpoints: data.imported_transient_checkpoints,
         })
     }
 

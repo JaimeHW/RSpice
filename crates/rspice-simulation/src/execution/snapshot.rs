@@ -728,6 +728,11 @@ impl AuthorizedTaskDispatch {
         &self.task.spec_options
     }
 
+    /// Receiving limits frozen into the authorized task, including checkpoint admission.
+    pub const fn execution_limits(&self) -> rspice_core::ResourceLimits {
+        self.execution_limits
+    }
+
     pub fn saved_output_contracts(&self) -> &[PreparedSavedOutput] {
         &self.saved_output_contracts
     }

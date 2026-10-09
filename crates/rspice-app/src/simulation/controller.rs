@@ -80,6 +80,7 @@ mod results_update;
 #[cfg(test)]
 pub(crate) mod test_execution;
 mod touchstone;
+mod transient_checkpoint;
 mod transient_post;
 pub(crate) use transient_post::{DerivedViewerLoadState, build_eye_from_waveform};
 
@@ -135,6 +136,10 @@ pub struct SimulationController {
     /// carry result semantics, such as whether PNOISE produced output PSD or
     /// dBc/Hz phase noise, across the asynchronous runner boundary.
     current_spec_options: Option<SpecExecutionOptions>,
+    /// Receiving resource limits authenticated by the active prepared task.
+    current_execution_limits: Option<rspice_core::ResourceLimits>,
+    /// A failed requested snapshot must also fail a concurrently completed task.
+    current_transient_checkpoint_error: Option<String>,
     /// The fundamental the periodic carrier of the active task actually
     /// converged at, in hertz, captured from the resolved dependency at
     /// dispatch.
@@ -223,6 +228,8 @@ impl SimulationController {
             current_spec: None,
             current_analysis_label: None,
             current_spec_options: None,
+            current_execution_limits: None,
+            current_transient_checkpoint_error: None,
             current_periodic_carrier_hz: None,
             current_artifact_producer: None,
             current_provenance: None,
@@ -326,6 +333,7 @@ impl SimulationController {
         self.publish_engine_log(state);
         self.publish_live_transient_samples(state);
         self.publish_monte_carlo_checkpoint(state);
+        self.publish_transient_checkpoint(state);
         self.poll_completion(state, export_io);
 
         // Apply/cancel background transient post-processing work after any
@@ -639,6 +647,8 @@ impl SimulationController {
         self.current_spec = None;
         self.current_analysis_label = None;
         self.current_spec_options = None;
+        self.current_execution_limits = None;
+        self.current_transient_checkpoint_error = None;
         self.current_periodic_carrier_hz = None;
         self.current_artifact_producer = None;
         self.current_provenance = None;
@@ -678,6 +688,8 @@ impl SimulationController {
         self.current_spec = None;
         self.current_analysis_label = None;
         self.current_spec_options = None;
+        self.current_execution_limits = None;
+        self.current_transient_checkpoint_error = None;
         self.current_periodic_carrier_hz = None;
         self.current_artifact_producer = None;
         self.current_provenance = None;
@@ -827,6 +839,7 @@ impl SimulationController {
         self.current_spec = Some(spec.clone());
         self.current_analysis_label = Some(analysis_name.clone());
         self.current_spec_options = Some(next_analysis.spec_options().clone());
+        self.current_execution_limits = Some(next_analysis.execution_limits());
         self.current_provenance = Some(provenance);
         self.current_config_digest = Some(next_analysis.config_digest());
         self.current_op_effective_source_content_digest = config.as_ref().and_then(|config| {
@@ -1138,10 +1151,15 @@ impl SimulationController {
         // prefix exists, or when the full terminal result exceeded the budget.
         // Seal it as interrupted instead of leaving a stale running marker.
         for analysis in &mut run.analyses {
-            if analysis.is_live_partial() && analysis.monte_carlo_checkpoint.is_some() {
+            if analysis.is_live_partial()
+                && (analysis.monte_carlo_checkpoint.is_some()
+                    || analysis.transient_checkpoint.is_some())
+            {
                 analysis.error_message = Some(
                     if terminal == Some(SimulationRunLifecycle::Aborted) {
                         "Simulation aborted by user"
+                    } else if analysis.transient_checkpoint.is_some() {
+                        "Transient ended before its result could be retained"
                     } else {
                         "Monte Carlo ended before its result could be retained"
                     }
@@ -1177,14 +1195,16 @@ impl SimulationController {
     ) -> Result<(), String> {
         // Terminal conversion must keep the last admitted journal, including
         // on abort/error. Match the complete prepared identity, not a label.
-        if analysis.monte_carlo_checkpoint.is_none()
-            && let Some(provenance) = analysis.provenance()
-            && let Some(live) =
-                run.find_analysis_by_source_instance(provenance.source_instance_id())
-            && live.is_live_partial()
-            && live.provenance() == Some(provenance)
+        self.preserve_live_checkpoints(run, &mut analysis);
+        if analysis.success
+            && analysis.analysis_type == AnalysisType::Transient
+            && self.transient_checkpoint_capture_requested()
+            && analysis.transient_checkpoint.is_none()
         {
-            analysis.monte_carlo_checkpoint = live.monte_carlo_checkpoint.clone();
+            return Err("Transient completed without its requested retained checkpoint".into());
+        }
+        if let Some(checkpoint) = &analysis.transient_checkpoint {
+            checkpoint.validate_for(&analysis.data)?;
         }
         if analysis.success
             && analysis.analysis_type == AnalysisType::MonteCarlo
@@ -1202,6 +1222,26 @@ impl SimulationController {
         self.validate_analysis_retention(run, &analysis)?;
         run.replace_live_or_add_analysis(analysis);
         Ok(())
+    }
+
+    fn preserve_live_checkpoints(
+        &self,
+        run: &crate::state::SimulationRun,
+        analysis: &mut AnalysisResult,
+    ) {
+        if let Some(provenance) = analysis.provenance()
+            && let Some(live) =
+                run.find_analysis_by_source_instance(provenance.source_instance_id())
+            && live.is_live_partial()
+            && live.provenance() == Some(provenance)
+        {
+            if analysis.monte_carlo_checkpoint.is_none() {
+                analysis.monte_carlo_checkpoint = live.monte_carlo_checkpoint.clone();
+            }
+            if analysis.transient_checkpoint.is_none() {
+                analysis.transient_checkpoint = live.transient_checkpoint.clone();
+            }
+        }
     }
 
     fn validate_analysis_retention(
@@ -1316,22 +1356,31 @@ impl SimulationController {
             log::error!("Accepted transient samples have no target simulation run");
             return;
         };
-        let retained = state
+        if let Err(error) = self.retain_live_transient_analysis(state, run_id, partial) {
+            log::error!("Could not publish live transient samples: {error}");
+        }
+    }
+
+    fn retain_live_transient_analysis(
+        &self,
+        state: &mut AppState,
+        run_id: u64,
+        mut partial: AnalysisResult,
+    ) -> Result<(), String> {
+        state
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
             .ok_or_else(|| format!("live transient target run {run_id} does not exist"))
             .and_then(|run| {
+                self.preserve_live_checkpoints(run, &mut partial);
                 self.validate_analysis_retention(run, &partial)?;
                 run.upsert_live_analysis(partial)
-            });
-        if let Err(error) = retained {
-            log::error!("Could not publish live transient samples: {error}");
-            return;
-        }
+            })?;
         state
             .simulation
             .select_latest_analysis_in_run_sequence(run_id);
+        Ok(())
     }
 
     /// Write the failure to the console, anchored to the objects the engine
@@ -1444,6 +1493,8 @@ impl SimulationController {
         self.current_spec = None;
         self.current_analysis_label = None;
         self.current_spec_options = None;
+        self.current_execution_limits = None;
+        self.current_transient_checkpoint_error = None;
         self.current_periodic_carrier_hz = None;
         self.current_artifact_producer = None;
         self.current_provenance = None;
@@ -1713,6 +1764,11 @@ impl SimulationController {
             // drain. Adopt its final journal before taking provenance or
             // dispatching the next task (which clears the runner queue).
             self.publish_monte_carlo_checkpoint(state);
+            self.publish_transient_checkpoint(state);
+            let result = match self.current_transient_checkpoint_error.take() {
+                Some(error) => Err(SimulationError::InvalidConfig(error)),
+                None => result,
+            };
             self.accept_completion(state, export_io, result);
         }
     }

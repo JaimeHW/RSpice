@@ -22,6 +22,7 @@ pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimu
         // Clearing datasets preserves both their allocation history and
         // the project's retention decision across save and session restore.
         return ProjectSimulationResultsData {
+            imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
             imported_monte_carlo_checkpoints: state
                 .retained
                 .imported_monte_carlo_checkpoints
@@ -49,6 +50,7 @@ pub(crate) fn capture_simulation_results(state: &SimulationState) -> ProjectSimu
     ProjectSimulationResultsData {
         runs,
         imported_monte_carlo_checkpoints: state.retained.imported_monte_carlo_checkpoints.clone(),
+        imported_transient_checkpoints: state.retained.imported_transient_checkpoints.clone(),
         next_run_id: state.retained.next_run_id.max(max_run_id),
         retained_dataset_limit: state.retained.retained_dataset_limit,
         active_run_stable_id: state.active_run().map(|run| run.run_id),
@@ -97,6 +99,7 @@ pub(crate) fn restore_simulation_results(
     // session was holding for a different project.
     state.retained.executed_decks = data.executed_decks;
     state.retained.imported_monte_carlo_checkpoints = data.imported_monte_carlo_checkpoints;
+    state.retained.imported_transient_checkpoints = data.imported_transient_checkpoints;
     Ok(())
 }
 fn restore_analysis(analysis: ProjectAnalysisResult) -> Result<AnalysisResult, String> {
