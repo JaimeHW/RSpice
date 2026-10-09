@@ -3,6 +3,7 @@ use super::*;
 
 mod digital_words;
 mod mixed_inputs;
+mod real_buses;
 
 #[derive(Debug, Clone)]
 struct DigitalShape {
@@ -15,6 +16,7 @@ struct DigitalShape {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConnectionScope {
     nodes: HashMap<SmolStr, NodeVector>,
+    real_buses: HashMap<SmolStr, super::real_buses::RealBus>,
     physical: HashSet<SmolStr>,
     digital: HashMap<SmolStr, DigitalShape>,
     constants: DigitalConstants,
@@ -49,6 +51,7 @@ impl ConnectionScope {
             .collect();
         Self {
             nodes: analyzed.physical_nodes.vectors.clone(),
+            real_buses: analyzed.physical_nodes.real_buses.clone(),
             physical,
             digital,
             constants: DigitalConstants::from_module(source),
@@ -339,9 +342,23 @@ pub(in crate::semantic) fn bind(
                 actual.span(),
             ));
         }
-        if lanes.len() == 1 && discrete.contains(&lanes[0]) {
+        if lanes.len() == 1
+            && discrete.contains(&lanes[0])
+            && !child.physical_nodes.real_buses.contains_key(formal)
+        {
             // Mixed input expressions retain their digital operands until the
             // connection planner has the parent's complete type environment.
+            let mut real_lanes = Vec::new();
+            if parent.append_real_bus(actual, &mut real_lanes)? {
+                if real_lanes.len() != 1 {
+                    return Err(error(
+                        format!("scalar port '{path}.{formal}' requires one real bus lane"),
+                        actual.span(),
+                    ));
+                }
+                bound[positions[&lanes[0]]] = real_lanes.pop();
+                continue;
+            }
             bound[positions[&lanes[0]]] = Some(
                 if child.ports[positions[&lanes[0]]].direction == PortDirection::Input
                     && matches!(actual, Expression::ArrayLiteral(_))

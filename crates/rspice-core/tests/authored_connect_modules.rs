@@ -2089,3 +2089,66 @@ connectrules chosen; connect low_gain; connect high_gain; endconnectrules
         }
     }
 }
+
+
+#[test]
+fn real_bus_ranges_resolve_original_drivers_under_loaded_analog_connections() {
+    let model = r#"
+`timescale 1ns/1ps
+module leaf(inout logic KIND [5:4] r);
+ assign r[5]=4.0; assign r[4]=6.0;
+endmodule
+module middle(inout logic KIND [-1:0] q);
+ leaf inner(q);
+endmodule
+module load(input electrical [1:0] a, output electrical p,q);
+ analog begin
+  I(a[1])<+V(a[1])/1000; I(a[0])<+V(a[0])/2000;
+  V(p)<+V(a[1]); V(q)<+V(a[0]);
+ end
+endmodule
+module top(p,q,r);
+ output p,q,r; electrical p,q,r;
+ KIND logic [3:4] bus;
+ real level=1.0, sampled=0.0;
+ integer index=3;
+ initial #1 level=3.0;
+ initial begin #0.4 sampled=bus[index]; #0.7 index=4; sampled=bus[index]; end
+ assign bus[3]=level; assign bus[4]=2.0*level;
+ middle nested(bus);
+ load receiver(bus,p,q);
+ analog V(r)<+sampled;
+endmodule
+connectmodule dac(input logic KIND value, output electrical a);
+ analog I(a)<+(V(a)-value)/1000;
+endmodule
+connectrules chosen; connect dac; endconnectrules
+"#;
+    for (kind, before, after) in [
+        ("wrealsum", [5.0, 8.0], [7.0, 12.0]),
+        ("wrealavg", [2.5, 4.0], [3.5, 6.0]),
+        ("wrealmin", [1.0, 2.0], [3.0, 6.0]),
+        ("wrealmax", [4.0, 6.0], [4.0, 6.0]),
+    ] {
+        let source = Source::new(&model.replace("KIND", kind));
+        let deck = Netlist::parse(&format!(
+            "* real bus driver identity\nX1 p q r top\n.va \"{}\" top module=top\n.end\n",
+            source.path()
+        ))
+        .unwrap();
+        let result = Engine::default().run_tran(&deck, 1.5e-9, 25e-12).unwrap();
+        for (time, values, sample) in [(0.5e-9, before, before[0]), (1.4e-9, after, after[1])] {
+            for (node, expected) in [
+                ("p", values[0] / 2.0),
+                ("q", values[1] * 2.0 / 3.0),
+                ("r", sample),
+            ] {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{kind} {node}@{time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}

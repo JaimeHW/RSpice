@@ -15,6 +15,9 @@ impl ConnectionScope {
             Expression::Digital(DigitalExpr::ArraySelect(select)) => &select.name,
             _ => return Ok(false),
         };
+        if self.append_real_bus(actual, output)? {
+            return Ok(true);
+        }
         let Some(shape) = self.digital.get(name) else {
             return Ok(false);
         };

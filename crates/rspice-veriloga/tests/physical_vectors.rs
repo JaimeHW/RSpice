@@ -1158,3 +1158,132 @@ fn real_net_alias_artifacts_preserve_identity_validate_and_link_transitively() {
         .is_err()
     );
 }
+
+
+#[test]
+fn real_buses_preserve_local_ranges_driver_groups_and_specialized_replay() {
+    let source = r#"
+module leaf(inout logic wrealsum [5:4] r);
+ assign r[5]=2.0; assign r[4]=4.0;
+endmodule
+module middle(inout logic wrealsum [-1:0] q);
+ leaf inner(q);
+endmodule
+module top(p);
+ parameter integer BASE=3;
+ output p; electrical p;
+ wrealsum logic [BASE:BASE+1] bus;
+ assign bus[BASE]=1.0; assign bus[BASE+1]=10.0;
+ middle nested(bus[BASE:BASE+1]);
+ analog V(p)<+bus[BASE]+bus[BASE+1];
+endmodule
+"#;
+    let compiler = compiler();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let check = |ir: &rspice_veriloga::canonical_ir::CanonicalIrArtifact, base: i64| {
+        ir.validate().unwrap();
+        let plan = &ir.digital;
+        assert_eq!(plan.arrays.len(), 3);
+        assert_eq!(plan.signals.len(), 6);
+        assert_eq!(plan.drivers.len(), 4);
+        assert_eq!(
+            plan.arrays
+                .iter()
+                .find(|array| array.name == "bus")
+                .unwrap()
+                .bounds,
+            (base, base + 1)
+        );
+        let representatives = plan.real_net_representatives().unwrap();
+        let mut groups = std::collections::BTreeMap::new();
+        for representative in &representatives {
+            *groups.entry(*representative).or_insert(0usize) += 1;
+        }
+        assert_eq!(groups.len(), 2);
+        assert!(groups.values().all(|count| *count == 3));
+        for representative in groups.keys() {
+            assert_eq!(
+                plan.drivers
+                    .iter()
+                    .filter(
+                        |driver| representatives[usize::from(driver.id.signal)] == *representative
+                    )
+                    .count(),
+                2
+            );
+        }
+    };
+    check(&artifact.canonical_ir, 3);
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 8.0)], &NoPipelineControl)
+        .unwrap();
+    check(&specialized.canonical_ir, 8);
+    let replay = compiler
+        .prepare_artifact_runtime_source(&specialized.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    check(&replay.canonical_ir, 8);
+    for (bad, expected) in [
+        (
+            source.replace(
+                "leaf(inout logic wrealsum [5:4]",
+                "leaf(inout logic wrealavg [5:4]",
+            ),
+            "same real resolution",
+        ),
+        (source.replace("[-1:0]", "[-1:1]"), "requires 3 lanes"),
+        (
+            source.replace("bus[BASE:BASE+1]);", "bus[BASE+1:BASE]);"),
+            "declared direction",
+        ),
+        (
+            source.replace("inout logic wrealsum [5:4]", "input logic wrealsum [5:4]"),
+            "input",
+        ),
+        (
+            source.replace("wrealsum", "wreal"),
+            "multiple independent drivers",
+        ),
+    ] {
+        let error = match compiler.compile_runtime(&bad, Some("top")) {
+            Ok(_) => panic!("accepted {expected}"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains(expected), "{expected}: {error}");
+    }
+}
+
+#[test]
+fn multidimensional_real_bus_words_and_parts_keep_element_coordinates() {
+    let source = r#"
+module leaf(inout logic wrealsum [7:6] p);
+ assign p[7]=2.0; assign p[6]=3.0;
+endmodule
+module top(p);
+ output p; electrical p;
+ wrealsum logic [4:2] bank[-2:-1][8:9];
+ leaf first(bank[-1][8][4:3]);
+ leaf second({bank[-2][9][2],bank[-1][9][4]});
+ analog V(p)<+bank[-1][8][4]+bank[-2][9][2];
+endmodule
+"#;
+    let ir = compiler()
+        .compile_runtime(source, Some("top"))
+        .unwrap()
+        .canonical_ir;
+    ir.validate().unwrap();
+    assert_eq!(
+        ir.digital
+            .arrays
+            .iter()
+            .find(|array| array.name == "bank")
+            .unwrap()
+            .storage
+            .len,
+        12
+    );
+    assert_eq!(ir.digital.drivers.len(), 4);
+    assert!(ir.digital.bit_aliases.is_empty());
+    assert_eq!(ir.digital.real_aliases.len(), 4);
+}

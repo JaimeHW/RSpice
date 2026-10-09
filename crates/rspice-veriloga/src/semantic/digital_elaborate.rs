@@ -632,7 +632,7 @@ impl DigitalElaborator<'_> {
             }
 
             let resizes_variable = is_variable && !declared.class.is_real();
-            let own = qualify(path, &port.name);
+            let own = element_binding_name(declared, &child.digital.signals, path)?;
             let form = connections[index]
                 .map(|expression| connection_form(expression, parent_scope, path, &port.name))
                 .transpose()?;
@@ -856,7 +856,10 @@ impl DigitalElaborator<'_> {
                 range: declared.range.unwrap_or(super::VectorBounds::SCALAR),
                 signed: declared.signedness.is_signed(),
                 is_variable: declared.class.is_variable(),
-                is_input_port: false,
+                is_input_port: child.physical_nodes.real_input_buses.contains(&declared.name)
+                    || declared.element_alias.as_ref().is_some_and(|alias| {
+                        child.physical_nodes.real_input_buses.contains(&alias.array)
+                    }),
             });
             let mut elaborated_declaration = declared.clone();
             if let Some(alias) = &mut elaborated_declaration.element_alias {

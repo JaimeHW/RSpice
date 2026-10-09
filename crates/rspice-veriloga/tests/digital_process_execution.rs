@@ -2737,8 +2737,7 @@ fn a_resolved_real_net_admits_several_drivers() {
     }
 }
 
-/// `posedge` on a real has no transition to classify, and a range on one
-/// declares an array of nets nothing downstream has. Both refuse by name.
+/// Edge qualifiers and packed-bit reads remain invalid on scalar real nets.
 #[test]
 fn the_real_net_refusals_name_themselves() {
     let cases = [
@@ -2747,12 +2746,6 @@ fn the_real_net_refusals_name_themselves() {
          \x20   reg q;\n\
          \x20   always @(posedge level) q = 1'b1;",
             "section 9.7.2",
-        ),
-        (
-            "    wreal [3:0] bus;\n\
-         \x20   reg q;\n\
-         \x20   initial q = 1'b0;",
-            "bus of real nets",
         ),
         (
             "    wreal level;\n\

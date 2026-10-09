@@ -479,23 +479,17 @@ fn lower_with_analog_variables(
             .iter()
             .map(|signal| (signal.name.clone(), signal.id)),
     );
-    let mut frame_signal_ids: Vec<Vec<DigitalSignalId>> =
-        Vec::with_capacity(digital.instances.len());
+    let mut real_aliases = Vec::new();
+    let mut frame_signal_ids = Vec::with_capacity(digital.instances.len());
     for instance in &digital.instances {
-        let mut ids = Vec::with_capacity(instance.signals.len());
-        for signal in &instance.signals {
+        let mut ids = vec![DigitalSignalId::new(0); instance.signals.len()];
+        for (index, signal) in instance.signals.iter().enumerate() {
+            if signal.declared.element_alias.is_some() {
+                continue;
+            }
             let id = match elaborated.get(&signal.name) {
                 Some(existing) => *existing,
                 None => {
-                    if signal.declared.element_alias.is_some() {
-                        return Err(vec![DigitalLoweringDiagnostic::invariant(
-                            format!(
-                                "array element view '{}' has no allocated target",
-                                signal.name
-                            ),
-                            signal.declared.span.into(),
-                        )]);
-                    }
                     let start = signals.len();
                     let id = append_signal(
                         &signal.declared,
@@ -512,7 +506,35 @@ fn lower_with_analog_variables(
                     id
                 }
             };
-            ids.push(id);
+            ids[index] = id;
+        }
+        for (index, signal) in instance.signals.iter().enumerate() {
+            let Some(alias) = &signal.declared.element_alias else {
+                continue;
+            };
+            let base = elaborated.get(&alias.array).copied().ok_or_else(|| {
+                vec![DigitalLoweringDiagnostic::invariant(
+                    format!("real array view '{}' has no allocated array", signal.name),
+                    signal.declared.span.into(),
+                )]
+            })?;
+            let array = arrays.iter().find(|array| array.storage.base == base);
+            if array.is_none_or(|array| alias.offset >= array.storage.len) {
+                return Err(vec![DigitalLoweringDiagnostic::invariant(
+                    "real array view is outside its storage",
+                    signal.declared.span.into(),
+                )]);
+            }
+            let cell = DigitalSignalId::new(base.index() + alias.offset);
+            let id = *elaborated.entry(signal.name.clone()).or_insert(cell);
+            if id != cell {
+                real_aliases.push(super::digital::DigitalRealAlias {
+                    left: cell,
+                    right: id,
+                    span: signal.declared.span.into(),
+                });
+            }
+            ids[index] = id;
         }
         frame_signal_ids.push(ids);
     }
@@ -949,7 +971,7 @@ fn lower_with_analog_variables(
             .collect(),
         arrays,
         bit_aliases,
-        real_aliases: Vec::new(),
+        real_aliases,
         signals,
         processes,
         drivers,

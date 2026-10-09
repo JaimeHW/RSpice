@@ -31,6 +31,7 @@ pub(super) fn requires_assignment(
                 && signal.range == formal.range
                 && signal.signedness == formal.signedness
                 && signal.class.is_real() == formal.class.is_real()
+                && !(formal.class.is_real() && signal.class.is_variable())
         }),
         Expression::ArrayAccess(access) => {
             !(formal.width == 1

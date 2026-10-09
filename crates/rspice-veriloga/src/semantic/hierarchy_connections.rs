@@ -87,6 +87,26 @@ fn endpoint(source: &Module, module: &AnalyzedModule, name: &str) -> Option<Endp
                     .find(|port| port.names.iter().any(|candidate| candidate == name))
                     .and_then(|port| port.discipline.clone())
             })
+            .or_else(|| {
+                module
+                    .physical_nodes
+                    .real_aliases
+                    .get(name)
+                    .and_then(|alias| {
+                        source
+                            .nets
+                            .iter()
+                            .find(|net| net.names.contains(&alias.array))
+                            .and_then(|net| net.discipline.clone())
+                            .or_else(|| {
+                                source
+                                    .port_declarations
+                                    .iter()
+                                    .find(|port| port.names.contains(&alias.array))
+                                    .and_then(|port| port.discipline.clone())
+                            })
+                    })
+            })
             .or_else(|| module.default_discipline.clone())
             .unwrap_or_else(|| "logic".into());
         let net_kind = match signal.class {
@@ -615,9 +635,9 @@ fn retain_parameter_guards(module: &AnalyzedModule, analyzed: &mut AnalyzedModul
         })
         .collect();
     for signal in &mut analyzed.digital.signals {
-        signal.element_alias = element_aliases
-            .get(&signal.name)
-            .map(|alias| (*alias).clone());
+        if let Some(alias) = element_aliases.get(&signal.name) {
+            signal.element_alias = Some((*alias).clone());
+        }
     }
     let original_parameters: HashMap<_, _> = module
         .parameters

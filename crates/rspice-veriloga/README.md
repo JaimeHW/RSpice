@@ -168,7 +168,7 @@ measure each local port's flow, including when parent connections tie ports toge
 These probes work in analog expressions and discrete processes, with custom nature
 flow access functions as well as `I`. Port probes cannot drive contributions or
 read potentials. Branch ranges and terminal selectors participate in parameter
-specialization. Artifact schema 137 and core cache record 119 invalidate models
+specialization. Artifact schema 138 and core cache record 120 invalidate models
 compiled before these checks.
 Inline discipline names on `wreal`, `wire`, and module-level `reg` declarations
 retain the same semantic identity as separate discipline declarations. ANSI and
@@ -193,10 +193,14 @@ Canonical real-net aliases can also join separately stored views through the sam
 resolver. Linking relocates their identities, validates the combined driver count,
 and retains them in artifact identity. Runtime publication updates the entire group
 before computed event expressions run; external drivers and trial/reset state use
-the same topology. This is the runtime prerequisite for real bus port views; those
-source-level declarations and connection forms are still pending.
-Unpacked conservative net arrays, real buses declared with a range before the net
-name, and whole-array formal ports remain open implementation work.
+the same topology. Real buses declared with a range before the net name retain
+local array coordinates and use these aliases for scalar or bus port connections.
+Whole buses, constant lane/part selections, concatenations, and selected bus words
+in multidimensional arrays preserve declaration order across ascending, descending,
+and different formal bounds. Dynamic scalar reads use the ordinary array evaluator.
+Specialization and source replay rebuild the bus shape and its lane connections.
+Unpacked conservative net arrays and whole unpacked-array formal ports remain open
+implementation work.
 Constant four-state wire bit/part selections can connect bidirectional HDL ports
 and scalar authored mixed boundaries. Explicit aliases retain each original driver,
 resolve contention, and release with `Z` through hierarchy and linked designs.

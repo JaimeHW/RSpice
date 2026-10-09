@@ -1,6 +1,7 @@
 //! Physical vector declarations and the scalar lanes shared by both domains.
 mod branches;
 mod connections;
+mod real_buses;
 use super::*;
 pub(super) use connections::{ConnectionScope, bind as bind_connections};
 use std::borrow::Cow;
@@ -30,6 +31,9 @@ impl NodeVector {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PhysicalNodes {
+    pub real_buses: HashMap<SmolStr, real_buses::RealBus>,
+    pub real_aliases: HashMap<SmolStr, DigitalElementAlias>,
+    pub real_input_buses: HashSet<SmolStr>,
     pub vectors: HashMap<SmolStr, NodeVector>,
     pub branches: HashMap<SmolStr, NodeVector>,
     /// Scalar aliases resolve to the original local port before hierarchy collapse.
@@ -166,7 +170,13 @@ pub(super) fn declarations<'a>(
         .iter()
         .map(|port| (port.name.clone(), names(&port.name)))
         .collect();
-    if nodes.vectors.is_empty() && module.branches.is_empty() {
+    if nodes.vectors.is_empty()
+        && module.branches.is_empty()
+        && !module
+            .digital_nets
+            .iter()
+            .any(|net| net.kind.is_real() && net.range.is_some())
+    {
         return Ok((Cow::Borrowed(module), nodes));
     }
     let mut expanded = module.clone();
@@ -213,6 +223,7 @@ pub(super) fn declarations<'a>(
         &mut used,
         count,
     )?;
+    real_buses::expand(module, &mut expanded, &mut nodes, &constants, &mut used)?;
     Ok((Cow::Owned(expanded), nodes))
 }
 

@@ -1010,6 +1010,11 @@ impl SemanticAnalyzer {
             .map(|(slot, variable)| (variable.name.clone(), slot))
             .collect();
         for signal in &analyzed.digital.signals {
+            // A generated cell view can already share the array's analog value
+            // and validity pair. Do not bind that value slot a second time.
+            if signal.element_alias.is_some() && self.discrete_validity.contains_key(&signal.name) {
+                continue;
+            }
             let layout = if let Some(bounds) = signal.unpacked {
                 let Some(array) = analyzed.arrays.get(&signal.name) else {
                     continue;
@@ -1139,23 +1144,9 @@ impl SemanticAnalyzer {
 
         for declaration in &module.digital_nets {
             let keyword = declaration.kind.keyword();
-            // Verilog-AMS LRM 2.4 Syntax 3-8 permits a range on a `wreal`,
-            // which declares a *bus of real nets* — an unpacked array of
-            // reals, not a packed vector of bits. Nothing downstream has an
-            // array of signals, so it is refused by name rather than read as
-            // one net of some width, which is what a range on a `wire` means
-            // and is the one wrong answer available here.
+            // Real bus ranges were expanded into array axes and scalar views.
+            // Each element is still a real net without a packed bit width.
             let bounds = if declaration.kind.is_real() {
-                if let Some(range) = &declaration.range {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "a range on a `{keyword}` declares a bus of real nets, which is not \
-                             supported yet; Verilog-AMS LRM 2.4 section 3.7 makes each element a \
-                             real-valued net of its own, so declare them separately"
-                        )),
-                        range.span,
-                    );
-                }
                 None
             } else {
                 self.resolve_vector_range(declaration.range.as_ref(), keyword)
@@ -1205,6 +1196,9 @@ impl SemanticAnalyzer {
         }
         self.promote_module_level_numeric_variables(module, &mut signals, &mut seen);
         self.push_implicit_port_nets(module, &mut signals, &mut seen);
+        for signal in &mut signals {
+            signal.element_alias = self.physical_nodes.real_aliases.get(&signal.name).cloned();
+        }
         signals
     }
 
@@ -1376,11 +1370,12 @@ impl SemanticAnalyzer {
         module: &Module,
         assignments: &[AnalyzedContinuousAssign],
     ) {
-        let inputs: std::collections::HashSet<&SmolStr> = module
+        let inputs: std::collections::HashSet<SmolStr> = module
             .port_declarations
             .iter()
             .filter(|declaration| declaration.direction == PortDirection::Input)
-            .flat_map(|declaration| declaration.names.iter())
+            .flat_map(|declaration| declaration.names.iter().cloned())
+            .chain(self.physical_nodes.real_input_buses.iter().cloned())
             .collect();
         if inputs.is_empty() {
             return;
