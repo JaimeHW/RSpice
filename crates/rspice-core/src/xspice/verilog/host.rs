@@ -58,8 +58,8 @@
 
 #[cfg(test)]
 mod analog_sample_tests;
-mod coupled;
 pub(crate) mod checkpoint;
+mod coupled;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
 
@@ -684,6 +684,19 @@ impl DigitalHost {
     /// The value a real net holds right now.
     pub(crate) fn read_real(&self, signal: DigitalSignalId) -> Option<f64> {
         self.store.real_value(signal)
+    }
+
+    pub(crate) fn external_contributions(
+        &self,
+    ) -> impl Iterator<Item = (&EventTarget, EventValue)> + '_ {
+        self.store
+            .external_bit_contributions()
+            .map(|(target, value)| (target, EventValue::Digital(value)))
+            .chain(
+                self.store
+                    .external_real_contributions()
+                    .map(|(target, value)| (target, EventValue::Real(value))),
+            )
     }
 
     /// The range a signal's bits are named over, from the plan.

@@ -340,6 +340,19 @@ impl DigitalSignalStore {
             .map_or(&[], |bits| bits.topology.external_sources.as_slice())
     }
 
+    /// Original external contributions, before resolution with HDL drivers.
+    pub(crate) fn external_bit_contributions(
+        &self,
+    ) -> impl Iterator<Item = (&EventTarget, DigitalValue)> + '_ {
+        self.connected.iter().flat_map(|bits| {
+            bits.topology
+                .external_sources
+                .iter()
+                .zip(&bits.external_values)
+                .map(|((_, target), value)| (target, *value))
+        })
+    }
+
     pub(crate) fn remap_external_nodes(&mut self, remap: impl Fn(usize) -> usize) {
         if let Some(bits) = &mut self.connected {
             for (_, target) in &mut Arc::make_mut(&mut bits.topology).external_sources {

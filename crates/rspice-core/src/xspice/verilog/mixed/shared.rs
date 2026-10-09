@@ -2,9 +2,8 @@
 use super::super::host::{DigitalActiveExchange, DigitalActiveParticipant};
 use super::super::store::{ExternalBitDriverId, StoreError};
 use super::*;
-mod observations;
 pub(crate) mod checkpoint;
-use rspice_veriloga_runtime::absdelta::AbsDeltaState;
+mod observations;
 use crate::xspice::event_scheduler::EventTarget;
 use crate::xspice::event_scheduler::SchedulerError;
 use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
@@ -12,6 +11,7 @@ use rspice_veriloga::canonical_ir::digital_link::{
     DigitalLinkDirection, DigitalLinkInstance, DigitalLinkNet, DigitalLinkPort,
     DigitalLinkedInstance, link_digital_plans,
 };
+use rspice_veriloga_runtime::absdelta::AbsDeltaState;
 
 /// An analog model observes resolved values; it owns no process, driver or queue.
 #[derive(Clone)]
@@ -774,6 +774,12 @@ impl MixedDigitalCoordinator {
         self.real_event_nodes
             .iter()
             .filter_map(|&(node, signal)| self.digital.read_real(signal).map(|value| (node, value)))
+    }
+
+    pub(crate) fn external_contributions(
+        &self,
+    ) -> impl Iterator<Item = (&EventTarget, crate::xspice::EventValue)> + '_ {
+        self.digital.external_contributions()
     }
 
     pub(crate) fn event_values(

@@ -219,6 +219,19 @@ impl DigitalSignalStore {
             .as_ref()
             .map_or(&[], |reals| reals.topology.sources.as_slice())
     }
+
+    pub(crate) fn external_real_contributions(
+        &self,
+    ) -> impl Iterator<Item = (&EventTarget, f64)> + '_ {
+        self.external_reals.iter().flat_map(|reals| {
+            reals
+                .topology
+                .sources
+                .iter()
+                .zip(&reals.values)
+                .map(|((_, target), value)| (target, *value))
+        })
+    }
     pub(super) fn external_real_values(
         &self,
         signal: DigitalSignalId,

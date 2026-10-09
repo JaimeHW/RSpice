@@ -7,8 +7,10 @@ use crate::xspice::DigitalValue;
 use crate::xspice::event_scheduler::EventTarget;
 #[cfg(test)]
 use crate::xspice::verilog::host::DigitalHost;
-use crate::xspice::verilog::host::{DigitalActiveExchange, DigitalActiveParticipant, DigitalRunError};
-use crate::xspice::verilog::store::{ExternalNetChange, ExternalBitDriverId, ExternalRealDriverId};
+use crate::xspice::verilog::host::{
+    DigitalActiveExchange, DigitalActiveParticipant, DigitalRunError,
+};
+use crate::xspice::verilog::store::{ExternalBitDriverId, ExternalNetChange, ExternalRealDriverId};
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 use std::collections::{BTreeSet, VecDeque};
 
@@ -27,6 +29,45 @@ pub(crate) struct XspiceDigitalBindings {
 }
 
 impl XspiceDigitalBindings {
+    pub(super) fn checkpoint_observations(
+        &self,
+        owner: &crate::xspice::verilog::MixedDigitalCoordinator,
+    ) -> Result<Vec<(NodeId, crate::xspice::EventValue)>, String> {
+        let mut bits = BTreeMap::new();
+        let mut reals = BTreeMap::new();
+        for (node, value) in owner
+            .event_values()
+            .filter(|(node, _)| self.by_node.contains_key(node))
+        {
+            if bits.insert(node, value).is_some_and(|old| old != value) {
+                return Err("HDL aliases disagree at an XSPICE bit node".into());
+            }
+        }
+        for (node, value) in owner
+            .real_event_values()
+            .filter(|(node, _)| self.real_by_node.contains_key(node))
+        {
+            if reals
+                .insert(node, value)
+                .is_some_and(|old: f64| old.to_bits() != value.to_bits())
+            {
+                return Err("HDL aliases disagree at an XSPICE real node".into());
+            }
+        }
+        if bits.len() != self.by_node.len() || reals.len() != self.real_by_node.len() {
+            return Err("restored HDL owner is missing an XSPICE shared observation".into());
+        }
+        Ok(bits
+            .into_iter()
+            .map(|(node, value)| (node, crate::xspice::EventValue::Digital(value)))
+            .chain(
+                reals
+                    .into_iter()
+                    .map(|(node, value)| (node, crate::xspice::EventValue::Real(value))),
+            )
+            .collect())
+    }
+
     pub(crate) fn enroll_circuit(
         circuit: &CircuitData,
         coordinator: &mut crate::xspice::verilog::MixedDigitalCoordinator,

@@ -1,4 +1,21 @@
 use super::*;
+
+#[test]
+fn event_checkpoint_topology_authenticates_elaborated_circuit_producers() {
+    let (mut circuit, _, _, _) = fixture(crate::xspice::EvaluationPhase::AcceptedStep);
+    circuit
+        .xspice_event_checkpoint_topology(circuit.scheduler.mixed_digital_coordinator.as_ref())
+        .unwrap();
+    assert!(circuit.xspice_event_checkpoint_topology(None).is_err());
+    // The rebuilt circuit cannot omit a producer still registered by its owner.
+    circuit.xspice_instances.remove(0);
+    assert!(
+        circuit
+            .xspice_event_checkpoint_topology(circuit.scheduler.mixed_digital_coordinator.as_ref())
+            .is_err()
+    );
+}
+
 use crate::xspice::event_scheduler::SchedulerLimits;
 use crate::xspice::verilog::MixedSignalError;
 use crate::xspice::{

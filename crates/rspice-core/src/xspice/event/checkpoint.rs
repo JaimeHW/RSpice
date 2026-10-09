@@ -27,15 +27,18 @@ impl Default for EventCheckpointLimits {
 pub(crate) struct EventCheckpointTopology {
     drivers: BTreeMap<EventTarget, bool>,
     shared: BTreeMap<(NodeId, bool), ValueImage>,
+    shared_drivers: BTreeMap<EventTarget, ValueImage>,
 }
 impl EventCheckpointTopology {
     pub(crate) fn new(
         drivers: impl IntoIterator<Item = (EventTarget, bool)>,
         shared: impl IntoIterator<Item = (NodeId, EventValue)>,
+        shared_drivers: impl IntoIterator<Item = (EventTarget, EventValue)>,
     ) -> Result<Self, String> {
         let mut topology = Self {
             drivers: BTreeMap::new(),
             shared: BTreeMap::new(),
+            shared_drivers: BTreeMap::new(),
         };
         for (driver, real) in drivers {
             if topology.drivers.insert(driver, real).is_some() {
@@ -50,6 +53,25 @@ impl EventCheckpointTopology {
             {
                 return Err("duplicate shared XSPICE node domain".into());
             }
+        }
+        for (target, value) in shared_drivers {
+            let value = ValueImage::from(value);
+            if topology.drivers.get(&target) != Some(&value.real())
+                || !topology
+                    .shared
+                    .contains_key(&(target.node_id, value.real()))
+                || topology.shared_drivers.insert(target, value).is_some()
+            {
+                return Err(
+                    "HDL owner has an unknown, duplicated or incompatible XSPICE driver".into(),
+                );
+            }
+        }
+        if topology.drivers.iter().any(|(target, real)| {
+            topology.shared.contains_key(&(target.node_id, *real))
+                && !topology.shared_drivers.contains_key(target)
+        }) {
+            return Err("HDL owner is missing a shared XSPICE driver".into());
         }
         Ok(topology)
     }
@@ -435,6 +457,39 @@ impl XspiceEventCheckpoint {
                 if expected != node.value {
                     return Err("XSPICE resolved value differs from saved drivers".into());
                 }
+            }
+        }
+        // A resolved observation can agree even when a weaker bit driver is
+        // wrong, or when real contributions cancel. Compare each original
+        // producer as well, including ones absent from the XSPICE bank.
+        for (target, expected) in &topology.shared_drivers {
+            let key = (target.node_id, expected.real());
+            let saved = self
+                .nodes
+                .binary_search_by_key(&key, |n| (n.node, n.value.real()))
+                .ok()
+                .and_then(|index| self.nodes[index].drivers.as_ref())
+                .and_then(|bank| {
+                    bank.binary_search_by(|(id, _)| {
+                        (&id.0, &id.1, id.2).cmp(&(
+                            &target.instance,
+                            &target.port_name,
+                            target.driver_index,
+                        ))
+                    })
+                    .ok()
+                    .map(|index| bank[index].1)
+                });
+            // HDL enrollment initializes untouched digital/real sources to
+            // high-Z/+0.0. An absent XSPICE entry means that source has never
+            // executed. Do not canonicalize an explicit -0.0 or NaN payload.
+            let initial = if expected.real() {
+                ValueImage::Real(0.0_f64.to_bits())
+            } else {
+                ValueImage::Digital(DigitalValue::high_z())
+            };
+            if saved.unwrap_or(initial) != *expected {
+                return Err("XSPICE contribution differs from its restored HDL driver".into());
             }
         }
         Ok(())

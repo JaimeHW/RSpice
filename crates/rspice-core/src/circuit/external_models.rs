@@ -750,6 +750,35 @@ impl VerilogACompanionRules {
 }
 
 impl CircuitData {
+    /// Authenticate the event image against actual elaborated producers and a
+    /// restored shared owner, before the circuit installs either component.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn xspice_event_checkpoint_topology(
+        &self,
+        coordinator: Option<&crate::xspice::verilog::MixedDigitalCoordinator>,
+    ) -> Result<crate::xspice::event_checkpoint::EventCheckpointTopology, String> {
+        let mut drivers = Vec::new();
+        for instance in &self.xspice_instances {
+            instance.for_each_digital_output_driver(|target| drivers.push((target, false)));
+            instance.for_each_real_output_driver(|target| drivers.push((target, true)));
+        }
+        let shared = match (&self.scheduler.mixed_xspice_bindings, coordinator) {
+            (Some(bindings), Some(owner)) => bindings.checkpoint_observations(owner)?,
+            (Some(_), None) => {
+                return Err("shared XSPICE checkpoint has no restored HDL owner".into());
+            }
+            (None, _) => Vec::new(),
+        };
+        crate::xspice::event_checkpoint::EventCheckpointTopology::new(
+            drivers,
+            shared,
+            coordinator
+                .into_iter()
+                .flat_map(|owner| owner.external_contributions())
+                .map(|(target, value)| (target.clone(), value)),
+        )
+    }
+
     //=========================================================================
     // XSPICE Code Model Interface
     //=========================================================================
