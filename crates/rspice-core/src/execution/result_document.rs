@@ -181,6 +181,7 @@ mod pac;
 mod payload;
 mod pxf;
 mod quasi_periodic;
+mod sensitivity;
 mod stability;
 #[cfg(test)]
 mod tests;
@@ -758,7 +759,7 @@ impl AnalysisResultDocument {
         stability::validate(self, abort)?;
         if let ResultPayload::Sensitivity(payload) = &self.payload {
             self.validate_sensitivity_units(abort)?;
-            self.validate_sensitivity_availability(payload, abort)?;
+            sensitivity::validate(self, payload, abort)?;
         }
         check_abort(abort)
     }
@@ -840,95 +841,6 @@ impl AnalysisResultDocument {
                     location: "legacy sensitivity output unit",
                     detail: error.to_string(),
                 })?;
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_sensitivity_availability(
-        &self,
-        payload: &SensitivityPayload,
-        abort: &dyn AbortSignal,
-    ) -> Result<(), ResultDocumentError> {
-        use crate::analysis::{SensitivityUnavailability as Reason, SensitivityValue};
-        let malformed = || {
-            ResultDocumentError::Malformed {
-            location: "sensitivity availability",
-            detail: "derived sensitivity availability does not match its nominal output and absolute derivative".into(),
-        }
-        };
-        if !payload.entries.is_empty() {
-            let output = self
-                .scalars
-                .iter()
-                .find_map(|scalar| {
-                    if scalar.name == "output_value"
-                        && let ScalarValue::Real { value } = scalar.value
-                    {
-                        value
-                    } else {
-                        None
-                    }
-                })
-                .ok_or_else(malformed)?;
-            for entry in &payload.entries {
-                check_abort(abort)?;
-                if entry.normalized.reason()
-                    != SensitivityValue::normalized(entry.nominal_value, entry.absolute, output)
-                        .reason()
-                {
-                    return Err(malformed());
-                }
-            }
-        }
-        if !payload.ac_entries.is_empty() {
-            let output = self
-                .signals
-                .iter()
-                .find_map(|signal| {
-                    if signal.descriptor.canonical_name() == "output"
-                        && let SeriesValues::Complex { samples } = &signal.values
-                    {
-                        Some(samples)
-                    } else {
-                        None
-                    }
-                })
-                .ok_or_else(malformed)?;
-            for entry in &payload.ac_entries {
-                if entry.absolute.len() != self.point_count || output.len() != self.point_count {
-                    return Err(malformed());
-                }
-                for ((((output, derivative), normalized), magnitude), phase) in output
-                    .iter()
-                    .zip(&entry.absolute)
-                    .zip(&entry.normalized)
-                    .zip(&entry.magnitude)
-                    .zip(&entry.phase)
-                {
-                    check_abort(abort)?;
-                    let output = output.as_ref().ok_or_else(malformed)?;
-                    let zero = output.real == 0.0 && output.imaginary == 0.0;
-                    if zero {
-                        let magnitude_valid =
-                            if derivative.real == 0.0 && derivative.imaginary == 0.0 {
-                                magnitude.value() == Some(0.0)
-                            } else {
-                                magnitude.reason() == Some(Reason::NondifferentiableMagnitude)
-                            };
-                        if normalized.reason() != Some(Reason::ZeroOutput)
-                            || phase.reason() != Some(Reason::ZeroOutput)
-                            || !magnitude_valid
-                        {
-                            return Err(malformed());
-                        }
-                    } else if [normalized.reason(), magnitude.reason(), phase.reason()]
-                        .iter()
-                        .any(|reason| !matches!(reason, None | Some(Reason::OutOfRange)))
-                    {
-                        return Err(malformed());
-                    }
-                }
             }
         }
         Ok(())

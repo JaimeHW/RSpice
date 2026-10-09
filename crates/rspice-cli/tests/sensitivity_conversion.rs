@@ -590,3 +590,73 @@ fn sensitivity_projection_checks_identities_limits_and_name_collisions() {
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert_eq!(std::fs::read_to_string(&destination).unwrap(), "previous");
 }
+
+#[test]
+fn contradictory_sensitivity_documents_cannot_be_exported_compared_or_blessed() {
+    let directory = common::test_dir("sensitivity_derived_validation");
+    let altered = directory.join("altered.json");
+    for ac in [false, true] {
+        let source = source(&directory, "source", ac, false);
+        let original = common::read_json(&source);
+        let cases = if ac {
+            &[
+                "normalized",
+                "magnitude",
+                "phase",
+                "false-range",
+                "duplicate",
+            ][..]
+        } else {
+            &["normalized", "false-range", "duplicate"][..]
+        };
+        for case in cases {
+            let mut document = original.clone();
+            let entries = &mut document["payload"][if ac { "acEntries" } else { "entries" }];
+            match *case {
+                "normalized" if ac => entries[0]["normalized"][0]["real"] = json!(123.0),
+                "normalized" => entries[0]["normalized"] = json!(123.0),
+                "magnitude" | "phase" => entries[0][*case][0] = json!(123.0),
+                "false-range" if ac => {
+                    entries[0]["normalized"][0] = json!({"unavailable":"out-of-range"})
+                }
+                "false-range" => entries[0]["normalized"] = json!({"unavailable":"out-of-range"}),
+                "duplicate" => {
+                    let mut second = entries[0].clone();
+                    second["vectorName"] = json!("r1");
+                    entries.as_array_mut().unwrap().push(second);
+                }
+                _ => panic!("case"),
+            }
+            std::fs::write(&altered, document.to_string()).unwrap();
+            for (format, extension) in FORMATS {
+                let destination = directory.join(format!("protected.{extension}"));
+                std::fs::write(&destination, "previous").unwrap();
+                let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+                    .args(["--quiet", "convert"])
+                    .arg(&altered)
+                    .arg(&destination)
+                    .args(["--to", format])
+                    .output()
+                    .unwrap();
+                assert_eq!(
+                    output.status.code(),
+                    Some(1),
+                    "{ac}/{case}/{format}: {output:?}"
+                );
+                assert_eq!(std::fs::read_to_string(destination).unwrap(), "previous");
+            }
+            let selected = compare(
+                &altered,
+                &altered,
+                &[
+                    "--variables",
+                    if ac { "Nominal output" } else { "output_value" },
+                ],
+            );
+            assert_eq!(selected.status.code(), Some(1), "{ac}/{case}: {selected:?}");
+            let blessed = compare(&altered, &source, &["--bless"]);
+            assert_eq!(blessed.status.code(), Some(1), "{ac}/{case}: {blessed:?}");
+            assert_eq!(common::read_json(&source), original);
+        }
+    }
+}

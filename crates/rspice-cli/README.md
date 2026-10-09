@@ -890,6 +890,9 @@ against sample validity and compared exactly, even with loose numeric
 tolerances. Known matching determinations can be compared; uncomputed gaps
 cannot establish agreement. Interpolation never invents a determination
 between retained samples.
+Typed sensitivity documents must also have unique parameter vectors and derived
+values consistent with their retained nominal output and absolute derivatives.
+Malformed documents are rejected before conversion or baseline replacement.
 The `--sens-param` shortcut uses the same `PARAM:<NAME>` identity as authored
 parameter probes; for example, `dV(out)/d(PARAM:RTOP)`. Older derivative-only
 flat baselines cannot verify the nominal operating point, normalized derivatives,

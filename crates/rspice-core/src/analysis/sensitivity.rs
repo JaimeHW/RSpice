@@ -31,6 +31,9 @@ use crate::{Complex64, Value};
 use rspice_veriloga_runtime::arithmetic::ScaledValue;
 use serde::{Deserialize, Serialize};
 
+mod derived;
+pub(crate) use derived::AcSensitivityDerived;
+
 /// A sensitivity quantity, or the reason it has no representable value.
 /// Available samples serialize as ordinary numbers (or complex samples).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

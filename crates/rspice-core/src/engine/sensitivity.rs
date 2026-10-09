@@ -9,14 +9,14 @@ use super::progress::StudyProgress;
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::sensitivity::{
-    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
-    SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult, SensitivityUnavailability,
+    AcSensitivity, AcSensitivityDerived, AcSensitivityOutput, AcSensitivityResult, ElementDesc,
+    ElementType, Sensitivity, SensitivityAnalysisError, SensitivityAnalyzer, SensitivityResult,
     SensitivityValue,
 };
 use crate::netlist::{ElementKind, SourceSpec};
 use crate::solver::SimulationResult;
 use crate::{CircuitData, Complex64, Netlist, Value};
-use rspice_veriloga_runtime::arithmetic::ScaledValue;
+use rspice_veriloga_runtime::arithmetic::{ArithmeticError, ScaledValue};
 use std::collections::{HashMap, HashSet};
 
 fn finite_sensitivity(value: ScaledValue) -> Result<Value, SimulationError> {
@@ -36,15 +36,6 @@ fn sensitivity_ratio(
     let result = ScaledValue::sum_triple_products_ratio(numerator, denominator)
         .map_err(|error| SimulationError::Circuit(format!("Sensitivity arithmetic: {error:?}")))?;
     finite_sensitivity(result)
-}
-
-fn derived_sensitivity_ratio(
-    numerator: impl Iterator<Item = [ScaledValue; 3]> + Clone,
-    denominator: impl Iterator<Item = [ScaledValue; 3]> + Clone,
-) -> Result<SensitivityValue<Value>, SimulationError> {
-    ScaledValue::sum_triple_products_ratio(numerator, denominator)
-        .map(SensitivityValue::from_scaled)
-        .map_err(|error| SimulationError::Circuit(format!("Sensitivity arithmetic: {error:?}")))
 }
 
 /// Derivative of the quadratic interpolant at points[0], for either a
@@ -2709,48 +2700,22 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            if [output.re, output.im, sensitivity.re, sensitivity.im]
-                .iter()
-                .any(|value| !value.is_finite())
-            {
-                return Err(SimulationError::Circuit(format!(
-                    "AC sensitivity '{}' contains a non-finite output or derivative",
-                    target.vector_name
-                )));
-            }
-            magnitude.push(SensitivityValue::magnitude(output, sensitivity));
-            let scale = output.re.abs().max(output.im.abs());
-            if scale != 0.0 {
-                let one = ScaledValue::new(1.0);
-                let re = ScaledValue::new(output.re);
-                let im = ScaledValue::new(output.im);
-                let dr = ScaledValue::new(sensitivity.re);
-                let di = ScaledValue::new(sensitivity.im);
-                let parameter = ScaledValue::new(target.nominal_value);
-                let norm_squared = [[re, re, one], [im, im, one]];
-                normalized.push(
-                    derived_sensitivity_ratio(
-                        [[re, dr, parameter], [im, di, parameter]].into_iter(),
-                        norm_squared.into_iter(),
-                    )?
-                    .zip(derived_sensitivity_ratio(
-                        [[re, di, parameter], [im.negated(), dr, parameter]].into_iter(),
-                        norm_squared.into_iter(),
-                    )?)
-                    .map(|(re, im)| Complex64::new(re, im)),
-                );
-                phase.push(derived_sensitivity_ratio(
-                    [[re, di, one], [im.negated(), dr, one]].into_iter(),
-                    norm_squared.into_iter(),
-                )?);
-            } else {
-                normalized.push(SensitivityValue::unavailable(
-                    SensitivityUnavailability::ZeroOutput,
-                ));
-                phase.push(SensitivityValue::unavailable(
-                    SensitivityUnavailability::ZeroOutput,
-                ));
-            }
+            let derived = AcSensitivityDerived::new(target.nominal_value, output, sensitivity)
+                .map_err(|error| {
+                    SimulationError::Circuit(match error {
+                        ArithmeticError::NonFiniteTerm => format!(
+                            "AC sensitivity '{}' contains a non-finite output or derivative",
+                            target.vector_name
+                        ),
+                        error => format!(
+                            "AC sensitivity '{}': arithmetic {error:?}",
+                            target.vector_name
+                        ),
+                    })
+                })?;
+            normalized.push(derived.normalized);
+            magnitude.push(derived.magnitude);
+            phase.push(derived.phase);
         }
         Ok(AcSensitivity {
             vector_name: target.vector_name.clone(),

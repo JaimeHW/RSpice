@@ -8,6 +8,7 @@ mod json_precision;
 mod pac;
 mod pxf;
 mod resource_counts;
+mod sensitivity;
 mod stability_curve;
 
 use super::payload::{DigitalBusSourceTag, DigitalEventBus};
