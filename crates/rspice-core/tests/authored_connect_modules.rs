@@ -2724,3 +2724,65 @@ endmodule
         );
     }
 }
+
+#[test]
+fn generated_hierarchical_references_execute_in_loaded_specialized_circuits() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module top(output electrical p,q,r,s,t);
+ parameter integer BASE=0;
+ genvar i;
+ wire \lane[0].code ;
+ assign \lane[0].code =1'b0;
+ generate for(i=BASE;i<BASE+2;i=i+1) begin : lane
+   electrical n;
+   branch(n) drive;
+   reg [2:0] code=0;
+   analog function real shifted;
+     input x; real x;
+     begin shifted=x+i-BASE+1; end
+   endfunction
+   analog I(drive)<+(V(drive)-(i-BASE+2))/1000;
+   if(1) begin : inner
+     wire [2:0] copied;
+     assign copied=lane[BASE+1].code;
+   end
+ end endgenerate
+ initial begin lane[BASE].code=3; lane[BASE+1].code[2:0]=5; end
+ real sampled=0;
+ initial #0.5 sampled=V(lane[BASE].n);
+ analog begin
+   I(lane[BASE].drive)<+V(lane[BASE].n)/1000;
+   V(p)<+lane[BASE].code+lane[BASE+1].code;
+   V(q)<+lane[BASE].shifted(lane[BASE+1].i)-BASE;
+   V(r)<+V(lane[BASE].n);
+   V(s)<+sampled+lane[BASE].inner.copied;
+   V(t)<+\lane[0].code ;
+ end
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!(
+        "* generated hierarchical bindings\nX1 p q r s t top\nX2 a b c d e top BASE=-2\n.va \"{}\" top module=top\n.end\n",source.path()
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 8.0),
+        ("q", 2.0),
+        ("r", 1.0),
+        ("s", 6.0),
+        ("t", 0.0),
+        ("a", 8.0),
+        ("b", 2.0),
+        ("c", 1.0),
+        ("d", 6.0),
+        ("e", 0.0),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}

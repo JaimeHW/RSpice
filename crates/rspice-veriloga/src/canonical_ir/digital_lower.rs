@@ -3725,6 +3725,10 @@ impl ProcessLowerer<'_> {
             if self.lookup_local(name).is_none()
                 && !self.index.contains_key(name.as_str())
                 && self.analog_variables.contains_key(name)
+                // Numeric localparams also have analog prologue variables. The
+                // digital expression uses their elaborated constants and needs
+                // no analog event subscription.
+                && !self.constants.contains(name)
                 && !indices.as_ref().map_or_else(
                     || self.retained_analog_read(name, None),
                     |indices| self.retained_analog_coordinates(name, indices),

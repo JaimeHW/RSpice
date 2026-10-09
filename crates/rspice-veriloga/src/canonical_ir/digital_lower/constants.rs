@@ -18,6 +18,13 @@ pub(super) struct ResolvedConstants {
 }
 
 impl ResolvedConstants {
+    pub fn contains(&self, name: &str) -> bool {
+        self.bits.contains_key(name)
+            || self.integers.contains_key(name)
+            || self.reals.contains_key(name)
+            || self.non_finite_reals.contains_key(name)
+    }
+
     pub fn integer(&self, name: &str) -> Option<i64> {
         self.integers.get(name).copied()
     }

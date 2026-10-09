@@ -36,6 +36,7 @@
 //! lowering. Local constants are available to nested generate schemes; local
 //! storage, branches and analog functions remain independent per occurrence.
 
+mod hierarchy;
 mod scope;
 
 use super::Parser;
@@ -245,6 +246,7 @@ impl Parser<'_> {
         let mut block = GenerateBlock {
             name: None,
             directly_nested: false,
+            explicit_name: false,
             items: Box::new(Module::new("", start)),
             nested: Vec::new(),
             span: start,
@@ -260,6 +262,7 @@ impl Parser<'_> {
 
         if self.match_token(TokenKind::Colon) {
             block.name = Some(self.expect_identifier("generate block name")?.into());
+            block.explicit_name = true;
         }
         while !self.check(TokenKind::End) && !self.at_end() {
             self.parse_generate_block_item(&mut block)?;
@@ -314,9 +317,10 @@ impl Parser<'_> {
 /// `next_process_id` is the parser's own counter, so a process copied out of a
 /// loop body gets an identity no source-level process was given.
 pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(), ParseError> {
-    if module.generates.is_empty() {
+    if module.generates.is_empty() && module.hierarchical_names.is_empty() {
         return Ok(());
     }
+    let hierarchy = hierarchy::Bindings::new(module);
     let constructs = std::mem::take(&mut module.generates);
     let genvars: Vec<SmolStr> = module
         .genvars
@@ -326,6 +330,10 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
     let constants = module_constants(module);
 
     let mut unroller = Unroller {
+        genvar_names: genvars
+            .iter()
+            .map(|name| (name.clone(), name.clone()))
+            .collect(),
         genvars,
         constants,
         time_scale: module.time_scale,
@@ -333,12 +341,20 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
         scoped_names: HashMap::new(),
         scope_prefix: String::new(),
         next_process_id,
+        hierarchy,
+        scope_path: Vec::new(),
     };
     let mut expanded = Module::new(module.name.clone(), module.span);
     for construct in &constructs {
         unroller.construct(construct, "", &mut expanded)?;
     }
     absorb(module, expanded);
+    if !unroller.hierarchy.authored.is_empty() {
+        unroller.rewrite_items(module);
+        unroller.scoped_names = unroller.hierarchy.resolve()?;
+        unroller.hierarchy.authored.clear();
+        unroller.rewrite_items(module);
+    }
     scope::sort_analog_items(module);
     Ok(())
 }
@@ -380,6 +396,7 @@ fn absorb(module: &mut Module, expanded: Module) {
 struct Unroller<'a> {
     /// Names declared `genvar`, so a loop over anything else is refused.
     genvars: Vec<SmolStr>,
+    genvar_names: HashMap<SmolStr, SmolStr>,
     constants: crate::semantic::DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
     /// The genvars currently bound, innermost loop last.
@@ -388,6 +405,8 @@ struct Unroller<'a> {
     scoped_names: HashMap<SmolStr, SmolStr>,
     scope_prefix: String,
     next_process_id: &'a mut u32,
+    hierarchy: hierarchy::Bindings,
+    scope_path: Vec<hierarchy::ScopeKey>,
 }
 
 impl Unroller<'_> {
@@ -449,8 +468,11 @@ impl Unroller<'_> {
         prefix: &str,
         out: &mut Module,
     ) -> Result<(), ParseError> {
-        let mut genvar = loop_.genvar.clone();
-        self.rename(&mut genvar);
+        let genvar = self
+            .genvar_names
+            .get(&loop_.genvar)
+            .cloned()
+            .unwrap_or_else(|| loop_.genvar.clone());
         if !self.genvars.contains(&genvar) {
             return Err(ParseError::new(
                 ParseErrorKind::UnsupportedConstruct {
@@ -534,7 +556,26 @@ impl Unroller<'_> {
             // The body's own name is already in the prefix, so the block is
             // expanded as if unnamed: naming it twice would produce
             // `bit_slice[3].bit_slice.stage`.
-            self.block_contents(&loop_.body, &iteration_prefix, out)?;
+            let mut body = loop_.body.clone();
+            if body.items.declared_names().contains(&loop_.genvar) {
+                return Err(ParseError::new(
+                    ParseErrorKind::InvalidParameter(format!(
+                        "generated scope redeclares its implicit loop localparam `{}`",
+                        loop_.genvar
+                    )),
+                    body.span,
+                ));
+            }
+            body.items.localparams.insert(
+                0,
+                hierarchy::iteration_parameter(&loop_.genvar, index, loop_.span),
+            );
+            self.scope_path.push(hierarchy::ScopeKey {
+                name: block_name.clone(),
+                index: Some(index),
+            });
+            self.block_contents(&body, &iteration_prefix, out)?;
+            self.scope_path.pop();
 
             index = self.genvar_assignment(&loop_.update, "generate for update")?;
             self.bindings.remove(&genvar);
@@ -549,7 +590,15 @@ impl Unroller<'_> {
         out: &mut Module,
     ) -> Result<(), ParseError> {
         match &block.name {
-            Some(name) => self.block_contents(block, &format!("{prefix}{name}."), out),
+            Some(name) => {
+                self.scope_path.push(hierarchy::ScopeKey {
+                    name: name.clone(),
+                    index: None,
+                });
+                let result = self.block_contents(block, &format!("{prefix}{name}."), out);
+                self.scope_path.pop();
+                result
+            }
             None => self.block_contents(block, prefix, out),
         }
     }
@@ -564,18 +613,62 @@ impl Unroller<'_> {
         let mut expanded = Module::new("", block.span);
         let out = &mut expanded;
         reject_declarations(&block.items)?;
-        let local_names = block.items.declared_names();
+        let local_names = self.hierarchy.register_scope(
+            &self.scope_path,
+            prefix,
+            &block.items,
+            block.explicit_name,
+        );
         let constants_len = self.constants.definitions.len();
         let genvars_len = self.genvars.len();
         let previous_prefix = std::mem::replace(&mut self.scope_prefix, prefix.to_string());
         let mut shadows = Vec::new();
-        for name in local_names {
-            let qualified = format!("{prefix}{name}").into();
+        for (name, qualified) in local_names {
             let previous = self.scoped_names.insert(name.clone(), qualified);
             shadows.push((name, previous));
         }
-        self.expand_scoped_declarations(&block.items, out);
-        for declaration in &block.items.digital_nets {
+        let genvar_shadows = block
+            .items
+            .genvars
+            .iter()
+            .flat_map(|declaration| &declaration.names)
+            .map(|name| {
+                let previous = self
+                    .genvar_names
+                    .insert(name.clone(), self.scoped_names[name].clone());
+                (name.clone(), previous)
+            })
+            .collect::<Vec<_>>();
+        self.expand_items(&block.items, out, true);
+
+        for nested in &block.nested {
+            self.construct(nested, prefix, out)?;
+        }
+        scope::sort_analog_items(out);
+        absorb(target, expanded);
+        self.constants.definitions.truncate(constants_len);
+        self.genvars.truncate(genvars_len);
+        self.scope_prefix = previous_prefix;
+        for (name, previous) in genvar_shadows {
+            if let Some(previous) = previous {
+                self.genvar_names.insert(name, previous);
+            } else {
+                self.genvar_names.remove(&name);
+            }
+        }
+        for (name, previous) in shadows.into_iter().rev() {
+            if let Some(previous) = previous {
+                self.scoped_names.insert(name, previous);
+            } else {
+                self.scoped_names.remove(&name);
+            }
+        }
+        Ok(())
+    }
+
+    fn expand_items(&mut self, items: &Module, out: &mut Module, fresh_processes: bool) {
+        self.expand_scoped_declarations(items, out);
+        for declaration in &items.digital_nets {
             let mut copy = declaration.clone();
             if let Some(range) = &mut copy.range {
                 self.substitute(&mut range.msb);
@@ -593,7 +686,7 @@ impl Unroller<'_> {
             }
             out.digital_nets.push(copy);
         }
-        for declaration in &block.items.nets {
+        for declaration in &items.nets {
             let mut copy = declaration.clone();
             for name in &mut copy.names {
                 self.rename(name);
@@ -612,9 +705,9 @@ impl Unroller<'_> {
             out.nets.push(copy);
         }
 
-        for instance in &block.items.instances {
+        for instance in &items.instances {
             let mut copy = instance.clone();
-            copy.name = SmolStr::from(format!("{prefix}{}", instance.name));
+            self.rename(&mut copy.name);
             for connection in &mut copy.connections {
                 match connection {
                     Connection::Ordered { signal, .. } | Connection::Named { signal, .. } => {
@@ -630,7 +723,7 @@ impl Unroller<'_> {
             out.instances.push(copy);
         }
 
-        for assignment in &block.items.continuous_assigns {
+        for assignment in &items.continuous_assigns {
             let mut copy = assignment.clone();
             self.substitute_lvalue(&mut copy.target);
             self.substitute(&mut copy.value);
@@ -640,30 +733,15 @@ impl Unroller<'_> {
             out.continuous_assigns.push(copy);
         }
 
-        for process in &block.items.digital_processes {
+        for process in &items.digital_processes {
             let mut copy = process.clone();
-            copy.id = DigitalProcessId(*self.next_process_id);
-            *self.next_process_id += 1;
+            if fresh_processes {
+                copy.id = DigitalProcessId(*self.next_process_id);
+                *self.next_process_id += 1;
+            }
             self.substitute_statement(&mut copy.body);
             out.digital_processes.push(copy);
         }
-
-        for nested in &block.nested {
-            self.construct(nested, prefix, out)?;
-        }
-        scope::sort_analog_items(out);
-        absorb(target, expanded);
-        self.constants.definitions.truncate(constants_len);
-        self.genvars.truncate(genvars_len);
-        self.scope_prefix = previous_prefix;
-        for (name, previous) in shadows.into_iter().rev() {
-            if let Some(previous) = previous {
-                self.scoped_names.insert(name, previous);
-            } else {
-                self.scoped_names.remove(&name);
-            }
-        }
-        Ok(())
     }
 
     fn constant_environment(&self, span: Span) -> crate::semantic::DigitalConstants {
@@ -761,6 +839,9 @@ impl Unroller<'_> {
     }
 
     fn rename(&self, name: &mut SmolStr) {
+        if self.bind_hierarchical_reference(name) {
+            return;
+        }
         if let Some(qualified) = self.scoped_names.get(name) {
             *name = qualified.clone();
         }

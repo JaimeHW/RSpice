@@ -12,6 +12,7 @@ use smol_str::SmolStr;
 
 mod digital;
 mod generate;
+mod hierarchical_names;
 mod implicit_nets;
 
 /// Declared attributes carried forward to the bare names that follow a typed
@@ -33,17 +34,41 @@ pub struct Parser<'a> {
     next_process_id: u32,
     time_scale: crate::time_scale::ModuleTimeScale,
     net_defaults: Vec<(u32, bool)>,
+    hierarchical_names: std::collections::BTreeMap<SmolStr, HierarchicalName>,
+    reserved_names: std::collections::HashSet<SmolStr>,
+    next_reference_id: usize,
+    reference_symbols: std::collections::HashMap<Span, SmolStr>,
+    authored_identifiers: std::sync::Arc<std::collections::HashSet<SmolStr>>,
 }
 
 impl<'a> Parser<'a> {
     /// Create a new parser
     pub fn new(tokens: &'a [Token]) -> Self {
+        let authored_identifiers = std::sync::Arc::new(
+            tokens
+                .iter()
+                .filter(|token| {
+                    matches!(
+                        token.kind,
+                        TokenKind::Identifier
+                            | TokenKind::EscapedIdentifier
+                            | TokenKind::SystemIdentifier
+                    )
+                })
+                .filter_map(|token| token.text.as_deref().map(SmolStr::from))
+                .collect(),
+        );
         Self {
             tokens,
             pos: 0,
             next_process_id: 0,
             time_scale: crate::time_scale::ModuleTimeScale::default(),
             net_defaults: Vec::new(),
+            hierarchical_names: Default::default(),
+            reserved_names: Default::default(),
+            authored_identifiers,
+            reference_symbols: Default::default(),
+            next_reference_id: 0,
         }
     }
 
@@ -416,6 +441,8 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier("module name")?;
         // Process identity is per module, so the counter restarts here.
         self.next_process_id = 0;
+        self.hierarchical_names.clear();
+        self.reference_symbols.clear();
         let mut module = Module::new(name, start);
         module.time_scale = self.time_scale;
 
@@ -434,6 +461,8 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::Endmodule)?;
         module.span = start.extend(self.previous_span());
 
+        module.hierarchical_names = std::mem::take(&mut self.hierarchical_names);
+        module.reserved_identifiers = self.authored_identifiers.clone();
         implicit_nets::declare(&mut module, &self.net_defaults)?;
 
         // IEEE 1364-2005 section 12.4 elaborates a generate region into module
@@ -441,7 +470,7 @@ impl<'a> Parser<'a> {
         // reads the module the author would have had to write by hand, and
         // needs no arm for a construct that contributes no run-time behaviour
         // of its own.
-        let template = (!module.generates.is_empty()).then(|| {
+        let template = (!module.generates.is_empty() || !module.hierarchical_names.is_empty()).then(|| {
             Box::new(GenerateTemplate {
                 module: module.clone(),
                 next_process_id: self.next_process_id,
@@ -1028,7 +1057,7 @@ impl<'a> Parser<'a> {
     fn parse_branch_terminal(
         &mut self,
     ) -> Result<(SmolStr, Vec<Expression>, Option<PackedSelect>), ParseError> {
-        let name = self.expect_branch_endpoint("branch terminal")?.into();
+        let name = self.parse_reference_endpoint("branch terminal")?;
         let mut prefix = Vec::new();
         let mut select = None;
         while self.match_token(TokenKind::LBracket) {
@@ -1820,7 +1849,7 @@ impl<'a> Parser<'a> {
                 Ok(AnalogStatement::Null(start))
             }
             // Handle both identifiers and keywords that can be used as variable names
-            TokenKind::Identifier | TokenKind::SystemIdentifier => {
+            TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::SystemIdentifier => {
                 self.parse_assignment_or_contribution()
             }
             _ if self.is_digital_statement_start() => Err(self.unsupported_ams_construct()),
@@ -2353,7 +2382,7 @@ impl<'a> Parser<'a> {
         }
 
         // Check for system task call ($strobe, $display, $write, etc.)
-        if self.check(TokenKind::SystemIdentifier) {
+        if self.check(TokenKind::SystemIdentifier) && !self.is_root_reference() {
             let sys_name = self.current().text.clone().unwrap_or_default();
             self.advance();
 
@@ -2378,7 +2407,7 @@ impl<'a> Parser<'a> {
         }
 
         // Must be assignment (to a scalar variable or an array element)
-        let name = self.expect_identifier("variable")?;
+        let name = self.parse_reference_name("variable")?;
 
         let target = if self.match_token(TokenKind::LBracket) {
             let index = self.parse_expression()?;
@@ -2463,7 +2492,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_node_operand(&mut self) -> Result<(SmolStr, Vec<Expression>), ParseError> {
-        let name = self.expect_branch_endpoint("node")?.into();
+        let name = self.parse_reference_endpoint("node")?;
         let mut indices = Vec::new();
         while self.match_token(TokenKind::LBracket) {
             indices.push(self.parse_expression()?);
@@ -2953,7 +2982,7 @@ impl<'a> Parser<'a> {
                     span: start.extend(self.previous_span()),
                 }))
             }
-            TokenKind::SystemIdentifier => {
+            TokenKind::SystemIdentifier if !self.is_root_reference() => {
                 let name: SmolStr = self.current().text.clone().unwrap_or_default().into();
                 self.advance();
 
@@ -2969,8 +2998,8 @@ impl<'a> Parser<'a> {
                     span: start.extend(self.previous_span()),
                 }))
             }
-            TokenKind::Identifier | TokenKind::EscapedIdentifier => {
-                let name = self.expect_identifier("identifier")?;
+            TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::SystemIdentifier => {
+                let name = self.parse_reference_name("identifier")?;
 
                 // Check if it's a function call or branch access
                 if self.check(TokenKind::LParen) {

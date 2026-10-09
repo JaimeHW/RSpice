@@ -659,6 +659,7 @@ impl Parser<'_> {
                 self.advance();
                 Ok(DigitalStatement::Null(start))
             }
+            TokenKind::SystemIdentifier if self.is_root_reference() => self.parse_digital_assignment(),
             TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::LBrace => {
                 self.parse_digital_assignment()
             }
@@ -1064,7 +1065,7 @@ impl Parser<'_> {
             });
         }
 
-        let name: SmolStr = self.expect_identifier("assignment target")?.into();
+        let name = self.parse_reference_name("assignment target")?;
         if !self.match_token(TokenKind::LBracket) {
             return Ok(DigitalLValue::Identifier {
                 name,

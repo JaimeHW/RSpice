@@ -35,7 +35,8 @@ fn refused(name: &str, span: Span) -> ParseError {
 }
 
 pub(super) fn declare(module: &mut Module, defaults: &[(u32, bool)]) -> Result<(), ParseError> {
-    scope(module, &HashSet::new(), defaults)?;
+    let references = module.hierarchical_names.keys().cloned().collect();
+    scope(module, &references, defaults)?;
     Ok(())
 }
 

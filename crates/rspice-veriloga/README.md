@@ -214,13 +214,23 @@ per-occurrence identities. Nested generate schemes see scoped constants; procedu
 locals and function arguments shadow enclosing names. Generated analog initialization
 and simulation statements retain source ordering and independent state. Ordinary
 parameter and port declarations remain illegal inside a generated block (VAMS-2023
-6.6). HIR 147 / cache record 129 invalidate pre-expansion artifacts. General hierarchical
-references and other unsupported module-item forms remain separate requirements.
+6.6). HIR 147 / cache record 129 invalidate pre-expansion artifacts. Other unsupported
+module-item forms remain separate requirements.
 Analog blocks concatenate after elaboration: repeated iterations remain in loop
 order, and nested generated constructs stay between their surrounding authored
 statements. Directly nested conditional generates share the enclosing scope level
 and construct number; conflicting block names diagnose even in unselected branches.
 HIR 148 / cache record 130 invalidate artifacts with earlier ordering or scope names.
+References into named generated scopes within a module now bind structured path
+segments, constant scope indices and lexical origins before either domain lowers.
+Forward/sibling references, digital reads/writes, physical probes/contributions and
+analog function calls use the selected declaration; terminal bit/part selectors stay
+separate from scope selectors. Each loop iteration retains its implicit integer
+localparam. Escaped identifiers cannot alias generated paths or internal symbols.
+Authored paths replay after parameter specialization. Cross-module and absolute
+`$root` binding, hierarchy-dependent generate decisions, and scope indices that
+themselves depend on hierarchical constants remain open. HIR 149 / cache record 131
+invalidate artifacts predating generated-reference binding.
 Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
 artifacts produced before scoped implicit-net construction.
 Explicit continuous-discipline `wire`/`tri` declarations allocate only physical

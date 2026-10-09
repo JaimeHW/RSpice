@@ -218,6 +218,10 @@ pub struct Module {
     pub generates: Vec<GenerateConstruct>,
     /// Original generate structure, retained for parameter specialization.
     pub generate_template: Option<Box<GenerateTemplate>>,
+    /// Authored tokens reserved against internal symbol allocation.
+    pub(crate) reserved_identifiers: std::sync::Arc<std::collections::HashSet<SmolStr>>,
+    /// Structured source references, interned under collision-free AST symbols.
+    pub hierarchical_names: std::collections::BTreeMap<SmolStr, HierarchicalName>,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
@@ -305,10 +309,27 @@ impl Module {
             genvars: Vec::new(),
             generates: Vec::new(),
             generate_template: None,
+            hierarchical_names: Default::default(),
+            reserved_identifiers: Default::default(),
             attributes: Vec::new(),
             span,
         }
     }
+}
+
+/// An authored path. Scope selectors are distinct from terminal vector/array selectors.
+#[derive(Debug, Clone)]
+pub struct HierarchicalName {
+    pub absolute: bool,
+    pub segments: Vec<HierarchicalSegment>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct HierarchicalSegment {
+    pub name: SmolStr,
+    pub index: Option<Expression>,
+    pub span: Span,
 }
 
 /// Source module before its generate regions were expanded.
@@ -373,6 +394,8 @@ pub struct GenerateBlock {
     /// A bare conditional nested directly inside a conditional shares its scope
     /// level with that outer construct (VAMS-2023 6.6.2).
     pub directly_nested: bool,
+    /// False for implicit genblk names, which are not source-visible scopes.
+    pub explicit_name: bool,
     pub items: Box<Module>,
     /// Generate constructs written inside this block, in declaration order.
     pub nested: Vec<GenerateConstruct>,

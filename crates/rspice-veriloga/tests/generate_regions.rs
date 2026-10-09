@@ -716,3 +716,61 @@ fn generated_scope_names_conflict_even_in_unselected_branches() {
         );
     }
 }
+
+#[test]
+fn generated_references_bind_forward_siblings_and_terminal_selectors() {
+    let compiled = plan(
+        r#"
+module top(output wire [3:0] y);
+ genvar i;
+ generate for(i=0;i<2;i=i+1) begin : lanes
+   wire [3:0] local_bus;
+   if(1) begin : nested
+     wire [3:0] sibling;
+     assign sibling=lanes[1-i].local_bus;
+   end
+   assign local_bus=i+3;
+ end endgenerate
+ assign y=lanes[0].nested.sibling[3:0];
+endmodule
+"#,
+    );
+    assert!(signal_names(&compiled).contains(&"lanes[0].nested.sibling".to_string()));
+    assert_eq!(compiled.drivers.len(), 5);
+}
+
+#[test]
+fn generated_paths_do_not_alias_escaped_identifiers() {
+    let compiled = plan(
+        r#"
+module top(output wire a,b);
+ wire \cell.q ;
+ assign \cell.q =1'b0;
+ generate if(1) begin : cell
+   wire q;
+   assign q=1'b1;
+ end endgenerate
+ assign a=cell.q;
+ assign b=\cell.q ;
+endmodule
+"#,
+    );
+    assert_eq!(compiled.signals.len(), 4);
+    assert_eq!(compiled.drivers.len(), 4);
+}
+
+#[test]
+fn generated_paths_require_existing_visible_scopes_and_constant_indices() {
+    for (declarations, reference) in [
+        ("if(1) begin wire q; end", "genblk1.q"),
+        ("if(0) begin : absent wire q; end", "absent.q"),
+        ("for(i=0;i<2;i=i+1) begin : lane wire q; end", "lane[2].q"),
+        ("for(i=0;i<2;i=i+1) begin : lane wire q; end", "lane[a].q"),
+    ] {
+        let source = format!(
+            "module top(input wire a,output wire y); genvar i; generate {declarations} endgenerate assign y={reference}; endmodule"
+        );
+        let error = compile_error(&source);
+        assert!(error.contains("hierarchical"), "{source}: {error}");
+    }
+}
