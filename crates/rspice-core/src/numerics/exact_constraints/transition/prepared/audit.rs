@@ -8,9 +8,17 @@ use super::*;
 pub(super) const SCRATCH_WORDS: usize = 1536;
 
 fn equation(terms: impl Iterator<Item = (Value, Value)>, abort: &dyn AbortSignal) -> Result<()> {
-    let mut residual = BigInt::default();
-    let mut magnitude = BigUint::default();
-    let mut count = 0usize;
+    equation_with_storage(terms, None, abort)
+}
+
+fn equation_with_storage(
+    terms: impl Iterator<Item = (Value, Value)>,
+    storage: Option<&BigInt>,
+    abort: &dyn AbortSignal,
+) -> Result<()> {
+    let mut residual = storage.map_or_else(BigInt::default, |value| -value);
+    let mut magnitude = residual.magnitude().clone();
+    let mut count = usize::from(storage.is_some());
     for (coefficient, value) in terms {
         check_abort(abort)?;
         if coefficient == 0.0 || value == 0.0 {
@@ -86,27 +94,34 @@ fn context(error: ConstraintError, context: String) -> ConstraintError {
 }
 
 impl PreparedTransition {
-    pub(super) fn audit_storage(&self, storage: &[Value], abort: &dyn AbortSignal) -> Result<()> {
+    pub(super) fn audit_storage(
+        &self,
+        storage: &TransitionStorage,
+        abort: &dyn AbortSignal,
+    ) -> Result<()> {
         for (_, row) in &self.storage_constraints.rows {
             check_abort(abort)?;
-            exact_equation(
-                row.nodes
-                    .iter()
-                    .map(|(&index, coefficient)| (coefficient, storage[index - 1])),
-                abort,
-            )?;
+            let mut residual = BigInt::default();
+            let mut magnitude = BigUint::default();
+            for (&index, coefficient) in &row.nodes {
+                check_abort(abort)?;
+                let product = coefficient * &storage.values[index - 1];
+                magnitude += product.magnitude();
+                residual += product;
+            }
+            verify(residual, magnitude, row.nodes.len(), abort)?;
         }
         Ok(())
     }
 
     pub(super) fn audit(
         &self,
-        storage: &[Value],
+        storage: &TransitionStorage,
         jets: &[Vec<Value>],
         result: &Transition,
         abort: &dyn AbortSignal,
     ) -> Result<()> {
-        for row in 0..self.size {
+        for (row, jet) in jets.iter().enumerate().take(self.size) {
             check_abort(abort)?;
             equation(
                 self.a[row]
@@ -117,20 +132,20 @@ impl PreparedTransition {
                             .iter()
                             .map(|&(column, coefficient)| (coefficient, result.rates()[column])),
                     )
-                    .chain([(-1.0, jets[row][0])]),
+                    .chain([(-1.0, jet[0])]),
                 abort,
             )
             .map_err(|error| context(error, format!("finite equation row {row}")))?;
-            equation(
+            equation_with_storage(
                 self.e[row]
                     .iter()
                     .map(|&(column, coefficient)| (coefficient, result.finite()[column]))
-                    .chain([(-1.0, storage[row])])
                     .chain(result.impulse(0).into_iter().flat_map(|impulse| {
                         self.a[row]
                             .iter()
                             .map(move |&(column, coefficient)| (coefficient, impulse[column]))
                     })),
+                Some(&storage.values[row]),
                 abort,
             )
             .map_err(|error| context(error, format!("charge jump row {row}")))?;

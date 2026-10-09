@@ -4,7 +4,7 @@ use super::*;
 use crate::device::MatrixStamper;
 use crate::numerics::exact_constraints::{
     ConstraintError,
-    transition::{PreparedTransition, Transition},
+    transition::{PreparedTransition, Transition, TransitionStorage},
 };
 
 #[derive(Clone, Copy)]
@@ -16,6 +16,7 @@ enum Forcing {
 pub(in crate::engine::transient) struct LinearDescriptor {
     kernel: PreparedTransition,
     forcing: Vec<Vec<(Forcing, Value)>>,
+    source_branches: Vec<usize>,
     retained_values: usize,
 }
 
@@ -62,9 +63,11 @@ impl LinearDescriptor {
             options,
             abort,
         )?;
+        let mut source_branches = Vec::new();
         for source in &sampler.constant_sources {
             check_abort(abort)?;
             let row = source.branch + 1;
+            source_branches.push(source.branch);
             sample.f.stamp(source.positive, row, 1.0);
             sample.f.stamp(source.negative, row, -1.0);
             for (node, coefficient) in source
@@ -79,6 +82,7 @@ impl LinearDescriptor {
         for index in 0..voltage.len() {
             check_abort(abort)?;
             let row = nodes + voltage.branch_indices[index];
+            source_branches.push(row - 1);
             let p = voltage.node_pos[index];
             let n = voltage.node_neg[index];
             sample.f.stamp(p, row, 1.0);
@@ -91,6 +95,7 @@ impl LinearDescriptor {
         for index in 0..ccvs.len() {
             check_abort(abort)?;
             let row = nodes + ccvs.branch_indices[index];
+            source_branches.push(row - 1);
             let p = ccvs.node_pos[index];
             let n = ccvs.node_neg[index];
             sample.f.stamp(p, row, 1.0);
@@ -156,8 +161,13 @@ impl LinearDescriptor {
         Ok(Self {
             kernel,
             forcing,
+            source_branches,
             retained_values,
         })
+    }
+
+    pub(in crate::engine::transient) fn source_branches(&self) -> &[usize] {
+        &self.source_branches
     }
 
     pub(in crate::engine::transient) fn storage(
@@ -165,10 +175,23 @@ impl LinearDescriptor {
         state: &[Value],
         options: &EventOptions,
         abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>> {
+    ) -> Result<TransitionStorage> {
         with_retained_values(options, self.retained_values, |bounded| {
             self.kernel
                 .charge_from_coordinates(state, bounded.limits, abort)
+                .map_err(kernel_error)
+        })
+    }
+
+    pub(in crate::engine::transient) fn startup_storage(
+        &self,
+        products: impl Iterator<Item = (usize, Value, Value)>,
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransitionStorage> {
+        with_retained_values(options, self.retained_values, |bounded| {
+            self.kernel
+                .storage_from_products(products, bounded.limits, abort)
                 .map_err(kernel_error)
         })
     }
@@ -177,7 +200,7 @@ impl LinearDescriptor {
         &self,
         circuit: &crate::CircuitData,
         time: Value,
-        storage: &[Value],
+        storage: &TransitionStorage,
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Transition> {
@@ -187,7 +210,7 @@ impl LinearDescriptor {
         }
         with_retained_values(options, self.retained_values, |bounded| {
             self.kernel
-                .evaluate(
+                .evaluate_storage(
                     storage,
                     |row, order| {
                         let mut terms = Vec::with_capacity(self.forcing[row].len());

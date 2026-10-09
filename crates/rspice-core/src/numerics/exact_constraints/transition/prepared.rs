@@ -1,6 +1,8 @@
 use super::*;
 
 mod audit;
+mod incoming;
+pub(crate) use incoming::TransitionStorage;
 
 pub(crate) struct PreparedTransition {
     size: usize,
@@ -44,48 +46,6 @@ impl Transition {
 impl PreparedTransition {
     pub(crate) fn retained_words(&self) -> usize {
         self.retained_words
-    }
-
-    pub(crate) fn charge_from_coordinates(
-        &self,
-        coordinates: &[Value],
-        limits: ResourceLimits,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<Value>> {
-        check_abort(abort)?;
-        if coordinates.len() != self.size || coordinates.iter().any(|v| !v.is_finite()) {
-            return Err(failure("invalid storage coordinates"));
-        }
-        ExactElimination::<Input>::ensure_words(
-            self.retained_words
-                .saturating_add(self.size.saturating_mul(2))
-                .saturating_add(audit::SCRATCH_WORDS),
-            limits.max_result_values,
-        )?;
-        let mut charges = Vec::with_capacity(self.size);
-        for row in &self.e {
-            check_abort(abort)?;
-            let cancelled = std::cell::Cell::new(false);
-            let value = rspice_veriloga_runtime::arithmetic::sum_products(
-                row.iter()
-                    .take_while(|_| {
-                        if cancelled.get() {
-                            return false;
-                        }
-                        if abort.is_aborted() {
-                            cancelled.set(true);
-                            return false;
-                        }
-                        true
-                    })
-                    .map(|&(column, coefficient)| (coordinates[column], coefficient)),
-            );
-            if cancelled.get() {
-                return Err(ConstraintError::Aborted);
-            }
-            charges.push(value.map_err(|_| failure("unrepresentable incoming storage"))?);
-        }
-        Ok(charges)
     }
 
     pub(crate) fn new(
@@ -162,7 +122,7 @@ impl PreparedTransition {
                 .unwrap_or(0);
             audit_words = audit_words.max(
                 usize::try_from(
-                    bits.saturating_add(2098 + u64::from(usize::BITS))
+                    bits.saturating_add(4196 + u64::from(usize::BITS))
                         .div_ceil(64),
                 )
                 .unwrap_or(usize::MAX)
@@ -202,17 +162,38 @@ impl PreparedTransition {
         })
     }
 
-    /// Use accepted nodal charge and branch flux, including authored per-device
-    /// startup ICs. No arbitrary finite voltage/current guess replaces storage.
+    #[cfg(test)]
     pub(crate) fn evaluate(
         &self,
         storage: &[Value],
+        forcing: impl FnMut(usize, usize) -> Result<Value>,
+        limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Transition> {
+        if storage.len() != self.size {
+            return Err(failure("invalid incoming charge or flux"));
+        }
+        let storage = self.storage_from_products(
+            storage
+                .iter()
+                .enumerate()
+                .map(|(row, &value)| (row, 1.0, value)),
+            limits,
+            abort,
+        )?;
+        self.evaluate_storage(&storage, forcing, limits, abort)
+    }
+
+    /// Use accepted physical products, including authored per-device ICs.
+    pub(crate) fn evaluate_storage(
+        &self,
+        storage: &TransitionStorage,
         mut forcing: impl FnMut(usize, usize) -> Result<Value>,
         limits: ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Transition> {
         check_abort(abort)?;
-        if storage.len() != self.size || storage.iter().any(|value| !value.is_finite()) {
+        if storage.values.len() != self.size {
             return Err(failure("invalid incoming charge or flux"));
         }
         ResourceLimitError::ensure(
@@ -225,6 +206,7 @@ impl PreparedTransition {
         });
         ExactElimination::<Input>::ensure_words(
             self.retained_words
+                .saturating_add(storage.retained_words())
                 .saturating_add(jet_values.saturating_mul(2))
                 .saturating_add(self.size.saturating_mul(4))
                 .saturating_add(self.forms.len().saturating_mul(2))
@@ -251,16 +233,18 @@ impl PreparedTransition {
             let mut numerator = BigInt::default();
             for (input, weight) in &form.values {
                 check_abort(abort)?;
-                let value = match *input {
-                    Input::Storage(row) => storage[row],
-                    Input::Forcing { row, order } => jets[row][order],
-                };
-                numerator += weight * integer_coefficient(value).unwrap();
+                match *input {
+                    Input::Storage(row) => numerator += weight * &storage.values[row],
+                    Input::Forcing { row, order } => {
+                        numerator +=
+                            (weight * integer_coefficient(jets[row][order]).unwrap()) << 1074usize;
+                    }
+                }
             }
             check_abort(abort)?;
-            // Inputs are exact integers in units of 2^-1074; divide only
+            // Physical products are in units of 2^-2148; divide only
             // after the complete signed sum, rounding the output once.
-            let value = coefficient_ratio(&-numerator, &(&form.query << 1074usize))
+            let value = coefficient_ratio(&-numerator, &(&form.query << 2148usize))
                 .ok_or_else(|| failure("unrepresentable transition evaluation"))?;
             values.push(value);
         }

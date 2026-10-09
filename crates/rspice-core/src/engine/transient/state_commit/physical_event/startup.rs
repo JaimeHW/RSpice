@@ -111,6 +111,83 @@ fn aligned(count: usize, lengths: &[usize]) -> Result<(), SimulationError> {
     }
 }
 
+/// The same authored C/L/mutual products feed finite and distributional
+/// startup owners. Rows use the circuit's one-based, ground-aware convention.
+pub(super) fn linear_storage_terms<'a>(
+    circuit: &'a crate::CircuitData,
+    currents: &'a [Value],
+) -> impl Iterator<Item = (usize, Value, Value)> + 'a {
+    let c = &circuit.capacitors;
+    let l = &circuit.inductors;
+    let nodes = circuit.num_nodes();
+    let caps = c.stamps.iter().enumerate().flat_map(move |(i, stamp)| {
+        [
+            (stamp.pp.row, c.capacitances[i], c.v_prev[i]),
+            (stamp.nn.row, -c.capacitances[i], c.v_prev[i]),
+        ]
+    });
+    let windings = l
+        .branch_indices
+        .iter()
+        .enumerate()
+        .map(move |(i, &ordinal)| (nodes + ordinal, -l.inductances[i], l.i_prev[i]));
+    let mutual = circuit.coupled_inductor_pairs.iter().flat_map(move |pair| {
+        let a = nodes + pair.branch1_ordinal;
+        let b = nodes + pair.branch2_ordinal;
+        [
+            (a, -pair.device.m, currents[b - 1]),
+            (b, -pair.device.m, currents[a - 1]),
+        ]
+    });
+    caps.chain(windings)
+        .chain(mutual)
+        .filter(|&(row, _, _)| row != 0)
+}
+
+pub(super) fn startup_winding_currents(
+    circuit: &crate::CircuitData,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SimulationError> {
+    if abort.is_aborted() {
+        return Err(SimulationError::Aborted);
+    }
+    let c = &circuit.capacitors;
+    let l = &circuit.inductors;
+    aligned(
+        c.len(),
+        &[
+            c.v_prev.len(),
+            c.v_prev_prev.len(),
+            c.v_prev_prev_prev.len(),
+            c.i_prev.len(),
+        ],
+    )?;
+    aligned(
+        l.len(),
+        &[
+            l.i_prev.len(),
+            l.i_prev_prev.len(),
+            l.i_prev_prev_prev.len(),
+            l.v_prev.len(),
+        ],
+    )?;
+    let mut currents = Vec::new();
+    currents
+        .try_reserve_exact(circuit.matrix_size())
+        .map_err(|source| SimulationError::Allocation {
+            object: "initial winding current coordinates",
+            source,
+        })?;
+    currents.resize(circuit.matrix_size(), 0.0);
+    for (index, &ordinal) in l.branch_indices.iter().enumerate() {
+        if index.is_multiple_of(64) && abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        currents[circuit.num_nodes() + ordinal - 1] = l.i_prev[index];
+    }
+    Ok(currents)
+}
+
 pub(super) fn seed(
     circuit: &crate::CircuitData,
     history: &BjtTransientHistory,
@@ -144,26 +221,7 @@ pub(super) fn seed(
             history.dynamic_linear_prev_prev.len(),
         ],
     )?;
-    let c = &circuit.capacitors;
-    let l = &circuit.inductors;
-    aligned(
-        c.len(),
-        &[
-            c.v_prev.len(),
-            c.v_prev_prev.len(),
-            c.v_prev_prev_prev.len(),
-            c.i_prev.len(),
-        ],
-    )?;
-    aligned(
-        l.len(),
-        &[
-            l.i_prev.len(),
-            l.i_prev_prev.len(),
-            l.i_prev_prev_prev.len(),
-            l.v_prev.len(),
-        ],
-    )?;
+    let currents = startup_winding_currents(circuit, abort)?;
     let mut charges = vec![0.0; circuit.matrix_size()];
     let mut add = |row: usize, value: Value| -> Result<(), SimulationError> {
         if !value.is_finite() {
@@ -174,13 +232,11 @@ pub(super) fn seed(
         }
         Ok(())
     };
-    for (index, stamp) in c.stamps.iter().enumerate() {
+    for (row, coefficient, coordinate) in linear_storage_terms(circuit, &currents) {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let charge = sum([(c.capacitances[index], c.v_prev[index])].into_iter())?;
-        add(stamp.pp.row, charge)?;
-        add(stamp.nn.row, -charge)?;
+        add(row, sum([(coefficient, coordinate)].into_iter())?)?;
     }
     diodes::validate_history(circuit, diode_history)?;
     for (diode, &charge) in circuit.diodes.devices.iter().zip(&diode_history.qd_prev) {
@@ -189,28 +245,6 @@ pub(super) fn seed(
         }
         add(diode.node_anode, charge)?;
         add(diode.node_cathode, -charge)?;
-    }
-    let nodes = circuit.num_nodes();
-    let mut currents = vec![0.0; circuit.matrix_size()];
-    for (index, &ordinal) in l.branch_indices.iter().enumerate() {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        let row = nodes + ordinal;
-        currents[row - 1] = l.i_prev[index];
-        add(
-            row,
-            sum([(-l.inductances[index], l.i_prev[index])].into_iter())?,
-        )?;
-    }
-    for pair in &circuit.coupled_inductor_pairs {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        let a = nodes + pair.branch1_ordinal;
-        let b = nodes + pair.branch2_ordinal;
-        add(a, sum([(-pair.device.m, currents[b - 1])].into_iter())?)?;
-        add(b, sum([(-pair.device.m, currents[a - 1])].into_iter())?)?;
     }
     let mut inputs = Vec::with_capacity(sampler.models().len());
     for (index, model) in sampler.models().iter().enumerate() {

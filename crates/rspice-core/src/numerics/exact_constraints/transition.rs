@@ -293,4 +293,4 @@ impl TransitionSystem {
 }
 
 mod prepared;
-pub(crate) use prepared::{PreparedTransition, Transition};
+pub(crate) use prepared::{PreparedTransition, Transition, TransitionStorage};

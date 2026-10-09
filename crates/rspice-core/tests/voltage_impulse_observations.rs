@@ -757,3 +757,22 @@ fn ccvs_current_forcing_and_mutual_flux_keep_original_polarities() {
     assert!(action_current(&result, "i1").points.is_empty());
     assert!(action_current(&result, "i1").derivatives.is_empty());
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_nonbinary_startup_preserves_exact_stored_charge() {
+    let deck = Netlist::parse("Unchanged stored charge\nV1 in 0 DC .4 PWL(0 .4 1n .4 2n .4)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0\n.save all\n.end\n").unwrap();
+    let result = ccvs_engine().run_tran(&deck, 0.5e-9, 5e-12).unwrap();
+    for trace in result.voltage_impulses.as_ref().unwrap() {
+        assert!(
+            trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
+            "{trace:?}"
+        );
+    }
+    for trace in result.current_impulses.as_ref().unwrap() {
+        assert!(
+            trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
+            "{trace:?}"
+        );
+    }
+}

@@ -35,7 +35,13 @@ pub(super) fn prepare(
         ));
     }
     let incoming_q = if startup {
-        startup::seed(circuit, history, step.diode_history, sampler, abort)?.charges
+        let currents = startup::startup_winding_currents(circuit, abort)?;
+        descriptor.startup_storage(
+            startup::linear_storage_terms(circuit, &currents)
+                .map(|(row, coefficient, value)| (row - 1, coefficient, value)),
+            options,
+            abort,
+        )?
     } else {
         descriptor.storage(step.incoming, options, abort)?
     };
@@ -51,6 +57,7 @@ pub(super) fn prepare(
         crate::resource::ResourceKind::ResultValues,
         descriptor
             .retained_values()
+            .saturating_add(incoming_q.retained_words())
             .saturating_add(transition.value_count().saturating_mul(4))
             .saturating_add(circuit.matrix_size().saturating_mul(64)),
         options.limits.max_result_values,
@@ -62,11 +69,12 @@ pub(super) fn prepare(
         }
         descriptor_impulses.push(transition.impulse(order).unwrap().to_vec());
     }
-    let nodes = circuit.num_nodes();
     let state = charge_event::ChargeEventState {
         solution: transition.finite().to_vec(),
-        source_impulses: (nodes..circuit.matrix_size())
-            .map(|column| transition.impulse(0).map_or(0.0, |values| values[column]))
+        source_impulses: descriptor
+            .source_branches()
+            .iter()
+            .map(|&column| transition.impulse(0).map_or(0.0, |values| values[column]))
             .collect(),
         coordinate_rates: transition.rates().iter().copied().map(Some).collect(),
         iterations: 0,
@@ -81,7 +89,7 @@ pub(super) fn prepare(
     }
     Ok(PreparedPhysicalEvent {
         state,
-        source_branches: (nodes..circuit.matrix_size()).collect(),
+        source_branches: descriptor.source_branches().to_vec(),
         phase_current_couplings: Vec::new(),
         time: step.time,
         dt: step.dt,

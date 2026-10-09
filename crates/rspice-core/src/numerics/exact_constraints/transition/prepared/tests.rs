@@ -286,8 +286,11 @@ fn every_distributional_order_is_audited_before_publication() {
     for coordinate in [0, 3, 5, 7, 11, 12, 15] {
         let mut result = prepared.evaluate(&[0.0; 4], jet, limits, &NoAbort).unwrap();
         result.values[coordinate] += 0.1;
+        let storage = prepared
+            .storage_from_products(std::iter::empty(), limits, &NoAbort)
+            .unwrap();
         assert!(
-            prepared.audit(&[0.0; 4], &jets, &result, &NoAbort).is_err(),
+            prepared.audit(&storage, &jets, &result, &NoAbort).is_err(),
             "unaudited coordinate {coordinate}"
         );
     }
@@ -486,9 +489,8 @@ fn unchanged_picofarad_storage_does_not_create_roundoff_actions() {
     let storage = prepared
         .charge_from_coordinates(&[1.0, 0.0, 0.0, 0.0], limits, &NoAbort)
         .unwrap();
-    assert_eq!(storage, [2e-12, 0.0, 0.0, 0.0]);
     let result = prepared
-        .evaluate(
+        .evaluate_storage(
             &storage,
             |row, order| Ok(if row == 2 && order == 0 { 1.0 } else { 0.0 }),
             limits,
@@ -506,4 +508,35 @@ fn unchanged_picofarad_storage_does_not_create_roundoff_actions() {
         Err(ConstraintError::Aborted)
     ));
     assert_eq!(abort.polls_after_abort(), 0);
+}
+
+#[test]
+fn unchanged_nonbinary_flux_has_no_rounding_impulse() {
+    let limits = ResourceLimits::default();
+    let kernel = PreparedTransition::new(
+        2,
+        &[(0, 1, 1.0), (1, 0, 1.0)],
+        &[(1, 1, -5e-9)],
+        limits,
+        &NoAbort,
+    )
+    .unwrap();
+    for current in [0.001, 0.0013, -0.00017] {
+        let storage = kernel
+            .charge_from_coordinates(&[0.0, current], limits, &NoAbort)
+            .unwrap();
+        let forcing = |row, order| Ok(if row == 0 && order == 0 { current } else { 0.0 });
+        let result = kernel
+            .evaluate_storage(&storage, forcing, limits, &NoAbort)
+            .unwrap();
+        assert_eq!(result.finite(), [0.0, current]);
+        for order in 0..result.impulse_count() {
+            assert!(result.impulse(order).unwrap().iter().all(|&v| v == 0.0));
+        }
+        // A representable stored flux rounded before projection is different.
+        let rounded = kernel
+            .evaluate(&[0.0, -5e-9 * current], forcing, limits, &NoAbort)
+            .unwrap();
+        assert_ne!(rounded.impulse(0).unwrap()[0], 0.0);
+    }
 }
