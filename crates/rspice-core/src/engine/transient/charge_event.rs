@@ -156,13 +156,13 @@ impl EventOptions {
     }
 }
 
-/// The returned solution contains finite source currents. Integrated source
-/// impulses are separate coulomb values, in the source descriptor order.
+/// The returned solution contains finite currents. Integrated current
+/// impulses are separate coulomb values in the owning topology's branch order.
 pub(super) struct ChargeEventState {
     pub solution: Vec<Value>,
     pub source_impulses: Vec<Value>,
-    /// Rates for node and non-source constitutive coordinates. This solve
-    /// does not determine derivatives of ideal-source branch currents.
+    /// Rates resolved by the event operator. The finite-voltage kernel leaves
+    /// ideal-source and capacitor branch-current derivatives unresolved.
     pub coordinate_rates: Vec<Option<Value>>,
     pub iterations: usize,
 }

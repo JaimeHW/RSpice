@@ -162,3 +162,83 @@ fn gp_capacitor_ic_charge_fanout_survives_packed_restart() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_capacitor_ic_shares_nonlinear_junction_charge_without_double_counting() {
+    let vt = thermal_voltage(SpiceDialect::Xyce);
+    let forward = |base: f64| 1e-16 * (base / vt).exp_m1();
+    let intrinsic_jump = 1e-9 * (forward(0.65) - forward(0.6));
+    let capacitor_jump = 2e-12 * (0.65 - 0.6);
+    for polarity in [1.0, -1.0] {
+        let kind = if polarity > 0.0 { "NPN" } else { "PNP" };
+        let deck = Netlist::parse(&format!(
+            "Shared intrinsic and capacitor IC charge\nVC c 0 {}\nVB b 0 PWL(0 {} 1n {} 1n {} 2.5n {})\nQ1 c b 0 qm IC=0,0\n.model qm {kind}(IS=1e-16 BF=80 BR=1 TF=1n PTF=57.29577951308232)\nC1 b 0 2p IC={}\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
+            2.0 * polarity, 0.6 * polarity, 0.6 * polarity,
+            0.65 * polarity, 0.65 * polarity, 0.6 * polarity,
+        )).unwrap();
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            // The clamping voltage source and capacitor IC would duplicate
+            // the OP constraint. UIC releases the capacitor into its DAE row.
+            let startup = TransientStartupMode::Uic;
+            let result = xyce_engine(method, 5e-12)
+                .run_tran_with_startup_mode(&deck, 2.5e-9, 5e-12, startup)
+                .unwrap_or_else(|error| panic!("{kind}/{method:?}/{startup:?}: {error}"));
+            let capacitor = actions(&result, "c1");
+            assert!(capacitor.complete && capacitor.derivatives.is_empty());
+            assert_eq!(capacitor.points.len(), 1, "{capacitor:?}");
+            assert_eq!(capacitor.points[0].time, 1e-9);
+            assert!(
+                (capacitor.points[0].charge_coulombs - polarity * capacitor_jump).abs() < 2e-24
+            );
+            let source = actions(&result, "vb");
+            assert!(source.complete && source.derivatives.is_empty());
+            assert_eq!(source.points.len(), 2, "{source:?}");
+            for point in &source.points {
+                // Authored C initial charge is already present in UIC;
+                // only the GP junction draws additional startup charge.
+                let expected = -polarity
+                    * if point.time == 0.0 {
+                        1e-9 * forward(0.6)
+                    } else {
+                        assert_eq!(point.time, 1e-9);
+                        intrinsic_jump + capacitor_jump
+                    };
+                assert!(
+                    (point.charge_coulombs - expected).abs() < 2e-24,
+                    "{point:?}, expected {expected:e}"
+                );
+            }
+            let icap = result.try_branch_current_waveform_named("c1").unwrap();
+            let ib = result.try_branch_current_waveform_named("vb").unwrap();
+            let ic = result.try_branch_current_waveform_named("vc").unwrap();
+            for (i, &time) in result.time.iter().enumerate() {
+                let base = if time < 1e-9 { 0.6 } else { 0.65 };
+                let reverse = 1e-16 * ((base - 2.0) / vt).exp_m1();
+                let arrived = time >= 1e-9 || (time - 1e-9).abs() < 8.0 * f64::EPSILON * 1e-9;
+                let changed = time >= 2e-9 || (time - 2e-9).abs() < 8.0 * f64::EPSILON * 2e-9;
+                let delayed = if !arrived {
+                    0.0
+                } else {
+                    forward(if changed { 0.65 } else { 0.6 })
+                };
+                assert!(
+                    icap[i].abs() < 1e-14,
+                    "{kind}/{method:?}/{startup:?} at {time:e}: I_C={}",
+                    icap[i]
+                );
+                assert!((-polarity * ib[i] - forward(base) / 80.0 - reverse).abs() < 1e-12);
+                assert!(
+                    (-polarity * ic[i] - delayed + 2.0 * reverse).abs() < 1e-12,
+                    "{kind}/{method:?}/{startup:?} at {time:e}: I_C={} delayed={delayed:e}",
+                    ic[i]
+                );
+            }
+        }
+    }
+}
