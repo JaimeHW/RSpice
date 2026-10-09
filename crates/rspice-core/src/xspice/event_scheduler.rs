@@ -71,6 +71,9 @@ use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::mem;
 
+mod checkpoint;
+pub use checkpoint::{SchedulerCheckpoint, SchedulerCheckpointError, SchedulerCheckpointLimits};
+
 /// Scheduling regions of one time slot, in execution order.
 ///
 /// IEEE 1364-2005 §11 stratifies a time slot so that a nonblocking assignment
@@ -82,7 +85,9 @@ use std::mem;
 /// walks, so admitting the Verilog-AMS analog-interleave region later is a new
 /// variant in the right position plus its entry here — no change to the loop
 /// and no change to the key type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum SchedulerRegion {
     /// Blocking assignments, evaluation, and `#0`-free process continuation.
     Active,
@@ -474,13 +479,17 @@ impl fmt::Display for Instant {
 /// exactly when all four agree, which is what lets a later output from one
 /// driver supersede an earlier one without disturbing a co-driver on the same
 /// node.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct EventTarget {
     /// Circuit node identifier the driver writes.
+    #[serde(with = "checkpoint::target_index")]
     pub node_id: usize,
     /// Port name on the owning instance.
     pub port_name: String,
     /// Element index within a vector port.
+    #[serde(with = "checkpoint::target_index")]
     pub driver_index: usize,
     /// Instance that scheduled the event.
     pub instance: String,
@@ -578,6 +587,11 @@ pub struct OscillationDiagnostic {
 /// Errors the kernel reports instead of panicking or hanging.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchedulerError {
+    /// No unused sequence number remains. The rejected operation changes no
+    /// pending event, and subsequent execution reports the same failure.
+    SequenceExhausted,
+    /// A per-slot execution counter cannot represent another operation.
+    AccountingExhausted,
     /// A tick past the exactly-invertible range reached a seconds conversion.
     TickNotExactlyRepresentable {
         /// The offending tick count.
@@ -607,6 +621,8 @@ pub enum SchedulerError {
 impl fmt::Display for SchedulerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            SchedulerError::SequenceExhausted => write!(f, "event sequence numbers are exhausted"),
+            SchedulerError::AccountingExhausted => write!(f, "event slot accounting is exhausted"),
             SchedulerError::TickNotExactlyRepresentable { ticks } => write!(
                 f,
                 "event tick {ticks} exceeds {} and has no exact seconds image",
@@ -664,7 +680,7 @@ impl fmt::Display for SchedulerError {
 impl std::error::Error for SchedulerError {}
 
 /// Ceilings that turn a non-settling tick into a diagnosis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SchedulerLimits {
     /// Region promotions allowed at one tick before the tick is declared
     /// oscillating.
@@ -799,6 +815,9 @@ struct EventQueues {
     cancelled: HashSet<u64>,
     /// Next sequence number. Per-scheduler, never reused.
     next_sequence: u64,
+    /// Infallible legacy supersession reports allocation failure at the next
+    /// execution boundary; it must never cancel an output it cannot replace.
+    sequence_exhausted: bool,
     /// Every driver ever scheduled, indexed by its [`TargetId`]. This is what
     /// a `ScheduledEvent` and an oscillation report are rendered from.
     targets: Vec<EventTarget>,
@@ -849,8 +868,9 @@ impl EventQueues {
         region: SchedulerRegion,
         target: TargetId,
         value: EventValue,
-    ) -> u64 {
+    ) -> Result<u64, SchedulerError> {
         let sequence = self.next_sequence;
+        self.require_sequence()?;
         self.next_sequence += 1;
         self.driver_events[target.index()].push((at, sequence));
         let event = PendingEvent {
@@ -865,7 +885,15 @@ impl EventQueues {
         } else {
             self.future.push(Reverse(Queued(event)));
         }
-        sequence
+        Ok(sequence)
+    }
+
+    fn require_sequence(&mut self) -> Result<(), SchedulerError> {
+        if self.sequence_exhausted || self.next_sequence == u64::MAX {
+            self.sequence_exhausted = true;
+            return Err(SchedulerError::SequenceExhausted);
+        }
+        Ok(())
     }
 
     /// File an event into its region's queue, in sequence order.
@@ -945,12 +973,16 @@ impl EventQueues {
     }
 
     /// Count one activation of `target` against the open slot.
-    fn note_activation(&mut self, target: TargetId) {
+    fn note_activation(&mut self, target: TargetId) -> Result<(), SchedulerError> {
         let count = &mut self.activations[target.index()];
+        let next = count
+            .checked_add(1)
+            .ok_or(SchedulerError::AccountingExhausted)?;
         if *count == 0 {
             self.activated.push(target);
         }
-        *count += 1;
+        *count = next;
+        Ok(())
     }
 
     /// Forget the open slot's activation counts.
@@ -1181,6 +1213,8 @@ pub struct EventScheduler {
     slot_delta_cycles: u32,
     /// Events executed against the open due slot, for the same reason.
     slot_events_executed: u64,
+    /// A failed slot is not an accepted checkpoint boundary.
+    failed_slot: bool,
 }
 
 impl EventScheduler {
@@ -1193,6 +1227,7 @@ impl EventScheduler {
             started: false,
             slot_delta_cycles: 0,
             slot_events_executed: 0,
+            failed_slot: false,
         }
     }
 
@@ -1312,7 +1347,7 @@ impl EventScheduler {
         }
         // No slot is open outside `run_time_slot`, so everything lands in the
         // future tier and is picked up when its instant opens.
-        Ok(self.queues.insert(None, at, region, target, value))
+        self.queues.insert(None, at, region, target, value)
     }
 
     /// Schedule an event that replaces this driver's own pending output.
@@ -1344,6 +1379,8 @@ impl EventScheduler {
     /// every event the drain has not opened yet, including one dated *earlier*
     /// — the interpolated-crossing case above — and that is the one ordering
     /// [`Self::run_due_events`] promises cannot happen.
+    /// If the sequence space is exhausted, no pending event is changed and
+    /// execution/checkpoint calls report the latched `SequenceExhausted` error.
     pub fn schedule_superseding_at(
         &mut self,
         at: Instant,
@@ -1363,8 +1400,12 @@ impl EventScheduler {
         target: TargetId,
         value: EventValue,
     ) -> usize {
+        if self.queues.require_sequence().is_err() {
+            return 0;
+        }
         let cancelled = self.queues.supersede_driver(target, at);
-        self.queues.insert(None, at, region, target, value);
+        // No callback or intervening allocation can consume this reservation.
+        let _ = self.queues.insert(None, at, region, target, value);
         cancelled
     }
 
@@ -1455,9 +1496,15 @@ impl EventScheduler {
         at: Instant,
         target: TargetId,
     ) -> Result<(), SchedulerError> {
+        self.check_sequence_state()?;
         self.open_due_slot(at);
-        self.slot_events_executed += 1;
-        self.queues.note_activation(target);
+        self.slot_events_executed = self
+            .slot_events_executed
+            .checked_add(1)
+            .ok_or_else(|| self.accounting_failure())?;
+        self.queues
+            .note_activation(target)
+            .inspect_err(|_| self.failed_slot = true)?;
         if self.slot_events_executed > self.limits.max_events_per_tick {
             return Err(self.oscillation(
                 at,
@@ -1488,12 +1535,17 @@ impl EventScheduler {
         F: FnMut(&mut EventQueues, PendingEvent, Instant),
     {
         debug_assert!(through <= bound);
+        self.check_sequence_state()?;
         self.open_due_slot(bound);
 
         loop {
+            self.check_sequence_state()?;
             let Some(event) = self.queues.pop_active() else {
                 if self.queues.promote() {
-                    self.slot_delta_cycles += 1;
+                    self.slot_delta_cycles = self
+                        .slot_delta_cycles
+                        .checked_add(1)
+                        .ok_or_else(|| self.accounting_failure())?;
                     if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
                         return Err(self.oscillation(
                             bound,
@@ -1514,7 +1566,10 @@ impl EventScheduler {
                 break;
             };
 
-            self.slot_events_executed += 1;
+            self.slot_events_executed = self
+                .slot_events_executed
+                .checked_add(1)
+                .ok_or_else(|| self.accounting_failure())?;
             if self.slot_events_executed > self.limits.max_events_per_tick {
                 return Err(self.oscillation(
                     bound,
@@ -1523,7 +1578,9 @@ impl EventScheduler {
                     self.slot_events_executed,
                 ));
             }
-            self.queues.note_activation(event.target);
+            self.queues
+                .note_activation(event.target)
+                .inspect_err(|_| self.failed_slot = true)?;
             execute(&mut self.queues, event, bound);
         }
 
@@ -1547,8 +1604,12 @@ impl EventScheduler {
     /// per drain would make the ceiling depend on how many processes the
     /// design has rather than on how deep the settling is.
     pub fn note_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
+        self.check_sequence_state()?;
         self.open_due_slot(bound);
-        self.slot_delta_cycles += 1;
+        self.slot_delta_cycles = self
+            .slot_delta_cycles
+            .checked_add(1)
+            .ok_or_else(|| self.accounting_failure())?;
         if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
             return Err(self.oscillation(
                 bound,
@@ -1587,6 +1648,7 @@ impl EventScheduler {
     where
         F: FnMut(ScheduledEvent, &mut SchedulerContext<'_>),
     {
+        self.check_sequence_state()?;
         let Some(at) = self.next_instant() else {
             return Ok(None);
         };
@@ -1605,11 +1667,14 @@ impl EventScheduler {
         let mut events_executed: u64 = 0;
 
         loop {
+            self.check_sequence_state()?;
             let Some(event) = self.queues.pop_active() else {
                 if !self.queues.promote() {
                     break;
                 }
-                delta_cycles += 1;
+                delta_cycles = delta_cycles
+                    .checked_add(1)
+                    .ok_or_else(|| self.accounting_failure())?;
                 if delta_cycles > self.limits.max_delta_cycles_per_tick {
                     return Err(self.oscillation(
                         at,
@@ -1621,7 +1686,9 @@ impl EventScheduler {
                 continue;
             };
 
-            events_executed += 1;
+            events_executed = events_executed
+                .checked_add(1)
+                .ok_or_else(|| self.accounting_failure())?;
             if events_executed > self.limits.max_events_per_tick {
                 return Err(self.oscillation(
                     at,
@@ -1630,7 +1697,9 @@ impl EventScheduler {
                     events_executed,
                 ));
             }
-            self.queues.note_activation(event.target);
+            self.queues
+                .note_activation(event.target)
+                .inspect_err(|_| self.failed_slot = true)?;
             let event = self.queues.render(event);
             let mut context = SchedulerContext {
                 queues: &mut self.queues,
@@ -1646,13 +1715,27 @@ impl EventScheduler {
         }))
     }
 
+    fn accounting_failure(&mut self) -> SchedulerError {
+        self.failed_slot = true;
+        SchedulerError::AccountingExhausted
+    }
+
+    fn check_sequence_state(&self) -> Result<(), SchedulerError> {
+        if self.queues.sequence_exhausted {
+            Err(SchedulerError::SequenceExhausted)
+        } else {
+            Ok(())
+        }
+    }
+
     fn oscillation(
-        &self,
+        &mut self,
         at: Instant,
         cause: OscillationCause,
         delta_cycles: u32,
         events_executed: u64,
     ) -> SchedulerError {
+        self.failed_slot = true;
         // Ordered by activation count, then by the driver's own order, so two
         // runs of the same oscillation report the same list.
         let mut entities: Vec<(EventTarget, u64)> = self
@@ -1724,9 +1807,8 @@ impl SchedulerContext<'_> {
             });
         }
         let target = self.queues.intern(target);
-        Ok(self
-            .queues
-            .insert(Some(self.current), at, region, target, value))
+        self.queues
+            .insert(Some(self.current), at, region, target, value)
     }
 }
 

@@ -795,6 +795,16 @@ Resume also requires the current resolved simulation identity (v16); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
+The event kernel exposes a separate versioned `SchedulerCheckpoint` image.
+It preserves exact event times, region/sequence ordering, target identities,
+digital strengths, real payload bits and slot accounting; restore rebuilds
+cancellation and driver indexes after validation. Invalid images, incompatible
+limits/targets and decoded resource-budget violations leave the receiver unchanged.
+Capture rejects failed or partially executed slots. The enclosing file reader
+must bound input bytes before deserialization. Full mixed-circuit persistence
+still requires process/driver, bridge, observation and accepted analog state;
+the engine's mixed accepted-state checkpoint blocker remains in force.
+
 PWL interpolation and repeat timing preserve finite nonzero knot intervals
 and positive `TSCALE` values without an absolute machine-epsilon cutoff.
 An exact repeat boundary retains the authored endpoint; the next representable

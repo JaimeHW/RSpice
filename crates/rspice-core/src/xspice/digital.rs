@@ -13,7 +13,9 @@ use std::fmt;
 ///
 /// This enumeration provides compatibility with ngspice's XSPICE digital system.
 /// States are organized by logic level and strength.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum DigitalState {
     /// Strong logic zero
     Zero,
@@ -168,7 +170,19 @@ impl fmt::Display for DigitalState {
 //=============================================================================
 
 /// Drive strength for digital signals
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum DigitalStrength {
     /// No drive (not driving)
     Undetermined,
@@ -193,7 +207,7 @@ impl DigitalStrength {
 //=============================================================================
 
 /// Complete digital value with state and strength
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct DigitalValue {
     /// Logic state
     pub state: DigitalState,
