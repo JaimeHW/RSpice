@@ -121,10 +121,17 @@ pub(super) fn linear_storage_terms<'a>(
     let l = &circuit.inductors;
     let nodes = circuit.num_nodes();
     let caps = c.stamps.iter().enumerate().flat_map(move |(i, stamp)| {
-        [
-            (stamp.pp.row, c.capacitances[i], c.v_prev[i]),
-            (stamp.nn.row, -c.capacitances[i], c.v_prev[i]),
-        ]
+        if let Some(ordinal) = c.ic_branch_indices[i] {
+            [
+                (nodes + ordinal, -c.capacitances[i], c.v_prev[i]),
+                (0, 0.0, 0.0),
+            ]
+        } else {
+            [
+                (stamp.pp.row, c.capacitances[i], c.v_prev[i]),
+                (stamp.nn.row, -c.capacitances[i], c.v_prev[i]),
+            ]
+        }
     });
     let windings = l
         .branch_indices

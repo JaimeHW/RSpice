@@ -28,7 +28,8 @@ pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     models: Vec<Bjt>,
     forward_charge_limits: Vec<bool>,
     ports: Vec<(usize, usize)>,
-    equations: Vec<EventBranchEquation>,
+    /// None marks a branch that requires the full descriptor owner.
+    equations: Vec<Option<EventBranchEquation>>,
     /// Zero-offset constraints: zero R/L branches, VCVS and resistive CCVS.
     constant_sources: Vec<EventVoltageSource>,
     current_structure: Option<Arc<CurrentConservation>>,
@@ -189,7 +190,11 @@ impl PreparedEventCircuit<'_> {
             self.circuit.matrix_size(),
             &self.ports,
             sources,
-            self.equations.clone(),
+            self.equations
+                .iter()
+                .copied()
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| error("event branch requires the full linear descriptor"))?,
             options,
             abort,
         )?;

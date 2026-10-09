@@ -166,13 +166,23 @@ impl PreparedEventCircuit<'_> {
             if index % 64 == 0 {
                 check_abort(abort)?;
             }
-            branch(
-                &mut sample.q,
-                state,
-                stamp.pp.row,
-                stamp.nn.row,
-                self.circuit.capacitors.capacitances[index],
-            );
+            let p = stamp.pp.row;
+            let n = stamp.nn.row;
+            let c = self.circuit.capacitors.capacitances[index];
+            if let Some(ordinal) = self.circuit.capacitors.ic_branch_indices[index] {
+                let row = nodes + ordinal;
+                current_port(&mut sample.f, state, p, n, row - 1);
+                sample.f.stamp(row, row, 1.0);
+                sample.f.stamp_rhs(row, -state[row - 1]);
+                sample.q.stamp(row, p, -c);
+                sample.q.stamp(row, n, c);
+                sample.q.stamp_rhs(
+                    row,
+                    sum([(voltage(state, p), c), (voltage(state, n), -c)].into_iter())?,
+                );
+            } else {
+                branch(&mut sample.q, state, p, n, c);
+            }
         }
         let rb = &self.circuit.resistor_branches;
         let l = &self.circuit.inductors;

@@ -113,11 +113,6 @@ impl<'a> PreparedEventCircuit<'a> {
                 .value_expressions
                 .iter()
                 .all(Option::is_none)
-            && circuit
-                .capacitors
-                .ic_branch_indices
-                .iter()
-                .all(Option::is_none)
     }
 
     /// The ordinary line path can opt into physical events only when every
@@ -288,7 +283,7 @@ impl<'a> PreparedEventCircuit<'a> {
             ));
         }
         if c.value_expressions.iter().any(Option::is_some)
-            || c.ic_branch_indices.iter().any(Option::is_some)
+            || (!use_descriptor && c.ic_branch_indices.iter().any(Option::is_some))
         {
             return Err(error(
                 "capacitor expressions and auxiliary current rows require their event descriptor",
@@ -308,9 +303,9 @@ impl<'a> PreparedEventCircuit<'a> {
         let mut ports = Vec::new();
         let mut equations = vec![None; size - nodes];
         let mut constant_sources = Vec::new();
-        let claim = |equations: &mut [Option<EventBranchEquation>],
+        let claim = |equations: &mut [Option<Option<EventBranchEquation>>],
                      ordinal: usize,
-                     row: EventBranchEquation|
+                     row: Option<EventBranchEquation>|
          -> Result<()> {
             let slot = ordinal
                 .checked_sub(1)
@@ -351,6 +346,11 @@ impl<'a> PreparedEventCircuit<'a> {
                 check_abort(abort)?;
             }
             terminals(stamp.pp.row, stamp.nn.row)?;
+            if let Some(ordinal) = c.ic_branch_indices[index] {
+                // I_C - d(C*V)/dt is owned by the full descriptor. It is
+                // neither an algebraic voltage constraint nor a flux row.
+                claim(&mut equations, ordinal, None)?;
+            }
             if c.capacitances[index] != 0.0 {
                 ResourceLimitError::ensure(
                     ResourceKind::ResultValues,
@@ -388,7 +388,7 @@ impl<'a> PreparedEventCircuit<'a> {
             claim(
                 &mut equations,
                 ordinal,
-                EventBranchEquation::Algebraic(options.voltage_tolerance),
+                Some(EventBranchEquation::Algebraic(options.voltage_tolerance)),
             )?;
         }
         for index in 0..is.len() {
@@ -415,7 +415,7 @@ impl<'a> PreparedEventCircuit<'a> {
             claim(
                 &mut equations,
                 source.branch_ordinal,
-                EventBranchEquation::Algebraic(options.voltage_tolerance),
+                Some(EventBranchEquation::Algebraic(options.voltage_tolerance)),
             )?;
         }
         for source in &circuit.behavioral_sources.current_sources {
@@ -473,7 +473,7 @@ impl<'a> PreparedEventCircuit<'a> {
             claim(
                 &mut equations,
                 source.branch_indices[index],
-                EventBranchEquation::Algebraic(options.voltage_tolerance),
+                Some(EventBranchEquation::Algebraic(options.voltage_tolerance)),
             )?;
             ResourceLimitError::ensure(
                 ResourceKind::ResultValues,
@@ -549,7 +549,7 @@ impl<'a> PreparedEventCircuit<'a> {
             claim(
                 &mut equations,
                 source.branch_indices[index],
-                EventBranchEquation::Algebraic(options.voltage_tolerance),
+                Some(EventBranchEquation::Algebraic(options.voltage_tolerance)),
             )?;
             if !use_descriptor {
                 let equation = Self::ccvs_equation(circuit, index).ok_or_else(|| {
@@ -622,7 +622,7 @@ impl<'a> PreparedEventCircuit<'a> {
                 } else {
                     EventBranchEquation::Algebraic(options.voltage_tolerance)
                 };
-                claim(&mut equations, ordinal, row)?;
+                claim(&mut equations, ordinal, Some(row))?;
                 if value == 0.0 {
                     constant_sources.push(EventVoltageSource {
                         positive: p,
@@ -674,7 +674,7 @@ impl<'a> PreparedEventCircuit<'a> {
                 claim(
                     &mut equations,
                     row - nodes,
-                    EventBranchEquation::Algebraic(options.voltage_tolerance),
+                    Some(EventBranchEquation::Algebraic(options.voltage_tolerance)),
                 )?;
             }
             model.resolve_mna_rbi_branch(nodes);

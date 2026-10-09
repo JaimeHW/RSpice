@@ -616,9 +616,10 @@ fn linear_actions_survive_live_delivery_compression_and_packed_restart() {
             }
         }
     }
-    for text in [
-        "CCVS retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
-        "Current-driven retained actions\nI1 0 out PWL(0 0 1n 0 1n 1m 2n 1m 2n 0 4n 0)\nR1 out winding 10\nL1 winding 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
+    for (text, startup) in [
+        ("CCVS retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n", TransientStartupMode::OperatingPoint),
+        ("Capacitor IC retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p IC=0\nH1 out 0 V1 3\nC2 out 0 5p IC=0\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n", TransientStartupMode::Uic),
+        ("Current-driven retained actions\nI1 0 out PWL(0 0 1n 0 1n 1m 2n 1m 2n 0 4n 0)\nR1 out winding 10\nL1 winding 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n", TransientStartupMode::OperatingPoint),
     ] {
         let deck = Netlist::parse(text).unwrap();
         for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
@@ -640,7 +641,7 @@ fn linear_actions_survive_live_delivery_compression_and_packed_restart() {
                         &deck,
                         4e-9,
                         5e-12,
-                        TransientStartupMode::OperatingPoint,
+                        startup,
                         &[1e-9, 1.5e-9],
                         &live,
                     )
@@ -796,19 +797,36 @@ fn current_driven_inductor_keeps_flux_actions_out_of_finite_voltage() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn ccvs_nonbinary_startup_preserves_exact_stored_charge() {
-    let deck = Netlist::parse("Unchanged stored charge\nV1 in 0 DC .4 PWL(0 .4 1n .4 2n .4)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0\n.save all\n.end\n").unwrap();
-    let result = ccvs_engine().run_tran(&deck, 0.5e-9, 5e-12).unwrap();
-    for trace in result.voltage_impulses.as_ref().unwrap() {
-        assert!(
-            trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
-            "{trace:?}"
-        );
-    }
-    for trace in result.current_impulses.as_ref().unwrap() {
-        assert!(
-            trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
-            "{trace:?}"
-        );
+    use rspice_core::engine::{SpiceDialect, TransientStartupMode};
+    for auxiliary in [false, true] {
+        let (c1, c2) = if auxiliary {
+            ("IC=.4", "IC=0")
+        } else {
+            ("", "")
+        };
+        let deck = Netlist::parse(&format!("Unchanged stored charge\nV1 in 0 DC .4 PWL(0 .4 1n .4 2n .4)\nC1 in 0 2p {c1}\nH1 out 0 V1 3\nC2 out 0 5p {c2}\nR2 out 0 10\n.options GMIN=0\n.save all\n.end\n")).unwrap();
+        let result = if auxiliary {
+            let mut config =
+                rspice_core::SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+            config.convergence_config.gmin_target = 0.0;
+            Engine::new(config)
+                .run_tran_with_startup_mode(&deck, 0.5e-9, 5e-12, TransientStartupMode::Uic)
+                .unwrap()
+        } else {
+            ccvs_engine().run_tran(&deck, 0.5e-9, 5e-12).unwrap()
+        };
+        for trace in result.voltage_impulses.as_ref().unwrap() {
+            assert!(
+                trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
+                "{trace:?}"
+            );
+        }
+        for trace in result.current_impulses.as_ref().unwrap() {
+            assert!(
+                trace.complete && trace.points.is_empty() && trace.derivatives.is_empty(),
+                "{trace:?}"
+            );
+        }
     }
 }
 
@@ -935,6 +953,97 @@ fn current_driven_winding_startup_keeps_authored_flux_and_regular_source_slopes(
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_capacitor_ic_preserves_ccvs_startup_transfer() {
+    use rspice_core::engine::{SimulationConfig, SpiceDialect, TransientStartupMode};
+    let deck = Netlist::parse("Xyce capacitor IC transfer\nV1 in 0 1\nC1 in 0 2p IC=.25\nH1 out 0 V1 3\nL1 out 0 5n IC=.002\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+    config.convergence_config.gmin_target = 0.0;
+    let result = Engine::new(config)
+        .run_tran_with_startup_mode(&deck, 1e-9, 5e-12, TransientStartupMode::Uic)
+        .unwrap();
+    let winding = result.try_branch_current_waveform_named("l1").unwrap();
+    // Xyce 7.10 gives I(L1)=1.1 mA after the first transfer. Independently,
+    // delta Q=2 pF*(1-.25) V and delta flux=-3 ohms*delta Q=-4.5 pV*s.
+    action_close(*winding.last().unwrap(), 0.0011);
+    let actions = action_voltage(&result, "out");
+    assert!(actions.complete);
+    assert_eq!(actions.points.len(), 1);
+    assert_eq!(actions.points[0].time, 0.0);
+    action_close(actions.points[0].volt_seconds, -4.5e-12);
+    action_close(
+        action_current(&result, "v1").points[0].charge_coulombs,
+        -1.5e-12,
+    );
+    action_close(
+        action_current(&result, "c1").points[0].charge_coulombs,
+        1.5e-12,
+    );
+    for &value in result.try_voltage_waveform_named("out").unwrap() {
+        action_close(value, 0.0);
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_capacitor_ic_preserves_differential_charge_and_slope() {
+    use rspice_core::engine::{SimulationConfig, SpiceDialect, TransientStartupMode};
+    use rspice_core::numerics::integration::IntegrationMethod;
+    for (terminals, initial, sign) in [("a b", ".25", 1.0), ("b a", "-.25", -1.0)] {
+        for method in [
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            let deck = Netlist::parse(&format!("Differential capacitor control\nVref b 0 .125\nV1 a b PWL(0 .25 1n .25 1n 1.25 2n 2.25 3n 2.25)\nC1 {terminals} 2p IC={initial}\nCzero a b 0 IC=.25\nH1 out 0 V1 {}\nL1 out 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n", -3.0 * sign)).unwrap();
+            let mut config = SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce);
+            config.integration_method = method;
+            config.convergence_config.gmin_target = 0.0;
+            let result = Engine::new(config)
+                .run_tran_with_startup_mode(&deck, 3e-9, 5e-12, TransientStartupMode::Uic)
+                .unwrap();
+            // delta Q=2 pC and I=C*dV/dt=2 mA during the one-ns ramp.
+            // H=3 ohms transfers 6 pV*s, then 6 mV, into L=5 nH.
+            let current = action_current(&result, "c1");
+            assert!(current.complete);
+            assert_eq!(current.points.len(), 1, "{current:?}");
+            assert_eq!(current.points[0].time, 1e-9);
+            action_close(current.points[0].charge_coulombs, sign * 2e-12);
+            let voltage = action_voltage(&result, "out");
+            assert_eq!(voltage.points.len(), 1, "{voltage:?}");
+            action_close(voltage.points[0].volt_seconds, sign * 6e-12);
+            let cap = result.try_branch_current_waveform_named("c1").unwrap();
+            let zero = result.try_branch_current_waveform_named("czero").unwrap();
+            let winding = result.try_branch_current_waveform_named("l1").unwrap();
+            let output = result.try_voltage_waveform_named("out").unwrap();
+            for (i, &time) in result.time.iter().enumerate() {
+                let ramp = (1e-9..2e-9).contains(&time);
+                let expected = if ramp { sign * 0.002 } else { 0.0 };
+                assert!(
+                    (cap[i] - expected).abs() < 1e-12,
+                    "{method:?} at {time:e}: {} != {expected}",
+                    cap[i]
+                );
+                assert!((output[i] - 3.0 * expected).abs() < 3e-12);
+                assert_eq!(zero[i], 0.0);
+                let expected_l = if time < 1e-9 {
+                    0.0
+                } else {
+                    sign * (0.0012 + 1.2e6 * (time - 1e-9).min(1e-9))
+                };
+                assert!(
+                    (winding[i] - expected_l).abs() < 1e-11,
+                    "{method:?} at {time:e}: {} != {expected_l}",
+                    winding[i]
+                );
+            }
+            let zero = action_current(&result, "czero");
+            assert!(zero.complete && zero.points.is_empty() && zero.derivatives.is_empty());
         }
     }
 }

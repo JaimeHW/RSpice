@@ -396,3 +396,64 @@ fn prepared_event_circuit_checks_storage_budget_and_refuses_auxiliary_capacitor_
         "{failure}"
     );
 }
+
+#[test]
+fn capacitor_current_rows_keep_physical_charge_and_exclusive_ownership() {
+    let deck = crate::Netlist::parse(
+        "Capacitor rows\nVp p 0 2\nVn n 0 .5\nC1 p n 2 IC=.25\nC0 p n 0 IC=.25\n.end\n",
+    )
+    .unwrap();
+    let engine = crate::Engine::new(
+        crate::SimulationConfig::default().with_spice_dialect(crate::engine::SpiceDialect::Xyce),
+    );
+    let mut circuit = engine.build_circuit(&deck).unwrap();
+    let options = options();
+    let mut state = vec![0.0; circuit.matrix_size()];
+    let p = circuit.capacitors.stamps[0].pp.row;
+    let n = circuit.capacitors.stamps[0].nn.row;
+    let c = circuit.num_nodes() + circuit.capacitors.ic_branch_indices[0].unwrap() - 1;
+    let zero = circuit.num_nodes() + circuit.capacitors.ic_branch_indices[1].unwrap() - 1;
+    state[p - 1] = 2.0;
+    state[n - 1] = 0.5;
+    state[c] = 0.75;
+    let mut sampler = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort).unwrap();
+    assert!(sampler.linear_descriptor().is_some());
+    assert!(
+        sampler
+            .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+            .is_err()
+    );
+    let sample = sampler
+        .sample(
+            0.0,
+            SourceTimeSide::RightLimit,
+            &state,
+            &[],
+            &options,
+            &NoAbort,
+        )
+        .unwrap();
+    // The auxiliary capacitor owns Q=-C*(Vp-Vn), F=I_C. Its charge
+    // must not be counted a second time in the terminal KCL rows.
+    close(sample.f.values[p - 1], 0.75, 0.0);
+    close(sample.f.values[n - 1], -0.75, 0.0);
+    close(sample.f.values[c], 0.75, 0.0);
+    close(sample.q.values[c], -3.0, 0.0);
+    assert!(
+        sample
+            .q
+            .values
+            .iter()
+            .enumerate()
+            .all(|(i, &q)| i == c || q == 0.0)
+    );
+    assert_eq!(sample.f.rows[zero], vec![(zero, 1.0)]);
+    drop(sampler);
+    // A descriptor-only row still claims the branch, including when another
+    // descriptor-only capacitor tries to use the same current coordinate.
+    circuit.capacitors.ic_branch_indices[1] = circuit.capacitors.ic_branch_indices[0];
+    let failure = PreparedEventCircuit::new(&circuit, 1e-20, &options, &NoAbort)
+        .err()
+        .unwrap();
+    assert!(failure.to_string().contains("multiple owners"), "{failure}");
+}
