@@ -359,9 +359,10 @@ fn running_study_cancellation_joins_the_solver_and_keeps_stderr_json() {
 }
 
 #[test]
-fn study_run_refuses_untransported_limits_and_honors_deadlines() {
+fn study_run_refuses_unsupported_route_limits_and_honors_deadlines() {
     let root = common::test_dir("study-runtime-policy");
-    let document = fixture(&root);
+    let mut document = fixture(&root);
+    document["tasks"] = json!([{ "id": "periodic", "analysis": "Pac" }]);
     let path = save(&root, &document);
     let destination = root.join("result.json");
     std::fs::write(
@@ -406,4 +407,51 @@ fn structured_sweep_gap_has_a_capability_exit_status() {
     assert_eq!(output.status.code(), Some(69), "{output:?}");
     let error: Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(error["error"]["capability"], "study.structured_sweeps");
+}
+
+#[test]
+fn study_run_enforces_captured_execution_limits_without_replacing_output() {
+    let root = common::test_dir("study-execution-limits");
+    let document = fixture(&root);
+    let path = save(&root, &document);
+    let destination = root.join("result.json");
+    std::fs::write(&destination, "previous result").unwrap();
+    let baseline = invoke(&root, &["study", "plan", path.to_str().unwrap(), "--json"]);
+    assert!(baseline.status.success(), "{baseline:?}");
+    let baseline: Value = serde_json::from_slice(&baseline.stdout).unwrap();
+    for (setting, resource, limit) in [
+        ("max_matrix_unknowns", "matrix_unknowns", 2),
+        ("max_analysis_points", "analysis_points", 2),
+        ("max_result_values", "result_values", 1),
+    ] {
+        std::fs::write(
+            root.join("config.toml"),
+            format!("[resources]\n{setting} = {limit}\n"),
+        )
+        .unwrap();
+        let planned = invoke(&root, &["study", "plan", path.to_str().unwrap(), "--json"]);
+        assert!(planned.status.success(), "{planned:?}");
+        let planned: Value = serde_json::from_slice(&planned.stdout).unwrap();
+        assert_eq!(planned["execution_limits"][setting], limit);
+        assert_ne!(planned["snapshot_digest"], baseline["snapshot_digest"]);
+        let output = invoke(
+            &root,
+            &[
+                "study",
+                "run",
+                path.to_str().unwrap(),
+                "--output",
+                destination.to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert_eq!(output.status.code(), Some(75), "{setting}: {output:?}");
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"]["resource"], resource, "{error}");
+        assert_eq!(error["error"]["limit"], limit, "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&destination).unwrap(),
+            "previous result"
+        );
+    }
 }

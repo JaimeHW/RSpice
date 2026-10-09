@@ -152,6 +152,7 @@ impl PreparedStudy {
             "circuit": self.circuit_path,
             "task_count": tasks.len(),
             "tasks": tasks,
+            "execution_limits": self.snapshot.execution_limits(),
             "snapshot_digest": metadata.snapshot_digest,
             "source_digest": metadata.source_digest,
             "target": metadata.target,
@@ -182,7 +183,7 @@ fn prepare(path: &Path, config: &Config) -> Result<PreparedStudy, CliError> {
         &crate::abort::ProcessAbort,
     )
     .map_err(|error| map_document_error(error, &path))?;
-    validate_execution_policy(config)?;
+    validate_execution_policy(config, &document)?;
     let circuit_path = path
         .parent()
         .expect("absolute file has parent")
@@ -219,26 +220,22 @@ fn prepare(path: &Path, config: &Config) -> Result<PreparedStudy, CliError> {
     })
 }
 
-fn validate_execution_policy(config: &Config) -> Result<(), CliError> {
-    // These seven limits govern captured source preparation. The shared
-    // runner still owns default execution limits; accepting any other custom
-    // ceiling here would silently execute a different policy from the request.
-    let defaults = rspice_core::ResourceLimits::default();
-    let mut execution = config.resources.limits();
-    execution.max_netlist_bytes = defaults.max_netlist_bytes;
-    execution.max_netlist_lines = defaults.max_netlist_lines;
-    execution.max_expanded_source_bytes = defaults.max_expanded_source_bytes;
-    execution.max_dependency_source_bytes = defaults.max_dependency_source_bytes;
-    execution.max_include_depth = defaults.max_include_depth;
-    execution.max_hierarchy_depth = defaults.max_hierarchy_depth;
-    execution.max_flattened_elements = defaults.max_flattened_elements;
-    if execution != defaults {
-        return Err(rspice_core::SimulationError::UnsupportedCapability(
-            Box::new(rspice_core::UnsupportedCapabilityError::new(
-                "study.execution_resource_overrides",
-                "study dispatch does not yet transport custom execution limits; use default execution resource settings. Source preparation limits remain configurable.",
-            )),
-        ).into());
+fn validate_execution_policy(config: &Config, document: &StudyDocument) -> Result<(), CliError> {
+    for task in &document.tasks {
+        if let Some(reason) = rspice_simulation::execution::execution_resource_policy_blocker(
+            &task.analysis,
+            config.resources.limits(),
+        ) {
+            return Err(
+                rspice_core::SimulationError::UnsupportedCapability(Box::new(
+                    rspice_core::UnsupportedCapabilityError::new(
+                        "study.execution_resource_overrides",
+                        format!("study task '{}': {reason}", task.id),
+                    ),
+                ))
+                .into(),
+            );
+        }
     }
     Ok(())
 }

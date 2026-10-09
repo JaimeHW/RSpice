@@ -112,8 +112,10 @@ The typed analysis representation is shared with application execution.
 PAC/PXF/PNOISE/PSTB additionally require a matching `periodic` object containing
 `kind` and complete typed `settings`. Structured sweep settings, external compiled
 model binding, and conversion of saved study artifacts are not exposed yet.
-Custom execution resource limits are refused explicitly until the shared runner
-transports them. The seven source limits (`max_netlist_bytes`, `max_netlist_lines`,
+Execution limits are captured in the prepared snapshot and enforced for OP, DC,
+AC (including AC data), transient (including transient noise), noise, pole-zero,
+and sensitivity analyses. Advanced analysis routes still explicitly refuse custom
+execution limits until they enforce the same policy. The seven source limits (`max_netlist_bytes`, `max_netlist_lines`,
 `max_expanded_source_bytes`, `max_dependency_source_bytes`, `max_include_depth`,
 `max_hierarchy_depth`, and `max_flattened_elements`) remain configurable.
 Successful preparation is not evidence of convergence or numerical qualification.
