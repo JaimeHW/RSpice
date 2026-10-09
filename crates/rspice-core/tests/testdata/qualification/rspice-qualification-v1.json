@@ -1666,7 +1666,7 @@
       "note": "packed envelope size relative to the canonical text it authenticates",
       "tolerance": 0.2,
       "unit": "ratio",
-      "value": 0.45438996579247437
+      "value": 0.3628260151865302
     }
   ],
   "schema": "rspice-qualification-baseline",

@@ -855,6 +855,9 @@ pub struct SolutionDependentCapacitorState {
     pub q_prev: Value,
     /// Charge at the accepted solution before `q_prev`.
     pub q_prev_prev: Value,
+    /// Last accepted charge increment, retained before adding it to Q.
+    /// Gear history must not recover this by subtracting rounded Q samples.
+    pub charge_increment_prev: Value,
     /// `dC/dX` at the previous accepted solution.
     pub dcdx_prev: Vec<(usize, Value)>,
     /// `dQ/dX` at the previous accepted solution.
@@ -867,6 +870,7 @@ impl Default for SolutionDependentCapacitorState {
             c_prev: Value::NAN,
             q_prev: Value::NAN,
             q_prev_prev: Value::NAN,
+            charge_increment_prev: 0.0,
             dcdx_prev: Vec::new(),
             dqdx_prev: Vec::new(),
         }
@@ -1327,6 +1331,7 @@ impl Capacitors {
                 state.c_prev = c;
                 state.q_prev = c * v_dc;
                 state.q_prev_prev = state.q_prev;
+                state.charge_increment_prev = 0.0;
                 state.dcdx_prev = linearization.partials;
                 state.dqdx_prev = dqdx;
                 self.effective_capacitances[index] = c;
@@ -1377,6 +1382,7 @@ impl Capacitors {
                 c_prev: capacitance,
                 q_prev: 0.0,
                 q_prev_prev: 0.0,
+                charge_increment_prev: 0.0,
                 dcdx_prev: linearization.partials,
                 dqdx_prev: Vec::new(),
             });
@@ -1412,7 +1418,7 @@ impl Capacitors {
         solution: &[Value],
         step: SolutionDependentCompanionStep<'_>,
     ) -> Result<(), String> {
-        self.stamp_solution_dependent_companion::<false>(matrix, rhs, solution, step, None, false)
+        self.stamp_solution_dependent_companion(matrix, rhs, solution, step, None, false)
     }
 
     /// The shared discrete-step Jacobian plus optional physical-current
@@ -1427,7 +1433,7 @@ impl Capacitors {
         currents: &mut [Value],
         physical_probe: bool,
     ) -> Result<(), String> {
-        self.stamp_solution_dependent_companion::<true>(
+        self.stamp_solution_dependent_companion(
             matrix,
             rhs,
             solution,
@@ -1438,7 +1444,7 @@ impl Capacitors {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn stamp_solution_dependent_companion<const SHOOTING: bool>(
+    fn stamp_solution_dependent_companion(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
@@ -1524,6 +1530,7 @@ impl Capacitors {
                 state.c_prev = capacitance;
                 state.q_prev = capacitance * self.v_prev[index];
                 state.q_prev_prev = state.q_prev;
+                state.charge_increment_prev = 0.0;
                 state.dcdx_prev = linearization.partials.clone();
                 state.dqdx_prev = linearization
                     .partials
@@ -1535,37 +1542,26 @@ impl Capacitors {
             let delta_v = v_new - self.v_prev[index];
             let average_capacitance = 0.5 * (state.c_prev + capacitance);
             let charge_increment = average_capacitance * delta_v;
-            let charge = state.q_prev + charge_increment;
             let dqd_x = linearization
                 .partials
                 .iter()
                 .map(|&(column, dcdx)| (column, 0.5 * delta_v * dcdx));
 
-            let current = if SHOOTING {
-                // The arbitrary charge origin cancels analytically. Preserve
-                // a tiny new increment before adding it to a large history.
-                coeff.capacitor_current(
-                    1.0,
-                    dt,
-                    charge_increment,
-                    0.0,
-                    state.q_prev_prev - state.q_prev,
-                    self.i_prev[index],
-                )
-            } else {
-                let mut current = charge_factor * charge - coeff.coeff_v_n / dt * state.q_prev;
-                if coeff.needs_two_history {
-                    current -= coeff.coeff_v_n_minus_1 / dt * state.q_prev_prev;
-                }
-                if coeff.coeff_i_n != 0.0 {
-                    current -= coeff.coeff_i_n * self.i_prev[index];
-                }
-                current
-            };
+            // Differentiate charge increments before adding the arbitrary
+            // charge origin. Retain the preceding increment independently for
+            // Gear; subtracting two accumulated Q samples loses the same bits.
+            let current = coeff.capacitor_current(
+                1.0,
+                dt,
+                charge_increment,
+                0.0,
+                -state.charge_increment_prev,
+                self.i_prev[index],
+            );
             if let Some(currents) = currents.as_deref_mut() {
                 currents[index] = current;
             }
-            if SHOOTING && physical_probe {
+            if physical_probe {
                 // Certify the real current, without a large Jacobian*x term
                 // inflating the residual's relative tolerance.
                 if let Some(ordinal) = self.ic_branch_indices[index] {
@@ -1687,7 +1683,6 @@ impl Capacitors {
         if !dt.is_finite() || dt <= 0.0 {
             return;
         }
-        let charge_factor = coeff.coeff_g / dt;
         for index in 0..self.stamps.len() {
             if self
                 .value_expressions
@@ -1728,6 +1723,7 @@ impl Capacitors {
                 state.c_prev = capacitance;
                 state.q_prev = capacitance * self.v_prev[index];
                 state.q_prev_prev = state.q_prev;
+                state.charge_increment_prev = 0.0;
                 state.dcdx_prev = linearization.partials.clone();
                 state.dqdx_prev = linearization
                     .partials
@@ -1736,7 +1732,8 @@ impl Capacitors {
                     .collect();
             }
             let delta_v = v_new - self.v_prev[index];
-            let charge = state.q_prev + 0.5 * (state.c_prev + capacitance) * delta_v;
+            let charge_increment = 0.5 * (state.c_prev + capacitance) * delta_v;
+            let charge = state.q_prev + charge_increment;
             let mut dqd_x = Vec::with_capacity(linearization.partials.len());
             for (column, dcdx) in &linearization.partials {
                 let old_dcdx = solution_partial(&state.dcdx_prev, *column);
@@ -1753,16 +1750,18 @@ impl Capacitors {
                     dqd_x.push((*column, *old_dqdx + 0.5 * old_dcdx * delta_v));
                 }
             }
-            let mut current = charge_factor * charge - coeff.coeff_v_n / dt * state.q_prev;
-            if coeff.needs_two_history {
-                current -= coeff.coeff_v_n_minus_1 / dt * state.q_prev_prev;
-            }
-            if coeff.coeff_i_n != 0.0 {
-                current -= coeff.coeff_i_n * self.i_prev[index];
-            }
+            let current = coeff.capacitor_current(
+                1.0,
+                dt,
+                charge_increment,
+                0.0,
+                -state.charge_increment_prev,
+                self.i_prev[index],
+            );
 
             state.q_prev_prev = state.q_prev;
             state.q_prev = charge;
+            state.charge_increment_prev = charge_increment;
             state.c_prev = capacitance;
             state.dcdx_prev = linearization.partials;
             state.dqdx_prev = dqd_x;
@@ -2570,6 +2569,8 @@ mod capacitor_state_tests {
             for method in [
                 IntegrationMethod::BackwardEuler,
                 IntegrationMethod::Trapezoidal,
+                IntegrationMethod::Gear2,
+                IntegrationMethod::TrapGear,
             ] {
                 let expression = SolutionDependentCapacitor::new(
                     "C1".into(),
@@ -2593,6 +2594,7 @@ mod capacitor_state_tests {
                 // must not alter this timestep's current or Newton Jacobian.
                 history.q_prev = 1e20;
                 history.q_prev_prev = 1e20;
+                history.charge_increment_prev = 0.03;
                 history.dqdx_prev = vec![(0, 1e30), (1, -1e30)];
                 let entries: Vec<_> = (0..3)
                     .flat_map(|row| (0..3).map(move |col| (row, col, 0.0)))
@@ -2619,7 +2621,8 @@ mod capacitor_state_tests {
                 .unwrap();
                 // Cprev=1.85, Cnew=2.23 (SDT=.07), dC/dctrl=2+.1.
                 let rate = coeff.coeff_g / 0.2;
-                let expected = rate * 0.204 - coeff.coeff_i_n * 0.2;
+                let expected =
+                    rate * 0.204 + coeff.coeff_v_n_minus_1 / 0.2 * 0.03 - coeff.coeff_i_n * 0.2;
                 assert_close(currents[0], expected);
                 let row = if branch.is_some() { 2 } else { 0 };
                 let scale = if branch.is_some() {
@@ -2632,6 +2635,7 @@ mod capacitor_state_tests {
                     assert_close(matrix.values_mut()[entry.offset()], scale * derivative);
                 }
                 let expected_matrix = matrix.values_mut().to_vec();
+                let expected_rhs = rhs;
                 matrix.clear_values();
                 rhs.fill(0.0);
                 caps.stamp_solution_dependent_transient_companion(
@@ -2644,6 +2648,7 @@ mod capacitor_state_tests {
                 // Ordinary transient uses the same fixed-history step
                 // derivative, even when old trajectory derivatives are huge.
                 assert_eq!(matrix.values_mut(), expected_matrix);
+                assert_eq!(rhs, expected_rhs);
                 matrix.clear_values();
                 rhs.fill(0.0);
                 caps.stamp_solution_dependent_shooting_companion(
@@ -2672,6 +2677,37 @@ mod capacitor_state_tests {
                     1e20
                 );
                 assert_eq!(caps.accepted_integrals().collect::<Vec<_>>(), [0.0]);
+                let mut accepted = solution;
+                accepted[2] = expected;
+                caps.update_solution_dependent_state_with_coefficients(
+                    &accepted, 0.2, 0.2, &coeff, 2,
+                );
+                let history = caps.value_expression_states[0].as_ref().unwrap();
+                assert_eq!(history.q_prev, 1e20);
+                assert_eq!(history.q_prev_prev, 1e20);
+                assert_close(history.charge_increment_prev, 0.204);
+                assert_close(caps.i_prev[0], expected);
+                matrix.clear_values();
+                rhs.fill(0.0);
+                caps.stamp_solution_dependent_shooting_companion(
+                    &mut matrix,
+                    &mut rhs,
+                    &[0.7, 0.5, 0.0],
+                    SolutionDependentCompanionStep {
+                        time: 0.4,
+                        dt: 0.2,
+                        coeff: &coeff,
+                        num_nodes: 2,
+                    },
+                    &mut currents,
+                    true,
+                )
+                .unwrap();
+                // SDT=.16, Cnew=2.65; the retained preceding increment is .204
+                // even though both absolute charge samples still equal 1e20.
+                let next = rate * 0.244 + coeff.coeff_v_n_minus_1 / 0.2 * 0.204
+                    - coeff.coeff_i_n * expected;
+                assert_close(currents[0], next);
             }
         }
     }

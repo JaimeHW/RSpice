@@ -536,3 +536,132 @@ fn expression_capacitor_control_copy_preserves_the_manufactured_waveform() {
         }
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn expression_capacitor_current_retains_small_increments_after_capacitance_changes() {
+    use rspice_core::engine::{
+        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode,
+    };
+    // A control voltage lowers C continuously from 1 uF+1 pF to 1 pF in 1 ns. On a 1 V/us
+    // ramp, its late current is exactly 1 uA regardless of earlier charge.
+    // The delayed ramp seeds a consistent current for the order-two methods;
+    // the immediate ramp retains the independently reproduced BE failure.
+    for delayed in [false, true] {
+        for (terminals, sign) in [("out 0", 1.0), ("0 out", -1.0)] {
+            for with_ic in [false, true] {
+                let source = if delayed {
+                    "Vdrive out 0 PWL(0 1 1.2n 1 2.2n 1.001)"
+                } else {
+                    "Bdrive out 0 V={1+1Meg*time}"
+                };
+                let ic = if with_ic {
+                    format!(" IC={sign}")
+                } else {
+                    String::new()
+                };
+                let deck = Netlist::parse(&format!(
+                    "Capacitor current precision\n{source}\nVctrl ctrl 0 PWL(0 1 1n 0)\nC1 {terminals} C={{1p+1u*V(ctrl)}}{ic}\n.ic V(out)=1 V(ctrl)=1\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save all\n.end\n"
+                )).unwrap();
+                for method in [
+                    IntegrationMethod::BackwardEuler,
+                    IntegrationMethod::Trapezoidal,
+                    IntegrationMethod::Gear2,
+                    IntegrationMethod::TrapGear,
+                ] {
+                    if !delayed && method != IntegrationMethod::BackwardEuler {
+                        continue;
+                    }
+                    let label = format!("{delayed}/{terminals}/{with_ic}/{method:?}");
+                    let engine = Engine::new(SimulationConfig {
+                        integration_method: method,
+                        max_timestep: 1e-12,
+                        min_timestep: 1e-15,
+                        ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
+                    });
+                    let (result, checkpoints) = engine
+                        .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                            &deck,
+                            2e-9,
+                            1e-12,
+                            TransientStartupMode::Uic,
+                            &[1.6e-9],
+                            &rspice_core::NoAbort,
+                        )
+                        .unwrap_or_else(|error| panic!("{label}: {error}"));
+                    let voltage = result.try_voltage_waveform_named("out").unwrap();
+                    let current = result.try_branch_current_waveform_named("c1").unwrap();
+                    let source = result
+                        .try_branch_current_waveform_named(if delayed {
+                            "vdrive"
+                        } else {
+                            "bdrive"
+                        })
+                        .unwrap();
+                    let mut max_current_error: f64 = 0.0;
+                    let mut max_source_error: f64 = 0.0;
+                    for (i, &time) in result.time.iter().enumerate() {
+                        let ramp_time = if delayed {
+                            (time - 1.2e-9).max(0.0)
+                        } else {
+                            time
+                        };
+                        assert!(
+                            (voltage[i] - (1.0 + 1e6 * ramp_time)).abs() < 1e-12,
+                            "{label}: voltage at {time:e}"
+                        );
+                        if time > if delayed { 1.5e-9 } else { 1.2e-9 } {
+                            max_current_error =
+                                max_current_error.max((sign * current[i] - 1e-6).abs());
+                            max_source_error = max_source_error.max((source[i] + 1e-6).abs());
+                            assert!(
+                                (sign * current[i] + source[i]).abs() < 1e-13,
+                                "{label}: KCL at {time:e}"
+                            );
+                        }
+                    }
+                    eprintln!(
+                        "{label}: {} points, capacitor error={max_current_error:e}, source error={max_source_error:e}",
+                        result.time.len()
+                    );
+                    assert!(
+                        max_current_error < 1e-11,
+                        "{label}: capacitor error {max_current_error:e}"
+                    );
+                    assert!(
+                        max_source_error < 1e-11,
+                        "{label}: source error {max_source_error:e}"
+                    );
+                    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                    assert_eq!(checkpoints.len(), 1);
+                    let checkpoint = TransientCheckpoint::from_bytes(
+                        &checkpoints[0]
+                            .checkpoint
+                            .to_bytes(TransientCheckpointEncoding::Packed)
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    let (resumed, _) = engine
+                        .run_tran_resume(&deck, &checkpoint, 2e-9, 1e-12)
+                        .unwrap();
+                    let offset = result
+                        .time
+                        .iter()
+                        .position(|&time| time == checkpoint.time)
+                        .unwrap();
+                    assert_eq!(resumed.time, result.time[offset..], "{label}");
+                    assert_eq!(resumed.voltages.len(), result.voltages.len());
+                    assert_eq!(resumed.branch_currents.len(), result.branch_currents.len());
+                    for (actual, full) in resumed
+                        .voltages
+                        .iter()
+                        .zip(&result.voltages)
+                        .chain(resumed.branch_currents.iter().zip(&result.branch_currents))
+                    {
+                        assert_eq!(actual, &full[offset..], "{label}");
+                    }
+                }
+            }
+        }
+    }
+}
