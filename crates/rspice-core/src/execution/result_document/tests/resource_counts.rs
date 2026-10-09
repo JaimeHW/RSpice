@@ -30,6 +30,55 @@ fn result_limit(document: &AnalysisResultDocument, count: usize) {
 }
 
 #[test]
+fn dc_mismatch_budgets_include_all_report_fields_and_counts() {
+    for retained in 0..=2 {
+        let mut document = document_for(AnalysisResultKind::DcMatch);
+        let ResultPayload::DcMatch(payload) = &mut document.payload else {
+            panic!("DC mismatch")
+        };
+        payload.contributors.truncate(retained);
+        // Independently enumerate the retained wire data: five real report
+        // fields, three integer counts, and four numbers per contributor.
+        let payload_count = 8 + 4 * retained;
+        assert_eq!(super::super::numeric_count::count(payload), payload_count);
+        assert_eq!(document.payload.value_count(), payload_count);
+        assert_eq!(document.scalars.len(), 5);
+        let count = payload_count + 5;
+        assert_eq!(document.total_value_count(), count);
+        result_limit(&document, count);
+        let json = document.to_json().unwrap();
+        for external in [false, true] {
+            let mut limits = crate::ResourceLimits::default();
+            let resource = if external {
+                limits.max_external_data_values = count - 1;
+                crate::ResourceKind::ExternalDataValues
+            } else {
+                limits.max_result_values = count - 1;
+                crate::ResourceKind::ResultValues
+            };
+            // Streaming admission must reject the same over-budget report
+            // before deserializing its contributor vector.
+            for error in [
+                super::super::json_admission::check(&json, &limits, &NoAbort).unwrap_err(),
+                AnalysisResultDocument::from_json_with_limits_and_abort(
+                    &json,
+                    &limits,
+                    &NoAbort,
+                    u64::MAX,
+                )
+                .unwrap_err(),
+            ] {
+                assert!(
+                    matches!(error, ResultDocumentError::ResourceLimit(ref error)
+                    if error.resource == resource && error.requested == count && error.limit == count - 1),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn rf_and_monte_carlo_budgets_include_every_retained_data_array() {
     let sp = document_for(AnalysisResultKind::SParameters);
     // One port number and impedance, plus the separately retained rad/s axis.

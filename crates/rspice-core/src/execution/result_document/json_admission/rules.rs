@@ -196,7 +196,7 @@ fn family(kind: AnalysisResultKind) -> Rule {
                 ("transient", TRANSIENT),
             ],
         ),
-        AnalysisResultKind::DcMatch => Object(4, &[("contributors", Items(4))]),
+        AnalysisResultKind::DcMatch => Object(8, &[("contributors", Items(4))]),
         AnalysisResultKind::Qpss
         | AnalysisResultKind::Qpac
         | AnalysisResultKind::Qpxf

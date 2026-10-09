@@ -209,13 +209,13 @@ impl ResultPayload {
                 .carrier
                 .value_count()
                 .saturating_add(payload.transient.value_count()),
-            // Four numbers per contributor plus the four scalars the payload
-            // carries beside the table.
+            // Four numbers per contributor, five floating-point report fields,
+            // and three contributor/correlation counts.
             Self::DcMatch(payload) => payload
                 .contributors
                 .len()
                 .saturating_mul(4)
-                .saturating_add(4),
+                .saturating_add(8),
         }
     }
 
