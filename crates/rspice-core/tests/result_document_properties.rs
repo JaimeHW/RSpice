@@ -805,7 +805,7 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
     }
     let axis_unit = if matches!(
         analysis,
-        AnalysisKind::Distortion | AnalysisKind::Pac | AnalysisKind::Pxf
+        AnalysisKind::Distortion | AnalysisKind::Pac | AnalysisKind::Pxf | AnalysisKind::Stb
     ) {
         SignalUnit::Hertz
     } else {

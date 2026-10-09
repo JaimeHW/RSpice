@@ -1,6 +1,7 @@
 //! Validate measured crossover pairs and independently measured DC evidence.
 
 use super::*;
+mod curve;
 
 pub(super) fn normalize_legacy(
     document: &mut AnalysisResultDocument,
@@ -83,6 +84,7 @@ pub(super) fn validate(
         ));
     }
     validate_margins(document, abort)?;
+    curve::validate(document, payload, abort)?;
     let mut raw = None;
     let mut db = None;
     for scalar in &document.scalars {

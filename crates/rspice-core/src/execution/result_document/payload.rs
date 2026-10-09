@@ -1583,7 +1583,8 @@ pub struct StabilityPayload {
     pub success: bool,
     pub warnings: Vec<String>,
     /// Nyquist contour, retained separately because it is optional and carries
-    /// its own frequency for each sample.
+    /// its own frequency for each sample. Retained samples form an ordered
+    /// subset of the Bode grid and agree with any retained complex loop gain.
     pub nyquist: Vec<NyquistSample>,
 }
 

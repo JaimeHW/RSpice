@@ -860,6 +860,11 @@ an explicit `--variables` selection may restrict comparison to the requested
 curve. Older flat artifacts without these columns provide only their retained
 curve evidence. Warning text and detailed extraction diagnostics remain in
 typed JSON. Expanded pole columns obey the same table resource limits.
+Typed STB imports also validate positive, increasing frequency coordinates,
+Bode units and derived values, and retained Nyquist samples. When the complete
+complex response is retained, its crossings must reproduce the stated margins
+and crossover count. Partial projections keep missing samples explicitly and
+are checked against the source evidence that remains.
 
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
