@@ -2522,63 +2522,86 @@ fn coupled_winding_history_preserves_the_transformer_orbit_and_continuation() {
 #[test]
 fn three_coupled_windings_match_the_full_flux_matrix_and_its_modes() {
     use num_complex::Complex64;
-    let netlist = Netlist::parse(
-        "three-winding flux\nV1 in 0 SIN(0 1 1meg)\nR1 in a 50\nL1 a 0 100u\nL2 b 0 200u\nR2 b 0 100\nL3 c 0 400u\nR3 c 0 200\nK1 L1 L2 0.25\nK2 L2 L3 0.25\nK3 L1 L3 0.25\n.end\n",
-    ).unwrap();
-    let analysis = Engine::default()
-        .run_pss(
-            &netlist,
-            PssConfig::new(F0)
-                .with_tstab_periods(0)
-                .with_points_per_period(1024)
-                .with_tolerance(1e-11),
-        )
-        .unwrap();
-    let omega = std::f64::consts::TAU * F0;
-    // With R_i/L_i = a and equal k, Z = sqrt(L) (d I + s 11^T) sqrt(L).
-    // Sherman-Morrison gives the exact driven current in every winding.
-    let d = Complex64::new(5e5, omega * 0.75);
-    let s = Complex64::new(0.0, omega * 0.25);
-    let i1 = (1.0 - s / (d + 3.0 * s)) / (100e-6 * d);
-    let i2 = -s / ((100e-6_f64 * 200e-6).sqrt() * d * (d + 3.0 * s));
-    let i3 = -s / ((100e-6_f64 * 400e-6).sqrt() * d * (d + 3.0 * s));
-    for (name, transfer) in [
-        ("a", 1.0 - 50.0 * i1),
-        ("b", -100.0 * i2),
-        ("c", -200.0 * i3),
-    ] {
-        let node = analysis
-            .result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case(name))
+    for amplitude in [1e-3, 1.0, 1e3] {
+        let netlist = Netlist::parse(&format!(
+            "three-winding flux\nV1 in 0 SIN(0 {amplitude} 1meg)\nR1 in a 50\nL1 a 0 100u\nL2 b 0 200u\nR2 b 0 100\nL3 c 0 400u\nR3 c 0 200\nK1 L1 L2 0.25\nK2 L2 L3 0.25\nK3 L1 L3 0.25\n.end\n",
+        )).unwrap();
+        let analysis = Engine::default()
+            .run_pss(
+                &netlist,
+                PssConfig::new(F0)
+                    .with_tstab_periods(0)
+                    .with_points_per_period(1024)
+                    .with_tolerance(1e-11),
+            )
             .unwrap();
-        for (&time, &voltage) in analysis
-            .result
-            .time
-            .iter()
-            .zip(&analysis.result.waveforms[node].values)
-        {
-            let expected = transfer.re * (omega * time).sin() + transfer.im * (omega * time).cos();
-            assert!(
-                (voltage - expected).abs() < 2e-5 * transfer.norm(),
-                "{name} at {time:e}: {voltage:e} vs {expected:e}"
-            );
+        let omega = std::f64::consts::TAU * F0;
+        // With R_i/L_i = a and equal k, Z = sqrt(L) (d I + s 11^T) sqrt(L).
+        // Sherman-Morrison gives the exact driven current in every winding.
+        let d = Complex64::new(5e5, omega * 0.75);
+        let s = Complex64::new(0.0, omega * 0.25);
+        let i1 = (1.0 - s / (d + 3.0 * s)) / (100e-6 * d);
+        let i2 = -s / ((100e-6_f64 * 200e-6).sqrt() * d * (d + 3.0 * s));
+        let i3 = -s / ((100e-6_f64 * 400e-6).sqrt() * d * (d + 3.0 * s));
+        for (name, transfer) in [
+            ("a", 1.0 - 50.0 * i1),
+            ("b", -100.0 * i2),
+            ("c", -200.0 * i3),
+        ] {
+            let node = analysis
+                .result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(name))
+                .unwrap();
+            for (&time, &voltage) in analysis
+                .result
+                .time
+                .iter()
+                .zip(&analysis.result.waveforms[node].values)
+            {
+                let expected = amplitude
+                    * (transfer.re * (omega * time).sin() + transfer.im * (omega * time).cos());
+                assert!(
+                    (voltage - expected).abs() < 2e-5 * amplitude * transfer.norm(),
+                    "{name} at {time:e}: {voltage:e} vs {expected:e}"
+                );
+            }
         }
-    }
-    assert_eq!(analysis.monodromy.len(), 3);
-    let mut multipliers = analysis
-        .floquet_multipliers
-        .iter()
-        .map(|value| {
-            assert!(value.im.abs() < 1e-9);
-            value.re
-        })
-        .collect::<Vec<_>>();
-    multipliers.sort_by(f64::total_cmp);
-    for (actual, flux_eigenvalue) in multipliers.into_iter().zip([0.75, 0.75, 1.5]) {
-        let expected = (-0.5_f64 / flux_eigenvalue).exp();
-        assert!((actual / expected - 1.0).abs() < 2e-6);
+        assert_eq!(analysis.monodromy.len(), 3);
+        // The complete linear period map is independent of drive amplitude.
+        // In sqrt(L)-scaled currents it has one common mode and two equal
+        // transverse modes, giving every matrix entry in closed form.
+        let transverse = (-0.5_f64 / 0.75).exp();
+        let common = (-0.5_f64 / 1.5).exp();
+        let inductances = [100e-6_f64, 200e-6, 400e-6];
+        for (row, entries) in analysis.monodromy.iter().enumerate() {
+            for (col, &actual) in entries.iter().enumerate() {
+                let expected = (inductances[col] / inductances[row]).sqrt()
+                    * ((common - transverse) / 3.0 + if row == col { transverse } else { 0.0 });
+                assert!(
+                    (actual / expected - 1.0).abs() < 2e-6,
+                    "amplitude={amplitude}, monodromy[{row},{col}]={actual:e}, expected={expected:e}"
+                );
+            }
+        }
+
+        let mut multipliers = analysis
+            .floquet_multipliers
+            .iter()
+            .map(|value| {
+                assert!(
+                    value.im.abs() < 1e-9,
+                    "amplitude={amplitude}, multiplier={value:?}"
+                );
+                value.re
+            })
+            .collect::<Vec<_>>();
+        multipliers.sort_by(f64::total_cmp);
+        for (actual, flux_eigenvalue) in multipliers.into_iter().zip([0.75, 0.75, 1.5]) {
+            let expected = (-0.5_f64 / flux_eigenvalue).exp();
+            assert!((actual / expected - 1.0).abs() < 2e-6);
+        }
     }
 }
 
