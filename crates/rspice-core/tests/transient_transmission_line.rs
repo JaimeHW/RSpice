@@ -2,6 +2,92 @@ use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheck
 use rspice_core::netlist::Netlist;
 
 #[test]
+fn finite_behavioral_current_controls_drive_the_analytic_delayed_rl_wave() {
+    use rspice_core::engine::{TransientCheckpointEncoding, TransientStartupMode};
+    let omega = std::f64::consts::TAU * 1e9;
+    let reactance = omega * 1e-6;
+    let current = |time: f64| {
+        let time = time.max(0.0);
+        1e-3 * (1000.0 * (omega * time).sin() - reactance * (omega * time).cos()
+            + reactance * (-time / 1e-9).exp())
+            / (1e6 + reactance * reactance)
+    };
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        // Independent refinement bounds each dialect's event-restart error
+        // below the same 10 pA analytic-current gate.
+        let max_step = if dialect == SpiceDialect::BestAvailable {
+            0.125e-12
+        } else {
+            0.5e-12
+        };
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.convergence_config.gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for control in ["L1", "R1"] {
+            let source = Netlist::parse(&format!("finite-current line drive\nVD drive 0 DC 0 SIN(0 1m 1G)\nR1 drive coil 1k\nL1 coil 0 1u\nB1 0 near I={{I({control})^1}}\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\n.options device zeroresistancetol=1k\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16\n.save v(far) i(b1)\n.end\n")).unwrap();
+            let (full, checkpoints) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode(
+                    &source,
+                    2.5e-9,
+                    max_step,
+                    TransientStartupMode::OperatingPoint,
+                    &[1.2e-9],
+                )
+                .unwrap();
+            let voltage = full.try_voltage_waveform_named("far").unwrap();
+            let forcing = full.try_branch_current_waveform_named("b1").unwrap();
+            for ((&time, &voltage), &forcing) in full.time.iter().zip(voltage).zip(forcing) {
+                assert!(
+                    (voltage - 50.0 * current(time - 1e-9)).abs() < 2e-9,
+                    "{dialect:?}/{control}: delayed RL voltage at {time:e}"
+                );
+                assert!(
+                    (forcing - current(time)).abs() < 1e-11,
+                    "{dialect:?}/{control}: RL current at {time:e}: {forcing:e} vs {:e}",
+                    current(time),
+                );
+            }
+            let checkpoint = TransientCheckpoint::from_bytes(
+                &checkpoints[0]
+                    .checkpoint
+                    .to_bytes(TransientCheckpointEncoding::Packed)
+                    .unwrap(),
+            )
+            .unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&source, &checkpoint, 2.5e-9, max_step)
+                .unwrap();
+            let seam = full
+                .time
+                .iter()
+                .position(|time| *time == resumed.time[0])
+                .unwrap();
+            assert_eq!(resumed.time, full.time[seam..]);
+            for (actual, expected) in [
+                (
+                    resumed.try_voltage_waveform_named("far").unwrap(),
+                    &voltage[seam..],
+                ),
+                (
+                    resumed.try_branch_current_waveform_named("b1").unwrap(),
+                    &forcing[seam..],
+                ),
+            ] {
+                assert_eq!(actual.len(), expected.len());
+                for (&actual, &expected) in actual.iter().zip(expected) {
+                    assert_eq!(actual.to_bits(), expected.to_bits());
+                }
+            }
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
+    }
+}
+
+#[test]
 fn controlled_current_drive_preserves_line_waves_and_current_observations_on_resume() {
     for (control, name) in [
         ("E1 ctrl 0 input 0 2", "e1"),

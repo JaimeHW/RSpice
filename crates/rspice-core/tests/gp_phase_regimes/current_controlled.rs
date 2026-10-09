@@ -9,6 +9,139 @@ fn trace<'a>(result: &'a TransientResult, name: &str) -> &'a CurrentImpulseTrace
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_finite_behavioral_current_controls_preserve_rl_law_and_packed_restart() {
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::Xyce,
+        SpiceDialect::BestAvailable,
+    ] {
+        let mut config = SimulationConfig::default().with_spice_dialect(dialect);
+        config.gp_transient_phase_model = GpTransientPhaseModel::ExactDelay;
+        config.convergence_config.gmin_target = 0.0;
+        let engine = Engine::new(config);
+        for polarity in [1.0, -1.0] {
+            for control in ["L1", "R1"] {
+                for square in [false, true] {
+                    let expression = if square {
+                        format!("{polarity}*1e6*I({control})^2")
+                    } else {
+                        format!("I({control})^1")
+                    };
+                    let source = Netlist::parse(&format!(
+                        "finite behavioral current\nVC c 0 {}\nVB b 0 {}\nVD drive 0 DC 0 SIN(0 {} 1G)\nR1 drive coil 1k\nL1 coil 0 1u\nB1 b 0 I={{{expression}}}\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=1k\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) i(vb) i(vc) i(b1) i(l1) i(r1)\n.end\n",
+                        2.0*polarity, 0.7*polarity, 1e-3*polarity, if polarity > 0.0 { "NPN" } else { "PNP" }
+                    )).unwrap();
+                    for startup in [
+                        TransientStartupMode::OperatingPoint,
+                        TransientStartupMode::Uic,
+                    ] {
+                        let (result, checkpoints) = engine
+                            .run_tran_checkpoint_schedule_with_startup_mode(
+                                &source,
+                                2.5e-9,
+                                1e-12,
+                                startup,
+                                &[1.2e-9],
+                            )
+                            .unwrap_or_else(|error| {
+                                panic!(
+                                    "{dialect:?}/{polarity}/{control}/{square}/{startup:?}: {error}"
+                                )
+                            });
+                        let voltage = result.try_voltage_waveform_named("b").unwrap();
+                        let output = result.try_branch_current_waveform_named("b1").unwrap();
+                        let winding = result.try_branch_current_waveform_named("l1").unwrap();
+                        let resistor = result.try_branch_current_waveform_named("r1").unwrap();
+                        let base = result.try_branch_current_waveform_named("vb").unwrap();
+                        let collector = result.try_branch_current_waveform_named("vc").unwrap();
+                        let vt = thermal_voltage(dialect);
+                        let forward = diode(0.7, vt, dialect).0;
+                        let reverse = diode(-1.3, vt, dialect).0;
+                        let omega = std::f64::consts::TAU * 1e9;
+                        let reactance = omega * 1e-6;
+                        for (index, &time) in result.time.iter().enumerate() {
+                            // Independent solution of L*dI/dt + R*I = A*sin(w*t), I(0)=0.
+                            let current = 1e-3
+                                * (1000.0 * (omega * time).sin()
+                                    - reactance * (omega * time).cos()
+                                    + reactance * (-time / 1e-9).exp())
+                                / (1e6 + reactance * reactance);
+                            let forcing = if square {
+                                1e6 * current * current
+                            } else {
+                                current
+                            };
+                            assert!((polarity * voltage[index] - 0.7).abs() < 1e-10);
+                            assert!(
+                                (polarity * winding[index] - current).abs() < 1e-11,
+                                "{dialect:?}/{polarity}/{control}/{square}/{startup:?}: RL current at {time:e}: actual={}, expected={current:e}",
+                                winding[index]
+                            );
+                            assert!((winding[index] - resistor[index]).abs() < 1e-15);
+                            assert!(
+                                (polarity * output[index] - forcing).abs() < 1e-11,
+                                "behavioral current at {time:e}"
+                            );
+                            assert!(
+                                (-polarity * base[index] - (forward / 100.0 + reverse + forcing))
+                                    .abs()
+                                    < 2e-11,
+                                "{dialect:?}/{polarity}/{control}/{square}/{startup:?}: base at {time:e}: actual={:e}, expected={:e}",
+                                -polarity * base[index],
+                                forward / 100.0 + reverse + forcing
+                            );
+                            let arrived =
+                                time >= DELAY || (time - DELAY).abs() <= 8.0 * f64::EPSILON * DELAY;
+                            let transport = if startup == TransientStartupMode::Uic && !arrived {
+                                0.0
+                            } else {
+                                forward
+                            };
+                            assert!(
+                                (-polarity * collector[index] - (transport - 2.0 * reverse)).abs()
+                                    < 2e-11
+                            );
+                        }
+                        assert_eq!(result.time.last(), Some(&2.5e-9));
+                        assert!(trace(&result, "b1").complete);
+                        assert!(
+                            trace(&result, "b1")
+                                .points
+                                .iter()
+                                .all(|point| point.charge_coulombs == 0.0)
+                        );
+                        if startup == TransientStartupMode::Uic {
+                            let impulse = trace(&result, "vb")
+                                .points
+                                .iter()
+                                .find(|point| point.time == 0.0)
+                                .unwrap()
+                                .charge_coulombs;
+                            assert!(
+                                (impulse + polarity * TF * forward).abs()
+                                    < 1e-25 + 1e-10 * TF * forward
+                            );
+                        }
+                        for checkpoint in checkpoints {
+                            exact_restart(
+                                &engine,
+                                &source,
+                                &result,
+                                &checkpoint.checkpoint,
+                                2.5e-9,
+                                1e-12,
+                            );
+                        }
+                        assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_current_controlled_sources_preserve_finite_currents_impulses_and_restart() {
     for dialect in [
         SpiceDialect::Ngspice,

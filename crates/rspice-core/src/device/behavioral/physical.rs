@@ -1,5 +1,6 @@
 //! Smooth physical-event equations and their analytic derivatives.
-//! Voltage and current equations can depend on time and nodal coordinates.
+//! Voltage equations depend on time and nodal coordinates; current equations
+//! can also use finite branch coordinates certified by the circuit event owner.
 //! Memory and branch-current impulses require their
 //! own state/descriptor owner, independently of a finite sample at one bias.
 
@@ -8,28 +9,29 @@ use crate::abort_signal::AbortSignal;
 use crate::expr::{TimeDerivativeError, TimeDerivatives, constant_over_time, constant_value};
 use crate::resource::{ResourceKind, ResourceLimitError};
 
-fn smooth(expr: &Expr, context: &Context<'_>, nodal: bool) -> bool {
+fn smooth(expr: &Expr, context: &Context<'_>, nodal: bool, branches: bool) -> bool {
     if constant_over_time(expr) {
         return true;
     }
     match expr {
         Expr::Time => true,
         Expr::NodeVoltage(_) => nodal,
+        Expr::BranchCurrent(_) => branches,
         Expr::Unary {
             op: UnaryOp::Neg,
             operand,
-        } => smooth(operand, context, nodal),
+        } => smooth(operand, context, nodal, branches),
         Expr::Binary { op, left, right } => match op {
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => {
-                smooth(left, context, nodal) && smooth(right, context, nodal)
+                smooth(left, context, nodal, branches) && smooth(right, context, nodal, branches)
             }
             BinaryOp::Div => {
-                smooth(left, context, nodal)
+                smooth(left, context, nodal, branches)
                     && constant_value(right, context)
                         .is_some_and(|value| value.is_finite() && value != 0.0)
             }
             BinaryOp::Pow => {
-                smooth(left, context, nodal)
+                smooth(left, context, nodal, branches)
                     && constant_value(right, context).is_some_and(|value| {
                         value.is_finite() && value >= 0.0 && value.fract() == 0.0
                     })
@@ -48,7 +50,7 @@ fn smooth(expr: &Expr, context: &Context<'_>, nodal: bool) -> bool {
                     | Function::Asinh
                     | Function::Sqr
             ) && args.len() == 1
-                && smooth(&args[0], context, nodal)
+                && smooth(&args[0], context, nodal, branches)
         }
         _ => false,
     }
@@ -59,7 +61,7 @@ pub(crate) fn prepared<'a>(
     prescribed: Option<(&'a CompiledExpr, Context<'a>)>,
 ) -> Option<(&'a CompiledExpr, Context<'a>)> {
     let (program, context) = prescribed?;
-    (TimeDerivatives::supports(program) && smooth(ast, &context, false))
+    (TimeDerivatives::supports(program) && smooth(ast, &context, false, false))
         .then_some((program, context))
 }
 
@@ -72,14 +74,14 @@ pub(crate) struct PhysicalSample {
 }
 
 macro_rules! physical_source {
-    ($source:ty) => {
+    ($source:ty, $branches:literal) => {
         impl $source {
             pub(crate) fn has_smooth_physical_equation(&self) -> bool {
-                if self.program.node_map.is_empty() {
+                if self.program.node_map.is_empty() && self.program.branch_map.is_empty() {
                     return self.physical_time_program().is_some();
                 }
                 self.program.sdt_count == 0
-                    && self.program.branch_map.is_empty()
+                    && ($branches || self.program.branch_map.is_empty())
                     && smooth(
                         &self.ast,
                         &self
@@ -87,6 +89,7 @@ macro_rules! physical_source {
                             .with_frequency(0.0)
                             .with_ieee_logarithm(),
                         true,
+                        $branches,
                     )
             }
 
@@ -105,6 +108,11 @@ macro_rules! physical_source {
                 }
                 if !self.has_smooth_physical_equation()
                     || self.node_bindings.len() != self.program.node_map.len()
+                    || self.branch_bindings.len() != self.program.branch_map.len()
+                    || self
+                        .branch_bindings
+                        .iter()
+                        .any(|binding| binding.is_none_or(|index| index >= solution.len()))
                     || self
                         .node_bindings
                         .iter()
@@ -120,7 +128,12 @@ macro_rules! physical_source {
                     .instructions
                     .len()
                     .saturating_mul(32)
-                    .saturating_add(self.node_bindings.len().saturating_mul(8))
+                    .saturating_add(
+                        self.node_bindings
+                            .len()
+                            .saturating_add(self.branch_bindings.len())
+                            .saturating_mul(8),
+                    )
                     .saturating_add(32 * 1024);
                 ResourceLimitError::ensure(ResourceKind::ResultValues, words, max_values)?;
                 let mut nodes = Vec::with_capacity(self.node_bindings.len());
@@ -130,7 +143,14 @@ macro_rules! physical_source {
                     }
                     nodes.push(binding.map_or(0.0, |index| solution[index]));
                 }
-                let context = Context::transient(&nodes, &[], time)
+                let mut branches = Vec::with_capacity(self.branch_bindings.len());
+                for binding in &self.branch_bindings {
+                    if abort.is_aborted() {
+                        return Err(TimeDerivativeError::Aborted);
+                    }
+                    branches.push(solution[binding.expect("validated physical branch binding")]);
+                }
+                let context = Context::transient(&nodes, &branches, time)
                     .with_temperature(self.temperature)
                     .with_frequency(0.0)
                     .with_gmin(self.gmin)
@@ -150,13 +170,13 @@ macro_rules! physical_source {
                         &self.ast,
                         &self.program,
                         &nodes,
-                        &[],
+                        &branches,
                         environment,
                         target,
                     )
                     .unwrap_or(Value::NAN)
                 };
-                let mut partials = Vec::with_capacity(nodes.len());
+                let mut partials = Vec::with_capacity(nodes.len().saturating_add(branches.len()));
                 for (local, binding) in self.node_bindings.iter().enumerate() {
                     if abort.is_aborted() {
                         return Err(TimeDerivativeError::Aborted);
@@ -164,6 +184,15 @@ macro_rules! physical_source {
                     if let Some(column) = binding {
                         partials.push((*column, derivative(DerivativeTarget::PhysicalNode(local))));
                     }
+                }
+                for (local, binding) in self.branch_bindings.iter().enumerate() {
+                    if abort.is_aborted() {
+                        return Err(TimeDerivativeError::Aborted);
+                    }
+                    partials.push((
+                        binding.expect("validated physical branch binding"),
+                        derivative(DerivativeTarget::PhysicalBranch(local)),
+                    ));
                 }
                 let time_partial = derivative(DerivativeTarget::Time);
                 if abort.is_aborted() {
@@ -191,8 +220,8 @@ macro_rules! physical_source {
     };
 }
 
-physical_source!(BehavioralVoltageSource);
-physical_source!(BehavioralCurrentSource);
+physical_source!(BehavioralVoltageSource, false);
+physical_source!(BehavioralCurrentSource, true);
 
 impl BehavioralSources {
     pub(crate) fn has_smooth_physical_equations(&self) -> bool {
@@ -263,6 +292,74 @@ mod tests {
             .unwrap();
         source.set_expression_dialect(dialect);
         source
+    }
+
+    #[test]
+    fn physical_branch_current_partials_are_exact_bounded_and_read_only() {
+        for dialect in [ExpressionDialect::Ngspice, ExpressionDialect::Xyce] {
+            let mut source = BehavioralCurrentSource::new(
+                "b".into(),
+                1,
+                0,
+                "i(l1)^1 + .5*i(r1)^3*(1+time^2) + v(a)*i(l1)",
+            )
+            .unwrap();
+            assert!(matches!(
+                source.physical_sample(&[2.0, 0.0, 0.0, -2.0], 0.5, 100_000, &NoAbort),
+                Err(TimeDerivativeError::Unsupported)
+            ));
+            source
+                .bind_references(
+                    |_| Some(1),
+                    |name| {
+                        BehavioralBranchResolution::Branch(if name.eq_ignore_ascii_case("l1") {
+                            2
+                        } else {
+                            3
+                        })
+                    },
+                )
+                .unwrap();
+            source.set_expression_dialect(dialect);
+            assert!(source.has_smooth_physical_equation());
+            let sample = source
+                .physical_sample(&[2.0, 0.0, 0.0, -2.0], 0.5, 100_000, &NoAbort)
+                .unwrap();
+            assert_eq!(sample.value, -5.0);
+            assert_eq!(sample.time_partial, -4.0);
+            for (column, expected) in [(0, 0.0), (2, 3.0), (3, 7.5)] {
+                assert_eq!(
+                    sample
+                        .partials
+                        .iter()
+                        .filter(|(c, _)| *c == column)
+                        .map(|(_, value)| value)
+                        .sum::<Value>(),
+                    expected
+                );
+            }
+            assert!(matches!(
+                source.physical_sample(&[2.0, 0.0, 0.0], 0.5, 100_000, &NoAbort),
+                Err(TimeDerivativeError::Unsupported)
+            ));
+            assert!(
+                matches!(source.physical_sample(&[2.0, 0.0, 0.0, -2.0], 0.5, 100, &NoAbort), Err(TimeDerivativeError::Resource(e)) if e.limit == 100 && e.requested > e.limit)
+            );
+            struct Stop;
+            impl AbortSignal for Stop {
+                fn is_aborted(&self) -> bool {
+                    true
+                }
+            }
+            assert!(matches!(
+                source.physical_sample(&[2.0, 0.0, 0.0, -2.0], 0.5, 100_000, &Stop),
+                Err(TimeDerivativeError::Aborted)
+            ));
+            assert!(source.branch_values.iter().all(|value| *value == 0.0));
+            assert!(source.branch_partials.iter().all(|value| *value == 0.0));
+        }
+        let voltage = BehavioralVoltageSource::new("b".into(), 1, 0, 1, "i(l1)").unwrap();
+        assert!(!voltage.has_smooth_physical_equation());
     }
 
     #[test]

@@ -8,6 +8,42 @@ fn aligned(name: &str, count: usize, lengths: &[usize]) -> Result<()> {
 }
 
 impl<'a> PreparedEventCircuit<'a> {
+    /// Nodal inputs and genuinely constitutive current coordinates are finite
+    /// at this event boundary. Ideal-source/zero-impedance currents may carry
+    /// actions and cannot be substituted into a nonlinear expression.
+    fn finite_behavioral_current_controls(
+        circuit: &crate::CircuitData,
+        source: &crate::device::behavioral::BehavioralCurrentSource,
+    ) -> bool {
+        source.bound_solution_indices().all(|column| {
+            if column < circuit.num_nodes() {
+                return true;
+            }
+            if column >= circuit.matrix_size() {
+                return false;
+            }
+            let ordinal = column - circuit.num_nodes() + 1;
+            let inductors = &circuit.inductors;
+            let resistors = &circuit.resistor_branches;
+            (!circuit
+                .coupled_inductor_pairs
+                .iter()
+                .any(|pair| pair.branch1_ordinal == ordinal || pair.branch2_ordinal == ordinal)
+                && inductors
+                    .branch_indices
+                    .iter()
+                    .position(|&branch| branch == ordinal)
+                    .and_then(|index| inductors.inductances.get(index))
+                    .is_some_and(|&value| value.is_finite() && value > 0.0))
+                || resistors
+                    .branch_indices
+                    .iter()
+                    .position(|&branch| branch == ordinal)
+                    .and_then(|index| resistors.resistances.get(index))
+                    .is_some_and(|&value| value.is_finite() && value != 0.0)
+        })
+    }
+
     fn admitted_family(family: PeriodicDeviceFamily) -> bool {
         use PeriodicDeviceFamily::*;
         matches!(
@@ -134,6 +170,11 @@ impl<'a> PreparedEventCircuit<'a> {
             })
             && circuit.resistors.thermal.iter().all(Option::is_none)
             && circuit.behavioral_sources.has_smooth_physical_equations()
+            && circuit
+                .behavioral_sources
+                .current_sources
+                .iter()
+                .all(|source| Self::finite_behavioral_current_controls(circuit, source))
             && circuit
                 .capacitors
                 .value_expressions
@@ -447,12 +488,9 @@ impl<'a> PreparedEventCircuit<'a> {
             if !source.has_smooth_physical_equation() {
                 return Err(behavioral::unsupported(&source.name));
             }
-            if source
-                .bound_solution_indices()
-                .any(|column| column >= nodes)
-            {
+            if !Self::finite_behavioral_current_controls(circuit, source) {
                 return Err(error(format!(
-                    "behavioral current '{}' has an invalid nodal binding",
+                    "behavioral current '{}' requires nodal inputs, a finite nonzero resistor current, or an uncoupled positive-inductance current control",
                     source.name
                 )));
             }

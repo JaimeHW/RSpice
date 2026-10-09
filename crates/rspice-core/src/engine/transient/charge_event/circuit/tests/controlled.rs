@@ -60,6 +60,7 @@ fn ccvs_probe_cutsets_refuse_storage_and_other_current_coordinates() {
         "L1 ctrl 0 1u",
         "V2 ctrl n 0\nR2 n 0 1k",
         "F1 ctrl 0 VD 1",
+        "VDL ind 0 1\nL1 ind 0 1u\nB1 ctrl 0 I={I(L1)}",
     ] {
         let circuit = build(&format!(
             "CCVS unsupported cutset\nVD drive 0 1\nVS drive ctrl 0\nR1 ctrl 0 1k\nH1 out 0 VS 1k\nRLOAD out 0 1k\n{extra}\n.end\n"
@@ -103,6 +104,40 @@ fn ccvs_probe_cutsets_refuse_unaligned_circuit_storage() {
             "field {field}"
         );
     }
+}
+
+#[test]
+fn behavioral_current_controls_require_finite_constitutive_coordinates() {
+    for (control, admitted) in [("R1", true), ("L1", true), ("V1", false)] {
+        let circuit = build(&format!(
+            "finite behavioral controls\nV1 c 0 1\nR1 c 0 1\nL1 l 0 1u\nR2 l 0 1k\nB1 out 0 I={{I({control})}}\nRO out 0 1k\n.options device zeroresistancetol=2\n.end\n"
+        ));
+        assert_eq!(
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                .is_ok(),
+            admitted,
+            "{control}"
+        );
+        if admitted {
+            let mut zero = circuit.clone();
+            if control == "R1" {
+                zero.resistor_branches.resistances[0] = 0.0;
+            } else {
+                zero.inductors.inductances[0] = 0.0;
+            }
+            assert!(
+                PreparedEventCircuit::for_finite_voltages(&zero, 1e-20, &options(), &NoAbort)
+                    .is_err()
+            );
+        }
+    }
+    // Positive diagonal inductances alone do not certify a coupled null mode.
+    let coupled = build(
+        "coupled behavioral control\nV1 drive 0 1\nR1 drive a 1k\nL1 a 0 1u\nL2 b 0 1u\nK1 L1 L2 1\nR2 b 0 1k\nB1 out 0 I={I(L1)}\nRO out 0 1k\n.end\n",
+    );
+    assert!(
+        PreparedEventCircuit::for_finite_voltages(&coupled, 1e-20, &options(), &NoAbort).is_err()
+    );
 }
 
 #[test]

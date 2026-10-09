@@ -4,7 +4,7 @@ use crate::expr::{CompiledExpr, Context, TimeDerivativeError, TimeDerivatives};
 
 pub(super) fn unsupported(name: &str) -> SimulationError {
     error(format!(
-        "behavioral source '{name}' requires a smooth prescribed physical time equation or a smooth nodal equation; branch-current control, switched and stateful event providers remain unavailable"
+        "behavioral source '{name}' requires a smooth prescribed physical time equation or a smooth nodal equation; unqualified branch-current controls, switched and stateful event providers remain unavailable"
     ))
 }
 

@@ -1553,15 +1553,19 @@ Gear2 intervals, so returning to trapezoidal integration uses the latest
 accepted currents.
 
 The exact-delay physical-event path supports smooth nodal behavioral voltage
-and current equations with analytic nodal Jacobians and fixed-coordinate time
-partials. Voltage constraints preserve their full nonlinear equations during
+and current equations with analytic Jacobians and fixed-coordinate time
+partials. Behavioral currents may also read finite nonzero resistor-branch
+currents and uncoupled positive-inductance currents. These controls share the
+physical equations used by scalar lossless-line events. Voltage constraints
+preserve their full nonlinear equations during
 charge projection and rate reconstruction. Independent public tests cover
 nonlinear feedback, finite source currents, source charge impulses and CCCS
 fanout, OP/UIC startup, and packed continuation across three dialects. Local
 voltage seeding backtracks invalid trial values; the coupled physical solve
-still verifies charge, flux, rank and current balance. Branch-current-controlled,
-switched and stateful behavioral equations, CCVS voltage impulses, and remaining
-device providers require further implementation.
+still verifies charge, flux, rank and current balance. Behavioral voltage
+branch controls, ideal-source and zero-impedance current controls, coupled
+inductance controls, switched and stateful behavioral equations, CCVS voltage
+impulses, and remaining device providers require further implementation.
 
 Native diodes accompanying exact-delay GP or scalar lossless lines supply
 physical conduction and charge equations, including the resolved junction,

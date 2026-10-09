@@ -205,6 +205,8 @@ pub(crate) enum DerivativeTarget<'a> {
     /// Physical event Jacobian, including unregularized polynomial slopes.
     PhysicalNode(usize),
     Branch(usize),
+    /// Physical event derivative with the controlling finite current held as a coordinate.
+    PhysicalBranch(usize),
     NodeDirection(&'a [Derivative]),
     Time,
 }
@@ -1412,7 +1414,12 @@ fn eval_behavioral_expr_with_derivative(
             let idx = *context.program.branch_map.get(name)?;
             let value = *context.branch_values.get(idx)?;
             let derivative = match context.target {
-                DerivativeTarget::Branch(target_idx) if target_idx == idx => 1.0,
+                DerivativeTarget::Branch(target_idx)
+                | DerivativeTarget::PhysicalBranch(target_idx)
+                    if target_idx == idx =>
+                {
+                    1.0
+                }
                 _ => 0.0,
             };
             derivative_pair(value, derivative)
@@ -1450,7 +1457,9 @@ fn eval_behavioral_expr_with_derivative(
             }
             if matches!(
                 context.target,
-                DerivativeTarget::Time | DerivativeTarget::PhysicalNode(_)
+                DerivativeTarget::Time
+                    | DerivativeTarget::PhysicalNode(_)
+                    | DerivativeTarget::PhysicalBranch(_)
             ) && *op == BinaryOp::Pow
                 && !crate::expr::constant_over_time(expr)
             {

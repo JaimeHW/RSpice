@@ -153,7 +153,14 @@ impl PreparedEventCircuit<'_> {
             }) || circuit.tlines.iter().any(|line| {
                 touches(node, line.node1_pos, line.node1_neg)
                     || touches(node, line.node2_pos, line.node2_neg)
-            });
+            }) || circuit.behavioral_sources.current_sources.iter().any(
+                |source| {
+                    touches(node, source.node_pos, source.node_neg)
+                        && source
+                            .bound_solution_indices()
+                            .any(|column| column >= circuit.num_nodes())
+                },
+            );
             if !other_current {
                 return Some(CurrentRow { source, node, sign });
             }
