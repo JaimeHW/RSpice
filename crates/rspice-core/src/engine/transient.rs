@@ -714,6 +714,10 @@ mod impulses;
 // Exact source-root ownership is prepared separately from the ordinary
 // controller; main physical-event dispatch is integrated after propagation.
 mod checkpoint;
+mod checkpoint_stream;
+pub use checkpoint_stream::{
+    TransientCheckpointObserver, TransientCheckpointStart, TransientCheckpointStream,
+};
 mod companion_stamps;
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) mod source_events;
@@ -984,12 +988,13 @@ struct ScheduledCheckpointHistories<'a> {
     accepted_integration_runtime_capture: AcceptedIntegrationRuntimeCapture<'a>,
 }
 
-/// Where the captured checkpoints accumulate, with the retention bookkeeping.
+/// Snapshot delivery and retained-memory accounting at an accepted boundary.
 struct ScheduledCheckpointSink<'a> {
     retained_result_values: usize,
     retained_scheduled_checkpoint_values: &'a mut usize,
     retained_scheduled_transport_bytes: &'a mut usize,
     captured: &'a mut Vec<ScheduledTransientCheckpoint>,
+    observer: Option<&'a TransientCheckpointObserver<'a>>,
 }
 
 /// The interval one resolved transient run covers.
@@ -1011,6 +1016,7 @@ struct TransientResumePlan<'a> {
     resume_validation: ResumeValidation,
     final_checkpoint_retention: FinalCheckpointRetention,
     scheduled_checkpoint_times: &'a [Value],
+    checkpoint_observer: Option<&'a TransientCheckpointObserver<'a>>,
 }
 
 /// Circuit construction and resume validation finish before the integration
@@ -3171,6 +3177,7 @@ impl Engine {
                     resume_validation: ResumeValidation::ExactNetlist,
                     final_checkpoint_retention: FinalCheckpointRetention::Retained,
                     scheduled_checkpoint_times: &[],
+                    checkpoint_observer: None,
                 },
             )
             .and_then(Self::require_retained_final_checkpoint)
@@ -3238,46 +3245,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, Vec<ScheduledTransientCheckpoint>), SimulationError> {
         validate_transient_window(tstop, max_step)?;
-        let mut previous = None;
-        for (index, &time) in checkpoint_times.iter().enumerate() {
-            if !time.is_finite() || time < 0.0 || time > tstop {
-                return Err(SimulationError::Circuit(format!(
-                    "scheduled checkpoint time {index} must be finite and within [0, {tstop:.17e}], found {time:.17e}"
-                )));
-            }
-            if previous.is_some_and(|previous| time <= previous) {
-                return Err(SimulationError::Circuit(format!(
-                    "scheduled checkpoint times must be strictly increasing; found {time:.17e} after {:.17e}",
-                    previous.expect("checked above")
-                )));
-            }
-            previous = Some(time);
-        }
-        let retained_schedules = netlist
-            .options
-            .output_time_points
-            .len()
-            .saturating_add(
-                netlist
-                    .options
-                    .output_interval_schedule
-                    .as_ref()
-                    .map_or(0, |schedule| schedule.intervals.len()),
-            )
-            .saturating_add(netlist.options.timeint_breakpoints.len())
-            .saturating_add(
-                netlist
-                    .options
-                    .restart
-                    .as_ref()
-                    .map_or(0, |restart| restart.intervals.len()),
-            )
-            .saturating_add(checkpoint_times.len());
-        crate::resource::ResourceLimitError::ensure(
-            crate::resource::ResourceKind::AnalysisPoints,
-            retained_schedules,
-            self.config.resource_limits.max_analysis_points,
-        )?;
+        self.validate_transient_checkpoint_schedule(netlist, 0.0, tstop, checkpoint_times)?;
 
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_transient_request_floor(tstop, max_step)?;
@@ -3298,6 +3266,7 @@ impl Engine {
                     resume_validation: ResumeValidation::ExactNetlist,
                     final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                     scheduled_checkpoint_times: checkpoint_times,
+                    checkpoint_observer: None,
                 },
             )
             .map(|(result, _, checkpoints)| (result, checkpoints))
@@ -3433,6 +3402,7 @@ impl Engine {
                     resume_validation: validation,
                     final_checkpoint_retention: FinalCheckpointRetention::Retained,
                     scheduled_checkpoint_times: &[],
+                    checkpoint_observer: None,
                 },
             )
             .and_then(Self::require_retained_final_checkpoint)
@@ -3579,6 +3549,7 @@ impl Engine {
                 resume_validation: ResumeValidation::ExactNetlist,
                 final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                 scheduled_checkpoint_times: &[],
+                checkpoint_observer: None,
             },
         )
         .map(|(result, _, _)| result)
@@ -3813,6 +3784,7 @@ impl Engine {
             retained_scheduled_checkpoint_values,
             retained_scheduled_transport_bytes,
             captured,
+            observer,
         } = sink;
         let ScheduledCheckpointHistories {
             bsim3_history,
@@ -3974,14 +3946,19 @@ impl Engine {
                 .saturating_add(*retained_scheduled_checkpoint_values)
                 .saturating_add(retained_checkpoint_values),
         )?;
-        *retained_scheduled_transport_bytes = retained_scheduled_transport_bytes
-            .saturating_add(checkpoint.transport_allocated_bytes());
-        captured.push(ScheduledTransientCheckpoint {
+        let point = ScheduledTransientCheckpoint {
             nominal_time: requested_time,
             checkpoint,
-        });
-        *retained_scheduled_checkpoint_values =
-            retained_scheduled_checkpoint_values.saturating_add(retained_checkpoint_values);
+        };
+        if let Some(observer) = observer {
+            observer(&point)?;
+        } else {
+            *retained_scheduled_transport_bytes = retained_scheduled_transport_bytes
+                .saturating_add(point.checkpoint.transport_allocated_bytes());
+            captured.push(point);
+            *retained_scheduled_checkpoint_values =
+                retained_scheduled_checkpoint_values.saturating_add(retained_checkpoint_values);
+        }
         *cursor += 1;
         while scheduled_times
             .get(*cursor)
@@ -4024,7 +4001,7 @@ impl Engine {
     /// state (time, solution, reactive histories) instead of the fresh
     /// initial solution — numerically a breakpoint restart at the
     /// checkpoint time. The final checkpoint is captured only when the public
-    /// caller retains it; scheduled checkpoint APIs retain their scheduled
+    /// caller retains it; scheduled APIs retain or immediately deliver their
     /// snapshots without materializing an otherwise discarded endpoint copy.
     fn solved_tran_resolved_with_resume(
         &self,
@@ -4195,8 +4172,13 @@ impl Engine {
             resume_validation: _,
             final_checkpoint_retention,
             scheduled_checkpoint_times,
+            checkpoint_observer,
         } = plan;
-        let mut scheduled_checkpoints = Vec::with_capacity(scheduled_checkpoint_times.len());
+        let mut scheduled_checkpoints = Vec::with_capacity(if checkpoint_observer.is_some() {
+            0
+        } else {
+            scheduled_checkpoint_times.len()
+        });
         let mut scheduled_checkpoint_cursor = 0_usize;
         let mut retained_scheduled_checkpoint_values = 0_usize;
         let mut retained_scheduled_transport_bytes = 0_usize;
@@ -4315,7 +4297,20 @@ impl Engine {
                 .map_err(SimulationError::Circuit)?;
                 let scheduled_checkpoint_values =
                     checkpoint.retained_value_count().saturating_add(1);
-                let final_checkpoint = if final_checkpoint_retention.is_retained() {
+                let final_checkpoint = if let (Some(observer), Some(&nominal_time)) =
+                    (checkpoint_observer, scheduled_checkpoint_times.first())
+                {
+                    self.ensure_result_values(
+                        Self::transient_result_value_count(&result)
+                            .saturating_add(scheduled_checkpoint_values),
+                    )?;
+                    let point = ScheduledTransientCheckpoint {
+                        nominal_time,
+                        checkpoint,
+                    };
+                    observer(&point)?;
+                    final_checkpoint_retention.is_retained().then_some(point.checkpoint)
+                } else if final_checkpoint_retention.is_retained() {
                     scheduled_checkpoints.extend(scheduled_checkpoint_times.iter().map(
                         |&nominal_time| ScheduledTransientCheckpoint {
                             nominal_time,
@@ -6402,6 +6397,7 @@ impl Engine {
                 retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
                 retained_scheduled_transport_bytes: &mut retained_scheduled_transport_bytes,
                 captured: &mut scheduled_checkpoints,
+                observer: checkpoint_observer,
             },
         )?;
         let b3soi_first_transient_handoff =
@@ -10922,6 +10918,7 @@ impl Engine {
                             retained_scheduled_transport_bytes:
                                 &mut retained_scheduled_transport_bytes,
                             captured: &mut scheduled_checkpoints,
+                            observer: checkpoint_observer,
                         },
                     )?;
                     reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);
@@ -11659,6 +11656,7 @@ impl Engine {
                     retained_scheduled_checkpoint_values: &mut retained_scheduled_checkpoint_values,
                     retained_scheduled_transport_bytes: &mut retained_scheduled_transport_bytes,
                     captured: &mut scheduled_checkpoints,
+                    observer: checkpoint_observer,
                 },
             )?;
             reinitialize_xyce_breakpoint_histories!(hit_breakpoint, analysis_final_step);

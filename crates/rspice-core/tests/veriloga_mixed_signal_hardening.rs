@@ -55,7 +55,8 @@ use determinism_fingerprint::{
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::pac::PacConfig;
 use rspice_core::engine::{
-    TransientCheckpoint, TransientCheckpointEncoding, TransientResult, TransientStartupMode,
+    ScheduledTransientCheckpoint, TransientCheckpoint, TransientCheckpointEncoding,
+    TransientCheckpointStart, TransientCheckpointStream, TransientResult, TransientStartupMode,
 };
 use rspice_core::netlist::{StepCommand, StepSweep, StepTarget};
 use rspice_core::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
@@ -647,6 +648,98 @@ fn a_mixed_checkpoint_restores_pending_xspice_events_through_disk() {
         divider.deck_path()
     );
     assert_mixed_persisted_restart(&deck, "qdiv");
+}
+
+#[test]
+fn a_mixed_checkpoint_stream_survives_cancellation_and_resumes_pending_work() {
+    let model = ModelFile::new("stream_divider", CLOCK_DIVIDER);
+    let netlist = Netlist::parse(&divider_deck(&model, 200)).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let times = [50e-9, 100e-9, 150e-9];
+    let (baseline, retained) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            200e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &times,
+        )
+        .unwrap();
+    let abort = rspice_core::abort_signal::AtomicAbort::new();
+    let saved = std::sync::Mutex::new(Vec::new());
+    let count = std::sync::Mutex::new(0usize);
+    let publish = |point: &ScheduledTransientCheckpoint| {
+        let mut count = count.lock().unwrap();
+        assert_eq!(point, &retained[*count]);
+        *saved.lock().unwrap() = point
+            .checkpoint
+            .to_bytes(TransientCheckpointEncoding::Packed)
+            .unwrap();
+        *count += 1;
+        if *count == 2 {
+            abort.set();
+        }
+        Ok(())
+    };
+    let error = engine
+        .run_tran_checkpoint_stream_with_abort(
+            &netlist,
+            200e-9,
+            1e-9,
+            TransientCheckpointStream {
+                start: TransientCheckpointStart::Fresh(TransientStartupMode::OperatingPoint),
+                times: &times,
+                observer: &publish,
+            },
+            &abort,
+        )
+        .unwrap_err();
+    assert!(matches!(error, SimulationError::Aborted));
+    assert_eq!(*count.lock().unwrap(), 2);
+    let checkpoint = TransientCheckpoint::from_bytes(&saved.into_inner().unwrap()).unwrap();
+    let continued = std::sync::Mutex::new(0);
+    let observe = |point: &ScheduledTransientCheckpoint| {
+        assert_eq!(point, &retained[2]);
+        *continued.lock().unwrap() += 1;
+        Ok(())
+    };
+    let result = engine
+        .run_tran_checkpoint_stream_with_abort(
+            &netlist,
+            200e-9,
+            1e-9,
+            TransientCheckpointStream {
+                start: TransientCheckpointStart::Resume(&checkpoint),
+                times: &times[2..],
+                observer: &observe,
+            },
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+    assert_eq!(*continued.lock().unwrap(), 1);
+    let seam = baseline
+        .time
+        .iter()
+        .position(|t| t.to_bits() == checkpoint.time.to_bits())
+        .unwrap();
+    assert_eq!(result.time, baseline.time[seam..]);
+    for (actual, expected) in result.voltages.iter().zip(&baseline.voltages) {
+        assert_eq!(
+            actual,
+            if expected.is_empty() {
+                &expected[..]
+            } else {
+                &expected[seam..]
+            }
+        );
+    }
+    let future = |result: &TransientResult| {
+        digital_points(result, "qdiv")
+            .into_iter()
+            .filter(|(t, _)| *t > checkpoint.time)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(future(&result), future(&baseline));
 }
 
 /// Analog-only Verilog-A checkpoint compatibility remains intact alongside the

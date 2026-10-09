@@ -185,6 +185,8 @@ pub use result::{
 pub use stb::StbAnalysisResult;
 pub use step::{MaterializedStepRun, StepPlan, StepPlanLimits};
 pub use transient::{
+    ScheduledTransientCheckpoint, TransientCheckpointObserver, TransientCheckpointStart,
+    TransientCheckpointStream,
     DEFAULT_MAX_CHECKPOINT_BYTES, TransientCheckpoint, TransientCheckpointBlocker,
     TransientCheckpointBlockerSource, TransientCheckpointCapability, TransientCheckpointEncoding,
     TransientStartupMode, XYCE_RESTART_SCHEDULE_TOLERANCE, XyceRestartJobPlan,

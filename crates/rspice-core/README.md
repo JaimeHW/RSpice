@@ -803,7 +803,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v129); states
+Resume also requires the current resolved simulation identity (v130); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -820,6 +820,15 @@ it and publishes the resume seam only after the saved state is authoritative.
 The gate and bridge families declare portable context state; other code models
 need an explicit capability contract. Live host resources and legacy mixed
 images without complete execution state remain refused.
+
+`Engine::run_tran_checkpoint_stream_with_abort` publishes scheduled snapshots
+at accepted boundaries during a fresh or resumed run. The engine releases each
+snapshot after the callback, so retaining the latest encoded image does not
+accumulate every checkpoint. Callback failures and cancellation stop delivery;
+snapshots already delivered can resume the run. This uses the same nominal-time
+coalescing and resource checks as the retained schedule API and adds no solver
+breakpoints. Worker and UI continuation require their own request and transport
+integration.
 
 The internal HDL signal-store checkpoint retains typed signal values, each
 driver's contribution (including never-driven state), analog samples, activation
