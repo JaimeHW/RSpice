@@ -1492,7 +1492,7 @@
     },
     "result_document": {
       "schema": "rspice-analysis-result",
-      "schema_version": 15
+      "schema_version": 17
     },
     "result_document_structure_blake3": {
       "ac": "9e599f8500df0569287402b23f21260e1199c3220331a5cb8e9eace6d29e6abf",
@@ -1512,14 +1512,14 @@
       "note": "abort polls a completed operating point performs",
       "tolerance": 0.15,
       "unit": "polls",
-      "value": 26.0
+      "value": 31.0
     },
     {
       "metric": "dc.abort_polls",
       "note": "abort polls a completed 101-point DC sweep performs",
       "tolerance": 0.15,
       "unit": "polls",
-      "value": 326.0
+      "value": 531.0
     },
     {
       "metric": "dc.abort_polls_after_cancel",
@@ -1575,7 +1575,7 @@
       "note": "abort polls a completed transient performs",
       "tolerance": 0.15,
       "unit": "polls",
-      "value": 1101.0
+      "value": 3124.0
     },
     {
       "metric": "tran.abort_polls_after_cancel",
