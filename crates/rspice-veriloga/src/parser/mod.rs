@@ -470,12 +470,13 @@ impl<'a> Parser<'a> {
         // reads the module the author would have had to write by hand, and
         // needs no arm for a construct that contributes no run-time behaviour
         // of its own.
-        let template = (!module.generates.is_empty() || !module.hierarchical_names.is_empty()).then(|| {
-            Box::new(GenerateTemplate {
-                module: module.clone(),
-                next_process_id: self.next_process_id,
-            })
-        });
+        let template = (!module.generates.is_empty() || !module.hierarchical_names.is_empty())
+            .then(|| {
+                Box::new(GenerateTemplate {
+                    module: module.clone(),
+                    next_process_id: self.next_process_id,
+                })
+            });
         generate::expand(&mut module, &mut self.next_process_id)?;
         module.generate_template = template;
         Ok(module)
@@ -2419,16 +2420,13 @@ impl<'a> Parser<'a> {
             }
             LValue::ArrayAccess {
                 normalized: false,
-                name: name.into(),
+                name,
                 index: Box::new(index),
                 additional_indices,
                 span: start,
             }
         } else {
-            LValue::Variable {
-                name: name.into(),
-                span: start,
-            }
+            LValue::Variable { name, span: start }
         };
 
         self.expect(TokenKind::Assign_)?;
@@ -3011,7 +3009,7 @@ impl<'a> Parser<'a> {
                             self.expect(TokenKind::Gt)?;
                             self.expect(TokenKind::RParen)?;
                             return Ok(Expression::BranchAccess(BranchAccess::Branch {
-                                access: name.into(),
+                                access: name,
                                 kind: None,
                                 name: branch,
                                 index,
@@ -3030,7 +3028,7 @@ impl<'a> Parser<'a> {
                         return Ok(Expression::BranchAccess(BranchAccess::Nodes {
                             pos_indices,
                             neg_indices,
-                            access: name.into(),
+                            access: name,
                             kind: None,
                             pos,
                             neg,
@@ -3041,7 +3039,7 @@ impl<'a> Parser<'a> {
                     // Regular function call
                     let args = self.parse_arg_list()?;
                     return Ok(Expression::Call(CallExpr {
-                        name: name.into(),
+                        name,
                         args,
                         span: start.extend(self.previous_span()),
                     }));
@@ -3056,7 +3054,7 @@ impl<'a> Parser<'a> {
                         self.expect(TokenKind::RBracket)?;
                         return Ok(Expression::Digital(DigitalExpr::PartSelect(
                             PartSelectExpr {
-                                name: name.into(),
+                                name,
                                 msb: Box::new(index),
                                 lsb: Box::new(lsb),
                                 span: start.extend(self.previous_span()),
@@ -3066,21 +3064,21 @@ impl<'a> Parser<'a> {
                     self.expect(TokenKind::RBracket)?;
                     if self.check(TokenKind::LBracket) {
                         return Ok(Expression::Digital(DigitalExpr::ArraySelect(
-                            self.parse_array_packed_select(name.into(), index, start)?,
+                            self.parse_array_packed_select(name, index, start)?,
                         )));
                     }
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
                         normalized: false,
                         packed: None,
                         discrete_validity: None,
-                        array: name.into(),
+                        array: name,
                         index: Box::new(index),
                         span: start.extend(self.previous_span()),
                     }));
                 }
 
                 Ok(Expression::Identifier(Identifier {
-                    name: name.into(),
+                    name,
                     span: start.extend(self.previous_span()),
                 }))
             }
