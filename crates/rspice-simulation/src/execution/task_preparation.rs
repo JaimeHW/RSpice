@@ -322,123 +322,131 @@ where
     }
 
     if !errors.is_empty() {
-        Err(errors)
-    } else {
-        // Before the producer identities are taken, because attaching a
-        // card to a transient changes that transient's payload digest —
-        // and the bindings below capture the digest a dependent must see.
-        // A `.fft` card makes every requested sample time a solver stop,
-        // so it is part of the solve it rides on, not an observation of it.
-        bound_cards::attach_bound_observation_cards(&mut queue);
-        let producer_identities = queue
-            .iter()
-            .map(|task| {
+        return Err(errors);
+    }
+    bind_prepared_task_dependencies(&mut queue)?;
+    Ok(queue)
+}
+
+/// Bind explicit graph edges to exact producer payloads. Both application
+/// plans and headless studies use this after lowering their typed requests.
+/// Observation cards are attached before producer digests are captured.
+pub(crate) fn bind_prepared_task_dependencies(
+    queue: &mut [PreparedTask],
+) -> Result<(), Vec<String>> {
+    let mut errors = Vec::new();
+    // Before the producer identities are taken, because attaching a
+    // card to a transient changes that transient's payload digest —
+    // and the bindings below capture the digest a dependent must see.
+    // A `.fft` card makes every requested sample time a solver stop,
+    // so it is part of the solve it rides on, not an observation of it.
+    bound_cards::attach_bound_observation_cards(queue);
+    let producer_identities = queue
+        .iter()
+        .map(|task| {
+            (
+                task.instance_id(),
                 (
-                    task.instance_id(),
-                    (
-                        task.source_revision(),
-                        task.config_digest(),
-                        matches!(task.queued_analysis().spec, AnalysisSpec::Transient { .. }),
-                        matches!(task.queued_analysis().spec, AnalysisSpec::Pss { .. }),
-                        matches!(
-                            task.queued_analysis().spec,
-                            AnalysisSpec::HarmonicBalance { .. }
-                        ),
-                        matches!(
-                            task.queued_analysis().spec,
-                            AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
-                        ),
-                        matches!(
-                            task.queued_analysis().spec,
-                            AnalysisSpec::Qpss {
-                                autonomous: false,
-                                ..
-                            }
-                        ),
+                    task.source_revision(),
+                    task.config_digest(),
+                    matches!(task.queued_analysis().spec, AnalysisSpec::Transient { .. }),
+                    matches!(task.queued_analysis().spec, AnalysisSpec::Pss { .. }),
+                    matches!(
+                        task.queued_analysis().spec,
+                        AnalysisSpec::HarmonicBalance { .. }
                     ),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        for task in &mut queue {
-            // The kinds this task's request admits, in preference order.
-            // A periodic small-signal request whose carrier is the
-            // preceding periodic solve admits either family, and the one
-            // it binds is whichever family the plan's own edge points at.
-            let required_kinds = crate::prepared_dependency::required_artifact_kinds(
-                &task.queued_analysis().spec,
-                &task.queued_analysis().spec_options,
-            );
-            if required_kinds.is_empty() {
-                continue;
-            }
-            let producers = task
-                .dependencies()
-                .iter()
-                .filter_map(|dependency| {
-                    let (revision, config_digest, transient, pss, hb, op, qpss) =
-                        producer_identities.get(dependency)?;
-                    let kind = required_kinds.iter().copied().find(|kind| match kind {
-                        ExecutionArtifactKind::TransientTrajectory => *transient,
-                        ExecutionArtifactKind::PeriodicState => *pss,
-                        ExecutionArtifactKind::HbState => *hb,
-                        ExecutionArtifactKind::QpssState => *qpss,
-                        ExecutionArtifactKind::DcOperatingPointSeed => *op,
-                    })?;
-                    Some(match kind {
-                        ExecutionArtifactKind::TransientTrajectory => {
-                            PreparedDependencyBinding::transient_trajectory(
-                                *dependency,
-                                *revision,
-                                *config_digest,
-                            )
+                    matches!(
+                        task.queued_analysis().spec,
+                        AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
+                    ),
+                    matches!(
+                        task.queued_analysis().spec,
+                        AnalysisSpec::Qpss {
+                            autonomous: false,
+                            ..
                         }
-                        ExecutionArtifactKind::PeriodicState => {
-                            PreparedDependencyBinding::periodic_state(
-                                *dependency,
-                                *revision,
-                                *config_digest,
-                            )
-                        }
-                        ExecutionArtifactKind::QpssState => PreparedDependencyBinding::qpss_state(
+                    ),
+                ),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for task in queue.iter_mut() {
+        // The kinds this task's request admits, in preference order.
+        // A periodic small-signal request whose carrier is the
+        // preceding periodic solve admits either family, and the one
+        // it binds is whichever family the plan's own edge points at.
+        let required_kinds = crate::prepared_dependency::required_artifact_kinds(
+            &task.queued_analysis().spec,
+            &task.queued_analysis().spec_options,
+        );
+        if required_kinds.is_empty() {
+            continue;
+        }
+        let producers = task
+            .dependencies()
+            .iter()
+            .filter_map(|dependency| {
+                let (revision, config_digest, transient, pss, hb, op, qpss) =
+                    producer_identities.get(dependency)?;
+                let kind = required_kinds.iter().copied().find(|kind| match kind {
+                    ExecutionArtifactKind::TransientTrajectory => *transient,
+                    ExecutionArtifactKind::PeriodicState => *pss,
+                    ExecutionArtifactKind::HbState => *hb,
+                    ExecutionArtifactKind::QpssState => *qpss,
+                    ExecutionArtifactKind::DcOperatingPointSeed => *op,
+                })?;
+                Some(match kind {
+                    ExecutionArtifactKind::TransientTrajectory => {
+                        PreparedDependencyBinding::transient_trajectory(
                             *dependency,
                             *revision,
                             *config_digest,
-                        ),
-                        ExecutionArtifactKind::HbState => PreparedDependencyBinding::hb_state(
+                        )
+                    }
+                    ExecutionArtifactKind::PeriodicState => {
+                        PreparedDependencyBinding::periodic_state(
                             *dependency,
                             *revision,
                             *config_digest,
-                        ),
-                        ExecutionArtifactKind::DcOperatingPointSeed => {
-                            PreparedDependencyBinding::dc_operating_point_seed(
-                                *dependency,
-                                *revision,
-                                *config_digest,
-                            )
-                        }
-                    })
+                        )
+                    }
+                    ExecutionArtifactKind::QpssState => PreparedDependencyBinding::qpss_state(
+                        *dependency,
+                        *revision,
+                        *config_digest,
+                    ),
+                    ExecutionArtifactKind::HbState => {
+                        PreparedDependencyBinding::hb_state(*dependency, *revision, *config_digest)
+                    }
+                    ExecutionArtifactKind::DcOperatingPointSeed => {
+                        PreparedDependencyBinding::dc_operating_point_seed(
+                            *dependency,
+                            *revision,
+                            *config_digest,
+                        )
+                    }
                 })
-                .collect::<Vec<_>>();
-            if producers.len() != 1 {
-                errors.push(format!(
-                    "{} must bind exactly one prepared {} task, found {}",
-                    task.queued_analysis().spec.run_type().display_name(),
-                    required_kinds
-                        .iter()
-                        .map(|kind| kind.producer_label())
-                        .collect::<Vec<_>>()
-                        .join(" or "),
-                    producers.len()
-                ));
-            } else {
-                task.set_dependency_bindings(producers);
-            }
-        }
-        if errors.is_empty() {
-            Ok(queue)
+            })
+            .collect::<Vec<_>>();
+        if producers.len() != 1 {
+            errors.push(format!(
+                "{} must bind exactly one prepared {} task, found {}",
+                task.queued_analysis().spec.run_type().display_name(),
+                required_kinds
+                    .iter()
+                    .map(|kind| kind.producer_label())
+                    .collect::<Vec<_>>()
+                    .join(" or "),
+                producers.len()
+            ));
         } else {
-            Err(errors)
+            task.set_dependency_bindings(producers);
         }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }
 
