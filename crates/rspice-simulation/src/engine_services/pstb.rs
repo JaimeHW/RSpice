@@ -14,7 +14,7 @@
 
 #[cfg(test)]
 use super::parse_runner_netlist_with_abort;
-use super::{ServiceRunError, ServiceRunResult, build_resolved_periodic_engine};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
 use crate::periodic::PstbRunConfig;
 use rspice_core::Value;
@@ -218,9 +218,28 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
     operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PstbData> {
+    run_pstb_analysis_on_materialized_with_context(
+        netlist,
+        config,
+        operating_point,
+        super::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_pstb_analysis_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: &PstbRunConfig,
+    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<PstbData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         config.pss_tolerance,
         "PSTB resolved producer configuration is invalid",
@@ -252,6 +271,20 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
     let stability = engine
         .run_pstb_card_from_pss_with_abort(netlist, &card, carrier, abort)
         .map_err(|error| ServiceRunError::from_core("PSTB error", error))?;
+    // The retained frontend result carries the complete modes, six plotted
+    // curves with their axes, a shared mode axis, and scalar evidence.
+    let order = stability.result.multipliers.len();
+    let values = order
+        .saturating_mul(5)
+        .saturating_add(order.min(config.num_multipliers).saturating_mul(13))
+        .saturating_add(16);
+    if values > context.limits.max_result_values {
+        return Err(ServiceRunError::resource_limit(
+            rspice_core::ResourceKind::ResultValues,
+            values,
+            context.limits.max_result_values,
+        ));
+    }
     build_pstb_data(stability, config.num_multipliers, abort)
 }
 

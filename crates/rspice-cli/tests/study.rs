@@ -447,7 +447,9 @@ fn running_study_cancellation_joins_the_solver_and_keeps_stderr_json() {
 fn study_run_refuses_unsupported_route_limits_and_honors_deadlines() {
     let root = common::test_dir("study-runtime-policy");
     let mut document = fixture(&root);
-    document["tasks"] = json!([{ "id": "periodic", "analysis": "Pac" }]);
+    document["tasks"] = json!([{ "id": "spectrum", "analysis": {"Fft": {"request": {
+        "output": "V(out)", "points": 16, "window": "RECT", "start": 0.0, "stop": 0.001
+    }}} }]);
     let path = save(&root, &document);
     let destination = root.join("result.json");
     std::fs::write(
@@ -737,9 +739,13 @@ fn output_sampling_budget_failures_preserve_exit_code_and_existing_artifact() {
 
 #[test]
 fn periodic_studies_accept_and_enforce_custom_execution_limits() {
+    use rspice_simulation::periodic::{
+        PacFrequencySweep, PacRunConfig, PnoiseFrequencySweep, PnoiseRunConfig, PstbRunConfig,
+        PxfFrequencySweep, PxfRunConfig,
+    };
     let root = common::test_dir("study-periodic-execution-limits");
     let mut document = fixture(&root);
-    let source = "Periodic policy\nV1 in 0 SIN(0 .1 1k)\nR1 in out 1k\nR2 out 0 1k\n.end\n";
+    let source = "Periodic policy\nV1 in 0 SIN(0 .1 1k)\nR1 in out 1k\nR2 out 0 1k\nLPROBE lp 0 .01\nRPROBE lp 0 1\n.end\n";
     let qpss = json!({"Qpss": {
         "tones": [
             {"frequency": 1000.0, "harmonics": 1, "source": "V1", "name": null},
@@ -783,7 +789,75 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
             {"id": "bias", "analysis": "DcOp"},
             {"id": name, "depends_on": ["bias"], "analysis": analysis}
         ]);
+        if name != "qpss" {
+            for (id, analysis, settings) in [
+                (
+                    "pac",
+                    "Pac",
+                    json!(PacRunConfig {
+                        pss_fundamental_freq: 1000.0,
+                        pss_num_harmonics: 3,
+                        pss_tolerance: 1e-6,
+                        start_freq: 10.0,
+                        stop_freq: 100.0,
+                        points_per_unit: 3,
+                        sweep: PacFrequencySweep::Linear,
+                        sideband_min: -1,
+                        sideband_max: 1,
+                        input_source: "V1".into(),
+                        output_node: "out".into(),
+                        ..Default::default()
+                    }),
+                ),
+                (
+                    "pxf",
+                    "Pxf",
+                    json!(PxfRunConfig {
+                        pss_fundamental_freq: 1000.0,
+                        pss_num_harmonics: 3,
+                        pss_tolerance: 1e-6,
+                        start_freq: 10.0,
+                        stop_freq: 100.0,
+                        points_per_unit: 3,
+                        sweep: PxfFrequencySweep::Linear,
+                        max_sideband: 1,
+                        input_source: "V1".into(),
+                        output_node: "out".into(),
+                        ..Default::default()
+                    }),
+                ),
+                (
+                    "pnoise",
+                    "Pnoise",
+                    json!(PnoiseRunConfig {
+                        pss_fundamental_freq: 1000.0,
+                        pss_num_harmonics: 3,
+                        pss_tolerance: 1e-6,
+                        start_freq: 10.0,
+                        stop_freq: 100.0,
+                        points_per_unit: 3,
+                        sweep: PnoiseFrequencySweep::Linear,
+                        max_sideband: 1,
+                        input_source: "V1".into(),
+                        output_node: "out".into(),
+                        ..Default::default()
+                    }),
+                ),
+            ] {
+                document["tasks"].as_array_mut().unwrap().push(json!({
+                    "id": id, "depends_on": [name], "analysis": analysis,
+                    "periodic": {"kind": id, "settings": settings}
+                }));
+            }
+        }
         if name == "pss" {
+            document["tasks"].as_array_mut().unwrap().push(json!({
+                "id": "pstb", "depends_on": [name], "analysis": "Pstb",
+                "periodic": {"kind": "pstb", "settings": PstbRunConfig {
+                    pss_fundamental_freq: 1000.0, pss_num_harmonics: 3, pss_tolerance: 1e-6,
+                    max_harmonics: 2, num_multipliers: 1, ..Default::default()
+                }}
+            }));
             document["tasks"].as_array_mut().unwrap().push(json!({
                 "id": "spectrum", "depends_on": ["pss"],
                 "analysis": {"PssSpectrum": {"num_harmonics": 3}}

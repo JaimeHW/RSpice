@@ -4,10 +4,11 @@
 //! This is the analysis that gives oscillator phase noise and mixer noise
 //! figure, where noise at every sideband folds onto the output.
 
+#[cfg(test)]
+use super::build_resolved_periodic_engine;
 use super::periodic_carrier::PeriodicCarrierState;
 use super::{
-    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
-    generate_freq_points_with_abort, is_ground_like,
+    ServiceRunError, ServiceRunResult, is_ground_like,
     netlist_has_independent_source_named_with_abort, parse_runner_netlist_with_abort,
     run_pss_analysis_with_source_path_and_abort,
 };
@@ -156,6 +157,25 @@ pub(crate) fn run_pnoise_analysis_on_materialized_with_abort(
     carrier: PeriodicCarrierState<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PnoiseData> {
+    run_pnoise_analysis_on_materialized_with_context(
+        netlist,
+        config,
+        carrier,
+        super::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_pnoise_analysis_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: &PnoiseRunConfig,
+    carrier: PeriodicCarrierState<'_>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<PnoiseData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate()?;
     carrier
@@ -173,17 +193,18 @@ pub(crate) fn run_pnoise_analysis_on_materialized_with_abort(
         }
     }
 
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         carrier.engine_tolerance(config.pss_tolerance),
         "PNOISE resolved producer configuration is invalid",
     )?;
 
-    let frequencies = generate_freq_points_with_abort(
+    let frequencies = super::helpers::generate_freq_points_with_limit_and_abort(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
+        context.limits.max_analysis_points,
         abort,
     )?;
 

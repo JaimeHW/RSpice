@@ -271,7 +271,19 @@ fn hb_op_handoff_preserves_environment_for_all_consumers() {
             1000.0 / 1100.0,
         ),
     ] {
-        let result = run(spec, options, &consumer_deck, &dependencies).unwrap();
+        let result = if matches!(
+            spec,
+            AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise | AnalysisSpec::Pstb
+        ) {
+            super::periodic_resource_limits::run_consumer_with_limit_checks(
+                spec,
+                options,
+                &consumer_deck,
+                &dependencies,
+            )
+        } else {
+            run(spec, options, &consumer_deck, &dependencies).unwrap()
+        };
         let actual = result
             .study_measurement(observation)
             .unwrap()

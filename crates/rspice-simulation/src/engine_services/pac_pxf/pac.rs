@@ -3,6 +3,8 @@
 //! Small-signal response about a periodic steady state, where a stimulus at
 //! one frequency produces a response at every sideband.
 
+#[cfg(test)]
+use super::super::build_resolved_periodic_engine;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -11,10 +13,7 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
 use super::super::periodic_carrier::PeriodicCarrierState;
-use super::super::{
-    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
-    parse_runner_netlist_with_abort,
-};
+use super::super::{ServiceRunError, ServiceRunResult, parse_runner_netlist_with_abort};
 use super::shared::resolve_pac_output_node_with_abort;
 use crate::error::{ensure_not_aborted, poll_periodically};
 use crate::periodic::PacRunConfig;
@@ -48,29 +47,28 @@ pub(crate) struct PacInternalResult {
     pub(super) output_node_name: String,
 }
 
-pub(super) fn run_pac_internal_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PacRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacInternalResult> {
-    run_pac_internal_impl(netlist, config, None, abort)
-}
-
+#[cfg(test)]
 pub(crate) fn run_pac_internal_from_carrier_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
     carrier: PeriodicCarrierState<'_>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacInternalResult> {
-    run_pac_internal_impl(netlist, config, Some(carrier), abort)
+    run_pac_internal_impl(
+        netlist,
+        config,
+        Some(carrier),
+        super::super::ServiceContext::with_defaults(None, abort),
+    )
 }
 
 fn run_pac_internal_impl(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
     carrier: Option<PeriodicCarrierState<'_>>,
-    abort: &dyn AbortSignal,
+    context: super::super::ServiceContext<'_>,
 ) -> ServiceRunResult<PacInternalResult> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     if let Some(carrier_state) = carrier {
@@ -79,7 +77,7 @@ fn run_pac_internal_impl(
             .map_err(ServiceRunError::Failure)?;
     }
 
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         carrier.map_or(config.pss_tolerance, |carrier| {
             carrier.engine_tolerance(config.pss_tolerance)
@@ -419,10 +417,26 @@ pub(crate) fn run_pac_analysis_on_materialized_with_abort(
     carrier: Option<PeriodicCarrierState<'_>>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PacData> {
-    let pac_internal = match carrier {
-        Some(carrier) => run_pac_internal_from_carrier_with_abort(netlist, config, carrier, abort)?,
-        None => run_pac_internal_with_abort(netlist, config, abort)?,
-    };
+    run_pac_analysis_on_materialized_with_context(
+        netlist,
+        config,
+        carrier,
+        super::super::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_pac_analysis_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: &PacRunConfig,
+    carrier: Option<PeriodicCarrierState<'_>>,
+    context: super::super::ServiceContext<'_>,
+) -> ServiceRunResult<PacData> {
+    let abort = context.abort;
+    let pac_internal = run_pac_internal_impl(netlist, config, carrier, context)?;
     let pac_result = pac_internal.pac_result;
 
     let mut sidebands = Vec::new();

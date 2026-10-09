@@ -1,6 +1,6 @@
 //! Dispatch for frequency-domain analyses.
 
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
 use rspice_core::abort_signal::AbortSignal;
 
@@ -20,7 +20,6 @@ pub(super) fn run_frequency_spec(
     dependencies: &ResolvedExecutionDependencies,
     context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
-    let source_path = context.source_path;
     let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     match spec {
@@ -89,9 +88,9 @@ pub(super) fn run_frequency_spec(
             accuracy,
             context,
         ),
-        AnalysisSpec::Pac => run_pac(netlist, source_path, options, dependencies, abort),
-        AnalysisSpec::Pxf => run_pxf(netlist, source_path, options, dependencies, abort),
-        AnalysisSpec::Pnoise => run_pnoise(netlist, source_path, options, dependencies, abort),
+        AnalysisSpec::Pac => run_pac(netlist, options, dependencies, context),
+        AnalysisSpec::Pxf => run_pxf(netlist, options, dependencies, context),
+        AnalysisSpec::Pnoise => run_pnoise(netlist, options, dependencies, context),
         AnalysisSpec::Stb {
             probe_node,
             start_freq,
@@ -108,7 +107,7 @@ pub(super) fn run_frequency_spec(
                 .with_nyquist(compute_nyquist),
             context,
         ),
-        AnalysisSpec::Pstb => run_pstb(netlist, source_path, options, dependencies, abort),
+        AnalysisSpec::Pstb => run_pstb(netlist, options, dependencies, context),
         other => Err(super::misrouted_spec_error("frequency", &other)),
     }
 }
@@ -335,11 +334,12 @@ fn carrier_is_harmonic_balance(dependencies: &ResolvedExecutionDependencies) -> 
 
 fn run_pac(
     netlist: &str,
-    source_path: Option<&Path>,
     options: SpecExecutionOptions,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     let pac_cfg = required_execution_option(
         options.pac,
         "PAC analysis requires explicit PAC execution options",
@@ -352,15 +352,20 @@ fn run_pac(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            let circuit =
-                hb_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-            svc_runner::run_pac_analysis_on_materialized_with_abort(
+            let circuit = hb_state.materialize_consumer_with_resource_limits(
+                netlist,
+                source_path,
+                dependencies,
+                context.limits,
+                abort,
+            )?;
+            svc_runner::run_pac_analysis_on_materialized_with_context(
                 &circuit,
                 &pac_cfg,
                 Some(svc_runner::PeriodicCarrierState::HarmonicBalance(
                     hb_state.operating_point(),
                 )),
-                abort,
+                context,
             )
         })?
     } else {
@@ -379,15 +384,20 @@ fn run_pac(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            let circuit =
-                periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-            svc_runner::run_pac_analysis_on_materialized_with_abort(
+            let circuit = periodic_state.materialize_consumer_with_resource_limits(
+                netlist,
+                source_path,
+                dependencies,
+                context.limits,
+                abort,
+            )?;
+            svc_runner::run_pac_analysis_on_materialized_with_context(
                 &circuit,
                 &pac_cfg,
                 Some(svc_runner::PeriodicCarrierState::Shooting(
                     periodic_state.operating_point(),
                 )),
-                abort,
+                context,
             )
         })?
     };
@@ -415,11 +425,12 @@ fn project_pac(
 
 fn run_pxf(
     netlist: &str,
-    source_path: Option<&Path>,
     options: SpecExecutionOptions,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     let pxf_cfg = required_execution_option(
         options.pxf,
         "PXF analysis requires explicit PXF execution options",
@@ -432,15 +443,20 @@ fn run_pxf(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            let circuit =
-                hb_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-            svc_runner::run_pxf_analysis_on_materialized_with_abort(
+            let circuit = hb_state.materialize_consumer_with_resource_limits(
+                netlist,
+                source_path,
+                dependencies,
+                context.limits,
+                abort,
+            )?;
+            svc_runner::run_pxf_analysis_on_materialized_with_context(
                 &circuit,
                 &pxf_cfg,
                 Some(svc_runner::PeriodicCarrierState::HarmonicBalance(
                     hb_state.operating_point(),
                 )),
-                abort,
+                context,
             )
         })?
     } else {
@@ -459,15 +475,20 @@ fn run_pxf(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            let circuit =
-                periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-            svc_runner::run_pxf_analysis_on_materialized_with_abort(
+            let circuit = periodic_state.materialize_consumer_with_resource_limits(
+                netlist,
+                source_path,
+                dependencies,
+                context.limits,
+                abort,
+            )?;
+            svc_runner::run_pxf_analysis_on_materialized_with_context(
                 &circuit,
                 &pxf_cfg,
                 Some(svc_runner::PeriodicCarrierState::Shooting(
                     periodic_state.operating_point(),
                 )),
-                abort,
+                context,
             )
         })?
     };
@@ -515,11 +536,12 @@ fn project_pxf(
 
 fn run_pnoise(
     netlist: &str,
-    source_path: Option<&Path>,
     options: SpecExecutionOptions,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     let pnoise_cfg = required_execution_option(
         options.pnoise,
         "PNOISE analysis requires explicit PNOISE execution options",
@@ -532,13 +554,18 @@ fn run_pnoise(
             ))
         })?;
         super::run_abort_aware_service(abort, || {
-            let circuit =
-                hb_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-            svc_runner::run_pnoise_analysis_on_materialized_with_abort(
+            let circuit = hb_state.materialize_consumer_with_resource_limits(
+                netlist,
+                source_path,
+                dependencies,
+                context.limits,
+                abort,
+            )?;
+            svc_runner::run_pnoise_analysis_on_materialized_with_context(
                 &circuit,
                 &pnoise_cfg,
                 svc_runner::PeriodicCarrierState::HarmonicBalance(hb_state.operating_point()),
-                abort,
+                context,
             )
         })?
     } else {
@@ -557,13 +584,18 @@ fn run_pnoise(
             )
             .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
         super::run_abort_aware_service(abort, || {
-            let circuit =
-                periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-            svc_runner::run_pnoise_analysis_on_materialized_with_abort(
+            let circuit = periodic_state.materialize_consumer_with_resource_limits(
+                netlist,
+                source_path,
+                dependencies,
+                context.limits,
+                abort,
+            )?;
+            svc_runner::run_pnoise_analysis_on_materialized_with_context(
                 &circuit,
                 &pnoise_cfg,
                 svc_runner::PeriodicCarrierState::Shooting(periodic_state.operating_point()),
-                abort,
+                context,
             )
         })?
     };
@@ -942,11 +974,12 @@ fn stb_sweep_type(sweep: FrequencySweep) -> rspice_core::analysis::stb::StbSweep
 
 fn run_pstb(
     netlist: &str,
-    source_path: Option<&Path>,
     options: SpecExecutionOptions,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     let pstb_cfg = required_execution_option(
         options.pstb,
         "PSTB analysis requires explicit PSTB execution options",
@@ -965,13 +998,18 @@ fn run_pstb(
         )
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
     let data = super::run_abort_aware_service(abort, || {
-        let circuit =
-            periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-        svc_runner::run_pstb_analysis_on_materialized_with_abort(
+        let circuit = periodic_state.materialize_consumer_with_resource_limits(
+            netlist,
+            source_path,
+            dependencies,
+            context.limits,
+            abort,
+        )?;
+        svc_runner::run_pstb_analysis_on_materialized_with_context(
             &circuit,
             &pstb_cfg,
             Some(periodic_state.operating_point()),
-            abort,
+            context,
         )
     })?;
 

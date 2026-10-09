@@ -190,3 +190,64 @@ fn pss_spectrum_checks_its_own_point_and_value_footprint() {
         );
     }
 }
+
+/// Exercise policy enforcement on a carrier that was already solved and
+/// transferred under a different policy, while callers check its physical oracle.
+pub(super) fn run_consumer_with_limit_checks(
+    spec: AnalysisSpec,
+    options: SpecExecutionOptions,
+    deck: &str,
+    dependencies: &ResolvedExecutionDependencies,
+) -> SimulationResult {
+    let mut limits = ResourceLimits::default();
+    limits.max_matrix_unknowns = 1000;
+    let run = |limits| {
+        run_spec_request(
+            &EngineBridge::new().with_resource_limits(limits),
+            spec.clone(),
+            options.clone(),
+            deck,
+            None,
+            dependencies,
+            &NoAbort,
+        )
+    };
+    let result = run(limits).expect("consumer accepts the captured custom policy");
+    if matches!(spec, AnalysisSpec::Pstb) {
+        // This two-mode fixture fits the native eigensolver's reservation,
+        // but its complete modes plus six retained plots need 52 values.
+        let mut display_limited = limits;
+        display_limited.max_result_values = 48;
+        assert!(matches!(
+            run(display_limited),
+            Err(SimulationError::ResourceLimit { resource, requested: 52, limit: 48 })
+                if resource == "result_values"
+        ));
+    }
+    for resource in [
+        "netlist_bytes",
+        "matrix_unknowns",
+        "analysis_points",
+        "result_values",
+    ] {
+        let mut limited = limits;
+        match resource {
+            "netlist_bytes" => limited.max_netlist_bytes = 1,
+            "matrix_unknowns" => limited.max_matrix_unknowns = 1,
+            "analysis_points" => {
+                limited.max_analysis_points = if matches!(spec, AnalysisSpec::Pstb) {
+                    1
+                } else {
+                    2
+                };
+            }
+            _ => limited.max_result_values = 1,
+        }
+        let error = run(limited).unwrap_err();
+        assert!(
+            matches!(&error, SimulationError::ResourceLimit { resource: actual, .. } if actual == resource),
+            "{spec:?}: expected {resource}, got {error:?}"
+        );
+    }
+    result
+}

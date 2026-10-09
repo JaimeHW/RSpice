@@ -99,7 +99,8 @@ pub(crate) use optimization::{
 };
 pub(crate) use pac_pxf::{
     PacData, PxfData, run_pac_analysis_on_materialized_with_abort,
-    run_pxf_analysis_on_materialized_with_abort,
+    run_pac_analysis_on_materialized_with_context, run_pxf_analysis_on_materialized_with_abort,
+    run_pxf_analysis_on_materialized_with_context,
 };
 #[cfg(test)]
 pub use pac_pxf::{
@@ -112,7 +113,10 @@ pub(crate) use periodic_carrier::PeriodicCarrierState;
 pub(crate) use pnoise::PnoiseData;
 #[cfg(test)]
 pub use pnoise::run_pnoise_analysis_from_hb_with_source_path_and_abort;
-pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_abort;
+pub(crate) use pnoise::{
+    run_pnoise_analysis_on_materialized_with_abort,
+    run_pnoise_analysis_on_materialized_with_context,
+};
 pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
 pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
 pub use psp::{PspRunConfig, PspSweep};
@@ -122,7 +126,10 @@ pub(crate) use pss::run_pss_analysis_on_materialized_with_abort;
 pub(crate) use pss::run_pss_analysis_with_config_and_source_path_and_abort;
 pub use pss::{PssRunConfig, run_pss_analysis_with_source_path_and_abort};
 pub(crate) use pss::{PssSeedEnvironment, run_pss_analysis_with_dc_seed_and_context};
-pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_abort};
+pub(crate) use pstb::{
+    PstbData, run_pstb_analysis_on_materialized_with_abort,
+    run_pstb_analysis_on_materialized_with_context,
+};
 #[cfg(test)]
 pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is

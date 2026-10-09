@@ -16,10 +16,11 @@ use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
+#[cfg(test)]
+use super::super::build_resolved_periodic_engine;
 use super::super::periodic_carrier::PeriodicCarrierState;
 use super::super::{
-    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine, build_voltage_output_expr,
-    parse_runner_netlist_with_abort,
+    ServiceRunError, ServiceRunResult, build_voltage_output_expr, parse_runner_netlist_with_abort,
 };
 use crate::error::{ensure_not_aborted, poll_periodically};
 use crate::periodic::PxfRunConfig;
@@ -135,6 +136,25 @@ pub(crate) fn run_pxf_analysis_on_materialized_with_abort(
     carrier: Option<PeriodicCarrierState<'_>>,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PxfData> {
+    run_pxf_analysis_on_materialized_with_context(
+        netlist,
+        config,
+        carrier,
+        super::super::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_pxf_analysis_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: &PxfRunConfig,
+    carrier: Option<PeriodicCarrierState<'_>>,
+    context: super::super::ServiceContext<'_>,
+) -> ServiceRunResult<PxfData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     if let Some(carrier) = carrier {
@@ -143,7 +163,7 @@ pub(crate) fn run_pxf_analysis_on_materialized_with_abort(
             .map_err(ServiceRunError::Failure)?;
     }
 
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         carrier.map_or(config.pss_tolerance, |carrier| {
             carrier.engine_tolerance(config.pss_tolerance)
