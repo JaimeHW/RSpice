@@ -192,7 +192,7 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
         reltol: 1.0e-3,
         abstol: 1.0e-12,
         mixed_mode: false,
-        noise_parameters: false,
+        noise_parameters: true,
         noise_reference: None,
     };
     let h = rspice_core::Complex64::new(1.0, 0.0)
@@ -236,19 +236,12 @@ fn pss_op_handoff_preserves_environment_for_all_consumers() {
             1000.0 / 1100.0,
         ),
     ] {
-        let result = if matches!(
+        let result = super::periodic_resource_limits::run_consumer_with_limit_checks(
             spec,
-            AnalysisSpec::Pac | AnalysisSpec::Pxf | AnalysisSpec::Pnoise | AnalysisSpec::Pstb
-        ) {
-            super::periodic_resource_limits::run_consumer_with_limit_checks(
-                spec,
-                options,
-                &consumer_deck,
-                &dependencies,
-            )
-        } else {
-            run(spec, options, &consumer_deck, &dependencies).unwrap()
-        };
+            options,
+            &consumer_deck,
+            &dependencies,
+        );
         let actual = result
             .study_measurement(observation)
             .unwrap()

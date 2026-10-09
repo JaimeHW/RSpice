@@ -224,6 +224,17 @@ pub(super) fn run_consumer_with_limit_checks(
                 if resource == "result_values"
         ));
     }
+    if matches!(spec, AnalysisSpec::Psp { .. } | AnalysisSpec::Hbsp { .. }) {
+        // Native scattering/covariance fits, but publishing the sideband paths
+        // and direct aliases of this two-port fixture needs 684 scalar values.
+        let mut display_limited = limits;
+        display_limited.max_result_values = 600;
+        assert!(matches!(
+            run(display_limited),
+            Err(SimulationError::ResourceLimit { resource, requested: 684, limit: 600 })
+                if resource == "result_values"
+        ));
+    }
     for resource in [
         "netlist_bytes",
         "matrix_unknowns",

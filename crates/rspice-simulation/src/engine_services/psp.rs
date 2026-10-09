@@ -8,6 +8,7 @@ mod noise;
 pub(crate) use noise::PspNoiseData;
 
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::Path;
 
 use num_complex::Complex64;
@@ -15,10 +16,9 @@ use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 
-use super::{
-    SParameterPort, ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
-    parse_runner_netlist_with_abort,
-};
+#[cfg(test)]
+use super::parse_runner_netlist_with_abort;
+use super::{SParameterPort, ServiceContext, ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
 
 /// Sweep type for periodic S-parameter analysis.
@@ -174,25 +174,43 @@ pub(crate) fn run_psp_analysis_from_pss_on_materialized_with_abort(
     operating_point: &rspice_core::engine::PssOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<PspData> {
+    run_psp_analysis_from_pss_on_materialized_with_context(
+        netlist,
+        config,
+        operating_point,
+        ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_psp_analysis_from_pss_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: &PspRunConfig,
+    operating_point: &rspice_core::engine::PssOperatingPoint,
+    context: ServiceContext<'_>,
+) -> ServiceRunResult<PspData> {
     run_periodic_sparameter_on_materialized(
         netlist,
         config,
         PeriodicOperatingPoint::Pss(operating_point),
-        abort,
+        context,
     )
 }
 
-pub(crate) fn run_hbsp_analysis_from_hb_on_materialized_with_abort(
+pub(crate) fn run_hbsp_analysis_from_hb_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &HbspRunConfig,
     operating_point: &rspice_core::engine::HbOperatingPoint,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<PspData> {
     run_periodic_sparameter_on_materialized(
         netlist,
         config,
         PeriodicOperatingPoint::Hb(operating_point),
-        abort,
+        context,
     )
 }
 
@@ -225,10 +243,7 @@ impl PeriodicOperatingPoint<'_> {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "retained periodic S-parameter source-path adapter"
-)]
+#[cfg(test)]
 fn run_periodic_sparameter_analysis(
     netlist_text: &str,
     config: &PspRunConfig,
@@ -242,22 +257,28 @@ fn run_periodic_sparameter_analysis(
         .validate_for(analysis)
         .map_err(ServiceRunError::Failure)?;
     let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_periodic_sparameter_on_materialized(&netlist, config, operating_point, abort)
+    run_periodic_sparameter_on_materialized(
+        &netlist,
+        config,
+        operating_point,
+        ServiceContext::with_defaults(source_path, abort),
+    )
 }
 
 fn run_periodic_sparameter_on_materialized(
     netlist: &rspice_core::Netlist,
     config: &PspRunConfig,
     operating_point: PeriodicOperatingPoint<'_>,
-    abort: &dyn AbortSignal,
+    context: ServiceContext<'_>,
 ) -> ServiceRunResult<PspData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     let analysis = operating_point.analysis_name();
     let producer = operating_point.producer_name();
     config
         .validate_for(analysis)
         .map_err(ServiceRunError::Failure)?;
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         operating_point.tolerance(),
         "periodic S-parameter configuration",
@@ -328,7 +349,7 @@ fn run_periodic_sparameter_on_materialized(
         .and_then(|n| n.checked_mul(prepared.frequencies().len()))
         .and_then(|n| n.checked_mul(3))
         .unwrap_or(usize::MAX);
-    let result_limit = rspice_core::ResourceLimits::default().max_result_values;
+    let result_limit = context.limits.max_result_values;
     if retained_values > result_limit {
         return Err(ServiceRunError::resource_limit(
             rspice_core::ResourceKind::ResultValues,

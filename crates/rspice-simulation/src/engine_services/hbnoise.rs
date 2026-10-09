@@ -18,8 +18,7 @@ use rspice_simulation_contract::hbnoise_policy::validate_hbnoise_frequency_optio
 #[cfg(test)]
 use super::parse_runner_netlist_with_abort;
 use super::{
-    ServiceRunError, ServiceRunResult, build_resolved_periodic_engine,
-    generate_freq_points_with_abort, is_ground_like,
+    ServiceContext, ServiceRunError, ServiceRunResult, is_ground_like,
     netlist_has_independent_source_named_with_abort,
 };
 use crate::error::{ensure_not_aborted, poll_periodically};
@@ -133,12 +132,28 @@ pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
     )
 }
 
-pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_abort(
+#[cfg(test)]
+fn run_hbnoise_analysis_from_hb_on_materialized_with_abort(
     netlist: &rspice_core::Netlist,
     config: &HbnoiseRunConfig,
     operating_point: &HbOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<HbnoiseData> {
+    run_hbnoise_analysis_from_hb_on_materialized_with_context(
+        netlist,
+        config,
+        operating_point,
+        ServiceContext::with_defaults(None, abort),
+    )
+}
+
+pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    config: &HbnoiseRunConfig,
+    operating_point: &HbOperatingPoint,
+    context: ServiceContext<'_>,
+) -> ServiceRunResult<HbnoiseData> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate()?;
     let source_name = config.input_source.trim();
@@ -148,11 +163,12 @@ pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_abort(
         )));
     }
 
-    let frequencies = generate_freq_points_with_abort(
+    let frequencies = super::helpers::generate_freq_points_with_limit_and_abort(
         config.start_freq,
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
+        context.limits.max_analysis_points,
         abort,
     )?;
     if (config.integrated_noise || config.contributor_ranking) && frequencies.len() < 2 {
@@ -172,7 +188,7 @@ pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_abort(
         ));
     }
 
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         operating_point.config().tolerance,
         "HBNOISE resolved producer configuration is invalid",

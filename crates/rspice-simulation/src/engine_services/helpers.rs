@@ -88,7 +88,8 @@ pub(super) fn normalize_voltage_signal_name(name: &str) -> String {
     trimmed.to_ascii_uppercase()
 }
 
-pub(crate) fn generate_freq_points_with_abort(
+#[cfg(test)]
+fn generate_freq_points_with_abort(
     start: Value,
     stop: Value,
     points: usize,

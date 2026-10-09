@@ -73,13 +73,15 @@ pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_context;
 pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub use hb::{HbRunConfig, HbToneRunConfig};
 pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
-pub(crate) use hbnoise::{integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_abort};
+pub(crate) use hbnoise::{
+    integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_context,
+};
 pub(crate) use helpers::parse_runner_netlist_with_abort;
 #[cfg(test)]
 use helpers::parse_runner_netlist_with_statistical_sampling_and_abort;
 use helpers::{
-    build_voltage_output_expr, generate_freq_points_with_abort, is_ground_like,
-    netlist_has_independent_source_named_with_abort, normalize_voltage_signal_name,
+    build_voltage_output_expr, is_ground_like, netlist_has_independent_source_named_with_abort,
+    normalize_voltage_signal_name,
 };
 pub(crate) use monte_carlo::{MonteCarloData, finish_monte_carlo_result};
 #[cfg(test)]
@@ -117,8 +119,11 @@ pub(crate) use pnoise::{
     run_pnoise_analysis_on_materialized_with_abort,
     run_pnoise_analysis_on_materialized_with_context,
 };
-pub(crate) use psp::run_psp_analysis_from_pss_on_materialized_with_abort;
-pub(crate) use psp::{PspData, run_hbsp_analysis_from_hb_on_materialized_with_abort};
+pub(crate) use psp::{
+    PspData, run_hbsp_analysis_from_hb_on_materialized_with_context,
+    run_psp_analysis_from_pss_on_materialized_with_abort,
+    run_psp_analysis_from_pss_on_materialized_with_context,
+};
 pub use psp::{PspRunConfig, PspSweep};
 pub(crate) use pss::PssData;
 pub(crate) use pss::run_pss_analysis_on_materialized_with_abort;

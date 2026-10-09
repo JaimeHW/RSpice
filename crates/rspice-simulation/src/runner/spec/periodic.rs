@@ -229,9 +229,8 @@ pub(super) fn run_periodic_spec(
                 noise_parameters,
                 noise_reference,
             },
-            source_path,
             dependencies,
-            abort,
+            context,
         ),
         spec @ (AnalysisSpec::Hbsp { .. } | AnalysisSpec::Hbnoise { .. }) => {
             let state = dependencies.hb_state().map_err(|error| {
@@ -240,9 +239,15 @@ pub(super) fn run_periodic_spec(
                 ))
             })?;
             let circuit = super::run_abort_aware_service(abort, || {
-                state.materialize_consumer(netlist, source_path, dependencies, abort)
+                state.materialize_consumer_with_resource_limits(
+                    netlist,
+                    source_path,
+                    dependencies,
+                    context.limits,
+                    abort,
+                )
             })?;
-            run_hb_consumer(spec, &circuit, state.operating_point(), abort)
+            run_hb_consumer_with_context(spec, &circuit, state.operating_point(), context)
         }
         other => Err(super::misrouted_spec_error("periodic", &other)),
     }
@@ -269,8 +274,9 @@ fn run_hbnoise(
     circuit: &rspice_core::Netlist,
     request: HbnoiseRunRequest,
     operating_point: &rspice_core::engine::HbOperatingPoint,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let config = svc_runner::HbnoiseRunConfig {
         input_sideband: request.input_sideband,
         output_sideband: request.output_sideband,
@@ -292,11 +298,11 @@ fn run_hbnoise(
         contributor_ranking: request.contributor_ranking,
     };
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_hbnoise_analysis_from_hb_on_materialized_with_abort(
+        svc_runner::run_hbnoise_analysis_from_hb_on_materialized_with_context(
             circuit,
             &config,
             operating_point,
-            abort,
+            context,
         )
     })?;
 
@@ -399,23 +405,29 @@ struct PspRunRequest {
 fn run_psp(
     netlist: &str,
     request: PspRunRequest,
-    source_path: Option<&Path>,
     dependencies: &ResolvedExecutionDependencies,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let source_path = context.source_path;
+    let abort = context.abort;
     let periodic_state = dependencies.periodic_state().map_err(|error| {
         SimulationError::InvalidConfig(format!(
             "PSP periodic-state dependency is unavailable: {error}"
         ))
     })?;
     run_periodic_sparameters(request, abort, |config| {
-        let circuit =
-            periodic_state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-        svc_runner::run_psp_analysis_from_pss_on_materialized_with_abort(
+        let circuit = periodic_state.materialize_consumer_with_resource_limits(
+            netlist,
+            source_path,
+            dependencies,
+            context.limits,
+            abort,
+        )?;
+        svc_runner::run_psp_analysis_from_pss_on_materialized_with_context(
             &circuit,
             config,
             periodic_state.operating_point(),
-            abort,
+            context,
         )
     })
 }
@@ -424,14 +436,14 @@ fn run_hbsp(
     circuit: &rspice_core::Netlist,
     request: PspRunRequest,
     operating_point: &rspice_core::engine::HbOperatingPoint,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
-    run_periodic_sparameters(request, abort, |config| {
-        svc_runner::run_hbsp_analysis_from_hb_on_materialized_with_abort(
+    run_periodic_sparameters(request, context.abort, |config| {
+        svc_runner::run_hbsp_analysis_from_hb_on_materialized_with_context(
             circuit,
             config,
             operating_point,
-            abort,
+            context,
         )
     })
 }
@@ -1692,7 +1704,25 @@ pub(in crate::runner) fn run_hb_consumer(
     operating_point: &rspice_core::engine::HbOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    super::ensure_not_aborted(abort)?;
+    run_hb_consumer_with_context(
+        spec,
+        circuit,
+        operating_point,
+        svc_runner::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+fn run_hb_consumer_with_context(
+    spec: AnalysisSpec,
+    circuit: &rspice_core::Netlist,
+    operating_point: &rspice_core::engine::HbOperatingPoint,
+    context: svc_runner::ServiceContext<'_>,
+) -> Result<SimulationResult, SimulationError> {
+    super::ensure_not_aborted(context.abort)?;
     match spec {
         AnalysisSpec::Hbsp {
             start_freq,
@@ -1722,7 +1752,7 @@ pub(in crate::runner) fn run_hb_consumer(
                 noise_reference,
             },
             operating_point,
-            abort,
+            context,
         ),
         AnalysisSpec::Hbnoise {
             input_sideband,
@@ -1758,7 +1788,7 @@ pub(in crate::runner) fn run_hb_consumer(
                 contributor_ranking,
             },
             operating_point,
-            abort,
+            context,
         ),
         _ => Err(SimulationError::InvalidConfig(
             "Expected HBSP or HBNOISE consumer".into(),

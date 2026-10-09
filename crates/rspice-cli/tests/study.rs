@@ -745,7 +745,7 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
     };
     let root = common::test_dir("study-periodic-execution-limits");
     let mut document = fixture(&root);
-    let source = "Periodic policy\nV1 in 0 SIN(0 .1 1k)\nR1 in out 1k\nR2 out 0 1k\nLPROBE lp 0 .01\nRPROBE lp 0 1\n.end\n";
+    let source = "Periodic policy\nV1 in 0 SIN(0 .1 1k)\nR1 in out 1k\nR2 out 0 1k\nLPROBE lp 0 .01\nRPROBE lp 0 1\nP1 p1 0 PORT=1 Z0=50\nP2 p2 0 PORT=2 Z0=50\nRSP p1 p2 1k\n.end\n";
     let qpss = json!({"Qpss": {
         "tones": [
             {"frequency": 1000.0, "harmonics": 1, "source": "V1", "name": null},
@@ -760,7 +760,7 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
             "pss",
             source,
             json!({"Pss": {
-                "fundamental_freq": 1000.0, "tone_sources": ["V1"],
+                "fundamental_freq": 1000.0, "tone_sources": ["V1", "P1", "P2"],
                 "tstab_periods": 0, "points_per_period": 64,
                 "tolerance": 1e-6, "num_harmonics": 3
             }}),
@@ -849,6 +849,35 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
                     "periodic": {"kind": id, "settings": settings}
                 }));
             }
+        }
+        if name != "qpss" {
+            let kind = if name == "pss" { "Psp" } else { "Hbsp" };
+            let mut analysis = serde_json::Map::new();
+            analysis.insert(
+                kind.into(),
+                json!({
+                    "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3,
+                    "sweep": "Linear", "ports": [], "max_sideband": 1,
+                    "reltol": 1e-6, "abstol": 1e-12, "mixed_mode": false,
+                    "noise_parameters": true, "noise_reference": null
+                }),
+            );
+            document["tasks"].as_array_mut().unwrap().push(json!({
+                "id": "network", "depends_on": [name], "analysis": analysis
+            }));
+        }
+        if name == "hb" {
+            document["tasks"].as_array_mut().unwrap().push(json!({
+                "id": "hbnoise", "depends_on": [name], "analysis": {"Hbnoise": {
+                    "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3,
+                    "sweep": "Linear", "output_node": "out", "output_ref": "0",
+                    "input_source": "V1", "max_sideband": 1,
+                    "input_sideband": 0, "output_sideband": 0,
+                    "integrated_noise": true, "contributor_ranking": true,
+                    "noise_figure": true,
+                    "noise_reference": {"source_resistor": "R1", "temperature_kelvin": 290.0}
+                }}
+            }));
         }
         if name == "pss" {
             document["tasks"].as_array_mut().unwrap().push(json!({
