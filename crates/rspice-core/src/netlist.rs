@@ -56,9 +56,7 @@ pub(crate) use xspice_params::{XspiceInstanceParams, XspiceNumericScope};
 
 pub use add_resistors::*;
 pub use ast::*;
-pub use data_table::{
-    FrequencyDataPoint, FrequencyDataTableError, data_table_parameter_name_is_valid,
-};
+pub use data_table::{FrequencyDataPoint, FrequencyDataTableError, data_table_parameter_name_is_valid};
 pub use expr::{
     ParamContext, ParameterRedefinitionDiagnosticPolicy, ParameterRedefinitionPolicy, RandomState,
     StatisticalParamMode,
@@ -112,7 +110,7 @@ pub use topology::{
     reduce_supernode_topology,
 };
 pub(crate) use topology::{
-    SupplyRail, SupplyReachability, analyze_dc_ground_paths_with_capacitor_ic_mode,
+    SupplyRail, SupplyReachability, analyze_dc_ground_paths_with_ic_modes,
     analyze_supply_reachability,
 };
 pub(crate) use xspice_parser::{

@@ -495,21 +495,30 @@ fn coupled_descriptor_orbit_preserves_physical_ic_branch_currents() {
     }
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn coupled_descriptor_orbits_preserve_physical_modes_and_currents() {
     let omega = std::f64::consts::TAU;
-    for case in 0..5 {
+    for case in 0..6 {
         let devices = match case {
             0 => "R1 in 0 4\nH1 out 0 V1 0",
             1 => "R1 in 0 4\nH1 out 0 V1 2",
             2 => "R1 in 0 4\nCin in 0 0.3\nH1 out 0 V1 2",
             3 => "L1 in mid 0.1\nR1 mid 0 1\nH1 out 0 L1 2",
-            _ => "R1 in mid 1\nR2 mid 0 1\nE1 out 0 mid 0 2",
+            4 => "R1 in mid 1\nR2 mid 0 1\nE1 out 0 mid 0 2",
+            _ => "L1 in mid 0.1 IC=-.2\nR1 mid 0 1\nH1 out 0 L1 2",
         };
         let deck = Netlist::parse(&format!(
             "Coupled descriptor orbit\nV1 in 0 SIN(0.7 1 1 0 0 37)\n{devices}\nCout out 0 0.2\n.end\n"
         )).unwrap();
-        let engine = Engine::default();
+        let engine = if case == 5 {
+            Engine::new(
+                SimulationConfig::default()
+                    .with_spice_dialect(rspice_core::config::SpiceDialect::Xyce),
+            )
+        } else {
+            Engine::default()
+        };
         let point = engine
             .run_pss_operating_point_with_abort(
                 &deck,
@@ -521,13 +530,17 @@ fn coupled_descriptor_orbits_preserve_physical_modes_and_currents() {
             .unwrap_or_else(|error| panic!("case {case}: {error}"));
         assert_eq!(
             point.shooting_state_basis(),
-            if case == 3 { &["L:L1"][..] } else { &[][..] }
+            if matches!(case, 3 | 5) {
+                &["L:L1"][..]
+            } else {
+                &[][..]
+            }
         );
         assert_eq!(
             point.analysis().floquet_multipliers.len(),
-            usize::from(case == 3)
+            usize::from(matches!(case, 3 | 5))
         );
-        if case == 3 {
+        if matches!(case, 3 | 5) {
             assert!((point.analysis().floquet_multipliers[0].re - (-10.0_f64).exp()).abs() < 2e-7);
         }
         let result = &point.analysis().result;
@@ -552,7 +565,7 @@ fn coupled_descriptor_orbits_preserve_physical_modes_and_currents() {
                 0 => (0.0, 0.0),
                 1 => (-v / 2.0, -slope / 2.0),
                 2 => (-v / 2.0 - 0.6 * slope, -slope / 2.0 - 0.6 * acceleration),
-                3 => {
+                3 | 5 => {
                     let lag = omega * 0.1;
                     let current = 0.7 + (phase.sin() - lag * phase.cos()) / (1.0 + lag * lag);
                     (2.0 * current, 2.0 * (v - current) / 0.1)
@@ -572,7 +585,7 @@ fn coupled_descriptor_orbits_preserve_physical_modes_and_currents() {
             current_error < 2e-4,
             "case {case}, current error {current_error:e}"
         );
-        if case == 3 {
+        if matches!(case, 3 | 5) {
             let pac = engine
                 .run_pac_from_pss_with_abort(
                     &deck,

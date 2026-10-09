@@ -5403,8 +5403,11 @@ impl Engine {
             .map_err(|error| map_build_parse_error("output validation", error))?;
         check_build_abort(abort)?;
         let mut circuit = CircuitData::new();
-        circuit.inductors.ignore_operating_point_ic =
-            self.config.spice_dialect == SpiceDialect::Ngspice;
+        circuit.inductors.ic_mode = match self.config.spice_dialect {
+            SpiceDialect::Ngspice => crate::circuit::InductorIcMode::UicOnly,
+            SpiceDialect::Xyce => crate::circuit::InductorIcMode::AllOperatingPoints,
+            SpiceDialect::BestAvailable => crate::circuit::InductorIcMode::TransientOperatingPoint,
+        };
         if netlist
             .options
             .device_pnjmaxi
@@ -5752,6 +5755,7 @@ impl Engine {
             &flat_elements,
             self.nodal_shunt_conductance() > 0.0,
             capacitor_ic_dc_mode(self.config.spice_dialect),
+            self.config.spice_dialect == SpiceDialect::Xyce,
         );
         if !floating_nodes.analysis_complete {
             log::debug!(

@@ -358,31 +358,33 @@ fn xyce_inductor_ic_cannot_fall_back_to_an_unconstrained_dc_solution() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn xyce_inductor_ic_seeds_a_valid_rl_operating_point_and_decay() {
-    let deck = Netlist::parse(
-        "Authored RL current\nV1 in 0 1\nR1 in winding 10\nL1 winding 0 5n IC=-.0002\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-14 VNTOL=1e-10\n.end\n",
-    )
+    for source in ["V1 in 0 1", "V1 reference 0 1\nE1 in 0 reference 0 1"] {
+        let deck = Netlist::parse(&format!(
+        "Authored RL current\n{source}\nR1 in winding 10\nL1 winding 0 5n IC=-.0002\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-14 VNTOL=1e-10\n.end\n",
+    ))
     .unwrap();
-    for method in [
-        IntegrationMethod::Trapezoidal,
-        IntegrationMethod::Gear2,
-        IntegrationMethod::TrapGear,
-    ] {
-        let config = SimulationConfig {
-            integration_method: method,
-            ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
-        };
-        let result = Engine::new(config).run_tran(&deck, 2e-9, 1e-12).unwrap();
-        let current = result.try_branch_current_waveform_named("l1").unwrap();
-        let voltage = result.try_voltage_waveform_named("winding").unwrap();
-        assert!((current[0] + 0.0002).abs() < 1e-14);
-        assert!((voltage[0] - 1.002).abs() < 1e-12);
-        for ((&time, &current), &voltage) in result.time.iter().zip(current).zip(voltage) {
-            let expected = 0.1 - 0.1002 * (-time / 0.5e-9).exp();
-            assert!(
-                (current - expected).abs() < 5e-7,
-                "{method:?} at {time:e}: {current:e} != {expected:e}"
-            );
-            assert!((voltage - (1.0 - 10.0 * current)).abs() < 1e-10);
+        for method in [
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            let config = SimulationConfig {
+                integration_method: method,
+                ..SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce)
+            };
+            let result = Engine::new(config).run_tran(&deck, 2e-9, 1e-12).unwrap();
+            let current = result.try_branch_current_waveform_named("l1").unwrap();
+            let voltage = result.try_voltage_waveform_named("winding").unwrap();
+            assert!((current[0] + 0.0002).abs() < 1e-14);
+            assert!((voltage[0] - 1.002).abs() < 1e-12);
+            for ((&time, &current), &voltage) in result.time.iter().zip(current).zip(voltage) {
+                let expected = 0.1 - 0.1002 * (-time / 0.5e-9).exp();
+                assert!(
+                    (current - expected).abs() < 5e-7,
+                    "{method:?} at {time:e}: {current:e} != {expected:e}"
+                );
+                assert!((voltage - (1.0 - 10.0 * current)).abs() < 1e-10);
+            }
         }
     }
 }
@@ -401,7 +403,6 @@ fn xyce_inductor_ic_preserves_a_valid_nonlinear_operating_point() {
     assert!((initial_current - 0.0002).abs() < 1e-14);
     assert!((0.5..0.7).contains(&initial_voltage));
 }
-
 
 #[test]
 fn mixed_tran_cards_require_and_honor_explicit_selected_startup_mode() {
@@ -738,6 +739,75 @@ fn ngspice_inductor_ic_requires_uic_for_linear_and_nonlinear_startup() {
                 (current - expected).abs() < 1e-14,
                 "{startup:?}: {current:e} != {expected:e}"
             );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn coupled_winding_initial_currents_survive_packed_continuation() {
+    use rspice_core::engine::{TransientCheckpoint, TransientCheckpointEncoding};
+    let deck = Netlist::parse("Coupled winding ICs\nV1 in 0 1\nR1 in first 10\nL1 first 0 5n IC=-.0002\nV2 drive 0 2\nR2 drive second 20\nL2 second 0 20n IC=.0003\nK1 L1 L2 .4\n.options GMIN=0\n.end\n").unwrap();
+    for dialect in [
+        SpiceDialect::Xyce,
+        SpiceDialect::Ngspice,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        for startup in [
+            TransientStartupMode::OperatingPoint,
+            TransientStartupMode::Uic,
+        ] {
+            let (full, scheduled) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode(
+                    &deck,
+                    0.4e-9,
+                    1e-12,
+                    startup,
+                    &[0.2e-9],
+                )
+                .unwrap();
+            for (name, authored) in [("l1", -0.0002), ("l2", 0.0003)] {
+                let expected = if dialect == SpiceDialect::Ngspice
+                    && startup == TransientStartupMode::OperatingPoint
+                {
+                    0.1
+                } else {
+                    authored
+                };
+                assert!(
+                    (full.try_branch_current_waveform_named(name).unwrap()[0] - expected).abs()
+                        < 1e-14,
+                    "{dialect:?}/{startup:?}/{name}"
+                );
+            }
+            let checkpoint = TransientCheckpoint::from_bytes(
+                &scheduled[0]
+                    .checkpoint
+                    .to_bytes(TransientCheckpointEncoding::Packed)
+                    .unwrap(),
+            )
+            .unwrap();
+            let (resumed, _) = engine
+                .run_tran_resume(&deck, &checkpoint, 0.4e-9, 1e-12)
+                .unwrap();
+            let offset = full
+                .time
+                .iter()
+                .position(|time| time.to_bits() == checkpoint.time.to_bits())
+                .unwrap();
+            assert_eq!(resumed.time, full.time[offset..], "{dialect:?}/{startup:?}");
+            for (actual, expected) in resumed
+                .voltages
+                .iter()
+                .zip(&full.voltages)
+                .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+            {
+                assert_eq!(actual.len(), expected[offset..].len());
+                for (a, b) in actual.iter().zip(&expected[offset..]) {
+                    assert_eq!(a.to_bits(), b.to_bits(), "{dialect:?}/{startup:?}");
+                }
+            }
         }
     }
 }

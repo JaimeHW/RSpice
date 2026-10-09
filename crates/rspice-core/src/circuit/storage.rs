@@ -18,7 +18,7 @@ mod nonlinear;
 mod passive;
 mod sources;
 
-pub use inductors::Inductors;
+pub use inductors::{InductorIcMode, Inductors};
 pub use nonlinear::Diodes;
 pub(crate) use nonlinear::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Ekv3Mosfets, EkvMosfets, Mosfets,
@@ -26,9 +26,7 @@ pub(crate) use nonlinear::{
 };
 pub(crate) use passive::SolutionDependentCapacitorSpec;
 pub(crate) use passive::SolutionDependentCapacitorState;
-pub use passive::{
-    Capacitors, ResistorBranches, ResistorFlickerNoise, Resistors, ThermalResistorState,
-};
+pub use passive::{Capacitors, ResistorBranches, ResistorFlickerNoise, Resistors, ThermalResistorState};
 pub(crate) use passive::{ResistorValues, SolutionDependentCompanionStep, ThermalUpdateError};
 pub use sources::{CurrentSources, VoltageSources};
 pub(crate) use sources::{SourceExcitation, SourceTimeBasis, SourceTimeSide};

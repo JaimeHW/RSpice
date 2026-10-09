@@ -7,6 +7,18 @@
 
 use super::*;
 
+/// Which bias calculations enforce an authored winding current.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum InductorIcMode {
+    /// Ngspice reserves element ICs for startup that skips the bias solve.
+    UicOnly,
+    /// The native compatibility mode enforces ICs for transient bias only.
+    #[default]
+    TransientOperatingPoint,
+    /// Xyce enforces ICs in both DC and transient operating points.
+    AllOperatingPoints,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Inductors {
     pub names: Vec<String>,
@@ -27,9 +39,8 @@ pub struct Inductors {
     pub v_prev: Vec<Value>,
     /// Initial condition current (IC=)
     pub ic: Vec<Option<Value>>,
-    /// Ngspice uses element ICs only under UIC. Keep the authored values for
-    /// that startup mode while omitting them from operating-point equations.
-    pub ignore_operating_point_ic: bool,
+    /// Bias policy; the authored `ic` values remain available to UIC in every mode.
+    pub ic_mode: InductorIcMode,
 }
 
 impl Inductors {
@@ -100,7 +111,7 @@ impl Inductors {
     }
 
     pub(crate) fn operating_point_ic(&self, index: usize) -> Option<Value> {
-        if self.ignore_operating_point_ic {
+        if self.ic_mode == InductorIcMode::UicOnly {
             None
         } else {
             self.ic[index]
@@ -108,7 +119,11 @@ impl Inductors {
     }
 
     pub(crate) fn has_operating_point_initial_conditions(&self) -> bool {
-        !self.ignore_operating_point_ic && self.has_explicit_initial_conditions()
+        self.ic_mode != InductorIcMode::UicOnly && self.has_explicit_initial_conditions()
+    }
+
+    pub(crate) fn has_dc_initial_conditions(&self) -> bool {
+        self.ic_mode == InductorIcMode::AllOperatingPoints && self.has_explicit_initial_conditions()
     }
 
     /// Get equivalent resistance for trapezoidal integration
@@ -120,7 +135,8 @@ impl Inductors {
     /// Stamp inductors for DC operating point.
     ///
     /// At DC, an ideal inductor is a short circuit:
-    /// V(np) - V(nn) = 0 with unconstrained branch current.
+    /// V(np) - V(nn) = 0 with unconstrained branch current. Xyce's authored
+    /// IC replaces this short with a fixed-current equation during bias.
     #[inline]
     pub fn stamp_dc_short_direct(
         &self,
@@ -128,6 +144,10 @@ impl Inductors {
         rhs: &mut [Value],
         num_nodes: usize,
     ) {
+        if self.ic_mode == InductorIcMode::AllOperatingPoints {
+            self.stamp_transient_operating_point_direct(matrix, rhs, num_nodes);
+            return;
+        }
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
@@ -293,6 +313,20 @@ impl Inductors {
     #[inline]
     pub fn stamp_dc_short(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], num_nodes: usize) {
         for i in 0..self.names.len() {
+            if let Some(current) =
+                self.ic[i].filter(|_| self.ic_mode == InductorIcMode::AllOperatingPoints)
+            {
+                if self.node_pos[i] > 0 {
+                    rhs[self.node_pos[i] - 1] -= current;
+                }
+                if self.node_neg[i] > 0 {
+                    rhs[self.node_neg[i] - 1] += current;
+                }
+                let row = num_nodes + self.branch_indices[i] - 1;
+                matrix.push(row, row, 1.0);
+                rhs[row] = current;
+                continue;
+            }
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
             let br_ordinal = self.branch_indices[i];

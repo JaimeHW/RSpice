@@ -1814,6 +1814,7 @@ pub(super) fn collect_floating_nodes(
     flat_elements: &[crate::netlist::Element],
     has_global_rshunt: bool,
     capacitor_ic_mode: crate::netlist::CapacitorIcDcMode,
+    inductor_ic_enforced: bool,
 ) -> crate::netlist::DcGroundPathDiagnostics {
     if let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
         for node in diagnostics.one_device_terminal_nodes {
@@ -1833,9 +1834,10 @@ pub(super) fn collect_floating_nodes(
 
     // An unanalyzable topology yields no nodes rather than a guess, leaving
     // every analysis free to run exactly as it did before.
-    let Ok(diagnostics) = crate::netlist::analyze_dc_ground_paths_with_capacitor_ic_mode(
+    let Ok(diagnostics) = crate::netlist::analyze_dc_ground_paths_with_ic_modes(
         flat_elements,
         capacitor_ic_mode,
+        inductor_ic_enforced,
     ) else {
         return crate::netlist::DcGroundPathDiagnostics::default();
     };

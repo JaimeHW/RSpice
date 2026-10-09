@@ -204,7 +204,25 @@ impl PssDescriptor {
                 }
             }
         }
+        let winding_ics_active = circuit.inductors.has_dc_initial_conditions();
         for (index, &branch) in circuit.inductors.branch_indices.iter().enumerate() {
+            if winding_ics_active && circuit.inductors.ic[index].is_some() {
+                // Xyce's prescribed-current identity is a bias constraint.
+                // Release it and restore the physical winding incidence before
+                // adding flux derivatives, just as capacitor IC clamps above
+                // are replaced by their dynamic equations.
+                let row = nodes + branch - 1;
+                add(row, nodes + branch, None, -1.0)?;
+                for (node, sign) in [
+                    (circuit.inductors.node_pos[index], 1.0),
+                    (circuit.inductors.node_neg[index], -1.0),
+                ] {
+                    if node != 0 {
+                        add(row, node, None, sign)?;
+                        add(node - 1, nodes + branch, None, sign)?;
+                    }
+                }
+            }
             add(
                 nodes + branch - 1,
                 size + nodes + branch,

@@ -19,7 +19,7 @@
       "id": "C02",
       "status": "in_progress",
       "requirement": "Transient decomposition",
-      "qualification_task": "Separate setup, trial, acceptance, observation and checkpoint responsibilities while preserving exact event clocks, accepted grids, retry/rollback, checkpoint identity and continuation. Preserve integration-error control during startup Newton recovery; tests/tran_uic.rs qualifies adaptive charge accuracy against an analytical RC law."
+      "qualification_task": "Separate setup, trial, acceptance, observation and checkpoint responsibilities while preserving exact event clocks, accepted grids, retry/rollback, checkpoint identity and continuation. Preserve integration-error control during startup Newton recovery; tests/tran_uic.rs qualifies adaptive charge accuracy against an analytical RC law, dialect-specific winding IC startup, constrained recovery, and packed coupled-winding continuation. tests/dc_topology_policy.rs covers winding IC bias and sweeps; pss_dependent_analysis.rs checks release of winding bias constraints into periodic descriptor equations."
     },
     {
       "id": "C03",

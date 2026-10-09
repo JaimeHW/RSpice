@@ -18,8 +18,8 @@ use thiserror::Error;
 mod storage;
 pub(crate) use magnetic::XyceCoreCompanionMode;
 pub use storage::{
-    Capacitors, CurrentSources, Diodes, Inductors, ResistorBranches, ResistorFlickerNoise,
-    Resistors, ThermalResistorState, VoltageSources,
+    Capacitors, CurrentSources, Diodes, InductorIcMode, Inductors, ResistorBranches,
+    ResistorFlickerNoise, Resistors, ThermalResistorState, VoltageSources,
 };
 pub(crate) use storage::{
     ResistorValues, SolutionDependentCompanionStep, SourceExcitation, SourceTimeBasis,

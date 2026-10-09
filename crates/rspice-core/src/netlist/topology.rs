@@ -264,12 +264,13 @@ impl DcGroundPathDiagnostics {
 pub fn analyze_dc_ground_paths(
     elements: &[Element],
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
-    analyze_dc_ground_paths_with_capacitor_ic_mode(elements, CapacitorIcDcMode::EnforcedConstraint)
+    analyze_dc_ground_paths_with_ic_modes(elements, CapacitorIcDcMode::EnforcedConstraint, false)
 }
 
-pub(crate) fn analyze_dc_ground_paths_with_capacitor_ic_mode(
+pub(crate) fn analyze_dc_ground_paths_with_ic_modes(
     elements: &[Element],
     capacitor_ic_mode: CapacitorIcDcMode,
+    inductor_ic_enforced: bool,
 ) -> Result<DcGroundPathDiagnostics, ConnectivityAnalysisError> {
     let mut union = NodeUnion::default();
     let mut order: Vec<String> = Vec::new();
@@ -306,15 +307,17 @@ pub(crate) fn analyze_dc_ground_paths_with_capacitor_ic_mode(
             }
         }
         let conduction_groups =
-            dc_conduction_groups(element, capacitor_ic_mode).unwrap_or_else(|_| {
-                analysis_complete = false;
-                uncertain_node_keys.extend(
-                    all_element_terminal_nodes(element)
-                        .into_iter()
-                        .map(node_key),
-                );
-                Vec::new()
-            });
+            dc_conduction_groups(element, capacitor_ic_mode, inductor_ic_enforced).unwrap_or_else(
+                |_| {
+                    analysis_complete = false;
+                    uncertain_node_keys.extend(
+                        all_element_terminal_nodes(element)
+                            .into_iter()
+                            .map(node_key),
+                    );
+                    Vec::new()
+                },
+            );
         for group in conduction_groups {
             if let Some((first, rest)) = group.split_first() {
                 for node in rest {
@@ -641,6 +644,7 @@ fn constant_dc_level(spec: &super::SourceSpec) -> Option<Value> {
 fn dc_conduction_groups(
     element: &Element,
     capacitor_ic_mode: CapacitorIcDcMode,
+    inductor_ic_enforced: bool,
 ) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
     let all = || vec![element.nodes.iter().map(String::as_str).collect::<Vec<_>>()];
     if matches!(
@@ -670,6 +674,10 @@ fn dc_conduction_groups(
         } if capacitor_ic_mode == CapacitorIcDcMode::EnforcedConstraint => all(),
         // Open at DC: a capacitor blocks it, and a source that prescribes a
         // current leaves the voltage across itself free.
+        ElementKind::Inductor {
+            initial_current: Some(_),
+            ..
+        } if inductor_ic_enforced => Vec::new(),
         ElementKind::Capacitor { .. }
         | ElementKind::CurrentSource(_)
         | ElementKind::Cccs { .. }
@@ -1661,16 +1669,18 @@ mod tests {
             .expect("deck flattens")
             .elements;
 
-        let enforced = analyze_dc_ground_paths_with_capacitor_ic_mode(
+        let enforced = analyze_dc_ground_paths_with_ic_modes(
             &flat,
             CapacitorIcDcMode::EnforcedConstraint,
+            false,
         )
         .expect("Xyce capacitor-IC topology is supported");
         assert!(enforced.no_dc_path_nodes.is_empty());
 
-        let seed_only = analyze_dc_ground_paths_with_capacitor_ic_mode(
+        let seed_only = analyze_dc_ground_paths_with_ic_modes(
             &flat,
             CapacitorIcDcMode::TransientSeedOnly,
+            false,
         )
         .expect("transient-only capacitor-IC topology is supported");
         assert_eq!(seed_only.no_dc_path_nodes, ["OUT"]);

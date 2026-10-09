@@ -569,3 +569,99 @@ fn capacitor_initial_condition_dc_constraint_is_dialect_exact() {
         );
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn inductor_initial_current_uses_the_selected_dc_dialect() {
+    // Xyce 7.10: V(winding)=1.002 V and I(L1)=-.0002 A.
+    // ngspice 46: V(winding)=0 V and I(L1)=.1 A.
+    let deck =
+        parse("DC winding IC\nV1 in 0 1\nR1 in winding 10\nL1 winding 0 5n IC=-.0002\n.end\n");
+    for dialect in [
+        SpiceDialect::Xyce,
+        SpiceDialect::Ngspice,
+        SpiceDialect::BestAvailable,
+    ] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let result = engine.run_dc_op(&deck).unwrap();
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("l1"))
+            .unwrap();
+        let expected_current = if dialect == SpiceDialect::Xyce {
+            -0.0002
+        } else {
+            0.1
+        };
+        let circuit = engine.build_circuit(&deck).unwrap();
+        let mut triplets = circuit.create_matrix();
+        let mut rhs = circuit.create_rhs();
+        circuit.stamp_dc(&mut triplets, &mut rhs);
+        let mut triplet_solution = Vec::new();
+        triplets
+            .to_static()
+            .unwrap()
+            .solve_into(&rhs, &mut triplet_solution)
+            .unwrap();
+        assert!((triplet_solution[circuit.num_nodes() + branch] - expected_current).abs() < 1e-14);
+        assert!(
+            (result.branch_currents[branch] - expected_current).abs() < 1e-14,
+            "{dialect:?}: I(L1)={:e}, expected {expected_current:e}",
+            result.branch_currents[branch]
+        );
+        assert!((voltage(&result, "winding") - (1.0 - 10.0 * expected_current)).abs() < 1e-12);
+        for (source, point) in engine.run_dc_sweep(&deck, "V1", 0.0, 2.0, 0.5).unwrap() {
+            let expected_current = if dialect == SpiceDialect::Xyce {
+                -0.0002
+            } else {
+                source / 10.0
+            };
+            assert!((point.branch_currents[branch] - expected_current).abs() < 1e-14);
+            assert!(
+                (voltage(&point, "winding") - (source - 10.0 * expected_current)).abs() < 1e-12
+            );
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_winding_ic_requires_a_physical_current_balance() {
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let inconsistent = parse(
+        "Inconsistent DC winding\nI1 0 out .00025\nL1 out 0 5n IC=.0002\n.options GMIN=0\n.end\n",
+    );
+    assert_eq!(
+        engine
+            .build_circuit(&inconsistent)
+            .unwrap()
+            .no_dc_path_nodes(),
+        ["OUT"]
+    );
+    assert!(engine.run_dc_op(&inconsistent).is_err());
+
+    // RSHUNT is authored conductance, so it may carry the difference.
+    let shunted = parse(
+        "Shunted DC winding\nI1 0 out .00025\nL1 out 0 5n IC=.0002\n.options GMIN=0 RSHUNT=1k\n.end\n",
+    );
+    let point = engine.run_dc_op(&shunted).unwrap();
+    assert!((voltage(&point, "out") - 0.05).abs() < 1e-12);
+    assert!((point.branch_currents[0] - 0.0002).abs() < 1e-14);
+    let transient = engine.run_tran(&shunted, 20e-12, 1e-12).unwrap();
+    assert!((transient.try_voltage_waveform_named("out").unwrap()[0] - 0.05).abs() < 1e-12);
+    assert!((transient.try_branch_current_waveform_named("l1").unwrap()[0] - 0.0002).abs() < 1e-14);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn xyce_winding_ic_participates_in_nonlinear_dc_bias() {
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let deck = parse(
+        "Nonlinear DC winding\nI1 0 out .00025\nL1 out 0 5n IC=.0002\nD1 out 0 diode\n.model diode D(IS=1e-14)\n.options GMIN=0\n.end\n",
+    );
+    let point = engine.run_dc_op(&deck).unwrap();
+    assert!((point.branch_currents[0] - 0.0002).abs() < 1e-14);
+    // Xyce 7.10 independent bias solution at the default 27 C.
+    assert!((voltage(&point, "out") - 0.577617386).abs() < 1e-6);
+}
