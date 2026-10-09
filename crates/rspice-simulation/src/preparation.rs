@@ -116,6 +116,33 @@ impl PreparationError {
         failure
     }
 
+    /// Keep admission failures typed when a prepared analysis performs bounded
+    /// elaboration or checkpoint validation before execution authorization.
+    pub(crate) fn from_simulation(
+        stage: PreparationStage,
+        context: &str,
+        error: crate::error::SimulationError,
+    ) -> Self {
+        use crate::error::SimulationError;
+        let mut failure = Self::new(stage, format!("{context}: {error}"));
+        failure.interruption = match error {
+            SimulationError::Aborted => Some(PreparationInterruption::Aborted),
+            SimulationError::ResourceLimit {
+                resource,
+                requested,
+                limit,
+            } => rspice_core::ResourceKind::from_name(&resource).map(|resource| {
+                PreparationInterruption::ResourceLimit(rspice_core::ResourceLimitError {
+                    resource,
+                    requested,
+                    limit,
+                })
+            }),
+            _ => None,
+        };
+        failure
+    }
+
     pub(crate) fn check_limit(
         resource: rspice_core::ResourceKind,
         requested: usize,

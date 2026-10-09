@@ -24,6 +24,7 @@ fn invalid(message: impl Into<String>) -> PreparationError {
 pub(super) fn route_resumes(
     tasks: &mut [PreparedTask],
     source: &str,
+    context: crate::engine_services::ServiceContext<'_>,
 ) -> Result<(), PreparationError> {
     let mut selections: HashMap<AnalysisInstanceId, Arc<[PreparedMonteCarloResume]>> =
         HashMap::new();
@@ -32,6 +33,7 @@ pub(super) fn route_resumes(
         .iter()
         .filter(|task| !task.monte_carlo_resumes.is_empty())
     {
+        PreparationError::check_abort(context.abort)?;
         if let Some(existing) = selections.get(&task.authored_instance_id) {
             if !Arc::ptr_eq(existing, &task.monte_carlo_resumes) {
                 return Err(invalid(
@@ -42,6 +44,7 @@ pub(super) fn route_resumes(
         }
         let mut bytes = 0usize;
         for resume in task.monte_carlo_resumes.iter() {
+            PreparationError::check_abort(context.abort)?;
             if !required.insert((task.authored_instance_id, resume.population_identity())) {
                 return Err(invalid(
                     "Monte Carlo checkpoint selections contain an unpooled duplicate population",
@@ -49,15 +52,16 @@ pub(super) fn route_resumes(
             }
             bytes = bytes.saturating_add(resume.input().byte_len());
         }
-        if bytes > rspice_core::ResourceLimits::default().max_external_data_bytes {
-            return Err(invalid(
-                "Selected Monte Carlo checkpoints exceed the combined byte limit",
-            ));
-        }
+        PreparationError::check_limit(
+            rspice_core::ResourceKind::ExternalDataBytes,
+            bytes,
+            context.limits.max_external_data_bytes,
+        )?;
         selections.insert(task.authored_instance_id, task.monte_carlo_resumes.clone());
     }
     let mut used = HashSet::new();
     for task in tasks.iter_mut() {
+        PreparationError::check_abort(context.abort)?;
         let options = &task.task.spec_options;
         let candidates = selections.get(&task.authored_instance_id);
         let direct = options
@@ -78,7 +82,7 @@ pub(super) fn route_resumes(
                 "Monte Carlo checkpoint request has missing or ambiguous resume policy",
             ));
         }
-        let population = crate::study::monte_carlo::prepared_population_identity(
+        let population = crate::study::monte_carlo::prepared_population_identity_with_context(
             options.study_base.as_ref(),
             options.mc_histogram_bins.unwrap_or(20),
             variation_source,
@@ -87,13 +91,30 @@ pub(super) fn route_resumes(
                 .as_deref()
                 .unwrap_or(source),
             task.execution_environment.clone(),
+            context,
         )
-        .map_err(|error| invalid(format!("{} checkpoint compatibility: {error}", task.label)))?;
+        .map_err(|error| {
+            PreparationError::from_simulation(
+                PreparationStage::AnalysisPlan,
+                &format!("{} checkpoint compatibility", task.label),
+                error,
+            )
+        })?;
         if let Some(candidates) = candidates {
             let selected = candidates
                 .iter()
                 .find(|candidate| candidate.population_identity() == population);
-            if selected.is_some() {
+            if let Some(selected) = selected {
+                selected
+                    .input()
+                    .decode_with_limits(context.limits, context.abort)
+                    .map_err(|error| {
+                        PreparationError::from_simulation(
+                            PreparationStage::AnalysisPlan,
+                            "Selected checkpoint",
+                            error,
+                        )
+                    })?;
                 used.insert((task.authored_instance_id, population));
             }
             task.task
@@ -106,8 +127,14 @@ pub(super) fn route_resumes(
             task.config_digest = task.payload_digest();
         } else if direct
             .expect("checked direct input")
-            .decode()
-            .map_err(|error| invalid(error.to_string()))?
+            .decode_with_limits(context.limits, context.abort)
+            .map_err(|error| {
+                PreparationError::from_simulation(
+                    PreparationStage::AnalysisPlan,
+                    "Checkpoint input",
+                    error,
+                )
+            })?
             .population_identity()
             != population
         {

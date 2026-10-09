@@ -199,3 +199,60 @@ fn monte_carlo_multi_point_resume_routes_exact_trials_and_keeps_unselected_point
             .contains("matches no requested Run Set point")
     );
 }
+
+#[test]
+fn checkpoint_resume_routing_keeps_captured_limits_and_typed_preparation_failures() {
+    let fresh = PreparedRunSnapshot::new(experiment()).unwrap();
+    let checkpoint = execute(&fresh.tasks[0], &fresh.executable_netlist, Some(0..1)).1;
+    for pooled in [false, true] {
+        for resource in ["external_data_bytes", "netlist_lines"] {
+            let mut parts = experiment();
+            parts.run_set = Some(global_parameter_run_set("r", &["1k"]));
+            let resumes = selected(std::slice::from_ref(&checkpoint));
+            if pooled {
+                let task = parts.tasks.remove(0).with_monte_carlo_resumes(resumes);
+                parts.tasks.push(task);
+            } else {
+                parts.tasks[0]
+                    .task
+                    .spec_options
+                    .mc_checkpoint
+                    .as_mut()
+                    .unwrap()
+                    .resume = Some(resumes[0].input().clone());
+                parts.tasks[0].config_digest = parts.tasks[0].payload_digest();
+            }
+            match resource {
+                "external_data_bytes" => parts.execution_limits.max_external_data_bytes = 1,
+                "netlist_lines" => parts.execution_limits.max_netlist_lines = 1,
+                _ => unreachable!(),
+            }
+            let error = PreparedRunSnapshot::new(parts).unwrap_err();
+            let budget = error
+                .resource_limit()
+                .unwrap_or_else(|| panic!("untyped: {error:?}"));
+            assert_eq!(budget.resource.as_str(), resource);
+            assert!(budget.requested > budget.limit);
+        }
+    }
+    // Limits are admission policy, not stochastic population identity.
+    let mut parts = experiment();
+    let task = parts
+        .tasks
+        .remove(0)
+        .with_monte_carlo_resumes(selected(&[checkpoint]));
+    parts.tasks.push(task);
+    parts.execution_limits.max_matrix_unknowns = 32;
+    parts.execution_limits.max_netlist_bytes = 1;
+    let resumed = PreparedRunSnapshot::new(parts).unwrap();
+    assert!(
+        resumed.tasks[0]
+            .task
+            .spec_options
+            .mc_checkpoint
+            .as_ref()
+            .unwrap()
+            .resume
+            .is_some()
+    );
+}

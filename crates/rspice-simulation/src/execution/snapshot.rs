@@ -1142,7 +1142,18 @@ impl PreparedRunSnapshot {
             }
         }
 
-        monte_carlo::route_resumes(&mut parts.tasks, &parts.executable_netlist)?;
+        // Population routing reparses an already expanded deck, as dispatch does.
+        let mut execution_limits = parts.execution_limits;
+        execution_limits.max_netlist_bytes = execution_limits.max_expanded_source_bytes;
+        monte_carlo::route_resumes(
+            &mut parts.tasks,
+            &parts.executable_netlist,
+            crate::engine_services::ServiceContext {
+                source_path: None,
+                limits: execution_limits,
+                abort,
+            },
+        )?;
 
         let mut positions = HashMap::with_capacity(parts.tasks.len());
         for (index, task) in parts.tasks.iter().enumerate() {
