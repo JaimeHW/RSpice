@@ -203,11 +203,7 @@ fn execute_inner(args: &StudyRunArgs, config: &Config, quiet: bool) -> Result<Va
                 rspice_core::SimulationErrorCategory::ResultSchema,
             )
         })?;
-        if let Some(measurement) = retained
-            .measurements
-            .iter()
-            .find(|measurement| !measurement.passed)
-        {
+        if let Some(measurement) = failed_verification(&retained) {
             return Err(CliError::VerificationFailed {
                 message: format!(
                     "task {} measurement {}: {}",
@@ -283,6 +279,31 @@ fn execute_inner(args: &StudyRunArgs, config: &Config, quiet: bool) -> Result<Va
         "elapsed_seconds": started.elapsed().as_secs_f64(),
         "qualification_blocker": receipt.sign_off_blocker(),
     }))
+}
+
+fn failed_verification(
+    result: &rspice_results::analysis_result::AnalysisResult,
+) -> Option<&rspice_core::MeasureResult> {
+    // STB generates optional margin readouts, including explicit unavailable
+    // values when the sweep contains no crossover. Those are observations,
+    // not authored verification requests. Keep them in the retained evidence
+    // without turning a successfully computed response into a failed study.
+    // Still reject any failed numeric readout or explicit verification contract.
+    let native_stability_readouts = matches!(
+        result.result_payload,
+        Some(rspice_results::analysis_payload::AnalysisResultPayload::Stb { .. })
+    );
+    result.measurements.iter().find(|measurement| {
+        !measurement.passed
+            && (!native_stability_readouts
+                || measurement.value.is_some()
+                || measurement.raw_value.is_some()
+                || measurement.error.is_none()
+                || measurement.expected.is_some()
+                || measurement.tolerance.is_some()
+                || measurement.failure_limit.is_some()
+                || measurement.failure_limit_exceeded)
+    })
 }
 
 #[derive(Serialize)]
@@ -390,4 +411,45 @@ fn now() -> f64 {
 }
 fn internal(message: String) -> CliError {
     CliError::InternalError { message }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::failed_verification;
+    use rspice_core::MeasureResult;
+    use rspice_results::analysis_payload::AnalysisResultPayload;
+    use rspice_results::analysis_result::AnalysisResult;
+    use rspice_results::analysis_type::AnalysisType;
+
+    #[test]
+    fn unavailable_native_readouts_do_not_weaken_authored_verification() {
+        let mut result = AnalysisResult::new(1, AnalysisType::Stb, "loop", 0.0);
+        result.measurements.push(MeasureResult::failed(
+            "stb_gain_margin_db",
+            "no crossover in the swept band",
+        ));
+        // Without a typed STB payload even this name is an ordinary failed
+        // measurement. Names alone never grant the optional-readout exception.
+        assert!(failed_verification(&result).is_some());
+        result.result_payload = Some(AnalysisResultPayload::Stb {
+            response: std::sync::Arc::new(Default::default()),
+        });
+        assert!(failed_verification(&result).is_none());
+        for contract in 0..6 {
+            let mut checked = result.clone();
+            let measurement = &mut checked.measurements[0];
+            match contract {
+                0 => measurement.expected = Some(6.0),
+                1 => measurement.tolerance = Some(0.1),
+                2 => measurement.failure_limit = Some(6.0),
+                3 => measurement.failure_limit_exceeded = true,
+                4 => measurement.value = Some(-3.0),
+                5 => measurement.raw_value = Some(-3.0),
+                _ => unreachable!(),
+            }
+            assert!(failed_verification(&checked).is_some());
+        }
+        result.measurements[0].error = None;
+        assert!(failed_verification(&result).is_some());
+    }
 }

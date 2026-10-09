@@ -287,31 +287,116 @@ fn study_run_protects_inputs_and_preserves_outputs_on_storage_failure() {
 }
 
 #[test]
+fn stability_studies_publish_unavailable_margins_without_a_false_verdict() {
+    for (case, gain, start, stop) in [
+        ("one-pole", -1000.0, 1e5, 1e7),
+        ("truncated-band", -1000.0, 10.0, 1000.0),
+        ("zero-loop", 0.0, 10.0, 1000.0),
+    ] {
+        let root = common::test_dir(&format!("study-stb-{case}"));
+        let mut document = fixture(&root);
+        std::fs::write(
+            root.join("circuits/divider.cir"),
+            format!("Stability readouts\nE1 EO 0 CTRL 0 {gain}\nVP EO X 0\nR1 X CTRL 1k\nC1 CTRL 0 159.154943091895n\n.end\n"),
+        ).unwrap();
+        document["tasks"] = json!([{ "id": "loop", "analysis": {"Stb": {
+            "probe_node": "VP", "start_freq": start, "stop_freq": stop,
+            "sweep": "Decade", "points_per_decade": 10, "compute_nyquist": true
+        }}}]);
+        let path = save(&root, &document);
+        let destination = root.join("result.json");
+        let output = invoke(
+            &root,
+            &[
+                "study",
+                "run",
+                path.to_str().unwrap(),
+                "-o",
+                destination.to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert!(output.status.success(), "{case}: {output:?}");
+        let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(summary["success"], true, "{case}");
+        let artifact: Value = serde_json::from_slice(&std::fs::read(destination).unwrap()).unwrap();
+        let retained: rspice_formats::project_results::ProjectSimulationResults =
+            serde_json::from_value(artifact["results"].clone()).unwrap();
+        retained.validate().unwrap();
+        let restored = retained
+            .restore_with(rspice_formats::project_results::ProjectAnalysisResult::into_analysis)
+            .unwrap();
+        let run = &restored.runs[0];
+        assert!(run.success, "{case}");
+        run.validate_provenance().unwrap();
+        let analysis = &run.analyses[0];
+        assert!(!analysis.waveforms.is_empty(), "{case}");
+        let gain_margin = analysis
+            .measurements
+            .iter()
+            .find(|measurement| measurement.name == "stb_gain_margin_db")
+            .unwrap();
+        assert_eq!(gain_margin.value, None, "{case}");
+        assert!(!gain_margin.passed, "unavailable is not a passing margin");
+        assert!(gain_margin.error.is_some(), "{case}");
+        assert_eq!(
+            gain_margin.units.as_ref().unwrap().value.symbol(),
+            Some("dB")
+        );
+        let rspice_results::analysis_payload::AnalysisResultPayload::Stb { response } =
+            analysis.result_payload.as_ref().unwrap()
+        else {
+            panic!("STB evidence")
+        };
+        assert_eq!(response.margins.gain_margin, None);
+        if case != "one-pole" {
+            assert_eq!(response.margins.phase_margin, None);
+        }
+        if case == "zero-loop" {
+            assert_eq!(
+                response.margins.dc_loop_gain,
+                Some(rspice_core::Complex64::new(0.0, 0.0))
+            );
+        }
+    }
+}
+
+#[test]
 fn failed_study_measurement_is_not_a_successful_run() {
-    let root = common::test_dir("study-verification");
-    let mut document = fixture(&root);
-    document["tasks"] = json!([{ "id": "waveform", "analysis": {"Transient": {
-        "step_time": 0.00001, "stop_time": 0.001, "start_time": 0.0, "max_timestep": 0.00001, "uic": false
-    }}}]);
-    std::fs::write(root.join("circuits/divider.cir"),
-        "Study measurement\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n.meas tran peak MAX V(out) GOAL=2 TOL=0.01\n.end\n").unwrap();
-    let path = save(&root, &document);
-    let destination = root.join("result.json");
-    let output = invoke(
-        &root,
-        &[
-            "study",
-            "run",
-            path.to_str().unwrap(),
-            "-o",
-            destination.to_str().unwrap(),
-            "--json",
-        ],
-    );
-    assert_eq!(output.status.code(), Some(3), "{output:?}");
-    assert!(!destination.exists());
-    let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(summary["success"], false);
+    for (case, measurement) in [
+        ("goal", ".meas tran peak MAX V(out) GOAL=2 TOL=0.01"),
+        ("no-event", ".meas tran crossing WHEN V(out)=2 RISE=1"),
+    ] {
+        let root = common::test_dir(&format!("study-verification-{case}"));
+        let mut document = fixture(&root);
+        document["tasks"] = json!([{ "id": "waveform", "analysis": {"Transient": {
+            "step_time": 0.00001, "stop_time": 0.001, "start_time": 0.0, "max_timestep": 0.00001, "uic": false
+        }}}]);
+        std::fs::write(
+            root.join("circuits/divider.cir"),
+            format!(
+                "Study measurement\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n{measurement}\n.end\n"
+            ),
+        )
+        .unwrap();
+        let path = save(&root, &document);
+        let destination = root.join("result.json");
+        let output = invoke(
+            &root,
+            &[
+                "study",
+                "run",
+                path.to_str().unwrap(),
+                "-o",
+                destination.to_str().unwrap(),
+                "--json",
+            ],
+        );
+        assert_eq!(output.status.code(), Some(3), "{case}: {output:?}");
+        assert!(!destination.exists());
+        let summary: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(summary["success"], false);
+    }
 }
 
 #[test]

@@ -94,7 +94,10 @@ Run the prepared study with
 stderr; it also selects JSON logs and errors so stderr remains machine-readable.
 The final `rspice.study.run` summary is separate on stdout. Ctrl-C and
 `--timeout` cancel through the shared runner and preserve exit codes 130 and 124.
-Solver failures and failed measurements return nonzero statuses. Result
+Solver failures and failed authored measurements return nonzero statuses.
+STB margins unavailable within the swept band remain explicitly unavailable in
+the saved result; their absence alone does not fail the study or establish a
+stability verdict. Result
 publication happens only after every task and result validation succeeds;
 failures leave an existing output unchanged. Output may not replace the study,
 circuit, include files, or configuration files.
