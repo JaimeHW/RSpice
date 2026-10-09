@@ -803,7 +803,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v127); states
+Resume also requires the current resolved simulation identity (v128); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -857,6 +857,16 @@ elaborated output ports, validates local resolution and shared HDL observations,
 and requires drained waveform notifications. It builds replacement queue/value
 banks without publishing events. Context histories, model resources and complete
 shared-driver agreement still belong to the remaining circuit integration work.
+
+Resource-free XSPICE contexts also have an internal transient image for state
+arrays, inertial delays, sample histories, port observations and output history,
+analog transitions, integration coefficients, parameter-cache revisions and
+retained matrix/RHS contributions. It authenticates receiving parameters, wiring
+and port shapes, preserves exact real payload bits, and constructs a replacement.
+Capture requires drained output events and breakpoint requests; live host resources
+and open resource transactions are refused. This does not enable model resume by
+itself: instance input signatures, explicit model capability, shared-driver
+consistency and the outer atomic restore still need integration.
 
 XSPICE event-driver banks resolve in stable instance/port/vector-element order.
 This keeps real-valued cancellation and digital inout observations reproducible
