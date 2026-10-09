@@ -372,6 +372,7 @@ impl PreparedEventCircuit<'_> {
                 }
             }
         }
+        self.stamp_ccvs_current_rows(&mut sample, state, abort)?;
         // Preserve numeric-domain failure for the event Newton backtracker.
         // Structural and resource faults remain immediate errors.
         sample.nonfinite(state.len())?;

@@ -8,6 +8,7 @@ use crate::engine::periodic_capability::PeriodicDeviceFamily;
 use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayTimeSide};
 
 mod behavioral;
+mod ccvs;
 mod coupling;
 pub(in crate::engine::transient) mod linear;
 mod prepare;
@@ -30,8 +31,10 @@ pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     ports: Vec<(usize, usize)>,
     /// None marks a branch that requires the full descriptor owner.
     equations: Vec<Option<EventBranchEquation>>,
-    /// Zero-offset constraints: zero R/L branches, VCVS and resistive CCVS.
+    /// Source constraints without prescribed offsets: zero R/L branches,
+    /// VCVS and finite-current CCVS (affine or physically sampled).
     constant_sources: Vec<EventVoltageSource>,
+    ccvs_current_rows: Vec<ccvs::CurrentRow>,
     current_structure: Option<Arc<CurrentConservation>>,
     flux_structure: Option<Arc<FluxConservation>>,
 }
@@ -54,13 +57,18 @@ impl PreparedEventCircuit<'_> {
     }
 
     fn retained_structure_values(&self) -> usize {
-        self.current_structure
-            .as_ref()
-            .map_or(0, |basis| basis.retained_values)
+        self.ccvs_current_rows
+            .capacity()
+            .saturating_mul(3)
             .saturating_add(
-                self.flux_structure
+                self.current_structure
                     .as_ref()
-                    .map_or(0, |basis| basis.retained_values),
+                    .map_or(0, |basis| basis.retained_values)
+                    .saturating_add(
+                        self.flux_structure
+                            .as_ref()
+                            .map_or(0, |basis| basis.retained_values),
+                    ),
             )
     }
 

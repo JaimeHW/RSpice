@@ -9,6 +9,8 @@ fn controlled_current_drive_preserves_line_waves_and_current_observations_on_res
             "RC input 0 1\nH1 ctrl 0 RC 2\n.options device zeroresistancetol=1",
             "h1",
         ),
+        ("VS input sense 0\nRC sense 0 1k\nH1 ctrl 0 VS 2k", "h1"),
+        ("VS sense input 0\nRC sense 0 1k\nH1 ctrl 0 VS -2k", "h1"),
     ] {
         let source=Netlist::parse(&format!("controlled matched line\nV1 input 0 SIN(0 .5 1G)\n{control}\nG1 0 near ctrl 0 1m\nT1 near 0 far 0 Z0=50 TD=1n\nRL far 0 50\n.options GMIN=0 RELTOL=1e-7 VNTOL=1e-10 ABSTOL=1e-16\n.save v(far) i(g1) i({name})\n.end\n")).unwrap();
         for dialect in [

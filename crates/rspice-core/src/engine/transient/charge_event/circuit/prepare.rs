@@ -128,7 +128,10 @@ impl<'a> PreparedEventCircuit<'a> {
             && circuit.tlines.iter().all(|line| {
                 line.supports_sided_history_events() && line.ltra_branch_matrix_indices().is_none()
             })
-            && (0..circuit.ccvs.len()).all(|index| Self::ccvs_equation(circuit, index).is_some())
+            && (0..circuit.ccvs.len()).all(|index| {
+                Self::ccvs_equation(circuit, index).is_some()
+                    || Self::ccvs_current_row(circuit, index).is_some()
+            })
             && circuit.resistors.thermal.iter().all(Option::is_none)
             && circuit.behavioral_sources.has_smooth_physical_equations()
             && circuit
@@ -319,6 +322,7 @@ impl<'a> PreparedEventCircuit<'a> {
         let mut ports = Vec::new();
         let mut equations = vec![None; size - nodes];
         let mut constant_sources = Vec::new();
+        let mut ccvs_current_rows = Vec::new();
         let claim = |equations: &mut [Option<Option<EventBranchEquation>>],
                      ordinal: usize,
                      row: Option<EventBranchEquation>|
@@ -572,12 +576,37 @@ impl<'a> PreparedEventCircuit<'a> {
                 Some(EventBranchEquation::Algebraic(options.voltage_tolerance)),
             )?;
             if !use_descriptor {
-                let equation = Self::ccvs_equation(circuit, index).ok_or_else(|| {
-                    error(format!(
-                        "CCVS '{}' requires a finite nonzero resistive control or a voltage-impulse descriptor",
+                let equation = if let Some(equation) = Self::ccvs_equation(circuit, index) {
+                    equation
+                } else if let Some(control) = Self::ccvs_current_row(circuit, index) {
+                    ResourceLimitError::ensure(
+                        ResourceKind::ResultValues,
+                        size.saturating_mul(64)
+                            .saturating_add(
+                                constant_sources
+                                    .len()
+                                    .saturating_add(source.len() - index)
+                                    .saturating_mul(SOURCE_STORAGE_VALUES),
+                            )
+                            .saturating_add(
+                                ccvs_current_rows.len().saturating_add(1).saturating_mul(3),
+                            ),
+                        options.limits.max_result_values,
+                    )?;
+                    ccvs_current_rows.try_reserve_exact(1).map_err(|source| {
+                        SimulationError::Allocation {
+                            object: "CCVS sensing cutsets",
+                            source,
+                        }
+                    })?;
+                    ccvs_current_rows.push(control);
+                    EventVoltageEquation::Sampled
+                } else {
+                    return Err(error(format!(
+                        "CCVS '{}' requires a finite nonzero resistive control, a charge-free nodal sensing cutset, or a voltage-impulse descriptor",
                         source.names[index]
-                    ))
-                })?;
+                    )));
+                };
                 constant_sources.push(EventVoltageSource {
                     positive: source.node_pos[index],
                     negative: source.node_neg[index],
@@ -724,6 +753,7 @@ impl<'a> PreparedEventCircuit<'a> {
             ports,
             equations,
             constant_sources,
+            ccvs_current_rows,
             current_structure: None,
             flux_structure: None,
         };
@@ -770,7 +800,8 @@ impl<'a> PreparedEventCircuit<'a> {
                         .saturating_mul(SOURCE_STORAGE_VALUES),
                 )
                 .saturating_add(prepared.ports.len().saturating_mul(2))
-                .saturating_add(circuit.cccs.len().saturating_mul(8));
+                .saturating_add(circuit.cccs.len().saturating_mul(8))
+                .saturating_add(prepared.retained_structure_values());
             let basis = with_retained_values(options, retained, |bounded| {
                 CurrentConservation::new(
                     nodes,

@@ -1,6 +1,111 @@
 use super::*;
 
 #[test]
+fn ccvs_probe_cutset_reuses_nonlinear_kcl_and_explicit_time_partials() {
+    for reverse in [false, true] {
+        let (pins, gain) = if reverse {
+            ("ctrl drive", -1000)
+        } else {
+            ("drive ctrl", 1000)
+        };
+        let circuit = build(&format!(
+            "CCVS probe\nVD drive 0 PWL(0 1 1 2)\nVS {pins} 0\nRC ctrl 0 1k\nB1 ctrl 0 I={{.0001*V(ctrl)^2}}\nG1 ctrl 0 b 0 .0001\nIS ctrl 0 PWL(0 .001 1 .002)\nH1 b 0 VS {gain}\nCB b 0 1n\nRB b 0 1k\n.end\n"
+        ));
+        let mut options = options();
+        options.nodal_gmin = 1e-4;
+        let mut sampler =
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort).unwrap();
+        assert_eq!(sampler.ccvs_current_rows.len(), 1);
+        let topology = sampler
+            .topology(0.0, SourceTimeSide::RightLimit, &options, &NoAbort)
+            .unwrap();
+        let zero = vec![0.0; circuit.matrix_size()];
+        let state = topology
+            .solve(&zero, &zero, &options, &NoAbort, |state, abort| {
+                sampler.sample(0.0, SourceTimeSide::RightLimit, state, &[], &options, abort)
+            })
+            .unwrap();
+        let output = circuit.ccvs.node_pos[0] - 1;
+        let branch = circuit.num_nodes() + circuit.ccvs.branch_indices[0] - 1;
+        let expected = 2.2 / 0.9;
+        let rate = 2.3 / 0.9;
+        close(state.solution[output], expected, 1e-12);
+        close(state.coordinate_rates[output].unwrap(), rate, 1e-12);
+        close(
+            state.solution[branch],
+            -1e-9 * rate - 0.0011 * expected,
+            1e-13,
+        );
+        let position = topology
+            .source_branches()
+            .position(|item| item == branch)
+            .unwrap();
+        close(state.source_impulses[position], -1e-9 * expected, 1e-22);
+        let control = circuit.num_nodes() + circuit.ccvs.ctrl_branch[0] - 1;
+        close(state.solution[control], expected / (gain as f64), 1e-13);
+        let position = topology
+            .source_branches()
+            .position(|item| item == control)
+            .unwrap();
+        assert_eq!(state.source_impulses[position], 0.0);
+    }
+}
+
+#[test]
+fn ccvs_probe_cutsets_refuse_storage_and_other_current_coordinates() {
+    for extra in [
+        "C1 ctrl 0 1p",
+        "C1 ctrl 0 {time*1p}",
+        "D1 ctrl 0 dm\n.model dm D(CJO=1p)",
+        "L1 ctrl 0 1u",
+        "V2 ctrl n 0\nR2 n 0 1k",
+        "F1 ctrl 0 VD 1",
+    ] {
+        let circuit = build(&format!(
+            "CCVS unsupported cutset\nVD drive 0 1\nVS drive ctrl 0\nR1 ctrl 0 1k\nH1 out 0 VS 1k\nRLOAD out 0 1k\n{extra}\n.end\n"
+        ));
+        assert!(
+            PreparedEventCircuit::ccvs_current_row(&circuit, 0).is_none(),
+            "{extra}"
+        );
+        assert!(
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                .is_err(),
+            "{extra}"
+        );
+    }
+}
+
+#[test]
+fn ccvs_probe_cutsets_refuse_unaligned_circuit_storage() {
+    for field in 0..9 {
+        let mut circuit = build(
+            "CCVS malformed storage\nVD drive 0 1\nVS drive ctrl 0\nR1 ctrl 0 1k\nH1 out 0 VS 1k\nR2 out 0 1k\nC1 out 0 1p\nF1 out 0 VD 1\n.end\n",
+        );
+        match field {
+            0 => circuit.voltage_sources.node_pos.clear(),
+            1 => circuit.voltage_sources.node_neg.clear(),
+            2 => circuit.voltage_sources.branch_indices.clear(),
+            3 => circuit.ccvs.node_pos.clear(),
+            4 => circuit.capacitors.stamps.clear(),
+            5 => circuit.capacitors.capacitances.clear(),
+            6 => circuit.capacitors.value_expressions.clear(),
+            7 => circuit.capacitors.ic_branch_indices.clear(),
+            _ => circuit.cccs.gains.clear(),
+        }
+        assert!(
+            PreparedEventCircuit::ccvs_current_row(&circuit, 0).is_none(),
+            "field {field}"
+        );
+        assert!(
+            PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options(), &NoAbort)
+                .is_err(),
+            "field {field}"
+        );
+    }
+}
+
+#[test]
 fn prepared_current_control_uses_finite_inductor_state_and_its_rate() {
     let circuit =
         build("finite current control\nV1 n 0 1\nL1 n 0 1u\nF1 out 0 L1 2\nR1 out 0 1k\n.end\n");

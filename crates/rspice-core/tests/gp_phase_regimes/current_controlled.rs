@@ -173,6 +173,16 @@ fn gp_current_controlled_impulse_drives_the_independent_rc_response_after_restar
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_resistive_ccvs_preserves_transport_charge_currents_and_restart() {
+    check_gp_finite_ccvs(false);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_probe_ccvs_preserves_transport_charge_currents_and_restart() {
+    check_gp_finite_ccvs(true);
+}
+
+fn check_gp_finite_ccvs(probe: bool) {
     for dialect in [
         SpiceDialect::Ngspice,
         SpiceDialect::Xyce,
@@ -183,29 +193,49 @@ fn gp_resistive_ccvs_preserves_transport_charge_currents_and_restart() {
         config.convergence_config.gmin_target = 0.0;
         let engine = Engine::new(config);
         for polarity in [1.0, -1.0] {
-            for resistance in [1.0, -2.0] {
+            for (resistance, sign) in if probe {
+                [(1000.0, 1.0), (1000.0, -1.0)]
+            } else {
+                [(1.0, 1.0), (-2.0, 1.0)]
+            } {
                 // A floating sensing resistor keeps the sign and reference-node
                 // mapping observable. Its MNA current remains a solved output.
+                let (drive_node, control_name, probe_deck) = if probe {
+                    (
+                        "drive",
+                        "vsense",
+                        if sign > 0.0 {
+                            "VSENSE drive ctrl 0\n"
+                        } else {
+                            "VSENSE ctrl drive 0\n"
+                        },
+                    )
+                } else {
+                    ("ctrl", "rc", "")
+                };
                 let source = Netlist::parse(&format!(
-                    "resistive CCVS GP\nVC c 0 {}\nVREF ref 0 1.25\nVB ctrl ref DC {} SIN({} {} 1G)\nRC ctrl ref {resistance}\nH1 b 0 RC {}\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=2\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) i(vc) i(h1) i(vb) i(rc)\n.end\n",
+                    "finite CCVS GP\nVC c 0 {}\nVREF ref 0 1.25\nVB {drive_node} ref DC {} SIN({} {} 1G)\n{probe_deck}RC ctrl ref {resistance}\nH1 b 0 {control_name} {}\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=2\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) i(vc) i(h1) i(vb) i({control_name})\n.end\n",
                     2.0*polarity,0.35*polarity,0.35*polarity,0.5e-6*polarity,
-                    2.0*resistance, if polarity>0.0 {"NPN"} else {"PNP"},
+                    2.0*resistance*sign, if polarity>0.0 {"NPN"} else {"PNP"},
                 )).unwrap();
                 let check = |result: &TransientResult, uic: bool| {
                     behavioral::check(result, dialect, polarity, None, "h1", uic);
                     let drive = result.try_branch_current_waveform_named("vb").unwrap();
-                    let control = result.try_branch_current_waveform_named("rc").unwrap();
+                    let control = result
+                        .try_branch_current_waveform_named(control_name)
+                        .unwrap();
                     for ((&time, &drive), &control) in result.time.iter().zip(drive).zip(control) {
-                        let expected = polarity
+                        let expected = sign
+                            * polarity
                             * (0.35 + 0.5e-6 * (std::f64::consts::TAU * 1e9 * time).sin())
                             / resistance;
                         assert!(
                             (control - expected).abs() < 1e-12,
                             "{dialect:?}/{polarity}/{resistance}: control at {time:e}"
                         );
-                        assert!((control + drive).abs() < 1e-12);
+                        assert!((control + sign * drive).abs() < 1e-12);
                     }
-                    for name in ["vb", "rc"] {
+                    for name in ["vb", control_name] {
                         assert!(trace(result, name).complete);
                         assert!(
                             trace(result, name)
@@ -233,20 +263,29 @@ fn gp_resistive_ccvs_preserves_transport_charge_currents_and_restart() {
                     TransientStartupMode::OperatingPoint,
                     TransientStartupMode::Uic,
                 ] {
-                    let result = engine
-                        .run_tran_with_startup_mode(&source, 2.5e-9, 4e-12, startup)
+                    let (result, checkpoints) = engine
+                        .run_tran_checkpoint_schedule_with_startup_mode(
+                            &source,
+                            2.5e-9,
+                            4e-12,
+                            startup,
+                            &[1.2e-9],
+                        )
                         .unwrap_or_else(|error| {
                             panic!("{dialect:?}/{polarity}/{resistance}/{startup:?}: {error}")
                         });
                     check(&result, startup == TransientStartupMode::Uic);
+                    for checkpoint in checkpoints {
+                        exact_restart(
+                            &engine,
+                            &source,
+                            &result,
+                            &checkpoint.checkpoint,
+                            2.5e-9,
+                            4e-12,
+                        );
+                    }
                 }
-                let (_, checkpoint) = engine
-                    .run_tran_checkpointed(&source, 1.2e-9, 4e-12)
-                    .unwrap();
-                let (resumed, _) = engine
-                    .run_tran_resume(&source, &checkpoint, 2.5e-9, 4e-12)
-                    .unwrap();
-                check(&resumed, false);
             }
         }
     }
@@ -255,6 +294,16 @@ fn gp_resistive_ccvs_preserves_transport_charge_currents_and_restart() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn gp_resistive_ccvs_step_preserves_charge_fanout_and_packed_restart() {
+    check_gp_finite_ccvs_step(false);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn gp_probe_ccvs_step_preserves_charge_fanout_and_packed_restart() {
+    check_gp_finite_ccvs_step(true);
+}
+
+fn check_gp_finite_ccvs_step(probe: bool) {
     let jump = 0.5e-9;
     let after =
         |time: f64, event: f64| time >= event || (time - event).abs() <= 8.0 * f64::EPSILON * event;
@@ -274,8 +323,25 @@ fn gp_resistive_ccvs_step_preserves_charge_fanout_and_packed_restart() {
             config.convergence_config.gmin_target = 0.0;
             let engine = Engine::new(config);
             for polarity in [1.0, -1.0] {
+                let sign = if probe { polarity } else { 1.0 };
+                let resistance = if probe { 1000.0 } else { 1.0 };
+                let (drive_node, control_name, control_deck, drive_charge) = if probe {
+                    (
+                        "drive",
+                        "vsense",
+                        if sign > 0.0 {
+                            "VSENSE drive ctrl 0\n"
+                        } else {
+                            "VSENSE ctrl drive 0\n"
+                        },
+                        0.0,
+                    )
+                } else {
+                    ("ctrl", "rc", "CC ctrl 0 1p\n", -polarity * 0.0005 * 1e-12)
+                };
+                let gain = 2.0 * resistance * sign;
                 let source=Netlist::parse(&format!(
-                    "CCVS charge jump\nVC c 0 {}\nVB ctrl 0 PWL(0 {} .5n {} .5n {} 2n {})\nRC ctrl 0 1\nCC ctrl 0 1p\nH1 b 0 RC 2\nCB b 0 2p\nF1 copy 0 H1 2\nRF copy 0 1k\nCF copy 0 3p\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=2\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) v(copy) i(vc) i(h1) i(vb) i(rc) i(f1)\n.end\n",
+                    "CCVS charge jump\nVC c 0 {}\nVB {drive_node} 0 PWL(0 {} .5n {} .5n {} 2n {})\nRC ctrl 0 {resistance}\n{control_deck}H1 b 0 {control_name} {gain}\nCB b 0 2p\nF1 copy 0 H1 2\nRF copy 0 1k\nCF copy 0 3p\nQ1 c b 0 qm\n.model qm {} IS=1e-16 BF=100 BR=1 TF=1n PTF=57.29577951308232\n.options device zeroresistancetol=2\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-26\n.save v(b) v(copy) i(vc) i(h1) i(vb) i({control_name}) i(f1)\n.end\n",
                     2.0*polarity,0.35*polarity,0.35*polarity,0.3505*polarity,0.3505*polarity,if polarity>0.0 {"NPN"} else {"PNP"},
                 )).unwrap();
                 let (result, checkpoints) = engine
@@ -295,7 +361,9 @@ fn gp_resistive_ccvs_step_preserves_charge_fanout_and_packed_restart() {
                 let b = result.try_voltage_waveform_named("b").unwrap();
                 let copy = result.try_voltage_waveform_named("copy").unwrap();
                 let h = result.try_branch_current_waveform_named("h1").unwrap();
-                let rc = result.try_branch_current_waveform_named("rc").unwrap();
+                let rc = result
+                    .try_branch_current_waveform_named(control_name)
+                    .unwrap();
                 let ic = result.try_branch_current_waveform_named("vc").unwrap();
                 let fanout = result.try_branch_current_waveform_named("f1").unwrap();
                 for (i, &time) in result.time.iter().enumerate() {
@@ -314,7 +382,7 @@ fn gp_resistive_ccvs_step_preserves_charge_fanout_and_packed_restart() {
                         2000.0 * base_current(0.7)
                     };
                     assert!((polarity * b[i] - v).abs() < 1e-10);
-                    assert!((polarity * rc[i] - v / 2.0).abs() < 1e-12);
+                    assert!((polarity * rc[i] - v / gain).abs() < 1e-12);
                     assert!(
                         (-polarity * h[i] - base_current(v)).abs() < 2e-11,
                         "{dialect:?}/{method:?}: finite CCVS current at {time:e}"
@@ -345,10 +413,19 @@ fn gp_resistive_ccvs_step_preserves_charge_fanout_and_packed_restart() {
                 for (name, expected) in [
                     ("h1", -polarity * charge),
                     ("f1", -2.0 * polarity * charge),
-                    ("vb", -polarity * 0.0005 * 1e-12),
+                    ("vb", drive_charge),
                 ] {
                     let observation = trace(&result, name);
                     assert!(observation.complete && observation.derivatives.is_empty());
+                    if expected == 0.0 {
+                        assert!(
+                            observation
+                                .points
+                                .iter()
+                                .all(|point| point.charge_coulombs == 0.0)
+                        );
+                        continue;
+                    }
                     let observed = observation
                         .points
                         .iter()
@@ -361,7 +438,7 @@ fn gp_resistive_ccvs_step_preserves_charge_fanout_and_packed_restart() {
                     );
                 }
                 assert!(
-                    trace(&result, "rc")
+                    trace(&result, control_name)
                         .points
                         .iter()
                         .all(|point| point.charge_coulombs == 0.0)
