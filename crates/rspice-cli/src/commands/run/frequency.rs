@@ -1514,10 +1514,10 @@ pub(super) fn run_pz(
     }
 }
 
-/// Print the pole/zero summary and export the singularities.
+/// Print the pole/zero summary and export the complete retained transfer.
 ///
-/// The export follows the rawfile convention for .PZ results: a single
-/// point with one complex variable per pole/zero (`pole(1)`, `zero(1)`, ...).
+/// Flat output shares the typed-document projection used by conversion, keeping
+/// gains and qualification beside the single-point `pole(N)`/`zero(N)` columns.
 pub(super) fn report_pz(
     ctx: &RunContext<'_>,
     result: &rspice_core::analysis::PoleZeroResult,
@@ -1559,41 +1559,31 @@ pub(super) fn report_pz(
 
     if let Some(output) = ctx.resolve_output("pz") {
         let analysis_id = output.analysis("pz")?;
-        use super::export::{ColumnData, ExportColumn, ExportTable};
-
-        let singularity =
-            |label: &str, index: usize, value: &rspice_core::Complex64| ExportColumn {
-                unit: Some(rspice_core::execution::SignalUnit::RadianPerSecond.symbol()),
-                name: format!("{label}({})", index + 1),
-                // Retain the SPICE rawfile pole/zero types, whose values are
-                // Laplace-plane roots rather than ordinary frequency in Hz.
-                var_type: label.to_string(),
-                data: ColumnData::Complex {
-                    real: vec![value.re],
-                    imag: vec![value.im],
-                },
-            };
-        let columns: Vec<ExportColumn> = poles
-            .iter()
-            .enumerate()
-            .map(|(i, p)| singularity("pole", i, p))
-            .chain(
-                zeros
-                    .iter()
-                    .enumerate()
-                    .map(|(i, z)| singularity("zero", i, z)),
-            )
-            .collect();
-
-        let table = ExportTable {
+        use super::export::{ColumnData, ExportTable};
+        let document =
+            || rspice_core::execution::AnalysisResultDocument::from_pole_zero(analysis_id, result);
+        let mut table = ExportTable {
             scale_unit: None,
             analysis: "pz".to_string(),
             plot_name: "Pole-Zero Analysis".to_string(),
             scale_name: "point".to_string(),
             scale_type: "index".to_string(),
             scale: vec![0.0],
-            columns,
+            columns: Vec::new(),
         };
+        if ctx.format != OutputFormat::Json {
+            let builder = document()
+                .map_err(|error| super::document::document_error(ctx, analysis_id, error))?;
+            let built = super::document::finish(ctx, analysis_id, builder)?;
+            // PZ is a scalar report with no source axes. Reuse its complete
+            // numeric payload projection while retaining native plot labels.
+            table.columns = crate::commands::waveform_io::result_document_table(
+                &output.path,
+                &built,
+                ctx.engine.config().resource_limits,
+            )?
+            .columns;
+        }
         let schema = super::document::distinct_schema(table.columns.iter().map(|column| {
             use rspice_core::execution::{
                 SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
@@ -1602,8 +1592,21 @@ pub(super) fn report_pz(
                 &column.name,
                 &column.name,
                 SignalKind::Scalar,
-                SignalUnit::RadianPerSecond,
-                SignalValueType::Complex,
+                match column.unit.as_deref() {
+                    Some("rad/s") => SignalUnit::RadianPerSecond,
+                    Some("ohm") => SignalUnit::Ohm,
+                    Some("1") => SignalUnit::Dimensionless,
+                    Some(unit) => SignalUnit::Custom(unit.into()),
+                    None => SignalUnit::Unspecified,
+                },
+                if matches!(
+                    column.data,
+                    ColumnData::Complex { .. } | ColumnData::NullableComplex(_)
+                ) {
+                    SignalValueType::Complex
+                } else {
+                    SignalValueType::Real
+                },
                 SignalShape::Scalar,
                 SignalOwner::Analysis,
             )
@@ -1614,7 +1617,7 @@ pub(super) fn report_pz(
             analysis_id,
             schema,
             &table,
-            || rspice_core::execution::AnalysisResultDocument::from_pole_zero(analysis_id, result),
+            document,
         )?;
 
         if !ctx.quiet {

@@ -17,19 +17,165 @@ const RC: &str =
     "* current RC\nR1 out 0 RESISTANCE\nC1 out 0 CAPACITANCE\n.pz out 0 out 0 cur pz\n.end\n";
 
 fn run(directory: &Path, name: &str, circuit: &str) -> PathBuf {
+    run_format(directory, name, circuit, "json", "json")
+}
+
+fn run_format(
+    directory: &Path,
+    name: &str,
+    circuit: &str,
+    format: &str,
+    extension: &str,
+) -> PathBuf {
     let deck = directory.join(format!("{name}.sp"));
-    let path = directory.join(format!("{name}.json"));
+    let path = directory.join(format!("{name}.{extension}"));
     std::fs::write(&deck, circuit).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "run"])
         .arg(deck)
         .arg("-o")
         .arg(&path)
-        .args(["-f", "json"])
+        .args(["-f", format])
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     path
+}
+
+#[test]
+fn direct_pole_zero_exports_use_the_same_complete_projection_as_conversion() {
+    let directory = common::test_dir("pz_direct_projection");
+    let source = original(&directory);
+    let baseline = RC.replace("RESISTANCE", "1k").replace("CAPACITANCE", "1u");
+    let altered = RC
+        .replace("RESISTANCE", "2k")
+        .replace("CAPACITANCE", "500n");
+    for (format, extension) in FORMATS {
+        let native = run_format(&directory, "native", &baseline, format, extension);
+        let changed = run_format(&directory, "changed", &altered, format, extension);
+        let converted = directory.join(format!("converted.{extension}"));
+        convert(&source, &converted, format);
+        let same = compare(&native, &converted, &[]);
+        assert!(same.status.success(), "{format}: {same:?}");
+        let different = compare(&changed, &native, &[]);
+        assert_eq!(different.status.code(), Some(3), "{format}: {different:?}");
+        assert!(String::from_utf8_lossy(&different.stdout).contains("dc_gain"));
+    }
+}
+
+#[test]
+fn empty_root_sets_retain_static_gains_and_integrators_retain_missing_dc_gain() {
+    let directory = common::test_dir("pz_static_and_integrator");
+    for (format, extension) in FORMATS {
+        let source = run_format(
+            &directory,
+            "static",
+            "* resistor\nR1 out 0 1k\n.pz out 0 out 0 cur pz\n.end\n",
+            format,
+            extension,
+        );
+        let changed = run_format(
+            &directory,
+            "changed",
+            "* resistor\nR1 out 0 2k\n.pz out 0 out 0 cur pz\n.end\n",
+            format,
+            extension,
+        );
+        let same = compare(&source, &source, &[]);
+        assert!(same.status.success(), "{format}: {same:?}");
+        let different = compare(&changed, &source, &[]);
+        assert_eq!(different.status.code(), Some(3), "{format}: {different:?}");
+        let integrator = run_format(
+            &directory,
+            "integrator",
+            "* capacitor\nC1 out 0 1u\n.pz out 0 out 0 cur pz\n.end\n",
+            format,
+            extension,
+        );
+        let decoded = directory.join("decoded.json");
+        convert(&integrator, &decoded, "json");
+        let table = common::read_json(&decoded);
+        assert_eq!(column(&table, "dc_gain")["values"], json!([null]));
+        assert_eq!(
+            column(&table, "high_frequency_gain")["values"],
+            json!([0.0])
+        );
+        let unknown = compare(&integrator, &integrator, &[]);
+        assert_eq!(unknown.status.code(), Some(3), "{format}: {unknown:?}");
+        let root = compare(&integrator, &integrator, &["--variables", "pole(1)"]);
+        assert!(root.status.success(), "{format}: {root:?}");
+    }
+}
+
+#[test]
+fn direct_pole_zero_exports_admit_the_complete_table_before_replacing_output() {
+    let directory = common::test_dir("pz_native_admission");
+    let source = original(&directory);
+    let deck = directory.join("original.sp");
+    let config = directory.join("limits.toml");
+    let destination = directory.join("protected.csv");
+    // The result-value budget also covers extraction workspace. Use the
+    // independent external-data budget to isolate flat export admission.
+    std::fs::write(&config, "[resources]\nmax_external_data_values=16\n").unwrap();
+    std::fs::write(&destination, "previous").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--config"])
+        .arg(&config)
+        .arg("run")
+        .arg(&deck)
+        .arg("-o")
+        .arg(&destination)
+        .args(["-f", "csv"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(75), "{output:?}");
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "previous");
+    // JSON retains the compact payload and does not pay the table expansion.
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--config"])
+        .arg(&config)
+        .arg("run")
+        .arg(&deck)
+        .arg("-o")
+        .arg(&source)
+        .args(["-f", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
+fn pole_zero_step_manifests_describe_root_gain_and_evidence_units() {
+    let directory = common::test_dir("pz_flat_manifest");
+    run_format(
+        &directory,
+        "sweep",
+        "* stepped RC\n.param r=1000\nR1 out 0 {r}\nC1 out 0 1u\n.step param r list 1000 2000\n.pz out 0 out 0 cur pz\n.end\n",
+        "csv",
+        "csv",
+    );
+    let manifest = common::read_json(&directory.join("sweep.step_schema.json"));
+    let schema = manifest["analyses"][0]["union_schema"].as_array().unwrap();
+    for (name, unit, value_type) in [
+        ("pole(1)", "radian_per_second", "complex"),
+        ("dc_gain", "ohm", "real"),
+        ("high_frequency_gain", "ohm", "real"),
+        ("pz:poles_evidence(qualified)", "dimensionless", "real"),
+    ] {
+        let descriptor = schema
+            .iter()
+            .find(|descriptor| descriptor["display_name"] == name)
+            .unwrap();
+        assert_eq!(descriptor["unit"], unit, "{name}: {descriptor}");
+        assert_eq!(descriptor["value_type"], value_type, "{name}: {descriptor}");
+    }
+    assert_eq!(
+        manifest["analyses"][0]["coordinates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 fn original(directory: &Path) -> PathBuf {

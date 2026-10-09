@@ -27,6 +27,13 @@ impl PayloadProjection<'_> {
     }
 
     pub(super) fn pole_zero(&mut self, payload: &PoleZeroPayload) -> Result<(), CliError> {
+        let unit = payload
+            .root_unit
+            .as_ref()
+            .unwrap_or(&SignalUnit::Unspecified);
+        // Keep the traditional root columns first; append report quantities.
+        self.pole_zero_roots("pole", &payload.poles, unit)?;
+        self.pole_zero_roots("zero", &payload.zeros, unit)?;
         self.pole_zero_marker("input", &payload.input)?;
         self.pole_zero_marker("output", &payload.output)?;
         let gain_unit = payload
@@ -42,15 +49,10 @@ impl PayloadProjection<'_> {
                 ColumnData::optional_real(vec![value; points])
             })?;
         }
-        let unit = payload
-            .root_unit
-            .as_ref()
-            .unwrap_or(&SignalUnit::Unspecified);
         for (role, roots, evidence) in [
             ("pole", payload.poles.as_slice(), &payload.pole_evidence),
             ("zero", payload.zeros.as_slice(), &payload.zero_evidence),
         ] {
-            self.pole_zero_roots(role, roots, unit)?;
             self.pole_zero_count(&format!("finite_{role}s"), roots.len())?;
             let (state, certificate) = match evidence {
                 RootSetEvidenceDocument::NotRequested => ("not_requested", None),

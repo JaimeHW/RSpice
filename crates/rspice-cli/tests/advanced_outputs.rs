@@ -327,15 +327,16 @@ fn pole_zero_exports_complex_singularities() {
     );
 
     let csv = std::fs::read_to_string(&out).expect("pz table");
-    let mut lines = common::delimited_data_text(&csv, b',').lines();
-    let header = lines.next().expect("header");
-    assert!(
-        header.contains("Re(pole(1))"),
-        "pole column expected: {header}"
-    );
-    let row = lines.next().expect("data row");
-    let re_idx = header.split(',').position(|c| c == "Re(pole(1))").unwrap();
-    let pole_re: f64 = row.split(',').nth(re_idx).unwrap().parse().unwrap();
+    let data = common::delimited_data_text(&csv, b',');
+    let mut reader = csv::Reader::from_reader(data.as_bytes());
+    let re_idx = reader
+        .headers()
+        .unwrap()
+        .iter()
+        .position(|c| c == "Re(pole(1))")
+        .unwrap();
+    let row = reader.records().next().expect("data row").unwrap();
+    let pole_re: f64 = row.get(re_idx).unwrap().parse().unwrap();
     assert!(
         (pole_re + 1e4).abs() < 1.0,
         "RC pole should be at -1e4 rad/s, got {pole_re}"
@@ -465,7 +466,17 @@ fn pole_zero_publication_retains_angular_frequency_and_gain_units() {
                 let flat: serde_json::Value =
                     serde_json::from_slice(&std::fs::read(converted).unwrap()).unwrap();
                 for signal in flat["signals"].as_array().unwrap() {
-                    assert_eq!(signal["unit"], "rad/s");
+                    let name = signal["name"].as_str().unwrap();
+                    let expected = if name.starts_with("pole(") || name.starts_with("zero(") {
+                        "rad/s"
+                    } else if matches!(name, "dc_gain" | "high_frequency_gain")
+                        && gain_unit == "ohm"
+                    {
+                        "ohm"
+                    } else {
+                        "1"
+                    };
+                    assert_eq!(signal["unit"], expected, "{name}");
                 }
             }
         }
