@@ -27,6 +27,9 @@ use rspice_veriloga::four_state::FourStateBit;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::BTreeMap;
 
+#[path = "digital_process_execution/checkpoint.rs"]
+mod checkpoint;
+
 // ===========================================================================
 // Harness
 // ===========================================================================
@@ -1177,15 +1180,15 @@ fn a_concatenation_target_extends_the_same_way_nonblocking() {
 fn a_product_is_computed_at_the_width_of_its_assignment_target() {
     let mut harness = Harness::new(
         "    reg [3:0] a, b;\n\
-     \x20   reg [7:0] p;\n\
-     \x20   initial p = a * b;",
+     \x20   reg [7:0] product;\n\
+     \x20   initial product = a * b;",
     );
     harness.set("a", "1111");
     harness.set("b", "1111");
 
     expect_finished(harness.run());
     // 15 * 15 = 225 = 0xE1.
-    assert_eq!(harness.get("p"), "11100001");
+    assert_eq!(harness.get("product"), "11100001");
 }
 
 /// One bit of target beyond the operands is enough: `15 + 15 = 30` needs five,
@@ -1194,8 +1197,8 @@ fn a_product_is_computed_at_the_width_of_its_assignment_target() {
 fn an_addition_keeps_the_carry_the_wider_target_has_room_for() {
     let mut harness = Harness::new(
         "    reg [3:0] a, b;\n\
-     \x20   reg [4:0] p;\n\
-     \x20   initial p = a + b;",
+     \x20   reg [4:0] product;\n\
+     \x20   initial product = a + b;",
     );
     harness.set("a", "1111");
     harness.set("b", "1111");
@@ -1203,7 +1206,7 @@ fn an_addition_keeps_the_carry_the_wider_target_has_room_for() {
     expect_finished(harness.run());
     // 15 + 15 = 30 = 5'b11110. Adding at four bits gives 14, then zero-extends
     // to `5'b01110` — the dropped carry.
-    assert_eq!(harness.get("p"), "11110");
+    assert_eq!(harness.get("product"), "11110");
 }
 
 /// Table 5-22 gives `<<` a result the size of its *left* operand, and the left
@@ -1216,15 +1219,15 @@ fn an_addition_keeps_the_carry_the_wider_target_has_room_for() {
 fn a_left_shift_happens_at_the_target_width_not_the_operand_width() {
     let mut harness = Harness::new(
         "    reg [3:0] a;\n\
-     \x20   reg [7:0] p;\n\
-     \x20   initial p = a << 5;",
+     \x20   reg [7:0] product;\n\
+     \x20   initial product = a << 5;",
     );
     harness.set("a", "0001");
 
     expect_finished(harness.run());
     // Bit 0 moves to bit 5. Shifting a four-bit `a` first shifts every bit out
     // and leaves `4'b0000`, which widens to zero.
-    assert_eq!(harness.get("p"), "00100000");
+    assert_eq!(harness.get("product"), "00100000");
 }
 
 /// The classic pin on the other side of the rule: section 5.4.1 makes *every*
@@ -1238,8 +1241,8 @@ fn a_left_shift_happens_at_the_target_width_not_the_operand_width() {
 fn a_concatenation_operand_is_self_determined_and_wraps() {
     let mut harness = Harness::new(
         "    reg [3:0] a, b, c;\n\
-     \x20   reg [15:0] p;\n\
-     \x20   initial p = {a, b + c};",
+     \x20   reg [15:0] product;\n\
+     \x20   initial product = {a, b + c};",
     );
     harness.set("a", "1010");
     harness.set("b", "1111");
@@ -1248,7 +1251,7 @@ fn a_concatenation_operand_is_self_determined_and_wraps() {
     expect_finished(harness.run());
     // `b + c` is `16 mod 16 = 0` at four bits. The concatenation is eight bits
     // wide, and section 5.2.1 zero-extends it into the sixteen-bit target.
-    assert_eq!(harness.get("p"), "0000000010100000");
+    assert_eq!(harness.get("product"), "0000000010100000");
 }
 
 /// A comparison's operands form their own context: they are sized to each
@@ -1263,19 +1266,19 @@ fn a_comparison_sizes_its_operands_to_each_other_only() {
     let mut harness = Harness::new(
         "    reg [3:0] a;\n\
      \x20   reg [7:0] b;\n\
-     \x20   reg [15:0] p;\n\
-     \x20   initial p = a == b;",
+     \x20   reg [15:0] product;\n\
+     \x20   initial product = a == b;",
     );
     harness.set("a", "1111");
     harness.set("b", "00001111");
 
     expect_finished(harness.run());
-    assert_eq!(harness.get("p"), "0000000000000001", "equal at eight bits");
+    assert_eq!(harness.get("product"), "0000000000000001", "equal at eight bits");
 
     harness.set("b", "10001111");
     expect_finished(harness.run());
     assert_eq!(
-        harness.get("p"),
+        harness.get("product"),
         "0000000000000000",
         "the high nibble of `b` is part of the comparison"
     );
@@ -1291,8 +1294,8 @@ fn a_comparison_sizes_its_operands_to_each_other_only() {
 #[test]
 fn an_unsized_literal_takes_a_context_wider_than_thirty_two_bits() {
     let mut harness = Harness::new(
-        "    reg [39:0] p;\n\
-     \x20   initial p = 1 << 35;",
+        "    reg [39:0] product;\n\
+     \x20   initial product = 1 << 35;",
     );
 
     expect_finished(harness.run());
@@ -1300,7 +1303,7 @@ fn an_unsized_literal_takes_a_context_wider_than_thirty_two_bits() {
     expected.push('1');
     expected.push_str(&"0".repeat(35));
     assert_eq!(expected.len(), 40);
-    assert_eq!(harness.get("p"), expected, "bit 35 is set and nothing else");
+    assert_eq!(harness.get("product"), expected, "bit 35 is set and nothing else");
 }
 
 /// The floor is still thirty-two: a concatenation's operands are
@@ -1314,8 +1317,8 @@ fn an_unsized_literal_takes_a_context_wider_than_thirty_two_bits() {
 fn an_unsized_literal_in_a_concatenation_is_exactly_thirty_two_bits() {
     let mut harness = Harness::new(
         "    reg [3:0] a;\n\
-     \x20   reg [35:0] p;\n\
-     \x20   initial p = {a, 1};",
+     \x20   reg [35:0] product;\n\
+     \x20   initial product = {a, 1};",
     );
     harness.set("a", "1010");
 
@@ -1324,7 +1327,7 @@ fn an_unsized_literal_in_a_concatenation_is_exactly_thirty_two_bits() {
     expected.push_str(&"0".repeat(31));
     expected.push('1');
     assert_eq!(expected.len(), 36);
-    assert_eq!(harness.get("p"), expected, "`a` sits above a 32-bit one");
+    assert_eq!(harness.get("product"), expected, "`a` sits above a 32-bit one");
 }
 
 /// Table 5-22 gives `~i` the size of `i`, and makes `i` context-determined.
@@ -1338,14 +1341,14 @@ fn an_unsized_literal_in_a_concatenation_is_exactly_thirty_two_bits() {
 fn a_bitwise_not_inverts_at_the_context_width() {
     let mut harness = Harness::new(
         "    reg [3:0] a, b;\n\
-     \x20   reg [7:0] p;\n\
-     \x20   initial p = ~(a == b);",
+     \x20   reg [7:0] product;\n\
+     \x20   initial product = ~(a == b);",
     );
     harness.set("a", "0110");
     harness.set("b", "0110");
 
     expect_finished(harness.run());
-    assert_eq!(harness.get("p"), "11111110");
+    assert_eq!(harness.get("product"), "11111110");
 }
 
 /// Both arms of `?:` are context-determined and the condition is not. The
@@ -1357,19 +1360,19 @@ fn both_arms_of_a_conditional_take_the_context_width() {
     let mut harness = Harness::new(
         "    reg [3:0] a, b;\n\
      \x20   reg sel;\n\
-     \x20   reg [7:0] p;\n\
-     \x20   initial p = sel ? a * b : a + b;",
+     \x20   reg [7:0] product;\n\
+     \x20   initial product = sel ? a * b : a + b;",
     );
     harness.set("a", "1111");
     harness.set("b", "1111");
     harness.set("sel", "1");
 
     expect_finished(harness.run());
-    assert_eq!(harness.get("p"), "11100001", "225 at eight bits");
+    assert_eq!(harness.get("product"), "11100001", "225 at eight bits");
 
     harness.set("sel", "0");
     expect_finished(harness.run());
-    assert_eq!(harness.get("p"), "00011110", "30 at eight bits");
+    assert_eq!(harness.get("product"), "00011110", "30 at eight bits");
 }
 
 /// A continuous assignment carries the same context as a procedural one: the
@@ -1379,8 +1382,8 @@ fn both_arms_of_a_conditional_take_the_context_width() {
 fn a_continuous_assignment_sizes_its_expression_to_the_driven_net() {
     let mut harness = Harness::new(
         "    reg [3:0] a, b;\n\
-     \x20   wire [7:0] p;\n\
-     \x20   assign p = a * b;",
+     \x20   wire [7:0] product;\n\
+     \x20   assign product = a * b;",
     );
     harness.set("a", "1111");
     harness.set("b", "1111");
@@ -1389,7 +1392,7 @@ fn a_continuous_assignment_sizes_its_expression_to_the_driven_net() {
     // published when the process suspends on its operands.
     expect_suspended(harness.start(0));
     harness.resolve_drivers();
-    assert_eq!(harness.get("p"), "11100001");
+    assert_eq!(harness.get("product"), "11100001");
 }
 
 /// A narrower target still truncates, which is section 5.2.1's step surviving
@@ -1400,15 +1403,15 @@ fn a_continuous_assignment_sizes_its_expression_to_the_driven_net() {
 fn a_narrower_target_truncates_a_wider_expression() {
     let mut harness = Harness::new(
         "    reg [3:0] a, b;\n\
-     \x20   reg [1:0] p;\n\
-     \x20   initial p = a + b;",
+     \x20   reg [1:0] product;\n\
+     \x20   initial product = a + b;",
     );
     harness.set("a", "1111");
     harness.set("b", "0011");
 
     expect_finished(harness.run());
     // 15 + 3 = 18, which is `4'b0010` at four bits; the low two bits are `10`.
-    assert_eq!(harness.get("p"), "10");
+    assert_eq!(harness.get("product"), "10");
 }
 
 // ===========================================================================
@@ -3245,18 +3248,18 @@ fn a_signed_value_sign_extends_to_a_wider_target() {
     assert_eq!(
         signed_case(
             "    reg signed [3:0] a;\n\
-             \x20   reg [7:0] p;\n\
-             \x20   initial begin a = 4'b1111; p = a; end",
-            "p",
+             \x20   reg [7:0] product;\n\
+             \x20   initial begin a = 4'b1111; product = a; end",
+            "product",
         ),
         "11111111",
     );
     assert_eq!(
         signed_case(
             "    reg [3:0] a;\n\
-             \x20   reg [7:0] p;\n\
-             \x20   initial begin a = 4'b1111; p = a; end",
-            "p",
+             \x20   reg [7:0] product;\n\
+             \x20   initial begin a = 4'b1111; product = a; end",
+            "product",
         ),
         "00001111",
     );
@@ -3269,9 +3272,9 @@ fn an_unknown_sign_bit_extends_as_itself() {
     assert_eq!(
         signed_case(
             "    reg signed [3:0] a;\n\
-             \x20   reg [7:0] p;\n\
-             \x20   initial begin a = 4'bx111; p = a; end",
-            "p",
+             \x20   reg [7:0] product;\n\
+             \x20   initial begin a = 4'bx111; product = a; end",
+            "product",
         ),
         "xxxxx111",
     );
@@ -3280,9 +3283,9 @@ fn an_unknown_sign_bit_extends_as_itself() {
     assert_eq!(
         signed_case(
             "    reg [3:0] a;\n\
-             \x20   reg [7:0] p;\n\
-             \x20   initial begin a = 4'bx111; p = a; end",
-            "p",
+             \x20   reg [7:0] product;\n\
+             \x20   initial begin a = 4'bx111; product = a; end",
+            "product",
         ),
         "0000x111",
     );
@@ -3360,10 +3363,10 @@ fn only_division_and_modulus_differ_between_signed_and_unsigned() {
         signed_case(
             &format!(
                 "    reg {signedness}[3:0] a, b;\n\
-                 \x20   reg {signedness}[3:0] p;\n\
-                 \x20   initial begin a = 4'b1001; b = 4'b0010; p = {expression}; end",
+                 \x20   reg {signedness}[3:0] product;\n\
+                 \x20   initial begin a = 4'b1001; b = 4'b0010; product = {expression}; end",
             ),
-            "p",
+            "product",
         )
     };
     // Nine and two, or minus seven and two, at four bits: the same bits out.
@@ -3390,10 +3393,10 @@ fn arithmetic_right_shift_fills_with_the_sign_only_when_signed() {
         signed_case(
             &format!(
                 "    reg {signedness}[7:0] a;\n\
-                 \x20   reg [7:0] p;\n\
-                 \x20   initial begin a = 8'b10000000; p = a {spelling} 2; end",
+                 \x20   reg [7:0] product;\n\
+                 \x20   initial begin a = 8'b10000000; product = a {spelling} 2; end",
             ),
-            "p",
+            "product",
         )
     };
     assert_eq!(shift("signed ", ">>>"), "11100000");
@@ -3413,10 +3416,10 @@ fn a_select_makes_its_expression_unsigned() {
         signed_case(
             &format!(
                 "    reg signed [3:0] a;\n\
-                 \x20   reg signed [7:0] p;\n\
-                 \x20   initial begin a = 4'b1111; p = {right}; end",
+                 \x20   reg signed [7:0] product;\n\
+                 \x20   initial begin a = 4'b1111; product = {right}; end",
             ),
-            "p",
+            "product",
         )
     };
     // -1 + 0 at eight bits, both operands signed.
@@ -3438,11 +3441,11 @@ fn an_unsigned_operand_poisons_the_whole_expression() {
         signed_case(
             &format!(
                 "{declarations}\n\
-                 \x20   reg [7:0] p;\n\
+                 \x20   reg [7:0] product;\n\
                  \x20   initial begin a = 4'b1111; b = 4'b0000; c = 4'b0000;\n\
-                 \x20       p = (a + b) + c; end",
+                 \x20       product = (a + b) + c; end",
             ),
-            "p",
+            "product",
         )
     };
     // All signed: -1 + 0 + 0 at eight bits.

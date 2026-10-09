@@ -396,6 +396,20 @@ impl FourStateValue {
         value
     }
 
+    /// Checkpoint values must be complete and canonical; unlike legacy artifact
+    /// decoding they cannot silently pad missing words or discard altered bits.
+    pub(crate) fn from_checked_planes(width: u32, aval: &[u32], bval: &[u32]) -> Option<Self> {
+        let words = Self::words_for(width);
+        if aval.len() != words || bval.len() != words {
+            return None;
+        }
+        let remainder = width % PLANE_WORD_BITS;
+        if remainder != 0 && ((aval[words - 1] | bval[words - 1]) >> remainder) != 0 {
+            return None;
+        }
+        Some(Self::from_planes(width, aval, bval))
+    }
+
     /// The plane words this value occupies, LSB word first.
     fn plane_words(&self) -> (&[u32], &[u32]) {
         match &self.planes {

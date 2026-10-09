@@ -452,6 +452,17 @@ that physical time even when their digital reporting tick is rounded. A later
 positive-delay activation receives its own clock. Custom `DigitalEnvironment`
 implementations must supply `read_clock`; absent or invalid clocks are errors.
 
+`canonical_ir::digital_eval::checkpoint` provides versioned process continuations,
+captured expression-event baselines, waits and pending nonblocking assignments.
+`DigitalCheckpointReader` validates the compiled plan once, authenticates saved
+identities and cursor/value shapes, and rebuilds event programs and analog-read
+capture maps without executing processes. Packed planes are checked strictly;
+real values preserve IEEE bits, including signed zero and NaN payloads. Shared
+decoded-item and packed-bit budgets apply across a reader's restored objects.
+The enclosing circuit reader must bound deserialization and validate/atomically
+install the complete host, scheduler, storage and analog state. These component
+APIs alone do not enable circuit-level persisted mixed-signal restart.
+
 Known digital arithmetic and relational operands wider than 64 bits use exact
 integer arithmetic, with results wrapping at their declared width. X/Z and
 division-by-zero behavior is preserved. Wide shift counts, based literals and

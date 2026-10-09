@@ -11,11 +11,11 @@ use super::*;
 
 #[derive(Debug)]
 pub(super) struct AnalogReadPlan {
-    captures: HashMap<ValueId, Arc<[ValueId]>>,
+    pub(super) captures: HashMap<ValueId, Arc<[ValueId]>>,
 }
 
 impl AnalogReadPlan {
-    fn build(function: &CfgFunction) -> Self {
+    pub(super) fn build(function: &CfgFunction) -> Self {
         let count = function.blocks.len();
         let mut predecessors = vec![Vec::new(); count];
         for block in &function.blocks {

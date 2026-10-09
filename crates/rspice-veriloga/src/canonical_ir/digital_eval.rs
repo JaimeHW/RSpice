@@ -80,6 +80,8 @@ use crate::four_state::FourStateBit;
 #[path = "digital_eval_analog_samples.rs"]
 mod analog_samples;
 use analog_samples::AnalogReadPlan;
+#[path = "digital_eval_checkpoint.rs"]
+pub mod checkpoint;
 
 // ============================================================================
 // The environment
