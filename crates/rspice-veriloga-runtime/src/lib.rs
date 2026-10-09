@@ -8148,9 +8148,11 @@ mod fixed_lane_tests {
         assert_eq!(GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, 5);
         const ARRAY: GeneratedVerilogAParameterDescriptor =
             GeneratedVerilogAParameterDescriptor::instance("coefficients", Some(0.0)).array();
-        assert!(ARRAY.is_array);
+        const {
+            assert!(ARRAY.is_array);
+            assert!(!PARAMETER.is_array);
+        }
         assert_eq!(ARRAY.default, None);
-        assert!(!PARAMETER.is_array);
         assert_eq!(TERMINALS[0].name, "FG");
         assert_eq!(TERMINALS[0].current_parameter, "ifg");
         assert_eq!(PARAMETER, EXPECTED_PARAMETER);

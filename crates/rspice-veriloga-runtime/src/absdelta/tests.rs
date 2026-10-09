@@ -257,11 +257,13 @@ fn zero_delta_uses_only_changed_endpoints_and_ignores_tolerances() {
 #[test]
 fn rejected_and_truncated_intervals_do_not_publish_future_events() {
     let accepted = initialized(0.0);
-    let mut rejected = interval(accepted, 1.0, 1.0, controls());
-    let first = rejected.next_event().unwrap().unwrap();
-    assert!(rejected.candidate().is_none());
-    close(first.sample.time, 0.25);
-    drop(rejected);
+    let first = {
+        let mut rejected = interval(accepted, 1.0, 1.0, controls());
+        let first = rejected.next_event().unwrap().unwrap();
+        assert!(rejected.candidate().is_none());
+        close(first.sample.time, 0.25);
+        first
+    };
     let (_, retry) = consume(interval(accepted, 1.0, 1.0, controls()));
     assert_eq!(retry.len(), 4);
     assert_eq!(retry[0], first);
