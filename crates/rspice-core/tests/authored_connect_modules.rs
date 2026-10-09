@@ -2786,3 +2786,60 @@ endmodule
         );
     }
 }
+
+#[test]
+fn foreign_parameter_reads_follow_nested_overrides_in_loaded_circuits() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module leaf(output electrical p);
+ parameter real G=2;
+ aliasparam gain=G;
+ parameter integer STEP=2;
+ parameter [65:0] BITS=66'h20000000000000001;
+ localparam real L=G+0.5;
+ genvar j;
+ generate for(j=0;j<2;j=j+1) begin : cells
+   localparam integer CODE=STEP+j;
+ end endgenerate
+ analog I(p)<+(V(p)-G)/1000;
+endmodule
+module middle(output electrical p);
+ parameter real LEVEL=3;
+ leaf #(.gain(LEVEL)) inner(p);
+endmodule
+module top(output electrical p,q,r,s,t);
+ parameter real BASE=3;
+ middle #(.LEVEL(BASE)) a(p);
+ leaf #(.gain(BASE+2)) b(q);
+ leaf #(.G(b.G+1)) c(r);
+ real sampled=0;
+ initial #0.5 sampled=a.inner.L+b.G+a.inner.cells[1].CODE+a.inner.BITS[65];
+ analog begin
+   I(p)<+V(p)/1000; I(q)<+V(q)/1000; I(r)<+V(r)/1000;
+   V(s)<+sampled; V(t)<+a.inner.G/b.G;
+ end
+endmodule
+"#,
+    );
+    let deck=Netlist::parse(&format!("* cross-module parameters\nX1 p q r s t top\nX2 a b c d e top BASE=5\n.va \"{}\" top module=top\n.end\n",source.path())).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 1.5),
+        ("q", 2.5),
+        ("r", 3.0),
+        ("s", 12.5),
+        ("t", 0.6),
+        ("a", 2.5),
+        ("b", 3.5),
+        ("c", 4.0),
+        ("d", 16.5),
+        ("e", 5.0 / 7.0),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}

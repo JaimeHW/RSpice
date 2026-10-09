@@ -694,3 +694,93 @@ endmodule
         );
     }
 }
+
+#[test]
+fn foreign_parameters_preserve_target_types_dependencies_and_replay() {
+    let source = r#"
+module leaf;
+ parameter integer N=1;
+ aliasparam ALT=N;
+ localparam integer L=N+1;
+ parameter [65:0] BITS=66'h20000000000000001;
+endmodule
+module top(output electrical p);
+ parameter integer SELECT=0,K=3;
+ genvar i;
+ generate for(i=0;i<2;i=i+1) begin : lanes
+   leaf #(.ALT(K+i)) u();
+ end endgenerate
+ real sampled;
+ initial sampled=lanes[SELECT].u.L+lanes[1-SELECT].u.BITS[65];
+ analog V(p)<+sampled;
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let initial = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &initial.canonical_ir,
+            &[("SELECT", 1.0), ("K", 5.0)],
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    for (report, k, selection) in [(&initial, 3.0, 0.0), (&specialized, 5.0, 1.0)] {
+        for (name, expected) in [("K", k), ("SELECT", selection)] {
+            let parameter = report
+                .canonical_ir
+                .hir
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name == name)
+                .unwrap();
+            assert_eq!(
+                parameter.elaboration_value,
+                Some(expected),
+                "{name} must be protected from stale foreign constants"
+            );
+        }
+        let replay = compiler
+            .prepare_artifact_runtime_source(
+                &report.canonical_ir,
+                &rspice_veriloga::NoPipelineControl,
+            )
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.digital.content_identity,
+            replay.canonical_ir.digital.content_identity
+        );
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+    }
+}
+
+#[test]
+fn foreign_parameter_binding_rejects_illegal_defaults_writes_and_cycles() {
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    for body in [
+        "leaf u(); parameter integer BAD=u.N; analog V(p)<+BAD;",
+        "leaf u(); parameter real BAD=1 from [0:u.N]; analog V(p)<+BAD;",
+        "leaf u(); parameter real BAD=2 exclude u.N; analog V(p)<+BAD;",
+        "leaf u(); initial u.N=3; analog V(p)<+1;",
+        "leaf u(); analog begin u.N=3; V(p)<+1; end",
+        "leaf #(.N(b.N)) a(); leaf #(.N(a.N)) b(); analog V(p)<+a.N;",
+    ] {
+        let source = format!(
+            "module leaf; parameter integer N=1; endmodule module top(output electrical p); {body} endmodule"
+        );
+        assert!(
+            compiler.compile_runtime(&source, Some("top")).is_err(),
+            "illegal foreign parameter use compiled: {body}"
+        );
+    }
+}

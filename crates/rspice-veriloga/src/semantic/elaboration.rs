@@ -24,7 +24,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[path = "elaboration_parameters.rs"]
-mod parameters;
+pub(super) mod parameters;
 
 /// Return the selected module itself when it has no hierarchy or retained
 /// generate structure, otherwise a faithfully flattened owned module.  Unsupported or ambiguous structure is
@@ -1371,65 +1371,9 @@ pub(super) fn bind_parameter_overrides(
     child: &AnalyzedModule,
     path: &str,
 ) -> CompileResult<HashMap<usize, Expression>> {
-    let has_named = instance
-        .parameters
-        .iter()
-        .any(|parameter| parameter.name.is_some());
-    let has_ordered = instance
-        .parameters
-        .iter()
-        .any(|parameter| parameter.name.is_none());
-    if has_named && has_ordered {
-        return Err(semantic_error(
-            SemanticErrorKind::UnsupportedFeature(format!(
-                "instance '{path}' mixes named and ordered parameter overrides"
-            )),
-            instance.span,
-        ));
-    }
-    if has_ordered && instance.parameters.len() > child.parameters.len() {
-        return Err(semantic_error(
-            SemanticErrorKind::ArgumentCountMismatch {
-                name: path.to_string(),
-                expected: format!("at most {} parameter overrides", child.parameters.len()),
-                got: instance.parameters.len(),
-            },
-            instance.span,
-        ));
-    }
-    let aliases: HashMap<&str, usize> = child
-        .param_aliases
-        .iter()
-        .map(|alias| (alias.alias.as_str(), alias.target))
-        .collect();
-    let mut overrides = HashMap::new();
-    for (ordered_index, parameter) in instance.parameters.iter().enumerate() {
-        let index = match &parameter.name {
-            Some(name) => child
-                .parameters
-                .iter()
-                .position(|candidate| candidate.name == *name)
-                .or_else(|| aliases.get(name.as_str()).copied())
-                .ok_or_else(|| {
-                    semantic_error(
-                        SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
-                        parameter.span,
-                    )
-                })?,
-            None => ordered_index,
-        };
-        if overrides.insert(index, parameter.value.clone()).is_some() {
-            let name = child.parameters[index].name.clone();
-            return Err(semantic_error(
-                SemanticErrorKind::DuplicateSymbol {
-                    name,
-                    first_defined: parameter.span,
-                },
-                parameter.span,
-            ));
-        }
-    }
-    Ok(overrides)
+    let names: Vec<_> = child.parameters.iter().map(|parameter| parameter.name.clone()).collect();
+    let aliases = child.param_aliases.iter().map(|alias| (alias.alias.clone(), alias.target)).collect();
+    super::instance_parameters::bind_overrides(instance, &names, &aliases, path)
 }
 
 fn resolve_connection(

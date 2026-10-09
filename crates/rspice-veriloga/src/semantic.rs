@@ -399,6 +399,7 @@ pub(crate) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&
 mod function_effects;
 mod implicit_integrator;
 mod instance_parameters;
+pub(crate) mod source_references;
 mod packed_parameters;
 mod parameter_assignments;
 mod parameter_constants;
@@ -579,6 +580,8 @@ impl SemanticAnalyzer {
     }
 
     pub fn analyze(&mut self, source: &SourceFile) -> CompileResult<AnalyzedFile> {
+        let prepared = source_references::prepare(source)?;
+        let source = prepared.as_ref();
         let mut modules = HashMap::new();
         let mut module_spans = HashMap::new();
         self.warnings.clear();

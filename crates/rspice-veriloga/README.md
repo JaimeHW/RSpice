@@ -227,10 +227,18 @@ Forward/sibling references, digital reads/writes, physical probes/contributions 
 analog function calls use the selected declaration; terminal bit/part selectors stay
 separate from scope selectors. Each loop iteration retains its implicit integer
 localparam. Escaped identifiers cannot alias generated paths or internal symbols.
-Authored paths replay after parameter specialization. Cross-module and absolute
-`$root` binding, hierarchy-dependent generate decisions, and scope indices that
-themselves depend on hierarchical constants remain open. HIR 149 / cache record 131
+Authored paths replay after parameter specialization. HIR 149 / cache record 131
 invalidate artifacts predating generated-reference binding.
+Descendant numeric parameter references now discover target occurrences before body
+analysis, with named/ordered overrides, aliases, local constants, packed values and
+parameters inside generated scopes. Sibling parameter reads may supply instance
+overrides; dependency cycles are diagnosed. Both domains consume the same effective
+value. Retained dependencies protect parameter updates from stale folded values and
+source replay rebinds after specialization. HIR 150 / cache record 132 invalidate
+artifacts predating these source bindings.
+Cross-module storage/function binding, upward and absolute `$root` paths, foreign
+parameter arrays/strings, hierarchy-dependent generate decisions, and scope indices
+that themselves depend on hierarchical constants remain open.
 Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
 artifacts produced before scoped implicit-net construction.
 Explicit continuous-discipline `wire`/`tri` declarations allocate only physical

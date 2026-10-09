@@ -4558,15 +4558,17 @@ mod tests {
 }
 
 /// Rebuild generated items from authored structure after parameter specialization.
-pub(crate) fn expand_specialized_generates(module: &mut Module) -> Result<(), ParseError> {
+pub(crate) fn expand_specialized_generates(module: &mut Module) -> crate::error::CompileResult<()> {
     let Some(template) = &module.generate_template else {
         return Ok(());
     };
     let mut expanded = template.module.clone();
     expanded.parameters = module.parameters.clone();
+    expanded.reference_sources = module.reference_sources.clone();
     let mut next_process_id = template.next_process_id;
     generate::expand(&mut expanded, &mut next_process_id)?;
     expanded.generate_template = Some(template.clone());
     *module = expanded;
+    crate::semantic::source_references::bind(module)?;
     Ok(())
 }

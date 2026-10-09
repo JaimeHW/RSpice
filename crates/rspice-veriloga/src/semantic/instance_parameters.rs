@@ -72,3 +72,61 @@ pub(super) fn override_identity(expression: &Expression) -> Result<String, Strin
     expression_key(expression, &mut key)?;
     Ok(key)
 }
+
+/// One ordered/named override contract for source discovery and body elaboration.
+pub(super) fn bind_overrides(
+    instance: &ModuleInstance,
+    names: &[SmolStr],
+    aliases: &HashMap<SmolStr, usize>,
+    path: &str,
+) -> CompileResult<HashMap<usize, Expression>> {
+    let has_named = instance.parameters.iter().any(|value| value.name.is_some());
+    let has_ordered = instance.parameters.iter().any(|value| value.name.is_none());
+    if has_named && has_ordered {
+        return Err(SemanticError::new(
+            SemanticErrorKind::UnsupportedFeature(format!(
+                "instance '{path}' mixes named and ordered parameter overrides"
+            )),
+            instance.span,
+        )
+        .into());
+    }
+    if has_ordered && instance.parameters.len() > names.len() {
+        return Err(SemanticError::new(
+            SemanticErrorKind::ArgumentCountMismatch {
+                name: path.into(),
+                expected: format!("at most {} parameter overrides", names.len()),
+                got: instance.parameters.len(),
+            },
+            instance.span,
+        )
+        .into());
+    }
+    let mut overrides = HashMap::new();
+    for (ordered, parameter) in instance.parameters.iter().enumerate() {
+        let index = match &parameter.name {
+            Some(name) => names
+                .iter()
+                .position(|candidate| candidate == name)
+                .or_else(|| aliases.get(name).copied())
+                .ok_or_else(|| {
+                    SemanticError::new(
+                        SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                        parameter.span,
+                    )
+                })?,
+            None => ordered,
+        };
+        if overrides.insert(index, parameter.value.clone()).is_some() {
+            return Err(SemanticError::new(
+                SemanticErrorKind::DuplicateSymbol {
+                    name: names[index].clone(),
+                    first_defined: parameter.span,
+                },
+                parameter.span,
+            )
+            .into());
+        }
+    }
+    Ok(overrides)
+}

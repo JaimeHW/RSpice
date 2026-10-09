@@ -115,6 +115,10 @@ impl HierarchyElaborator<'_> {
 
 #[derive(Default)]
 pub(super) struct ParameterHierarchy {
+    root_name: Option<SmolStr>,
+    source_names: HashMap<SmolStr, SmolStr>,
+    foreign_roots: HashSet<SmolStr>,
+    foreign_given_roots: HashSet<SmolStr>,
     edges: HashMap<SmolStr, HashSet<SmolStr>>,
     values: HashMap<SmolStr, f64>,
     roots: HashSet<SmolStr>,
@@ -137,6 +141,36 @@ impl ParameterHierarchy {
         scope: &ScopeMap,
         parent: Option<(&Module, &ScopeMap, &HashMap<usize, Expression>)>,
     ) -> CompileResult<()> {
+        if scope.instance_path.is_none() {
+            self.root_name = Some(source.name.clone());
+        }
+        let root = self
+            .root_name
+            .as_deref()
+            .expect("root registered before its children");
+        let path = scope.instance_path.as_deref().map(|path| {
+            path.strip_prefix(root)
+                .and_then(|suffix| suffix.strip_prefix('.'))
+                .expect("occurrence belongs to the selected root")
+        });
+        let qualify = |name: &SmolStr| -> SmolStr {
+            path.map_or_else(|| name.clone(), |path| format!("{path}.{name}").into())
+        };
+        for (name, target) in &scope.parameters {
+            let source_name = qualify(name);
+            if let Some(previous) = self
+                .source_names
+                .insert(source_name.clone(), target.clone())
+                && previous != *target
+            {
+                return Err(semantic_error(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "ambiguous hierarchical parameter identity '{source_name}'"
+                    )),
+                    source.span,
+                ));
+            }
+        }
         let order = crate::semantic::parameter_defaults::declaration_order(source);
         let declarations: Vec<_> = order
             .iter()
@@ -248,6 +282,12 @@ impl ParameterHierarchy {
                     .filter_map(|name| scope.parameters.get(&name).cloned()),
             );
         }
+        // Foreign constant reads are immutable in this occurrence's body. Their
+        // dependencies must propagate through the target's override edges too.
+        self.foreign_roots
+            .extend(source.hierarchical_parameter_values.iter().map(qualify));
+        self.foreign_given_roots
+            .extend(source.hierarchical_parameter_given.iter().map(qualify));
         // Re-expanded generate structure is also immutable in a compiled device.
         if let Some(template) = &source.generate_template {
             let dependencies =
@@ -272,6 +312,22 @@ impl ParameterHierarchy {
         let mut pending: Vec<_> = self.roots.iter().cloned().collect();
         let mut required = HashSet::new();
         let mut given_required = self.given_roots.clone();
+        let resolve = |name: &SmolStr| {
+            self.source_names.get(name).cloned().ok_or_else(|| {
+                semantic_error(
+                    SemanticErrorKind::UnsupportedFeature(format!(
+                        "hierarchical parameter dependency '{name}' has no elaborated declaration"
+                    )),
+                    span,
+                )
+            })
+        };
+        for name in &self.foreign_roots {
+            pending.push(resolve(name)?);
+        }
+        for name in &self.foreign_given_roots {
+            given_required.insert(resolve(name)?);
+        }
         while let Some(name) = pending.pop() {
             if !required.insert(name.clone()) {
                 continue;
@@ -307,19 +363,19 @@ impl ParameterHierarchy {
 /// Public inputs read by an expression, expanding local dependencies only.
 /// Public-to-public edges remain separate so instance overrides replace them.
 #[derive(Default)]
-struct ParameterDependencies {
-    values: HashSet<SmolStr>,
-    given: HashSet<SmolStr>,
+pub(crate) struct ParameterDependencies {
+    pub(crate) values: HashSet<SmolStr>,
+    pub(crate) given: HashSet<SmolStr>,
 }
 
-struct SourceParameters<'a> {
+pub(crate) struct SourceParameters<'a> {
     given: parameter_given::GivenParameters,
     public: HashSet<&'a SmolStr>,
     locals: HashMap<&'a SmolStr, &'a crate::ast::ParameterDecl>,
 }
 
 impl<'a> SourceParameters<'a> {
-    fn new(source: &'a Module) -> Self {
+    pub(crate) fn new(source: &'a Module) -> Self {
         Self {
             given: parameter_given::GivenParameters::new(source),
             public: source.parameters.iter().map(|value| &value.name).collect(),
@@ -331,7 +387,7 @@ impl<'a> SourceParameters<'a> {
         }
     }
 
-    fn dependencies<'b>(
+    pub(crate) fn dependencies<'b>(
         &'b self,
         expressions: impl IntoIterator<Item = &'b Expression>,
     ) -> CompileResult<ParameterDependencies> {

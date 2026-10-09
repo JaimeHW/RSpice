@@ -351,10 +351,13 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
     absorb(module, expanded);
     if !unroller.hierarchy.authored.is_empty() {
         unroller.rewrite_items(module);
-        unroller.scoped_names = unroller.hierarchy.resolve()?;
+        let (resolved, pending) = unroller.hierarchy.resolve()?;
+        unroller.scoped_names = resolved;
+        module.pending_hierarchical_references = pending;
         unroller.hierarchy.authored.clear();
         unroller.rewrite_items(module);
     }
+    module.hierarchical_scopes = unroller.hierarchy.scopes;
     scope::sort_analog_items(module);
     Ok(())
 }

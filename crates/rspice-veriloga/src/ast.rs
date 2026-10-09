@@ -222,6 +222,13 @@ pub struct Module {
     pub(crate) reserved_identifiers: std::sync::Arc<std::collections::HashSet<SmolStr>>,
     /// Structured source references, interned under collision-free AST symbols.
     pub hierarchical_names: std::collections::BTreeMap<SmolStr, HierarchicalName>,
+    /// Concrete source scopes retained for design-level reference binding.
+    pub(crate) hierarchical_scopes: std::collections::HashMap<Vec<HierarchicalScopeKey>, HierarchicalScope>,
+    pub(crate) pending_hierarchical_references: std::collections::BTreeMap<SmolStr, ScopedHierarchicalReference>,
+    /// Source declarations shared by concrete reference specializations.
+    pub(crate) reference_sources: Option<std::sync::Arc<std::collections::HashMap<SmolStr, Module>>>,
+    pub(crate) hierarchical_parameter_values: std::collections::HashSet<SmolStr>,
+    pub(crate) hierarchical_parameter_given: std::collections::HashSet<SmolStr>,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
@@ -311,10 +318,37 @@ impl Module {
             generate_template: None,
             hierarchical_names: Default::default(),
             reserved_identifiers: Default::default(),
+            hierarchical_scopes: Default::default(),
+            pending_hierarchical_references: Default::default(),
+            reference_sources: None,
+            hierarchical_parameter_values: Default::default(),
+            hierarchical_parameter_given: Default::default(),
             attributes: Vec::new(),
             span,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct HierarchicalScopeKey {
+    pub name: SmolStr,
+    pub index: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct HierarchicalScope {
+    pub members: std::collections::HashMap<SmolStr, SmolStr>,
+    pub explicit: bool,
+    pub children: std::collections::HashSet<SmolStr>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ScopedHierarchicalReference {
+    pub source: HierarchicalName,
+    pub origin: Vec<HierarchicalScopeKey>,
+    pub scopes: Vec<HierarchicalScopeKey>,
+    /// Lexically bound index expressions before their values were closed.
+    pub index_dependencies: Vec<Expression>,
 }
 
 /// An authored path. Scope selectors are distinct from terminal vector/array selectors.

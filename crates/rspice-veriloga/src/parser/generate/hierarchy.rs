@@ -3,23 +3,15 @@ use super::*;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) struct ScopeKey {
-    pub name: SmolStr,
-    pub index: Option<i64>,
-}
-
-struct Scope {
-    members: HashMap<SmolStr, SmolStr>,
-    explicit: bool,
-    children: HashSet<SmolStr>,
-}
+pub(super) type ScopeKey = HierarchicalScopeKey;
+type Scope = HierarchicalScope;
 struct Pending {
     symbol: SmolStr,
     origin: Vec<ScopeKey>,
     scopes: Vec<ScopeKey>,
     terminal: SmolStr,
     source: HierarchicalName,
+    index_dependencies: Vec<Expression>,
 }
 #[derive(Default)]
 struct State {
@@ -42,7 +34,7 @@ impl State {
 
 pub(super) struct Bindings {
     pub authored: BTreeMap<SmolStr, HierarchicalName>,
-    scopes: HashMap<Vec<ScopeKey>, Scope>,
+    pub(super) scopes: HashMap<Vec<ScopeKey>, Scope>,
     state: RefCell<State>,
 }
 impl Bindings {
@@ -130,12 +122,21 @@ impl Bindings {
         members
     }
 
-    pub fn resolve(&self) -> Result<HashMap<SmolStr, SmolStr>, ParseError> {
+    pub fn resolve(
+        &self,
+    ) -> Result<
+        (
+            HashMap<SmolStr, SmolStr>,
+            BTreeMap<SmolStr, ScopedHierarchicalReference>,
+        ),
+        ParseError,
+    > {
         let mut state = self.state.borrow_mut();
         if !state.errors.is_empty() {
             return Err(state.errors.remove(0));
         }
         let mut result = HashMap::new();
+        let mut deferred = BTreeMap::new();
         for pending in &state.pending {
             let mut target = None;
             if !pending.source.absolute {
@@ -173,26 +174,20 @@ impl Bindings {
                 }
             }
             let Some(target) = target else {
-                let spelling = pending
-                    .source
-                    .segments
-                    .iter()
-                    .map(|part| part.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".");
-                return Err(ParseError::new(
-                    ParseErrorKind::UnsupportedConstruct {
-                        context: "hierarchical reference".into(),
-                        found: format!(
-                            "`{spelling}` does not resolve to a source-visible generated declaration in this module; cross-module and absolute binding require design-level elaboration"
-                        ),
+                deferred.insert(
+                    pending.symbol.clone(),
+                    ScopedHierarchicalReference {
+                        source: pending.source.clone(),
+                        origin: pending.origin.clone(),
+                        scopes: pending.scopes.clone(),
+                        index_dependencies: pending.index_dependencies.clone(),
                     },
-                    pending.source.span,
-                ));
+                );
+                continue;
             };
             result.insert(pending.symbol.clone(), target);
         }
-        Ok(result)
+        Ok((result, deferred))
     }
 }
 
@@ -218,10 +213,16 @@ impl Unroller<'_> {
             return false;
         };
         let mut scopes = Vec::new();
+        let mut index_dependencies = Vec::new();
         for segment in &source.segments[..source.segments.len() - 1] {
             let index = match &segment.index {
                 Some(expression) => match self.value(expression, "hierarchical scope index") {
-                    Ok(value) => Some(value),
+                    Ok(value) => {
+                        let mut dependency = expression.clone();
+                        self.substitute(&mut dependency);
+                        index_dependencies.push(dependency);
+                        Some(value)
+                    }
                     Err(error) => {
                         self.hierarchy.state.borrow_mut().errors.push(error);
                         return true;
@@ -242,6 +243,7 @@ impl Unroller<'_> {
             scopes,
             terminal: source.segments.last().unwrap().name.clone(),
             source: source.clone(),
+            index_dependencies,
         });
         *name = symbol;
         true
