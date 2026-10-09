@@ -35,6 +35,13 @@ pub struct PreparationError {
     message: String,
     /// The 1-based deck line this failure named, where it named one.
     line: Option<usize>,
+    interruption: Option<PreparationInterruption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreparationInterruption {
+    Aborted,
+    ResourceLimit(rspice_core::ResourceLimitError),
 }
 
 impl PreparationError {
@@ -43,6 +50,7 @@ impl PreparationError {
             stage,
             message: message.into(),
             line: None,
+            interruption: None,
         }
     }
 
@@ -62,6 +70,71 @@ impl PreparationError {
 
     pub const fn line(&self) -> Option<usize> {
         self.line
+    }
+
+    pub fn is_aborted(&self) -> bool {
+        matches!(self.interruption, Some(PreparationInterruption::Aborted))
+    }
+
+    pub fn resource_limit(&self) -> Option<&rspice_core::ResourceLimitError> {
+        match &self.interruption {
+            Some(PreparationInterruption::ResourceLimit(error)) => Some(error),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn check_abort(
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<(), Self> {
+        if abort.is_aborted() {
+            let mut error = Self::new(PreparationStage::SourceChecks, "Preparation aborted");
+            error.interruption = Some(PreparationInterruption::Aborted);
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn from_parse(
+        stage: PreparationStage,
+        context: &str,
+        error: rspice_core::netlist::ParseWithAbortError,
+    ) -> Self {
+        use rspice_core::netlist::{ParseError, ParseWithAbortError};
+        let mut failure = Self::new(stage, format!("{context}: {error}"));
+        match error {
+            ParseWithAbortError::Aborted => {
+                failure.interruption = Some(PreparationInterruption::Aborted);
+            }
+            ParseWithAbortError::Parse(ParseError::ResourceLimit(error)) => {
+                failure.interruption = Some(PreparationInterruption::ResourceLimit(error));
+            }
+            ParseWithAbortError::Parse(error) => {
+                failure.line = crate::execution::parse_error_line(&error);
+            }
+        }
+        failure
+    }
+
+    pub(crate) fn check_limit(
+        resource: rspice_core::ResourceKind,
+        requested: usize,
+        limit: usize,
+    ) -> Result<(), Self> {
+        if requested > limit {
+            Err(Self::from_parse(
+                PreparationStage::SourceChecks,
+                "Prepared source exceeds its resource policy",
+                rspice_core::netlist::ParseError::ResourceLimit(rspice_core::ResourceLimitError {
+                    resource,
+                    requested,
+                    limit,
+                })
+                .into(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 }
 

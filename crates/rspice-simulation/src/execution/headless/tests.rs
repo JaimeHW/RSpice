@@ -359,3 +359,105 @@ fn generated_transient_noise_settings_are_present_in_the_dispatched_source() {
             .contains(&card)
     );
 }
+
+#[test]
+fn captured_includes_use_the_expanded_budget_after_root_admission() {
+    let path = origin();
+    let included = path.with_file_name("divider.inc");
+    let source = "Expanded budget\n.include divider.inc\nV1 in 0 1\n.end\n";
+    let contents = format!(
+        "{}R1 in out 1k\nR2 out 0 1k\n",
+        "* retained library comment\n".repeat(8)
+    );
+    assert!(contents.len() > source.len());
+    let mut input = HeadlessRunInput::new(source, &path, vec![op()]);
+    input.preparation_limits.max_netlist_bytes = source.len();
+    input.preparation_limits.max_expanded_source_bytes = 4096;
+    input.resolver = HeadlessSourceResolver::Sealed(
+        SealedSourceBundle::try_new_with_edges(
+            [(path.clone(), source.into()), (included.clone(), contents)],
+            [SealedSourceEdge {
+                owner: path.clone(),
+                requested_path: "divider.inc".into(),
+                target: included,
+            }],
+        )
+        .unwrap(),
+    );
+    let prepared = prepare_headless_run(input, &NoAbort).unwrap();
+    assert!((voltage(&execute(prepared)[0]) - 0.5).abs() < 1e-10);
+}
+
+#[test]
+fn hierarchy_and_generated_task_decks_obey_preparation_limits() {
+    let path = origin();
+    let hierarchical =
+        "Bounded hierarchy\n.subckt cell a b\nR1 a b 1k\nR2 a b 2k\n.ends\nX1 in 0 cell\n.end\n";
+    let mut input = HeadlessRunInput::new(hierarchical, &path, vec![op()]);
+    input.preparation_limits.max_flattened_elements = 1;
+    assert!(matches!(
+        prepare_headless_run(input, &NoAbort),
+        Err(HeadlessPreparationError::ResourceLimit(
+            ResourceLimitError {
+                resource: ResourceKind::FlattenedElements,
+                requested: 2,
+                limit: 1,
+            }
+        ))
+    ));
+
+    // Source admission alone is insufficient: task cards are materialized
+    // later, and that final deck needs the same hierarchy policy.
+    let mut request = op();
+    request
+        .analysis
+        .analysis_line
+        .push_str("\nRextra in out 3k");
+    let mut input = HeadlessRunInput::new(DIVIDER, &path, vec![request]);
+    input.preparation_limits.max_flattened_elements = 3;
+    assert!(matches!(
+        prepare_headless_run(input, &NoAbort),
+        Err(HeadlessPreparationError::ResourceLimit(
+            ResourceLimitError {
+                resource: ResourceKind::FlattenedElements,
+                requested: 4,
+                limit: 3,
+            }
+        ))
+    ));
+}
+
+#[test]
+fn generated_card_separators_count_towards_the_expanded_source_budget() {
+    let path = origin();
+    let request = op();
+    let mut input = HeadlessRunInput::new(DIVIDER, &path, vec![request]);
+    // The card also adds a newline. The final deck must be checked, not just
+    // the sum of the original source and the card's content.
+    input.preparation_limits.max_expanded_source_bytes = DIVIDER.len() + ".op".len();
+    assert!(matches!(
+        prepare_headless_run(input, &NoAbort),
+        Err(HeadlessPreparationError::ResourceLimit(
+            ResourceLimitError {
+                resource: ResourceKind::ExpandedSourceBytes,
+                ..
+            }
+        ))
+    ));
+}
+
+#[test]
+fn hierarchy_cancellation_retains_its_type_through_preparation_errors() {
+    let parsed = rspice_core::Netlist::parse(DIVIDER).unwrap();
+    let failure = validated_parsed_hierarchy_with_limits_and_abort(
+        &parsed,
+        ResourceLimits::default(),
+        &CountingAbort::new(2),
+    )
+    .unwrap_err();
+    assert!(failure.is_aborted());
+    assert!(matches!(
+        HeadlessPreparationError::from(failure),
+        HeadlessPreparationError::Aborted
+    ));
+}

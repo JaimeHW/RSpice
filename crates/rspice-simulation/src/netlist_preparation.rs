@@ -28,6 +28,10 @@ pub use parsing::{
     parse_runner_netlist_with_options_and_abort,
     parse_runner_netlist_with_resource_limits_and_abort, validated_executable_hierarchy,
 };
+pub(crate) use parsing::{
+    validated_executable_hierarchy_with_limits_and_abort,
+    validated_parsed_hierarchy_with_limits_and_abort,
+};
 
 pub const REFERENCE_MODEL_BINDING_BEGIN: &str = "* RSPICE REFERENCE MODEL BINDING BEGIN";
 pub const REFERENCE_MODEL_BINDING_END: &str = "* RSPICE REFERENCE MODEL BINDING END";

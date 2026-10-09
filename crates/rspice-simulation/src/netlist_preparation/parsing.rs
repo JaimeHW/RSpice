@@ -118,20 +118,63 @@ pub fn parse_runner_netlist_with_options_and_abort(
 pub fn validated_executable_hierarchy(
     executable_netlist: &str,
 ) -> Result<(rspice_core::Netlist, rspice_core::netlist::FlattenedNetlist), PreparationError> {
-    let parsed = rspice_core::netlist::parse_netlist(executable_netlist).map_err(|error| {
-        PreparationError::new(
+    validated_executable_hierarchy_with_limits_and_abort(
+        executable_netlist,
+        rspice_core::ResourceLimits::default(),
+        &rspice_core::NoAbort,
+    )
+}
+
+pub(crate) fn validated_executable_hierarchy_with_limits_and_abort(
+    executable_netlist: &str,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<(rspice_core::Netlist, rspice_core::netlist::FlattenedNetlist), PreparationError> {
+    let parsed = rspice_core::Netlist::parse_with_options_and_abort(
+        executable_netlist,
+        rspice_core::netlist::NetlistParseOptions {
+            resource_limits: limits,
+            ..Default::default()
+        },
+        abort,
+    )
+    .map_err(|error| {
+        PreparationError::from_parse(
             PreparationStage::ModelBindings,
-            format!("Executable source cannot authenticate project model use: {error}"),
+            "Executable source cannot authenticate project model use",
+            error,
         )
     })?;
-    let flattened =
-        rspice_core::netlist::flatten_netlist_with_models(&parsed).map_err(|error| {
-            PreparationError::new(
-                PreparationStage::ModelBindings,
-                format!("Executable hierarchy cannot authenticate project model use: {error}"),
-            )
-        })?;
+    let flattened = validated_parsed_hierarchy_with_limits_and_abort(&parsed, limits, abort)?;
+    Ok((parsed, flattened))
+}
+
+/// Validate an already parsed source without reparsing it or resampling its
+/// parameter expressions. Limits apply while hierarchy records are allocated.
+pub(crate) fn validated_parsed_hierarchy_with_limits_and_abort(
+    parsed: &rspice_core::Netlist,
+    limits: rspice_core::ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<rspice_core::netlist::FlattenedNetlist, PreparationError> {
+    PreparationError::check_abort(abort)?;
+    let flattened = rspice_core::netlist::flatten_netlist_with_models_config_with_abort(
+        parsed,
+        rspice_core::netlist::FlattenerConfig {
+            max_depth: limits.max_hierarchy_depth,
+            max_elements: limits.max_flattened_elements,
+            ..Default::default()
+        },
+        abort,
+    )
+    .map_err(|error| {
+        PreparationError::from_parse(
+            PreparationStage::ModelBindings,
+            "Executable hierarchy cannot authenticate project model use",
+            error,
+        )
+    })?;
     for element in &flattened.elements {
+        PreparationError::check_abort(abort)?;
         let dependency = rspice_core::netlist::independent_source_file_dependency(&element.kind)
             .map_err(|error| {
                 PreparationError::new(PreparationStage::SourceChecks, error.to_string())
@@ -146,5 +189,5 @@ pub fn validated_executable_hierarchy(
             ));
         }
     }
-    Ok((parsed, flattened))
+    Ok(flattened)
 }

@@ -878,7 +878,22 @@ impl PreparedRunSnapshot {
         self.simulation_plan_id
     }
 
-    pub(crate) fn new(mut parts: SnapshotParts) -> Result<Self, PreparationError> {
+    pub(crate) fn new(parts: SnapshotParts) -> Result<Self, PreparationError> {
+        Self::new_with_preparation_policy(
+            parts,
+            rspice_core::ResourceLimits::default(),
+            &rspice_core::NoAbort,
+        )
+    }
+
+    /// Policy for validating materialized sources, including cards introduced
+    /// by task preparation. This does not change the solver execution policy.
+    pub(crate) fn new_with_preparation_policy(
+        mut parts: SnapshotParts,
+        limits: rspice_core::ResourceLimits,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<Self, PreparationError> {
+        PreparationError::check_abort(abort)?;
         ObjectRevision::new(parts.project_revision).map_err(|error| {
             PreparationError::new(
                 PreparationStage::Authorization,
@@ -909,6 +924,7 @@ impl PreparedRunSnapshot {
         }
         let mut specification_names = HashSet::with_capacity(parts.specifications.len());
         for specification in &parts.specifications {
+            PreparationError::check_abort(abort)?;
             specification.entry().validate().map_err(|error| {
                 PreparationError::new(
                     PreparationStage::AnalysisPlan,
@@ -943,6 +959,7 @@ impl PreparedRunSnapshot {
             ));
         }
         for (index, task) in parts.tasks.iter().enumerate() {
+            PreparationError::check_abort(abort)?;
             validate_prepared_task_integrity(
                 task,
                 index,
@@ -1008,6 +1025,7 @@ impl PreparedRunSnapshot {
         // key, so the analysis wins over the plan without either block having
         // to know the other exists.
         for task in &mut parts.tasks {
+            PreparationError::check_abort(abort)?;
             let deck = task
                 .executable_netlist_override
                 .as_deref()
@@ -1033,6 +1051,7 @@ impl PreparedRunSnapshot {
         // Manual decks already hold their own cards and are preserved here.
         if parts.task_source_policy != TaskSourcePolicy::AuthoredDeck {
             for task in &mut parts.tasks {
+                PreparationError::check_abort(abort)?;
                 if parts.task_source_policy == TaskSourcePolicy::PreparedAnalyses
                     && !matches!(task.task.spec, AnalysisSpec::Fft { .. })
                     && task.authored_ac_data_cards().is_none()
@@ -1066,16 +1085,24 @@ impl PreparedRunSnapshot {
 
         if parts.task_source_policy == TaskSourcePolicy::PreparedAnalyses {
             for task in &parts.tasks {
+                PreparationError::check_abort(abort)?;
                 let deck = task
                     .executable_netlist_override
                     .as_deref()
                     .unwrap_or(&parts.executable_netlist);
+                PreparationError::check_limit(
+                    rspice_core::ResourceKind::ExpandedSourceBytes,
+                    deck.len(),
+                    limits.max_expanded_source_bytes,
+                )?;
                 crate::netlist_preparation::reject_deferred_external_sources_with_project_runtimes(
                     deck,
                     &parts.project_veriloga_runtimes,
                     &parts.measurement_references,
                 )?;
-                crate::netlist_preparation::validated_executable_hierarchy(deck)?;
+                crate::netlist_preparation::validated_executable_hierarchy_with_limits_and_abort(
+                    deck, limits, abort,
+                )?;
             }
         }
 
@@ -1254,15 +1281,25 @@ impl PreparedRunSnapshot {
                     format!("Sealed Verilog-A runtime set is invalid: {error}"),
                 )
             })?;
-        let parsed_netlist =
-            rspice_core::Netlist::parse(&parts.executable_netlist).map_err(|error| {
-                PreparationError::new(
-                    PreparationStage::Netlist,
-                    format!("Prepared executable netlist is invalid: {error}"),
-                )
-            })?;
+        PreparationError::check_abort(abort)?;
+        let parsed_netlist = rspice_core::Netlist::parse_with_options_and_abort(
+            &parts.executable_netlist,
+            rspice_core::netlist::NetlistParseOptions {
+                resource_limits: limits,
+                ..Default::default()
+            },
+            abort,
+        )
+        .map_err(|error| {
+            PreparationError::from_parse(
+                PreparationStage::Netlist,
+                "Prepared executable netlist is invalid",
+                error,
+            )
+        })?;
         saved_outputs::bind_decks(&mut parts.tasks, &parsed_netlist)?;
         let model_bin_config = rspice_core::SimulationConfig {
+            resource_limits: limits,
             temperature: rspice_core::constants::celsius_to_kelvin(
                 parts.reference_temperature_celsius,
             ),

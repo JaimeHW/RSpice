@@ -22,7 +22,8 @@ use crate::measurement_references::PreparedMeasurementReferences;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::netlist_preparation::IncludeSearchChain;
 use crate::netlist_preparation::{
-    reject_deferred_external_sources_with_project_runtimes, validated_executable_hierarchy,
+    reject_deferred_external_sources_with_project_runtimes,
+    validated_parsed_hierarchy_with_limits_and_abort,
 };
 use crate::preparation::{PreparationError, PreparationStage};
 use crate::veriloga::PreparedVerilogARuntimeSet;
@@ -102,7 +103,13 @@ pub enum HeadlessPreparationError {
 
 impl From<PreparationError> for HeadlessPreparationError {
     fn from(error: PreparationError) -> Self {
-        Self::Preparation(error)
+        if error.is_aborted() {
+            Self::Aborted
+        } else if let Some(limit) = error.resource_limit() {
+            Self::ResourceLimit(*limit)
+        } else {
+            Self::Preparation(error)
+        }
     }
 }
 
@@ -159,12 +166,16 @@ pub fn prepare_headless_run(
     let expanded = processor.expand_content_with_abort(input.source, &origin, abort)?;
     let sealed_source_dependencies = processor.resolved_dependencies().to_vec();
     check_abort(abort)?;
+    // Root admission happened before expansion. The captured closure is now
+    // an executable deck governed by the expanded-source budget.
+    let mut expanded_limits = limits;
+    expanded_limits.max_netlist_bytes = limits.max_expanded_source_bytes;
     let parsed = rspice_core::Netlist::parse_with_options_and_abort(
         &expanded,
         NetlistParseOptions {
             retain_control_script: true,
             statistical_mode: StatisticalParamMode::Nominal,
-            resource_limits: limits,
+            resource_limits: expanded_limits,
             ..Default::default()
         },
         abort,
@@ -178,15 +189,15 @@ pub fn prepare_headless_run(
             "Headless explicit studies require circuit-only source; move analysis cards into the task graph and run control scripts through their authored-deck host",
         ));
     }
+    // Reject hierarchy amplification under the caller's policy before any
+    // compatibility check can repeat flattening under default limits.
+    validated_parsed_hierarchy_with_limits_and_abort(&parsed, expanded_limits, abort)?;
     super::preparation::reject_unresolved_device_models(&expanded, false)?;
     reject_deferred_external_sources_with_project_runtimes(
         &expanded,
         &input.veriloga_runtimes,
         &input.measurement_references,
     )?;
-    // This is the same hierarchy/file-backed waveform guard used for model
-    // authentication in application preparation; indirect PWL paths count too.
-    validated_executable_hierarchy(&expanded)?;
     check_abort(abort)?;
 
     for request in &input.tasks {
@@ -245,39 +256,43 @@ pub fn prepare_headless_run(
         &config_digests,
     );
     check_abort(abort)?;
-    let snapshot = PreparedRunSnapshot::new(SnapshotParts {
-        task_source_policy: TaskSourcePolicy::PreparedAnalyses,
-        // Source domain means literal netlist versus schematic generation; it
-        // does not identify which frontend supplied the explicit task graph.
-        intent: SimulationRunIntent::ManualDeck,
-        simulation_plan_id: None,
-        project_revision: input.source_revision.get(),
-        topology_revision: 0,
-        source_digest,
-        reference_process: input.reference_process,
-        reference_temperature_celsius: input.reference_temperature_celsius,
-        run_set: None,
-        tasks,
-        executable_netlist: expanded,
-        save_policy: input.save_policy,
-        model_identities: Vec::new(),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: Default::default(),
-        project_veriloga_runtimes: input.veriloga_runtimes,
-        measurement_references: input.measurement_references,
-        target: ExecutionTargetCapabilities::current(),
-        receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
-        advisories: parsed
-            .diagnostics
-            .iter()
-            .map(|diagnostic| diagnostic.message.clone())
-            .collect(),
-        manual_source: Some(input.source.to_owned()),
-        cross_probe: None,
-        touchstone_export: input.touchstone_export,
-        sealed_source_dependencies,
-    })?;
+    let snapshot = PreparedRunSnapshot::new_with_preparation_policy(
+        SnapshotParts {
+            task_source_policy: TaskSourcePolicy::PreparedAnalyses,
+            // Source domain means literal netlist versus schematic generation; it
+            // does not identify which frontend supplied the explicit task graph.
+            intent: SimulationRunIntent::ManualDeck,
+            simulation_plan_id: None,
+            project_revision: input.source_revision.get(),
+            topology_revision: 0,
+            source_digest,
+            reference_process: input.reference_process,
+            reference_temperature_celsius: input.reference_temperature_celsius,
+            run_set: None,
+            tasks,
+            executable_netlist: expanded,
+            save_policy: input.save_policy,
+            model_identities: Vec::new(),
+            project_model_sources: Vec::new(),
+            specifications: Vec::new(),
+            specification_policy: Default::default(),
+            project_veriloga_runtimes: input.veriloga_runtimes,
+            measurement_references: input.measurement_references,
+            target: ExecutionTargetCapabilities::current(),
+            receipt: RunSourceReceipt::ManualSourceCheck(receipt_digest),
+            advisories: parsed
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.clone())
+                .collect(),
+            manual_source: Some(input.source.to_owned()),
+            cross_probe: None,
+            touchstone_export: input.touchstone_export,
+            sealed_source_dependencies,
+        },
+        expanded_limits,
+        abort,
+    )?;
     check_abort(abort)?;
     Ok(snapshot)
 }
