@@ -188,6 +188,9 @@ pub(super) fn run(
             ControlAnalysisResult::Distortion(result) => {
                 AnalysisResultDocument::from_distortion(dataset.analysis_id, result)
             }
+            ControlAnalysisResult::DcMatch(result) => {
+                AnalysisResultDocument::from_dc_match(dataset.analysis_id, result)
+            }
             ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
                 SensitivityCardResult::Dc(result) => {
                     AnalysisResultDocument::from_sensitivity(dataset.analysis_id, result)

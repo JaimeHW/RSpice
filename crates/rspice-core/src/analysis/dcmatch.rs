@@ -113,6 +113,15 @@ pub struct DcMatchResult {
 }
 
 impl DcMatchResult {
+    /// Physical unit of the authored voltage or branch-current output probe.
+    pub fn output_unit(&self) -> crate::signal_unit::SignalUnit {
+        if self.output.starts_with('I') {
+            crate::signal_unit::SignalUnit::Ampere
+        } else {
+            crate::signal_unit::SignalUnit::Volt
+        }
+    }
+
     /// Numeric storage retained by this result, including every contributor.
     pub fn retained_value_count(&self) -> usize {
         Self::value_count_for_contributors(self.contributors.len())

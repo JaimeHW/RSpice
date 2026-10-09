@@ -1187,8 +1187,16 @@ pub(super) fn run_dc_match_from_command(
         .run_dc_match_with_abort(ctx.netlist, card, &crate::abort::ProcessAbort)
         .map_err(|error| map_advanced_simulation_error(ctx, "DC Mismatch", error))?;
     ensure_not_cancelled(ctx)?;
-    report_dc_match(ctx, &result)?;
-    export_dc_match(ctx, &result)
+    finish_dc_match_result(ctx, &result)
+}
+
+pub(super) fn finish_dc_match_result(
+    ctx: &RunContext<'_>,
+    result: &rspice_core::analysis::dcmatch::DcMatchResult,
+) -> Result<(), CliError> {
+    ensure_not_cancelled(ctx)?;
+    report_dc_match(ctx, result)?;
+    export_dc_match(ctx, result)
 }
 
 /// Unit symbol of a `.DCMATCH` probe, read off the probe the result names.

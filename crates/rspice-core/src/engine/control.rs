@@ -59,6 +59,7 @@ pub enum ControlAnalysisResult {
     TransferFunction(Box<crate::analysis::TransferFunctionResult>),
     PoleZero(Box<crate::analysis::PoleZeroResult>),
     Sensitivity(Box<super::SensitivityCardResult>),
+    DcMatch(Box<crate::analysis::dcmatch::DcMatchResult>),
     Transient(Box<TransientResult>),
 }
 
@@ -101,9 +102,8 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" => Self::Set,
             "alter" => Self::Alter,
-            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb" => {
-                Self::Analysis
-            }
+            "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
+            | "dcmatch" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             _ => {
@@ -412,6 +412,17 @@ impl ControlCircuit {
                 (
                     kind,
                     ControlAnalysisResult::Sensitivity(Box::new(result)),
+                    count,
+                )
+            }
+            AnalysisCommand::DcMatch(card) => {
+                let result = bounded
+                    .run_dc_match_with_abort(&netlist, card, abort)
+                    .map_err(|error| simulation_error(line, error))?;
+                let count = result.retained_value_count();
+                (
+                    kind,
+                    ControlAnalysisResult::DcMatch(Box::new(result)),
                     count,
                 )
             }

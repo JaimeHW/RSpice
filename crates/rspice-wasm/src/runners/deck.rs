@@ -1752,6 +1752,49 @@ R2 out 0 {r2v}\n";
             .sum();
         assert!((shares - 1.0).abs() < 1.0e-9, "shares sum to {shares}");
     }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn dcmatch_scripts_publish_direct_payloads_and_scalar_presentations() {
+        use rspice_core::engine::ControlPresentationKind;
+        use rspice_core::execution::SignalUnit;
+        let Expectation::Routed { deck } = expectation(AnalysisResultKind::DcMatch) else {
+            panic!("DC mismatch adapter is required");
+        };
+        let direct = run_authored_deck_document_detailed(&deck).unwrap();
+        let analysis = ".DCMATCH OUT=V(out) CONTRIBUTORS=0 SIGMA=3";
+        assert!(deck.contains(analysis));
+        for command in ["DCMATCH OUT=V(out) CONTRIBUTORS=0 SIGMA=3", "run"] {
+            let script =
+                format!(".control\n{command}\nprint sigma_total quoted_sigma contribution\n.endc");
+            let source = deck.replace(
+                analysis,
+                &if command == "run" {
+                    format!("{analysis}\n{script}")
+                } else {
+                    script
+                },
+            );
+            let execution = run_authored_deck_document_detailed(&source).unwrap();
+            assert_eq!(execution.control_datasets, ["dcmatch1"]);
+            assert_eq!(execution.results.len(), 1);
+            assert_eq!(execution.results[0].payload(), direct.results[0].payload());
+            assert_eq!(execution.results[0].scalars(), direct.results[0].scalars());
+            assert_eq!(execution.control_presentations.len(), 1);
+            let presentation = &execution.control_presentations[0];
+            assert_eq!(presentation.scalars.len(), 2);
+            assert_eq!(
+                presentation.scalars[0].scalar.unit(),
+                Some(&SignalUnit::Volt)
+            );
+            let ControlPresentationKind::Print(traces) = &presentation.kind else {
+                panic!("PRINT")
+            };
+            assert_eq!(traces.len(), 1);
+            assert_eq!(traces[0].y.samples.len(), 6);
+            assert_document_round_trips(AnalysisResultKind::DcMatch, execution);
+        }
+    }
 }
 
 #[cfg(test)]

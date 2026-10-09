@@ -748,6 +748,18 @@ is an error. CLI and WASM publish the ordinary sensitivity document. Failed or
 cancelled runs preserve existing datasets and ordinals, and each retained result
 consumes the control session's cumulative result allowance.
 
+Explicit `dcmatch OUT=V(out)` commands and declarative `.DCMATCH` cards executed
+by `run` retain immutable `dcmatch1`, `dcmatch2`, ... datasets. Scalar expressions
+and `print` expose `nominal_value`, `sigma_total`, `sigma_mismatch`,
+`sigma_process`, and `quoted_sigma`, including when report filtering retains no
+contributors. Ranked vectors `sigma_parameter`, `sensitivity`, `contribution`,
+and `share` use `contributor_index`; the typed report preserves each row's
+instance, parameter and scope. Combining contributor vectors requires matching
+row identities. Output quantities carry volts or amperes; mixed parameter and
+sensitivity units remain unspecified. CLI and WASM publish the same DC mismatch
+document as direct execution. Cancellation and quota failures preserve prior
+datasets and ordinals.
+
 The unused `JunctionTempScaling` and `MosfetTempScaling` placeholders and
 the unused `CapacitorTempCoeffs::vc1/vc2` fields have also been removed.
 Semiconductor temperature behavior belongs to each device model;

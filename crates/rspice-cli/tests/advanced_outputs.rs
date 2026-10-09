@@ -801,6 +801,69 @@ fn a_dcmatch_card_runs_and_publishes_its_typed_document() {
 }
 
 #[test]
+fn dcmatch_control_routes_publish_the_direct_report_and_presentations() {
+    let dir = test_dir("dcmatch-control");
+    std::fs::write(dir.join("statistics.scs"), DIVIDER_STATISTICS).unwrap();
+    let analysis = "DCMATCH OUT=V(out) CONTRIBUTORS=0 SIGMA=3";
+    let presentation = "print sigma_total quoted_sigma contribution share";
+    let mut documents = Vec::new();
+    for (route, commands) in [
+        ("direct", format!(".{analysis}")),
+        (
+            "explicit",
+            format!(".control\n{analysis}\n{presentation}\n.endc"),
+        ),
+        (
+            "run",
+            format!(".{analysis}\n.control\nrun\n{presentation}\n.endc"),
+        ),
+    ] {
+        let source = DIVIDER_MISMATCH_DECK.replace(&format!(".{analysis}"), &commands);
+        let deck = write_deck(&dir, &format!("{route}.sp"), &source);
+        let checked = run_rspice(&["--quiet", "check", deck.to_str().unwrap(), "--json"]);
+        assert!(checked.status.success(), "{route}: {checked:?}");
+        let output = dir.join(format!("{route}.json"));
+        let run = run_rspice(&[
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+            "-f",
+            "json",
+        ]);
+        assert!(run.status.success(), "{route}: {run:?}");
+        let path = if route == "direct" {
+            output
+        } else {
+            dir.join(format!("{route}.dcmatch-001.json"))
+        };
+        let text = std::fs::read_to_string(path).unwrap();
+        rspice_core::execution::AnalysisResultDocument::from_json(&text).unwrap();
+        let document: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(document["resultKind"], "dcmatch");
+        documents.push(document);
+        if route != "direct" {
+            let print: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(dir.join(format!("{route}.control-001.json"))).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(print["scalars"].as_array().unwrap().len(), 2);
+            assert_eq!(print["traces"][0]["y"]["unit"], "V");
+            assert_eq!(
+                print["traces"][0]["y"]["samples"].as_array().unwrap().len(),
+                6
+            );
+        }
+    }
+    for document in &documents[1..] {
+        assert_eq!(document["payload"], documents[0]["payload"]);
+        assert_eq!(document["scalars"], documents[0]["scalars"]);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn a_dcmatch_card_without_statistics_reports_the_engines_remedy() {
     let dir = test_dir("dcmatch-no-statistics");
     let deck = write_deck(

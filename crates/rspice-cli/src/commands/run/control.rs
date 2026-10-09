@@ -188,6 +188,9 @@ pub(super) fn run(
                             ControlAnalysisResult::Sensitivity(result) => {
                                 frequency::finish_sensitivity_result(&ctx, result)?;
                             }
+                            ControlAnalysisResult::DcMatch(result) => {
+                                advanced::finish_dc_match_result(&ctx, result)?;
+                            }
                             ControlAnalysisResult::AcTable(table) => {
                                 frequency::finish_ac_table(&ctx, table)?;
                             }

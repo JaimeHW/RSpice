@@ -1850,13 +1850,43 @@ impl AnalysisResultDocument {
         analysis: AnalysisInstanceId,
         result: &DcMatchResult,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
-        const LOCATION: &str = "DC mismatch result";
-        let unit = if result.output.starts_with('I') {
-            SignalUnit::Ampere
-        } else {
-            SignalUnit::Volt
+        let scalars = Self::dc_match_scalars(result)?;
+        // Every number below is checked by `DcMatchPayload::validate`, which
+        // the builder runs before the document is handed back.
+        let payload = DcMatchPayload {
+            output: result.output.clone(),
+            nominal_value: result.nominal_value,
+            sigma_multiplier: result.sigma_multiplier,
+            sigma_total: result.sigma_total,
+            sigma_mismatch: result.sigma_mismatch,
+            sigma_process: result.sigma_process,
+            contributors: result
+                .contributors
+                .iter()
+                .map(|contributor| DcMatchContributorDocument {
+                    instance: contributor.instance.clone(),
+                    parameter: contributor.parameter.clone(),
+                    scope: contributor.scope,
+                    sigma_parameter: contributor.sigma_parameter,
+                    sensitivity: contributor.sensitivity,
+                    contribution: contributor.contribution,
+                    share: contributor.share,
+                })
+                .collect(),
+            evaluated_contributors: result.evaluated_contributors,
+            applied_correlations_mismatch: result.applied_correlations_mismatch,
+            applied_correlations_process: result.applied_correlations_process,
         };
-        let scalars = vec![
+        Ok(Self::builder(analysis, ResultPayload::DcMatch(payload), 0).scalars(scalars))
+    }
+
+    /// Shared DC mismatch summary values for documents and control PRINT.
+    pub(crate) fn dc_match_scalars(
+        result: &DcMatchResult,
+    ) -> Result<Vec<ResultScalar>, ResultDocumentError> {
+        const LOCATION: &str = "DC mismatch result";
+        let unit = result.output_unit();
+        Ok(vec![
             real_scalar(
                 LOCATION,
                 "nominal_value",
@@ -1894,34 +1924,7 @@ impl AnalysisResultDocument {
                 unit,
                 result.quoted_sigma(),
             )?,
-        ];
-        // Every number below is checked by `DcMatchPayload::validate`, which
-        // the builder runs before the document is handed back.
-        let payload = DcMatchPayload {
-            output: result.output.clone(),
-            nominal_value: result.nominal_value,
-            sigma_multiplier: result.sigma_multiplier,
-            sigma_total: result.sigma_total,
-            sigma_mismatch: result.sigma_mismatch,
-            sigma_process: result.sigma_process,
-            contributors: result
-                .contributors
-                .iter()
-                .map(|contributor| DcMatchContributorDocument {
-                    instance: contributor.instance.clone(),
-                    parameter: contributor.parameter.clone(),
-                    scope: contributor.scope,
-                    sigma_parameter: contributor.sigma_parameter,
-                    sensitivity: contributor.sensitivity,
-                    contribution: contributor.contribution,
-                    share: contributor.share,
-                })
-                .collect(),
-            evaluated_contributors: result.evaluated_contributors,
-            applied_correlations_mismatch: result.applied_correlations_mismatch,
-            applied_correlations_process: result.applied_correlations_process,
-        };
-        Ok(Self::builder(analysis, ResultPayload::DcMatch(payload), 0).scalars(scalars))
+        ])
     }
 
     /// Shared scalar determinations for documents and control expressions.

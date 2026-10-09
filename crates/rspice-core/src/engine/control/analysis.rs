@@ -21,6 +21,7 @@ impl ControlCircuit {
             AnalysisKind::Sensitivity => Some("sens"),
             AnalysisKind::Distortion => Some("disto"),
             AnalysisKind::Stb => Some("stb"),
+            AnalysisKind::DcMatch => Some("dcmatch"),
             AnalysisKind::ImplicitOp
             | AnalysisKind::Sp
             | AnalysisKind::Pss
@@ -41,8 +42,7 @@ impl ControlCircuit {
             | AnalysisKind::Qpss
             | AnalysisKind::Qpac
             | AnalysisKind::Qpnoise
-            | AnalysisKind::Qpxf
-            | AnalysisKind::DcMatch => None,
+            | AnalysisKind::Qpxf => None,
         }
     }
 
@@ -137,6 +137,7 @@ pub(super) fn identity(
         AnalysisCommand::Sensitivity { .. } => AnalysisKind::Sensitivity,
         AnalysisCommand::Disto { .. } => AnalysisKind::Distortion,
         AnalysisCommand::Stb { .. } => AnalysisKind::Stb,
+        AnalysisCommand::DcMatch(_) => AnalysisKind::DcMatch,
         _ => {
             return Err(command_error(
                 line,
@@ -313,6 +314,7 @@ mod tests {
             (AnalysisKind::Sensitivity, "V(out) R1"),
             (AnalysisKind::Distortion, "lin 3 1 10"),
             (AnalysisKind::Stb, "lin 3 1 10 probe=Vprobe"),
+            (AnalysisKind::DcMatch, "OUT=V(out)"),
         ];
         for (kind, arguments) in fixtures {
             let name = ControlCircuit::analysis_command_name(kind).expect("advertised handler");

@@ -194,8 +194,22 @@ fn analysis_inventory_parses_and_matches_control_execution() {
                 "Core requirements\n.param r=1k\nV1 in 0 1 AC 1 DISTOF1 1m DISTOF2 1m\nR1 in out {{r}}\nR2 out 0 1k\n.data grid freq\n1\n10\n.enddata\n{card}\n.end\n"
             )
         };
-        let netlist =
+        let mut netlist =
             crate::Netlist::parse(&source).unwrap_or_else(|error| panic!("{name}: {error}"));
+        if name == "DcMatch" {
+            netlist
+                .spectre_statistics
+                .variations
+                .push(crate::netlist::SpectreVariation {
+                    line: 1,
+                    scope: crate::netlist::SpectreVariationScope::Mismatch,
+                    parameter: "r".into(),
+                    distribution: crate::netlist::SpectreDistribution::Gaussian,
+                    spread: crate::netlist::SpectreSpread::StandardDeviation("10".into()),
+                    percent: false,
+                    bounds: None,
+                });
+        }
         let [command] = netlist.analyses.as_slice() else {
             panic!("{name}: inventory card must name exactly one command");
         };

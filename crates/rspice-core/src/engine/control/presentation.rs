@@ -1,6 +1,7 @@
 //! Resolve control output against immutable, named analysis datasets.
 
 use super::*;
+mod dcmatch;
 mod distortion;
 mod noise;
 mod pole_zero;
@@ -26,7 +27,10 @@ pub(super) fn resolve_scalar(
             Some(value) => Ok(Some(value)),
             None => match sensitivity::resolve_scalar(circuit, name)? {
                 Some(value) => Ok(Some(value)),
-                None => stability::resolve_scalar(circuit, name),
+                None => match stability::resolve_scalar(circuit, name)? {
+                    Some(value) => Ok(Some(value)),
+                    None => dcmatch::resolve_scalar(circuit, name),
+                },
             },
         },
     }
@@ -133,6 +137,7 @@ enum Column {
     Sensitivity(sensitivity::SensitivityColumn),
     Distortion(distortion::DistortionColumn),
     Stability(stability::StabilityColumn),
+    DcMatch(dcmatch::DcMatchColumn),
 }
 
 struct Selected<'a> {
@@ -169,6 +174,7 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => points.len(),
             ControlAnalysisResult::Distortion(result) => result.points.len(),
             ControlAnalysisResult::Stability(result) => result.frequencies.len(),
+            ControlAnalysisResult::DcMatch(result) => result.contributors.len(),
             ControlAnalysisResult::DcSweep(result) => result.points.len(),
             ControlAnalysisResult::Transient(result) => result.time.len(),
         }
@@ -182,7 +188,8 @@ impl ControlNamedDataset {
             },
             ControlAnalysisResult::OperatingPoint(_)
             | ControlAnalysisResult::TransferFunction(_)
-            | ControlAnalysisResult::PoleZero(_) => SignalUnit::Dimensionless,
+            | ControlAnalysisResult::PoleZero(_)
+            | ControlAnalysisResult::DcMatch(_) => SignalUnit::Dimensionless,
             ControlAnalysisResult::Ac(_)
             | ControlAnalysisResult::AcTable(_)
             | ControlAnalysisResult::Noise(_)
@@ -199,6 +206,7 @@ impl ControlNamedDataset {
 
     fn scale_name(&self) -> &str {
         match &self.result {
+            ControlAnalysisResult::DcMatch(_) => "contributor_index",
             ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
                 SensitivityCardResult::Dc(_) => "index",
                 SensitivityCardResult::Ac(_) => "frequency",
@@ -221,6 +229,9 @@ impl ControlNamedDataset {
 
     fn scale_value(&self, row: usize) -> Option<Value> {
         match &self.result {
+            ControlAnalysisResult::DcMatch(result) => {
+                (row < result.contributors.len()).then_some(row as Value)
+            }
             ControlAnalysisResult::Sensitivity(result) => match result.as_ref() {
                 SensitivityCardResult::Dc(_) => (row == 0).then_some(0.0),
                 SensitivityCardResult::Ac(result) => result.frequencies.get(row).copied(),
@@ -251,7 +262,8 @@ impl ControlNamedDataset {
             ControlAnalysisResult::TransferFunction(_)
             | ControlAnalysisResult::PoleZero(_)
             | ControlAnalysisResult::Sensitivity(_)
-            | ControlAnalysisResult::Stability(_) => &[],
+            | ControlAnalysisResult::Stability(_)
+            | ControlAnalysisResult::DcMatch(_) => &[],
             ControlAnalysisResult::Distortion(result) => result
                 .points
                 .first()
@@ -275,11 +287,22 @@ impl ControlNamedDataset {
 }
 
 impl Selected<'_> {
+    fn is_scalar(&self) -> bool {
+        matches!(self.column, Column::DcMatch(column) if column.is_scalar())
+    }
+
     fn sample(&self, row: usize) -> Option<ComplexValue> {
+        if let (Column::DcMatch(column), ControlAnalysisResult::DcMatch(result)) =
+            (self.column, &self.dataset.result)
+        {
+            return column.sample(result, row);
+        }
         if row >= self.dataset.length() {
             return None;
         }
         match (self.column, &self.dataset.result) {
+            (Column::DcMatch(_), _)
+            | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::DcMatch(_)) => None,
             (Column::Stability(column), ControlAnalysisResult::Stability(result)) => {
                 column.sample(result, row)
             }
@@ -460,6 +483,7 @@ impl ControlCircuit {
                 .or(pole_zero::select_gain(dataset, name))
                 .or(sensitivity::select(dataset, name))
                 .or(stability::select(dataset, name))
+                .or(dcmatch::select(dataset, name))
                 .or(noise::select(dataset, name, line)?)
         {
             if let Some(unit) = self.vector_units.get(&selected.id) {
@@ -512,7 +536,8 @@ impl ControlCircuit {
                 ControlAnalysisResult::TransferFunction(_)
                 | ControlAnalysisResult::PoleZero(_)
                 | ControlAnalysisResult::Sensitivity(_)
-                | ControlAnalysisResult::Stability(_) => {
+                | ControlAnalysisResult::Stability(_)
+                | ControlAnalysisResult::DcMatch(_) => {
                     return Err(unavailable(line, dataset, name));
                 }
                 ControlAnalysisResult::DcSweep(result) => {
@@ -782,6 +807,18 @@ impl ControlCircuit {
                     scalars.push(scalar);
                     continue;
                 }
+                if command.name == "print"
+                    && x.is_none()
+                    && let Some(scalar) = dcmatch::printed_expression(
+                        &mut resolver,
+                        &y,
+                        &label,
+                        traces.len() + scalars.len(),
+                    )?
+                {
+                    scalars.push(scalar);
+                    continue;
+                }
                 let ys = if let Some(group) = self.group(&y, line)? {
                     group
                         .into_iter()
@@ -911,6 +948,22 @@ impl<'a> Resolver<'a> {
             _ => false,
         };
         let same_axes = match (&a.result, &b.result) {
+            (ControlAnalysisResult::DcMatch(a), ControlAnalysisResult::DcMatch(b)) => {
+                let mut same = a.contributors.len() == b.contributors.len();
+                for (a, b) in a.contributors.iter().zip(&b.contributors) {
+                    check_abort(self.abort, self.line)?;
+                    same &= a.scope == b.scope
+                        && a.instance == b.instance
+                        && a.parameter == b.parameter;
+                    if !same {
+                        break;
+                    }
+                }
+                same
+            }
+            (ControlAnalysisResult::DcMatch(_), _) | (_, ControlAnalysisResult::DcMatch(_)) => {
+                false
+            }
             (ControlAnalysisResult::DcSweep(a), ControlAnalysisResult::DcSweep(b)) => {
                 a.axes == b.axes
             }
@@ -1105,7 +1158,9 @@ impl<'a> Resolver<'a> {
         preferred: Option<&'a ControlNamedDataset>,
     ) -> Result<ControlVector, ControlExecutionError> {
         let dataset = inputs
-            .first()
+            .iter()
+            .find(|input| !input.is_scalar())
+            .or(inputs.first())
             .map(|input| input.dataset)
             .or(preferred)
             .or_else(|| self.circuit.datasets.last())
@@ -1113,7 +1168,9 @@ impl<'a> Resolver<'a> {
                 command_error(self.line, "output requires a completed analysis dataset")
             })?;
         for input in &inputs {
-            self.same_grid(dataset, input.dataset)?;
+            if !input.is_scalar() {
+                self.same_grid(dataset, input.dataset)?;
+            }
         }
         self.charge(
             dataset
