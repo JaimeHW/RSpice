@@ -138,6 +138,7 @@
 
 mod analog_events;
 mod analog_samples;
+pub(crate) mod checkpoint;
 mod shared;
 mod standalone;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};

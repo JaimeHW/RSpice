@@ -18,6 +18,47 @@ pub(crate) struct CoordinatorCheckpoint {
 }
 
 impl MixedDigitalCoordinator {
+    /// Rebuild an instance's read-only values from the restored circuit owner.
+    /// No process executes and no bridge publication occurs during restoration.
+    pub(in crate::xspice::verilog::mixed) fn checkpoint_view(
+        &self,
+        instance: &str,
+        plan: Arc<rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan>,
+        time: f64,
+    ) -> Result<MixedDigital, String> {
+        if self.trial_open || self.accepted_time != Some(time) {
+            return Err("participant and coordinator accepted times differ".into());
+        }
+        let map = self
+            .maps
+            .iter()
+            .find(|map| map.name == instance)
+            .ok_or("checkpoint participant is absent from the coordinator")?;
+        if map.signals.len() != plan.signals.len() {
+            return Err("checkpoint participant signal dimensions differ".into());
+        }
+        let mut view = SignalView::new(plan);
+        for (local, &global) in map.signals.iter().enumerate() {
+            let signal = &view.plan.signals[local];
+            if signal.kind.is_real() {
+                view.reals[local] = self
+                    .digital
+                    .read_real(global)
+                    .ok_or("missing linked real signal")?;
+            } else {
+                let value = self
+                    .digital
+                    .read(global)
+                    .ok_or("missing linked bit signal")?;
+                if value.width() != signal.width {
+                    return Err("checkpoint participant signal widths differ".into());
+                }
+                view.bits[local] = value.clone();
+            }
+        }
+        Ok(MixedDigital::View(view))
+    }
+
     fn checkpoint_topology(&self) -> Result<[u8; 32], String> {
         let maps: Vec<_> = self
             .maps

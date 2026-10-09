@@ -100,16 +100,25 @@ fn coordinator_checkpoint_resumes_observers_and_multiple_instance_timers() {
     );
     let bytes = serde_json::to_vec(&image).unwrap();
     let transported = serde_json::from_slice(&bytes).unwrap();
-    let (mut template, _) = fixture(OBSERVER);
+    let (mut template, templates) = fixture(OBSERVER);
     template.set_interval_event_limit(99);
     let mut restored = template
         .restored_checkpoint(&transported, Default::default())
         .unwrap();
     assert_eq!(restored.interval_event_limit(), 99);
     assert_eq!(image, restored.checkpoint(Default::default()).unwrap());
-    // Analog participant persistence is a separate component. This test keeps
-    // its accepted images in memory while transporting all shared execution.
-    let mut restored_hosts = hosts.clone();
+    let mut restored_hosts: Vec<_> = hosts
+        .iter()
+        .zip(&templates)
+        .map(|(host, template)| {
+            let image = host.participant_checkpoint(Default::default()).unwrap();
+            let bytes = serde_json::to_vec(&image).unwrap();
+            let image = serde_json::from_slice(&bytes).unwrap();
+            template
+                .restored_participant_checkpoint(&image, &restored, Default::default())
+                .unwrap()
+        })
+        .collect();
     for (time, value) in [(1e-9, 1.0), (1.1e-9, 0.98), (1.2e-9, 0.94), (2e-9, 0.94)] {
         step(&mut original, &mut hosts, time, value);
         step(&mut restored, &mut restored_hosts, time, value);

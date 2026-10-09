@@ -842,6 +842,15 @@ left behind accepted time or activation clocks ahead of it. Capture and restore
 refuse open trials. Restored coordinators retain the receiving resource ceilings;
 per-instance analog and bridge images must join the final circuit transaction.
 
+Enrolled mixed participants have a separate accepted-transient image for analog
+VM/operator history, solver inputs and both integration rules, ADC samples and
+decisions, transition times, probe samples and ADC/DAC switching histories.
+Restore validates source/parameter shape and boundary wiring, rebuilds local
+digital views from the restored coordinator, and checks bridge histories against
+those values. Decoding constructs a replacement module without modifying the
+receiver. These internal components still need bounded outer-file decoding,
+XSPICE circuit event-state persistence and one atomic circuit installation.
+
 PWL interpolation and repeat timing preserve finite nonzero knot intervals
 and positive `TSCALE` values without an absolute machine-epsilon cutoff.
 An exact repeat boundary retains the authored endpoint; the next representable
