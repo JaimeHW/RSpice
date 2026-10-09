@@ -17,6 +17,7 @@ mod evidence;
 mod fft;
 mod interpolation;
 mod selection;
+mod sensitivity;
 use selection::{parse_variable_name, variable_name_matches};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -627,6 +628,19 @@ fn compare_waveforms(
     let golden_determinations = determinations::Determinations::new(golden);
     cmp_result.problems.extend(evidence::problems(result));
     cmp_result.problems.extend(evidence::problems(golden));
+    let result_sensitivity = sensitivity::Evidence::new(result);
+    let golden_sensitivity = sensitivity::Evidence::new(golden);
+    cmp_result
+        .problems
+        .extend(result_sensitivity.problems.iter().cloned());
+    cmp_result
+        .problems
+        .extend(golden_sensitivity.problems.iter().cloned());
+    let exact_args = CompareArgs {
+        abstol: 0.0,
+        reltol: 0.0,
+        ..Default::default()
+    };
     for (evidence, data) in [
         (&result_determinations, result),
         (&golden_determinations, golden),
@@ -696,10 +710,20 @@ fn compare_waveforms(
         let mut defined_points = 0usize;
         let mut undefined_mismatches = 0usize;
         let mut first_undefined_mismatch = None;
+        let mut determined_points = 0usize;
+        let mut first_reason_mismatch = None;
+        let status =
+            result_sensitivity.is_status(var_idx) || golden_sensitivity.is_status(golden_idx);
         for i in 0..num_points {
             let rv = if let Some(interpolation) = &interpolation {
                 if var_idx == 0 {
                     Some(interpolation.target[i])
+                } else if status {
+                    interpolation.availability_status(
+                        result_vals,
+                        result.validity[var_idx].as_deref(),
+                        i,
+                    )
                 } else {
                     interpolation.sample(
                         result_vals,
@@ -716,11 +740,35 @@ fn compare_waveforms(
             match (rv, gv) {
                 (Some(rv), Some(gv)) => {
                     defined_points += 1;
-                    if cmp_result.compare_number(rv, gv, var_name, i, args) && args.fail_fast {
+                    if cmp_result.compare_number(
+                        rv,
+                        gv,
+                        var_name,
+                        i,
+                        if status { &exact_args } else { args },
+                    ) && args.fail_fast
+                    {
                         return Ok(cmp_result);
                     }
                 }
-                (None, None) => {}
+                (None, None) => {
+                    let result_index = interpolation
+                        .as_ref()
+                        .map_or(Some(i), |plan| plan.observed_index(i));
+                    let left = result_index
+                        .and_then(|row| result_sensitivity.reason(result, var_idx, row));
+                    let right = golden_sensitivity.reason(golden, golden_idx, i);
+                    if left.is_some() || right.is_some() {
+                        if left == right {
+                            determined_points += 1;
+                        } else {
+                            first_reason_mismatch.get_or_insert(i);
+                            if args.fail_fast {
+                                break;
+                            }
+                        }
+                    }
+                }
                 _ => {
                     undefined_mismatches += 1;
                     first_undefined_mismatch.get_or_insert(i);
@@ -730,11 +778,17 @@ fn compare_waveforms(
                 }
             }
         }
+        if let Some(first) = first_reason_mismatch {
+            cmp_result.problems.push(format!(
+                "'{var_name}': sensitivity unavailability reasons differ at index {first}"
+            ));
+        }
         if let Some(first) = first_undefined_mismatch {
             cmp_result.problems.push(format!(
                 "'{var_name}': {undefined_mismatches} sample(s) are undefined on only one side, first at index {first}"
             ));
         } else if defined_points == 0
+            && determined_points == 0
             && (num_points == 0
                 || !result_determinations.agrees(var_idx, &golden_determinations, golden_idx))
         {

@@ -7,6 +7,41 @@ pub(super) struct Interpolation<'a> {
 }
 
 impl<'a> Interpolation<'a> {
+    /// Only retained coordinates establish a categorical sample determination.
+    /// Endpoint rounding follows the same bounded clamping as numeric samples.
+    pub fn observed_index(&self, index: usize) -> Option<usize> {
+        let point = self.target[index];
+        let upper = self.source.partition_point(|&value| value < point);
+        if upper == 0 {
+            Some(0)
+        } else if upper == self.source.len() {
+            Some(upper - 1)
+        } else {
+            (self.source[upper] == point).then_some(upper)
+        }
+    }
+
+    /// Availability codes are categorical. Between retained coordinates only
+    /// two available endpoints (code zero) support an interpolated value.
+    pub fn availability_status(
+        &self,
+        series: &[f64],
+        validity: Option<&[bool]>,
+        index: usize,
+    ) -> Option<f64> {
+        let defined = |index| validity.is_none_or(|valid| valid[index]);
+        if let Some(observed) = self.observed_index(index) {
+            return defined(observed).then_some(series[observed]);
+        }
+        let upper = self
+            .source
+            .partition_point(|&value| value < self.target[index]);
+        ([upper - 1, upper]
+            .into_iter()
+            .all(|index| defined(index) && series[index] == 0.0))
+        .then_some(0.0)
+    }
+
     pub fn new(result: &'a WaveformData, golden: &'a WaveformData) -> Result<Self, CliError> {
         let invalid = |message: String| CliError::VerificationFailed { message };
 

@@ -877,6 +877,20 @@ only that retained root is the intended comparison. Older documents without
 units keep those units unstated. Older root-only flat exports can verify only
 their retained roots; regenerate those baselines to check gains and evidence.
 
+Sensitivity JSON conversion retains each parameter's nominal value, absolute
+and normalized derivatives, and AC magnitude and phase derivatives. Normalized
+values are dimensionless; absolute derivatives use the analysis's native
+parameter units, which the payload does not explicitly identify. Phase
+derivatives use radians per native parameter unit. `sens:output(...)` and
+`sens:parameter(...)` indicators retain the probe and parameter identities.
+When a derived quantity has missing values, its `:sensitivity_status` column
+records each sample: `0` available, `1` zero output, `2` nondifferentiable
+magnitude, or `3` outside the representable range. These codes are checked
+against sample validity and compared exactly, even with loose numeric
+tolerances. Known matching determinations can be compared; uncomputed gaps
+cannot establish agreement. Interpolation never invents a determination
+between retained samples.
+
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
 real/imag arrays in JSON and HDF5). One sample is a result: an operating point

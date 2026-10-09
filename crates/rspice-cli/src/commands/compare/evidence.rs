@@ -2,6 +2,19 @@
 
 use super::WaveformData;
 
+pub(super) fn dimensionless(data: &WaveformData, column: usize) -> bool {
+    data.units[column].as_deref().is_none_or(|unit| unit == "1")
+        && super::quantity_type(&data.variable_types[column])
+            .as_deref()
+            .is_none_or(|unit| unit == "1")
+}
+
+pub(super) fn true_indicator(data: &WaveformData, column: usize) -> bool {
+    !data.values[column].is_empty()
+        && dimensionless(data, column)
+        && (0..data.values[column].len()).all(|row| data.sample(column, row) == Some(1.0))
+}
+
 pub(super) fn problems(data: &WaveformData) -> Vec<String> {
     let root_evidence: &[&str] = &[
         "not_requested",
@@ -78,12 +91,7 @@ pub(super) fn problems(data: &WaveformData) -> Vec<String> {
                     states.contains(&state)
                 }
             })
-            && !data.values[column].is_empty()
-            && data.units[column].as_deref().is_none_or(|unit| unit == "1")
-            && super::quantity_type(&data.variable_types[column])
-                .as_deref()
-                .is_none_or(|unit| unit == "1")
-            && (0..data.values[column].len()).all(|row| data.sample(column, row) == Some(1.0));
+            && true_indicator(data, column);
         seen[index] = true;
         if !valid {
             let family = if field.starts_with("stb:") {
