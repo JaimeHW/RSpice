@@ -2,6 +2,78 @@
 use super::*;
 
 impl SemanticAnalyzer {
+    pub(super) fn prepare_localparam_array(
+        &mut self,
+        declaration: &ParameterDecl,
+        locals: &parameter_defaults::LocalDefaults,
+        declarations: &[ParameterDecl],
+        indices: &HashMap<SmolStr, usize>,
+    ) -> CompileResult<(VariableItem, VarType)> {
+        let mut parameter = declaration.clone();
+        parameter.default = parameter
+            .default
+            .as_ref()
+            .map(|value| locals.expand(value))
+            .transpose()?;
+        for dimension in &mut parameter.dimensions {
+            dimension.start = locals.expand(&dimension.start)?;
+            dimension.end = locals.expand(&dimension.end)?;
+        }
+        let default = parameter
+            .default
+            .as_ref()
+            .map(|default| {
+                let materialized = self.materialize_replication_expression(
+                    default,
+                    MAX_PARAMETER_ARRAY_ELEMENTS as usize,
+                    MAX_REPLICATION_MATERIALIZATION_WORK,
+                    &format!("default of localparam array '{}'", parameter.name),
+                    false,
+                )?;
+                self.normalize_integer_expression(&materialized)
+            })
+            .transpose()?;
+        let errors = self.errors.len();
+        self.validate_parameter_array_declaration(
+            &parameter,
+            default.as_ref(),
+            indices[&parameter.name],
+            declarations,
+            indices,
+        );
+        if self.errors.len() > errors {
+            return Err(self.errors.remove(errors).into());
+        }
+        let (var_type, value_type) = match parameter.param_type {
+            ParamType::Real => (VarType::Real, ValueType::Real),
+            ParamType::Integer => (VarType::Integer, ValueType::Integer),
+            ParamType::String => unreachable!("numeric parameter array validation"),
+        };
+        let default = if parameter.param_type == ParamType::Integer {
+            default
+                .map(|value| self.coerce_integer_parameter_array_default(value))
+                .transpose()?
+        } else {
+            default
+        };
+        self.define_symbol(Symbol {
+            name: parameter.name.clone(),
+            kind: SymbolKind::Parameter,
+            value_type,
+            span: parameter.span,
+            attrs: Default::default(),
+        })?;
+        Ok((
+            VariableItem {
+                name: parameter.name,
+                dimensions: parameter.dimensions,
+                init: default,
+                span: parameter.span,
+            },
+            var_type,
+        ))
+    }
+
     pub(super) fn parameter_array_items(module: &AnalyzedModule) -> Vec<(VariableItem, VarType)> {
         module
             .parameters

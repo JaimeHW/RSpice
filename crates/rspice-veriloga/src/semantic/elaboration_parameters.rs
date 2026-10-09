@@ -431,6 +431,9 @@ impl<'a> SourceParameters<'a> {
                     if let Some(range) = &local.packed_range {
                         pending.extend([&range.msb, &range.lsb]);
                     }
+                    for dimension in &local.dimensions {
+                        pending.extend([&dimension.start, &dimension.end]);
+                    }
                 }
             });
         }

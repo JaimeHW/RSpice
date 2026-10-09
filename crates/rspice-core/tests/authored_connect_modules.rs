@@ -111,6 +111,65 @@ connectrules selected; connect drive {mode} #(.S(3),.R(1)); endconnectrules
 }
 
 #[test]
+fn foreign_parameter_arrays_keep_target_shapes_and_readonly_values_in_both_domains() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module leaf(output electrical side);
+ parameter integer N=2;
+ parameter real G=1;
+ parameter real taps[2:1][1:N]='{'{(N-1){G+1},G+5},'{(N-1){G+2},G+6}};
+ parameter integer weights[4:3]='{1.5,-1.5};
+ localparam real local_taps[2:1]='{G+3,G+4};
+ analog V(side)<+$root.top.ROOT_TAPS[3];
+endmodule
+module top(output electrical p,q,r,s,t);
+ parameter real BASE=2;
+ parameter integer WIDTH=2;
+ localparam real ROOT_TAPS[3:2]='{BASE+7,BASE+8};
+ leaf #(.G(BASE),.N(WIDTH),.taps('{'{(WIDTH-1){BASE+1},BASE+5},'{(WIDTH-1){BASE+2},BASE+6}})) a(s);
+ leaf #(.G(BASE+10),.N(WIDTH),.taps('{'{(WIDTH-1){BASE+11},BASE+15},'{(WIDTH-1){BASE+12},BASE+16}})) b(t);
+ integer index;
+ real sampled;
+ initial begin index=1; sampled=0; #0.4 index=WIDTH; end
+ always #0.1 sampled=a.taps[2][index]+b.weights[3]+a.local_taps[1];
+ analog begin
+   V(p)<+a.taps[1][index];
+   V(q)<+sampled;
+   V(r)<+b.local_taps[2]+b.weights[4]+ROOT_TAPS[2];
+ end
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* foreign readonly arrays\nX1 p q r s t top BASE=2 WIDTH=2\nX2 a b c d e top BASE=5 WIDTH=3\n.va \"{}\" top module=top\nRp p 0 1k\nRq q 0 1k\nRr r 0 1k\nRs s 0 1k\nRt t 0 1k\nRa a 0 1k\nRb b 0 1k\nRc c 0 1k\nRd d 0 1k\nRe e 0 1k\n.end\n",source.path(),
+    )).unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (nodes, base) in [
+        (["p", "q", "r", "s", "t"], 2.0),
+        (["a", "b", "c", "d", "e"], 5.0),
+    ] {
+        for time in [0.3e-9, 0.8e-9] {
+            let delta = if time > 0.4e-9 { 4.0 } else { 0.0 };
+            let expected = [
+                base + 2.0 + delta,
+                2.0 * base + 3.0 + delta,
+                2.0 * base + 23.0,
+                base + 7.0,
+                base + 7.0,
+            ];
+            for (node, expected) in nodes.into_iter().zip(expected) {
+                let actual = voltage(&result, node, time);
+                assert!(
+                    (actual - expected).abs() < 1e-7,
+                    "{node} t={time}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn hierarchy_connect_insertion_preserves_merged_split_loading_and_sampling() {
     for (mode, high) in [("merged", 1.5), ("split", 2.0)] {
         let source = Source::new(&format!(

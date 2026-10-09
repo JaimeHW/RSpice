@@ -762,6 +762,118 @@ endmodule
 }
 
 #[test]
+fn foreign_parameter_arrays_preserve_private_storage_guards_and_replay() {
+    let source = r#"
+module leaf;
+ parameter integer N=2;
+ parameter real G=1;
+ parameter real taps[2:1][1:N]='{'{N{G+1}},'{N{G+2}}};
+ localparam integer weights[3:2]='{1.5,-1.5};
+endmodule
+module top(output electrical p);
+ parameter integer WIDTH=2;
+ parameter real BASE=2;
+ leaf #(.N(WIDTH),.G(BASE),.taps('{'{WIDTH{BASE+1}},'{WIDTH{BASE+2}}})) child();
+ integer index;
+ real sampled;
+ initial begin index=WIDTH; sampled=child.taps[1][index]+child.weights[2]; end
+ analog V(p)<+sampled+child.taps[2][1];
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let initial = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(
+            &initial.canonical_ir,
+            &[("WIDTH", 3.0), ("BASE", 5.0)],
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    for (artifact, width, base) in [(&initial, 2.0, 2.0), (&specialized, 3.0, 5.0)] {
+        for (name, value) in [("WIDTH", width), ("BASE", base)] {
+            let parameter = artifact
+                .canonical_ir
+                .hir
+                .parameters
+                .iter()
+                .find(|parameter| parameter.name == name)
+                .unwrap();
+            assert_eq!(parameter.elaboration_value, Some(value), "{name}");
+        }
+        let public: Vec<_> = artifact
+            .canonical_ir
+            .hir
+            .parameters
+            .iter()
+            .filter(|p| p.is_public)
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(public, ["WIDTH", "BASE"]);
+        let replay = compiler
+            .prepare_artifact_runtime_source(
+                &artifact.canonical_ir,
+                &rspice_veriloga::NoPipelineControl,
+            )
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            artifact.canonical_ir.digital.content_identity,
+            replay.canonical_ir.digital.content_identity
+        );
+        assert_eq!(
+            artifact.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+    }
+    for body in [
+        "initial child.taps[1][1]=3;",
+        "analog child.taps[1][1]=3;",
+        "initial child.weights[2]=3;",
+        "analog child.weights[2]=3;",
+    ] {
+        let invalid = source.replace("analog V(p)<+sampled+child.taps[2][1];", body);
+        assert!(
+            compiler.compile_runtime(&invalid, Some("top")).is_err(),
+            "{body}"
+        );
+    }
+    let invalid = source.replace(
+        "leaf #(.N(WIDTH),.G(BASE),.taps('{'{WIDTH{BASE+1}},'{WIDTH{BASE+2}}})) child();",
+        "leaf #(.N(3),.G(BASE)) child();",
+    );
+    let error = compiler
+        .compile_runtime(&invalid, Some("top"))
+        .err()
+        .expect("resized arrays require replacement")
+        .to_string();
+    assert!(error.contains("replacement array"), "{error}");
+}
+
+#[test]
+fn local_parameter_arrays_validate_shapes_types_and_readonly_access() {
+    for declaration in [
+        "localparam real a[1:0]='{1};",
+        "localparam integer a[1:0]='{1,2147483648.0};",
+        "localparam real a[0:1048576]='{1};",
+        "localparam real a[1:0]='{V(p),2};",
+        "localparam real a[1:0]='{1,2}; analog a[0]=3;",
+    ] {
+        let source =
+            format!("module top(output electrical p); {declaration} analog V(p)<+1; endmodule");
+        assert!(
+            VerilogACompiler::default()
+                .compile_canonical_ir_module(&source, Some("top"))
+                .is_err(),
+            "{declaration}"
+        );
+    }
+}
+
+#[test]
 fn foreign_parameter_binding_rejects_illegal_defaults_writes_and_cycles() {
     let compiler = VerilogACompiler::new(CompilerOptions {
         enable_ams: true,

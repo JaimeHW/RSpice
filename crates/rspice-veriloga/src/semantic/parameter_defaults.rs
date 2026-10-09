@@ -25,15 +25,7 @@ impl SemanticAnalyzer {
         localparam: &ParameterDecl,
         module: &Module,
     ) -> CompileResult<Option<Expression>> {
-        if !localparam.dimensions.is_empty() {
-            return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "localparam array '{}' is retained with its declared dimensions, but array-valued localparam storage and indexing are not implemented",
-                    localparam.name
-                )),
-                localparam.span,
-            )));
-        }
+        debug_assert!(localparam.dimensions.is_empty());
         let closed = localparam
             .default
             .as_ref()

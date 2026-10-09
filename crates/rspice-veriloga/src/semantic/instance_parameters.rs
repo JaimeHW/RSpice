@@ -5,6 +5,71 @@ pub(super) fn constants(source: &Module) -> DigitalConstants {
     DigitalConstants::from_module(source)
 }
 
+/// Concrete reference discovery must retain the same array replacement rule as
+/// ordinary hierarchy elaboration (VAMS-2023 3.4.4). Re-expanding a replicated
+/// default at the new width is not an explicit array assignment.
+pub(super) fn validate_array_replacements(
+    declared: &Module,
+    effective: &Module,
+    provided: &[(usize, String)],
+    path: &str,
+) -> CompileResult<()> {
+    if provided.is_empty() {
+        return Ok(());
+    }
+    let before = constants(declared);
+    let after = constants(effective);
+    for (index, parameter) in declared.parameters.iter().enumerate() {
+        if parameter.dimensions.is_empty() || provided.iter().any(|(given, _)| *given == index) {
+            continue;
+        }
+        let extent = |dimension: &ArrayDimension, constants: &DigitalConstants| {
+            let bound = |expression: &Expression| {
+                crate::canonical_ir::digital_lower::elaboration_constant(
+                    expression,
+                    constants,
+                    declared.time_scale,
+                )
+                .and_then(|value| match value {
+                    crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+                    crate::numeric_literal::NumericLiteralValue::Real(value) => {
+                        SemanticAnalyzer::exact_const_i64(value)
+                    }
+                })
+            };
+            bound(&dimension.start)
+                .zip(bound(&dimension.end))
+                .and_then(|(left, right)| left.abs_diff(right).checked_add(1))
+        };
+        let mut changed = false;
+        for dimension in &parameter.dimensions {
+            let (Some(before), Some(after)) = (extent(dimension, &before), extent(dimension, &after))
+            else {
+                return Err(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "array '{}' at instance '{path}' requires finite integer bounds",
+                        parameter.name
+                    )),
+                    dimension.span,
+                )
+                .into());
+            };
+            changed |= before != after;
+        }
+        if changed {
+            return Err(SemanticError::new(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "instance '{path}' changes the size of parameter array '{}' without an explicit replacement array value (VAMS-2023 3.4.4)",
+                    parameter.name
+                )),
+                parameter.span,
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn close_override(
     declaration: &ParameterDecl,
     expression: Expression,

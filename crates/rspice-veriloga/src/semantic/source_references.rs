@@ -370,18 +370,17 @@ impl Resolver {
         span: Span,
     ) -> CompileResult<()> {
         let target_source = &self.frames[target].source;
-        if !declaration.dimensions.is_empty() {
-            return Err(error(
-                "foreign parameter arrays require aggregate reference binding",
-                span,
-            ));
-        }
         let query = Expression::Identifier(Identifier {
             name: declaration.name.clone(),
             span,
         });
         let mut typed = declaration.clone();
-        typed.default = Some(query.clone());
+        // Aggregate overrides are already closed in their declaring occurrence.
+        // Preserve the assignment pattern and close each leaf with its element
+        // type; a scalar query would discard the array's shape.
+        if declaration.dimensions.is_empty() {
+            typed.default = Some(query.clone());
+        }
         let constants = DigitalConstants::from_module(target_source);
         let value = crate::canonical_ir::digital_lower::parameter_override_literal(
             &typed,
@@ -393,6 +392,9 @@ impl Resolver {
         if let Some(range) = &declaration.packed_range {
             dependencies.extend([&range.msb, &range.lsb]);
         }
+        for dimension in &declaration.dimensions {
+            dependencies.extend([&dimension.start, &dimension.end]);
+        }
         let target_dependencies =
             SourceParameters::new(target_source).dependencies(dependencies)?;
         let mut imported = declaration;
@@ -402,29 +404,37 @@ impl Resolver {
         imported.range = None;
         imported.attributes.clear();
         imported.span = span;
-        if let Some(range) = &mut imported.packed_range {
-            for expression in [&mut range.msb, &mut range.lsb] {
-                let value = crate::canonical_ir::digital_lower::elaboration_constant(
-                    expression,
-                    &constants,
-                    target_source.time_scale,
+        let bounds = imported
+            .packed_range
+            .iter_mut()
+            .flat_map(|range| [&mut range.msb, &mut range.lsb])
+            .chain(
+                imported
+                    .dimensions
+                    .iter_mut()
+                    .flat_map(|dimension| [&mut dimension.start, &mut dimension.end]),
+            );
+        for expression in bounds {
+            let value = crate::canonical_ir::digital_lower::elaboration_constant(
+                expression,
+                &constants,
+                target_source.time_scale,
+            )
+            .and_then(|value| match value {
+                crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
+                _ => None,
+            })
+            .ok_or_else(|| {
+                error(
+                    "parameter bounds require integer constants",
+                    expression.span(),
                 )
-                .and_then(|value| match value {
-                    crate::numeric_literal::NumericLiteralValue::Integer(value) => Some(value),
-                    _ => None,
-                })
-                .ok_or_else(|| {
-                    error(
-                        "parameter packed bounds require integer constants",
-                        expression.span(),
-                    )
-                })?;
-                *expression = Expression::Number(NumberLit {
-                    value: value as f64,
-                    raw: value.to_string().into(),
-                    span: expression.span(),
-                });
-            }
+            })?;
+            *expression = Expression::Number(NumberLit {
+                value: value as f64,
+                raw: value.to_string().into(),
+                span: expression.span(),
+            });
         }
         self.retain_dependencies(owner, target, target_dependencies);
         self.frames[owner].source.localparams.push(imported);
@@ -639,6 +649,12 @@ impl Resolver {
             child.parameters[index].is_given = true;
         }
         child.reference_sources = None;
+        super::instance_parameters::validate_array_replacements(
+            source,
+            &child,
+            &specialization,
+            &path,
+        )?;
         crate::parser::expand_specialized_generates(&mut child)?;
         validate_parameter_references(&child)?;
         context::extend_insertions(&self.sources, &mut child, &path);

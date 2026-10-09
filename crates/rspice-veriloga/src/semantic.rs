@@ -1487,6 +1487,7 @@ impl SemanticAnalyzer {
             module
                 .parameters
                 .iter()
+                .chain(&module.localparams)
                 .filter(|parameter| !parameter.dimensions.is_empty())
                 .map(|parameter| parameter.name.clone()),
         );
@@ -1528,6 +1529,19 @@ impl SemanticAnalyzer {
         }
         let mut localparam_defaults = vec![None; module.localparams.len()];
         let mut local_defaults = parameter_defaults::LocalDefaults::default();
+        let array_declarations: Vec<_> = if module
+            .localparams
+            .iter()
+            .any(|parameter| !parameter.dimensions.is_empty())
+        {
+            ordered
+                .iter()
+                .map(|declaration| (**declaration).clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut local_arrays = Vec::new();
         for (local, parameter_index) in declarations {
             if local {
                 let mut localparam = module.localparams[parameter_index].clone();
@@ -1536,6 +1550,15 @@ impl SemanticAnalyzer {
                     localparam.default = Some(default);
                 }
                 let localparam = &localparam;
+                if !localparam.dimensions.is_empty() {
+                    local_arrays.push(self.prepare_localparam_array(
+                        localparam,
+                        &local_defaults,
+                        &array_declarations,
+                        &all_indices,
+                    )?);
+                    continue;
+                }
                 let default = self.prepare_localparam_default(localparam, module)?;
                 if localparam.param_type == ParamType::String {
                     local_defaults.insert_string(localparam.name.clone());
@@ -1924,7 +1947,8 @@ impl SemanticAnalyzer {
 
         // Parameter arrays share checked numeric storage with variables, but
         // retain parameter symbols so source code can never write their cells.
-        let parameter_arrays = Self::parameter_array_items(&analyzed);
+        let mut parameter_arrays = Self::parameter_array_items(&analyzed);
+        parameter_arrays.extend(local_arrays);
         for (item, var_type) in &parameter_arrays {
             if let Some(layout) =
                 self.register_array_variable(item, *var_type, &item.name, &mut analyzed)
@@ -2037,6 +2061,11 @@ impl SemanticAnalyzer {
             .zip(&localparam_defaults)
             .zip(&localparam_types)
         {
+            if !localparam.dimensions.is_empty() {
+                // Private readonly arrays use the same initialized storage as
+                // public parameter arrays, without adding external ABI slots.
+                continue;
+            }
             let value_type = match param_type {
                 ParamType::Real => ValueType::Real,
                 ParamType::Integer => ValueType::Integer,

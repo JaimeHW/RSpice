@@ -1,4 +1,4 @@
-﻿# rspice-veriloga
+# rspice-veriloga
 
 A Verilog-AMS compiler written in Rust, covering both halves of LRM 2.4: the
 supported analog subset commonly called Verilog-A, and the supported discrete
@@ -241,9 +241,25 @@ local names, nested calls and built-in math binding. Scalar output/inout copy-ou
 uses the existing function execution path. Captured values and scope indices remain
 protected through specialization and source replay. HIR 151 / cache record 133
 invalidate artifacts predating these function bindings.
-Cross-module storage binding, upward and absolute `$root` paths, foreign
-parameter arrays/strings, hierarchy-dependent generate decisions, and scope indices
-that themselves depend on hierarchical constants remain open.
+Continuous-net, named-branch, explicit unnamed-branch and port-current references
+bind to the target occurrence's existing physical storage. Branch ownership,
+orientation, contributions and derivative signs survive flattening. Within one
+selected HDL root, upward, sibling, self/module-name and `$root.selected_root`
+references retain lexical shadowing and effective instance parameters. Automatically
+inserted connect bodies and their helpers use the upper connection's actual context,
+including supply probes, generated structure and connect-rule overrides.
+Numeric integer/real parameter and localparam arrays retain their declared coordinates
+and readonly storage. Hierarchical reads such as `child.table[index]` close values
+and bounds in the target occurrence while evaluating runtime indices in the caller.
+Imported arrays add no externally overridable parameters. Bounds, dependencies,
+integer assignment conversion and source replay follow the existing typed parameter
+path. Resizing a public parameter array requires an explicit replacement array value.
+HIR 156 / cache record 138 invalidate artifacts predating these array bindings.
+Foreign digital storage, multiple HDL roots/cross-model hierarchy, string parameter
+binding, aggregate expressions that depend on other arrays, hierarchy-dependent
+generate decisions, and scope indices that themselves depend on hierarchical
+constants remain open. References requiring complete post-insertion discovery or
+prior coercion of an implicit net's discipline also need further elaboration work.
 Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
 artifacts produced before scoped implicit-net construction.
 Explicit continuous-discipline `wire`/`tri` declarations allocate only physical
