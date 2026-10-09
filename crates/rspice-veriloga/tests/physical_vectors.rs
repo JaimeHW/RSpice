@@ -11,6 +11,122 @@ fn compiler() -> VerilogACompiler {
 }
 
 #[test]
+fn continuous_wire_declarations_share_physical_storage_and_replay() {
+    let source = r#"
+module source(output electrical wire a);
+ analog I(a)<+(V(a)-2.5)/1000;
+endmodule
+module load(input electrical wire [1:0] a,output electrical wire p);
+ analog begin I(a[1])<+V(a[1])/1000; I(a[0])<+V(a[0])/1000; V(p)<+V(a[1])+V(a[0]); end
+endmodule
+module top(output electrical wire p,q);
+ parameter integer BASE=-2;
+ wire [5:4] bus; electrical [5:4] bus;
+ source first(bus[5]),second(bus[4]); load packed_load(bus,p);
+ generate begin : channels
+   tri electrical [BASE:BASE+1] cells[3:3];
+   source first(cells[3][BASE]),second(cells[3][BASE+1]);
+   load array_load(cells[3],q);
+ end endgenerate
+endmodule
+"#;
+    let compiler = VerilogACompiler::default();
+    let artifact = compiler.compile_runtime(source, Some("top")).unwrap();
+    let specialized = compiler
+        .specialize_mixed_runtime(&artifact.canonical_ir, &[("BASE", 7.0)], &NoPipelineControl)
+        .unwrap();
+    for report in [&artifact, &specialized] {
+        report.canonical_ir.validate().unwrap();
+        assert!(report.canonical_ir.digital.signals.is_empty());
+        assert!(report.canonical_ir.digital.processes.is_empty());
+        assert!(report.canonical_ir.digital.drivers.is_empty());
+        let replay = compiler
+            .prepare_artifact_runtime_source(&report.canonical_ir, &NoPipelineControl)
+            .unwrap()
+            .compile_runtime(None)
+            .unwrap();
+        assert_eq!(
+            report.canonical_ir.runtime_source_identity(),
+            replay.canonical_ir.runtime_source_identity()
+        );
+    }
+}
+
+#[test]
+fn continuous_wire_normalization_preserves_discrete_siblings_and_probe_reads() {
+    let source = r#"
+`timescale 1ns/1ps
+module top(output electrical p);
+ wire physical,discrete; electrical physical;
+ real sampled;
+ assign discrete=1'b1;
+ initial #1 sampled=V(physical);
+ analog begin V(physical)<+2.5; V(p)<+sampled+discrete; end
+endmodule
+"#;
+    let artifact = compiler().compile_runtime(source, Some("top")).unwrap();
+    let names: Vec<_> = artifact
+        .canonical_ir
+        .digital
+        .signals
+        .iter()
+        .map(|signal| signal.name.as_str())
+        .collect();
+    assert!(names.contains(&"discrete"));
+    assert!(names.contains(&"sampled"));
+    assert!(!names.contains(&"physical"));
+}
+
+#[test]
+fn continuous_wire_declarations_reject_conflicting_shapes_and_digital_drivers() {
+    for (body, expected) in [
+        (
+            "wire electrical a=1;",
+            "cannot be driven by a digital net declaration assignment",
+        ),
+        (
+            "wire a=1; electrical a;",
+            "cannot be driven by a digital net declaration assignment",
+        ),
+        (
+            "wire [2:1] a; electrical [1:2] a;",
+            "inconsistent wire and discipline shapes",
+        ),
+        (
+            "wire a[2:1]; electrical a[1:2];",
+            "inconsistent wire and discipline shapes",
+        ),
+        (
+            "wire a[2:1]; electrical a;",
+            "inconsistent wire and discipline shapes",
+        ),
+        (
+            "wire a; wire a; electrical a;",
+            "duplicate net type declaration",
+        ),
+        (
+            "wreal electrical [1:0] a;",
+            "requires a discrete discipline",
+        ),
+        ("reg electrical [1:0] a;", "requires a discrete discipline"),
+    ] {
+        let source = format!("module top; {body} endmodule");
+        let error = compiler()
+            .compile_runtime(&source, Some("top"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(expected), "{body}: {error}");
+    }
+    for body in ["assign a=1'b1;", "initial a=1'b1;"] {
+        let source = format!("module top; wire electrical a; {body} endmodule");
+        assert!(
+            compiler().compile_runtime(&source, Some("top")).is_err(),
+            "{body}"
+        );
+    }
+}
+
+#[test]
 fn physical_ranges_and_probe_selectors_replay_with_parameters() {
     let source = r#"
 module top(p);

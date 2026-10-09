@@ -190,13 +190,18 @@ fn an_output_port_may_be_redeclared_as_a_register() {
         "module port_reg(clk, q);\n\
          \x20   input clk;\n\
          \x20   output q;\n\
-         \x20   electrical clk, q;\n\
+         \x20   wire clk;\n\
          \x20   reg q;\n\
          \x20   always @(posedge clk) q <= 1'b1;\n\
          endmodule\n",
     );
     let module = only_module(&analyzed);
-    let signal = &module.digital.signals[0];
+    let signal = module
+        .digital
+        .signals
+        .iter()
+        .find(|signal| signal.name == "q")
+        .unwrap();
     assert_eq!(signal.name, "q");
     assert!(signal.redeclares_port);
 }

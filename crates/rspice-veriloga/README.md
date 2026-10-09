@@ -212,6 +212,13 @@ names, preserved through specialization and source replay. Generated local varia
 parameters/functions and analog blocks still require further scoped elaboration.
 Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
 artifacts produced before scoped implicit-net construction.
+Explicit continuous-discipline `wire`/`tri` declarations allocate only physical
+nodes. Inline and separate declarations retain their packed and unpacked shapes
+through generated scopes, parameter specialization and replay. Discrete siblings
+and potential/flow reads retain their existing domain bindings. Conflicting shapes
+and digital drivers on continuous nets are diagnosed. HIR 146 / cache record 128
+invalidate artifacts compiled before this storage normalization. Net-discipline
+initializer (nodeset) syntax remains separate unfinished work.
 The existing `output real` variable-port form is an RSpice compatibility extension,
 not the VAMS-2023 real-net port syntax (`wreal`).
 Compatible scalar and complete bus connections to real nets resolve `wire`/`tri`

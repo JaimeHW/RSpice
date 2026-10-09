@@ -337,7 +337,11 @@ impl Parser<'_> {
     ) {
         if let Some(discipline) = discipline {
             module.nets.push(NetDecl {
-                dimensions: Vec::new(),
+                dimensions: items
+                    .iter()
+                    .filter(|item| !item.dimensions.is_empty())
+                    .map(|item| (item.name.clone(), item.dimensions.clone()))
+                    .collect(),
                 discipline: Some(discipline),
                 range: range.clone(),
                 names: items.iter().map(|item| item.name.clone()).collect(),

@@ -2,6 +2,7 @@
 mod arrays;
 mod branches;
 mod connections;
+mod continuous_nets;
 mod real_buses;
 use super::*;
 pub(super) use connections::{ConnectionScope, bind as bind_connections};
@@ -86,6 +87,8 @@ pub(super) fn declarations<'a>(
     module: &'a Module,
     db: &DisciplineDb,
 ) -> CompileResult<(Cow<'a, Module>, PhysicalNodes)> {
+    let normalized = continuous_nets::normalize(module, db)?;
+    let module = normalized.as_ref();
     let constants = DigitalConstants::from_module(module);
     let mut physical = HashSet::new();
     let continuous = |name: &SmolStr| {
@@ -193,7 +196,7 @@ pub(super) fn declarations<'a>(
             .iter()
             .any(|net| net.kind.is_real() && net.range.is_some())
     {
-        return Ok((Cow::Borrowed(module), nodes));
+        return Ok((normalized, nodes));
     }
     let mut expanded = module.clone();
     expanded.ports = module

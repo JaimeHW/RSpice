@@ -2566,3 +2566,58 @@ endmodule
         }
     }
 }
+
+#[test]
+fn explicitly_continuous_wires_preserve_loading_and_digital_sampling() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module source(output electrical wire a);
+ parameter real LEVEL=2.5;
+ analog I(a)<+(V(a)-LEVEL)/1000;
+endmodule
+module load(input electrical wire a,output electrical wire p);
+ analog begin I(a)<+V(a)/1000; V(p)<+V(a); end
+endmodule
+module pair(input electrical wire [1:0] a,output electrical wire p);
+ analog begin I(a[1])<+V(a[1])/1000; I(a[0])<+V(a[0])/1000; V(p)<+V(a[1])+V(a[0]); end
+endmodule
+module top(output electrical wire p,output electrical wire [1:0] q,output electrical wire r,s);
+ wire [3:2] bus; electrical [3:2] bus;
+ source #(.LEVEL(4.5)) first(bus[3]); source #(.LEVEL(6.5)) second(bus[2]);
+ pair packed_load(bus,p);
+ genvar i;
+ generate for(i=0;i<2;i=i+1) begin : channels
+   tri electrical local_nodes[i:i];
+   source #(.LEVEL(i+2.5)) producer(local_nodes[i]);
+   load consumer(local_nodes[i],q[i]);
+ end endgenerate
+ wire scalar,discrete; electrical scalar;
+ real sampled;
+ source producer(scalar); load consumer(scalar,r);
+ assign discrete=1'b1;
+ always #0.1 sampled=V(scalar);
+ analog V(s)<+sampled+discrete;
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* explicit continuous wire storage\nX1 p q1 q0 r s top\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 1e-9, 50e-12).unwrap();
+    for (node, expected) in [
+        ("p", 5.5),
+        ("q0", 1.25),
+        ("q1", 1.75),
+        ("r", 1.25),
+        ("s", 2.25),
+    ] {
+        let actual = voltage(&result, node, 0.8e-9);
+        assert!(
+            (actual - expected).abs() < 1e-7,
+            "{node}: {actual} != {expected}"
+        );
+    }
+}
