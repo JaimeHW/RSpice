@@ -6,6 +6,9 @@ use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
 use crate::commands::result_signal::qualified_name;
 use std::path::Path;
 
+mod stability;
+pub(in crate::commands) use stability::append_stability_columns;
+
 /// Project signed or unsigned 64-bit integers only when binary64 is exact.
 /// A wider round trip avoids saturating i64::MAX/u64::MAX casts, and permits
 /// representable multiples above 2^53 instead of rejecting all large integers.
@@ -79,6 +82,9 @@ fn append_payload_columns(
                 SignalUnit::Hertz,
                 payload.fundamental_frequency,
             )?;
+        }
+        ResultPayload::Stb(payload) => {
+            projection.stability(payload.success, &payload.circuit_poles)?;
         }
         ResultPayload::Distortion(payload) => {
             if let Some(ratio) = payload.f2_over_f1 {

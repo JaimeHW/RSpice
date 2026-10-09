@@ -846,6 +846,21 @@ retains each `frequency(<product>)` column and the fixed F2 frequency and
 authored F2/F1 ratio for two-tone runs. Expanded payload columns count toward
 both external-data and result-value limits.
 
+STB conversion and direct flat output retain circuit stability independently
+of the return-ratio curve. `stb:pole(N)` columns carry the finite natural poles
+in rad/s, sorted by real then imaginary part; finite/infinite counts,
+descriptor order, backward error, and qualification tolerance accompany them.
+The `stb:completed(...)`, `stb:circuit_stability(...)`, and
+`stb:circuit_poles(...)` columns identify completion, stability, and spectrum
+availability/qualification. These reserved categorical indicators contain
+exactly `1` in every row; contradictory indicators fail comparison regardless
+of tolerances or signal selection. An explicitly incomplete STB run cannot
+pass comparison or be blessed. Full comparisons include the pole evidence;
+an explicit `--variables` selection may restrict comparison to the requested
+curve. Older flat artifacts without these columns provide only their retained
+curve evidence. Warning text and detailed extraction diagnostics remain in
+typed JSON. Expanded pole columns obey the same table resource limits.
+
 **`convert`** preserves complex AC data across every round trip
 (`Re(..)`/`Im(..)` column pairs in CSV and TSV, `Flags: complex` in rawfiles,
 real/imag arrays in JSON and HDF5). One sample is a result: an operating point

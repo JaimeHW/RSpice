@@ -16,6 +16,7 @@ mod determinations;
 mod fft;
 mod interpolation;
 mod selection;
+mod stability;
 use selection::{parse_variable_name, variable_name_matches};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -624,6 +625,8 @@ fn compare_waveforms(
     let pairs = selection::pairs(result, golden, args, &mut cmp_result);
     let result_determinations = determinations::Determinations::new(result);
     let golden_determinations = determinations::Determinations::new(golden);
+    cmp_result.problems.extend(stability::problems(result));
+    cmp_result.problems.extend(stability::problems(golden));
     for (evidence, data) in [
         (&result_determinations, result),
         (&golden_determinations, golden),

@@ -954,7 +954,7 @@ pub(super) fn finish_stb_result(
         let analysis_id = output.analysis("stb")?;
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
-        let table = ExportTable {
+        let mut table = ExportTable {
             scale_unit: Some("Hz".into()),
             analysis: "stb".to_string(),
             plot_name: "STB Loop Gain".to_string(),
@@ -997,6 +997,15 @@ pub(super) fn finish_stb_result(
                 },
             ],
         };
+        if ctx.format != OutputFormat::Json {
+            crate::commands::waveform_io::append_stability_columns(
+                &output.path,
+                &mut table,
+                stb.result.success,
+                &stb.result.circuit_poles,
+                ctx.engine.config().resource_limits,
+            )?;
+        }
         let schema = table_schema(&table)?;
         super::document::publish_analysis_result(
             ctx,

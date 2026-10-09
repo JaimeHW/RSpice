@@ -23,6 +23,7 @@ pub(crate) use delimited::{parse_record as parse_delimited_record, records as de
 mod touchstone;
 mod typed;
 pub(crate) use snapshot::ResultSnapshot;
+pub(super) use typed::append_stability_columns;
 pub(super) use typed::result_document_table;
 
 pub(crate) enum ImportedResult {
