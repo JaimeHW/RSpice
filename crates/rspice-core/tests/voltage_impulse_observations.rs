@@ -361,3 +361,399 @@ fn voltage_integral_seams_own_each_action_once() {
         close(value.value.unwrap(), expected);
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_capacitive_event_keeps_voltage_actions_out_of_finite_samples() {
+    let deck=Netlist::parse("CCVS differentiator event\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save v(out) i(v1) i(h1) i(c1) i(c2) i(r2)\n.end\n").unwrap();
+    let mut config = rspice_core::SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    let result = Engine::new(config).run_tran(&deck, 2e-9, 5e-12).unwrap();
+    for (&time, &voltage) in result
+        .time
+        .iter()
+        .zip(result.try_voltage_waveform_named("out").unwrap())
+    {
+        assert!(
+            voltage.abs() < 1e-10,
+            "finite V(out) at {time:e}: {voltage:e}; the voltage action is separate"
+        );
+    }
+    let trace = result
+        .voltage_impulses
+        .as_ref()
+        .expect("voltage action coverage")
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    assert!(trace.complete);
+    let point = trace
+        .points
+        .iter()
+        .find(|point| point.time == 1e-9)
+        .unwrap();
+    // I(V1)=-Cin*delta, V(out)=Rm*I(V1). The output capacitor
+    // contributes Cout*dV(out)/dt, so I(H1) also has delta-prime.
+    assert!((point.volt_seconds + 6e-12).abs() < 1e-24);
+    let current=result.current_impulses.as_ref().unwrap().iter().find(|trace| matches!(&trace.owner,rspice_core::CurrentImpulseOwner::Branch {branch_name} if branch_name.eq_ignore_ascii_case("h1"))).unwrap();
+    assert!(current.complete);
+    let point = current
+        .points
+        .iter()
+        .find(|point| point.time == 1e-9)
+        .unwrap();
+    assert!((point.charge_coulombs - 6e-13).abs() < 1e-25);
+    let derivative = current
+        .derivatives
+        .iter()
+        .find(|point| point.time == 1e-9 && point.order == 1)
+        .unwrap();
+    assert!((derivative.coefficient - 3e-23).abs() < 1e-35);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_voltage_action_changes_inductor_flux_at_the_exact_event() {
+    let deck=Netlist::parse("CCVS winding event\nV1 in 0 PWL(0 0 1n 0 1n 1 3n 1)\nC1 in 0 2p\nH1 out 0 V1 3\nR1 out winding 1\nL1 winding 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save v(out) v(winding) i(v1) i(h1) i(l1)\n.end\n").unwrap();
+    let mut config = rspice_core::SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    let result = Engine::new(config).run_tran(&deck, 3e-9, 5e-12).unwrap();
+    for (&time, &current) in result
+        .time
+        .iter()
+        .zip(result.try_branch_current_waveform_named("l1").unwrap())
+    {
+        let expected = if time < 1e-9 {
+            0.0
+        } else {
+            -1.2e-3 * (-(time - 1e-9) / 5e-9).exp()
+        };
+        assert!(
+            (current - expected).abs() < 1e-9,
+            "I(L1) at {time:e}: {current:e} != {expected:e}"
+        );
+    }
+    for node in ["out", "winding"] {
+        let trace = result
+            .voltage_impulses
+            .as_ref()
+            .expect("voltage action coverage")
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case(node))
+            .unwrap();
+        assert!(trace.complete);
+        let point = trace
+            .points
+            .iter()
+            .find(|point| point.time == 1e-9)
+            .unwrap();
+        assert!((point.volt_seconds + 6e-12).abs() < 1e-24);
+    }
+}
+
+fn ccvs_engine() -> Engine {
+    let mut config = rspice_core::SimulationConfig::default();
+    config.convergence_config.gmin_target = 0.0;
+    Engine::new(config)
+}
+
+fn action_current<'a>(
+    result: &'a TransientResult,
+    name: &str,
+) -> &'a rspice_core::CurrentImpulseTrace {
+    result.current_impulses.as_ref().unwrap().iter().find(|trace| matches!(&trace.owner,
+        rspice_core::CurrentImpulseOwner::Branch {branch_name} if branch_name.eq_ignore_ascii_case(name))).unwrap()
+}
+
+fn action_voltage<'a>(result: &'a TransientResult, name: &str) -> &'a VoltageImpulseTrace {
+    result
+        .voltage_impulses
+        .as_ref()
+        .unwrap()
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case(name))
+        .unwrap()
+}
+
+fn action_close(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() <= 2e-12 * expected.abs(),
+        "{actual:e} != {expected:e}"
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_cascade_preserves_second_derivatives_and_controlled_observations() {
+    let deck=Netlist::parse("Cascaded CCVS actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\nH2 next 0 H1 7\nC3 next 0 11p\nR3 next 0 100\nG1 g 0 out 0 2\nRG g 0 1\nF1 f 0 H1 -2\nRF f 0 1\nE1 e 0 out 0 -2\nRE e 0 1\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    let result = ccvs_engine().run_tran(&deck, 2e-9, 5e-12).unwrap();
+    for (name, delta, derivatives) in [
+        ("v1", -2e-12, vec![]),
+        ("c1", 2e-12, vec![]),
+        ("h1", 6e-13, vec![3e-23]),
+        ("c2", 0.0, vec![-3e-23]),
+        ("r2", -6e-13, vec![]),
+        ("h2", -4.2e-14, vec![-4.83e-23, -2.31e-33]),
+        ("c3", 0.0, vec![4.62e-23, 2.31e-33]),
+        ("g1", -1.2e-11, vec![]),
+        ("f1", -1.2e-12, vec![-6e-23]),
+        ("e1", -12e-12, vec![]),
+    ] {
+        let trace = action_current(&result, name);
+        assert!(trace.complete, "{name}");
+        let points: Vec<_> = trace.points.iter().filter(|p| p.time == 1e-9).collect();
+        if delta == 0.0 {
+            assert!(points.is_empty(), "{name}");
+        } else {
+            assert_eq!(points.len(), 1, "{name}");
+            action_close(points[0].charge_coulombs, delta);
+        }
+        let actual: Vec<_> = trace
+            .derivatives
+            .iter()
+            .filter(|p| p.time == 1e-9)
+            .collect();
+        assert_eq!(actual.len(), derivatives.len(), "{name}");
+        for (order, (point, expected)) in actual.iter().zip(derivatives).enumerate() {
+            assert_eq!(point.order, order as u32 + 1);
+            action_close(point.coefficient, expected);
+        }
+    }
+    let voltage = action_voltage(&result, "next");
+    action_close(
+        voltage
+            .points
+            .iter()
+            .find(|p| p.time == 1e-9)
+            .unwrap()
+            .volt_seconds,
+        4.2e-12,
+    );
+    action_close(
+        voltage
+            .derivatives
+            .iter()
+            .find(|p| p.time == 1e-9 && p.order == 1)
+            .unwrap()
+            .coefficient,
+        2.1e-22,
+    );
+    for node in ["out", "next", "g", "f", "e"] {
+        assert!(
+            result
+                .try_voltage_waveform_named(node)
+                .unwrap()
+                .iter()
+                .all(|v| v.abs() < 1e-10),
+            "{node}"
+        );
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
+    let deck=Netlist::parse("CCVS source jets\nV1 in 0 PWL(0 0 1n 1 2n 1 3n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    let result = ccvs_engine().run_tran(&deck, 4e-9, 5e-12).unwrap();
+    let voltage = result.try_voltage_waveform_named("out").unwrap();
+    for (time, expected) in [(0.0, -0.006), (1e-9, 0.0), (2e-9, 0.006), (3.0 * 1e-9, 0.0)] {
+        let i = result.time.iter().position(|&t| t == time).unwrap();
+        assert!(
+            (voltage[i] - expected).abs() < 1e-12,
+            "V(out) at {time:e}: {}",
+            voltage[i]
+        );
+    }
+    for (time, expected) in [
+        (0.0, 3e-14),
+        (1e-9, -3e-14),
+        (2e-9, -3e-14),
+        (3.0 * 1e-9, 3e-14),
+    ] {
+        action_close(
+            action_current(&result, "h1")
+                .points
+                .iter()
+                .find(|p| p.time == time)
+                .unwrap()
+                .charge_coulombs,
+            expected,
+        );
+    }
+    assert!(
+        action_voltage(&result, "out")
+            .points
+            .iter()
+            .all(|p| p.volt_seconds.abs() < 1e-24)
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_actions_survive_live_delivery_compression_and_packed_restart() {
+    use rspice_core::engine::{
+        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode, SpiceDialect,
+        CompressionConfig,
+    };
+    use rspice_core::numerics::integration::IntegrationMethod;
+    #[derive(Default)]
+    struct Live(
+        std::sync::Mutex<(
+            Vec<VoltageImpulseTrace>,
+            Vec<rspice_core::CurrentImpulseTrace>,
+        )>,
+    );
+    impl rspice_core::AbortSignal for Live {
+        fn is_aborted(&self) -> bool {
+            false
+        }
+        fn observe_transient_sample(&self, sample: rspice_core::abort_signal::TransientSample<'_>) {
+            if let (Some(voltage), Some(current)) =
+                (sample.voltage_impulses, sample.current_impulses)
+            {
+                let mut saved = self.0.lock().unwrap();
+                *saved = (voltage.to_vec(), current.to_vec());
+            }
+        }
+    }
+    let deck=Netlist::parse("CCVS retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        for method in [
+            IntegrationMethod::Trapezoidal,
+            IntegrationMethod::Gear2,
+            IntegrationMethod::TrapGear,
+        ] {
+            let mut config = rspice_core::SimulationConfig {
+                spice_dialect: dialect,
+                integration_method: method,
+                ..Default::default()
+            };
+            config.convergence_config.gmin_target = 0.0;
+            let engine = Engine::new(config);
+            let live = Live::default();
+            let (full, schedule) = engine
+                .run_tran_checkpoint_schedule_with_startup_mode_and_abort(
+                    &deck,
+                    4e-9,
+                    5e-12,
+                    TransientStartupMode::OperatingPoint,
+                    &[1e-9, 1.5e-9],
+                    &live,
+                )
+                .unwrap();
+            let observed = live.0.lock().unwrap();
+            assert_eq!(Some(&observed.0), full.voltage_impulses.as_ref());
+            assert_eq!(Some(&observed.1), full.current_impulses.as_ref());
+            drop(observed);
+            let compressed = engine
+                .compress_transient_result_with_abort(
+                    &deck,
+                    &full,
+                    &CompressionConfig::default(),
+                    &NoAbort,
+                )
+                .unwrap();
+            compressed.validate().unwrap();
+            assert_eq!(compressed.voltage_impulses, full.voltage_impulses);
+            assert_eq!(compressed.current_impulses, full.current_impulses);
+            for saved in schedule {
+                let checkpoint = TransientCheckpoint::from_bytes(
+                    &saved
+                        .checkpoint
+                        .to_bytes(TransientCheckpointEncoding::Packed)
+                        .unwrap(),
+                )
+                .unwrap();
+                let (resumed, _) = engine
+                    .run_tran_resume(&deck, &checkpoint, 4e-9, 5e-12)
+                    .unwrap();
+                let offset = full
+                    .time
+                    .iter()
+                    .position(|&t| t == checkpoint.time)
+                    .unwrap();
+                assert_eq!(resumed.time, full.time[offset..], "{dialect:?}/{method:?}");
+                for (a, b) in resumed
+                    .voltages
+                    .iter()
+                    .zip(&full.voltages)
+                    .chain(resumed.branch_currents.iter().zip(&full.branch_currents))
+                {
+                    assert_eq!(a, &b[offset..], "{dialect:?}/{method:?}");
+                }
+                let mut voltages = full.voltage_impulses.clone().unwrap();
+                for trace in &mut voltages {
+                    trace.points.retain(|p| p.time > checkpoint.time);
+                    trace.derivatives.retain(|p| p.time > checkpoint.time);
+                }
+                assert_eq!(resumed.voltage_impulses, Some(voltages));
+                let mut currents = full.current_impulses.clone().unwrap();
+                for trace in &mut currents {
+                    trace.points.retain(|p| p.time > checkpoint.time);
+                    trace.derivatives.retain(|p| p.time > checkpoint.time);
+                }
+                assert_eq!(resumed.current_impulses, Some(currents));
+            }
+        }
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_uic_preserves_authored_capacitor_charge_and_winding_flux() {
+    use rspice_core::engine::TransientStartupMode;
+    let deck=Netlist::parse("CCVS IC transition\nV1 in 0 1\nC1 in 0 2p IC=.25\nH1 out 0 V1 3\nL1 out 0 5n IC=.002\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    let result = ccvs_engine()
+        .run_tran_with_startup_mode(&deck, 1e-9, 5e-12, TransientStartupMode::Uic)
+        .unwrap();
+    // Cin*(1-.25) transfers -4.5 pV*s, changing the winding current
+    // by -0.9 mA from the authored 2 mA, independently of the first dt.
+    action_close(
+        action_voltage(&result, "out").points[0].volt_seconds,
+        -4.5e-12,
+    );
+    for &current in result.try_branch_current_waveform_named("l1").unwrap() {
+        action_close(current, 0.0011);
+    }
+    action_close(
+        action_current(&result, "v1").points[0].charge_coulombs,
+        -1.5e-12,
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn ccvs_current_forcing_and_mutual_flux_keep_original_polarities() {
+    let deck=Netlist::parse("CCVS coupled flux\nV1 in 0 PWL(0 0 1n 0 1n 1 4n 1)\nI1 0 in PWL(0 0 1n 0 1n .0001 4n .0001)\nC1 in 0 2p\nH1 out 0 V1 3\nL1 out 0 5n\nL2 secondary 0 20n\nK1 L1 L2 .2\nR2 secondary 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n").unwrap();
+    let result = ccvs_engine().run_tran(&deck, 4e-9, 5e-12).unwrap();
+    let event = result.time.iter().position(|&time| time == 1e-9).unwrap();
+    // [L1 M; M L2] * delta_i = [-6p,0], with M=2n.
+    action_close(
+        result.try_branch_current_waveform_named("l1").unwrap()[event],
+        -0.00125,
+    );
+    action_close(
+        result.try_branch_current_waveform_named("l2").unwrap()[event],
+        0.000125,
+    );
+    action_close(
+        result.try_voltage_waveform_named("out").unwrap()[event],
+        0.0003,
+    );
+    action_close(
+        result.try_voltage_waveform_named("secondary").unwrap()[event],
+        -0.00125,
+    );
+    action_close(
+        action_voltage(&result, "out")
+            .points
+            .iter()
+            .find(|p| p.time == 1e-9)
+            .unwrap()
+            .volt_seconds,
+        -6e-12,
+    );
+    assert!(action_voltage(&result, "secondary").points.is_empty());
+    assert!(action_current(&result, "i1").points.is_empty());
+    assert!(action_current(&result, "i1").derivatives.is_empty());
+}

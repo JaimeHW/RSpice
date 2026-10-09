@@ -768,3 +768,94 @@ fn physical_event_acceptance_preflights_order_storage_before_history_rotation() 
 mod causal;
 mod causal_second;
 mod startup;
+
+#[test]
+fn linear_descriptor_observations_prepare_atomically_and_refuse_replay() {
+    use crate::abort_signal::CountingAbort;
+    let text = "atomic linear event\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0\n.save all\n.end\n";
+    let deck = Netlist::parse(text).unwrap();
+    let (engine, circuit, _, incoming, history) = fixture(text);
+    let point = engine
+        .prepare_physical_event(
+            &circuit,
+            &history,
+            PhysicalEventStep {
+                diode_history: &EMPTY_DIODES,
+                integration_coefficients: None,
+                incoming: &incoming,
+                time: 1e-9,
+                dt: 1e-12,
+                phase_events: PhysicalEventOrders::Declared(&[]),
+            },
+            &options(),
+            1e-20,
+            &NoAbort,
+        )
+        .unwrap();
+    let mut result = engine.run_tran(&deck, 0.5e-9, 1e-11).unwrap();
+    result.current_impulses = None;
+    result.voltage_impulses = None;
+    let derived =
+        Engine::derived_transient_branch_currents(&deck, &circuit, &circuit.branch_names_sorted());
+    let (plan, _) = crate::engine::transient::impulses::initialize(
+        &mut result,
+        &circuit,
+        &derived,
+        &options(),
+        1e-20,
+        0,
+        &NoAbort,
+    )
+    .unwrap();
+    let before = (
+        result.current_impulses.clone(),
+        result.voltage_impulses.clone(),
+    );
+    let census = CountingAbort::new(usize::MAX);
+    drop(
+        plan.prepare(&mut result, &point, 0, &options().limits, &census)
+            .unwrap(),
+    );
+    for poll in 0..census.count() {
+        let abort = CountingAbort::new(poll);
+        assert!(matches!(
+            plan.prepare(&mut result, &point, 0, &options().limits, &abort),
+            Err(SimulationError::Aborted)
+        ));
+        assert_eq!(abort.polls_after_abort(), 0);
+        assert_eq!(
+            (&result.current_impulses, &result.voltage_impulses),
+            (&before.0, &before.1)
+        );
+    }
+    let tight = crate::resource::ResourceLimits {
+        max_result_values: 1,
+        ..Default::default()
+    };
+    assert!(matches!(
+        plan.prepare(&mut result, &point, 0, &tight, &NoAbort),
+        Err(SimulationError::ResourceLimit(_))
+    ));
+    assert_eq!(
+        (&result.current_impulses, &result.voltage_impulses),
+        (&before.0, &before.1)
+    );
+    assert!(
+        plan.prepare(&mut result, &point, 0, &options().limits, &NoAbort)
+            .unwrap()
+            .commit()
+            > 0
+    );
+    let committed = (
+        result.current_impulses.clone(),
+        result.voltage_impulses.clone(),
+    );
+    assert!(
+        plan.prepare(&mut result, &point, 0, &options().limits, &NoAbort)
+            .is_err()
+    );
+    assert_eq!(
+        (&result.current_impulses, &result.voltage_impulses),
+        (&committed.0, &committed.1)
+    );
+}

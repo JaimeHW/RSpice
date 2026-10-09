@@ -3,6 +3,8 @@ use super::*;
 use crate::{CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace};
 use state_commit::physical_event::{PhysicalDeviceImpulses, PreparedPhysicalEvent};
 
+mod descriptor;
+
 fn failure(message: impl std::fmt::Display) -> SimulationError {
     SimulationError::Circuit(format!("physical current impulse observation: {message}"))
 }
@@ -27,6 +29,7 @@ pub(super) struct Plan {
     diodes: Vec<Option<usize>>,
     bjt_terminals: Vec<[usize; 4]>,
     controlled_currents: Vec<Vec<(usize, Value)>>,
+    descriptor: Option<descriptor::Plan>,
 }
 
 pub(super) fn initialize(
@@ -41,12 +44,15 @@ pub(super) fn initialize(
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
-    if result.current_impulses.is_some() {
+    if result.current_impulses.is_some() || result.voltage_impulses.is_some() {
         return Err(failure("history was already initialized"));
     }
     // Coverage is a physical claim. Run the complete admitted model census
     // before declaring any owner known, including on a checkpoint resume.
-    charge_event::circuit::PreparedEventCircuit::new(circuit, flux_tolerance, options, abort)?;
+    let linear =
+        charge_event::circuit::PreparedEventCircuit::new(circuit, flux_tolerance, options, abort)?
+            .linear_descriptor()
+            .is_some();
     let solved_branches = circuit.num_branches();
     if result.num_nodes != circuit.num_nodes()
         || result.branch_names.len() != solved_branches.saturating_add(derived.len())
@@ -182,6 +188,21 @@ pub(super) fn initialize(
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
+    let descriptor = if linear {
+        let (plan, voltage_traces, count) = descriptor::initialize(
+            circuit,
+            derived,
+            result,
+            retained_values.saturating_add(added_values),
+            &options.limits,
+            abort,
+        )?;
+        added_values = added_values.saturating_add(count);
+        result.voltage_impulses = Some(voltage_traces);
+        Some(plan)
+    } else {
+        None
+    };
     result.current_impulses = Some(traces);
     Ok((
         Plan {
@@ -191,6 +212,7 @@ pub(super) fn initialize(
             diodes,
             bjt_terminals,
             controlled_currents,
+            descriptor,
         },
         added_values,
     ))
@@ -212,6 +234,11 @@ impl Plan {
         limits: &crate::resource::ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Prepared<'a>, SimulationError> {
+        if let Some(plan) = &self.descriptor {
+            return plan
+                .prepare(result, event, retained_values, limits, abort)
+                .map(Prepared::Descriptor);
+        }
         let (capacitors, diodes, terminals): (&[Value], &[Value], &[[Value; 4]]) =
             match event.device_impulses() {
                 PhysicalDeviceImpulses::Continuous => (&[], &[], &[]),
@@ -279,7 +306,12 @@ impl Plan {
 /// Exclusive ownership keeps the prepared target unchanged until acceptance.
 /// Dropping publishes nothing; commit has no allocation or fallible work.
 #[must_use]
-pub(super) struct Prepared<'a> {
+pub(super) enum Prepared<'a> {
+    Current(CurrentPrepared<'a>),
+    Descriptor(descriptor::Prepared<'a>),
+}
+
+pub(super) struct CurrentPrepared<'a> {
     target: &'a mut Vec<CurrentImpulseTrace>,
     additions: Vec<(usize, CurrentImpulsePoint)>,
     added_values: usize,
@@ -346,15 +378,24 @@ fn prepare<'a>(
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
-    Ok(Prepared {
+    Ok(Prepared::Current(CurrentPrepared {
         target,
         additions,
         added_values,
-    })
+    }))
 }
 
 impl Prepared<'_> {
     pub(super) fn commit(self) -> usize {
+        match self {
+            Self::Current(prepared) => prepared.commit(),
+            Self::Descriptor(prepared) => prepared.commit(),
+        }
+    }
+}
+
+impl CurrentPrepared<'_> {
+    fn commit(self) -> usize {
         for (trace, point) in self.additions {
             self.target[trace].points.push(point);
         }
@@ -521,6 +562,7 @@ mod tests {
             diodes: Vec::new(),
             bjt_terminals: Vec::new(),
             controlled_currents: Vec::new(),
+            descriptor: None,
         };
         assert_eq!(plan.source_index(1).unwrap(), 0);
         assert_eq!(plan.source_index(2).unwrap(), 1);

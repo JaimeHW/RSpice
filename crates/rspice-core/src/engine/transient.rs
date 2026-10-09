@@ -5980,7 +5980,9 @@ impl Engine {
         let has_line_events =
             charge_event::circuit::PreparedEventCircuit::supports_scalar_line_events(&circuit)
                 && bjt_history.weil_phase.iter().all(Option::is_none);
-        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) || has_line_events {
+        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) || has_line_events
+            || charge_event::circuit::PreparedEventCircuit::supports_linear_events(&circuit)
+        {
             Some(Self::collect_physical_source_events(
                 &circuit,
                 tstop,

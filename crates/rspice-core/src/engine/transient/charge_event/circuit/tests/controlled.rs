@@ -149,7 +149,7 @@ fn ccvs_event_admission_rejects_unowned_controls_and_invalid_metadata() {
             8 => candidate.ccvs.ctrl_branch[0] = candidate.num_branches() + 1,
             9 => candidate.ccvs.transresistances[0] = Value::NAN,
             10 => candidate.resistor_branches.resistances[0] = 0.0,
-            11 => candidate.ccvs.ctrl_branch[0] = candidate.voltage_sources.branch_indices[0],
+            11 => candidate.ccvs.branch_indices[0] = candidate.voltage_sources.branch_indices[0],
             _ => candidate.ccvs.branch_indices[0] = candidate.resistor_branches.branch_indices[0],
         }
         assert!(

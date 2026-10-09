@@ -9,6 +9,7 @@ use rspice_veriloga_runtime::transport_delay::{DelayBuffer, DelayTimeSide};
 
 mod behavioral;
 mod coupling;
+pub(in crate::engine::transient) mod linear;
 mod prepare;
 mod sample;
 #[cfg(test)]
@@ -23,6 +24,7 @@ pub(in crate::engine::transient) struct EventPhase<'a> {
 
 pub(in crate::engine::transient) struct PreparedEventCircuit<'a> {
     circuit: &'a crate::CircuitData,
+    linear: Option<linear::LinearDescriptor>,
     models: Vec<Bjt>,
     forward_charge_limits: Vec<bool>,
     ports: Vec<(usize, usize)>,
@@ -44,6 +46,12 @@ fn side(side: SourceTimeSide) -> Result<DelayTimeSide> {
 }
 
 impl PreparedEventCircuit<'_> {
+    pub(in crate::engine::transient) fn linear_descriptor(
+        &self,
+    ) -> Option<&linear::LinearDescriptor> {
+        self.linear.as_ref()
+    }
+
     fn retained_structure_values(&self) -> usize {
         self.current_structure
             .as_ref()
@@ -88,6 +96,11 @@ impl PreparedEventCircuit<'_> {
         options: &EventOptions,
         abort: &dyn AbortSignal,
     ) -> Result<ChargeEventTopology> {
+        if self.linear.is_some() {
+            return Err(error(
+                "this event requires the full linear voltage-impulse descriptor",
+            ));
+        }
         with_retained_values(options, self.retained_structure_values(), |bounded| {
             self.topology_inner(time, source_side, bounded, abort)
         })

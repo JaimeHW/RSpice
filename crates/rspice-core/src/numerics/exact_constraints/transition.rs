@@ -292,7 +292,5 @@ impl TransitionSystem {
     }
 }
 
-// The physical event evaluator and its audits remain test-gated until circuit
-// integration owns all required accepted state. PZ consumes the exact system.
-#[cfg(test)]
 mod prepared;
+pub(crate) use prepared::{PreparedTransition, Transition};

@@ -16,6 +16,11 @@ impl Engine {
         solver: crate::solver::SolverOptions,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        if PreparedEventCircuit::supports_linear_events(circuit) {
+            return Err(failure(
+                "PSS boundary requires retained CCVS voltage-impulse observations",
+            ));
+        }
         let options = self.pss_physical_event_options(solver);
         let orders: Vec<_> = incoming_history
             .phase

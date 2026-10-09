@@ -79,6 +79,46 @@ impl<'a> PreparedEventCircuit<'a> {
         })
     }
 
+    /// Constant linear equations can retain every required voltage/current
+    /// action through a descriptor transition. A nonlinear Jacobian is never
+    /// substituted for these authored equations.
+    pub(in crate::engine::transient) fn supports_linear_events(
+        circuit: &crate::CircuitData,
+    ) -> bool {
+        use PeriodicDeviceFamily::*;
+        !circuit.ccvs.is_empty()
+            && (0..circuit.ccvs.len()).any(|index| Self::ccvs_equation(circuit, index).is_none())
+            && PeriodicDeviceFamily::ALL.into_iter().all(|family| {
+                family.instance_count(circuit) == 0
+                    || matches!(
+                        family,
+                        Resistor
+                            | ResistorBranch
+                            | Capacitor
+                            | Inductor
+                            | VoltageSource
+                            | CurrentSource
+                            | Vcvs
+                            | Vccs
+                            | Cccs
+                            | Ccvs
+                            | InductorCoupling
+                            | CoupledInductorPair
+                    )
+            })
+            && circuit.resistors.thermal.iter().all(Option::is_none)
+            && circuit
+                .capacitors
+                .value_expressions
+                .iter()
+                .all(Option::is_none)
+            && circuit
+                .capacitors
+                .ic_branch_indices
+                .iter()
+                .all(Option::is_none)
+    }
+
     /// The ordinary line path can opt into physical events only when every
     /// device has the corresponding equations. Other populations retain
     /// their existing transient owner until their event sampler is available.
@@ -120,6 +160,7 @@ impl<'a> PreparedEventCircuit<'a> {
     ) -> Result<Self> {
         check_abort(abort)?;
         options.validate()?;
+        let use_descriptor = Self::supports_linear_events(circuit);
         let nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
         ResourceLimitError::ensure(
@@ -469,23 +510,34 @@ impl<'a> PreparedEventCircuit<'a> {
         for index in 0..source.len() {
             check_abort(abort)?;
             terminals(source.node_pos[index], source.node_neg[index])?;
-            let equation = Self::ccvs_equation(circuit, index).ok_or_else(|| {
-                error(format!(
-                    "CCVS '{}' requires a finite nonzero resistive control or a voltage-impulse descriptor",
+            if source.ctrl_branch[index] == 0
+                || source.ctrl_branch[index] > size - nodes
+                || !source.transresistances[index].is_finite()
+            {
+                return Err(error(format!(
+                    "CCVS '{}' has invalid control or gain",
                     source.names[index]
-                ))
-            })?;
+                )));
+            }
             claim(
                 &mut equations,
                 source.branch_indices[index],
                 EventBranchEquation::Algebraic(options.voltage_tolerance),
             )?;
-            constant_sources.push(EventVoltageSource {
-                positive: source.node_pos[index],
-                negative: source.node_neg[index],
-                branch: nodes + source.branch_indices[index] - 1,
-                equation,
-            });
+            if !use_descriptor {
+                let equation = Self::ccvs_equation(circuit, index).ok_or_else(|| {
+                    error(format!(
+                        "CCVS '{}' requires a finite nonzero resistive control or a voltage-impulse descriptor",
+                        source.names[index]
+                    ))
+                })?;
+                constant_sources.push(EventVoltageSource {
+                    positive: source.node_pos[index],
+                    negative: source.node_neg[index],
+                    branch: nodes + source.branch_indices[index] - 1,
+                    equation,
+                });
+            }
         }
         let controlled_current = &circuit.cccs;
         aligned(
@@ -619,6 +671,7 @@ impl<'a> PreparedEventCircuit<'a> {
             .ok_or_else(|| error("MNA branch has no physical event owner"))?;
         let mut prepared = Self {
             circuit,
+            linear: None,
             forward_charge_limits: vec![false; models.len()],
             models,
             ports,
@@ -627,6 +680,14 @@ impl<'a> PreparedEventCircuit<'a> {
             current_structure: None,
             flux_structure: None,
         };
+        if use_descriptor {
+            prepared.linear = Some(linear::LinearDescriptor::prepare(
+                &mut prepared,
+                options,
+                abort,
+            )?);
+            return Ok(prepared);
+        }
         if !circuit.cccs.is_empty() {
             // Coefficients and charge incidence are constant for this prepared
             // owner. Compile once; time-dependent voltage values/rates remain

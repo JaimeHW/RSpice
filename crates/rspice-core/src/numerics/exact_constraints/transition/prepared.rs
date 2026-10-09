@@ -2,7 +2,7 @@ use super::*;
 
 mod audit;
 
-pub(super) struct PreparedTransition {
+pub(crate) struct PreparedTransition {
     size: usize,
     impulse_orders: usize,
     forms: Vec<ExactRow<Input>>,
@@ -15,27 +15,80 @@ pub(super) struct PreparedTransition {
     e: Terms,
 }
 
-pub(super) struct Transition {
+pub(crate) struct Transition {
     size: usize,
     impulse_orders: usize,
     values: Vec<Value>,
 }
 
 impl Transition {
-    pub(super) fn finite(&self) -> &[Value] {
+    pub(crate) fn impulse_count(&self) -> usize {
+        self.impulse_orders
+    }
+    pub(crate) fn value_count(&self) -> usize {
+        self.values.len()
+    }
+
+    pub(crate) fn finite(&self) -> &[Value] {
         &self.values[..self.size]
     }
-    pub(super) fn rates(&self) -> &[Value] {
+    pub(crate) fn rates(&self) -> &[Value] {
         &self.values[(self.impulse_orders + 1) * self.size..]
     }
-    pub(super) fn impulse(&self, order: usize) -> Option<&[Value]> {
+    pub(crate) fn impulse(&self, order: usize) -> Option<&[Value]> {
         (order < self.impulse_orders)
             .then(|| &self.values[(order + 1) * self.size..(order + 2) * self.size])
     }
 }
 
 impl PreparedTransition {
-    pub(super) fn new(
+    pub(crate) fn retained_words(&self) -> usize {
+        self.retained_words
+    }
+
+    pub(crate) fn charge_from_coordinates(
+        &self,
+        coordinates: &[Value],
+        limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>> {
+        check_abort(abort)?;
+        if coordinates.len() != self.size || coordinates.iter().any(|v| !v.is_finite()) {
+            return Err(failure("invalid storage coordinates"));
+        }
+        ExactElimination::<Input>::ensure_words(
+            self.retained_words
+                .saturating_add(self.size.saturating_mul(2))
+                .saturating_add(audit::SCRATCH_WORDS),
+            limits.max_result_values,
+        )?;
+        let mut charges = Vec::with_capacity(self.size);
+        for row in &self.e {
+            check_abort(abort)?;
+            let cancelled = std::cell::Cell::new(false);
+            let value = rspice_veriloga_runtime::arithmetic::sum_products(
+                row.iter()
+                    .take_while(|_| {
+                        if cancelled.get() {
+                            return false;
+                        }
+                        if abort.is_aborted() {
+                            cancelled.set(true);
+                            return false;
+                        }
+                        true
+                    })
+                    .map(|&(column, coefficient)| (coordinates[column], coefficient)),
+            );
+            if cancelled.get() {
+                return Err(ConstraintError::Aborted);
+            }
+            charges.push(value.map_err(|_| failure("unrepresentable incoming storage"))?);
+        }
+        Ok(charges)
+    }
+
+    pub(crate) fn new(
         size: usize,
         a: &[(usize, usize, Value)],
         e: &[(usize, usize, Value)],
@@ -151,7 +204,7 @@ impl PreparedTransition {
 
     /// Use accepted nodal charge and branch flux, including authored per-device
     /// startup ICs. No arbitrary finite voltage/current guess replaces storage.
-    pub(super) fn evaluate(
+    pub(crate) fn evaluate(
         &self,
         storage: &[Value],
         mut forcing: impl FnMut(usize, usize) -> Result<Value>,

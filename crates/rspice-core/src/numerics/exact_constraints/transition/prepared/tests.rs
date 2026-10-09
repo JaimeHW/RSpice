@@ -483,7 +483,9 @@ fn unchanged_picofarad_storage_does_not_create_roundoff_actions() {
     e[0].2 = 2e-12;
     e[1].2 = 5e-12;
     let prepared = PreparedTransition::new(4, &a, &e, limits, &NoAbort).unwrap();
-    let storage = [2e-12, 0.0, 0.0, 0.0];
+    let storage = prepared
+        .charge_from_coordinates(&[1.0, 0.0, 0.0, 0.0], limits, &NoAbort)
+        .unwrap();
     assert_eq!(storage, [2e-12, 0.0, 0.0, 0.0]);
     let result = prepared
         .evaluate(
@@ -495,7 +497,13 @@ fn unchanged_picofarad_storage_does_not_create_roundoff_actions() {
         .unwrap();
     assert_eq!(result.finite(), [1.0, 0.0, 0.0, 0.0]);
     assert!(result.rates().iter().all(|&v| v == 0.0));
-    for order in 0..prepared.impulse_orders {
+    for order in 0..result.impulse_count() {
         assert!(result.impulse(order).unwrap().iter().all(|&v| v == 0.0));
     }
+    let abort = crate::abort_signal::CountingAbort::new(2);
+    assert!(matches!(
+        prepared.charge_from_coordinates(&[1.0, 0.0, 0.0, 0.0], limits, &abort),
+        Err(ConstraintError::Aborted)
+    ));
+    assert_eq!(abort.polls_after_abort(), 0);
 }

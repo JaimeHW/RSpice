@@ -8,6 +8,7 @@ use charge_event::circuit::{EventPhase, PreparedEventCircuit};
 pub(super) mod diodes;
 mod impulses;
 mod integration;
+mod linear;
 mod lines;
 mod orders;
 mod periodic;
@@ -44,6 +45,8 @@ pub(in crate::engine::transient) struct PreparedPhysicalEvent {
     left_limits: Vec<Option<Value>>,
     phase_anchors: Vec<Option<(usize, Value, Value)>>,
     device_impulses: PhysicalDeviceImpulses,
+    /// Coefficients of delta and its derivatives for every MNA coordinate.
+    descriptor_impulses: Option<Vec<Vec<Value>>>,
 }
 
 pub(super) struct AcceptedWinding {
@@ -113,6 +116,45 @@ fn prepare_windings(
     Ok(prepared)
 }
 
+fn prepare_capacitors(
+    circuit: &crate::CircuitData,
+    step: &PhysicalEventStep<'_>,
+    state: &charge_event::ChargeEventState,
+    startup: bool,
+    device_impulses: &mut PhysicalDeviceImpulses,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<CapacitorAcceptedState>, SimulationError> {
+    let mut capacitors = Vec::with_capacity(circuit.capacitors.len());
+    for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let p = stamp.pp.row;
+        let n = stamp.nn.row;
+        let c = circuit.capacitors.capacitances[index];
+        let outgoing_voltage = Engine::differential_voltage(&state.solution, p, n);
+        if let PhysicalDeviceImpulses::Jumps { capacitors, .. } = device_impulses {
+            let incoming_voltage = if startup {
+                circuit.capacitors.v_prev[index]
+            } else {
+                Engine::differential_voltage(step.incoming, p, n)
+            };
+            capacitors.push(sum(
+                [(c, outgoing_voltage), (-c, incoming_voltage)].into_iter()
+            )?);
+        }
+        capacitors.push(CapacitorAcceptedState {
+            voltage: outgoing_voltage,
+            current: sum([
+                (rate(&state.coordinate_rates, p)?, c),
+                (rate(&state.coordinate_rates, n)?, -c),
+            ]
+            .into_iter())?,
+        });
+    }
+    Ok(capacitors)
+}
+
 fn phase_anchors(history: &BjtTransientHistory) -> Vec<Option<(usize, Value, Value)>> {
     history
         .phase
@@ -177,6 +219,10 @@ impl PreparedPhysicalEvent {
             .iter()
             .copied()
             .zip(self.state.source_impulses.iter().copied())
+    }
+
+    pub(in crate::engine::transient) fn descriptor_impulses(&self) -> Option<&[Vec<Value>]> {
+        self.descriptor_impulses.as_deref()
     }
 
     pub(in crate::engine::transient) fn device_impulses(&self) -> &PhysicalDeviceImpulses {
@@ -335,6 +381,10 @@ impl Engine {
         }
         bjt::BjtPhaseContext::default().bind(history)?;
         let mut sampler = PreparedEventCircuit::new(circuit, flux_tolerance, options, abort)?;
+        if sampler.linear_descriptor().is_some() {
+            return linear::prepare(circuit, history, &step, &sampler, options, abort);
+        }
+
         let seed = if startup {
             Some(startup::seed(
                 circuit,
@@ -494,34 +544,8 @@ impl Engine {
             circuit.bjts.len(),
             circuit.diodes.len(),
         )?;
-        let mut capacitors = Vec::with_capacity(circuit.capacitors.len());
-        for (index, stamp) in circuit.capacitors.stamps.iter().enumerate() {
-            if index.is_multiple_of(64) && abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let p = stamp.pp.row;
-            let n = stamp.nn.row;
-            let c = circuit.capacitors.capacitances[index];
-            let outgoing_voltage = Self::differential_voltage(&state.solution, p, n);
-            if let PhysicalDeviceImpulses::Jumps { capacitors, .. } = &mut device_impulses {
-                let incoming_voltage = if startup {
-                    circuit.capacitors.v_prev[index]
-                } else {
-                    Self::differential_voltage(step.incoming, p, n)
-                };
-                capacitors.push(sum(
-                    [(c, outgoing_voltage), (-c, incoming_voltage)].into_iter()
-                )?);
-            }
-            capacitors.push(CapacitorAcceptedState {
-                voltage: outgoing_voltage,
-                current: sum([
-                    (rate(&state.coordinate_rates, p)?, c),
-                    (rate(&state.coordinate_rates, n)?, -c),
-                ]
-                .into_iter())?,
-            });
-        }
+        let capacitors =
+            prepare_capacitors(circuit, &step, &state, startup, &mut device_impulses, abort)?;
         let diodes = diodes::prepare(
             circuit,
             &step,
@@ -734,6 +758,7 @@ impl Engine {
             left_limits,
             phase_anchors: phase_anchors(history),
             device_impulses,
+            descriptor_impulses: None,
         })
     }
 }
