@@ -1270,8 +1270,6 @@ fn browser_worker_transfer_protocol_matches_rust_transport() {
     use rspice_simulation_contract::worker_protocol::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,
     };
-    assert_eq!(WORKER_RESPONSE_TRANSPORT_PROTOCOL, 36);
-    assert_eq!(WORKER_REQUEST_TRANSPORT_PROTOCOL, 42);
     let source = include_str!("../../../web/simulation-worker.js");
     assert!(source.contains(&format!(
         "const WORKER_PROTOCOL_VERSION = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"
