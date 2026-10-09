@@ -23,6 +23,7 @@ cargo build --release -p rspice-cli
 | `convert` | Convert between result formats |
 | `compile-va` | Compile a Verilog-A model and report its interface |
 | `health` | Probe backend liveness or numerical readiness |
+| `capabilities` | Describe execution routes, control coverage, result mappings, and unsupported workflows |
 | `completions` | Emit a shell completion script for bash, zsh, fish, powershell, or elvish |
 
 `run`, `check`, and `info` share `-I`, `-D`, dialect, parameter-redefinition,
@@ -69,6 +70,20 @@ or consume statistical samples to produce these reports.
 
 ## Supported-feature boundaries
 
+`rspice capabilities` lists the current CLI routes. `rspice capabilities --json`
+emits a version-1 `rspice.capabilities` document, including under `--quiet`,
+without parsing a netlist or running the solver. It names every canonical
+analysis, including analyses unavailable through this CLI, and distinguishes
+execution from control-script support. Fourier/FFT control support is partial:
+authored post-processing runs with `tran`/`run`, without a direct command.
+
+`result_document.families` reports the existing shared typed JSON mappings for
+scalar, STEP, and temperature runs. Format names describe command-level input
+and output options; they do not imply that every format can preserve every
+result family. The document also includes build identity and explicit workflow
+gaps. These declarations describe adapters, not circuit admission or numerical
+qualification. Existing global configuration and diagnostic policies apply.
+
 The CLI is an adapter over the core engine. An engine entry point does not
 imply that the CLI has a complete export or orchestration adapter for it.
 These combinations remain explicitly unsupported:
@@ -77,6 +92,12 @@ These combinations remain explicitly unsupported:
 | :--- | :--- |
 | Strict Verilog-A LRM checking | `compile-va --strict` returns an unsupported-capability error until strict checking is implemented |
 | Partial-spectrum conversion | `convert --variables`/`--start`/`--stop` cannot represent a complete typed transform and are rejected |
+| SOA and optimization studies | Shared application services exist, but no CLI execution route is exposed |
+| PSP, HBSP, and dedicated HB-noise studies | No complete CLI execution/result route is exposed |
+| Advanced control-script execution | The control host accepts fewer analyses than declarative decks; inspect `capabilities` for each route |
+| Saved-result post-processing | Conversion and comparison exist; standalone remeasurement, expressions, FFT computation, and plotting do not |
+| Persistent campaigns | Parallel variants/corners exist; durable multi-netlist manifests and selective retry do not |
+| Monte Carlo continuation/aggregation | Indexed `START` batches exist; checkpoint continuation and aggregation are not exposed by the CLI |
 
 These are feature gaps, not a claim of parity with other commercial simulators.
 Passing crate tests does not qualify every device model or platform. Desktop,

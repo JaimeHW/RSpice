@@ -132,7 +132,7 @@ fn emit_failure(args: &HealthArgs, duration_secs: f64, error: &CliError) -> Resu
     Ok(())
 }
 
-fn tool_identity() -> serde_json::Value {
+pub(super) fn tool_identity() -> serde_json::Value {
     serde_json::json!({
         "name": "rspice",
         "version": env!("CARGO_PKG_VERSION"),

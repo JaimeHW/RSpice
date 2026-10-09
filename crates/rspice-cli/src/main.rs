@@ -3,6 +3,7 @@
 //! Usage:
 //!   rspice run <netlist.sp>           Run the analyses a deck requests
 //!   rspice health                     Probe backend liveness or readiness
+//!   rspice capabilities              Describe CLI routes and result mappings
 //!   rspice info <netlist.sp>          Summarize a netlist without simulating
 //!   rspice check <netlist.sp>         Validate syntax, topology, and outputs
 //!   rspice compile-va <model.va>      Compile a Verilog-A model
@@ -237,6 +238,7 @@ fn main() -> ExitCode {
     let result: Result<(), cli::CliError> = match cli.command {
         Commands::Run(args) => commands::run(args, &config, cli.verbose, cli.quiet),
         Commands::Health(args) => commands::health(args, &config, cli.verbose, cli.quiet),
+        Commands::Capabilities(args) => commands::capabilities::execute(args, cli.quiet),
         Commands::Info(args) => commands::info(args, &config, cli.verbose, cli.quiet),
         Commands::Models(args) => commands::models(args, cli.verbose, cli.quiet),
         Commands::CompileVa(args) => commands::compile_va(args, &config, cli.verbose, cli.quiet),

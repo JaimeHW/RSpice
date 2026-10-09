@@ -3,6 +3,7 @@
 //! This module contains the implementation logic for each CLI subcommand:
 //! - `run` - Execute simulations
 //! - `health` - Probe backend liveness and numerical readiness
+//! - `capabilities` - Describe CLI routes and result mappings
 //! - `info` - Display netlist information
 //! - `compile_va` - Compile Verilog-A models
 //! - `check` - Validate netlists
@@ -15,6 +16,7 @@
 //! shares: `-` means stdin, the same resource policy bounds both stdin and
 //! files, and core parse errors keep their typed context on the way out.
 
+pub mod capabilities;
 pub mod check;
 pub mod compare;
 pub mod compile_va;

@@ -203,6 +203,9 @@ pub enum Commands {
     /// Probe backend liveness or numerical readiness
     Health(HealthArgs),
 
+    /// Describe available CLI execution routes and result representations
+    Capabilities(CapabilitiesArgs),
+
     /// Display netlist information without simulating
     Info(InfoArgs),
 
@@ -270,6 +273,14 @@ pub struct HealthArgs {
     pub mode: HealthMode,
 
     /// Emit a versioned JSON health document
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Build-specific frontend capabilities; no netlist or solver work is performed.
+#[derive(Args, Debug)]
+pub struct CapabilitiesArgs {
+    /// Emit a versioned JSON capability document
     #[arg(long)]
     pub json: bool,
 }
