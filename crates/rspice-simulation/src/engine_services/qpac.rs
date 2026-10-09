@@ -1,5 +1,5 @@
 //! QPAC consumes the exact QPSS producer configuration and retained orbit.
-use super::{ServiceRunError, ServiceRunResult, build_resolved_periodic_engine};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{QpacAnalysisResult, QpssOperatingPoint};
@@ -11,10 +11,29 @@ pub(crate) fn run_qpac_analysis_from_qpss_on_materialized_with_abort(
     point: &QpssOperatingPoint,
     abort: &dyn AbortSignal,
 ) -> ServiceRunResult<QpacAnalysisResult> {
+    run_qpac_analysis_from_qpss_on_materialized_with_context(
+        netlist,
+        card,
+        point,
+        super::ServiceContext {
+            source_path: None,
+            limits: Default::default(),
+            abort,
+        },
+    )
+}
+
+pub(crate) fn run_qpac_analysis_from_qpss_on_materialized_with_context(
+    netlist: &rspice_core::Netlist,
+    card: &QpacCard,
+    point: &QpssOperatingPoint,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<QpacAnalysisResult> {
+    let abort = context.abort;
     ensure_not_aborted(abort)?;
     // The producer's engine settings authenticate the orbit. QPAC's authored
     // equation tolerances configure its translated solve, not a new producer.
-    let engine = build_resolved_periodic_engine(
+    let engine = context.periodic_engine(
         netlist,
         point.config().solver.relative_tolerance,
         "QPAC resolved engine configuration is invalid",

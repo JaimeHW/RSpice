@@ -27,7 +27,9 @@ mod qpnoise;
 mod qpss;
 mod qpxf;
 pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_abort;
+pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_context;
 pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_abort;
+pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_context;
 #[cfg(test)]
 pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
 pub(crate) use qpss::{
@@ -36,6 +38,7 @@ pub(crate) use qpss::{
     run_qpss_analysis_with_dc_seed_on_materialized_with_context,
 };
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_abort;
+pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_context;
 mod soa;
 mod sparameter;
 pub use sparameter::run_sparameter_analysis_with_context;

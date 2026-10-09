@@ -637,6 +637,39 @@ fn periodic_studies_accept_and_enforce_custom_execution_limits() {
                 "analysis": {"PssSpectrum": {"num_harmonics": 3}}
             }));
         }
+        if name == "qpss" {
+            for (id, analysis) in [
+                (
+                    "qpac",
+                    json!({"Qpac": {
+                        "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3, "sweep": "Linear",
+                        "input_source": "V1", "output_node": "out", "output_ref": "0",
+                        "input_lattice": [0, 0], "output_lattice": [0, 0]
+                    }}),
+                ),
+                (
+                    "qpxf",
+                    json!({"Qpxf": {
+                        "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3, "sweep": "Linear",
+                        "input_source": "V1", "output_node": "out", "output_ref": "0",
+                        "input_lattice": [0, 0], "output_lattice": [0, 0], "group_delay": false
+                    }}),
+                ),
+                (
+                    "qpnoise",
+                    json!({"Qpnoise": {
+                        "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3, "sweep": "Linear",
+                        "input_source": "V1", "output_node": "out", "output_ref": "0",
+                        "lattice_min": [-1, -1], "lattice_max": [1, 1],
+                        "integrated_noise": true, "contributor_ranking": true
+                    }}),
+                ),
+            ] {
+                document["tasks"].as_array_mut().unwrap().push(json!({
+                    "id": id, "depends_on": ["qpss"], "analysis": analysis
+                }));
+            }
+        }
         let path = save(&root, &document);
         let run = || {
             invoke(

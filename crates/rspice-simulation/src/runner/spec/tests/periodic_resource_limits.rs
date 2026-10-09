@@ -8,9 +8,8 @@ const PERIODIC: &str = "Periodic policy\nP1 p1 0 SIN(0 .1 1Meg) PORT=1 Z0=50\nP2
 const QUASI_PERIODIC: &str =
     "QP policy\nV1 in 0 DC 0 AC .1\nI1 0 out DC 0 AC .0001\nR1 in out 1k\nR2 out 0 1k\n.end\n";
 
-#[test]
-fn periodic_producers_keep_limits_after_resolving_a_successful_op() {
-    let qpss = QpssDraft {
+fn qpss_spec() -> AnalysisSpec {
+    QpssDraft {
         tones: "1k, 1414.213562373095".into(),
         harmonics: "1, 1".into(),
         collocation_points: "8, 8".into(),
@@ -19,11 +18,15 @@ fn periodic_producers_keep_limits_after_resolving_a_successful_op() {
         ..Default::default()
     }
     .to_spec()
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn periodic_producers_keep_limits_after_resolving_a_successful_op() {
     for (spec, deck) in [
         (pss_producer_spec(), PERIODIC),
         (hb_producer_spec(), PERIODIC),
-        (qpss, QUASI_PERIODIC),
+        (qpss_spec(), QUASI_PERIODIC),
     ] {
         let dependencies = op_dependencies(deck, deck, deck, Default::default());
         let mut limits = ResourceLimits::default();
@@ -43,6 +46,109 @@ fn periodic_producers_keep_limits_after_resolving_a_successful_op() {
         for resource in ["matrix_unknowns", "analysis_points", "result_values"] {
             let mut limited = limits;
             match resource {
+                "matrix_unknowns" => limited.max_matrix_unknowns = 1,
+                "analysis_points" => limited.max_analysis_points = 2,
+                _ => limited.max_result_values = 1,
+            }
+            let error = run(limited).unwrap_err();
+            assert!(
+                matches!(&error, SimulationError::ResourceLimit { resource: actual, .. } if actual == resource),
+                "{spec:?}: {error:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn qp_consumers_preserve_limits_after_a_worker_round_trip() {
+    use serde_json::json;
+    let deck = QUASI_PERIODIC;
+    let producer = qpss_spec();
+    let dependencies = op_dependencies(deck, deck, deck, Default::default());
+    let result = run_spec_request(
+        &EngineBridge::new(),
+        producer.clone(),
+        Default::default(),
+        deck,
+        None,
+        &dependencies,
+        &NoAbort,
+    )
+    .unwrap();
+    let snapshot = digest(0x71);
+    let binding = PreparedDependencyBinding::qpss_state(
+        AnalysisInstanceId::new(),
+        ObjectRevision::INITIAL,
+        digest(0x72),
+    );
+    let artifact = ExecutionArtifactEnvelope::from_qpss_result_with_environment(
+        snapshot,
+        binding.producer_instance_id(),
+        binding.producer_source_revision(),
+        binding.producer_config_digest(),
+        &producer,
+        &result,
+        Some(
+            dependencies
+                .dc_operating_point_seed()
+                .unwrap()
+                .environment(),
+        ),
+    )
+    .unwrap()
+    .unwrap();
+    let mut dependencies = ResolvedExecutionDependencies::resolve(
+        snapshot,
+        vec![binding.clone()],
+        &HashMap::from([(binding.producer_instance_id(), artifact)]),
+    )
+    .unwrap();
+    dependencies.bind_source(deck, rspice_design::netlist_document::content_digest(deck));
+    let (metadata, buffers) =
+        crate::runner::worker_contract::copy_dependency_transfer(&dependencies).unwrap();
+    let dependencies = ResolvedExecutionDependencies::decode_transfer(&metadata, buffers).unwrap();
+    for request in [
+        json!({"Qpac": {
+            "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3, "sweep": "Linear",
+            "input_source": "V1", "output_node": "out", "output_ref": "0",
+            "input_lattice": [0, 0], "output_lattice": [0, 0]
+        }}),
+        json!({"Qpxf": {
+            "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3, "sweep": "Linear",
+            "input_source": "V1", "output_node": "out", "output_ref": "0",
+            "input_lattice": [0, 0], "output_lattice": [0, 0], "group_delay": false
+        }}),
+        json!({"Qpnoise": {
+            "start_freq": 10.0, "stop_freq": 100.0, "points_per_unit": 3, "sweep": "Linear",
+            "input_source": "V1", "output_node": "out", "output_ref": "0",
+            "lattice_min": [-1, -1], "lattice_max": [1, 1],
+            "integrated_noise": true, "contributor_ranking": true
+        }}),
+    ] {
+        let spec: AnalysisSpec = serde_json::from_value(request).unwrap();
+        let mut limits = ResourceLimits::default();
+        limits.max_matrix_unknowns = 1000;
+        let run = |limits| {
+            run_spec_request(
+                &EngineBridge::new().with_resource_limits(limits),
+                spec.clone(),
+                Default::default(),
+                deck,
+                None,
+                &dependencies,
+                &NoAbort,
+            )
+        };
+        run(limits).expect("consumer accepts custom limits and the transferred orbit");
+        for resource in [
+            "netlist_bytes",
+            "matrix_unknowns",
+            "analysis_points",
+            "result_values",
+        ] {
+            let mut limited = limits;
+            match resource {
+                "netlist_bytes" => limited.max_netlist_bytes = 1,
                 "matrix_unknowns" => limited.max_matrix_unknowns = 1,
                 "analysis_points" => limited.max_analysis_points = 2,
                 _ => limited.max_result_values = 1,

@@ -31,6 +31,9 @@ pub fn execution_resource_policy_blocker(
             | AnalysisSpec::PssSpectrum { .. }
             | AnalysisSpec::HarmonicBalance { .. }
             | AnalysisSpec::Qpss { .. }
+            | AnalysisSpec::Qpac { .. }
+            | AnalysisSpec::Qpxf { .. }
+            | AnalysisSpec::Qpnoise { .. }
     ) {
         return None;
     }

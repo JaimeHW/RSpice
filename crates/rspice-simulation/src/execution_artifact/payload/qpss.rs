@@ -24,13 +24,39 @@ impl QpssStateArtifact {
         dependencies: &ResolvedExecutionDependencies,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
+        self.materialize_consumer_with_resource_limits(
+            source,
+            source_path,
+            dependencies,
+            rspice_core::ResourceLimits::default(),
+            abort,
+        )
+    }
+
+    pub fn materialize_consumer_with_resource_limits(
+        &self,
+        source: &str,
+        source_path: Option<&std::path::Path>,
+        dependencies: &ResolvedExecutionDependencies,
+        limits: rspice_core::ResourceLimits,
+        abort: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> crate::error::ServiceRunResult<rspice_core::Netlist> {
         match &self.environment {
-            Some(environment) => environment.materialize(source, source_path, dependencies, abort),
-            None => crate::netlist_preparation::parse_runner_netlist_with_abort(
+            Some(environment) => environment.materialize_with_resource_limits(
                 source,
                 source_path,
+                dependencies,
+                limits,
                 abort,
             ),
+            None => {
+                crate::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort(
+                    source,
+                    source_path,
+                    limits,
+                    abort,
+                )
+            }
         }
     }
 

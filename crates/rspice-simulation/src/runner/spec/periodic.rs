@@ -35,13 +35,18 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                let circuit =
-                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_abort(
+                let circuit = state.materialize_consumer_with_resource_limits(
+                    netlist,
+                    source_path,
+                    dependencies,
+                    context.limits,
+                    abort,
+                )?;
+                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_context(
                     &circuit,
                     &card,
                     state.operating_point(),
-                    abort,
+                    context,
                 )
             })?;
             super::ensure_not_aborted(abort)?;
@@ -54,13 +59,18 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                let circuit =
-                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_abort(
+                let circuit = state.materialize_consumer_with_resource_limits(
+                    netlist,
+                    source_path,
+                    dependencies,
+                    context.limits,
+                    abort,
+                )?;
+                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_context(
                     &circuit,
                     &card,
                     state.operating_point(),
-                    abort,
+                    context,
                 )
             })?;
             super::ensure_not_aborted(abort)?;
@@ -73,13 +83,18 @@ pub(super) fn run_periodic_spec(
                 .qpss_state()
                 .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
             let response = super::run_abort_aware_service(abort, || {
-                let circuit =
-                    state.materialize_consumer(netlist, source_path, dependencies, abort)?;
-                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_abort(
+                let circuit = state.materialize_consumer_with_resource_limits(
+                    netlist,
+                    source_path,
+                    dependencies,
+                    context.limits,
+                    abort,
+                )?;
+                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_context(
                     &circuit,
                     &card,
                     state.operating_point(),
-                    abort,
+                    context,
                 )
             })?;
             super::ensure_not_aborted(abort)?;
