@@ -1,7 +1,7 @@
 //! Indexed waveform subscriptions, independent of functional event fanout.
 use super::*;
-use crate::xspice::{DigitalValue, EventValue};
 use crate::xspice::event_trace::{EventTraceJournal, EventTracePoint};
+use crate::xspice::{DigitalValue, EventValue};
 
 #[derive(Clone, Copy)]
 pub(crate) enum TraceSource {
@@ -10,7 +10,7 @@ pub(crate) enum TraceSource {
     Real(DigitalSignalId),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize)]
 struct TraceBindings {
     bits: BTreeMap<DigitalSignalId, Vec<(usize, u32)>>,
     reals: BTreeMap<DigitalSignalId, Vec<usize>>,
@@ -21,6 +21,15 @@ struct TraceBindings {
 pub(super) struct StoreTraces {
     bindings: Arc<TraceBindings>,
     journal: EventTraceJournal,
+}
+
+impl StoreTraces {
+    pub(super) fn checkpoint_identity(&self) -> Result<[u8; 32], String> {
+        if !self.journal.is_empty() {
+            return Err("waveform publications are not drained".into());
+        }
+        super::checkpoint::fingerprint(self.bindings.as_ref())
+    }
 }
 
 impl DigitalSignalStore {

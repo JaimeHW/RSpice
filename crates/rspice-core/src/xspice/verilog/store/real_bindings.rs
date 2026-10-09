@@ -93,7 +93,7 @@ impl RealConnections {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(super) struct RealTopology {
     pub(super) sources: Vec<(DigitalSignalId, EventTarget)>,
     pub(super) observed: BTreeSet<DigitalSignalId>,
@@ -105,12 +105,41 @@ pub(super) struct ExternalReals {
     values: Vec<f64>,
 }
 impl ExternalReals {
+    pub(super) fn checkpoint(&self) -> Result<RealCheckpoint, String> {
+        Ok(RealCheckpoint {
+            topology: super::checkpoint::fingerprint(self.topology.as_ref())?,
+            values: self.values.iter().map(|value| value.to_bits()).collect(),
+        })
+    }
+
+    pub(super) fn restore_checkpoint(&self, image: &RealCheckpoint) -> Result<Self, String> {
+        if image.topology != super::checkpoint::fingerprint(self.topology.as_ref())?
+            || image.values.len() != self.values.len()
+        {
+            return Err("real checkpoint topology or dimensions differ".into());
+        }
+        Ok(Self {
+            topology: Arc::clone(&self.topology),
+            values: image
+                .values
+                .iter()
+                .map(|bits| f64::from_bits(*bits))
+                .collect(),
+        })
+    }
+
     pub(super) fn fresh(&self) -> Self {
         Self {
             topology: Arc::clone(&self.topology),
             values: vec![0.0; self.values.len()],
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) struct RealCheckpoint {
+    topology: [u8; 32],
+    values: Vec<u64>,
 }
 
 impl DigitalSignalStore {

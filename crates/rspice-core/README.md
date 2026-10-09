@@ -805,6 +805,15 @@ must bound input bytes before deserialization. Full mixed-circuit persistence
 still requires process/driver, bridge, observation and accepted analog state;
 the engine's mixed accepted-state checkpoint blocker remains in force.
 
+The internal HDL signal-store checkpoint retains typed signal values, each
+driver's contribution (including never-driven state), analog samples, activation
+clock, expression subscriptions, external bit strengths and real contributions.
+Capture requires drained writes, publications and waveform notifications. Restore
+authenticates linked topology, analog dependencies and trace bindings, rebuilds
+subscription indexes, and checks saved net values against driver resolution before
+returning a replacement store. Host process/queue ownership and complete circuit
+installation remain responsibilities of the enclosing mixed checkpoint.
+
 PWL interpolation and repeat timing preserve finite nonzero knot intervals
 and positive `TSCALE` values without an absolute machine-epsilon cutoff.
 An exact repeat boundary retains the authored endpoint; the next representable

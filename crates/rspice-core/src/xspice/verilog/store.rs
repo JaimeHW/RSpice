@@ -80,6 +80,7 @@
 //! `@*` process from re-triggering itself forever.
 
 mod traces;
+pub(crate) mod checkpoint;
 pub(crate) use traces::TraceSource;
 mod bindings;
 use bindings::ConnectedBits;

@@ -26,14 +26,14 @@ pub(crate) struct DigitalBitChange {
 
 pub(crate) use rspice_veriloga::canonical_ir::digital::DigitalNetBit as DigitalBitConnection;
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 struct BitNet {
     members: Vec<DigitalBitConnection>,
     contributions: Vec<(usize, u32)>,
     external_nets: Vec<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 struct BitTopology {
     nets: Vec<BitNet>,
     /// Stable caller net identities mapped onto connected components.
@@ -57,6 +57,35 @@ pub(super) struct ConnectedBits {
 }
 
 impl ConnectedBits {
+    pub(super) fn checkpoint(&self) -> Result<BitCheckpoint, String> {
+        if !self.touched.is_empty() || self.pending.iter().any(Option::is_some) {
+            return Err("bit publication is not drained".into());
+        }
+        Ok(BitCheckpoint {
+            topology: super::checkpoint::fingerprint(self.topology.as_ref())?,
+            resolved: self.resolved.clone(),
+            external: self.external_values.clone(),
+            other_drivers: self.other_driver_values.clone(),
+        })
+    }
+
+    pub(super) fn restore_checkpoint(&self, image: &BitCheckpoint) -> Result<Self, String> {
+        if image.topology != super::checkpoint::fingerprint(self.topology.as_ref())?
+            || image.resolved.len() != self.resolved.len()
+            || image.external.len() != self.external_values.len()
+            || image.other_drivers.len() != self.other_driver_values.len()
+        {
+            return Err("bit checkpoint topology or dimensions differ".into());
+        }
+        let mut restored = Self::fresh(Arc::clone(&self.topology));
+        restored.resolved.clone_from(&image.resolved);
+        restored.external_values.clone_from(&image.external);
+        restored
+            .other_driver_values
+            .clone_from(&image.other_drivers);
+        Ok(restored)
+    }
+
     fn fresh(topology: Arc<BitTopology>) -> Self {
         Self {
             resolved: vec![DigitalValue::high_z(); topology.nets.len()],
@@ -80,6 +109,14 @@ impl ConnectedBits {
         }
         slot.as_mut().unwrap()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) struct BitCheckpoint {
+    topology: [u8; 32],
+    resolved: Vec<DigitalValue>,
+    external: Vec<DigitalValue>,
+    other_drivers: Vec<DigitalValue>,
 }
 
 impl DigitalSignalStore {
@@ -392,14 +429,12 @@ impl DigitalSignalStore {
         self.connected = Some(connected);
     }
 
-    fn resolve_connected_net(
-        &mut self,
-        connected: &mut ConnectedBits,
+    fn connected_hdl_value(
+        &self,
+        connected: &ConnectedBits,
         net_index: usize,
-        publication_start: usize,
-    ) {
-        let topology = Arc::clone(&connected.topology);
-        let net = &topology.nets[net_index];
+    ) -> Option<DigitalValue> {
+        let net = &connected.topology.nets[net_index];
         let hdl = net.contributions.iter().fold(
             FourStateBit::HighImpedance,
             |resolved, &(slot, offset)| {
@@ -413,29 +448,79 @@ impl DigitalSignalStore {
                 resolve_bit(resolved, value.bit(offset))
             },
         );
-        let hdl_value = match hdl {
+        match hdl {
             FourStateBit::Zero => Some(DigitalValue::zero()),
             FourStateBit::One => Some(DigitalValue::one()),
             FourStateBit::Unknown => Some(DigitalValue::unknown()),
             FourStateBit::HighImpedance => None,
+        }
+    }
+
+    fn connected_external_value(
+        &self,
+        connected: &ConnectedBits,
+        net_index: usize,
+        hdl_value: Option<DigitalValue>,
+        excluded: Option<usize>,
+    ) -> DigitalValue {
+        let mut resolved = hdl_value;
+        for &slot in &connected.topology.external_by_net[net_index] {
+            if excluded == Some(slot) {
+                continue;
+            }
+            let value = connected.external_values[slot];
+            if value.state != DigitalState::HighZ {
+                resolved = Some(resolved.map_or(value, |existing| existing.resolve(&value)));
+            }
+        }
+        resolved.unwrap_or_else(DigitalValue::high_z)
+    }
+
+    pub(super) fn validate_connected_checkpoint(
+        &self,
+    ) -> Result<BTreeSet<DigitalBitConnection>, String> {
+        let mut members = BTreeSet::new();
+        let Some(connected) = &self.connected else {
+            return Ok(members);
         };
-        let resolve_external = |excluded: Option<usize>| {
-            let mut resolved = hdl_value;
-            for &slot in &topology.external_by_net[net_index] {
-                if excluded == Some(slot) {
-                    continue;
-                }
-                let value = connected.external_values[slot];
-                if value.state != DigitalState::HighZ {
-                    resolved = Some(resolved.map_or(value, |existing| existing.resolve(&value)));
+        for (index, net) in connected.topology.nets.iter().enumerate() {
+            members.extend(net.members.iter().copied());
+            let hdl = self.connected_hdl_value(connected, index);
+            let resolved = self.connected_external_value(connected, index, hdl, None);
+            if connected.resolved[index] != resolved
+                || net.members.iter().any(|member| {
+                    self.values[usize::from(member.signal)].bit(member.bit) != hdl_bit(resolved)
+                })
+            {
+                return Err("connected bit value differs from driver resolution".into());
+            }
+            for &slot in &connected.topology.external_by_net[index] {
+                let expected = if connected.topology.other_driver_observers[slot] {
+                    self.connected_external_value(connected, index, hdl, Some(slot))
+                } else {
+                    DigitalValue::high_z()
+                };
+                if connected.other_driver_values[slot] != expected {
+                    return Err("other-driver observation differs from driver resolution".into());
                 }
             }
-            resolved.unwrap_or_else(DigitalValue::high_z)
-        };
-        let resolved = resolve_external(None);
+        }
+        Ok(members)
+    }
+
+    fn resolve_connected_net(
+        &mut self,
+        connected: &mut ConnectedBits,
+        net_index: usize,
+        publication_start: usize,
+    ) {
+        let topology = Arc::clone(&connected.topology);
+        let net = &topology.nets[net_index];
+        let hdl = self.connected_hdl_value(connected, net_index);
+        let resolved = self.connected_external_value(connected, net_index, hdl, None);
         for &slot in &topology.external_by_net[net_index] {
             if topology.other_driver_observers[slot] {
-                let value = resolve_external(Some(slot));
+                let value = self.connected_external_value(connected, net_index, hdl, Some(slot));
                 let previous = std::mem::replace(&mut connected.other_driver_values[slot], value);
                 if previous != value {
                     self.external_changes.push(ExternalNetChange::DriverInput {
