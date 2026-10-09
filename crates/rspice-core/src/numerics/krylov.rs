@@ -441,9 +441,10 @@ pub(crate) fn try_gmres_with_abort<E>(
         if is_aborted() {
             return Err(GmresError::Aborted);
         }
-        // Arnoldi basis (m+1 vectors) and Hessenberg columns.
+        // Arnoldi and preconditioned bases stay bounded by the restart size.
         let mut basis: Vec<Vec<Complex64>> = Vec::with_capacity(m + 1);
         basis.push(r.iter().map(|c| c / beta).collect());
+        let mut preconditioned_basis = Vec::with_capacity(m);
 
         let mut hessenberg: Vec<Vec<Complex64>> = Vec::with_capacity(m);
         let mut cs: Vec<f64> = Vec::with_capacity(m);
@@ -472,6 +473,8 @@ pub(crate) fn try_gmres_with_abort<E>(
             if is_aborted() {
                 return Err(GmresError::Aborted);
             }
+
+            preconditioned_basis.push(z);
 
             // Modified Gram-Schmidt.
             let mut h_col = vec![ZERO; j + 2];
@@ -543,21 +546,16 @@ pub(crate) fn try_gmres_with_abort<E>(
             y[i] = sum.quotient(hessenberg[i][i]);
         }
 
-        // x += M⁻¹ (V y)
-        let mut update = vec![ZERO; size];
+        // Form the update from the directions whose operator images entered
+        // Arnoldi. Reapplying an inexact preconditioner to V*y need not equal
+        // the same combination of those directions.
         for (j, y_j) in y.iter().enumerate() {
-            for (u, v) in update.iter_mut().zip(&basis[j]) {
-                *u += y_j * v;
+            if is_aborted() {
+                return Err(GmresError::Aborted);
             }
-        }
-        if is_aborted() {
-            return Err(GmresError::Aborted);
-        }
-        check_vector::<E>(&update, size)?;
-        let preconditioned = precondition(&update).map_err(GmresError::Operator)?;
-        check_vector::<E>(&preconditioned, size)?;
-        for (x_i, p_i) in x.iter_mut().zip(&preconditioned) {
-            *x_i += p_i;
+            for (x_i, z_i) in x.iter_mut().zip(&preconditioned_basis[j]) {
+                *x_i += y_j * z_i;
+            }
         }
 
         // True residual for the restart decision.
@@ -1024,6 +1022,32 @@ mod operator_contract_tests {
             &|| false,
         );
         assert!(matches!(result, Err(GmresError::InvalidData(_))));
+    }
+
+    #[test]
+    fn gmres_retains_directions_from_an_inexact_preconditioner() {
+        let rhs = vec![Complex64::new(1.0, -0.5); 3];
+        let mut gain = 1.0;
+        let outcome = try_gmres_with_abort(
+            &mut |v| Ok::<_, ()>(v.to_vec()),
+            &mut |v| {
+                // An adaptive approximate solve can change between calls.
+                // A scaled identity still spans the exact answer in one step.
+                gain *= 0.5;
+                Ok(v.iter().map(|value| gain * value).collect())
+            },
+            &rhs,
+            8,
+            1,
+            1e-12,
+            &|| false,
+        )
+        .unwrap();
+        assert!(outcome.converged);
+        assert_eq!(outcome.iterations, 1);
+        for (actual, expected) in outcome.solution.iter().zip(&rhs) {
+            assert!((actual - expected).norm() < 1e-12);
+        }
     }
 
     #[test]

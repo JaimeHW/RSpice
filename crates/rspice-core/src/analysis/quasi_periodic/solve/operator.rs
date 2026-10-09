@@ -29,6 +29,57 @@ impl Workspace<'_> {
             ));
         }
         let spectra = coordinates::decode(direction, entries);
+        // Constant derivatives are diagonal in the tone lattice. Sending them
+        // through an inverse/forward transform introduces cross-tone roundoff
+        // in otherwise exact constraints, which can stall tight Krylov solves.
+        // Match each slot across every sample; changing sparse term order or
+        // count simply keeps the affected term on the general sampled path.
+        let constant = |charge: bool| -> Result<Vec<bool>, Error> {
+            let first = if charge {
+                &evaluation.jacobian[0].capacitance
+            } else {
+                &evaluation.jacobian[0].conductance
+            };
+            let mut fixed = vec![true; first.len()];
+            for (time, sample) in evaluation.jacobian.iter().enumerate() {
+                if time.is_multiple_of(256) {
+                    check_abort(abort)?;
+                }
+                let terms = if charge {
+                    &sample.capacitance
+                } else {
+                    &sample.conductance
+                };
+                for (index, (flag, entry)) in fixed.iter_mut().zip(first).enumerate() {
+                    *flag &= terms.get(index) == Some(entry);
+                }
+            }
+            Ok(fixed)
+        };
+        let constant_g = constant(false)?;
+        let constant_c = constant(true)?;
+        let mut output = vec![vec![Complex64::ZERO; entries]; self.unknowns];
+        for (terms, fixed, charge) in [
+            (&evaluation.jacobian[0].conductance, &constant_g, false),
+            (&evaluation.jacobian[0].capacitance, &constant_c, true),
+        ] {
+            for (&(row, col, derivative), &fixed) in terms.iter().zip(fixed) {
+                check_abort(abort)?;
+                if fixed {
+                    for k in 0..entries {
+                        let value = if charge {
+                            Complex64::new(
+                                0.0,
+                                std::f64::consts::TAU * self.grid.frequencies_hz()[k] * derivative,
+                            )
+                        } else {
+                            Complex64::new(derivative, 0.0)
+                        };
+                        output[row][k] += value * spectra[col][k];
+                    }
+                }
+            }
+        }
         // A direct-solve column activates only one MNA coordinate; preserve
         // that transform cost while also accepting dense Krylov directions.
         let mut perturbations = Vec::with_capacity(self.unknowns);
@@ -46,18 +97,20 @@ impl Workspace<'_> {
             if time.is_multiple_of(256) {
                 check_abort(abort)?;
             }
-            for (terms, values) in [
-                (&sample.conductance, &mut conductance),
-                (&sample.capacitance, &mut capacitance),
+            for (terms, values, fixed) in [
+                (&sample.conductance, &mut conductance, &constant_g),
+                (&sample.capacitance, &mut capacitance, &constant_c),
             ] {
-                for &(row, col, derivative) in terms {
+                for (index, &(row, col, derivative)) in terms.iter().enumerate() {
+                    if fixed.get(index) == Some(&true) {
+                        continue;
+                    }
                     if let Some(perturbation) = &perturbations[col] {
                         values[row][time].re += derivative * perturbation[time];
                     }
                 }
             }
         }
-        let mut output = vec![vec![Complex64::ZERO; entries]; self.unknowns];
         for row in 0..self.unknowns {
             let g = self
                 .transform
@@ -66,7 +119,7 @@ impl Workspace<'_> {
                 .transform
                 .to_spectrum_with_abort(&capacitance[row], abort)?;
             for k in 0..entries {
-                output[row][k] = g[k]
+                output[row][k] += g[k]
                     + Complex64::new(0.0, std::f64::consts::TAU * self.grid.frequencies_hz()[k])
                         * c[k];
             }

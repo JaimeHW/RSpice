@@ -314,3 +314,62 @@ fn qpss_krylov_refuses_singular_zero_residual_and_observes_cancellation() {
     ));
     assert_eq!(abort.polls_after_abort(), 0);
 }
+
+#[test]
+fn qpss_constant_constraints_preserve_small_spectral_residuals() {
+    let config = QuasiPeriodicSolveConfig::default();
+    let mut work = workspace(&config);
+    work.unknowns = 2;
+    work.voltage_rows = vec![false, true];
+    let entries = work.grid.len();
+    let mut spectra = vec![vec![Complex64::ZERO; entries]; 2];
+    for (k, frequency) in work.grid.frequencies_hz().iter().enumerate() {
+        spectra[0][k] = Complex64::new(0.25, 0.0);
+        spectra[1][k] =
+            Complex64::new(0.0, std::f64::consts::TAU * frequency * 1e6) * spectra[0][k];
+    }
+    let jacobian = (0..work.grid.sample_count())
+        .map(|time| {
+            let phase = work.grid.phases(time).unwrap()[0];
+            evaluation::JacobianSample {
+                conductance: vec![(0, 0, 1.0 + 0.2 * phase.cos()), (1, 1, -1.0)],
+                capacitance: vec![(1, 0, 1e6)],
+            }
+        })
+        .collect();
+    let mut evaluation = evaluation::Evaluation {
+        residual: vec![],
+        charge: vec![],
+        jacobian,
+        merit: 0.0,
+    };
+    for reordered in [false, true] {
+        if reordered {
+            // Sparse derivative order may change; only truly invariant slots
+            // can bypass projection. An extra zero term must also be harmless.
+            evaluation.jacobian[1].conductance.reverse();
+            evaluation.jacobian[1].conductance.push((0, 0, 0.0));
+        }
+        let result = work
+            .jacobian_action(&evaluation, &coordinates::encode(&spectra), &NoAbort)
+            .unwrap();
+        let result = coordinates::decode(&result, entries);
+        for (k, tuple) in work.grid.indices().iter().enumerate() {
+            let mut expected = spectra[0][k];
+            for offset in [-1, 1] {
+                let mut neighbor = tuple.clone();
+                neighbor[0] += offset;
+                if let Some(index) = work.grid.index_of(&neighbor) {
+                    expected += 0.1 * spectra[0][index];
+                }
+            }
+            assert!((result[0][k] - expected).norm() < 1e-14);
+            let tolerance = if reordered { 1e-8 } else { 1e-12 };
+            assert!(
+                result[1][k].norm() < tolerance,
+                "constraint at {tuple:?}: {:?}",
+                result[1][k]
+            );
+        }
+    }
+}
