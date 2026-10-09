@@ -2621,3 +2621,58 @@ endmodule
         );
     }
 }
+
+
+#[test]
+fn generated_mixed_bodies_keep_local_state_and_branch_loading_independent() {
+    let source = Source::new(
+        r#"
+`timescale 1ns/1ps
+module top(output electrical [BASE:BASE+1] p,q);
+ parameter integer BASE=0;
+ genvar i;
+ generate for(i=BASE;i<BASE+2;i=i+1) begin : channel
+   localparam integer DELAY=i-BASE+1;
+   localparam real LEVEL=i-BASE+2.5;
+   electrical n;
+   branch(n) drive;
+   reg enabled=0;
+   real sampled=0,offset;
+   genvar j;
+   analog function real shifted;
+     input i; real i;
+     begin shifted=i+LEVEL; end
+   endfunction
+   initial #DELAY enabled=1;
+   always #0.1 sampled=V(n);
+   analog initial offset=0.25;
+   analog begin
+     I(drive)<+(V(drive)-shifted(enabled ? 0.5 : 0.0)-offset)/1000;
+     for(j=0;j<1;j=j+1) I(n)<+V(n)/1000;
+     V(p[i])<+V(n);
+     V(q[i])<+sampled;
+   end
+ end endgenerate
+endmodule
+"#,
+    );
+    let deck = Netlist::parse(&format!(
+        "* generated mixed channels\nX1 p0 p1 q0 q1 top BASE=-2\n.va \"{}\" top module=top\n.end\n",
+        source.path()
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&deck, 2.6e-9, 50e-12).unwrap();
+    for (time, first, second) in [
+        (0.5e-9, 1.375, 1.875),
+        (1.5e-9, 1.625, 1.875),
+        (2.5e-9, 1.625, 2.125),
+    ] {
+        for (node, expected) in [("p0", first), ("q0", first), ("p1", second), ("q1", second)] {
+            let actual = voltage(&result, node, time);
+            assert!(
+                (actual - expected).abs() < 1e-7,
+                "{node}@{time}: {actual} != {expected}"
+            );
+        }
+    }
+}

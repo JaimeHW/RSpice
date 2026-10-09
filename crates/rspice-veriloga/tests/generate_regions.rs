@@ -510,3 +510,159 @@ endmodule
     assert!(plan.signals.iter().any(|signal| signal.name == "middle"));
     assert!(plan.signals.iter().any(|signal| signal.name == "result"));
 }
+
+
+#[test]
+fn generated_storage_and_local_constants_preserve_each_scope() {
+    let source = r#"
+module top;
+ parameter integer BASE=-1;
+ localparam integer WIDTH=12;
+ genvar i;
+ generate for(i=BASE;i<BASE+2;i=i+1) begin : channel
+   localparam integer WIDTH=i-BASE+2;
+   reg [WIDTH-1:0] state[WIDTH:WIDTH];
+   integer count=WIDTH;
+   real level=WIDTH+0.25;
+   initial begin
+     reg [WIDTH-1:0] scratch;
+     scratch=WIDTH;
+     state[WIDTH]=scratch;
+     #1 count=count+1;
+     level=level+count;
+   end
+   if(WIDTH==2) begin : small
+     reg enabled=1;
+   end else begin : large
+     reg enabled=0;
+   end
+   if(1) begin : nested
+     genvar j;
+     localparam integer SIZE=WIDTH-1;
+     for(j=0;j<SIZE;j=j+1) begin : bits
+       reg bit_value=1;
+     end
+   end
+ end endgenerate
+endmodule
+"#;
+    let compiled = plan(source);
+    for (index, width) in [(-1, 2), (0, 3)] {
+        let name = format!("channel[{index}].state[{width}]");
+        let signal = compiled
+            .signals
+            .iter()
+            .find(|signal| signal.name == name)
+            .unwrap();
+        assert_eq!(signal.width, width);
+        for variable in ["count", "level"] {
+            assert!(
+                compiled
+                    .signals
+                    .iter()
+                    .any(|signal| signal.name == format!("channel[{index}].{variable}"))
+            );
+        }
+    }
+    let names = signal_names(&compiled);
+    assert!(names.iter().any(|name| name == "channel[-1].small.enabled"));
+    assert!(names.iter().any(|name| name == "channel[0].large.enabled"));
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| name.ends_with(".bit_value"))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn generated_analog_functions_branches_and_local_shadowing_compile() {
+    let source = r#"
+module top(output electrical [1:0] p);
+ parameter real SCALE=1.0;
+ genvar i;
+ generate for(i=0;i<2;i=i+1) begin : channel
+   localparam real LEVEL=i+2.5;
+   localparam integer N=2;
+   electrical n;
+   branch(n) drive;
+   real offset;
+   analog function real shifted;
+     input i; real i;
+     real temporary;
+     begin temporary=i+LEVEL; shifted=temporary; end
+   endfunction
+   analog initial offset=0.25;
+   analog begin : behavior
+     real LEVEL;
+     LEVEL=shifted(0.5);
+     I(drive)<+(V(drive)-SCALE*LEVEL-offset)/1000;
+     I(n)<+V(n)/1000+white_noise(1e-18,"thermal");
+     V(p[i])<+V(n);
+   end
+ end endgenerate
+endmodule
+"#;
+    let compiler = VerilogACompiler::default();
+    let compiled = compiler.compile_runtime(source, Some("top")).unwrap();
+    assert!(compiled.canonical_ir.digital.signals.is_empty());
+    compiled.canonical_ir.validate().unwrap();
+    let noise_names: Vec<_> = compiled
+        .model
+        .noise_sources
+        .iter()
+        .map(|source| source.name.as_deref().unwrap())
+        .collect();
+    assert_eq!(noise_names.len(), 2);
+    assert!(
+        noise_names
+            .iter()
+            .any(|name| name.contains("channel[0].thermal"))
+    );
+    assert!(
+        noise_names
+            .iter()
+            .any(|name| name.contains("channel[1].thermal"))
+    );
+    let rebuilt = compiler
+        .prepare_artifact_runtime_source(
+            &compiled.canonical_ir,
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    assert_eq!(
+        compiled.canonical_ir.runtime_source_identity(),
+        rebuilt.canonical_ir.runtime_source_identity()
+    );
+}
+
+#[test]
+fn generated_declarations_reject_invalid_interface_and_cyclic_schemes() {
+    for (body, expected) in [
+        (
+            "if(0) begin : bad parameter integer N=2; end",
+            "parameter declaration",
+        ),
+        (
+            "if(1) begin : bad parameter integer N=2; end",
+            "parameter declaration",
+        ),
+        ("if(1) begin : bad input p; end", "port declaration"),
+        (
+            "for(i=0;i<2;i=1-i) begin : bad wire a; end",
+            "repeats genvar value",
+        ),
+        (
+            "if(1) begin : bad localparam integer N=M; localparam integer M=N; if(N) wire a; end",
+            "cannot fold to a constant",
+        ),
+    ] {
+        let message = compile_error(&format!(
+            "module top; genvar i; generate {body} endgenerate endmodule"
+        ));
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}

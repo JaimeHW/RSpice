@@ -208,8 +208,14 @@ behavioral code do not introduce nets. Analog behavioral access still requires a
 declared nature (VAMS-2023 3.6.3–3.6.5).
 Generate blocks retain separate explicit and implicit net declarations, packed ranges,
 unpacked dimensions and local shadowing. Unnamed blocks use collision-checked genblk
-names, preserved through specialization and source replay. Generated local variables,
-parameters/functions and analog blocks still require further scoped elaboration.
+names, preserved through specialization and source replay. Generated local storage,
+localparams, genvars, branches, analog functions and analog bodies retain concrete
+per-occurrence identities. Nested generate schemes see scoped constants; procedural
+locals and function arguments shadow enclosing names. Generated analog initialization
+and simulation statements retain source ordering and independent state. Ordinary
+parameter and port declarations remain illegal inside a generated block (VAMS-2023
+6.6). HIR 147 / cache record 129 invalidate pre-expansion artifacts. General hierarchical
+references and other unsupported module-item forms remain separate requirements.
 Detailed top-down domain resolution remains open. HIR 145 / cache record 127 invalidate
 artifacts produced before scoped implicit-net construction.
 Explicit continuous-discipline `wire`/`tri` declarations allocate only physical
