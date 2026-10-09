@@ -27,18 +27,11 @@ mod qpac;
 mod qpnoise;
 mod qpss;
 mod qpxf;
-pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_abort;
 pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_context;
-pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_abort;
 pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_context;
 #[cfg(test)]
 pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
-pub(crate) use qpss::{
-    run_qpss_analysis_on_materialized_with_abort,
-    run_qpss_analysis_with_dc_seed_on_materialized_with_abort,
-    run_qpss_analysis_with_dc_seed_on_materialized_with_context,
-};
-pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_abort;
+pub(crate) use qpss::run_qpss_analysis_with_dc_seed_on_materialized_with_context;
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_context;
 mod soa;
 mod sparameter;
@@ -66,8 +59,6 @@ pub(crate) use envelope_fourier::{
 };
 pub(crate) use hb::HbData;
 pub(crate) use hb::HbSpectrum;
-pub(crate) use hb::run_hb_analysis_on_materialized_with_abort;
-pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_abort;
 pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_context;
 #[cfg(test)]
 pub use hb::run_hb_analysis_with_source_path_and_abort;
@@ -100,8 +91,7 @@ pub(crate) use optimization::{
     run_optimization_with_cost_evaluator,
 };
 pub(crate) use pac_pxf::{
-    PacData, PxfData, run_pac_analysis_on_materialized_with_abort,
-    run_pac_analysis_on_materialized_with_context, run_pxf_analysis_on_materialized_with_abort,
+    PacData, PxfData, run_pac_analysis_on_materialized_with_context,
     run_pxf_analysis_on_materialized_with_context,
 };
 #[cfg(test)]
@@ -115,26 +105,18 @@ pub(crate) use periodic_carrier::PeriodicCarrierState;
 pub(crate) use pnoise::PnoiseData;
 #[cfg(test)]
 pub use pnoise::run_pnoise_analysis_from_hb_with_source_path_and_abort;
-pub(crate) use pnoise::{
-    run_pnoise_analysis_on_materialized_with_abort,
-    run_pnoise_analysis_on_materialized_with_context,
-};
+pub(crate) use pnoise::run_pnoise_analysis_on_materialized_with_context;
 pub(crate) use psp::{
     PspData, run_hbsp_analysis_from_hb_on_materialized_with_context,
-    run_psp_analysis_from_pss_on_materialized_with_abort,
     run_psp_analysis_from_pss_on_materialized_with_context,
 };
 pub use psp::{PspRunConfig, PspSweep};
-pub(crate) use pss::PssData;
-pub(crate) use pss::run_pss_analysis_on_materialized_with_abort;
 #[cfg(test)]
 pub(crate) use pss::run_pss_analysis_with_config_and_source_path_and_abort;
+pub(crate) use pss::{PssData, run_pss_analysis_on_materialized_with_context};
 pub use pss::{PssRunConfig, run_pss_analysis_with_source_path_and_abort};
 pub(crate) use pss::{PssSeedEnvironment, run_pss_analysis_with_dc_seed_and_context};
-pub(crate) use pstb::{
-    PstbData, run_pstb_analysis_on_materialized_with_abort,
-    run_pstb_analysis_on_materialized_with_context,
-};
+pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_context};
 #[cfg(test)]
 pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is

@@ -1,27 +1,8 @@
 //! QPXF consumes the exact QPSS producer configuration and retained orbit.
 use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{QpssOperatingPoint, QpxfAnalysisResult};
 use rspice_core::netlist::QpxfCard;
-
-pub(crate) fn run_qpxf_analysis_from_qpss_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    card: &QpxfCard,
-    point: &QpssOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<QpxfAnalysisResult> {
-    run_qpxf_analysis_from_qpss_on_materialized_with_context(
-        netlist,
-        card,
-        point,
-        super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
 
 pub(crate) fn run_qpxf_analysis_from_qpss_on_materialized_with_context(
     netlist: &rspice_core::Netlist,

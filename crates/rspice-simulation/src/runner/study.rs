@@ -41,6 +41,18 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+/// A trial inherits its parent engine's execution policy for every nested solve.
+fn service_context<'a>(
+    engine: &rspice_core::Engine,
+    abort: &'a dyn AbortSignal,
+) -> services::ServiceContext<'a> {
+    services::ServiceContext {
+        source_path: None,
+        limits: engine.config().resource_limits,
+        abort,
+    }
+}
+
 struct StudyAbort<'a> {
     parent: &'a dyn AbortSignal,
     failed: AtomicBool,

@@ -408,7 +408,7 @@ fn fourier_limits_cover_source_copies_and_every_selected_output() {
         normalize: false,
     };
     let run = |spec, limits| {
-        run_spectral_from_trajectory_with_context(
+        run_spectral_from_trajectory(
             spec,
             &trajectory,
             svc_runner::ServiceContext {

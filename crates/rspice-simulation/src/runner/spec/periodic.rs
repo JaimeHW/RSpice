@@ -176,7 +176,7 @@ pub(super) fn run_periodic_spec(
             },
             context,
         ),
-        spec @ AnalysisSpec::Fourier { .. } => run_spectral_from_trajectory_with_context(
+        spec @ AnalysisSpec::Fourier { .. } => run_spectral_from_trajectory(
             spec,
             dependencies
                 .transient_trajectory()
@@ -245,7 +245,7 @@ pub(super) fn run_periodic_spec(
                     abort,
                 )
             })?;
-            run_hb_consumer_with_context(spec, &circuit, state.operating_point(), context)
+            run_hb_consumer(spec, &circuit, state.operating_point(), context)
         }
         other => Err(super::misrouted_spec_error("periodic", &other)),
     }
@@ -1627,22 +1627,6 @@ fn fourier_output_unit(output_expression: &str) -> &'static str {
 pub(in crate::runner) fn run_spectral_from_trajectory(
     spec: AnalysisSpec,
     trajectory: &TransientTrajectoryArtifact,
-    abort: &dyn AbortSignal,
-) -> Result<SimulationResult, SimulationError> {
-    run_spectral_from_trajectory_with_context(
-        spec,
-        trajectory,
-        svc_runner::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
-fn run_spectral_from_trajectory_with_context(
-    spec: AnalysisSpec,
-    trajectory: &TransientTrajectoryArtifact,
     context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
     super::ensure_not_aborted(context.abort)?;
@@ -1746,12 +1730,15 @@ fn hb_run_config(
 pub(in crate::runner) fn run_native_study_on_materialized(
     spec: AnalysisSpec,
     circuit: &rspice_core::Netlist,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     if matches!(spec, AnalysisSpec::Qpss { .. }) {
         let config = spec.qpss_config().map_err(SimulationError::InvalidConfig)?;
         let data = super::run_abort_aware_service(abort, || {
-            svc_runner::run_qpss_analysis_on_materialized_with_abort(circuit, config, abort)
+            svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+                circuit, config, None, context,
+            )
         })?;
         super::ensure_not_aborted(abort)?;
         return SimulationResult::from_qpss_operating_point(data.operating_point)
@@ -1759,30 +1746,14 @@ pub(in crate::runner) fn run_native_study_on_materialized(
     }
     let config = hb_run_config(spec, abort)?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_hb_analysis_on_materialized_with_abort(circuit, &config, abort)
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            circuit, &config, None, context,
+        )
     })?;
     project_hb_data(data, true, abort)
 }
 
 pub(in crate::runner) fn run_hb_consumer(
-    spec: AnalysisSpec,
-    circuit: &rspice_core::Netlist,
-    operating_point: &rspice_core::engine::HbOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> Result<SimulationResult, SimulationError> {
-    run_hb_consumer_with_context(
-        spec,
-        circuit,
-        operating_point,
-        svc_runner::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
-fn run_hb_consumer_with_context(
     spec: AnalysisSpec,
     circuit: &rspice_core::Netlist,
     operating_point: &rspice_core::engine::HbOperatingPoint,
@@ -1866,12 +1837,13 @@ pub(in crate::runner) fn run_hb_seeded_study_on_materialized(
     producer: AnalysisSpec,
     circuit: &rspice_core::Netlist,
     seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let config = hb_run_config(producer, abort)?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_abort(
-            circuit, &config, seed, abort,
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            circuit, &config, seed, context,
         )
     })?;
     project_hb_data(data, true, abort)
@@ -1881,13 +1853,16 @@ pub(in crate::runner) fn run_hb_study_on_materialized(
     producer: AnalysisSpec,
     consumer: AnalysisSpec,
     circuit: &rspice_core::Netlist,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let config = hb_run_config(producer, abort)?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_hb_analysis_on_materialized_with_abort(circuit, &config, abort)
+        svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            circuit, &config, None, context,
+        )
     })?;
-    run_hb_consumer(consumer, circuit, &data.operating_point, abort)
+    run_hb_consumer(consumer, circuit, &data.operating_point, context)
 }
 
 pub(in crate::runner) fn run_pss_study_on_materialized(
@@ -1895,16 +1870,17 @@ pub(in crate::runner) fn run_pss_study_on_materialized(
     circuit: &rspice_core::Netlist,
     seed: &rspice_core::engine::PssDcOperatingPointSeed,
     temperature_kelvin: f64,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let config = pss_run_config(spec)?;
     let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_pss_analysis_on_materialized_with_abort(
+        svc_runner::run_pss_analysis_on_materialized_with_context(
             circuit,
             &config,
             Some(seed),
             Some(temperature_kelvin),
-            abort,
+            context,
         )
     })?;
     project_pss_data(data, abort)
@@ -1964,8 +1940,9 @@ pub(super) fn run_psp_study_consumer(
     spec: AnalysisSpec,
     circuit: &rspice_core::Netlist,
     point: &rspice_core::engine::PssOperatingPoint,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     let AnalysisSpec::Psp {
         start_freq,
         stop_freq,
@@ -2000,8 +1977,8 @@ pub(super) fn run_psp_study_consumer(
         },
         abort,
         |config| {
-            svc_runner::run_psp_analysis_from_pss_on_materialized_with_abort(
-                circuit, config, point, abort,
+            svc_runner::run_psp_analysis_from_pss_on_materialized_with_context(
+                circuit, config, point, context,
             )
         },
     )
@@ -2011,15 +1988,16 @@ pub(in crate::runner) fn run_qp_study_consumer(
     spec: AnalysisSpec,
     circuit: &rspice_core::Netlist,
     point: &rspice_core::engine::QpssOperatingPoint,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
+    let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     match spec {
         spec @ AnalysisSpec::Qpac { .. } => {
             let card = spec.qpac_card().map_err(SimulationError::InvalidConfig)?;
             let response = super::run_abort_aware_service(abort, || {
-                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_abort(
-                    circuit, &card, point, abort,
+                svc_runner::run_qpac_analysis_from_qpss_on_materialized_with_context(
+                    circuit, &card, point, context,
                 )
             })?;
             super::ensure_not_aborted(abort)?;
@@ -2029,8 +2007,8 @@ pub(in crate::runner) fn run_qp_study_consumer(
         spec @ AnalysisSpec::Qpxf { .. } => {
             let card = spec.qpxf_card().map_err(SimulationError::InvalidConfig)?;
             let response = super::run_abort_aware_service(abort, || {
-                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_abort(
-                    circuit, &card, point, abort,
+                svc_runner::run_qpxf_analysis_from_qpss_on_materialized_with_context(
+                    circuit, &card, point, context,
                 )
             })?;
             super::ensure_not_aborted(abort)?;
@@ -2042,8 +2020,8 @@ pub(in crate::runner) fn run_qp_study_consumer(
                 .qpnoise_card()
                 .map_err(SimulationError::InvalidConfig)?;
             let response = super::run_abort_aware_service(abort, || {
-                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_abort(
-                    circuit, &card, point, abort,
+                svc_runner::run_qpnoise_analysis_from_qpss_on_materialized_with_context(
+                    circuit, &card, point, context,
                 )
             })?;
             super::ensure_not_aborted(abort)?;

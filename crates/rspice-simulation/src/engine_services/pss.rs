@@ -202,26 +202,6 @@ fn run_pss_analysis_internal(
 
 /// Execute on one already varied circuit and its freshly solved DC seed.
 /// Temperature/supply materialization belongs to the caller at this boundary.
-pub(crate) fn run_pss_analysis_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PssRunConfig,
-    dc_seed: Option<&PssDcOperatingPointSeed>,
-    temperature_kelvin: Option<Value>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PssData> {
-    run_pss_analysis_on_materialized_with_context(
-        netlist,
-        config,
-        dc_seed,
-        temperature_kelvin,
-        super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
 pub(crate) fn run_pss_analysis_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &PssRunConfig,

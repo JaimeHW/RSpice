@@ -1,27 +1,8 @@
 //! QPAC consumes the exact QPSS producer configuration and retained orbit.
 use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
-use rspice_core::abort_signal::AbortSignal;
 use rspice_core::engine::{QpacAnalysisResult, QpssOperatingPoint};
 use rspice_core::netlist::QpacCard;
-
-pub(crate) fn run_qpac_analysis_from_qpss_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    card: &QpacCard,
-    point: &QpssOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<QpacAnalysisResult> {
-    run_qpac_analysis_from_qpss_on_materialized_with_context(
-        netlist,
-        card,
-        point,
-        super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
 
 pub(crate) fn run_qpac_analysis_from_qpss_on_materialized_with_context(
     netlist: &rspice_core::Netlist,

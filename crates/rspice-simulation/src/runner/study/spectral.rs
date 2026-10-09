@@ -10,6 +10,7 @@ pub(super) fn run_trial(
     circuit: &rspice_core::Netlist,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    let context = service_context(engine, abort);
     let Some(postprocess) = &request_config.postprocess else {
         return match analysis {
             StudyAnalysis::Basic(config) => {
@@ -35,7 +36,7 @@ pub(super) fn run_trial(
             )
             .map(|(_, result)| result),
             StudyAnalysis::Native(spec) => {
-                super::super::spec::run_native_study_on_materialized(spec.clone(), circuit, abort)
+                super::super::spec::run_native_study_on_materialized(spec.clone(), circuit, context)
             }
         };
     };
@@ -73,13 +74,13 @@ pub(super) fn run_trial(
             let consumer = super::pss::circuit_with_options(
                 &physical,
                 &request_config.numeric_options,
-                abort,
+                context,
             )?;
             return super::super::spec::run_hb_consumer(
                 postprocess.request.clone(),
                 &consumer,
                 &operating_point,
-                abort,
+                context,
             );
         }
         let StudyAnalysis::Native(producer @ AnalysisSpec::HarmonicBalance { .. }) = analysis
@@ -92,7 +93,7 @@ pub(super) fn run_trial(
             producer.clone(),
             postprocess.request.clone(),
             circuit,
-            abort,
+            context,
         );
     }
     let mut trial = circuit.clone();
@@ -153,7 +154,7 @@ pub(super) fn run_trial(
     super::super::spec::run_spectral_from_trajectory(
         postprocess.request.clone(),
         &trajectory,
-        abort,
+        context,
     )
 }
 

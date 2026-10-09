@@ -10,6 +10,7 @@ pub(super) fn run_with_circuit(
     numeric_options: &str,
     abort: &dyn AbortSignal,
 ) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
+    let context = service_context(engine, abort);
     request_config
         .validate()
         .map_err(SimulationError::InvalidConfig)?;
@@ -33,16 +34,16 @@ pub(super) fn run_with_circuit(
             (physical, None)
         }
     };
-    let mut physical = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
+    let mut physical = super::pss::circuit_with_options(&physical, numeric_options, context)?;
     // OP's resolved temperature defines this physical run point, even if
     // the analysis has its own independent numerical-options overlay.
     physical.options.temp = Some(request_config.operating_point.config.temperature_celsius);
     let data = super::super::spec::run_abort_aware_service(abort, || {
-        services::run_qpss_analysis_with_dc_seed_on_materialized_with_abort(
+        services::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
             &physical,
             config,
             seed.as_ref(),
-            abort,
+            context,
         )
     })?;
     let result = SimulationResult::from_qpss_operating_point(data.operating_point)

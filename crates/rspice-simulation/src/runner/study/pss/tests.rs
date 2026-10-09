@@ -1,6 +1,27 @@
 //! PSS study tests keep operating-point and shooting controls independent.
 
 use super::*;
+
+#[test]
+fn study_reporting_options_keep_the_caller_point_limit() {
+    let circuit = rspice_core::Netlist::parse("Options policy\nR1 out 0 1k\n.end\n").unwrap();
+    let mut limits = rspice_core::ResourceLimits::default();
+    limits.max_analysis_points = 2;
+    let context = services::ServiceContext {
+        source_path: None,
+        limits,
+        abort: &rspice_core::NoAbort,
+    };
+    let error = circuit_with_options(&circuit, ".options output outputtimepoints=0,1,2", context)
+        .unwrap_err();
+    assert!(
+        matches!(&error, SimulationError::ResourceLimit { resource, limit: 2, .. } if resource == "analysis_points"),
+        "{error:?}"
+    );
+    assert!(
+        circuit_with_options(&circuit, ".options output outputtimepoints=0,1", context).is_ok()
+    );
+}
 use crate::execution_options::SpecExecutionOptions;
 use crate::runner::worker_contract::WorkerSpecExecutionOptions;
 use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
@@ -116,14 +137,28 @@ fn pss_study_varies_the_circuit_and_keeps_op_and_shooting_options_separate() {
     let StudyAnalysis::Pss(pss) = &base.analysis else {
         unreachable!()
     };
-    let op =
-        circuit_with_options(&nominal, &pss.operating_point.numeric_options, &NoAbort).unwrap();
-    let shooting = circuit_with_options(&nominal, &base.numeric_options, &NoAbort).unwrap();
+    let op = circuit_with_options(
+        &nominal,
+        &pss.operating_point.numeric_options,
+        services::ServiceContext::with_defaults(None, &NoAbort),
+    )
+    .unwrap();
+    let shooting = circuit_with_options(
+        &nominal,
+        &base.numeric_options,
+        services::ServiceContext::with_defaults(None, &NoAbort),
+    )
+    .unwrap();
     assert_eq!(op.options.gmin, Some(1e-7));
     assert_eq!(shooting.options.gmin, Some(0.0));
     assert_eq!(nominal.options.gmin, Some(1e-10));
     assert!(
-        circuit_with_options(&nominal, ".options GMIN=1 INVALID_STUDY_OPTION=2", &NoAbort).is_err()
+        circuit_with_options(
+            &nominal,
+            ".options GMIN=1 INVALID_STUDY_OPTION=2",
+            services::ServiceContext::with_defaults(None, &NoAbort)
+        )
+        .is_err()
     );
     assert_eq!(nominal.options.gmin, Some(1e-10));
     let result = dispatch(

@@ -11,6 +11,7 @@ pub(super) fn run_periodic(
     numeric_options: &str,
     abort: &dyn AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
+    let context = service_context(engine, abort);
     request_config.periodic_execution_options()?;
     let (physical, result) = match analysis {
         StudyAnalysis::Pss(pss) => super::pss::run_with_circuit(
@@ -40,12 +41,12 @@ pub(super) fn run_periodic(
             let physical = super::pss::circuit_with_options(
                 circuit,
                 &request_config.producer_numeric_options,
-                abort,
+                context,
             )?;
             let result = super::super::spec::run_native_study_on_materialized(
                 producer.clone(),
                 &physical,
-                abort,
+                context,
             )?;
             (physical, result)
         }
@@ -55,7 +56,7 @@ pub(super) fn run_periodic(
             ));
         }
     };
-    let consumer = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
+    let consumer = super::pss::circuit_with_options(&physical, numeric_options, context)?;
     if let SimulationResult::Qpss {
         operating_point, ..
     } = &result
@@ -64,7 +65,7 @@ pub(super) fn run_periodic(
             request_config.request.clone(),
             &consumer,
             operating_point,
-            abort,
+            context,
         );
     }
     let carrier = match &result {
@@ -87,7 +88,7 @@ pub(super) fn run_periodic(
         request_config.periodic_options.as_ref(),
         &consumer,
         carrier,
-        abort,
+        context,
     )
 }
 

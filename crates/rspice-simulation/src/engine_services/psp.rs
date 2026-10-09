@@ -168,24 +168,6 @@ pub fn run_hbsp_analysis_from_hb_with_source_path_and_abort(
     )
 }
 
-pub(crate) fn run_psp_analysis_from_pss_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PspRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PspData> {
-    run_psp_analysis_from_pss_on_materialized_with_context(
-        netlist,
-        config,
-        operating_point,
-        ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
 pub(crate) fn run_psp_analysis_from_pss_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &PspRunConfig,

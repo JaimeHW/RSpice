@@ -21,16 +21,17 @@ pub(super) fn run_with_circuit(
     numeric_options: &str,
     abort: &dyn AbortSignal,
 ) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
+    let context = service_context(engine, abort);
     let (physical, seed) =
         super::pss::run_operating_point(&request_config.operating_point, engine, circuit, abort)?;
     let temperature_kelvin = request_config.operating_point.config.temperature_celsius + 273.15;
-    let pss_circuit = circuit_with_options(&physical, numeric_options, abort)?;
+    let pss_circuit = circuit_with_options(&physical, numeric_options, context)?;
     let result = super::super::spec::run_pss_study_on_materialized(
         request_config.request.clone(),
         &pss_circuit,
         &seed,
         temperature_kelvin,
-        abort,
+        context,
     )?;
     Ok((pss_circuit, result))
 }
@@ -38,8 +39,9 @@ pub(super) fn run_with_circuit(
 pub(super) fn circuit_with_options(
     circuit: &rspice_core::Netlist,
     commands: &str,
-    abort: &dyn AbortSignal,
+    context: services::ServiceContext<'_>,
 ) -> Result<rspice_core::Netlist, SimulationError> {
+    let abort = context.abort;
     let mut circuit = circuit.clone();
     for line in commands
         .lines()
@@ -59,15 +61,19 @@ pub(super) fn circuit_with_options(
             arguments,
             &circuit.params,
             &circuit.options,
-            rspice_core::ResourceLimits::default().max_analysis_points,
+            context.limits.max_analysis_points,
             abort,
         )
-        .map_err(|error| {
-            if error.is_aborted() {
-                SimulationError::Aborted
-            } else {
-                SimulationError::InvalidConfig(error.to_string())
-            }
+        .map_err(|error| match error {
+            rspice_core::netlist::ParseWithAbortError::Aborted => SimulationError::Aborted,
+            rspice_core::netlist::ParseWithAbortError::Parse(
+                rspice_core::netlist::ParseError::ResourceLimit(error),
+            ) => SimulationError::ResourceLimit {
+                resource: error.resource.as_str().into(),
+                requested: error.requested,
+                limit: error.limit,
+            },
+            other => SimulationError::InvalidConfig(other.to_string()),
         })?;
     }
     Ok(circuit)
@@ -113,8 +119,9 @@ pub(super) fn run_operating_point(
     ),
     SimulationError,
 > {
+    let context = service_context(engine, abort);
     let (physical, op) = physical_circuit(request_config, circuit, abort)?;
-    let op_circuit = circuit_with_options(&physical, &request_config.numeric_options, abort)?;
+    let op_circuit = circuit_with_options(&physical, &request_config.numeric_options, context)?;
     let result = EngineBridge::run_materialized_with_abort(
         engine,
         &AnalysisConfig::DcOp(op),

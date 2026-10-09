@@ -1531,9 +1531,10 @@ pub(super) fn run_periodic_study_consumer(
     options: &crate::study::StudyPeriodicOptions,
     circuit: &rspice_core::Netlist,
     carrier: svc_runner::PeriodicCarrierState<'_>,
-    abort: &dyn AbortSignal,
+    context: svc_runner::ServiceContext<'_>,
 ) -> Result<SimulationResult, SimulationError> {
     use crate::study::StudyPeriodicOptions;
+    let abort = context.abort;
     if let svc_runner::PeriodicCarrierState::Shooting(point) = carrier {
         let (name, frequency, harmonics, tolerance, phase) = match options {
             StudyPeriodicOptions::Pac(c) => (
@@ -1573,30 +1574,30 @@ pub(super) fn run_periodic_study_consumer(
     match options {
         StudyPeriodicOptions::Pac(config) => {
             let data = super::run_abort_aware_service(abort, || {
-                svc_runner::run_pac_analysis_on_materialized_with_abort(
+                svc_runner::run_pac_analysis_on_materialized_with_context(
                     circuit,
                     config,
                     Some(carrier),
-                    abort,
+                    context,
                 )
             })?;
             project_pac(data, abort)
         }
         StudyPeriodicOptions::Pxf(config) => {
             let data = super::run_abort_aware_service(abort, || {
-                svc_runner::run_pxf_analysis_on_materialized_with_abort(
+                svc_runner::run_pxf_analysis_on_materialized_with_context(
                     circuit,
                     config,
                     Some(carrier),
-                    abort,
+                    context,
                 )
             })?;
             project_pxf(data, abort)
         }
         StudyPeriodicOptions::Pnoise(config) => {
             let data = super::run_abort_aware_service(abort, || {
-                svc_runner::run_pnoise_analysis_on_materialized_with_abort(
-                    circuit, config, carrier, abort,
+                svc_runner::run_pnoise_analysis_on_materialized_with_context(
+                    circuit, config, carrier, context,
                 )
             })?;
             pnoise_result(data, config.noise_ref, abort)
@@ -1608,11 +1609,11 @@ pub(super) fn run_periodic_study_consumer(
                 ));
             };
             let data = super::run_abort_aware_service(abort, || {
-                svc_runner::run_pstb_analysis_on_materialized_with_abort(
+                svc_runner::run_pstb_analysis_on_materialized_with_context(
                     circuit,
                     config,
                     Some(point),
-                    abort,
+                    context,
                 )
             })?;
             project_pstb(data, abort)

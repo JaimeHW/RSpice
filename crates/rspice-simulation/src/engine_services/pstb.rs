@@ -212,6 +212,7 @@ fn run_pstb_analysis_impl(
     run_pstb_analysis_on_materialized_with_abort(&netlist, config, operating_point, abort)
 }
 
+#[cfg(test)]
 pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
     netlist: &rspice_core::Netlist,
     config: &PstbRunConfig,

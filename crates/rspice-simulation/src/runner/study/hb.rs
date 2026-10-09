@@ -9,11 +9,12 @@ pub(super) fn run_with_circuit(
     numeric_options: &str,
     abort: &dyn AbortSignal,
 ) -> Result<(rspice_core::Netlist, SimulationResult), SimulationError> {
+    let context = service_context(engine, abort);
     request_config
         .validate()
         .map_err(SimulationError::InvalidConfig)?;
     // The HB overlay decides startup; it must not leak into the OP solve.
-    let controls = super::pss::circuit_with_options(circuit, numeric_options, abort)?;
+    let controls = super::pss::circuit_with_options(circuit, numeric_options, context)?;
     let (physical, seed) = if controls.options.hb_time_domain_mode
         == Some(rspice_core::netlist::XyceHbTimeDomainMode::Direct)
     {
@@ -29,13 +30,13 @@ pub(super) fn run_with_circuit(
         )?;
         (physical, Some(seed))
     };
-    let mut physical = super::pss::circuit_with_options(&physical, numeric_options, abort)?;
+    let mut physical = super::pss::circuit_with_options(&physical, numeric_options, context)?;
     physical.options.temp = Some(request_config.operating_point.config.temperature_celsius);
     let result = super::super::spec::run_hb_seeded_study_on_materialized(
         request_config.request.clone(),
         &physical,
         seed.as_ref(),
-        abort,
+        context,
     )?;
     Ok((physical, result))
 }
