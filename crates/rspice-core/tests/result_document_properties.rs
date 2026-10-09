@@ -583,26 +583,33 @@ fn document(family: usize, shape: &Shape) -> AnalysisResultDocument {
                 }),
             }),
         ),
-        14 => (
-            AnalysisKind::MonteCarlo,
-            None,
-            ResultAxisKind::TrialIndex,
-            integer_axis.clone(),
-            ResultPayload::MonteCarlo(MonteCarloPayload {
-                successful_trial_indices: None,
-                statistics: vec![MonteCarloVariableStatistics {
-                    name: "v(out)".to_owned(),
-                    unit: None,
-                    samples: shape.reals(),
-                    mean: Some(shape.magnitudes[0]),
-                    standard_deviation: None,
-                    minimum: Some(shape.magnitudes[0]),
-                    maximum: Some(shape.magnitudes[0]),
-                    histogram: vec![1, 0],
-                    bin_edges: vec![0.0, 1.0, 2.0],
-                }],
-            }),
-        ),
+        14 => {
+            let population = rspice_core::analysis::monte_carlo::VariableStatistics::from_samples(
+                "v(out)",
+                shape.finite_reals(),
+                2,
+            );
+            (
+                AnalysisKind::MonteCarlo,
+                None,
+                ResultAxisKind::TrialIndex,
+                integer_axis.clone(),
+                ResultPayload::MonteCarlo(MonteCarloPayload {
+                    successful_trial_indices: None,
+                    statistics: vec![MonteCarloVariableStatistics {
+                        name: "v(out)".to_owned(),
+                        unit: None,
+                        samples: shape.reals(),
+                        mean: Some(population.mean),
+                        standard_deviation: Some(population.std_dev),
+                        minimum: Some(population.min),
+                        maximum: Some(population.max),
+                        histogram: population.histogram,
+                        bin_edges: population.bin_edges,
+                    }],
+                }),
+            )
+        }
         15 => (
             AnalysisKind::Pss,
             None,

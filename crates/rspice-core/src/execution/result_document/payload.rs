@@ -2464,6 +2464,8 @@ pub struct MonteCarloVariableStatistics {
     pub standard_deviation: Option<f64>,
     pub minimum: Option<f64>,
     pub maximum: Option<f64>,
+    /// Counts for intervals including their lower edge, with the final interval
+    /// also including its upper edge. Counts cover the retained population.
     pub histogram: Vec<usize>,
     pub bin_edges: Vec<f64>,
 }

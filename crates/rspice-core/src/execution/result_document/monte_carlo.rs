@@ -80,6 +80,7 @@ pub(super) fn validate(
                 "standard deviation must be nonnegative and extrema ordered",
             ));
         }
+        validate_statistics(variable, abort)?;
     }
     let completed = scalars.count("completed_runs")?;
     let failed = scalars.count("failed_runs")?;
@@ -239,6 +240,111 @@ pub(super) fn validate(
                 "confidence declaration refers to an unretained variable",
             ));
         }
+    }
+    Ok(())
+}
+
+/// Reconcile summaries with their retained evidence without fabricating any
+/// missing sample or recomputing a producer's rounded moment estimates.
+fn validate_statistics(
+    variable: &MonteCarloVariableStatistics,
+    abort: &dyn AbortSignal,
+) -> Result<(), ResultDocumentError> {
+    let mut observed_min = f64::INFINITY;
+    let mut observed_max = f64::NEG_INFINITY;
+    let mut observed = 0;
+    for (index, sample) in variable.samples.iter().enumerate() {
+        if index % 64 == 0 {
+            check_abort(abort)?;
+        }
+        if let Some(value) = sample {
+            observed_min = observed_min.min(*value);
+            observed_max = observed_max.max(*value);
+            observed += 1;
+        }
+    }
+    let complete = observed != 0 && observed == variable.samples.len();
+    if variable
+        .minimum
+        .is_some_and(|min| min > observed_min || complete && min != observed_min)
+        || variable
+            .maximum
+            .is_some_and(|max| max < observed_max || complete && max != observed_max)
+    {
+        return Err(invalid("extrema disagree with retained samples"));
+    }
+    let (minimum, maximum) = if complete {
+        (Some(observed_min), Some(observed_max))
+    } else {
+        (variable.minimum, variable.maximum)
+    };
+    if variable.mean.is_some_and(|mean| {
+        minimum.is_some_and(|min| mean < min) || maximum.is_some_and(|max| mean > max)
+    }) {
+        return Err(invalid("mean lies outside the sample extrema"));
+    }
+
+    if variable.histogram.is_empty() {
+        return if variable.bin_edges.is_empty() {
+            Ok(())
+        } else {
+            Err(invalid("histogram edges have no corresponding bins"))
+        };
+    }
+    // Payload shape/finite checks have already admitted exactly n+1 edges.
+    // Repeated edges in legacy reports are allowed only when their counts
+    // agree with the same half-open intervals used by current producers.
+    let mut total = 0usize;
+    let intervals = variable
+        .bin_edges
+        .iter()
+        .zip(variable.bin_edges.iter().skip(1));
+    for (index, (&count, (&lower, &upper))) in variable.histogram.iter().zip(intervals).enumerate()
+    {
+        if index % 64 == 0 {
+            check_abort(abort)?;
+        }
+        if lower > upper {
+            return Err(invalid("histogram edges must be ordered"));
+        }
+        if count != 0 && index + 1 < variable.histogram.len() && lower == upper {
+            return Err(invalid(
+                "an empty histogram interval cannot contain samples",
+            ));
+        }
+        total = total
+            .checked_add(count)
+            .ok_or_else(|| invalid("histogram population overflows its count type"))?;
+    }
+    if total != variable.samples.len() {
+        return Err(invalid(
+            "histogram counts disagree with the retained trial population",
+        ));
+    }
+    let (Some(&first), Some(&last)) = (variable.bin_edges.first(), variable.bin_edges.last())
+    else {
+        return Err(invalid("histogram has no bin edges"));
+    };
+    if minimum.is_some_and(|min| min < first) || maximum.is_some_and(|max| max > last) {
+        return Err(invalid("histogram edges do not enclose the sample extrema"));
+    }
+    let mut remaining = variable.histogram.clone();
+    for (index, sample) in variable.samples.iter().enumerate() {
+        if index % 64 == 0 {
+            check_abort(abort)?;
+        }
+        let Some(sample) = sample else { continue };
+        if *sample < first || *sample > last {
+            return Err(invalid("histogram edges do not enclose retained samples"));
+        }
+        let bin = variable.bin_edges.partition_point(|edge| edge <= sample) - 1;
+        let bin = bin.min(remaining.len() - 1);
+        let count = remaining
+            .get_mut(bin)
+            .ok_or_else(|| invalid("histogram sample has no corresponding bin"))?;
+        *count = count
+            .checked_sub(1)
+            .ok_or_else(|| invalid("histogram bin counts disagree with retained samples"))?;
     }
     Ok(())
 }

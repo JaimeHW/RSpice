@@ -48,6 +48,15 @@ fn monte_carlo_rejects_contradictory_campaigns_and_confidence() {
         "duplicate",
         "negative-sigma",
         "extrema",
+        "extrema-evidence",
+        "mean-evidence",
+        "histogram-total",
+        "histogram-membership",
+        "histogram-empty-interval",
+        "histogram-order",
+        "histogram-end",
+        "histogram-empty",
+        "histogram-overflow",
         "level",
         "conditional",
         "reversed-ci",
@@ -84,6 +93,24 @@ fn monte_carlo_rejects_contradictory_campaigns_and_confidence() {
             }
             "negative-sigma" => wire["payload"]["statistics"][0]["standardDeviation"] = json!(-0.1),
             "extrema" => wire["payload"]["statistics"][0]["maximum"] = json!(0.0),
+            "extrema-evidence" => wire["payload"]["statistics"][0]["maximum"] = json!(2.0),
+            "mean-evidence" => wire["payload"]["statistics"][0]["mean"] = json!(2.0),
+            "histogram-total" => wire["payload"]["statistics"][0]["histogram"] = json!([1, 999]),
+            "histogram-membership" => wire["payload"]["statistics"][0]["histogram"] = json!([2, 1]),
+            "histogram-empty-interval" => {
+                wire["payload"]["statistics"][0]["binEdges"] = json!([0.9, 0.9, 1.1]);
+                wire["payload"]["statistics"][0]["samples"][0] = Value::Null;
+            }
+            "histogram-order" => {
+                wire["payload"]["statistics"][0]["binEdges"] = json!([0.9, 0.8, 1.1])
+            }
+            "histogram-end" => {
+                wire["payload"]["statistics"][0]["binEdges"] = json!([0.9, 1.0, 1.05])
+            }
+            "histogram-empty" => wire["payload"]["statistics"][0]["histogram"] = json!([]),
+            "histogram-overflow" => {
+                wire["payload"]["statistics"][0]["histogram"] = json!([usize::MAX, usize::MAX])
+            }
             "level" => {
                 scalar(&mut wire, "mean_confidence_level_pct")["value"]["value"] = json!(100.0)
             }
@@ -135,4 +162,90 @@ fn monte_carlo_rejects_contradictory_campaigns_and_confidence() {
             .starts_with("mean_confidence")
     });
     assert!(AnalysisResultDocument::from_json(&legacy.to_string()).is_ok());
+}
+
+#[test]
+fn monte_carlo_histogram_validation_preserves_missingness_and_legacy_intervals() {
+    let document = AnalysisResultDocument::from_monte_carlo(
+        instance(AnalysisKind::MonteCarlo),
+        &monte_carlo_result(),
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    for (edges, counts) in [
+        (vec![0.8, 0.95, 1.01, 1.2], vec![1, 1, 1]),
+        (vec![0.9, 1.0, 1.0, 1.1], vec![1, 0, 2]),
+    ] {
+        let mut document = document.clone();
+        let ResultPayload::MonteCarlo(payload) = &mut document.payload else {
+            panic!("Monte Carlo payload expected");
+        };
+        payload.statistics[0].bin_edges = edges;
+        payload.statistics[0].histogram = counts;
+        document.schema_version = 17;
+        document.validate().unwrap();
+        let ResultPayload::MonteCarlo(payload) = &mut document.payload else {
+            panic!("Monte Carlo payload expected");
+        };
+        payload.statistics[0].samples[1] = None;
+        let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
+        assert_eq!(restored, document);
+    }
+    for samples in [vec![], vec![1.0; 3]] {
+        let mut result = MonteCarloResult::new();
+        result.num_runs = samples.len();
+        result.all_converged = true;
+        result.variables.insert(
+            "out".into(),
+            VariableStatistics::from_samples("out", samples, 20),
+        );
+        let document =
+            AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
+                .unwrap()
+                .build()
+                .unwrap();
+        let restored = AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap();
+        assert_eq!(restored, document);
+    }
+    let mut missing = document;
+    let ResultPayload::MonteCarlo(payload) = &mut missing.payload else {
+        panic!("Monte Carlo payload expected");
+    };
+    let statistics = &mut payload.statistics[0];
+    statistics.samples.fill(None);
+    statistics.mean = None;
+    statistics.standard_deviation = None;
+    statistics.minimum = None;
+    statistics.maximum = None;
+    statistics.histogram.clear();
+    statistics.bin_edges.clear();
+    let restored = AnalysisResultDocument::from_json(&missing.to_json().unwrap()).unwrap();
+    assert_eq!(restored, missing);
+}
+
+#[test]
+fn monte_carlo_population_validation_honors_cancellation() {
+    let mut result = MonteCarloResult::new();
+    result.num_runs = 512;
+    result.all_converged = true;
+    result.variables.insert(
+        "out".into(),
+        VariableStatistics::from_samples("out", (0..512).map(f64::from).collect(), 128),
+    );
+    let document =
+        AnalysisResultDocument::from_monte_carlo(instance(AnalysisKind::MonteCarlo), &result)
+            .unwrap()
+            .build()
+            .unwrap();
+    let count = CountingAbort::new(usize::MAX);
+    document.validate_with_abort(&count).unwrap();
+    for threshold in 0..count.count() {
+        let abort = CountingAbort::new(threshold);
+        assert_eq!(
+            document.validate_with_abort(&abort),
+            Err(ResultDocumentError::Aborted)
+        );
+        assert_eq!(abort.polls_after_abort(), 0);
+    }
 }

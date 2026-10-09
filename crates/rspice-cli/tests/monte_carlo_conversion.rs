@@ -667,8 +667,23 @@ fn contradictory_monte_carlo_reports_cannot_be_exported_compared_or_blessed() {
         "conditional",
         "bounds",
         "unit",
+        "histogram-population",
+        "histogram-location",
+        "histogram-empty-interval",
+        "histogram-order",
+        "histogram-end",
+        "histogram-empty",
+        "histogram-overflow",
+        "extrema-evidence",
+        "mean-evidence",
     ] {
         let mut document = original.clone();
+        let variable_index = document["payload"]["statistics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|variable| variable["name"] == "V(OUT)")
+            .unwrap();
         let name = match case {
             "failed" => "failed_runs",
             "converged" => "all_converged",
@@ -690,6 +705,56 @@ fn contradictory_monte_carlo_reports_cannot_be_exported_compared_or_blessed() {
             "bounds" => scalar["value"]["value"] = json!(100.0),
             "unit" => scalar["unit"] = json!({"unit":"ampere"}),
             "range" => document["payload"]["successfulTrialIndices"][5] = json!(13),
+            "histogram-population" => {
+                document["payload"]["statistics"][variable_index]["histogram"][0] = json!(999)
+            }
+            "histogram-location" => {
+                let counts = document["payload"]["statistics"][variable_index]["histogram"]
+                    .as_array_mut()
+                    .unwrap();
+                let source = counts
+                    .iter()
+                    .position(|count| count.as_u64().unwrap() != 0)
+                    .unwrap();
+                let target = (source + 1) % counts.len();
+                counts[source] = json!(counts[source].as_u64().unwrap() - 1);
+                counts[target] = json!(counts[target].as_u64().unwrap() + 1);
+            }
+            "histogram-empty-interval" => {
+                let variable = &mut document["payload"]["statistics"][variable_index];
+                let min = variable["minimum"].clone();
+                let max = variable["maximum"].clone();
+                variable["binEdges"] = json!([min, min, max]);
+                variable["histogram"] = json!([1, 5]);
+                for sample in variable["samples"].as_array_mut().unwrap() {
+                    *sample = Value::Null;
+                }
+            }
+            "histogram-order" => {
+                document["payload"]["statistics"][variable_index]["binEdges"][1] = json!(-1000.0)
+            }
+            "histogram-end" => {
+                let edges = document["payload"]["statistics"][variable_index]["binEdges"]
+                    .as_array_mut()
+                    .unwrap();
+                let last = edges.last_mut().unwrap();
+                *last = json!(last.as_f64().unwrap().next_down());
+            }
+            "histogram-empty" => {
+                document["payload"]["statistics"][variable_index]["histogram"] = json!([])
+            }
+            "histogram-overflow" => {
+                document["payload"]["statistics"][variable_index]["histogram"][0] =
+                    json!(usize::MAX);
+                document["payload"]["statistics"][variable_index]["histogram"][1] =
+                    json!(usize::MAX);
+            }
+            "extrema-evidence" => {
+                document["payload"]["statistics"][variable_index]["maximum"] = json!(1000.0)
+            }
+            "mean-evidence" => {
+                document["payload"]["statistics"][variable_index]["mean"] = json!(1000.0)
+            }
             _ => unreachable!(),
         }
         std::fs::write(&altered, document.to_string()).unwrap();

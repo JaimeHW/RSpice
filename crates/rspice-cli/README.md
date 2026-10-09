@@ -895,6 +895,12 @@ interpolated. Native JSON retains integer trial indices without binary64 roundin
 flat formats reject indices that cannot be represented exactly. Output units remain
 explicit where known by the producing analysis, and unstated in legacy populations.
 
+Histogram intervals include their lower edge; the final interval also includes
+its upper edge. Native histograms retain the exact sample extrema and collapse
+coincident rounded boundaries. JSON report admission checks histogram totals,
+ordered edges, per-bin membership, and extrema against the retained samples.
+Contradictory reports cannot be converted, compared, or blessed as baselines.
+
 `mc:identity:` columns preserve text, integer values, units, and variable identities
 as exact named indicators. Text uses UTF-8 hexadecimal encoding so case-sensitive
 metadata cannot alias in case-insensitive file formats. Large integer seeds remain
