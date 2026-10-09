@@ -15,6 +15,9 @@ pub struct TranSetup {
     pub max_step: String,
     /// Skip the DC operating point and use initial conditions.
     pub uic: bool,
+    /// Optional accepted-state capture and immutable continuation selections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<crate::tran_checkpoint::TranCheckpointDraft>,
 }
 
 impl Default for TranSetup {
@@ -25,6 +28,7 @@ impl Default for TranSetup {
             start: "0".to_owned(),
             max_step: "auto".to_owned(),
             uic: false,
+            checkpoint: None,
         }
     }
 }

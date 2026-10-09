@@ -13,6 +13,18 @@ pub fn analysis_spec_execution_options(
     use rspice_simulation_contract::analysis_draft::AnalysisDraft;
 
     match spec {
+        AnalysisSpec::Transient { stop_time, .. } => {
+            let AnalysisDraft::Transient(draft) = draft else {
+                return Err("Transient specification requires its authored draft".into());
+            };
+            Ok(SpecExecutionOptions {
+                tran_checkpoint: crate::transient_checkpoint::preparation::request_from_draft(
+                    draft.checkpoint.as_ref(),
+                    *stop_time,
+                )?,
+                ..Default::default()
+            })
+        }
         AnalysisSpec::MonteCarlo { .. } => {
             let AnalysisDraft::MonteCarlo(draft) = draft else {
                 return Err("Monte Carlo specification requires its authored draft".into());

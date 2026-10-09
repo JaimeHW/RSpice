@@ -37,6 +37,7 @@ pub fn prerequisite_draft_for(
             start: format!("{:.12e}", requirement.start_time),
             max_step: format!("{interval:.12e}"),
             uic: false,
+            checkpoint: None,
         }));
     }
     if prerequisite == AnalysisKind::Transient
@@ -59,6 +60,7 @@ pub fn prerequisite_draft_for(
             start: format!("{:.12e}", 0.0),
             max_step: format!("{step:.12e}"),
             uic: false,
+            checkpoint: None,
         }));
     }
     if prerequisite == AnalysisKind::Pss {

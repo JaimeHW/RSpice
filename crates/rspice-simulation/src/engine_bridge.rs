@@ -244,12 +244,11 @@ impl EngineBridge {
         )
     }
 
-    fn run_request_with_checkpoint(
+    fn materialize_input(
         &self,
-        input: SimulationInput<'_>,
-        checkpoint: Option<crate::transient_checkpoint::CheckpointExecution<'_>>,
+        input: &SimulationInput<'_>,
         abort_flag: &dyn AbortSignal,
-    ) -> Result<SimulationResult, SimulationError> {
+    ) -> Result<rspice_core::Netlist, SimulationError> {
         ensure_not_aborted(abort_flag)?;
         input.config.validate().map_err(|errors| {
             SimulationError::InvalidConfig(format!(
@@ -293,7 +292,7 @@ impl EngineBridge {
             // temporary temperature card used during parameter evaluation.
             netlist.source_text = Some(input.netlist_str.to_owned());
         }
-        if let Some(environment) = input.environment {
+        if let Some(environment) = &input.environment {
             if !environment.temperature_celsius.is_finite()
                 || environment.temperature_celsius <= -273.15
             {
@@ -331,7 +330,7 @@ impl EngineBridge {
                     ));
                 }
             }
-        } else if let Some(corner) = input.supply_corner {
+        } else if let Some(corner) = &input.supply_corner {
             crate::netlist_preparation::apply_voltage_corner(
                 &mut netlist,
                 corner.corner_voltage,
@@ -349,6 +348,16 @@ impl EngineBridge {
                 }
             })?;
         }
+        Ok(netlist)
+    }
+
+    fn run_request_with_checkpoint(
+        &self,
+        input: SimulationInput<'_>,
+        checkpoint: Option<crate::transient_checkpoint::CheckpointExecution<'_>>,
+        abort_flag: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        let netlist = self.materialize_input(&input, abort_flag)?;
         if let Some(checkpoint) = checkpoint {
             let AnalysisConfig::Transient(config) = input.config else {
                 return Err(SimulationError::InvalidConfig(

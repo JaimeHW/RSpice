@@ -46,6 +46,8 @@ pub struct RunPreparationInputs<'a, R, A> {
     pub schematic_source: rspice_design::projection::SchematicSource<'a>,
     pub imported_checkpoints:
         &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+    pub imported_transient_checkpoints:
+        &'a rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     pub display_waveform_cache_samples: usize,
     pub compilation: Option<&'a crate::project_veriloga::receipt::ProjectCompileReceipt>,
 }
@@ -182,6 +184,7 @@ where
         &plan,
         &sealed_models,
         inputs.imported_checkpoints,
+        inputs.imported_transient_checkpoints,
         inputs.schematic_source.current_file,
     )
     .map_err(|errors| PreparationError::new(PreparationStage::AnalysisPlan, errors.join("; ")))?;

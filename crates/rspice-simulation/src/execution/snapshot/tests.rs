@@ -6,6 +6,7 @@
 
 mod identity;
 mod monte_carlo;
+mod transient_checkpoint;
 
 use super::*;
 use crate::execution_options::SpecExecutionOptions;

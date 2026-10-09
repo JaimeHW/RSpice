@@ -8,11 +8,122 @@ use rspice_formats::project_results::{PersistedField, ProjectSimulationResults};
 use rspice_results::transient_checkpoint::{
     TransientCheckpointEvidence, TransientCheckpointLibrary,
 };
+use rspice_simulation::results::SimulationResult;
 use rspice_simulation::transient_checkpoint::TransientCheckpointRequest;
 use std::sync::Arc;
 
 const DECK: &str =
     "Checkpoint retention\nV1 in 0 sin(0 1 1meg)\nR1 in out 1k\nC1 out 0 1p\n.tran 1n 20n\n.end\n";
+
+#[test]
+fn transient_checkpoint_authored_plan_prepares_captures_and_resumes_native_run() {
+    use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+    use rspice_simulation_contract::tran_checkpoint::TranCheckpointDraft;
+    let mut state = super::super::test_execution::monte_carlo::checkpoint_state();
+    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let ids: Vec<_> = plan
+        .instances()
+        .iter()
+        .map(|instance| instance.id())
+        .collect();
+    for id in ids {
+        plan.set_enabled(id, false).unwrap();
+    }
+    let (id, _) = plan.insert(AnalysisKind::Transient).unwrap();
+    plan.edit(id, |draft| {
+        let AnalysisDraft::Transient(draft) = draft else {
+            unreachable!()
+        };
+        draft.stop = "20n".into();
+        draft.step = "1n".into();
+        draft.max_step = "1n".into();
+        draft.checkpoint = Some(TranCheckpointDraft {
+            interval: Some("7n".into()),
+            resume: vec![],
+        });
+    })
+    .unwrap();
+    let mut controller = SimulationController::new();
+    controller.prepare_run_set_for_preflight(&state).unwrap();
+    let mut tasks = controller
+        .consume_snapshot_for_dispatch(&state)
+        .unwrap()
+        .into_tasks();
+    assert_eq!(tasks.len(), 1);
+    let task = tasks.pop_front().unwrap();
+    let times = &task.spec_options().tran_checkpoint.as_ref().unwrap().times;
+    assert_eq!(times.len(), 3);
+    for (actual, expected) in times.iter().zip([7e-9, 14e-9, 20e-9]) {
+        assert!((actual - expected).abs() < 1e-23);
+    }
+    let mut runner = SimulationRunner::new();
+    runner
+        .start_prepared(
+            task.resolve_dependency_artifacts(&Default::default())
+                .unwrap(),
+            false,
+        )
+        .unwrap();
+    super::super::test_execution::wait_until_finished_unpolled(&runner);
+    let image =
+        TransientCheckpointEvidence::from_bytes(runner.take_transient_checkpoint().unwrap())
+            .unwrap();
+    runner.poll_result().unwrap().unwrap();
+    assert_eq!(image.accepted_time(), 20e-9);
+    state
+        .simulation
+        .retained
+        .imported_transient_checkpoints
+        .insert("accepted".into(), image.clone())
+        .unwrap();
+    state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .unwrap()
+        .edit(id, |draft| {
+            let AnalysisDraft::Transient(draft) = draft else {
+                unreachable!()
+            };
+            draft.stop = "40n".into();
+            draft.checkpoint.as_mut().unwrap().resume = vec![image.digest()];
+        })
+        .unwrap();
+    controller.prepare_run_set_for_preflight(&state).unwrap();
+    let mut tasks = controller
+        .consume_snapshot_for_dispatch(&state)
+        .unwrap()
+        .into_tasks();
+    let task = tasks.pop_front().unwrap();
+    let request = task.spec_options().tran_checkpoint.as_ref().unwrap();
+    assert_eq!(request.resume.as_ref().unwrap().digest(), image.digest());
+    assert!(
+        request
+            .times
+            .iter()
+            .all(|time| *time > image.accepted_time())
+    );
+    runner
+        .start_prepared(
+            task.resolve_dependency_artifacts(&Default::default())
+                .unwrap(),
+            false,
+        )
+        .unwrap();
+    super::super::test_execution::wait_until_finished_unpolled(&runner);
+    let result = runner.poll_result().unwrap().unwrap();
+    let SimulationResult::Transient { time, .. } = result else {
+        panic!("transient")
+    };
+    assert_eq!(time.first(), Some(&20e-9));
+    assert_eq!(time.last(), Some(&40e-9));
+    assert_eq!(
+        TransientCheckpointEvidence::from_bytes(runner.take_transient_checkpoint().unwrap())
+            .unwrap()
+            .accepted_time(),
+        40e-9
+    );
+}
 
 fn images() -> Vec<Arc<[u8]>> {
     let (_, images) = Engine::default()

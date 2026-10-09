@@ -376,9 +376,13 @@ impl SimulationRunner {
             environment,
             execution_limits,
         ) = dispatch.into_runner_parts();
+        // A configuration-only request has no checkpoint policy. Preserve the
+        // sealed options even when this transient also has a basic config.
         let request = match task.config {
-            Some(config) => SimulationRequest::Config(Box::new(config)),
-            None => SimulationRequest::Spec {
+            Some(config) if task.spec_options.tran_checkpoint.is_none() => {
+                SimulationRequest::Config(Box::new(config))
+            }
+            _ => SimulationRequest::Spec {
                 spec: Box::new(task.spec),
                 options: Box::new(task.spec_options),
             },

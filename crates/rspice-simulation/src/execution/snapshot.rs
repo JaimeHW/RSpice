@@ -49,6 +49,7 @@ mod declared_points;
 mod derived_identity;
 mod hierarchy_map;
 mod monte_carlo;
+mod transient_checkpoint;
 use crate::monte_carlo_checkpoint::preparation::PreparedMonteCarloResume;
 use crate::monte_carlo_checkpoint::preparation::digest_with_resumes;
 mod participation;
@@ -336,6 +337,7 @@ pub struct PreparedTask {
     bound_observation_cards: Vec<String>,
     /// Checked selections are routed only after per-point source materialization.
     monte_carlo_resumes: Arc<[PreparedMonteCarloResume]>,
+    transient_resumes: Arc<[rspice_results::transient_checkpoint::TransientCheckpointEvidence]>,
 }
 
 impl PreparedTask {
@@ -373,6 +375,7 @@ impl PreparedTask {
             run_at: rspice_simulation_contract::analysis_run_at::AnalysisRunAt::default(),
             bound_observation_cards: Vec::new(),
             monte_carlo_resumes: Arc::from([]),
+            transient_resumes: Arc::from([]),
         }
     }
 
@@ -478,6 +481,8 @@ impl PreparedTask {
             &self.bound_observation_cards,
         );
         let analysis_digest = digest_with_resumes(analysis_digest, &self.monte_carlo_resumes);
+        let analysis_digest =
+            transient_checkpoint::digest_with_resumes(analysis_digest, &self.transient_resumes);
         let Some(environment) = self.execution_environment.as_ref() else {
             return analysis_digest;
         };
@@ -1154,6 +1159,7 @@ impl PreparedRunSnapshot {
                 abort,
             },
         )?;
+        transient_checkpoint::route_resumes(&mut parts, execution_limits, abort)?;
 
         let mut positions = HashMap::with_capacity(parts.tasks.len());
         for (index, task) in parts.tasks.iter().enumerate() {

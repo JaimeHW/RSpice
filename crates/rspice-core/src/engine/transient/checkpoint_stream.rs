@@ -29,6 +29,70 @@ pub struct TransientCheckpointStream<'a> {
 }
 
 impl Engine {
+    /// Check a streamed request against its materialized circuit and resolved
+    /// numerical policy without running a transient or installing saved state.
+    /// Runtime restore still validates every circuit-owned state contract.
+    pub fn validate_transient_checkpoint_request(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        start: TransientCheckpointStart<'_>,
+        times: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        Self::ensure_model_run_active(abort)?;
+        validate_transient_window(tstop, max_step)?;
+        let engine = self.resolved_for_netlist(netlist);
+        if netlist.options.transient_noise.is_some()
+            && (!matches!(start, TransientCheckpointStart::Fresh(_)) || !times.is_empty())
+        {
+            return Err(SimulationError::Circuit(
+                "A transient with NOISEFMAX cannot be checkpointed or resumed: the noise stream state is not yet persisted".into(),
+            ));
+        }
+        let accepted_time = match start {
+            TransientCheckpointStart::Fresh(_) => 0.0,
+            TransientCheckpointStart::Resume(checkpoint)
+            | TransientCheckpointStart::Restart(checkpoint) => {
+                if !checkpoint.time.is_finite() || checkpoint.time < 0.0 || tstop <= checkpoint.time
+                {
+                    return Err(SimulationError::Circuit(
+                        "streamed resume requires a finite accepted time before the stop time"
+                            .into(),
+                    ));
+                }
+                match start {
+                    TransientCheckpointStart::Restart(_) => {
+                        checkpoint.validate_for_restart_with_config(netlist, &engine.config)
+                    }
+                    _ => checkpoint.validate_for_with_config(netlist, &engine.config),
+                }
+                .map_err(SimulationError::Circuit)?;
+                checkpoint
+                    .validate_recorded_integration_max_step()
+                    .map_err(SimulationError::Circuit)?;
+                checkpoint
+                    .validated_integration_continuation()
+                    .map_err(SimulationError::Circuit)?;
+                checkpoint.time
+            }
+        };
+        engine.validate_transient_checkpoint_schedule(netlist, accepted_time, tstop, times)?;
+        fft::preflight(&engine, netlist, tstop, abort)?;
+        if netlist
+            .fft_analyses
+            .iter()
+            .any(|request| request.start.unwrap_or(0.0) < accepted_time)
+        {
+            return Err(SimulationError::Circuit(
+                "FFT window starts before the resumed trajectory; select an earlier checkpoint or a later FFT window".into(),
+            ));
+        }
+        engine.ensure_transient_request_floor(tstop - accepted_time, max_step)?;
+        Self::ensure_model_run_active(abort)
+    }
+
     /// Run or resume a transient while publishing accepted checkpoints.
     ///
     /// No scheduled snapshots are retained by the engine after delivery. The
@@ -44,7 +108,14 @@ impl Engine {
         stream: TransientCheckpointStream<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
-        validate_transient_window(tstop, max_step)?;
+        self.validate_transient_checkpoint_request(
+            netlist,
+            tstop,
+            max_step,
+            stream.start,
+            stream.times,
+            abort,
+        )?;
         let resume_validation = match stream.start {
             TransientCheckpointStart::Restart(_) => ResumeValidation::AuthoredRestart,
             _ => ResumeValidation::ExactNetlist,

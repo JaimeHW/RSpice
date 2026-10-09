@@ -20,6 +20,7 @@ pub fn prepare_plan_tasks<'a, R, A, W>(
     plan: &FrozenSimulationPlan,
     sealed_model_sources: &crate::model_sources::SealedModelExecutionSources,
     imported_checkpoints: &'a rspice_results::monte_carlo_checkpoint::MonteCarloCheckpointLibrary,
+    imported_transient_checkpoints: &'a rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     source_path: Option<&std::path::Path>,
 ) -> Result<Vec<PreparedTask>, Vec<String>>
 where
@@ -183,6 +184,25 @@ where
             Vec::new()
         };
 
+        let transient_resumes = if let AnalysisDraft::Transient(draft) = instance.draft() {
+            match crate::transient_checkpoint::preparation::selected_images(
+                inputs
+                    .runs
+                    .iter()
+                    .flat_map(|run| run.as_ref().analyses.iter().map(AsRef::as_ref)),
+                imported_transient_checkpoints,
+                draft.checkpoint.as_ref(),
+            ) {
+                Ok(images) => images,
+                Err(error) => {
+                    errors.push(format!("{}: {error}", instance.display_name()));
+                    continue;
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
         // A PSS request that asks to retain harmonics earns a second
         // prepared task for them. It is a task in its own right, with its
         // own identity and config digest, rather than a second result
@@ -269,7 +289,8 @@ where
             task,
         )
         .with_run_at(run_at.clone())
-        .with_monte_carlo_resumes(monte_carlo_resumes);
+        .with_monte_carlo_resumes(monte_carlo_resumes)
+        .with_transient_resumes(transient_resumes);
         if instance.kind() == AnalysisKind::SParameter {
             match crate::preparation::touchstone::touchstone_export_policy_for_dialog(
                 &projected_state.sim_setup.sp,

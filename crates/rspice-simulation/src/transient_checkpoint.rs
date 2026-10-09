@@ -23,6 +23,7 @@ pub(crate) fn check_limit(
 }
 
 pub use rspice_results::transient_checkpoint::checkpoint_digest;
+pub(crate) mod preparation;
 
 fn translate_checkpoint_error(
     error: rspice_results::transient_checkpoint::TransientCheckpointError,
@@ -140,6 +141,20 @@ impl TransientCheckpointRequest {
         stop: f64,
         limits: ResourceLimits,
     ) -> Result<(), SimulationError> {
+        self.validate_times(stop, limits)?;
+        if self.times.is_empty() && self.resume.is_none() {
+            return Err(SimulationError::InvalidConfig(
+                "Transient checkpoint request has no schedule or resume input".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_times(
+        &self,
+        stop: f64,
+        limits: ResourceLimits,
+    ) -> Result<(), SimulationError> {
         check_limit(
             rspice_core::ResourceKind::AnalysisPoints,
             self.times.len(),
@@ -156,11 +171,6 @@ impl TransientCheckpointRequest {
                 ));
             }
             previous = Some(time);
-        }
-        if self.times.is_empty() && self.resume.is_none() {
-            return Err(SimulationError::InvalidConfig(
-                "Transient checkpoint request has no schedule or resume input".into(),
-            ));
         }
         Ok(())
     }

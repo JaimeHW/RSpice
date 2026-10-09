@@ -12,6 +12,50 @@ use rspice_core::netlist::AnalysisCommand;
 use rspice_simulation_contract::config::TransientAnalysisConfig;
 
 impl EngineBridge {
+    /// Validate source/environment identity using the same materialization as execution.
+    pub(crate) fn validate_transient_checkpoint(
+        &self,
+        config: &rspice_simulation_contract::config::AnalysisConfig,
+        source: &str,
+        environment: Option<crate::runner::AnalysisExecutionEnvironment>,
+        checkpoint: Option<&rspice_core::engine::TransientCheckpoint>,
+        times: &[f64],
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let input = super::SimulationInput {
+            config,
+            netlist_str: source,
+            source_path: None,
+            environment,
+            supply_corner: None,
+        };
+        let materialized = self.materialize_input(&input, abort)?;
+        let rspice_simulation_contract::config::AnalysisConfig::Transient(config) = config else {
+            return Err(SimulationError::InvalidConfig(
+                "Checkpoint requires a transient task".into(),
+            ));
+        };
+        let netlist = netlist_for_transient_config(&materialized, config, abort)?;
+        let start = checkpoint.map_or(
+            rspice_core::engine::TransientCheckpointStart::Fresh(
+                rspice_core::engine::TransientStartupMode::from_uic(config.uic),
+            ),
+            rspice_core::engine::TransientCheckpointStart::Restart,
+        );
+        self.engine
+            .validate_transient_checkpoint_request(
+                &netlist,
+                config.stop_time,
+                config
+                    .resolved_maximum_step()
+                    .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?,
+                start,
+                times,
+                abort,
+            )
+            .map_err(|error| self.translate_error(error))
+    }
+
     /// Run transient analysis.
     pub(super) fn run_transient(
         &self,
