@@ -162,6 +162,41 @@ fn pxf_import_preserves_projected_missing_samples_and_midpoints() {
 }
 
 #[test]
+fn pxf_publication_keeps_the_transfer_when_group_delay_is_unavailable() {
+    for zero_transfer in [false, true] {
+        let (card, mut source) = pxf_measurement();
+        if zero_transfer {
+            source.points[1].transfer = Complex64::new(0.0, 0.0);
+        } else {
+            for (index, point) in source.points.iter_mut().enumerate() {
+                point.freq_in = (index + 1) as f64 * 1e-320;
+                point.freq_out = point.freq_in;
+                point.transfer = if index == 1 {
+                    Complex64::new(0.0, -1.0)
+                } else {
+                    Complex64::new(1.0, 0.0)
+                };
+            }
+        }
+        source.compute_metrics();
+        let document =
+            AnalysisResultDocument::from_pxf(instance(AnalysisKind::Pxf), &card, &source)
+                .unwrap()
+                .build()
+                .unwrap();
+        let ResultPayload::Pxf(payload) = document.payload() else {
+            panic!("expected PXF")
+        };
+        assert!(payload.group_delay.is_empty());
+        assert_eq!(document.signals()[0].values().len(), 3);
+        assert_eq!(
+            AnalysisResultDocument::from_json(&document.to_json().unwrap()).unwrap(),
+            document
+        );
+    }
+}
+
+#[test]
 fn pxf_validation_cancels_during_group_delay_scan() {
     let mut document = document_for(AnalysisResultKind::Pxf);
     let offsets = (1..=ABORT_POLL_STRIDE * 8)

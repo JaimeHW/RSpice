@@ -3402,6 +3402,11 @@ impl AnalysisResultDocument {
 
         let mut group_delay = Vec::with_capacity(point_count.saturating_sub(1));
         for (frequency, delay) in result.group_delay_curve() {
+            if frequency.is_finite() && delay.is_nan() {
+                // The primary grid identifies the omitted interval. A zero
+                // transfer or unrepresentable derivative has no finite delay.
+                continue;
+            }
             if !frequency.is_finite() || !delay.is_finite() {
                 return Err(source_error(
                     LOCATION,

@@ -309,11 +309,23 @@ impl TransferPoint {
         self.transfer.arg() * 180.0 / PI
     }
 
-    /// Get group delay at this point (requires adjacent points)
+    /// Difference-derived group delay over the next interval.
+    ///
+    /// NaN denotes an unavailable delay: zero or invalid transfer values,
+    /// invalid frequency spacing, or a result outside the finite range.
     pub fn group_delay(&self, next: &TransferPoint) -> Value {
         let df = next.freq_in - self.freq_in;
-        if df == 0.0 {
-            return 0.0;
+        if !self.freq_in.is_finite()
+            || !next.freq_in.is_finite()
+            || !df.is_finite()
+            || df <= 0.0
+            || [self, next].iter().any(|point| {
+                !point.transfer.re.is_finite()
+                    || !point.transfer.im.is_finite()
+                    || point.transfer == Complex64::new(0.0, 0.0)
+            })
+        {
+            return Value::NAN;
         }
         let dphi = next.phase() - self.phase();
         // Unwrap phase if needed
@@ -326,11 +338,12 @@ impl TransferPoint {
         };
         // Preserve every resolvable interval. Multiplying a very large finite
         // interval by 2π can overflow even when the delay is representable.
-        if df.abs() > f64::MAX / (2.0 * PI) {
+        let delay = if df.abs() > f64::MAX / (2.0 * PI) {
             (-dphi_unwrapped / (2.0 * PI)) / df
         } else {
             -dphi_unwrapped / (2.0 * PI * df)
-        }
+        };
+        if delay.is_finite() { delay } else { Value::NAN }
     }
 }
 
@@ -411,7 +424,8 @@ impl PxfResult {
             .collect()
     }
 
-    /// Get group delay curve (frequency, delay in seconds)
+    /// Midpoint group-delay curve, with NaN gaps for unavailable intervals.
+    /// Every interval is retained so a plot cannot bridge undefined phase.
     pub fn group_delay_curve(&self) -> Vec<(Value, Value)> {
         if self.points.len() < 2 {
             return Vec::new();
@@ -661,6 +675,41 @@ mod tests {
             assert_eq!(result.bandwidth_3db, None);
             assert_eq!(result.unity_gain_freq, None);
             assert_eq!(result.dc_gain, None);
+        }
+    }
+
+    #[test]
+    fn group_delay_keeps_gaps_at_zero_transfer_and_resumes_after_them() {
+        let result = response(&[
+            (1.0, Complex64::new(1.0, 0.0)),
+            (2.0, Complex64::new(0.0, -1.0)),
+            (3.0, Complex64::new(0.0, 0.0)),
+            (4.0, Complex64::new(1.0, 0.0)),
+            (5.0, Complex64::new(0.0, -1.0)),
+        ]);
+        let curve = result.group_delay_curve();
+        assert_eq!(
+            curve.iter().map(|sample| sample.0).collect::<Vec<_>>(),
+            vec![1.5, 2.5, 3.5, 4.5]
+        );
+        assert_eq!(curve[0].1, 0.25);
+        assert!(curve[1].1.is_nan());
+        assert!(curve[2].1.is_nan());
+        assert_eq!(curve[3].1, 0.25);
+    }
+
+    #[test]
+    fn unrepresentable_or_invalid_delay_is_unavailable_without_clipping() {
+        let result = response(&[
+            (1e-320, Complex64::new(1.0, 0.0)),
+            (2e-320, Complex64::new(0.0, -1.0)),
+        ]);
+        assert!(result.points[0].group_delay(&result.points[1]).is_nan());
+        let first = &result.points[0];
+        for frequency in [first.freq_in, 0.0, f64::INFINITY, f64::NAN] {
+            let mut next = result.points[1].clone();
+            next.freq_in = frequency;
+            assert!(first.group_delay(&next).is_nan());
         }
     }
 

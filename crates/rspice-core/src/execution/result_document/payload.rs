@@ -2672,6 +2672,8 @@ pub struct PxfPayload {
     /// It carries its own abscissa, the way `StabilityPayload::nyquist` does,
     /// because a `ResultSignal` must have exactly `point_count` samples and a
     /// difference-derived delay has one fewer, on a grid of its own.
+    /// Undefined or non-representable intervals are omitted; retained midpoint
+    /// coordinates identify which intervals have finite delay evidence.
     pub group_delay: Vec<PxfGroupDelaySample>,
     /// Transfer at zero offset, only when actually evaluated there. Positive
     /// offset samples do not establish DC gain, however small their frequency.

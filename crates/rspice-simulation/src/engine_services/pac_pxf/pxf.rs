@@ -46,6 +46,7 @@ pub struct PxfData {
     /// Complex transfer H(input sideband -> output sideband).
     pub transfer: Vec<Complex64>,
     /// Optional group delay curve [(Hz, s)], on its own midpoint abscissa.
+    /// NaN marks an unavailable interval and becomes a waveform gap.
     pub group_delay: Option<Vec<(Value, Value)>>,
     /// Input sideband index.
     pub input_sideband: i32,

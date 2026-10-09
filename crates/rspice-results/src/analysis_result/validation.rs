@@ -8,6 +8,7 @@ use crate::soa_evidence::{
 use crate::soa_source::SoaSourceHistory;
 use crate::validation::{normalized_f64, same_retained_float};
 use std::collections::HashSet;
+mod pxf;
 mod soa_derating;
 mod soa_duration;
 mod soa_envelope;
@@ -81,11 +82,14 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
                 ));
             }
             // Imported adapters explicitly admit unavailable source samples.
-            // A solver NaN still indicates invalid native evidence; accepting
-            // an external gap must not mask a numerical engine failure.
-            if self.import_source.is_none() && waveform.has_missing_samples() {
+            // Native derived PXF delay gaps must be reproducible from finite
+            // retained transfer samples. A solver NaN is still invalid.
+            if self.import_source.is_none()
+                && waveform.has_missing_samples()
+                && !pxf::verified_group_delay(self, waveform)
+            {
                 return Err(format!(
-                    "native retained waveform '{}' contains an unavailable sample without import attribution",
+                    "native retained waveform '{}' contains an unavailable sample without import attribution or verified derived evidence",
                     waveform.name
                 ));
             }

@@ -1255,6 +1255,90 @@ fn insert_group_delay(
     Ok(())
 }
 
+#[cfg(test)]
+mod pxf_group_delay_tests {
+    use super::*;
+    use crate::runner::worker_contract::WorkerSimulationResult;
+    use num_complex::Complex64;
+    use rspice_core::analysis::pxf::{PxfResult, TransferPoint};
+
+    #[test]
+    fn pxf_group_delay_reaches_the_waveform_as_gaps_between_valid_intervals() {
+        let mut result = PxfResult::new(1000.0, 0, 0);
+        for (index, transfer) in [
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.0, -1.0),
+            Complex64::new(0.0, 0.0),
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.0, -1.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let offset = (index + 1) as f64;
+            result.add_point(TransferPoint {
+                freq_in: offset,
+                freq_out: offset,
+                transfer,
+                sideband_in: 0,
+                sideband_out: 0,
+            });
+        }
+        let projected = project_pxf(
+            svc_runner::PxfData {
+                offset_frequencies: result.points.iter().map(|point| point.freq_in).collect(),
+                output_frequencies: result.points.iter().map(|point| point.freq_out).collect(),
+                transfer: result.points.iter().map(|point| point.transfer).collect(),
+                group_delay: Some(result.group_delay_curve()),
+                input_sideband: 0,
+                output_sideband: 0,
+                output_label: "V(out)".into(),
+            },
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap();
+        let worker = WorkerSimulationResult::try_from(projected).unwrap();
+        let received: SimulationResult = worker.into();
+        let SimulationResult::Ac { waveforms, .. } = &received else {
+            panic!("expected frequency result")
+        };
+        let delay = &waveforms["group_delay"];
+        assert_eq!(delay.x_values, vec![1.5, 2.5, 3.5, 4.5]);
+        assert_eq!(delay.y_unit, "s");
+        assert_eq!(delay.y_values[0], 0.25);
+        assert!(delay.y_values[1].is_nan());
+        assert!(delay.y_values[2].is_nan());
+        assert_eq!(delay.y_values[3], 0.25);
+        let retained = crate::result_conversion::convert(
+            received,
+            rspice_results::analysis_type::AnalysisType::Pxf,
+            "PXF group-delay gaps",
+            || 0.0,
+        );
+        assert_eq!(retained.validate_retained_evidence(), Ok(()));
+        // The exception is evidence-based: neither arbitrary solver gaps nor
+        // invented delay samples may become valid by using the reserved name.
+        for index in [0, 1] {
+            let mut altered = retained.clone();
+            let delay = altered
+                .waveforms
+                .iter_mut()
+                .find(|wave| wave.name == "group_delay")
+                .unwrap();
+            std::sync::Arc::make_mut(&mut delay.y)[index] = if index == 0 { f64::NAN } else { 0.0 };
+            assert!(altered.validate_retained_evidence().is_err());
+        }
+        let mut wrong_domain = retained.clone();
+        wrong_domain.analysis_type = rspice_results::analysis_type::AnalysisType::Ac;
+        assert!(wrong_domain.validate_retained_evidence().is_err());
+        let mut missing_source = retained;
+        missing_source
+            .waveforms
+            .retain(|wave| wave.complex.is_none());
+        assert!(missing_source.validate_retained_evidence().is_err());
+    }
+}
+
 fn complex_waveform(
     name: String,
     frequencies: &[f64],
