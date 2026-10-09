@@ -959,6 +959,57 @@ mod convergence_conversion_tests {
 mod waveform_unit_conversion_tests {
     use super::*;
 
+    #[test]
+    fn monte_carlo_histogram_centers_preserve_finite_extreme_intervals() {
+        let limit = f64::MAX;
+        let tiny = f64::from_bits(1);
+        for (lower, upper, expected) in [
+            (limit * 0.5, limit, limit * 0.75),
+            (-limit, -limit * 0.5, -limit * 0.75),
+            (limit.next_down(), limit, limit.next_down()),
+            (-limit * 0.5, limit * 0.5, 0.0),
+            (tiny, 2.0 * tiny, 2.0 * tiny),
+            (tiny, tiny, tiny),
+        ] {
+            let statistics = rspice_core::analysis::monte_carlo::VariableStatistics::from_samples(
+                "out",
+                vec![lower, upper],
+                1,
+            );
+            let result = super::convert(
+                SimulationResult::MonteCarlo {
+                    seed: 1,
+                    runs_requested: 2,
+                    runs_completed: 2,
+                    num_failures: 0,
+                    all_converged: true,
+                    member_measurements: Vec::new(),
+                    variables: vec![crate::results::MonteCarloVariableResult {
+                        name: statistics.name,
+                        samples: statistics.samples,
+                        mean: statistics.mean,
+                        std_dev: statistics.std_dev,
+                        min: statistics.min,
+                        max: statistics.max,
+                        histogram: statistics.histogram,
+                        bin_edges: statistics.bin_edges,
+                        mean_confidence: None,
+                    }],
+                },
+                AnalysisType::MonteCarlo,
+                "Monte Carlo",
+                || 0.0,
+            );
+            assert_eq!(result.waveforms.len(), 1);
+            assert_eq!(
+                result.waveforms[0].x.as_slice(),
+                &[expected],
+                "[{lower}, {upper}]"
+            );
+            assert_eq!(result.waveforms[0].y.as_slice(), &[2.0]);
+        }
+    }
+
     fn producer_waveform(
         name: &str,
         y_values: Vec<f64>,

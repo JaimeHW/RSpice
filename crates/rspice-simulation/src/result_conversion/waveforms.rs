@@ -216,7 +216,7 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
             if !histogram.is_empty() && bin_edges.len() == histogram.len().saturating_add(1) {
                 let x: Vec<f64> = bin_edges
                     .windows(2)
-                    .map(|window| (window[0] + window[1]) * 0.5)
+                    .map(|window| window[0].midpoint(window[1]))
                     .collect();
                 let y: Vec<f64> = histogram.into_iter().map(|count| count as f64).collect();
                 waveforms.push(rspice_results::waveform::RetainedWaveform::new(
