@@ -31,7 +31,7 @@
       "id": "C04",
       "status": "in_progress",
       "requirement": "Control execution",
-      "qualification_task": "Complete the remaining 17 of 29 control dispositions, producer dependencies and bounded orchestration. Preserve direct/control numerical equivalence, complex scalar bindings, physical units, immutable dataset identity and atomic publication. Extend qualification for earlier-card and eager-parameter temperatures, statistical/runtime binding, physical overrides, whole-run memory, cancellation, configuration and performance. Existing parser and analysis regression tests remain required."
+      "qualification_task": "Complete the remaining 17 of 29 control dispositions, producer dependencies and bounded orchestration. DCMATCH preflights all candidate contributor values before displaced solves and report truncation; dcmatch_bounds_all_candidate_contributors_before_report_truncation guards the reproduced quota overrun. Preserve direct/control numerical equivalence, complex scalar bindings, physical units, immutable dataset identity and atomic publication. Extend qualification for earlier-card and eager-parameter temperatures, statistical/runtime binding, physical overrides, whole-run memory, cancellation, configuration and performance. Existing parser and analysis regression tests remain required."
     },
     {
       "id": "C05",

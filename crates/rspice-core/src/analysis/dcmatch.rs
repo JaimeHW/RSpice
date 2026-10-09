@@ -113,6 +113,17 @@ pub struct DcMatchResult {
 }
 
 impl DcMatchResult {
+    /// Numeric storage retained by this result, including every contributor.
+    pub fn retained_value_count(&self) -> usize {
+        Self::value_count_for_contributors(self.contributors.len())
+    }
+
+    pub(crate) fn value_count_for_contributors(contributors: usize) -> usize {
+        // Five report scalars and sigma, sensitivity, displacement and share
+        // for each contributor. Quoted sigma is derived, not stored again.
+        5usize.saturating_add(contributors.saturating_mul(4))
+    }
+
     /// The total standard deviation the card asked to be quoted:
     /// `sigma_multiplier * sigma_total`.
     pub fn quoted_sigma(&self) -> Value {

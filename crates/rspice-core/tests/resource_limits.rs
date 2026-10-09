@@ -780,3 +780,71 @@ fn harmonic_balance_rejects_oversized_collocation_before_circuit_build() {
         })) if requested > 3
     ));
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn dcmatch_bounds_all_candidate_contributors_before_report_truncation() {
+    use rspice_core::netlist::{
+        AnalysisCommand, SpectreDistribution, SpectreSpread, SpectreStatisticsPlan,
+        SpectreVariation, SpectreVariationScope,
+    };
+    let mut text = String::from("Mismatch quota\n.param r=1k s=0 t=0\nI1 0 out 1m\n");
+    for index in 0..24 {
+        text.push_str(&format!("R{index} out 0 {{r+s+t}}\n"));
+    }
+    text.push_str(".dcmatch OUT=V(out) CONTRIBUTORS=0\n.end\n");
+    for scope in [
+        SpectreVariationScope::Mismatch,
+        SpectreVariationScope::Process,
+    ] {
+        let mut netlist = Netlist::parse(&text).unwrap();
+        netlist.spectre_statistics = SpectreStatisticsPlan {
+            variations: ["r", "s", "t"]
+                .into_iter()
+                .map(|name| SpectreVariation {
+                    bounds: None,
+                    line: 1,
+                    scope,
+                    parameter: name.into(),
+                    distribution: SpectreDistribution::Gaussian,
+                    spread: SpectreSpread::StandardDeviation("10".into()),
+                    percent: false,
+                })
+                .collect(),
+            correlations: vec![],
+        };
+        let AnalysisCommand::DcMatch(mut card) = netlist.analyses[0].clone() else {
+            panic!("DCMATCH card");
+        };
+        card.process = scope == SpectreVariationScope::Process;
+        card.mismatch = !card.process;
+        // 25 instance scopes times three mismatch variables, or three process
+        // variables. Each contributor retains four physical scalar values.
+        let expected_rows = if card.process { 3 } else { 75 };
+        let required = if card.process { 17 } else { 305 };
+        let mut config = SimulationConfig::default();
+        config.resource_limits.max_result_values = if card.process { 16 } else { 128 };
+        let bounded = Engine::new(config.clone());
+        for count in [0, 1, 10] {
+            card.contributor_limit = count;
+            assert!(
+                matches!(bounded.run_dc_match(&netlist, &card), Err(SimulationError::ResourceLimit(error))
+                if error.resource == ResourceKind::ResultValues && error.requested == required
+                && error.limit == config.resource_limits.max_result_values)
+            );
+            assert_eq!(
+                bounded.convergence_quality().total_iterations,
+                0,
+                "reject contributor storage before circuit solves"
+            );
+        }
+        card.contributor_limit = 0;
+        // The process circuit needs room for its OP too. Mismatch uses its
+        // exact candidate boundary, then checks the actual returned storage.
+        config.resource_limits.max_result_values = required.max(128);
+        let result = Engine::new(config).run_dc_match(&netlist, &card).unwrap();
+        assert_eq!(result.contributors.len(), expected_rows);
+        assert_eq!(result.retained_value_count(), required);
+        assert!(result.sigma_total.is_finite() && result.sigma_total > 0.0);
+    }
+}

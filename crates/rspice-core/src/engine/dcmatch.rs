@@ -218,6 +218,31 @@ impl Engine {
             )?,
         };
 
+        // Ranking and correlated variance need all candidate rows before the
+        // authored report limit can be applied. Bound that retained numeric
+        // state before allocating it or running any displaced operating points.
+        let active_mismatch = mismatch_sigmas
+            .iter()
+            .filter(|sigma| sigma.standard_deviation != 0.0)
+            .count();
+        let instances = if active_mismatch == 0 {
+            Vec::new()
+        } else {
+            self.mismatch_instances(&base, abort)?
+        };
+        let candidate_count = process_sigmas
+            .iter()
+            .filter(|sigma| sigma.standard_deviation != 0.0)
+            .count()
+            .saturating_add(instances.len().saturating_mul(active_mismatch));
+        self.ensure_result_values(DcMatchResult::value_count_for_contributors(candidate_count))?;
+        let mut contributors = Vec::new();
+        contributors
+            .try_reserve_exact(candidate_count)
+            .map_err(|source| SimulationError::Allocation {
+                object: "DC mismatch contributors",
+                source,
+            })?;
         let output = self.resolve_probe(&base, card, abort)?;
         let nominal = self.run_dc_op_state_with_startup_and_abort(
             &base,
@@ -226,7 +251,6 @@ impl Engine {
         )?;
         let nominal_value = Self::dc_sensitivity_output_value(&nominal.result, &output)?;
 
-        let mut contributors = Vec::new();
         let mut warm_start_iterations = 0usize;
         let mut warm_start_solves = 0usize;
 
@@ -274,7 +298,7 @@ impl Engine {
         }
 
         if !mismatch_sigmas.is_empty() {
-            for instance in self.mismatch_instances(&base, abort)? {
+            for instance in instances {
                 for sigma in &mismatch_sigmas {
                     if sigma.standard_deviation == 0.0 {
                         continue;
