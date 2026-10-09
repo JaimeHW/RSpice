@@ -15,6 +15,8 @@ use crate::{NodeId, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+pub(crate) mod checkpoint;
+
 //=============================================================================
 // Event Types
 //=============================================================================

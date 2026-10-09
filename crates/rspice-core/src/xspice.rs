@@ -105,6 +105,7 @@ pub use data_file::{
 };
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub use event::EventValue;
+pub(crate) use event::checkpoint as event_checkpoint;
 pub(crate) use event::{
     SharedXspiceEventQueue, SharedXspiceEventValues, XspiceEventScheduler, XspiceEventValues,
 };

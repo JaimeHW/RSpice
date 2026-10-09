@@ -19,6 +19,15 @@ pub(crate) struct EventTraceJournal {
 }
 
 impl EventTraceJournal {
+    /// Trace retention is immutable checkpoint identity. Publications belong
+    /// to the result sink and must be delivered before capture or replacement.
+    pub(crate) fn checkpoint_retention(&self) -> Result<&[bool], String> {
+        if !self.points.is_empty() {
+            return Err("event waveform publications must be drained before checkpointing".into());
+        }
+        Ok(&self.retained)
+    }
+
     pub(crate) fn configure(&mut self, retained: Arc<[bool]>) {
         self.retained = retained;
         self.points.clear();

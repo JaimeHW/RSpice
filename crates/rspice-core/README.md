@@ -849,7 +849,14 @@ Restore validates source/parameter shape and boundary wiring, rebuilds local
 digital views from the restored coordinator, and checks bridge histories against
 those values. Decoding constructs a replacement module without modifying the
 receiver. These internal components still need bounded outer-file decoding,
-XSPICE circuit event-state persistence and one atomic circuit installation.
+complete XSPICE model-context persistence and one atomic circuit installation.
+
+The internal XSPICE event image retains the exact queue, per-driver contributions,
+resolved observations and event times. Restore authenticates producers against
+elaborated output ports, validates local resolution and shared HDL observations,
+and requires drained waveform notifications. It builds replacement queue/value
+banks without publishing events. Context histories, model resources and complete
+shared-driver agreement still belong to the remaining circuit integration work.
 
 XSPICE event-driver banks resolve in stable instance/port/vector-element order.
 This keeps real-valued cancellation and digital inout observations reproducible

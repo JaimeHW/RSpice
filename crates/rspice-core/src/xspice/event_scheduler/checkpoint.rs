@@ -82,8 +82,10 @@ struct EventImage {
     value: ValueImage,
 }
 
-#[cfg(feature = "veriloga")]
 impl SchedulerCheckpoint {
+    pub(crate) fn targets(&self) -> &[EventTarget] {
+        &self.targets
+    }
     /// Enclosing hosts inspect relationships only after kernel validation.
     pub(crate) fn target_count(&self) -> usize {
         self.targets.len()

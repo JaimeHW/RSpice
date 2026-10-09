@@ -11,6 +11,10 @@
 #[path = "external_models/coupled_tests.rs"]
 mod coupled_tests;
 
+#[cfg(test)]
+#[path = "external_models/event_checkpoint_tests.rs"]
+mod event_checkpoint_tests;
+
 #[cfg(feature = "veriloga")]
 mod coupled;
 #[cfg(feature = "veriloga")]
