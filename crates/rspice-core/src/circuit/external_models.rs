@@ -5173,6 +5173,37 @@ endmodule"#;
     }
 
     #[test]
+    fn apply_xspice_events_resolves_real_cancellation_in_stable_driver_order() {
+        // All three identity components participate in the order. Publication
+        // and insertion order must not select which finite term disappears.
+        for identities in [
+            [("a", "out", 0), ("b", "out", 0), ("c", "out", 0)],
+            [("a", "a", 0), ("a", "b", 0), ("a", "c", 0)],
+            [("a", "out", 0), ("a", "out", 1), ("a", "out", 2)],
+        ] {
+            for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+                let mut values = SharedXspiceEventValues::default();
+                let mut queue = SharedXspiceEventQueue::new();
+                for index in order {
+                    let (instance, port, element) = identities[index];
+                    queue.make_mut().schedule(1e-9, 1, port, instance, element,
+                        EventValue::Real([1e16, -1e16, 1.0][index]));
+                }
+                let mut digital = Vec::new();
+                let mut real = Vec::new();
+                apply_xspice_events_at_or_before(&mut values, &mut queue, &mut digital, &mut real, 1e-9).unwrap();
+                assert_eq!(values.real_values[&1].to_bits(), 1.0f64.to_bits());
+                // A later update must use that same ordering, not the order in
+                // which the previously accepted driver bank was populated.
+                let (instance, port, element) = identities[2];
+                queue.make_mut().schedule(2e-9, 1, port, instance, element, EventValue::Real(2.0));
+                apply_xspice_events_at_or_before(&mut values, &mut queue, &mut digital, &mut real, 2e-9).unwrap();
+                assert_eq!(values.real_values[&1].to_bits(), 2.0f64.to_bits());
+            }
+        }
+    }
+
+    #[test]
     fn apply_xspice_events_resolves_touched_nodes_from_node_driver_maps() {
         let mut event_values = SharedXspiceEventValues::default();
         let mut queue = SharedXspiceEventQueue::new();
@@ -5217,10 +5248,10 @@ endmodule"#;
         assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
         assert_eq!(touched_real_nodes.capacity(), real_capacity);
         assert_eq!(
-            event_values.digital_drivers.get(&1).map(HashMap::len),
+            event_values.digital_drivers.get(&1).map(|drivers| drivers.len()),
             Some(2)
         );
-        assert_eq!(event_values.real_drivers.get(&2).map(HashMap::len), Some(2));
+        assert_eq!(event_values.real_drivers.get(&2).map(|drivers| drivers.len()), Some(2));
         assert_eq!(
             event_values.digital_values.get(&1).copied(),
             Some(DigitalValue::one())
@@ -5381,10 +5412,10 @@ endmodule"#;
         );
 
         assert_eq!(
-            event_values.digital_drivers.get(&1).map(HashMap::len),
+            event_values.digital_drivers.get(&1).map(|drivers| drivers.len()),
             Some(2)
         );
-        assert_eq!(event_values.real_drivers.get(&2).map(HashMap::len), Some(2));
+        assert_eq!(event_values.real_drivers.get(&2).map(|drivers| drivers.len()), Some(2));
         assert_eq!(
             event_values.digital_values.get(&1).copied(),
             Some(DigitalValue::one())

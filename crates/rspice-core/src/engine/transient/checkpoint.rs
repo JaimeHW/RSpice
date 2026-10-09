@@ -1299,7 +1299,8 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     // v106 preserves accepted diode displacement current through normalized restart.
     // v114 binds periodic diode projection to the resolved native M/FC law.
     // v126 retains prescribed capacitor charge and finite current across physical events.
-    hasher.update(b"rspice-transient-resolved-config-v126\0");
+    // v127 resolves XSPICE driver banks in stable instance/port/element order.
+    hasher.update(b"rspice-transient-resolved-config-v127\0");
     hash_field(
         &mut hasher,
         "gp_transient_phase_model",

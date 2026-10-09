@@ -12,7 +12,7 @@ use super::event_scheduler::{
     EventScheduler, EventTarget, Instant, SchedulerError, SchedulerLimits, SchedulerRegion,
 };
 use crate::{NodeId, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 //=============================================================================
@@ -345,10 +345,14 @@ impl XspiceEventScheduler {
 
 /// Identity of one output driver: instance, port, and vector element.
 pub(crate) type XspiceDriverId = (String, String, usize);
+// Node lookup order is immaterial; the driver fold is not. In particular,
+// summing real drivers in randomized HashMap order changes cancellation after
+// rebuilding a circuit. Keep every fold, including inout other-driver views,
+// in this stable identity order without sorting or allocating during resolution.
 /// Per-node digital drive state, one entry per driver of the node.
-pub(crate) type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
+pub(crate) type XspiceDigitalDrivers = HashMap<NodeId, BTreeMap<XspiceDriverId, DigitalValue>>;
 /// Per-node real-valued drive state, one entry per driver of the node.
-pub(crate) type XspiceRealDrivers = HashMap<NodeId, HashMap<XspiceDriverId, Value>>;
+pub(crate) type XspiceRealDrivers = HashMap<NodeId, BTreeMap<XspiceDriverId, Value>>;
 
 /// What every event-driven net of one circuit currently carries.
 ///

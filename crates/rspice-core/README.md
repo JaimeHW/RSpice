@@ -803,7 +803,7 @@ Checkpoint format 35 retains the step and stop defaults that determine
 independent-source waveforms. Extending a run or changing its step ceiling
 preserves those source parameters. Older checkpoints remain readable; resume
 requires fully specified source timing when the original defaults are absent.
-Resume also requires the current resolved simulation identity (v16); states
+Resume also requires the current resolved simulation identity (v127); states
 captured under previous source evaluation or behavioral event timing semantics
 must be regenerated.
 
@@ -850,6 +850,11 @@ digital views from the restored coordinator, and checks bridge histories against
 those values. Decoding constructs a replacement module without modifying the
 receiver. These internal components still need bounded outer-file decoding,
 XSPICE circuit event-state persistence and one atomic circuit installation.
+
+XSPICE event-driver banks resolve in stable instance/port/vector-element order.
+This keeps real-valued cancellation and digital inout observations reproducible
+when a circuit is rebuilt, without sorting drivers on each publication. Checkpoints
+from the previous randomized driver order require a fresh run.
 
 PWL interpolation and repeat timing preserve finite nonzero knot intervals
 and positive `TSCALE` values without an absolute machine-epsilon cutoff.
