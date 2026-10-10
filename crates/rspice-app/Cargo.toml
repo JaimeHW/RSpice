@@ -113,7 +113,7 @@ arrow-array = "59"
 arrow-ipc = "59"
 arrow-schema = "59"
 matfile = "0.5"
-parquet = { version = "59", default-features = false, features = ["arrow"] }
+parquet = { version = "60", default-features = false, features = ["arrow"] }
 wat = "1"
 fst-writer = "0.3"
 

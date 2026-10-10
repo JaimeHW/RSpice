@@ -48,7 +48,7 @@ npyz = { version = "0.9", features = ["complex"] }
 py_literal = "0.4"
 # arrow-rs 59 is the first release whose parquet drops the `thrift` crate
 # (GHSA-2f9f-gq7v-9h6m); every parquet <= 58 pins the unpatched `thrift ^0.17`.
-parquet = { version = "59", default-features = false, features = ["arrow"], optional = true }
+parquet = { version = "60", default-features = false, features = ["arrow"], optional = true }
 rustyhdf5 = { version = "1.93", default-features = false, optional = true }
 rust_xlsxwriter = { version = "0.99", default-features = false, optional = true }
 rspice-app-types = { workspace = true, optional = true }
