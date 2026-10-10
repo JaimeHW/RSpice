@@ -37,7 +37,7 @@ xlsx = ["dep:rust_xlsxwriter"]
 [dependencies]
 arrow-array = { version = "59", optional = true }
 arrow-ipc = { version = "59", optional = true }
-arrow-schema = { version = "59", optional = true }
+arrow-schema = { version = "60", optional = true }
 bytes = { version = "1", optional = true }
 csv.workspace = true
 fst-reader = { version = "0.17", optional = true }
