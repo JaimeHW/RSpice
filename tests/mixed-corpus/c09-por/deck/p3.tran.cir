@@ -1,0 +1,8 @@
+* C9 power-on reset, variant p3, tran
+* The boundaries convert through the authored supply-sensitive connect modules
+* of net/por_ctrl_p3.vams (selected below), whose third port is the supply.
+.hdl "../net/por_ctrl_p3.vams" module=por_ctrl
+.include ../net/por.cir
+.options connectrules=por_supply
+.tran 10n 500u
+.end

@@ -1,0 +1,6 @@
+* C9 power-on reset, variant base, tran
+.hdl "../net/por_ctrl.v"
+.include ../net/por.cir
+.param vcc=3.3
+.tran 10n 500u
+.end

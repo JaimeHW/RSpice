@@ -1,0 +1,58 @@
+schema = "rspice-mixed-design/1"
+id = "C9"
+title = "Power-on reset under a supply ramp"
+exit_phases = ["P1", "P3"]
+dialect = "best-available"
+features = []
+
+# base: .param vcc=3.3, a static converter supply (amendment A4: correct as stated).
+[[variant]]
+name = "base"
+families = ["spice", "xspice", "vams-digital"]
+today = "runs"
+
+# p3: authored supply-sensitive connect modules with a supply port (A4).
+[[variant]]
+name = "p3"
+families = ["spice", "xspice", "vams-digital", "vams-analog"]
+today = "refused:P3.2"
+
+# live: no .param vcc and no connect-rule vsup; the supply is inferred from
+# vdd and binds live (A4b, plan D-C).
+[[variant]]
+name = "live"
+families = ["spice", "xspice", "vams-digital"]
+today = "runs"
+
+# Budgets are about five times the slower route's measured case time (at
+# least 30 s), so a hang surfaces quickly.
+[[analysis]]
+id = "tran"
+variants = ["base", "p3", "live"]
+oracles = ["O6"]
+timeout_s = 50
+phase = "P1"
+
+# porn_up: the upward sweep, state carried from point to point (P1 S6).
+[[analysis]]
+id = "dc"
+variants = ["base", "p3", "live"]
+oracles = ["O6"]
+timeout_s = 30
+phase = "P1"
+
+# porn_down: the downward sweep, state carried from point to point.
+[[analysis]]
+id = "dc-down"
+variants = ["base", "p3", "live"]
+oracles = ["O6"]
+timeout_s = 30
+phase = "P1"
+
+# porn_restart: the upward sweep with RESTART=YES, every point a fresh .op.
+[[analysis]]
+id = "dc-restart"
+variants = ["base", "p3", "live"]
+oracles = ["O6"]
+timeout_s = 30
+phase = "P1"

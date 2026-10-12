@@ -1,0 +1,6 @@
+* C9 power-on reset, variant base, dc-restart (upward supply sweep, every point a fresh .op)
+.hdl "../net/por_ctrl.v"
+.include ../net/por.cir
+.param vcc=3.3
+.dc vdd 0 3.6 0.01 RESTART=YES
+.end

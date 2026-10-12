@@ -1,0 +1,6 @@
+* C9 power-on reset, variant live, dc-down (downward supply sweep; state carried point to point)
+* No .param vcc and no connect rule: the boundary supply is inferred from vdd.
+.hdl "../net/por_ctrl.v"
+.include ../net/por.cir
+.dc vdd 3.6 0 -0.01
+.end

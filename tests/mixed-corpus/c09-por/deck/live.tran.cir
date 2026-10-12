@@ -1,0 +1,7 @@
+* C9 power-on reset, variant live, tran
+* No .param vcc and no connect rule: the boundary supply is inferred from the
+* rail that reaches the converters (vdd), which binds live (plan D-C, P3.2a).
+.hdl "../net/por_ctrl.v"
+.include ../net/por.cir
+.tran 10n 500u
+.end

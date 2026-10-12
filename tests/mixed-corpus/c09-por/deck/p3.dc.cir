@@ -1,0 +1,7 @@
+* C9 power-on reset, variant p3, dc (upward supply sweep; state carried point to point)
+* The boundaries convert through the authored supply-sensitive connect modules.
+.hdl "../net/por_ctrl_p3.vams" module=por_ctrl
+.include ../net/por.cir
+.options connectrules=por_supply
+.dc vdd 0 3.6 0.01
+.end

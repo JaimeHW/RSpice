@@ -1,0 +1,23 @@
+* C9 power-on reset (RSpice-authored; corpus design C9). A 0 -> 3.3 V supply
+* ramp, a brown-out to 2.0 V and a recovery; two SPICE threshold comparators
+* (hi at 2.7 V, lo_n at 2.4 V); the Verilog controller (net/por_ctrl.v); and an
+* XSPICE 4-bit ripple counter clocked by the controller's clk, an event net the
+* two share, and cleared while por_n is low. por_n, rst_n and tie_hi reach
+* analog nodes through built-in D/A converters; hi and lo_n reach the
+* controller through built-in A/D converters. The decks add the HDL source,
+* the converter supply where they state one, and the analysis card.
+vdd vdd 0 pwl(0 0 100u 3.3 300u 3.3 310u 2.0 320u 2.0 330u 3.3)
+bhi hi 0 v = v(vdd)*0.5*(1+tanh(200*(v(vdd)-2.7)))
+blo lo_n 0 v = v(vdd)*0.5*(1+tanh(200*(v(vdd)-2.4)))
+xpor hi lo_n por_n rst_n tie_hi clk por_ctrl
+* counter clear: por_n read back through an XSPICE A/D and inverted
+abpor [por_n] [porn_d] adc_por
+.model adc_por adc_bridge(in_low = 1.65 in_high = 1.65)
+ainv porn_d cnt_rst inv1
+.model inv1 d_inverter(rise_delay = 1n fall_delay = 1n)
+* ripple up-counter: each stage toggles on the rise of the previous stage's nout
+adff0 q0b clk null cnt_rst q0 q0b dff1
+adff1 q1b q0b null cnt_rst q1 q1b dff1
+adff2 q2b q1b null cnt_rst q2 q2b dff1
+adff3 q3b q2b null cnt_rst q3 q3b dff1
+.model dff1 d_dff(clk_delay = 1n set_delay = 1n reset_delay = 1n ic = 0)

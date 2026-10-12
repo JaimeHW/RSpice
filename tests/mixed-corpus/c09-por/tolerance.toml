@@ -1,0 +1,246 @@
+schema = "rspice-mixed-tolerance/1"
+# por_ctrl: `timescale 1ns/1ps; the XSPICE counter's delays are 1 ns.
+time_precision = 1e-12
+
+# Threshold model of the O6 expectations (analytic/c09.rs): base converts at
+# its stated static supply (A/D threshold 1.65 V, D/A level 3.3 V); p3 and live
+# convert against the supply itself (threshold v(vdd)/2, level v(vdd)), as
+# P3.2 and P3.2a define them. The two models put tpor 34 ns and tbo 15 ns
+# apart, inside every time tolerance below.
+
+# ---- tran ------------------------------------------------------------------
+
+[[q]]
+id = "tpor"
+analysis = "tran"
+variants = ["base", "p3", "live"]
+kind = "cross"
+signal = "v(por_n)"
+level = 1.65
+edge = "rise"
+window = [0.0, 2.0e-4]
+oracle = "O6"
+expect = "c09::tpor"
+abs = 2.0e-7
+why = "hi crosses the A/D threshold on the 33 V/ms ramp: 81.85 us (static 1.65 V) or 81.82 us (v(vdd)/2); the comparator's tanh width (5 mV) is 0.15 us of ramp"
+
+[[q]]
+id = "trst"
+analysis = "tran"
+variants = ["base", "p3", "live"]
+kind = "cross"
+signal = "v(rst_n)"
+level = 1.65
+edge = "rise"
+window = [0.0, 2.0e-4]
+oracle = "O6"
+expect = "c09::trst"
+abs = 1.0e-6
+why = "the next clock rise after por_n (82.5 us) plus 16 us; one clock period of alignment"
+
+[[q]]
+id = "tbo"
+analysis = "tran"
+variants = ["base", "p3", "live"]
+kind = "cross"
+signal = "v(por_n)"
+level = 1.65
+edge = "fall"
+window = [2.0e-4, 3.2e-4]
+oracle = "O6"
+expect = "c09::tbo"
+abs = 2.0e-7
+why = "lo_n falls through the A/D threshold on the 130 V/ms brown-out ramp at 306.91 us (static) or 306.92 us (v(vdd)/2); comparator width as tpor"
+
+[[q]]
+id = "tpor2"
+analysis = "tran"
+variants = ["base", "p3", "live"]
+kind = "cross"
+signal = "v(por_n)"
+level = 1.65
+edge = "rise"
+window = [3.2e-4, 5.0e-4]
+oracle = "O6"
+expect = "c09::tpor2"
+abs = 2.0e-7
+why = "re-arm on the recovery ramp (2.0 -> 3.3 V over 320..330 us): 325.39 us; comparator width as tpor"
+
+[[q]]
+id = "trst2"
+analysis = "tran"
+variants = ["base", "p3", "live"]
+kind = "cross"
+signal = "v(rst_n)"
+level = 1.65
+edge = "rise"
+window = [3.2e-4, 5.0e-4]
+oracle = "O6"
+expect = "c09::trst2"
+abs = 1.0e-6
+why = "rst_n cleared at the first clock rise after the brown-out, re-released 16 us after the next clock rise past tpor2 (341.5 us); clock alignment"
+
+[[q]]
+id = "cnt"
+analysis = "tran"
+variants = ["base", "p3", "live"]
+kind = "codes"
+nets = ["q3", "q2", "q1", "q0"]
+strobe = "clk"
+window = [8.3e-5, 9.86e-5]
+oracle = "O6"
+expect = "c09::cnt"
+why = "the XSPICE counter on the controller's clock event net, released by por_n through an XSPICE A/D: sampled before each clock rise it reads 1..15, 0 (digital, exact)"
+
+[[q]]
+id = "track"
+analysis = "tran"
+variants = ["p3", "live"]
+kind = "held_at"
+signal = "v(tie_hi)"
+at = [5.0e-5, 2.0e-4, 3.15e-4]
+oracle = "O6"
+expect = "c09::track"
+rel = 0.05
+why = "a held 1 drives the supply it converts against: v(vdd) = 1.65, 3.3, 2.0 V; tie_hi is unloaded, so only the converter's own tracking error remains"
+
+# ---- dc: upward sweep, state carried (P1 S6) --------------------------------
+# The sweep points are split around the hi threshold (2.70 V). At exactly
+# 2.70 V v(hi) equals v(vdd)/2, an A/D input on its threshold for the
+# supply-tracking variants (plan §6.2: excluded as at-threshold).
+
+[[q]]
+id = "porn_up.lo"
+analysis = "dc"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(por_n)"
+times = { start = 0.0, step = 0.01, count = 270 }
+oracle = "O6"
+expect = "c09::porn_up"
+abs = 1.0e-3
+why = "por_n held 0 below the hi threshold: a held level behind 20 ohm into an unloaded node"
+
+[[q]]
+id = "porn_up.hi"
+analysis = "dc"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(por_n)"
+times = { start = 2.71, step = 0.01, count = 90 }
+oracle = "O6"
+expect = "c09::porn_up"
+abs = 1.0e-3
+why = "por_n set from the first point with v(hi) at or above the threshold (2.71 V) and held: 3.3 V (base) or v(vdd) (p3, live)"
+
+[[q]]
+id = "rstn"
+analysis = "dc"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(rst_n)"
+times = { start = 0.0, step = 0.01, count = 361 }
+oracle = "O6"
+expect = "c09::rstn"
+abs = 1.0e-3
+why = "time never advances in a sweep (P1 S6), so the clock never rises and rst_n keeps its initial 0"
+
+[[q]]
+id = "thr.hi"
+analysis = "dc"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(hi)"
+points = [2.6, 2.65, 2.7, 2.75, 2.8]
+oracle = "O6"
+expect = "c09::thr_hi"
+abs = 0.01
+why = "the hi comparator's B-source on the sweep grid (10 mV) around its 2.7 V threshold"
+
+[[q]]
+id = "thr.lo"
+analysis = "dc"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(lo_n)"
+points = [2.3, 2.35, 2.4, 2.45, 2.5]
+oracle = "O6"
+expect = "c09::thr_lo"
+abs = 0.01
+why = "the lo_n comparator's B-source on the sweep grid (10 mV) around its 2.4 V threshold"
+
+# ---- dc-down: downward sweep, state carried ---------------------------------
+
+[[q]]
+id = "porn_down.hi"
+analysis = "dc-down"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(por_n)"
+times = { start = 3.6, step = -0.01, count = 120 }
+oracle = "O6"
+expect = "c09::porn_down"
+abs = 1.0e-3
+why = "the first point's .op sees hi high, so por_n is 1, and it holds down to 2.41 V: 3.3 V (base) or v(vdd) (p3, live)"
+
+[[q]]
+id = "porn_down.lo"
+analysis = "dc-down"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(por_n)"
+times = { start = 2.39, step = -0.01, count = 240 }
+oracle = "O6"
+expect = "c09::porn_down"
+abs = 1.0e-3
+why = "por_n cleared at the first point with v(lo_n) below the threshold and held 0 (2.40 V is excluded as at-threshold for the tracking variants)"
+
+[[q]]
+id = "rstn"
+analysis = "dc-down"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(rst_n)"
+times = { start = 3.6, step = -0.01, count = 361 }
+oracle = "O6"
+expect = "c09::rstn"
+abs = 1.0e-3
+why = "time never advances in a sweep, so rst_n keeps its initial 0"
+
+# ---- dc-restart: every point a fresh .op ------------------------------------
+
+[[q]]
+id = "porn_restart.lo"
+analysis = "dc-restart"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(por_n)"
+times = { start = 0.0, step = 0.01, count = 270 }
+oracle = "O6"
+expect = "c09::porn_restart"
+abs = 1.0e-3
+why = "an independent .op at each point: hi low, so por_n keeps its initial 0"
+
+[[q]]
+id = "porn_restart.hi"
+analysis = "dc-restart"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(por_n)"
+times = { start = 2.71, step = 0.01, count = 90 }
+oracle = "O6"
+expect = "c09::porn_restart"
+abs = 1.0e-3
+why = "an independent .op at each point: hi high at time 0 sets por_n, identical point for point to the carried upward sweep"
+
+[[q]]
+id = "rstn"
+analysis = "dc-restart"
+variants = ["base", "p3", "live"]
+kind = "dc_curve"
+signal = "v(rst_n)"
+times = { start = 0.0, step = 0.01, count = 361 }
+oracle = "O6"
+expect = "c09::rstn"
+abs = 1.0e-3
+why = "time never advances in an operating point, so rst_n keeps its initial 0"
