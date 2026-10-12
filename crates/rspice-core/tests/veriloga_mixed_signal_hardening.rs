@@ -1400,8 +1400,16 @@ fn a_cross_domain_zero_delay_loop_is_refused_by_naming_its_participants() {
     );
 }
 
+/// The same loop, enabled after a valid operating point.
+///
+/// Every move of it is now an accepted timepoint of its own. `y` acts on the
+/// analog solution from the first instant after the point that moved it — the
+/// left limit of a D/A edge — so the crossing it carries on `c` is landed one
+/// minimum step later, and that landing moves `y` again. The stepper is pinned
+/// at its floor one landing per point, and the refusal names the loop from its
+/// accepted history rather than naming the floor.
 #[test]
-fn a_cross_domain_loop_enabled_after_startup_names_its_rejected_probe_activity() {
+fn a_cross_domain_loop_enabled_after_startup_is_refused_by_naming_its_participants() {
     let model = ModelFile::new(
         "enabled_loop",
         r#"
@@ -1430,13 +1438,17 @@ endmodule
         "{error}"
     );
     assert!(
-        lowered.contains("net `c`") && lowered.contains("net `y`"),
-        "{error}"
+        lowered.contains("net `c` on circuit node") && lowered.contains("read by the module"),
+        "the diagnostic must name the net the module reads: {error}"
     );
-    assert!(lowered.contains("rejected solver probes"), "{error}");
     assert!(
-        !lowered.contains("t=0e0s"),
-        "startup must have succeeded: {error}"
+        lowered.contains("net `y` on circuit node") && lowered.contains("driven by the module"),
+        "the diagnostic must name the net the module drives: {error}"
+    );
+    assert!(
+        lowered.contains("consecutive accepted timepoints"),
+        "startup must have succeeded, and the loop must be refused from the timepoints it \
+         was accepted at: {error}"
     );
     assert!(error.contains("1 0 1 0"), "{error}");
 }

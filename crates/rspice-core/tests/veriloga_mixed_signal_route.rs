@@ -4093,8 +4093,11 @@ endmodule
                 (2.0 * (ns - 6.0)).clamp(0.0, 2.0)
             };
             // Equal 20-ohm source and load: V(q)=(1 V + V(driver))/2.
-            // Z releases the source entirely and leaves the 1 V bias.
-            let expected = if time >= 10e-9 - 1e-18 {
+            // Z releases the source entirely and leaves the 1 V bias — from
+            // the first instant after 10 ns, as a ramp starts from the first
+            // instant after its edge: the point on the edge holds the drive
+            // before it.
+            let expected = if time > 10e-9 + 1e-18 {
                 1.0
             } else {
                 (1.0 + target) / 2.0

@@ -6146,22 +6146,36 @@ endmodule
         );
         host.accept_trial().unwrap();
 
+        fn bridge_rhs(host: &mut MixedSignalHost, voltages: &[f64]) -> f64 {
+            let mut rhs = 0.0;
+            host.stamp(
+                voltages,
+                |_, _, _| {},
+                |row, value| {
+                    if row == 3 {
+                        rhs += value;
+                    }
+                },
+            )
+            .unwrap();
+            rhs
+        }
+
+        let high = [0.0, 1.0, 1.0, 0.0];
         begin(&mut host, 1);
-        assert!(host.settle_analog_bridges(&[0.0, 1.0, 1.0, 0.0]).unwrap());
+        assert!(host.settle_analog_bridges(&high).unwrap());
         assert_eq!(host.read_digital("q").unwrap(), "1");
         assert_eq!(host.read_digital("dac").unwrap(), "1");
-        let mut high_rhs = 0.0;
-        host.stamp(
-            &[0.0, 1.0, 1.0, 0.0],
-            |_, _, _| {},
-            |row, value| {
-                if row == 3 {
-                    high_rhs += value;
-                }
-            },
-        )
-        .unwrap();
-        assert!((high_rhs - 0.05).abs() < 1e-15);
+        // The bridge the crossing moved drives the analog solution from the
+        // first instant after this timepoint: the timepoint itself is solved
+        // with the level the trial opened with.
+        assert_eq!(bridge_rhs(&mut host, &high), 0.0);
+        while host.settle_analog_bridges(&high).unwrap() {}
+        host.accept_trial().unwrap();
+
+        begin(&mut host, 2);
+        assert!(!host.settle_analog_bridges(&high).unwrap());
+        assert!((bridge_rhs(&mut host, &high) - 0.05).abs() < 1e-15);
     }
 
     #[test]

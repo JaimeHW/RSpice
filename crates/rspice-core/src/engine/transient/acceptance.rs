@@ -614,6 +614,11 @@ mod tests {
                         integral
                     };
                     let prior_voltage = if time == 1e-9 { 0.0 } else { 2.0 };
+                    // `q` moves at both timepoints. The analog block reads the
+                    // new bit at once; the D/A bridge drives the solution at
+                    // the timepoint with the bit from before it and the new
+                    // one only from the first instant after.
+                    let drive = if time == 1e-9 { 0.0 } else { 1.0 };
                     let ddt_gain = if weighted { 6.0 } else { 3.0 };
                     let idt_gain = if weighted { 0.5 } else { 1.0 };
                     let digital_before = circuit.mixed_signal_hosts[0].read_digital("q").unwrap();
@@ -651,7 +656,7 @@ mod tests {
                     );
                     let bridge_slot = matrix.get_index(bridge - 1, bridge - 1).unwrap();
                     assert_eq!(matrix.values_mut()[bridge_slot.offset()], weight * 0.5);
-                    assert_eq!(probe_rhs[bridge - 1], weight * 0.5 * digital);
+                    assert_eq!(probe_rhs[bridge - 1], weight * 0.5 * drive);
                     assert_eq!(
                         circuit.mixed_signal_hosts[0].read_digital("q").unwrap(),
                         digital_before
@@ -677,7 +682,7 @@ mod tests {
                             < 1e-12,
                         "mixed history={history:?}"
                     );
-                    assert_eq!(history[bridge - 1], 0.25 - 0.5 * digital);
+                    assert_eq!(history[bridge - 1], 0.25 - 0.5 * drive);
                     assert_eq!(history[native - 1], 0.25);
                     assert_eq!(
                         circuit.mixed_signal_hosts[0].read_digital("q").unwrap(),

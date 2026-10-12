@@ -1363,23 +1363,33 @@ endmodule
     );
     host.reject_trial().unwrap();
     assert_eq!(host.read_digital("q").unwrap(), "0");
+    let bridge_rhs = |host: &mut MixedSignalHost, solution: &[f64]| {
+        let mut rhs = 0.0;
+        host.stamp(
+            solution,
+            |_, _, _| {},
+            |node, value| {
+                if node == 1 {
+                    rhs += value;
+                }
+            },
+        )
+        .unwrap();
+        rhs
+    };
     begin(&mut host, root, root);
     settle_standalone_observer(&mut host, &[0.125, 1.0]);
     assert_eq!(host.trial_boundary_refinement_time(1e-15).unwrap(), None);
-    let mut rhs = 0.0;
-    host.stamp(
-        &[0.125, 1.0],
-        |_, _, _| {},
-        |node, value| {
-            if node == 1 {
-                rhs += value;
-            }
-        },
-    )
-    .unwrap();
-    assert!((rhs - 1e-3).abs() < 1e-15, "{rhs}");
+    // The handler's `q` drives the bridge from the first instant after the
+    // root it ran at: the root itself is solved with the level from before.
+    assert_eq!(bridge_rhs(&mut host, &[0.125, 1.0]), 0.0);
     host.accept_trial().unwrap();
     assert_eq!(host.read_digital("q").unwrap(), "1");
+    begin(&mut host, root + 1e-12, 1e-12);
+    settle_standalone_observer(&mut host, &[0.125, 1.0]);
+    let rhs = bridge_rhs(&mut host, &[0.125, 1.0]);
+    assert!((rhs - 1e-3).abs() < 1e-15, "{rhs}");
+    host.accept_trial().unwrap();
 }
 
 #[test]

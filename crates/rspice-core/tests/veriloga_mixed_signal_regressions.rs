@@ -368,12 +368,14 @@ fn output_release_and_unknown_drive_are_distinct_across_timesteps() {
         .iter()
         .position(|node| node.eq_ignore_ascii_case("q"))
         .unwrap();
+    // Each drive, its impedance included, acts from the first instant after
+    // the timepoint that set it: the point on an edge holds the drive before it.
     for (time, voltage) in result.time.iter().zip(&result.voltages[q]) {
-        let expected = if *time < 1e-9 - 1e-18 {
+        let expected = if *time <= 1e-9 + 1e-18 {
             3.3 * 20.0 / 1020.0
-        } else if *time < 2e-9 - 1e-18 {
+        } else if *time <= 2e-9 + 1e-18 {
             3.3
-        } else if *time < 3e-9 - 1e-18 {
+        } else if *time <= 3e-9 + 1e-18 {
             (3.3 * 20.0 + 1.65 * 1000.0) / 1020.0
         } else {
             3.3
@@ -415,13 +417,17 @@ endmodule
             .iter()
             .position(|node| node.eq_ignore_ascii_case(name))
             .unwrap();
+        // A drive acts from the first instant after the timepoint that moved
+        // it, so the edge is the accepted point the rise leaves from: the last
+        // sample at the old level sits on it and the first above 3 V follows.
         let index = result.voltages[node]
             .iter()
             .position(|value| *value > 3.0)
             .unwrap();
+        let edge = result.time[index - 1];
         assert!(
-            result.time[index] >= earliest - 1e-18 && result.time[index] <= latest + 1e-18,
-            "{name} first rose at {}",
+            edge >= earliest - 1e-18 && edge <= latest + 1e-18,
+            "{name} rose from {edge}, reaching 3 V at {}",
             result.time[index]
         );
     }

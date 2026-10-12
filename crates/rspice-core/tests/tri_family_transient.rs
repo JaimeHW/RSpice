@@ -540,32 +540,79 @@ fn deck_a_tri_family_transient_sequence_golden() {
 /// bounds nothing. R2.24 stopped forming it, and the step after a restart is
 /// now accepted on Newton convergence and the ngspice device truncation limits
 /// instead — which is what `CKTterr` does, charge and flux states only.
+///
+/// # Landings are not restarts
+///
+/// The deck does take steps at its floor, and must: they are *landings*, the
+/// one analog timepoint the stepper owes an event it cannot separate from the
+/// point before. Two kinds, both measured on this deck:
+///
+/// - `a_adc` reaches `in_low` exactly on the point that lands its 1.6 V root,
+///   and holds `0` there (ngspice `cfunc.mod`), so its move to `x` is a root at
+///   that point itself and is landed one minimum step after it (48.48 ps).
+/// - `q` is a zero-rise D/A drive: it acts from the first instant after the
+///   point that steps it, so an A/D crossing in the interval leaving that point
+///   is first asked of the point one minimum step past it, where a crossing the
+///   step caused already is (0.05, 10.05 … 50.05 ns, each followed here by
+///   `a_adc`'s own `in_high` crossing on the clock ramp).
+///
+/// What this case pins is that every one of them is a single step: the step
+/// after a landing restarts from the proposal the event interrupted, and is
+/// controller-sized. The ladder P0.10 D10 found — the restart after the 48.48
+/// ps landing capped at twice its own width by the device truncation ceiling,
+/// and doubled out of the floor over twenty accepted points — is the shape this
+/// fails on.
 #[test]
 fn deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge() {
     const FLOOR_LADDER_BOUND: f64 = 1e-14;
+    const CONTROLLER_STEP_BOUND: f64 = 1e-12;
     let result = run_deck_a();
-    let tiny: Vec<(usize, f64, f64)> = result
-        .time
-        .windows(2)
-        .enumerate()
-        .map(|(index, pair)| (index + 1, pair[0], pair[1] - pair[0]))
-        .filter(|(_, _, step)| *step < FLOOR_LADDER_BOUND)
-        .collect();
-    let smallest = result
+    let steps: Vec<f64> = result
         .time
         .windows(2)
         .map(|pair| pair[1] - pair[0])
-        .fold(f64::INFINITY, f64::min);
+        .collect();
+    // (index of the point the step lands on, where it starts, the step, the
+    // step after it).
+    let tiny: Vec<(usize, f64, f64, Option<f64>)> = steps
+        .iter()
+        .enumerate()
+        .filter(|(_, step)| **step < FLOOR_LADDER_BOUND)
+        .map(|(index, step)| {
+            (
+                index + 1,
+                result.time[index],
+                *step,
+                steps.get(index + 1).copied(),
+            )
+        })
+        .collect();
+    let rungs: Vec<_> = tiny
+        .iter()
+        .filter(|(.., next)| next.is_some_and(|next| next < CONTROLLER_STEP_BOUND))
+        .collect();
     println!(
-        "TRIFAMILY deck_a_floor_steps={} smallest={smallest:e}",
-        tiny.len()
+        "TRIFAMILY deck_a_floor_steps={} rungs={} {tiny:?}",
+        tiny.len(),
+        rungs.len()
     );
     assert!(
-        tiny.is_empty(),
-        "a digital edge must not restart the analog stepper near its floor; \
-         {} accepted steps are below {FLOOR_LADDER_BOUND:e}, first few {:?}",
+        rungs.is_empty(),
+        "a landing must restart the analog stepper from the proposal it \
+         interrupted, not from its own width; {} of the {} accepted steps below \
+         {FLOOR_LADDER_BOUND:e} are followed by a step below \
+         {CONTROLLER_STEP_BOUND:e}: {:?}",
+        rungs.len(),
         tiny.len(),
-        tiny.iter().take(6).collect::<Vec<_>>()
+        rungs.iter().take(6).collect::<Vec<_>>()
+    );
+    // Each landing is owed to an event: there are no more of them than the
+    // deck has digital transitions — `d_clk`'s and `q`'s.
+    let events = trace_points(&result, "d_clk").len() + trace_points(&result, "q").len();
+    assert!(
+        tiny.len() <= events,
+        "{} floor-width landings for {events} digital transitions: {tiny:?}",
+        tiny.len()
     );
 }
 
@@ -584,8 +631,8 @@ fn deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge() {
 /// would have accepted 0.125 ps at the same instant and called the ladder gone,
 /// so a bound between the two is what tells "ended" from "masked". The second
 /// assertion is what a masked ladder cannot satisfy at all: the edge is taken
-/// whole, in the one accepted point that lands on it, at the level `q` still
-/// holds 2.5 ns later.
+/// whole, in the first accepted point past it — the point on the edge holds
+/// the drive from before it — at the level `q` still holds 2.5 ns later.
 #[test]
 fn deck_a_takes_a_controller_sized_step_after_every_digital_edge() {
     const CONTROLLER_STEP_BOUND: f64 = 1e-12;
@@ -621,34 +668,44 @@ fn deck_a_takes_a_controller_sized_step_after_every_digital_edge() {
         let settled = sample_at(&result, "Q", edge + DECK_A_INSTANT_OFFSET);
         assert!(
             (q[index] - settled).abs() < 1e-6,
-            "V(q) at the edge instant {edge:e} is {}, and the level it settles \
-             at is {settled}: the edge was not taken in the point that landed \
-             on it",
+            "V(q) at {edge:e}, the first point past the edge, is {}, and the \
+             level it settles at is {settled}: the edge was not taken whole",
             q[index]
         );
     }
 
-    // Since R2.24 no step is below the floor bound at all, and
+    // Since R2.24 no step below the floor bound is a retry rung, and the only
+    // ones left are landings, which
     // `deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge`
-    // asserts exactly that. This loop is the shape check that outlives it: if
-    // the set ever refills, a returning edge on `q` or the far end of a `y`
-    // ramp lands here and fails, because both are flat 50 ps later while the
-    // one class that used to live here — a ramp leaving zero volts — is at
-    // 1.65 V by then.
-    for (index, times) in result.time.windows(2).enumerate() {
-        if times[1] - times[0] >= FLOOR_LADDER_BOUND {
+    // accounts for. This loop is the shape check that outlives it: a landing
+    // is one floor-width step between two controller-sized ones, so a returning
+    // ladder on `q`, at the far end of a `y` ramp, or on a ramp leaving zero
+    // volts — two sub-picosecond steps in a row anywhere — lands here and
+    // fails.
+    let steps: Vec<f64> = result
+        .time
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .collect();
+    for (index, step) in steps.iter().enumerate() {
+        if *step >= FLOOR_LADDER_BOUND {
             continue;
         }
-        let soon = sample_at(&result, "Y", times[0] + 5e-11);
-        assert!(
-            y[index] < 0.5 && soon > 1.0,
-            "the accepted step {:e} at {:e} is below {FLOOR_LADDER_BOUND:e} \
-             somewhere other than a `y` ramp leaving zero volts: V(y) is {} \
-             there and {soon} fifty picoseconds later",
-            times[1] - times[0],
-            times[0],
-            y[index]
-        );
+        for neighbour in [index.checked_sub(1), Some(index + 1)]
+            .into_iter()
+            .flatten()
+            .filter_map(|neighbour| steps.get(neighbour))
+        {
+            assert!(
+                *neighbour >= CONTROLLER_STEP_BOUND,
+                "the accepted step {step:e} at {:e} is below {FLOOR_LADDER_BOUND:e} \
+                 and a neighbouring step is {neighbour:e}, below \
+                 {CONTROLLER_STEP_BOUND:e}: that is a rung, not a landing (V(y) {} \
+                 there)",
+                result.time[index],
+                y[index]
+            );
+        }
     }
 }
 
