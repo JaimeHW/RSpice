@@ -1,0 +1,10 @@
+* C10 c1908, variant c1908-vlog, tran-vec
+.hdl "../net/c1908.v"
+xdut g21 g18 g32 g30 g12 g24 g5 g9 g14 g3 g26 g10 g15 g7 g31 g17 g27 g11 g22 g4 g29 g20 g23 g13 g2
++ g19 g8 g16 g6 g1 g28 g25 g33 g1884 g1885 g1886 g1887 g1888 g1889 g1890 g1891 g1892 g1893 g1894
++ g1895 g1896 g1897 g1898 g1899 g1900 g1901 g1902 g1903 g1904 g1905 g1906 g1907 g1908 c1908
+.param vcc=1.0
+.include ../net/c1908_vectors.cir
+.include ../net/strobe_vectors.cir
+.tran 1n 640n
+.end

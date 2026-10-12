@@ -1,0 +1,6 @@
+* C10 c6288, variant c6288-xs, tran-c6288
+.include ../net/c6288_xs.cir
+.include ../net/c6288_pulse.cir
+.include ../net/strobe_iscas.cir
+.tran 1p 1n
+.end

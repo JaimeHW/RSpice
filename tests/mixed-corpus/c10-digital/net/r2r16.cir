@@ -1,0 +1,35 @@
+* C10 16-bit R-2R ladder (RSpice-authored; corpus design C10): R = 10k, 2R = 20k.
+* Bit i drives ladder node n<i> through 2R; adjacent nodes are joined by R; n0 is
+* terminated by 2R to ground; the output dac = n15 = sum_i v(q<i>) 2^(i-16).
+rt n0 0 20k
+r2_0 q0 n0 20k
+r2_1 q1 n1 20k
+r2_2 q2 n2 20k
+r2_3 q3 n3 20k
+r2_4 q4 n4 20k
+r2_5 q5 n5 20k
+r2_6 q6 n6 20k
+r2_7 q7 n7 20k
+r2_8 q8 n8 20k
+r2_9 q9 n9 20k
+r2_10 q10 n10 20k
+r2_11 q11 n11 20k
+r2_12 q12 n12 20k
+r2_13 q13 n13 20k
+r2_14 q14 n14 20k
+r2_15 q15 dac 20k
+r_0 n0 n1 10k
+r_1 n1 n2 10k
+r_2 n2 n3 10k
+r_3 n3 n4 10k
+r_4 n4 n5 10k
+r_5 n5 n6 10k
+r_6 n6 n7 10k
+r_7 n7 n8 10k
+r_8 n8 n9 10k
+r_9 n9 n10 10k
+r_10 n10 n11 10k
+r_11 n11 n12 10k
+r_12 n12 n13 10k
+r_13 n13 n14 10k
+r_14 n14 dac 10k

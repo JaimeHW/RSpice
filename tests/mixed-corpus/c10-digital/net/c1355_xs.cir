@@ -1,0 +1,582 @@
+* C10 c1355, XSPICE gate level (derived; RSPICE-VENDORING.md, C10): tests/iscas85/85/c1355/c1355.net with every
+* standard-cell instance replaced by its XSPICE gate (10 ps rise/fall). The
+* 41 primary inputs enter through adc_bridge (0.5 V, 1 ps) onto d_<name>; the 32 primary
+* outputs leave through dac_bridge (0 / 1 V) onto analog nodes of their own name.
+abpi [g21 g18 g31 g17 g27 g11 g22 g32 g30 g4 g12 g29 g24 g39 g38 g20 g5 g35 g23 g13 g2 g37 g41 g9
++ g40 g14 g36 g19 g8 g3 g26 g16 g10 g6 g1 g28 g25 g15 g33 g7 g34] [d_g21 d_g18 d_g31 d_g17 d_g27
++ d_g11 d_g22 d_g32 d_g30 d_g4 d_g12 d_g29 d_g24 d_g39 d_g38 d_g20 d_g5 d_g35 d_g23 d_g13 d_g2 d_g37
++ d_g41 d_g9 d_g40 d_g14 d_g36 d_g19 d_g8 d_g3 d_g26 d_g16 d_g10 d_g6 d_g1 d_g28 d_g25 d_g15 d_g33
++ d_g7 d_g34] adc_half
+a101 [d_g20 d_g356] d_g422 d_nand_m
+a366 [d_g975 d_g991] d_x72 d_and_m
+a467 [d_g17 d_g1180] d_g1260 d_nand_m
+a194 [d_g588 d_g589] d_g645 d_nand_m
+a2 [d_g34 d_g41] d_g245 d_and_m
+a505 [d_g1240 d_g1241] d_g1298 d_nand_m
+a254 [d_g712 d_g748] d_g767 d_nand_m
+a428 [d_g26 d_g1111] d_g1207 d_nand_m
+a234 [d_g245 d_g721] d_g733 d_nand_m
+a414 [d_g12 d_g1069] d_g1165 d_nand_m
+a285 [d_g660 d_g812] d_g830 d_nand_m
+a130 [d_g412 d_g413] d_g501 d_nand_m
+a144 [d_g468 d_g471] d_g543 d_nand_m
+a159 [d_g444 d_g531] d_g576 d_nand_m
+a120 [d_g392 d_g393] d_g471 d_nand_m
+a31 [d_g4 d_g8] d_g332 d_nand_m
+a554 d_g1315 d_g1347 d_inverter_m
+a314 d_g899 d_g955 d_inverter_m
+a189 [d_g578 d_g579] d_g622 d_nand_m
+a518 [d_g1266 d_g1267] d_g1311 d_nand_m
+a471 [d_g19 d_g1186] d_g1264 d_nand_m
+a504 [d_g1238 d_g1239] d_g1297 d_nand_m
+a302 d_g873 d_g943 d_inverter_m
+a526 [d_g1282 d_g1283] d_g1319 d_nand_m
+a328 d_g899 d_g969 d_inverter_m
+a202 [d_g612 d_g617] d_g669 d_nand_m
+a170 [d_g477 d_g546] d_g587 d_nand_m
+a415 [d_g13 d_g1072] d_g1168 d_nand_m
+a61 [d_g21 d_g296] d_g382 d_nand_m
+a377 [d_g860 d_g1001] d_g1054 d_and_m
+a439 [d_g3 d_g1138] d_g1232 d_nand_m
+a293 [d_g828 d_g829] d_g886 d_nand_m
+a89 [d_g17 d_g338] d_g410 d_nand_m
+a275 [d_g645 d_g797] d_g820 d_nand_m
+a280 [d_g779 d_g803] d_g825 d_nand_m
+a523 [d_g1276 d_g1277] d_g1316 d_nand_m
+a246 [d_g724 d_g736] d_g759 d_nand_m
+a325 d_g899 d_g966 d_inverter_m
+a67 [d_g27 d_g305] d_g388 d_nand_m
+a558 d_g1319 d_g1351 d_inverter_m
+a543 d_g1304 d_g1336 d_inverter_m
+a398 [d_g899 d_g1026] d_g1117 d_and_m
+a218 [d_g627 d_g678] d_g699 d_nand_m
+a46 [d_g6 d_g272] d_g367 d_nand_m
+a228 [d_g696 d_g697] d_g715 d_nand_m
+a15 [d_g13 d_g14] d_g284 d_nand_m
+a58 [d_g18 d_g290] d_g379 d_nand_m
+a374 [d_g873 d_g996] d_g1045 d_and_m
+a113 [d_g378 d_g379] d_g450 d_nand_m
+a396 [d_g886 d_g1026] d_g1111 d_and_m
+a125 [d_g402 d_g403] d_g486 d_nand_m
+a5 [d_g37 d_g41] d_g254 d_and_m
+a383 [d_g834 d_g1011] d_g1072 d_and_m
+a308 d_g873 d_g949 d_inverter_m
+a40 [d_g28 d_g32] d_g359 d_nand_m
+a457 [d_g12 d_g1165] d_g1250 d_nand_m
+a260 [d_g760 d_g761] d_g779 d_nand_m
+a214 [d_g612 d_g672] d_g695 d_nand_m
+a79 [d_g10 d_g323] d_g400 d_nand_m
+a182 [d_g513 d_g564] d_g599 d_nand_m
+a139 [d_g438 d_g441] d_g528 d_nand_m
+a420 [d_g18 d_g1087] d_g1183 d_nand_m
+a266 [d_g645 d_g773] d_g797 d_nand_m
+a358 [d_x41 d_x42] d_g1011 d_and_m
+a283 [d_g657 d_g809] d_g828 d_nand_m
+a365 [d_g974 d_g847 d_g860] d_x71 d_and_m
+a268 [d_g651 d_g779] d_g803 d_nand_m
+a551 d_g1312 d_g1344 d_inverter_m
+a470 [d_g1087 d_g1183] d_g1263 d_nand_m
+a185 [d_g570 d_g571] d_g602 d_nand_m
+a44 [d_g4 d_g269] d_g365 d_nand_m
+a86 [d_g8 d_g332] d_g407 d_nand_m
+a14 [d_g11 d_g12] d_g281 d_nand_m
+a438 [d_g1039 d_g1135] d_g1231 d_nand_m
+a73 [d_g1 d_g314] d_g394 d_nand_m
+a30 [d_g11 d_g15] d_g329 d_nand_m
+a94 [d_g22 d_g344] d_g415 d_nand_m
+a62 [d_g22 d_g296] d_g383 d_nand_m
+a417 [d_g15 d_g1078] d_g1174 d_nand_m
+a121 [d_g394 d_g395] d_g474 d_nand_m
+a57 [d_g17 d_g290] d_g378 d_nand_m
+a136 [d_g424 d_g425] d_g519 d_nand_m
+a506 [d_g1242 d_g1243] d_g1299 d_nand_m
+a66 [d_g26 d_g302] d_g387 d_nand_m
+a368 [d_g976 d_g847 d_g977] d_x81 d_and_m
+a236 [d_g251 d_g727] d_g739 d_nand_m
+a233 [d_g242 d_g718] d_g730 d_nand_m
+a525 [d_g1280 d_g1281] d_g1318 d_nand_m
+a290 [d_g820 d_g821] d_g847 d_nand_m
+a473 [d_g20 d_g1189] d_g1266 d_nand_m
+a95 [d_g26 d_g347] d_g416 d_nand_m
+a503 [d_g1236 d_g1237] d_g1296 d_nand_m
+a480 [d_g1102 d_g1198] d_g1273 d_nand_m
+a442 [d_g1045 d_g1141] d_g1235 d_nand_m
+a47 [d_g7 d_g275] d_g368 d_nand_m
+a179 [d_g504 d_g561] d_g596 d_nand_m
+a276 [d_g773 d_g797] d_g821 d_nand_m
+a345 [d_g978 d_g979 d_g980 d_g981] d_g986 d_or_m
+a197 [d_g594 d_g595] d_g654 d_nand_m
+a495 [d_g31 d_g1222] d_g1288 d_nand_m
+a430 [d_g28 d_g1117] d_g1213 d_nand_m
+a153 [d_g426 d_g522] d_g570 d_nand_m
+a81 [d_g3 d_g326] d_g402 d_nand_m
+a315 d_g925 d_g956 d_inverter_m
+a371 [d_g834 d_g996] d_g1036 d_and_m
+a529 [d_g1288 d_g1289] d_g1322 d_nand_m
+a397 [d_g912 d_g1026] d_g1114 d_and_m
+a143 [d_g462 d_g465] d_g540 d_nand_m
+a309 d_g886 d_g950 d_inverter_m
+a78 [d_g6 d_g320] d_g399 d_nand_m
+a406 [d_g4 d_g1045] d_g1141 d_nand_m
+a56 [d_g16 d_g287] d_g377 d_nand_m
+a20 [d_g23 d_g24] d_g299 d_nand_m
+a384 [d_g847 d_g1011] d_g1075 d_and_m
+a209 [d_g602 d_g666] d_g690 d_nand_m
+a423 [d_g21 d_g1096] d_g1192 d_nand_m
+a100 [d_g31 d_g353] d_g421 d_nand_m
+a510 [d_g1250 d_g1251] d_g1303 d_nand_m
+a464 [d_g1078 d_g1174] d_g1257 d_nand_m
+a201 [d_g602 d_g607] d_g666 d_nand_m
+a537 d_g1298 d_g1330 d_inverter_m
+a265 [d_g642 d_g770] d_g794 d_nand_m
+a429 [d_g27 d_g1114] d_g1210 d_nand_m
+a245 [d_g248 d_g736] d_g758 d_nand_m
+a517 [d_g1264 d_g1265] d_g1310 d_nand_m
+a138 [d_g432 d_g435] d_g525 d_nand_m
+a27 [d_g2 d_g6] d_g320 d_nand_m
+a301 d_g847 d_g942 d_inverter_m
+a114 [d_g380 d_g381] d_g453 d_nand_m
+a122 [d_g396 d_g397] d_g477 d_nand_m
+a102 [d_g24 d_g356] d_g423 d_nand_m
+a494 [d_g1123 d_g1219] d_g1287 d_nand_m
+a4 [d_g36 d_g41] d_g251 d_and_m
+a219 [d_g632 d_g681] d_g700 d_nand_m
+a296 [d_g826 d_g827] d_g925 d_nand_m
+a230 [d_g700 d_g701] d_g721 d_nand_m
+a213 [d_g602 d_g672] d_g694 d_nand_m
+a400 [d_g886 d_g1031] d_g1123 d_and_m
+a200 [d_g600 d_g601] d_g663 d_nand_m
+a108 [d_g368 d_g369] d_g435 d_nand_m
+a444 [d_g1048 d_g1144] d_g1237 d_nand_m
+a522 [d_g1274 d_g1275] d_g1315 d_nand_m
+a156 [d_g435 d_g525] d_g573 d_nand_m
+a351 [d_g899 d_g986] d_x22 d_and_m
+a412 [d_g10 d_g1063] d_g1159 d_nand_m
+a132 [d_g416 d_g417] d_g507 d_nand_m
+a437 [d_g2 d_g1135] d_g1230 d_nand_m
+a180 [d_g507 d_g561] d_g597 d_nand_m
+a141 [d_g450 d_g453] d_g534 d_nand_m
+a41 [d_g1 d_g266] d_g362 d_nand_m
+a278 [d_g776 d_g800] d_g823 d_nand_m
+a295 [d_g830 d_g831] d_g912 d_nand_m
+a13 [d_g9 d_g10] d_g278 d_nand_m
+a37 [d_g19 d_g23] d_g350 d_nand_m
+a382 [d_g873 d_g1006] d_g1069 d_and_m
+a252 [d_g709 d_g745] d_g765 d_nand_m
+a552 d_g1313 d_g1345 d_inverter_m
+a240 [d_g263 d_g715] d_g751 d_nand_m
+a107 [d_g366 d_g367] d_g432 d_nand_m
+a481 [d_g24 d_g1201] d_g1274 d_nand_m
+a544 d_g1305 d_g1337 d_inverter_m
+a164 [d_g459 d_g537] d_g581 d_nand_m
+a60 [d_g20 d_g293] d_g381 d_nand_m
+a247 [d_g251 d_g739] d_g760 d_nand_m
+a469 [d_g18 d_g1183] d_g1262 d_nand_m
+a524 [d_g1278 d_g1279] d_g1317 d_nand_m
+a49 [d_g9 d_g278] d_g370 d_nand_m
+a264 [d_g768 d_g769] d_g791 d_nand_m
+a443 [d_g5 d_g1144] d_g1236 d_nand_m
+a241 [d_g242 d_g730] d_g754 d_nand_m
+a279 [d_g651 d_g803] d_g824 d_nand_m
+a375 [d_g834 d_g1001] d_g1048 d_and_m
+a326 d_g886 d_g967 d_inverter_m
+a39 [d_g20 d_g24] d_g356 d_nand_m
+a116 [d_g384 d_g385] d_g459 d_nand_m
+a225 [d_g690 d_g691] d_g706 d_nand_m
+a172 [d_g483 d_g549] d_g589 d_nand_m
+a426 [d_g24 d_g1105] d_g1201 d_nand_m
+a93 [d_g18 d_g344] d_g414 d_nand_m
+a465 [d_g16 d_g1177] d_g1258 d_nand_m
+a344 [d_g925 d_g967 d_g968 d_g969] d_g985 d_and_m
+a29 [d_g3 d_g7] d_g326 d_nand_m
+a9 [d_g1 d_g2] d_g266 d_nand_m
+a157 [d_g438 d_g528] d_g574 d_nand_m
+a323 d_g925 d_g964 d_inverter_m
+a284 [d_g785 d_g809] d_g829 d_nand_m
+a300 d_g834 d_g941 d_inverter_m
+a546 d_g1307 d_g1339 d_inverter_m
+a74 [d_g5 d_g314] d_g395 d_nand_m
+a488 [d_g1114 d_g1210] d_g1281 d_nand_m
+a316 d_g912 d_g957 d_inverter_m
+a472 [d_g1090 d_g1186] d_g1265 d_nand_m
+a51 [d_g11 d_g281] d_g372 d_nand_m
+a557 d_g1318 d_g1350 d_inverter_m
+a69 [d_g29 d_g308] d_g390 d_nand_m
+a408 [d_g6 d_g1051] d_g1147 d_nand_m
+a208 [d_g627 d_g637] d_g687 d_nand_m
+a431 [d_g29 d_g1120] d_g1216 d_nand_m
+a154 [d_g429 d_g522] d_g571 d_nand_m
+a390 [d_g899 d_g1016] d_g1093 d_and_m
+a493 [d_g30 d_g1219] d_g1286 d_nand_m
+a332 d_g860 d_g973 d_inverter_m
+a210 [d_g607 d_g666] d_g691 d_nand_m
+a381 [d_g860 d_g1006] d_g1066 d_and_m
+a256 [d_g715 d_g751] d_g769 d_nand_m
+a177 [d_g498 d_g558] d_g594 d_nand_m
+a387 [d_g925 d_g1016] d_g1084 d_and_m
+a196 [d_g592 d_g593] d_g651 d_nand_m
+a498 [d_g1129 d_g1225] d_g1291 d_nand_m
+a287 [d_g663 d_g815] d_g832 d_nand_m
+a59 [d_g19 d_g293] d_g380 d_nand_m
+a451 [d_g9 d_g1156] d_g1244 d_nand_m
+a450 [d_g1057 d_g1153] d_g1243 d_nand_m
+a68 [d_g28 d_g305] d_g389 d_nand_m
+a92 [d_g29 d_g341] d_g413 d_nand_m
+a131 [d_g414 d_g415] d_g504 d_nand_m
+a401 [d_g912 d_g1031] d_g1126 d_and_m
+a422 [d_g20 d_g1093] d_g1189 d_nand_m
+a445 [d_g6 d_g1147] d_g1238 d_nand_m
+a337 [d_g938 d_g939 d_g940 d_g873] d_g978 d_and_m
+a255 [d_g263 d_g751] d_g768 d_nand_m
+a352 [d_x21 d_x22] d_g1001 d_and_m
+a342 [d_g961 d_g962 d_g912 d_g963] d_g983 d_and_m
+a48 [d_g8 d_g275] d_g369 d_nand_m
+a475 [d_g21 d_g1192] d_g1268 d_nand_m
+a212 [d_g617 d_g669] d_g693 d_nand_m
+a38 [d_g27 d_g31] d_g353 d_nand_m
+a75 [d_g9 d_g317] d_g396 d_nand_m
+a363 [d_g873 d_g991] d_x62 d_and_m
+a21 [d_g25 d_g26] d_g302 d_nand_m
+a8 [d_g40 d_g41] d_g263 d_and_m
+a80 [d_g14 d_g323] d_g401 d_nand_m
+a3 [d_g35 d_g41] d_g248 d_and_m
+a292 [d_g824 d_g825] d_g873 d_nand_m
+a198 [d_g596 d_g597] d_g657 d_nand_m
+a12 [d_g7 d_g8] d_g275 d_nand_m
+a413 [d_g11 d_g1066] d_g1162 d_nand_m
+a373 [d_g860 d_g996] d_g1042 d_and_m
+a253 [d_g260 d_g748] d_g766 d_nand_m
+a360 [d_g971 d_g991] d_x52 d_and_m
+a391 [d_g925 d_g1021] d_g1096 d_and_m
+a123 [d_g398 d_g399] d_g480 d_nand_m
+a183 [d_g516 d_g567] d_g600 d_nand_m
+a188 [d_g576 d_g577] d_g617 d_nand_m
+a330 d_g873 d_g971 d_inverter_m
+a399 [d_g925 d_g1031] d_g1120 d_and_m
+a378 [d_g873 d_g1001] d_g1057 d_and_m
+a462 [d_g1075 d_g1171] d_g1255 d_nand_m
+a339 [d_g944 d_g847 d_g945 d_g946] d_g980 d_and_m
+a545 d_g1306 d_g1338 d_inverter_m
+a281 [d_g654 d_g806] d_g826 d_nand_m
+a211 [d_g612 d_g669] d_g692 d_nand_m
+a171 [d_g480 d_g549] d_g588 d_nand_m
+a409 [d_g7 d_g1054] d_g1150 d_nand_m
+a191 [d_g582 d_g583] d_g632 d_nand_m
+a150 [d_g504 d_g507] d_g561 d_nand_m
+a427 [d_g25 d_g1108] d_g1204 d_nand_m
+a514 [d_g1258 d_g1259] d_g1307 d_nand_m
+a468 [d_g1084 d_g1180] d_g1261 d_nand_m
+a317 d_g925 d_g958 d_inverter_m
+a88 [d_g16 d_g335] d_g409 d_nand_m
+a235 [d_g248 d_g724] d_g736 d_nand_m
+a207 [d_g622 d_g632] d_g684 d_nand_m
+a343 [d_g964 d_g886 d_g965 d_g966] d_g984 d_and_m
+a124 [d_g400 d_g401] d_g483 d_nand_m
+a178 [d_g501 d_g558] d_g595 d_nand_m
+a519 [d_g1268 d_g1269] d_g1312 d_nand_m
+a482 [d_g1105 d_g1201] d_g1275 d_nand_m
+a226 [d_g692 d_g693] d_g709 d_nand_m
+a306 d_g847 d_g947 d_inverter_m
+a238 [d_g257 d_g709] d_g745 d_nand_m
+a263 [d_g766 d_g767] d_g788 d_nand_m
+a158 [d_g441 d_g528] d_g575 d_nand_m
+a319 d_g912 d_g960 d_inverter_m
+a36 [d_g26 d_g30] d_g347 d_nand_m
+a436 [d_g1036 d_g1132] d_g1229 d_nand_m
+a489 [d_g28 d_g1213] d_g1282 d_nand_m
+a199 [d_g598 d_g599] d_g660 d_nand_m
+a388 [d_g886 d_g1016] d_g1087 d_and_m
+a410 [d_g8 d_g1057] d_g1153 d_nand_m
+a338 [d_g941 d_g942 d_g860 d_g943] d_g979 d_and_m
+a261 [d_g762 d_g763] d_g782 d_nand_m
+a35 [d_g18 d_g22] d_g344 d_nand_m
+a215 [d_g607 d_g675] d_g696 d_nand_m
+a322 d_g899 d_g963 d_inverter_m
+a453 [d_g10 d_g1159] d_g1246 d_nand_m
+a96 [d_g30 d_g347] d_g417 d_nand_m
+a446 [d_g1051 d_g1147] d_g1239 d_nand_m
+a70 [d_g30 d_g308] d_g391 d_nand_m
+a500 [d_g1230 d_g1231] d_g1293 d_nand_m
+a535 d_g1296 d_g1328 d_inverter_m
+a324 d_g912 d_g965 d_inverter_m
+a369 [d_g873 d_g991] d_x82 d_and_m
+a492 [d_g1120 d_g1216] d_g1285 d_nand_m
+a299 d_g860 d_g940 d_inverter_m
+a559 d_g1320 d_g1352 d_inverter_m
+a539 d_g1300 d_g1332 d_inverter_m
+a389 [d_g912 d_g1016] d_g1090 d_and_m
+a305 d_g873 d_g946 d_inverter_m
+a1 [d_g33 d_g41] d_g242 d_and_m
+a105 [d_g362 d_g363] d_g426 d_nand_m
+a353 [d_g954 d_g886 d_g912] d_x31 d_and_m
+a206 [d_g632 d_g637] d_g681 d_nand_m
+a229 [d_g698 d_g699] d_g718 d_nand_m
+a509 [d_g1248 d_g1249] d_g1302 d_nand_m
+a186 [d_g572 d_g573] d_g607 d_nand_m
+a549 d_g1310 d_g1342 d_inverter_m
+a163 [d_g456 d_g537] d_g580 d_nand_m
+a392 [d_g886 d_g1021] d_g1099 d_and_m
+a531 d_g1292 d_g1324 d_inverter_m
+a329 d_g847 d_g970 d_inverter_m
+a402 [d_g899 d_g1031] d_g1129 d_and_m
+a483 [d_g25 d_g1204] d_g1276 d_nand_m
+a269 [d_g654 d_g782] d_g806 d_nand_m
+a117 [d_g386 d_g387] d_g462 d_nand_m
+a341 [d_g958 d_g959 d_g960 d_g899] d_g982 d_and_m
+a223 [d_g627 d_g687] d_g704 d_nand_m
+a129 [d_g410 d_g411] d_g498 d_nand_m
+a550 d_g1311 d_g1343 d_inverter_m
+a76 [d_g13 d_g317] d_g397 d_nand_m
+a23 [d_g29 d_g30] d_g308 d_nand_m
+a271 [d_g660 d_g788] d_g812 d_nand_m
+a311 d_g886 d_g952 d_inverter_m
+a555 d_g1316 d_g1348 d_inverter_m
+a82 [d_g7 d_g326] d_g403 d_nand_m
+a259 [d_g758 d_g759] d_g776 d_nand_m
+a289 [d_g818 d_g819] d_g834 d_nand_m
+a441 [d_g4 d_g1141] d_g1234 d_nand_m
+a165 [d_g462 d_g540] d_g582 d_nand_m
+a318 d_g886 d_g959 d_inverter_m
+a42 [d_g2 d_g266] d_g363 d_nand_m
+a155 [d_g432 d_g525] d_g572 d_nand_m
+a243 [d_g245 d_g733] d_g756 d_nand_m
+a435 [d_g1 d_g1132] d_g1228 d_nand_m
+a133 [d_g418 d_g419] d_g510 d_nand_m
+a91 [d_g25 d_g341] d_g412 d_nand_m
+a258 [d_g756 d_g757] d_g773 d_nand_m
+a474 [d_g1093 d_g1189] d_g1267 d_nand_m
+a237 [d_g254 d_g706] d_g742 d_nand_m
+a347 [d_g925 d_g950 d_g912] d_x11 d_and_m
+a548 d_g1309 d_g1341 d_inverter_m
+a174 [d_g489 d_g552] d_g591 d_nand_m
+a424 [d_g22 d_g1099] d_g1195 d_nand_m
+a491 [d_g29 d_g1216] d_g1284 d_nand_m
+a115 [d_g382 d_g383] d_g456 d_nand_m
+a10 [d_g3 d_g4] d_g269 d_nand_m
+a521 [d_g1272 d_g1273] d_g1314 d_nand_m
+a181 [d_g510 d_g564] d_g598 d_nand_m
+a257 [d_g754 d_g755] d_g770 d_nand_m
+a34 [d_g25 d_g29] d_g341 d_nand_m
+a77 [d_g2 d_g320] d_g398 d_nand_m
+a249 [d_g254 d_g742] d_g762 d_nand_m
+a540 d_g1301 d_g1333 d_inverter_m
+a33 [d_g17 d_g21] d_g338 d_nand_m
+a128 [d_g408 d_g409] d_g495 d_nand_m
+a166 [d_g465 d_g540] d_g583 d_nand_m
+a248 [d_g727 d_g739] d_g761 d_nand_m
+a562 d_g1323 d_g1355 d_inverter_m
+a142 [d_g456 d_g459] d_g537 d_nand_m
+a168 [d_g471 d_g543] d_g585 d_nand_m
+a224 [d_g637 d_g687] d_g705 d_nand_m
+a277 [d_g648 d_g800] d_g822 d_nand_m
+a106 [d_g364 d_g365] d_g429 d_nand_m
+a118 [d_g388 d_g389] d_g465 d_nand_m
+a354 [d_g955 d_g986] d_x32 d_and_m
+a149 [d_g498 d_g501] d_g558 d_nand_m
+a90 [d_g21 d_g338] d_g411 d_nand_m
+a335 d_g834 d_g976 d_inverter_m
+a376 [d_g847 d_g1001] d_g1051 d_and_m
+a393 [d_g912 d_g1021] d_g1102 d_and_m
+a251 [d_g257 d_g745] d_g764 d_nand_m
+a530 [d_g1290 d_g1291] d_g1323 d_nand_m
+a83 [d_g11 d_g329] d_g404 d_nand_m
+a463 [d_g15 d_g1174] d_g1256 d_nand_m
+a321 d_g886 d_g962 d_inverter_m
+a270 [d_g657 d_g785] d_g809 d_nand_m
+a286 [d_g788 d_g812] d_g831 d_nand_m
+a547 d_g1308 d_g1340 d_inverter_m
+a458 [d_g1069 d_g1165] d_g1251 d_nand_m
+a22 [d_g27 d_g28] d_g305 d_nand_m
+a147 [d_g486 d_g489] d_g552 d_nand_m
+a340 [d_g834 d_g947 d_g948 d_g949] d_g981 d_and_m
+a43 [d_g3 d_g269] d_g364 d_nand_m
+a418 [d_g16 d_g1081] d_g1177 d_nand_m
+a310 d_g899 d_g951 d_inverter_m
+a459 [d_g13 d_g1168] d_g1252 d_nand_m
+a411 [d_g9 d_g1060] d_g1156 d_nand_m
+a193 [d_g586 d_g587] d_g642 d_nand_m
+a380 [d_g847 d_g1006] d_g1063 d_and_m
+a242 [d_g718 d_g730] d_g755 d_nand_m
+a111 [d_g374 d_g375] d_g444 d_nand_m
+a513 [d_g1256 d_g1257] d_g1306 d_nand_m
+a477 [d_g22 d_g1195] d_g1270 d_nand_m
+a28 [d_g10 d_g14] d_g323 d_nand_m
+a536 d_g1297 d_g1329 d_inverter_m
+a50 [d_g10 d_g278] d_g371 d_nand_m
+a152 [d_g516 d_g519] d_g567 d_nand_m
+a499 [d_g1228 d_g1229] d_g1292 d_nand_m
+a440 [d_g1042 d_g1138] d_g1233 d_nand_m
+a205 [d_g622 d_g627] d_g678 d_nand_m
+a294 [d_g832 d_g833] d_g899 d_nand_m
+a52 [d_g12 d_g281] d_g373 d_nand_m
+a173 [d_g486 d_g552] d_g590 d_nand_m
+a272 [d_g663 d_g791] d_g815 d_nand_m
+a452 [d_g1060 d_g1156] d_g1245 d_nand_m
+a476 [d_g1096 d_g1192] d_g1269 d_nand_m
+a484 [d_g1108 d_g1204] d_g1277 d_nand_m
+a447 [d_g7 d_g1150] d_g1240 d_nand_m
+a448 [d_g1054 d_g1150] d_g1241 d_nand_m
+a331 d_g847 d_g972 d_inverter_m
+a348 [d_g951 d_g986] d_x12 d_and_m
+a520 [d_g1270 d_g1271] d_g1313 d_nand_m
+a162 [d_g453 d_g534] d_g579 d_nand_m
+a355 [d_x31 d_x32] d_g1006 d_and_m
+a364 [d_x61 d_x62] d_g1021 d_and_m
+a403 [d_g1 d_g1036] d_g1132 d_nand_m
+a385 [d_g860 d_g1011] d_g1078 d_and_m
+a320 d_g925 d_g961 d_inverter_m
+a87 [d_g12 d_g335] d_g408 d_nand_m
+a356 [d_g956 d_g886 d_g957] d_x41 d_and_m
+a184 [d_g519 d_g567] d_g601 d_nand_m
+a507 [d_g1244 d_g1245] d_g1300 d_nand_m
+a359 [d_g834 d_g970 d_g860] d_x51 d_and_m
+a135 [d_g422 d_g423] d_g516 d_nand_m
+a63 [d_g23 d_g299] d_g384 d_nand_m
+a282 [d_g782 d_g806] d_g827 d_nand_m
+a333 d_g834 d_g974 d_inverter_m
+a291 [d_g822 d_g823] d_g860 d_nand_m
+a167 [d_g468 d_g543] d_g584 d_nand_m
+a455 [d_g11 d_g1162] d_g1248 d_nand_m
+a556 d_g1317 d_g1349 d_inverter_m
+a460 [d_g1072 d_g1168] d_g1253 d_nand_m
+a103 [d_g28 d_g359] d_g424 d_nand_m
+a239 [d_g260 d_g712] d_g748 d_nand_m
+a434 [d_g32 d_g1129] d_g1225 d_nand_m
+a145 [d_g474 d_g477] d_g546 d_nand_m
+a16 [d_g15 d_g16] d_g287 d_nand_m
+a312 d_g912 d_g953 d_inverter_m
+a487 [d_g27 d_g1210] d_g1280 d_nand_m
+a497 [d_g32 d_g1225] d_g1290 d_nand_m
+a65 [d_g25 d_g302] d_g386 d_nand_m
+a407 [d_g5 d_g1048] d_g1144 d_nand_m
+a425 [d_g23 d_g1102] d_g1198 d_nand_m
+a127 [d_g406 d_g407] d_g492 d_nand_m
+a72 [d_g32 d_g311] d_g393 d_nand_m
+a404 [d_g2 d_g1039] d_g1135 d_nand_m
+a288 [d_g791 d_g815] d_g833 d_nand_m
+a386 [d_g873 d_g1011] d_g1081 d_and_m
+a516 [d_g1262 d_g1263] d_g1309 d_nand_m
+a533 d_g1294 d_g1326 d_inverter_m
+a112 [d_g376 d_g377] d_g447 d_nand_m
+a303 d_g834 d_g944 d_inverter_m
+a541 d_g1302 d_g1334 d_inverter_m
+a304 d_g860 d_g945 d_inverter_m
+a313 d_g925 d_g954 d_inverter_m
+a137 [d_g426 d_g429] d_g522 d_nand_m
+a327 d_g912 d_g968 d_inverter_m
+a532 d_g1293 d_g1325 d_inverter_m
+a478 [d_g1099 d_g1195] d_g1271 d_nand_m
+a146 [d_g480 d_g483] d_g549 d_nand_m
+a511 [d_g1252 d_g1253] d_g1304 d_nand_m
+a55 [d_g15 d_g287] d_g376 d_nand_m
+a25 [d_g1 d_g5] d_g314 d_nand_m
+a84 [d_g15 d_g329] d_g405 d_nand_m
+a19 [d_g21 d_g22] d_g296 d_nand_m
+a367 [d_x71 d_x72] d_g1026 d_and_m
+a273 [d_g642 d_g794] d_g818 d_nand_m
+a372 [d_g847 d_g996] d_g1039 d_and_m
+a394 [d_g899 d_g1021] d_g1105 d_and_m
+a349 [d_x11 d_x12] d_g996 d_and_m
+a161 [d_g450 d_g534] d_g578 d_nand_m
+a490 [d_g1117 d_g1213] d_g1283 d_nand_m
+a528 [d_g1286 d_g1287] d_g1321 d_nand_m
+a538 d_g1299 d_g1331 d_inverter_m
+a160 [d_g447 d_g531] d_g577 d_nand_m
+a190 [d_g580 d_g581] d_g627 d_nand_m
+a449 [d_g8 d_g1153] d_g1242 d_nand_m
+a336 d_g860 d_g977 d_inverter_m
+a297 d_g834 d_g938 d_inverter_m
+a502 [d_g1234 d_g1235] d_g1295 d_nand_m
+a553 d_g1314 d_g1346 d_inverter_m
+a7 [d_g39 d_g41] d_g260 d_and_m
+a560 d_g1321 d_g1353 d_inverter_m
+a216 [d_g617 d_g675] d_g697 d_nand_m
+a176 [d_g495 d_g555] d_g593 d_nand_m
+a98 [d_g23 d_g350] d_g419 d_nand_m
+a204 [d_g607 d_g617] d_g675 d_nand_m
+a221 [d_g622 d_g684] d_g702 d_nand_m
+a232 [d_g704 d_g705] d_g727 d_nand_m
+a26 [d_g9 d_g13] d_g317 d_nand_m
+a54 [d_g14 d_g284] d_g375 d_nand_m
+a244 [d_g721 d_g733] d_g757 d_nand_m
+a262 [d_g764 d_g765] d_g785 d_nand_m
+a18 [d_g19 d_g20] d_g293 d_nand_m
+a419 [d_g17 d_g1084] d_g1180 d_nand_m
+a298 d_g847 d_g939 d_inverter_m
+a461 [d_g14 d_g1171] d_g1254 d_nand_m
+a126 [d_g404 d_g405] d_g489 d_nand_m
+a203 [d_g602 d_g612] d_g672 d_nand_m
+a433 [d_g31 d_g1126] d_g1222 d_nand_m
+a220 [d_g637 d_g681] d_g701 d_nand_m
+a110 [d_g372 d_g373] d_g441 d_nand_m
+a362 [d_g834 d_g972 d_g973] d_x61 d_and_m
+a379 [d_g834 d_g1006] d_g1060 d_and_m
+a53 [d_g13 d_g284] d_g374 d_nand_m
+a346 [d_g982 d_g983 d_g984 d_g985] d_g991 d_or_m
+a496 [d_g1126 d_g1222] d_g1289 d_nand_m
+a501 [d_g1232 d_g1233] d_g1294 d_nand_m
+a134 [d_g420 d_g421] d_g513 d_nand_m
+a17 [d_g17 d_g18] d_g290 d_nand_m
+a187 [d_g574 d_g575] d_g612 d_nand_m
+a334 d_g873 d_g975 d_inverter_m
+a485 [d_g26 d_g1207] d_g1278 d_nand_m
+a6 [d_g38 d_g41] d_g257 d_and_m
+a64 [d_g24 d_g299] d_g385 d_nand_m
+a109 [d_g370 d_g371] d_g438 d_nand_m
+a97 [d_g19 d_g350] d_g418 d_nand_m
+a32 [d_g12 d_g16] d_g335 d_nand_m
+a192 [d_g584 d_g585] d_g637 d_nand_m
+a405 [d_g3 d_g1042] d_g1138 d_nand_m
+a71 [d_g31 d_g311] d_g392 d_nand_m
+a140 [d_g444 d_g447] d_g531 d_nand_m
+a148 [d_g492 d_g495] d_g555 d_nand_m
+a274 [d_g770 d_g794] d_g819 d_nand_m
+a222 [d_g632 d_g684] d_g703 d_nand_m
+a534 d_g1295 d_g1327 d_inverter_m
+a466 [d_g1081 d_g1177] d_g1259 d_nand_m
+a432 [d_g30 d_g1123] d_g1219 d_nand_m
+a24 [d_g31 d_g32] d_g311 d_nand_m
+a515 [d_g1260 d_g1261] d_g1308 d_nand_m
+a151 [d_g510 d_g513] d_g564 d_nand_m
+a227 [d_g694 d_g695] d_g712 d_nand_m
+a486 [d_g1111 d_g1207] d_g1279 d_nand_m
+a85 [d_g4 d_g332] d_g406 d_nand_m
+a267 [d_g648 d_g776] d_g800 d_nand_m
+a370 [d_x81 d_x82] d_g1031 d_and_m
+a169 [d_g474 d_g546] d_g586 d_nand_m
+a11 [d_g5 d_g6] d_g272 d_nand_m
+a350 [d_g925 d_g952 d_g953] d_x21 d_and_m
+a456 [d_g1066 d_g1162] d_g1249 d_nand_m
+a217 [d_g622 d_g678] d_g698 d_nand_m
+a307 d_g860 d_g948 d_inverter_m
+a542 d_g1303 d_g1335 d_inverter_m
+a527 [d_g1284 d_g1285] d_g1320 d_nand_m
+a250 [d_g706 d_g742] d_g763 d_nand_m
+a195 [d_g590 d_g591] d_g648 d_nand_m
+a421 [d_g19 d_g1090] d_g1186 d_nand_m
+a357 [d_g899 d_g986] d_x42 d_and_m
+a119 [d_g390 d_g391] d_g468 d_nand_m
+a99 [d_g27 d_g353] d_g420 d_nand_m
+a45 [d_g5 d_g272] d_g366 d_nand_m
+a454 [d_g1063 d_g1159] d_g1247 d_nand_m
+a508 [d_g1246 d_g1247] d_g1301 d_nand_m
+a512 [d_g1254 d_g1255] d_g1305 d_nand_m
+a231 [d_g702 d_g703] d_g724 d_nand_m
+a175 [d_g492 d_g555] d_g592 d_nand_m
+a479 [d_g23 d_g1198] d_g1272 d_nand_m
+a395 [d_g925 d_g1026] d_g1108 d_and_m
+a104 [d_g32 d_g359] d_g425 d_nand_m
+a416 [d_g14 d_g1075] d_g1171 d_nand_m
+a361 [d_x51 d_x52] d_g1016 d_and_m
+a561 d_g1322 d_g1354 d_inverter_m
+abpo [d_g1324 d_g1325 d_g1326 d_g1327 d_g1328 d_g1329 d_g1330 d_g1331 d_g1332 d_g1333 d_g1334
++ d_g1335 d_g1336 d_g1337 d_g1338 d_g1339 d_g1340 d_g1341 d_g1342 d_g1343 d_g1344 d_g1345 d_g1346
++ d_g1347 d_g1348 d_g1349 d_g1350 d_g1351 d_g1352 d_g1353 d_g1354 d_g1355] [g1324 g1325 g1326 g1327
++ g1328 g1329 g1330 g1331 g1332 g1333 g1334 g1335 g1336 g1337 g1338 g1339 g1340 g1341 g1342 g1343
++ g1344 g1345 g1346 g1347 g1348 g1349 g1350 g1351 g1352 g1353 g1354 g1355] dac_rail
+.model adc_half adc_bridge(in_low = 0.5 in_high = 0.5 rise_delay = 1e-12 fall_delay = 1e-12)
+.model dac_rail dac_bridge(out_low = 0 out_high = 1 out_undef = 0.5 t_rise = 1e-11 t_fall = 1e-11)
+.model d_and_m d_and(rise_delay = 1e-11 fall_delay = 1e-11)
+.model d_inverter_m d_inverter(rise_delay = 1e-11 fall_delay = 1e-11)
+.model d_nand_m d_nand(rise_delay = 1e-11 fall_delay = 1e-11)
+.model d_or_m d_or(rise_delay = 1e-11 fall_delay = 1e-11)

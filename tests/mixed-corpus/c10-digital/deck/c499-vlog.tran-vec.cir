@@ -1,0 +1,11 @@
+* C10 c499, variant c499-vlog, tran-vec
+.hdl "../net/c499.v"
+xdut g21 g18 g31 g17 g27 g11 g22 g32 g30 g4 g12 g29 g24 g39 g38 g20 g5 g35 g23 g13 g2 g37 g41 g9 g40
++ g14 g36 g19 g8 g3 g26 g16 g10 g6 g1 g28 g25 g15 g33 g7 g34 g468 g469 g470 g471 g472 g473 g474 g475
++ g476 g477 g478 g479 g480 g481 g482 g483 g484 g485 g486 g487 g488 g489 g490 g491 g492 g493 g494
++ g495 g496 g497 g498 g499 c499
+.param vcc=1.0
+.include ../net/c499_vectors.cir
+.include ../net/strobe_vectors.cir
+.tran 1n 640n
+.end

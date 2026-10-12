@@ -1,0 +1,11 @@
+* C10 c6288, variant c6288-vlog, tran-vec-c6288
+.hdl "../net/c6288.v"
+xdut g21 g18 g30 g5 g14 g26 g15 g7 g17 g27 g22 g4 g23 g13 g19 g6 g1 g28 g32 g12 g24 g9 g3 g10 g31
++ g11 g29 g20 g2 g8 g16 g25 g6257 g6258 g6259 g6260 g6261 g6262 g6263 g6264 g6265 g6266 g6267 g6268
++ g6269 g6270 g6271 g6272 g6273 g6274 g6275 g6276 g6277 g6278 g6279 g6280 g6281 g6282 g6283 g6284
++ g6285 g6286 g6287 g6288 c6288
+.param vcc=1.0
+.include ../net/c6288_vectors.cir
+.include ../net/strobe_vectors.cir
+.tran 1n 80n
+.end

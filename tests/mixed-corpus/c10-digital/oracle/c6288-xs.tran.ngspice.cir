@@ -1,0 +1,53 @@
+* C10 c6288, tran: O1 (ngspice-46) oracle deck. The ISCAS85 transistor-level deck
+* tests/iscas85/85/c6288/c6288.net (45 nm BSIM4 PTM, Vdd 1.8 V, .tran 1ps 1ns) included verbatim,
+* plus the RSpice decks' strobe and XSPICE A/D probes at 0.9 V (Vdd/2) on the
+* primary outputs, named as the xs digital nets. The control script swings every
+* input 0 -> 1.8 V (the deck's own 0 -> 1 V inputs, a logic 1 for the gate-level
+* renderings' 0.5 V threshold, do not resolve every 1.8 V gate: c880's all-high
+* response differs) with the deck's timing, and its run is the one written.
+.include ../../../iscas85/85/c6288/c6288.net
+.include ../net/strobe_iscas.cir
+aprobe [g6257 g6258 g6259 g6260 g6261 g6262 g6263 g6264 g6265 g6266 g6267 g6268 g6269 g6270 g6271
++ g6272 g6273 g6274 g6275 g6276 g6277 g6278 g6279 g6280 g6281 g6282 g6283 g6284 g6285 g6286 g6287
++ g6288] [d_g6257 d_g6258 d_g6259 d_g6260 d_g6261 d_g6262 d_g6263 d_g6264 d_g6265 d_g6266 d_g6267
++ d_g6268 d_g6269 d_g6270 d_g6271 d_g6272 d_g6273 d_g6274 d_g6275 d_g6276 d_g6277 d_g6278 d_g6279
++ d_g6280 d_g6281 d_g6282 d_g6283 d_g6284 d_g6285 d_g6286 d_g6287 d_g6288] adc_logic
+.model adc_logic adc_bridge(in_low = 0.9 in_high = 0.9 rise_delay = 1e-12 fall_delay = 1e-12)
+* rspice-write: v(g6257)
+* rspice-events: d_stb d_g6257 d_g6258 d_g6259 d_g6260 d_g6261 d_g6262 d_g6263 d_g6264 d_g6265 d_g6266 d_g6267 d_g6268 d_g6269 d_g6270 d_g6271 d_g6272 d_g6273 d_g6274 d_g6275 d_g6276 d_g6277 d_g6278 d_g6279 d_g6280 d_g6281 d_g6282 d_g6283 d_g6284 d_g6285 d_g6286 d_g6287 d_g6288
+* rspice-control-begin
+* alter @v1[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v2[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v3[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v4[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v5[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v6[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v7[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v8[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v9[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v10[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v11[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v12[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v13[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v14[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v15[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v16[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v17[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v18[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v19[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v20[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v21[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v22[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v23[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v24[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v25[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v26[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v27[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v28[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v29[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v30[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v31[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* alter @v32[pulse] = [ 0 1.8 0 200p 200p 1n 2n ]
+* run
+* rspice-control-end
+.end

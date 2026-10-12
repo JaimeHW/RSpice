@@ -1,0 +1,9 @@
+* C10 c432, variant c432-vlog, tran
+.hdl "../net/c432.v"
+xdut g35 g21 g18 g23 g13 g2 g31 g9 g17 g27 g14 g36 g19 g8 g3 g26 g16 g11 g22 g32 g30 g10 g6 g1 g28
++ g25 g4 g15 g12 g29 g33 g7 g24 g34 g20 g5 g426 g427 g428 g429 g430 g431 g432 c432
+.param vcc=1.0
+.include ../net/c432_pulse.cir
+.include ../net/strobe_iscas.cir
+.tran 1p 1n
+.end

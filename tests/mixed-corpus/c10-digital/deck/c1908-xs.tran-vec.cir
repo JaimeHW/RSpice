@@ -1,0 +1,6 @@
+* C10 c1908, variant c1908-xs, tran-vec
+.include ../net/c1908_xs.cir
+.include ../net/c1908_vectors.cir
+.include ../net/strobe_vectors.cir
+.tran 1n 640n
+.end

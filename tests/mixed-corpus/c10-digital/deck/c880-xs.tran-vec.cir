@@ -1,0 +1,6 @@
+* C10 c880, variant c880-xs, tran-vec
+.include ../net/c880_xs.cir
+.include ../net/c880_vectors.cir
+.include ../net/strobe_vectors.cir
+.tran 1n 640n
+.end

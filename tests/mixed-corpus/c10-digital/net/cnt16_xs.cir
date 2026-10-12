@@ -1,0 +1,27 @@
+* C10 XSPICE 16-bit ripple counter (RSpice-authored; corpus design C10): a 10 MHz
+* SPICE clock through an adc_bridge (rising through 0.5 V at 50.5 ns + k 100 ns)
+* clocks stage 0; stage k toggles on the rise of stage k-1's nout. dac_bridge
+* (an ideal 0 / 1 V source) puts d_q15..d_q0 on q15..q0 for the ladder.
+vclk clk 0 pulse(0 1 50n 1n 1n 49n 100n)
+abclk [clk] [d_clk] adc_half
+adff0 d_q0b d_clk null null d_q0 d_q0b dff1
+adff1 d_q1b d_q0b null null d_q1 d_q1b dff1
+adff2 d_q2b d_q1b null null d_q2 d_q2b dff1
+adff3 d_q3b d_q2b null null d_q3 d_q3b dff1
+adff4 d_q4b d_q3b null null d_q4 d_q4b dff1
+adff5 d_q5b d_q4b null null d_q5 d_q5b dff1
+adff6 d_q6b d_q5b null null d_q6 d_q6b dff1
+adff7 d_q7b d_q6b null null d_q7 d_q7b dff1
+adff8 d_q8b d_q7b null null d_q8 d_q8b dff1
+adff9 d_q9b d_q8b null null d_q9 d_q9b dff1
+adff10 d_q10b d_q9b null null d_q10 d_q10b dff1
+adff11 d_q11b d_q10b null null d_q11 d_q11b dff1
+adff12 d_q12b d_q11b null null d_q12 d_q12b dff1
+adff13 d_q13b d_q12b null null d_q13 d_q13b dff1
+adff14 d_q14b d_q13b null null d_q14 d_q14b dff1
+adff15 d_q15b d_q14b null null d_q15 d_q15b dff1
+abq [d_q15 d_q14 d_q13 d_q12 d_q11 d_q10 d_q9 d_q8 d_q7 d_q6 d_q5 d_q4 d_q3 d_q2 d_q1 d_q0]
++ [q15 q14 q13 q12 q11 q10 q9 q8 q7 q6 q5 q4 q3 q2 q1 q0] dac_rail
+.model adc_half adc_bridge(in_low = 0.5 in_high = 0.5)
+.model dac_rail dac_bridge(out_low = 0 out_high = 1 out_undef = 0.5 t_rise = 1e-9 t_fall = 1e-9)
+.model dff1 d_dff(clk_delay = 1n set_delay = 1n reset_delay = 1n ic = 0)

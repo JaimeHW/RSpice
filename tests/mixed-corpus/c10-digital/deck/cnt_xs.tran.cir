@@ -1,0 +1,5 @@
+* C10 counter into an R-2R DAC, variant cnt_xs, tran
+.include ../net/cnt16_xs.cir
+.include ../net/r2r16.cir
+.tran 1n 20u
+.end

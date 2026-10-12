@@ -1,0 +1,11 @@
+* C10 c1355, variant c1355-vlog, tran
+.hdl "../net/c1355.v"
+xdut g21 g18 g31 g17 g27 g11 g22 g32 g30 g4 g12 g29 g24 g39 g38 g20 g5 g35 g23 g13 g2 g37 g41 g9 g40
++ g14 g36 g19 g8 g3 g26 g16 g10 g6 g1 g28 g25 g15 g33 g7 g34 g1324 g1325 g1326 g1327 g1328 g1329
++ g1330 g1331 g1332 g1333 g1334 g1335 g1336 g1337 g1338 g1339 g1340 g1341 g1342 g1343 g1344 g1345
++ g1346 g1347 g1348 g1349 g1350 g1351 g1352 g1353 g1354 g1355 c1355
+.param vcc=1.0
+.include ../net/c1355_pulse.cir
+.include ../net/strobe_iscas.cir
+.tran 1p 1n
+.end

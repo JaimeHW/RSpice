@@ -1,0 +1,11 @@
+* C10 c880, variant c880-vlog, tran-vec
+.hdl "../net/c880.v"
+xdut g44 g57 g35 g21 g18 g23 g13 g53 g41 g37 g2 g31 g9 g17 g27 g60 g40 g14 g47 g36 g46 g19 g58 g8 g3
++ g26 g59 g54 g16 g11 g22 g32 g50 g30 g10 g45 g6 g1 g48 g28 g55 g42 g51 g25 g4 g15 g12 g29 g33 g7
++ g49 g24 g39 g56 g52 g34 g38 g20 g5 g43 g855 g856 g857 g858 g859 g860 g861 g862 g863 g864 g865 g866
++ g867 g868 g869 g870 g871 g872 g873 g874 g875 g876 g877 g878 g879 g880 c880
+.param vcc=1.0
+.include ../net/c880_vectors.cir
+.include ../net/strobe_vectors.cir
+.tran 1n 640n
+.end

@@ -1,0 +1,7 @@
+* C10 LFSR into an R-2R DAC, variant lfsr, tran
+.hdl "../net/lfsr16.v"
+xlfsr clk q15 q14 q13 q12 q11 q10 q9 q8 q7 q6 q5 q4 q3 q2 q1 q0 lfsr16
+.include ../net/r2r16.cir
+.param vcc=1.0
+.tran 1n 20u
+.end

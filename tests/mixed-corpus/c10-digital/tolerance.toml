@@ -1,0 +1,421 @@
+schema = "rspice-mixed-tolerance/1"
+# XSPICE gate delays are 10 ps; lfsr16: `timescale 1ns/1ps; the ISCAS Verilog
+# renderings have no timescale (zero delay).
+time_precision = 1e-12
+
+# The ISCAS outputs are read as codes on their event nets (xs: the XSPICE nets
+# d_<port>; vlog: the built-in converters' endpoints xdut.<port>__event_0),
+# MSB first in natural port order, just before each rise of the strobe d_stb.
+# O1 is the ISCAS transistor-level deck run by ngspice-46 with A/D probes at
+# 0.9 V on the same outputs (oracle/<c>-xs.tran.ngspice.cir); O6 is the
+# netlist's Boolean function of the applied inputs (analytic/c10.rs).
+
+# ---- lfsr / cnt_xs --------------------------------------------------------
+
+[[q]]
+id = "seq"
+analysis = "tran"
+variants = ["lfsr"]
+kind = "codes"
+nets = ["xlfsr.q15__event_0", "xlfsr.q14__event_0", "xlfsr.q13__event_0", "xlfsr.q12__event_0", "xlfsr.q11__event_0", "xlfsr.q10__event_0", "xlfsr.q9__event_0", "xlfsr.q8__event_0", "xlfsr.q7__event_0", "xlfsr.q6__event_0", "xlfsr.q5__event_0", "xlfsr.q4__event_0", "xlfsr.q3__event_0", "xlfsr.q2__event_0", "xlfsr.q1__event_0", "xlfsr.q0__event_0"]
+strobe = "xlfsr.clk__event_0"
+window = [0.0, 2.0e-5]
+oracle = "O6"
+expect = "c10::seq"
+why = "the register before each of its 200 clock rises: 16'hACE1, then one Fibonacci step (taps 16, 14, 13, 11) per rise; digital, exact"
+
+[[q]]
+id = "vdac"
+analysis = "tran"
+variants = ["lfsr"]
+kind = "held_at"
+signal = "v(dac)"
+times = { start = 1.3e-7, step = 1e-7, count = 199 }
+oracle = "O6"
+expect = "c10::vdac_lfsr"
+abs = 1.5e-3
+why = "state/65536 V 80 ns after each clock rise; the built-in D/A's 20 ohm against each 20k arm is at most 0.1 % of full scale"
+
+[[q]]
+id = "seq"
+analysis = "tran"
+variants = ["cnt_xs"]
+kind = "codes"
+nets = ["d_q15", "d_q14", "d_q13", "d_q12", "d_q11", "d_q10", "d_q9", "d_q8", "d_q7", "d_q6", "d_q5", "d_q4", "d_q3", "d_q2", "d_q1", "d_q0"]
+strobe = "d_clk"
+window = [0.0, 2.0e-5]
+oracle = "O6"
+expect = "c10::count"
+why = "the ripple counter before each of its 200 clock rises: 0..199 (at most 16 ns of ripple against the 100 ns clock); digital, exact"
+
+[[q]]
+id = "vdac"
+analysis = "tran"
+variants = ["cnt_xs"]
+kind = "held_at"
+signal = "v(dac)"
+times = { start = 1.3e-7, step = 1e-7, count = 199 }
+oracle = "O6"
+expect = "c10::vdac_count"
+abs = 1e-6
+why = "count/65536 V 79.5 ns after each clock rise; dac_bridge is an ideal source, so the ladder is exact to Newton's tolerance (one LSB is 15 uV)"
+
+# ---- c432 ------------------------------------------------------------------
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c432-xs", "c432-vlog"]
+kind = "codes"
+nets = { c432-xs = ["d_g426", "d_g427", "d_g428", "d_g429", "d_g430", "d_g431", "d_g432"], c432-vlog = ["xdut.g426__event_0", "xdut.g427__event_0", "xdut.g428__event_0", "xdut.g429__event_0", "xdut.g430__event_0", "xdut.g431__event_0", "xdut.g432__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O1"
+ref = "ref/c432-xs.tran.O1.out"
+why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c432-xs", "c432-vlog"]
+kind = "codes"
+nets = { c432-xs = ["d_g426", "d_g427", "d_g428", "d_g429", "d_g430", "d_g431", "d_g432"], c432-vlog = ["xdut.g426__event_0", "xdut.g427__event_0", "xdut.g428__event_0", "xdut.g429__event_0", "xdut.g430__event_0", "xdut.g431__event_0", "xdut.g432__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c432-xs", "c432-vlog"]
+kind = "codes"
+nets = { c432-xs = ["d_g426", "d_g427", "d_g428", "d_g429", "d_g430", "d_g431", "d_g432"], c432-vlog = ["xdut.g426__event_0", "xdut.g427__event_0", "xdut.g428__event_0", "xdut.g429__event_0", "xdut.g430__event_0", "xdut.g431__event_0", "xdut.g432__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "pi.0"
+analysis = "tran-vec"
+variants = ["c432-xs", "c432-vlog"]
+kind = "codes"
+nets = { c432-xs = ["d_g35", "d_g21", "d_g18", "d_g23", "d_g13", "d_g2", "d_g31", "d_g9", "d_g17", "d_g27", "d_g14", "d_g36", "d_g19", "d_g8", "d_g3", "d_g26", "d_g16", "d_g11", "d_g22", "d_g32", "d_g30", "d_g10", "d_g6", "d_g1", "d_g28", "d_g25", "d_g4", "d_g15", "d_g12", "d_g29", "d_g33", "d_g7"], c432-vlog = ["xdut.g35__event_0", "xdut.g21__event_0", "xdut.g18__event_0", "xdut.g23__event_0", "xdut.g13__event_0", "xdut.g2__event_0", "xdut.g31__event_0", "xdut.g9__event_0", "xdut.g17__event_0", "xdut.g27__event_0", "xdut.g14__event_0", "xdut.g36__event_0", "xdut.g19__event_0", "xdut.g8__event_0", "xdut.g3__event_0", "xdut.g26__event_0", "xdut.g16__event_0", "xdut.g11__event_0", "xdut.g22__event_0", "xdut.g32__event_0", "xdut.g30__event_0", "xdut.g10__event_0", "xdut.g6__event_0", "xdut.g1__event_0", "xdut.g28__event_0", "xdut.g25__event_0", "xdut.g4__event_0", "xdut.g15__event_0", "xdut.g12__event_0", "xdut.g29__event_0", "xdut.g33__event_0", "xdut.g7__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 1..32 of 36 in deck order; at most 32 per code so every code is an exact double)"
+
+[[q]]
+id = "pi.1"
+analysis = "tran-vec"
+variants = ["c432-xs", "c432-vlog"]
+kind = "codes"
+nets = { c432-xs = ["d_g24", "d_g34", "d_g20", "d_g5"], c432-vlog = ["xdut.g24__event_0", "xdut.g34__event_0", "xdut.g20__event_0", "xdut.g5__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 33..36 of 36 in deck order; at most 32 per code so every code is an exact double)"
+
+# ---- c499 ------------------------------------------------------------------
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c499-xs", "c499-vlog"]
+kind = "codes"
+nets = { c499-xs = ["d_g468", "d_g469", "d_g470", "d_g471", "d_g472", "d_g473", "d_g474", "d_g475", "d_g476", "d_g477", "d_g478", "d_g479", "d_g480", "d_g481", "d_g482", "d_g483", "d_g484", "d_g485", "d_g486", "d_g487", "d_g488", "d_g489", "d_g490", "d_g491", "d_g492", "d_g493", "d_g494", "d_g495", "d_g496", "d_g497", "d_g498", "d_g499"], c499-vlog = ["xdut.g468__event_0", "xdut.g469__event_0", "xdut.g470__event_0", "xdut.g471__event_0", "xdut.g472__event_0", "xdut.g473__event_0", "xdut.g474__event_0", "xdut.g475__event_0", "xdut.g476__event_0", "xdut.g477__event_0", "xdut.g478__event_0", "xdut.g479__event_0", "xdut.g480__event_0", "xdut.g481__event_0", "xdut.g482__event_0", "xdut.g483__event_0", "xdut.g484__event_0", "xdut.g485__event_0", "xdut.g486__event_0", "xdut.g487__event_0", "xdut.g488__event_0", "xdut.g489__event_0", "xdut.g490__event_0", "xdut.g491__event_0", "xdut.g492__event_0", "xdut.g493__event_0", "xdut.g494__event_0", "xdut.g495__event_0", "xdut.g496__event_0", "xdut.g497__event_0", "xdut.g498__event_0", "xdut.g499__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O1"
+ref = "ref/c499-xs.tran.O1.out"
+why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c499-xs", "c499-vlog"]
+kind = "codes"
+nets = { c499-xs = ["d_g468", "d_g469", "d_g470", "d_g471", "d_g472", "d_g473", "d_g474", "d_g475", "d_g476", "d_g477", "d_g478", "d_g479", "d_g480", "d_g481", "d_g482", "d_g483", "d_g484", "d_g485", "d_g486", "d_g487", "d_g488", "d_g489", "d_g490", "d_g491", "d_g492", "d_g493", "d_g494", "d_g495", "d_g496", "d_g497", "d_g498", "d_g499"], c499-vlog = ["xdut.g468__event_0", "xdut.g469__event_0", "xdut.g470__event_0", "xdut.g471__event_0", "xdut.g472__event_0", "xdut.g473__event_0", "xdut.g474__event_0", "xdut.g475__event_0", "xdut.g476__event_0", "xdut.g477__event_0", "xdut.g478__event_0", "xdut.g479__event_0", "xdut.g480__event_0", "xdut.g481__event_0", "xdut.g482__event_0", "xdut.g483__event_0", "xdut.g484__event_0", "xdut.g485__event_0", "xdut.g486__event_0", "xdut.g487__event_0", "xdut.g488__event_0", "xdut.g489__event_0", "xdut.g490__event_0", "xdut.g491__event_0", "xdut.g492__event_0", "xdut.g493__event_0", "xdut.g494__event_0", "xdut.g495__event_0", "xdut.g496__event_0", "xdut.g497__event_0", "xdut.g498__event_0", "xdut.g499__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c499-xs", "c499-vlog"]
+kind = "codes"
+nets = { c499-xs = ["d_g468", "d_g469", "d_g470", "d_g471", "d_g472", "d_g473", "d_g474", "d_g475", "d_g476", "d_g477", "d_g478", "d_g479", "d_g480", "d_g481", "d_g482", "d_g483", "d_g484", "d_g485", "d_g486", "d_g487", "d_g488", "d_g489", "d_g490", "d_g491", "d_g492", "d_g493", "d_g494", "d_g495", "d_g496", "d_g497", "d_g498", "d_g499"], c499-vlog = ["xdut.g468__event_0", "xdut.g469__event_0", "xdut.g470__event_0", "xdut.g471__event_0", "xdut.g472__event_0", "xdut.g473__event_0", "xdut.g474__event_0", "xdut.g475__event_0", "xdut.g476__event_0", "xdut.g477__event_0", "xdut.g478__event_0", "xdut.g479__event_0", "xdut.g480__event_0", "xdut.g481__event_0", "xdut.g482__event_0", "xdut.g483__event_0", "xdut.g484__event_0", "xdut.g485__event_0", "xdut.g486__event_0", "xdut.g487__event_0", "xdut.g488__event_0", "xdut.g489__event_0", "xdut.g490__event_0", "xdut.g491__event_0", "xdut.g492__event_0", "xdut.g493__event_0", "xdut.g494__event_0", "xdut.g495__event_0", "xdut.g496__event_0", "xdut.g497__event_0", "xdut.g498__event_0", "xdut.g499__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "pi.0"
+analysis = "tran-vec"
+variants = ["c499-xs", "c499-vlog"]
+kind = "codes"
+nets = { c499-xs = ["d_g21", "d_g18", "d_g31", "d_g17", "d_g27", "d_g11", "d_g22", "d_g32", "d_g30", "d_g4", "d_g12", "d_g29", "d_g24", "d_g39", "d_g38", "d_g20", "d_g5", "d_g35", "d_g23", "d_g13", "d_g2", "d_g37", "d_g41", "d_g9", "d_g40", "d_g14", "d_g36", "d_g19", "d_g8", "d_g3", "d_g26", "d_g16"], c499-vlog = ["xdut.g21__event_0", "xdut.g18__event_0", "xdut.g31__event_0", "xdut.g17__event_0", "xdut.g27__event_0", "xdut.g11__event_0", "xdut.g22__event_0", "xdut.g32__event_0", "xdut.g30__event_0", "xdut.g4__event_0", "xdut.g12__event_0", "xdut.g29__event_0", "xdut.g24__event_0", "xdut.g39__event_0", "xdut.g38__event_0", "xdut.g20__event_0", "xdut.g5__event_0", "xdut.g35__event_0", "xdut.g23__event_0", "xdut.g13__event_0", "xdut.g2__event_0", "xdut.g37__event_0", "xdut.g41__event_0", "xdut.g9__event_0", "xdut.g40__event_0", "xdut.g14__event_0", "xdut.g36__event_0", "xdut.g19__event_0", "xdut.g8__event_0", "xdut.g3__event_0", "xdut.g26__event_0", "xdut.g16__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 1..32 of 41 in deck order; at most 32 per code so every code is an exact double)"
+
+[[q]]
+id = "pi.1"
+analysis = "tran-vec"
+variants = ["c499-xs", "c499-vlog"]
+kind = "codes"
+nets = { c499-xs = ["d_g10", "d_g6", "d_g1", "d_g28", "d_g25", "d_g15", "d_g33", "d_g7", "d_g34"], c499-vlog = ["xdut.g10__event_0", "xdut.g6__event_0", "xdut.g1__event_0", "xdut.g28__event_0", "xdut.g25__event_0", "xdut.g15__event_0", "xdut.g33__event_0", "xdut.g7__event_0", "xdut.g34__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 33..41 of 41 in deck order; at most 32 per code so every code is an exact double)"
+
+# ---- c880 ------------------------------------------------------------------
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c880-xs", "c880-vlog"]
+kind = "codes"
+nets = { c880-xs = ["d_g855", "d_g856", "d_g857", "d_g858", "d_g859", "d_g860", "d_g861", "d_g862", "d_g863", "d_g864", "d_g865", "d_g866", "d_g867", "d_g868", "d_g869", "d_g870", "d_g871", "d_g872", "d_g873", "d_g874", "d_g875", "d_g876", "d_g877", "d_g878", "d_g879", "d_g880"], c880-vlog = ["xdut.g855__event_0", "xdut.g856__event_0", "xdut.g857__event_0", "xdut.g858__event_0", "xdut.g859__event_0", "xdut.g860__event_0", "xdut.g861__event_0", "xdut.g862__event_0", "xdut.g863__event_0", "xdut.g864__event_0", "xdut.g865__event_0", "xdut.g866__event_0", "xdut.g867__event_0", "xdut.g868__event_0", "xdut.g869__event_0", "xdut.g870__event_0", "xdut.g871__event_0", "xdut.g872__event_0", "xdut.g873__event_0", "xdut.g874__event_0", "xdut.g875__event_0", "xdut.g876__event_0", "xdut.g877__event_0", "xdut.g878__event_0", "xdut.g879__event_0", "xdut.g880__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O1"
+ref = "ref/c880-xs.tran.O1.out"
+why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c880-xs", "c880-vlog"]
+kind = "codes"
+nets = { c880-xs = ["d_g855", "d_g856", "d_g857", "d_g858", "d_g859", "d_g860", "d_g861", "d_g862", "d_g863", "d_g864", "d_g865", "d_g866", "d_g867", "d_g868", "d_g869", "d_g870", "d_g871", "d_g872", "d_g873", "d_g874", "d_g875", "d_g876", "d_g877", "d_g878", "d_g879", "d_g880"], c880-vlog = ["xdut.g855__event_0", "xdut.g856__event_0", "xdut.g857__event_0", "xdut.g858__event_0", "xdut.g859__event_0", "xdut.g860__event_0", "xdut.g861__event_0", "xdut.g862__event_0", "xdut.g863__event_0", "xdut.g864__event_0", "xdut.g865__event_0", "xdut.g866__event_0", "xdut.g867__event_0", "xdut.g868__event_0", "xdut.g869__event_0", "xdut.g870__event_0", "xdut.g871__event_0", "xdut.g872__event_0", "xdut.g873__event_0", "xdut.g874__event_0", "xdut.g875__event_0", "xdut.g876__event_0", "xdut.g877__event_0", "xdut.g878__event_0", "xdut.g879__event_0", "xdut.g880__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c880-xs", "c880-vlog"]
+kind = "codes"
+nets = { c880-xs = ["d_g855", "d_g856", "d_g857", "d_g858", "d_g859", "d_g860", "d_g861", "d_g862", "d_g863", "d_g864", "d_g865", "d_g866", "d_g867", "d_g868", "d_g869", "d_g870", "d_g871", "d_g872", "d_g873", "d_g874", "d_g875", "d_g876", "d_g877", "d_g878", "d_g879", "d_g880"], c880-vlog = ["xdut.g855__event_0", "xdut.g856__event_0", "xdut.g857__event_0", "xdut.g858__event_0", "xdut.g859__event_0", "xdut.g860__event_0", "xdut.g861__event_0", "xdut.g862__event_0", "xdut.g863__event_0", "xdut.g864__event_0", "xdut.g865__event_0", "xdut.g866__event_0", "xdut.g867__event_0", "xdut.g868__event_0", "xdut.g869__event_0", "xdut.g870__event_0", "xdut.g871__event_0", "xdut.g872__event_0", "xdut.g873__event_0", "xdut.g874__event_0", "xdut.g875__event_0", "xdut.g876__event_0", "xdut.g877__event_0", "xdut.g878__event_0", "xdut.g879__event_0", "xdut.g880__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "pi.0"
+analysis = "tran-vec"
+variants = ["c880-xs", "c880-vlog"]
+kind = "codes"
+nets = { c880-xs = ["d_g44", "d_g57", "d_g35", "d_g21", "d_g18", "d_g23", "d_g13", "d_g53", "d_g41", "d_g37", "d_g2", "d_g31", "d_g9", "d_g17", "d_g27", "d_g60", "d_g40", "d_g14", "d_g47", "d_g36", "d_g46", "d_g19", "d_g58", "d_g8", "d_g3", "d_g26", "d_g59", "d_g54", "d_g16", "d_g11", "d_g22", "d_g32"], c880-vlog = ["xdut.g44__event_0", "xdut.g57__event_0", "xdut.g35__event_0", "xdut.g21__event_0", "xdut.g18__event_0", "xdut.g23__event_0", "xdut.g13__event_0", "xdut.g53__event_0", "xdut.g41__event_0", "xdut.g37__event_0", "xdut.g2__event_0", "xdut.g31__event_0", "xdut.g9__event_0", "xdut.g17__event_0", "xdut.g27__event_0", "xdut.g60__event_0", "xdut.g40__event_0", "xdut.g14__event_0", "xdut.g47__event_0", "xdut.g36__event_0", "xdut.g46__event_0", "xdut.g19__event_0", "xdut.g58__event_0", "xdut.g8__event_0", "xdut.g3__event_0", "xdut.g26__event_0", "xdut.g59__event_0", "xdut.g54__event_0", "xdut.g16__event_0", "xdut.g11__event_0", "xdut.g22__event_0", "xdut.g32__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 1..32 of 60 in deck order; at most 32 per code so every code is an exact double)"
+
+[[q]]
+id = "pi.1"
+analysis = "tran-vec"
+variants = ["c880-xs", "c880-vlog"]
+kind = "codes"
+nets = { c880-xs = ["d_g50", "d_g30", "d_g10", "d_g45", "d_g6", "d_g1", "d_g48", "d_g28", "d_g55", "d_g42", "d_g51", "d_g25", "d_g4", "d_g15", "d_g12", "d_g29", "d_g33", "d_g7", "d_g49", "d_g24", "d_g39", "d_g56", "d_g52", "d_g34", "d_g38", "d_g20", "d_g5", "d_g43"], c880-vlog = ["xdut.g50__event_0", "xdut.g30__event_0", "xdut.g10__event_0", "xdut.g45__event_0", "xdut.g6__event_0", "xdut.g1__event_0", "xdut.g48__event_0", "xdut.g28__event_0", "xdut.g55__event_0", "xdut.g42__event_0", "xdut.g51__event_0", "xdut.g25__event_0", "xdut.g4__event_0", "xdut.g15__event_0", "xdut.g12__event_0", "xdut.g29__event_0", "xdut.g33__event_0", "xdut.g7__event_0", "xdut.g49__event_0", "xdut.g24__event_0", "xdut.g39__event_0", "xdut.g56__event_0", "xdut.g52__event_0", "xdut.g34__event_0", "xdut.g38__event_0", "xdut.g20__event_0", "xdut.g5__event_0", "xdut.g43__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 33..60 of 60 in deck order; at most 32 per code so every code is an exact double)"
+
+# ---- c1355 -----------------------------------------------------------------
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c1355-xs", "c1355-vlog"]
+kind = "codes"
+nets = { c1355-xs = ["d_g1324", "d_g1325", "d_g1326", "d_g1327", "d_g1328", "d_g1329", "d_g1330", "d_g1331", "d_g1332", "d_g1333", "d_g1334", "d_g1335", "d_g1336", "d_g1337", "d_g1338", "d_g1339", "d_g1340", "d_g1341", "d_g1342", "d_g1343", "d_g1344", "d_g1345", "d_g1346", "d_g1347", "d_g1348", "d_g1349", "d_g1350", "d_g1351", "d_g1352", "d_g1353", "d_g1354", "d_g1355"], c1355-vlog = ["xdut.g1324__event_0", "xdut.g1325__event_0", "xdut.g1326__event_0", "xdut.g1327__event_0", "xdut.g1328__event_0", "xdut.g1329__event_0", "xdut.g1330__event_0", "xdut.g1331__event_0", "xdut.g1332__event_0", "xdut.g1333__event_0", "xdut.g1334__event_0", "xdut.g1335__event_0", "xdut.g1336__event_0", "xdut.g1337__event_0", "xdut.g1338__event_0", "xdut.g1339__event_0", "xdut.g1340__event_0", "xdut.g1341__event_0", "xdut.g1342__event_0", "xdut.g1343__event_0", "xdut.g1344__event_0", "xdut.g1345__event_0", "xdut.g1346__event_0", "xdut.g1347__event_0", "xdut.g1348__event_0", "xdut.g1349__event_0", "xdut.g1350__event_0", "xdut.g1351__event_0", "xdut.g1352__event_0", "xdut.g1353__event_0", "xdut.g1354__event_0", "xdut.g1355__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O1"
+ref = "ref/c1355-xs.tran.O1.out"
+why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c1355-xs", "c1355-vlog"]
+kind = "codes"
+nets = { c1355-xs = ["d_g1324", "d_g1325", "d_g1326", "d_g1327", "d_g1328", "d_g1329", "d_g1330", "d_g1331", "d_g1332", "d_g1333", "d_g1334", "d_g1335", "d_g1336", "d_g1337", "d_g1338", "d_g1339", "d_g1340", "d_g1341", "d_g1342", "d_g1343", "d_g1344", "d_g1345", "d_g1346", "d_g1347", "d_g1348", "d_g1349", "d_g1350", "d_g1351", "d_g1352", "d_g1353", "d_g1354", "d_g1355"], c1355-vlog = ["xdut.g1324__event_0", "xdut.g1325__event_0", "xdut.g1326__event_0", "xdut.g1327__event_0", "xdut.g1328__event_0", "xdut.g1329__event_0", "xdut.g1330__event_0", "xdut.g1331__event_0", "xdut.g1332__event_0", "xdut.g1333__event_0", "xdut.g1334__event_0", "xdut.g1335__event_0", "xdut.g1336__event_0", "xdut.g1337__event_0", "xdut.g1338__event_0", "xdut.g1339__event_0", "xdut.g1340__event_0", "xdut.g1341__event_0", "xdut.g1342__event_0", "xdut.g1343__event_0", "xdut.g1344__event_0", "xdut.g1345__event_0", "xdut.g1346__event_0", "xdut.g1347__event_0", "xdut.g1348__event_0", "xdut.g1349__event_0", "xdut.g1350__event_0", "xdut.g1351__event_0", "xdut.g1352__event_0", "xdut.g1353__event_0", "xdut.g1354__event_0", "xdut.g1355__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c1355-xs", "c1355-vlog"]
+kind = "codes"
+nets = { c1355-xs = ["d_g1324", "d_g1325", "d_g1326", "d_g1327", "d_g1328", "d_g1329", "d_g1330", "d_g1331", "d_g1332", "d_g1333", "d_g1334", "d_g1335", "d_g1336", "d_g1337", "d_g1338", "d_g1339", "d_g1340", "d_g1341", "d_g1342", "d_g1343", "d_g1344", "d_g1345", "d_g1346", "d_g1347", "d_g1348", "d_g1349", "d_g1350", "d_g1351", "d_g1352", "d_g1353", "d_g1354", "d_g1355"], c1355-vlog = ["xdut.g1324__event_0", "xdut.g1325__event_0", "xdut.g1326__event_0", "xdut.g1327__event_0", "xdut.g1328__event_0", "xdut.g1329__event_0", "xdut.g1330__event_0", "xdut.g1331__event_0", "xdut.g1332__event_0", "xdut.g1333__event_0", "xdut.g1334__event_0", "xdut.g1335__event_0", "xdut.g1336__event_0", "xdut.g1337__event_0", "xdut.g1338__event_0", "xdut.g1339__event_0", "xdut.g1340__event_0", "xdut.g1341__event_0", "xdut.g1342__event_0", "xdut.g1343__event_0", "xdut.g1344__event_0", "xdut.g1345__event_0", "xdut.g1346__event_0", "xdut.g1347__event_0", "xdut.g1348__event_0", "xdut.g1349__event_0", "xdut.g1350__event_0", "xdut.g1351__event_0", "xdut.g1352__event_0", "xdut.g1353__event_0", "xdut.g1354__event_0", "xdut.g1355__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "pi.0"
+analysis = "tran-vec"
+variants = ["c1355-xs", "c1355-vlog"]
+kind = "codes"
+nets = { c1355-xs = ["d_g21", "d_g18", "d_g31", "d_g17", "d_g27", "d_g11", "d_g22", "d_g32", "d_g30", "d_g4", "d_g12", "d_g29", "d_g24", "d_g39", "d_g38", "d_g20", "d_g5", "d_g35", "d_g23", "d_g13", "d_g2", "d_g37", "d_g41", "d_g9", "d_g40", "d_g14", "d_g36", "d_g19", "d_g8", "d_g3", "d_g26", "d_g16"], c1355-vlog = ["xdut.g21__event_0", "xdut.g18__event_0", "xdut.g31__event_0", "xdut.g17__event_0", "xdut.g27__event_0", "xdut.g11__event_0", "xdut.g22__event_0", "xdut.g32__event_0", "xdut.g30__event_0", "xdut.g4__event_0", "xdut.g12__event_0", "xdut.g29__event_0", "xdut.g24__event_0", "xdut.g39__event_0", "xdut.g38__event_0", "xdut.g20__event_0", "xdut.g5__event_0", "xdut.g35__event_0", "xdut.g23__event_0", "xdut.g13__event_0", "xdut.g2__event_0", "xdut.g37__event_0", "xdut.g41__event_0", "xdut.g9__event_0", "xdut.g40__event_0", "xdut.g14__event_0", "xdut.g36__event_0", "xdut.g19__event_0", "xdut.g8__event_0", "xdut.g3__event_0", "xdut.g26__event_0", "xdut.g16__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 1..32 of 41 in deck order; at most 32 per code so every code is an exact double)"
+
+[[q]]
+id = "pi.1"
+analysis = "tran-vec"
+variants = ["c1355-xs", "c1355-vlog"]
+kind = "codes"
+nets = { c1355-xs = ["d_g10", "d_g6", "d_g1", "d_g28", "d_g25", "d_g15", "d_g33", "d_g7", "d_g34"], c1355-vlog = ["xdut.g10__event_0", "xdut.g6__event_0", "xdut.g1__event_0", "xdut.g28__event_0", "xdut.g25__event_0", "xdut.g15__event_0", "xdut.g33__event_0", "xdut.g7__event_0", "xdut.g34__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 33..41 of 41 in deck order; at most 32 per code so every code is an exact double)"
+
+# ---- c1908 -----------------------------------------------------------------
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c1908-xs", "c1908-vlog"]
+kind = "codes"
+nets = { c1908-xs = ["d_g1884", "d_g1885", "d_g1886", "d_g1887", "d_g1888", "d_g1889", "d_g1890", "d_g1891", "d_g1892", "d_g1893", "d_g1894", "d_g1895", "d_g1896", "d_g1897", "d_g1898", "d_g1899", "d_g1900", "d_g1901", "d_g1902", "d_g1903", "d_g1904", "d_g1905", "d_g1906", "d_g1907", "d_g1908"], c1908-vlog = ["xdut.g1884__event_0", "xdut.g1885__event_0", "xdut.g1886__event_0", "xdut.g1887__event_0", "xdut.g1888__event_0", "xdut.g1889__event_0", "xdut.g1890__event_0", "xdut.g1891__event_0", "xdut.g1892__event_0", "xdut.g1893__event_0", "xdut.g1894__event_0", "xdut.g1895__event_0", "xdut.g1896__event_0", "xdut.g1897__event_0", "xdut.g1898__event_0", "xdut.g1899__event_0", "xdut.g1900__event_0", "xdut.g1901__event_0", "xdut.g1902__event_0", "xdut.g1903__event_0", "xdut.g1904__event_0", "xdut.g1905__event_0", "xdut.g1906__event_0", "xdut.g1907__event_0", "xdut.g1908__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O1"
+ref = "ref/c1908-xs.tran.O1.out"
+why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low) and before 985 ps (inputs high since 200 ps; every output settled by 0.85 ns); logic values, exact"
+
+[[q]]
+id = "po"
+analysis = "tran"
+variants = ["c1908-xs", "c1908-vlog"]
+kind = "codes"
+nets = { c1908-xs = ["d_g1884", "d_g1885", "d_g1886", "d_g1887", "d_g1888", "d_g1889", "d_g1890", "d_g1891", "d_g1892", "d_g1893", "d_g1894", "d_g1895", "d_g1896", "d_g1897", "d_g1898", "d_g1899", "d_g1900", "d_g1901", "d_g1902", "d_g1903", "d_g1904", "d_g1905", "d_g1906", "d_g1907", "d_g1908"], c1908-vlog = ["xdut.g1884__event_0", "xdut.g1885__event_0", "xdut.g1886__event_0", "xdut.g1887__event_0", "xdut.g1888__event_0", "xdut.g1889__event_0", "xdut.g1890__event_0", "xdut.g1891__event_0", "xdut.g1892__event_0", "xdut.g1893__event_0", "xdut.g1894__event_0", "xdut.g1895__event_0", "xdut.g1896__event_0", "xdut.g1897__event_0", "xdut.g1898__event_0", "xdut.g1899__event_0", "xdut.g1900__event_0", "xdut.g1901__event_0", "xdut.g1902__event_0", "xdut.g1903__event_0", "xdut.g1904__event_0", "xdut.g1905__event_0", "xdut.g1906__event_0", "xdut.g1907__event_0", "xdut.g1908__event_0"] }
+strobe = "d_stb"
+window = [0.0, 1.0e-9]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of the all-low inputs and of the all-high inputs; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c1908-xs", "c1908-vlog"]
+kind = "codes"
+nets = { c1908-xs = ["d_g1884", "d_g1885", "d_g1886", "d_g1887", "d_g1888", "d_g1889", "d_g1890", "d_g1891", "d_g1892", "d_g1893", "d_g1894", "d_g1895", "d_g1896", "d_g1897", "d_g1898", "d_g1899", "d_g1900", "d_g1901", "d_g1902", "d_g1903", "d_g1904", "d_g1905", "d_g1906", "d_g1907", "d_g1908"], c1908-vlog = ["xdut.g1884__event_0", "xdut.g1885__event_0", "xdut.g1886__event_0", "xdut.g1887__event_0", "xdut.g1888__event_0", "xdut.g1889__event_0", "xdut.g1890__event_0", "xdut.g1891__event_0", "xdut.g1892__event_0", "xdut.g1893__event_0", "xdut.g1894__event_0", "xdut.g1895__event_0", "xdut.g1896__event_0", "xdut.g1897__event_0", "xdut.g1898__event_0", "xdut.g1899__event_0", "xdut.g1900__event_0", "xdut.g1901__event_0", "xdut.g1902__event_0", "xdut.g1903__event_0", "xdut.g1904__event_0", "xdut.g1905__event_0", "xdut.g1906__event_0", "xdut.g1907__event_0", "xdut.g1908__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "pi.0"
+analysis = "tran-vec"
+variants = ["c1908-xs", "c1908-vlog"]
+kind = "codes"
+nets = { c1908-xs = ["d_g21", "d_g18", "d_g32", "d_g30", "d_g12", "d_g24", "d_g5", "d_g9", "d_g14", "d_g3", "d_g26", "d_g10", "d_g15", "d_g7", "d_g31", "d_g17", "d_g27", "d_g11", "d_g22", "d_g4", "d_g29", "d_g20", "d_g23", "d_g13", "d_g2", "d_g19", "d_g8", "d_g16", "d_g6", "d_g1", "d_g28", "d_g25"], c1908-vlog = ["xdut.g21__event_0", "xdut.g18__event_0", "xdut.g32__event_0", "xdut.g30__event_0", "xdut.g12__event_0", "xdut.g24__event_0", "xdut.g5__event_0", "xdut.g9__event_0", "xdut.g14__event_0", "xdut.g3__event_0", "xdut.g26__event_0", "xdut.g10__event_0", "xdut.g15__event_0", "xdut.g7__event_0", "xdut.g31__event_0", "xdut.g17__event_0", "xdut.g27__event_0", "xdut.g11__event_0", "xdut.g22__event_0", "xdut.g4__event_0", "xdut.g29__event_0", "xdut.g20__event_0", "xdut.g23__event_0", "xdut.g13__event_0", "xdut.g2__event_0", "xdut.g19__event_0", "xdut.g8__event_0", "xdut.g16__event_0", "xdut.g6__event_0", "xdut.g1__event_0", "xdut.g28__event_0", "xdut.g25__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 1..32 of 33 in deck order; at most 32 per code so every code is an exact double)"
+
+[[q]]
+id = "pi.1"
+analysis = "tran-vec"
+variants = ["c1908-xs", "c1908-vlog"]
+kind = "codes"
+nets = { c1908-xs = ["d_g33"], c1908-vlog = ["xdut.g33__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 33..33 of 33 in deck order; at most 32 per code so every code is an exact double)"
+
+# ---- c6288 -----------------------------------------------------------------
+
+[[q]]
+id = "po"
+analysis = "tran-c6288"
+variants = ["c6288-xs", "c6288-vlog"]
+kind = "codes"
+nets = { c6288-xs = ["d_g6257", "d_g6258", "d_g6259", "d_g6260", "d_g6261", "d_g6262", "d_g6263", "d_g6264", "d_g6265", "d_g6266", "d_g6267", "d_g6268", "d_g6269", "d_g6270", "d_g6271", "d_g6272", "d_g6273", "d_g6274", "d_g6275", "d_g6276", "d_g6277", "d_g6278", "d_g6279", "d_g6280", "d_g6281", "d_g6282", "d_g6283", "d_g6284", "d_g6285", "d_g6286", "d_g6287", "d_g6288"], c6288-vlog = ["xdut.g6257__event_0", "xdut.g6258__event_0", "xdut.g6259__event_0", "xdut.g6260__event_0", "xdut.g6261__event_0", "xdut.g6262__event_0", "xdut.g6263__event_0", "xdut.g6264__event_0", "xdut.g6265__event_0", "xdut.g6266__event_0", "xdut.g6267__event_0", "xdut.g6268__event_0", "xdut.g6269__event_0", "xdut.g6270__event_0", "xdut.g6271__event_0", "xdut.g6272__event_0", "xdut.g6273__event_0", "xdut.g6274__event_0", "xdut.g6275__event_0", "xdut.g6276__event_0", "xdut.g6277__event_0", "xdut.g6278__event_0", "xdut.g6279__event_0", "xdut.g6280__event_0", "xdut.g6281__event_0", "xdut.g6282__event_0", "xdut.g6283__event_0", "xdut.g6284__event_0", "xdut.g6285__event_0", "xdut.g6286__event_0", "xdut.g6287__event_0", "xdut.g6288__event_0"] }
+strobe = "d_stb"
+window = [0.0, 5.0e-10]
+oracle = "O1"
+ref = "ref/c6288-xs.tran.O1.out"
+why = "the transistor-level deck (inputs swung to its 1.8 V supply) read at 0.9 V just before 45 ps (inputs still low): its carry chain has not settled at 1 ns at either level of abstraction, so only the all-low response is compared; logic values, exact"
+
+[[q]]
+id = "po"
+analysis = "tran-c6288"
+variants = ["c6288-xs", "c6288-vlog"]
+kind = "codes"
+nets = { c6288-xs = ["d_g6257", "d_g6258", "d_g6259", "d_g6260", "d_g6261", "d_g6262", "d_g6263", "d_g6264", "d_g6265", "d_g6266", "d_g6267", "d_g6268", "d_g6269", "d_g6270", "d_g6271", "d_g6272", "d_g6273", "d_g6274", "d_g6275", "d_g6276", "d_g6277", "d_g6278", "d_g6279", "d_g6280", "d_g6281", "d_g6282", "d_g6283", "d_g6284", "d_g6285", "d_g6286", "d_g6287", "d_g6288"], c6288-vlog = ["xdut.g6257__event_0", "xdut.g6258__event_0", "xdut.g6259__event_0", "xdut.g6260__event_0", "xdut.g6261__event_0", "xdut.g6262__event_0", "xdut.g6263__event_0", "xdut.g6264__event_0", "xdut.g6265__event_0", "xdut.g6266__event_0", "xdut.g6267__event_0", "xdut.g6268__event_0", "xdut.g6269__event_0", "xdut.g6270__event_0", "xdut.g6271__event_0", "xdut.g6272__event_0", "xdut.g6273__event_0", "xdut.g6274__event_0", "xdut.g6275__event_0", "xdut.g6276__event_0", "xdut.g6277__event_0", "xdut.g6278__event_0", "xdut.g6279__event_0", "xdut.g6280__event_0", "xdut.g6281__event_0", "xdut.g6282__event_0", "xdut.g6283__event_0", "xdut.g6284__event_0", "xdut.g6285__event_0", "xdut.g6286__event_0", "xdut.g6287__event_0", "xdut.g6288__event_0"] }
+strobe = "d_stb"
+window = [0.0, 5.0e-10]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of the all-low inputs (the 10 ps-per-gate xs rendering has not settled at 985 ps); exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec-c6288"
+variants = ["c6288-xs", "c6288-vlog"]
+kind = "codes"
+nets = { c6288-xs = ["d_g6257", "d_g6258", "d_g6259", "d_g6260", "d_g6261", "d_g6262", "d_g6263", "d_g6264", "d_g6265", "d_g6266", "d_g6267", "d_g6268", "d_g6269", "d_g6270", "d_g6271", "d_g6272", "d_g6273", "d_g6274", "d_g6275", "d_g6276", "d_g6277", "d_g6278", "d_g6279", "d_g6280", "d_g6281", "d_g6282", "d_g6283", "d_g6284", "d_g6285", "d_g6286", "d_g6287", "d_g6288"], c6288-vlog = ["xdut.g6257__event_0", "xdut.g6258__event_0", "xdut.g6259__event_0", "xdut.g6260__event_0", "xdut.g6261__event_0", "xdut.g6262__event_0", "xdut.g6263__event_0", "xdut.g6264__event_0", "xdut.g6265__event_0", "xdut.g6266__event_0", "xdut.g6267__event_0", "xdut.g6268__event_0", "xdut.g6269__event_0", "xdut.g6270__event_0", "xdut.g6271__event_0", "xdut.g6272__event_0", "xdut.g6273__event_0", "xdut.g6274__event_0", "xdut.g6275__event_0", "xdut.g6276__event_0", "xdut.g6277__event_0", "xdut.g6278__event_0", "xdut.g6279__event_0", "xdut.g6280__event_0", "xdut.g6281__event_0", "xdut.g6282__event_0", "xdut.g6283__event_0", "xdut.g6284__event_0", "xdut.g6285__event_0", "xdut.g6286__event_0", "xdut.g6287__event_0", "xdut.g6288__event_0"] }
+strobe = "d_stb"
+window = [0.0, 8.0e-08]
+oracle = "O6"
+expect = "c10::vec"
+why = "the netlist's Boolean function of each of the 8 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "pi.0"
+analysis = "tran-vec-c6288"
+variants = ["c6288-xs", "c6288-vlog"]
+kind = "codes"
+nets = { c6288-xs = ["d_g21", "d_g18", "d_g30", "d_g5", "d_g14", "d_g26", "d_g15", "d_g7", "d_g17", "d_g27", "d_g22", "d_g4", "d_g23", "d_g13", "d_g19", "d_g6", "d_g1", "d_g28", "d_g32", "d_g12", "d_g24", "d_g9", "d_g3", "d_g10", "d_g31", "d_g11", "d_g29", "d_g20", "d_g2", "d_g8", "d_g16", "d_g25"], c6288-vlog = ["xdut.g21__event_0", "xdut.g18__event_0", "xdut.g30__event_0", "xdut.g5__event_0", "xdut.g14__event_0", "xdut.g26__event_0", "xdut.g15__event_0", "xdut.g7__event_0", "xdut.g17__event_0", "xdut.g27__event_0", "xdut.g22__event_0", "xdut.g4__event_0", "xdut.g23__event_0", "xdut.g13__event_0", "xdut.g19__event_0", "xdut.g6__event_0", "xdut.g1__event_0", "xdut.g28__event_0", "xdut.g32__event_0", "xdut.g12__event_0", "xdut.g24__event_0", "xdut.g9__event_0", "xdut.g3__event_0", "xdut.g10__event_0", "xdut.g31__event_0", "xdut.g11__event_0", "xdut.g29__event_0", "xdut.g20__event_0", "xdut.g2__event_0", "xdut.g8__event_0", "xdut.g16__event_0", "xdut.g25__event_0"] }
+strobe = "d_stb"
+window = [0.0, 8.0e-08]
+oracle = "O6"
+expect = "c10::inputs"
+why = "the converted inputs carry each vector's levels (inputs 1..32 of 32 in deck order; at most 32 per code so every code is an exact double)"

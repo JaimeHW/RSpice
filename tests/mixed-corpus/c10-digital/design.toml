@@ -1,0 +1,118 @@
+schema = "rspice-mixed-design/1"
+id = "C10"
+title = "Digital-heavy: ISCAS-85 gate level, LFSR and counter into an R-2R DAC"
+exit_phases = ["P2", "P8"]
+dialect = "best-available"
+features = []
+
+# ISCAS-85 gate-level renderings of tests/iscas85/85 (RSPICE-VENDORING.md, C10):
+# <c>-xs in XSPICE gates with adc_bridge/dac_bridge, <c>-vlog in Verilog
+# primitives with built-in converters at vcc = 1 V.
+[[variant]]
+name = "c432-xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+[[variant]]
+name = "c432-vlog"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "c499-xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+[[variant]]
+name = "c499-vlog"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "c880-xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+[[variant]]
+name = "c880-vlog"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "c1355-xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+[[variant]]
+name = "c1355-vlog"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "c1908-xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+[[variant]]
+name = "c1908-vlog"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "c6288-xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+[[variant]]
+name = "c6288-vlog"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+# A Verilog 16-bit LFSR and an XSPICE 16-bit ripple counter, each into an R-2R DAC.
+[[variant]]
+name = "lfsr"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "cnt_xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+# Budgets are about five times the slower route's measured case time (at
+# least 30 s), so a hang surfaces quickly.
+# ISCAS: the transistor decks' own stimulus (every input 0 -> 1 V at t = 0),
+# .tran 1p 1n. LFSR and counter: .tran 1n 20u.
+[[analysis]]
+id = "tran"
+variants = ["c432-xs", "c432-vlog", "c499-xs", "c499-vlog", "c880-xs", "c880-vlog", "c1355-xs", "c1355-vlog", "c1908-xs", "c1908-vlog", "lfsr", "cnt_xs"]
+oracles = ["O6", "O3", "O1"]
+timeout_s = 50
+phase = "P2"
+
+# ISCAS: 64 random vectors, one per 10 ns, .tran 1n 640n (c6288: 8 vectors,
+# .tran 1n 80n). The outputs are read 8 ns into each vector, so the analog
+# step has nothing to resolve: the gates are event driven.
+[[analysis]]
+id = "tran-vec"
+variants = ["c432-xs", "c432-vlog", "c499-xs", "c499-vlog", "c880-xs", "c880-vlog", "c1355-xs", "c1355-vlog", "c1908-xs", "c1908-vlog"]
+oracles = ["O6", "O3"]
+timeout_s = 110
+phase = "P2"
+
+# c6288 (the 16 x 16 multiplier, 2416 cells) is the extended pair of each.
+[[analysis]]
+id = "tran-c6288"
+variants = ["c6288-xs", "c6288-vlog"]
+oracles = ["O6", "O3", "O1"]
+timeout_s = 40
+extended = true
+phase = "P8"
+
+[[analysis]]
+id = "tran-vec-c6288"
+variants = ["c6288-xs", "c6288-vlog"]
+oracles = ["O6", "O3"]
+timeout_s = 120
+extended = true
+phase = "P8"

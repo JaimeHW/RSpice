@@ -1,0 +1,6 @@
+* C10 c499, variant c499-xs, tran-vec
+.include ../net/c499_xs.cir
+.include ../net/c499_vectors.cir
+.include ../net/strobe_vectors.cir
+.tran 1n 640n
+.end

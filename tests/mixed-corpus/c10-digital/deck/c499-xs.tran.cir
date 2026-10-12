@@ -1,0 +1,6 @@
+* C10 c499, variant c499-xs, tran
+.include ../net/c499_xs.cir
+.include ../net/c499_pulse.cir
+.include ../net/strobe_iscas.cir
+.tran 1p 1n
+.end
