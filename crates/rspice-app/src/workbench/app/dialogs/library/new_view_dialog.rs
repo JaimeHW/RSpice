@@ -435,7 +435,10 @@ impl RSpiceApp {
             }
         };
         let module_name = verilog_module_name(cell);
-        if let Some(invalid) = ports.iter().find(|port| !is_verilog_identifier(&port.name)) {
+        if let Some(invalid) = ports
+            .iter()
+            .find(|port| verilog_port_declaration(&port.name).is_none())
+        {
             self.state.dialogs.new_view_error = Some(format!(
                 "Interface port '{}' is not a valid Verilog-A identifier; rename the cell port before creating this view",
                 invalid.name
@@ -684,17 +687,11 @@ fn derive_cell_interface(
         contracts.push((format!("{library_name}/{cell_name}/{}", view.name), ports));
     }
 
+    // A cell that declares no interface yet gets a module that declares none:
+    // its first compile is what defines the ports. Inventing a `p`/`n` pair
+    // here gave every such cell an interface nobody had asked for.
     let Some((authority_name, authority)) = contracts.first() else {
-        return Ok(vec![
-            crate::state::PortSpec {
-                name: "p".to_owned(),
-                direction: crate::state::PortDirection::InOut,
-            },
-            crate::state::PortSpec {
-                name: "n".to_owned(),
-                direction: crate::state::PortDirection::InOut,
-            },
-        ]);
+        return Ok(Vec::new());
     };
     validate_unique_ports(authority_name, authority)?;
     for (source_name, candidate) in contracts.iter().skip(1) {
@@ -736,7 +733,7 @@ fn validate_unique_ports(source: &str, ports: &[crate::state::PortSpec]) -> Resu
     Ok(())
 }
 
-fn verilog_module_name(cell_name: &str) -> String {
+pub(super) fn verilog_module_name(cell_name: &str) -> String {
     let mut sanitized = String::with_capacity(cell_name.len().saturating_add(11));
     for character in cell_name.chars() {
         if character.is_ascii_alphanumeric() || character == '_' {
@@ -751,7 +748,7 @@ fn verilog_module_name(cell_name: &str) -> String {
     format!("rspice_{sanitized}_va")
 }
 
-fn is_verilog_identifier(value: &str) -> bool {
+pub(super) fn is_verilog_identifier(value: &str) -> bool {
     let mut characters = value.chars();
     characters
         .next()
@@ -759,38 +756,88 @@ fn is_verilog_identifier(value: &str) -> bool {
         && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-fn starter_veriloga_source(module_name: &str, ports: &[crate::state::PortSpec]) -> String {
+/// How a module declares the port an interface names: a scalar under its
+/// own name, or a vector `d[7:0]` under `d` with its range. `None` for a name
+/// a Verilog-A module cannot declare.
+pub(super) fn verilog_port_declaration(name: &str) -> Option<(&str, Option<(u32, u32)>)> {
+    if is_verilog_identifier(name) {
+        return Some((name, None));
+    }
+    let vector = rspice_design_model::bus::declared_vector(name)?;
+    let base = name.split_once('[')?.0;
+    (vector.notation == rspice_design_model::bus::BusNotation::Square
+        && vector.width() > 1
+        && is_verilog_identifier(base))
+    .then_some((base, Some((vector.msb, vector.lsb))))
+}
+
+/// The module a new Verilog-A view starts from: its header, a direction
+/// declaration per port and its discipline, and no behaviour. A vector port
+/// is declared under its base name with its range, as `inout [7:0] d;`. A
+/// supply pin is an `inout` port, the only way a module can declare one.
+pub(super) fn starter_veriloga_source(
+    module_name: &str,
+    ports: &[crate::state::PortSpec],
+) -> String {
     use crate::state::PortDirection;
 
-    let names = ports
+    let declared = ports
         .iter()
-        .map(|port| port.name.as_str())
+        .filter_map(|port| {
+            verilog_port_declaration(&port.name).map(|(base, range)| (port.direction, base, range))
+        })
         .collect::<Vec<_>>();
     let mut source = String::from("`include \"constants.vams\"\n`include \"disciplines.vams\"\n\n");
-    if names.is_empty() {
+    if declared.is_empty() {
         source.push_str(&format!("module {module_name};\nendmodule\n"));
         return source;
     }
+    let names = declared
+        .iter()
+        .map(|(_, base, _)| *base)
+        .collect::<Vec<_>>();
     source.push_str(&format!("module {module_name}({});\n", names.join(", ")));
+    // Scalars that share a keyword share a line; each vector has its own,
+    // because a declaration states one range for everything it names.
+    let declare = |source: &mut String, keyword: &str, group: Vec<(&str, Option<(u32, u32)>)>| {
+        let scalars = group
+            .iter()
+            .filter(|(_, range)| range.is_none())
+            .map(|(base, _)| *base)
+            .collect::<Vec<_>>();
+        if !scalars.is_empty() {
+            source.push_str(&format!("    {keyword} {};\n", scalars.join(", ")));
+        }
+        for (base, range) in group {
+            if let Some((msb, lsb)) = range {
+                source.push_str(&format!("    {keyword} [{msb}:{lsb}] {base};\n"));
+            }
+        }
+    };
     for (keyword, direction) in [
         ("input", PortDirection::In),
         ("output", PortDirection::Out),
         ("inout", PortDirection::InOut),
     ] {
-        let group = ports
+        let group = declared
             .iter()
-            .filter(|port| {
-                port.direction == direction
+            .filter(|(port_direction, _, _)| {
+                *port_direction == direction
                     || (direction == PortDirection::InOut
-                        && port.direction == PortDirection::Supply)
+                        && *port_direction == PortDirection::Supply)
             })
-            .map(|port| port.name.as_str())
+            .map(|(_, base, range)| (*base, *range))
             .collect::<Vec<_>>();
-        if !group.is_empty() {
-            source.push_str(&format!("    {keyword} {};\n", group.join(", ")));
-        }
+        declare(&mut source, keyword, group);
     }
-    source.push_str(&format!("    electrical {};\n", names.join(", ")));
+    declare(
+        &mut source,
+        "electrical",
+        declared
+            .iter()
+            .map(|(_, base, range)| (*base, *range))
+            .collect(),
+    );
     source.push_str("endmodule\n");
     source
 }
@@ -1275,6 +1322,93 @@ mod tests {
         assert_eq!(selected.selected_module(), Some("rspice_precision_amp_va"));
         assert!(selected.bundle().validation_is_current());
         assert!(app.state.ui.code_workspace.veriloga.receipt.is_some());
+    }
+
+    /// A cell with no schematic ports and no symbol pins has no interface yet,
+    /// and its module declares none. It used to be handed a `p`/`n` pair that
+    /// nothing had asked for, which then became the cell's interface.
+    #[test]
+    fn a_veriloga_view_of_a_cell_with_no_interface_starts_without_ports() {
+        let mut app = RSpiceApp::test_instance();
+        let mut library = Library::new("behavioral_models");
+        library.add_cell(Cell::new("blank"));
+        app.state.library_manager.add_library(library);
+        app.state.dialogs.new_view_library = "behavioral_models".to_owned();
+        app.state.dialogs.new_view_cell = "blank".to_owned();
+        app.state.dialogs.new_view_name = "veriloga".to_owned();
+        app.state.dialogs.new_view_type = ViewType::VerilogA;
+        app.state.dialogs.new_view_library_revision = app.state.library_manager.revision();
+
+        let outcome = app.handle_new_view_create_action();
+
+        assert!(outcome.close, "{:?}", app.state.dialogs.new_view_error);
+        let owner = ProjectSourceOwner::cell_view(CellViewRef::new(
+            "behavioral_models",
+            "blank",
+            "veriloga",
+        ));
+        let source = app
+            .state
+            .workspace
+            .content
+            .project_sources
+            .bundle_for_owner(&owner)
+            .expect("the view owns its source")
+            .root()
+            .content()
+            .to_owned();
+        assert!(
+            source.contains("module rspice_blank_va;\nendmodule"),
+            "{source}"
+        );
+        assert!(!source.contains("electrical"), "{source}");
+        let view = app
+            .state
+            .library_manager
+            .get_library("behavioral_models")
+            .and_then(|library| library.get_cell("blank"))
+            .and_then(|cell| cell.get_view("veriloga"))
+            .expect("the created view");
+        assert_eq!(
+            view.metadata.get("veriloga.ports").map(String::as_str),
+            Some("[]")
+        );
+    }
+
+    /// A vector port is declared under its base name with its range, the
+    /// only spelling a module header can carry.
+    #[test]
+    fn a_starter_declares_a_bus_port_under_its_base_name_with_its_range() {
+        let source = starter_veriloga_source(
+            "rspice_dac_va",
+            &[
+                PortSpec {
+                    name: "d[7:0]".to_owned(),
+                    direction: PortDirection::In,
+                },
+                PortSpec {
+                    name: "clk".to_owned(),
+                    direction: PortDirection::In,
+                },
+                PortSpec {
+                    name: "out".to_owned(),
+                    direction: PortDirection::Out,
+                },
+            ],
+        );
+        assert!(
+            source.contains(
+                "module rspice_dac_va(d, clk, out);\n    input clk;\n    input [7:0] d;\n    output out;\n    electrical clk, out;\n    electrical [7:0] d;\nendmodule\n"
+            ),
+            "{source}"
+        );
+        assert_eq!(
+            verilog_port_declaration("d[7:0]"),
+            Some(("d", Some((7, 0))))
+        );
+        assert_eq!(verilog_port_declaration("A<3:0>"), None);
+        assert_eq!(verilog_port_declaration("d[3:3]"), None);
+        assert_eq!(verilog_port_declaration("9d"), None);
     }
 
     #[test]
