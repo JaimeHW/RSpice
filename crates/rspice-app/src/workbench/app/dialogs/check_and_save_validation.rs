@@ -845,6 +845,24 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
         let Some(binding) = component.library_cell.as_ref() else {
             continue;
         };
+        // A value for a parameter the module no longer declares is refused by
+        // the netlister; it is named here, with its repair, rather than left
+        // to read as a deck error.
+        for (key, value) in crate::workbench::app::undeclared_instance_parameters(state, component)
+        {
+            insert_located_finding(
+                findings,
+                CheckAndSaveFindingLevel::Blocker,
+                "parameters",
+                &format!("{component_identity}:undeclared:{key}"),
+                format!(
+                    "{document_key}: {} sets {key}={value}, which {}/{} does not declare; \
+                     select it and press Remove beside {key} in the inspector.",
+                    component.name, binding.library, binding.cell
+                ),
+                at(component),
+            );
+        }
         let Some(symbol) = symbol_resolver.resolve_binding(binding) else {
             insert_located_finding(
                 findings,
