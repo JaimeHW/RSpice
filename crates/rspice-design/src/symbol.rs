@@ -26,6 +26,7 @@
 //!   again means deleting it.
 
 pub mod edit;
+pub mod generated;
 pub mod publication;
 
 use std::collections::HashSet;
@@ -1025,8 +1026,10 @@ impl SymbolDocument {
     ///   the side its direction implies and clear of the terminals already
     ///   there.
     /// - A pin that already exists keeps its authored geometry and takes the
-    ///   port's electrical contract. Its side is re-derived only while it is
-    ///   unplaced, because moving a drawn terminal is an artwork change.
+    ///   port's direction. It keeps its electrical type while its direction
+    ///   stands; a changed direction re-derives the type from the new one.
+    ///   Its side is re-derived only while it is unplaced, because moving a
+    ///   drawn terminal is an artwork change.
     /// - A pin no port declares is **kept**. It is the orphan the symbol
     ///   check reports; deleting it here would silently disconnect every
     ///   instance already wired to it.
@@ -1034,11 +1037,28 @@ impl SymbolDocument {
     ///   Sorting a mismatched list would interleave orphans into netlist
     ///   order, which is the one thing the order means.
     pub fn reconcile_ports(&mut self, ports: &[PortSpec]) {
+        self.reconcile_typed_ports(ports, |_| None);
+    }
+
+    /// [`Self::reconcile_ports`], with the electrical type `electrical` states
+    /// for a port winning over both the pin's own and its direction's: a
+    /// discrete Verilog-A port is `Logic` whichever way it points.
+    pub fn reconcile_typed_ports(
+        &mut self,
+        ports: &[PortSpec],
+        electrical: impl Fn(&PortSpec) -> Option<SymbolElectricalType>,
+    ) {
         let bounds = self.body_bounds();
         for port in ports {
-            let electrical = default_electrical_type(port.direction);
+            let stated = electrical(port);
             let known = match self.pin_mut(&port.name) {
                 Some(pin) => {
+                    let kept = pin
+                        .electrical_type
+                        .filter(|_| pin.direction == port.direction);
+                    let electrical = stated
+                        .or(kept)
+                        .unwrap_or_else(|| default_electrical_type(port.direction));
                     pin.name = port.name.clone();
                     pin.set_electrical_contract(electrical, port.direction);
                     if pin.position.is_some() {
@@ -1056,6 +1076,7 @@ impl SymbolDocument {
                 }
                 continue;
             }
+            let electrical = stated.unwrap_or_else(|| default_electrical_type(port.direction));
             let mut pin = SymbolPin::new(&port.name, port.direction, None)
                 .with_contract(electrical, side, offset);
             pin.set_side_and_offset(side, offset, bounds);
@@ -1624,5 +1645,59 @@ mod validation_tests {
 
         assert_eq!(migrated.text_runs().count(), 1);
         assert_eq!(reloaded.body, migrated.body);
+    }
+
+    /// Reconciling used to reset every pin to its direction's default type,
+    /// so a `Logic` pin came back `Analog` from an unrelated port change.
+    #[test]
+    fn reconciling_ports_keeps_a_pins_type_while_its_direction_stands() {
+        let port = |name: &str, direction| PortSpec {
+            name: name.to_owned(),
+            direction,
+        };
+        let mut document = SymbolDocument::generated_from_ports(&[
+            port("clk", PortDirection::In),
+            port("q", PortDirection::Out),
+        ]);
+        for name in ["clk", "q"] {
+            document.pin_mut(name).expect("the pin").electrical_type =
+                Some(SymbolElectricalType::Logic);
+        }
+        let electrical = |document: &SymbolDocument, name: &str| {
+            document.pin(name).and_then(|pin| pin.electrical_type)
+        };
+
+        // `q` turns round, and `en` is new.
+        let ports = [
+            port("clk", PortDirection::In),
+            port("q", PortDirection::InOut),
+            port("en", PortDirection::In),
+        ];
+        let mut untyped = document.clone();
+        untyped.reconcile_ports(&ports);
+
+        assert_eq!(
+            electrical(&untyped, "clk"),
+            Some(SymbolElectricalType::Logic)
+        );
+        assert_eq!(
+            electrical(&untyped, "q"),
+            Some(SymbolElectricalType::Analog)
+        );
+        assert_eq!(
+            electrical(&untyped, "en"),
+            Some(SymbolElectricalType::Analog)
+        );
+
+        // A type the interface states wins over the pin's and its direction's.
+        let mut typed = document;
+        typed.reconcile_typed_ports(&ports, |_| Some(SymbolElectricalType::Logic));
+        for name in ["clk", "q", "en"] {
+            assert_eq!(
+                electrical(&typed, name),
+                Some(SymbolElectricalType::Logic),
+                "{name}"
+            );
+        }
     }
 }

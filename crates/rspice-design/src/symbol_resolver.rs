@@ -3,11 +3,8 @@
 use crate::library::{Cell, LibraryCatalog, View, ViewType};
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::{component::LibraryCellInstance, document::SchematicDocument};
-use crate::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument};
-use rspice_design_model::{
-    cell_view::CellViewRef,
-    port::{PortDirection, PortSpec},
-};
+use crate::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, generated};
+use rspice_design_model::{cell_view::CellViewRef, port::PortSpec};
 use std::collections::HashMap;
 
 pub struct SymbolResolver<'a, S: AsRef<SchematicDocument>> {
@@ -76,6 +73,15 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
             fallback_ports,
             port_preference,
         );
+
+        // A generated symbol is derived from the interface, whatever document
+        // it last stored. New Cell stores an empty one for a cell with no
+        // ports yet, and reading that as authored left every port unplaced.
+        if let Some(ports) = ports.as_deref().filter(|ports| !ports.is_empty())
+            && symbol_view.is_some_and(generated::is_generated_symbol)
+        {
+            return Some(ResolvedCellSymbol::from_generated(ports));
+        }
 
         match authored_document(symbol_view) {
             AuthoredDocument::Loaded(document) => {
@@ -210,22 +216,9 @@ fn find_symbol_view<'a>(cell: &'a Cell, requested_view: Option<&str>) -> Option<
 }
 
 fn legacy_ports_from_view(view: &View) -> Option<Vec<PortSpec>> {
-    view.metadata.get("ports").map(|encoded| {
-        encoded
-            .split_whitespace()
-            .filter_map(|entry| {
-                let (name, direction) = entry.split_once(':')?;
-                let name = name.trim();
-                if name.is_empty() {
-                    return None;
-                }
-                Some(PortSpec {
-                    name: name.to_owned(),
-                    direction: PortDirection::parse(direction),
-                })
-            })
-            .collect()
-    })
+    view.metadata
+        .get(generated::GENERATED_PORTS_KEY)
+        .map(|encoded| generated::decode_ports(encoded))
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use crate::{
         document::SchematicDocument,
         identity::SchematicIdentity,
     },
-    symbol::{SymbolDocument, SymbolPin, SymbolShape},
+    symbol::{SymbolDocument, SymbolPin, SymbolShape, generated},
 };
 use rspice_design_model::{
     Point,
@@ -236,4 +236,74 @@ fn invalid_authored_metadata_falls_back_to_generated_symbol_with_issue() {
     assert!(resolved.issues().iter().any(|issue| {
         matches!(issue.kind, ResolvedSymbolIssueKind::InvalidMetadata) && issue.pin_name == "symbol"
     }));
+}
+
+/// A catalog holding `work/dev` with only `views`, and no schematic buffers.
+fn library_with_dev(views: Vec<View>) -> (LibraryCatalog, HashMap<String, SchematicDocument>) {
+    let mut libraries = LibraryCatalog::default();
+    let mut library = Library::new("work");
+    let mut cell = Cell::new("dev");
+    for view in views {
+        cell.add_view(view);
+    }
+    library.add_cell(cell);
+    libraries.add_library(library);
+    (libraries, HashMap::new())
+}
+
+/// New Cell stores an empty generated symbol for a cell with no ports yet.
+/// Read as authored, every port of the module that later defined the cell
+/// resolved unplaced, and the netlister refused the instance.
+#[test]
+fn an_empty_generated_symbol_resolves_from_the_bound_interface() {
+    let mut symbol = View::new(generated::GENERATED_SYMBOL_VIEW, ViewType::Symbol);
+    generated::store_generated_symbol(&mut symbol, &[], |_| None).expect("symbol stores");
+    let (libraries, buffers) =
+        library_with_dev(vec![View::new("veriloga", ViewType::VerilogA), symbol]);
+    let resolver = SymbolResolver::new(&libraries, &buffers);
+    let mut binding = LibraryCellInstance::new("work", "dev", "veriloga");
+    binding.bind_interface(&[
+        port("p", PortDirection::InOut),
+        port("n", PortDirection::InOut),
+    ]);
+
+    let resolved = resolver.resolve_binding(&binding).expect("symbol resolves");
+
+    assert!(resolved.issues().is_empty(), "{:?}", resolved.issues());
+    assert_eq!(
+        resolved
+            .connectable_pins()
+            .map(|pin| pin.name.as_str())
+            .collect::<Vec<_>>(),
+        ["p", "n"]
+    );
+    assert!(matches!(resolved.source(), ResolvedSymbolSource::Generated));
+}
+
+/// A bus pin in a generated symbol's `ports` keeps its whole name.
+#[test]
+fn a_generated_symbols_bus_pin_resolves_under_its_whole_name() {
+    let mut symbol = View::new(generated::GENERATED_SYMBOL_VIEW, ViewType::Symbol);
+    symbol.metadata.insert(
+        generated::GENERATED_MARKER_KEY.to_owned(),
+        "ports".to_owned(),
+    );
+    symbol.metadata.insert(
+        generated::GENERATED_PORTS_KEY.to_owned(),
+        "D[7:0]:inout en:in".to_owned(),
+    );
+    let (libraries, buffers) = library_with_dev(vec![symbol]);
+    let resolver = SymbolResolver::new(&libraries, &buffers);
+
+    let resolved = resolver
+        .resolve_reference(&CellViewRef::new("work", "dev", "symbol"))
+        .expect("symbol resolves");
+
+    assert_eq!(
+        resolved
+            .connectable_pins()
+            .map(|pin| (pin.name.as_str(), pin.direction))
+            .collect::<Vec<_>>(),
+        [("D[7:0]", PortDirection::InOut), ("en", PortDirection::In)]
+    );
 }
