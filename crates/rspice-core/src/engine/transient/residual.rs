@@ -557,12 +557,17 @@ impl Engine {
     #[cfg(feature = "parallel")]
     #[inline]
     pub(super) fn classic_mos_parallel_worker_count(&self, instance_count: usize) -> Option<usize> {
+        // Below the threshold the answer is None whatever the machine offers,
+        // and asking the operating system how many threads it has is a system
+        // call this runs at every accepted point.
+        if instance_count < PARALLEL_CLASSIC_MOS_THRESHOLD {
+            return None;
+        }
         let useful_workers = instance_count.div_ceil(CLASSIC_MOS_INSTANCES_PER_WORKER);
         let worker_count = self
             .parallel_worker_count(instance_count)
             .min(useful_workers.max(1));
-        (instance_count >= PARALLEL_CLASSIC_MOS_THRESHOLD && worker_count > 1)
-            .then_some(worker_count)
+        (worker_count > 1).then_some(worker_count)
     }
 
     /// Capture the run-invariant part of the restricted classic-MOS transient
