@@ -678,14 +678,18 @@ fn complex_interp(axis: &[f64], series: &[Complex64], point: f64) -> MeasureResu
     Ok(series[low] + (series[high] - series[low]) * fraction)
 }
 
-/// Indices bracketing `point`; equal when `point` is a grid value (relative
-/// 1e-9) — the usual case, since both sides run the same sweep card.
+/// Two axis values name the same point when they agree to a relative 1e-9.
+/// A sweep card and a tolerance table spell one value two ways: the deck's
+/// `25u` is 25 × 1e-6, one ulp below the table's `2.5e-5`, so exact equality
+/// would put a window ending at the stop time outside the run.
+fn same_point(value: f64, point: f64) -> bool {
+    (value - point).abs() <= 1e-9 * point.abs().max(1e-30)
+}
+
+/// Indices bracketing `point`; equal when `point` is a grid value
+/// ([`same_point`]) — the usual case, since both sides run the same sweep card.
 fn bracket(axis: &[f64], point: f64) -> MeasureResult<(usize, usize)> {
-    let tolerance = 1e-9 * point.abs().max(1e-30);
-    if let Some(index) = axis
-        .iter()
-        .position(|value| (value - point).abs() <= tolerance)
-    {
+    if let Some(index) = axis.iter().position(|value| same_point(*value, point)) {
         return Ok((index, index));
     }
     let ascending = axis.first() <= axis.last();
@@ -707,9 +711,11 @@ pub fn pwl_mean(axis: &[f64], series: &[f64], (start, stop): (f64, f64)) -> Meas
         return Ok(series[0]);
     }
     check_axis(axis, series)?;
-    if stop.partial_cmp(&start) != Some(std::cmp::Ordering::Greater)
-        || start < axis[0]
-        || stop > axis[axis.len() - 1]
+    let (first, last) = (axis[0], axis[axis.len() - 1]);
+    // A window end that is the run's end spelled another way is the run's end.
+    let start = if same_point(first, start) { first } else { start };
+    let stop = if same_point(last, stop) { last } else { stop };
+    if stop.partial_cmp(&start) != Some(std::cmp::Ordering::Greater) || start < first || stop > last
     {
         return invalid(format!(
             "mean window [{start:e}, {stop:e}] is not inside the run"
@@ -957,6 +963,21 @@ mod tests {
             panic!()
         };
         assert!((value[0] - 1.0).abs() < 1e-9, "{value:?}");
+    }
+
+    #[test]
+    fn a_window_ending_at_the_stop_time_spelled_otherwise_is_inside_the_run() {
+        // `.tran 0.1n 25u` stops at 25 × 1e-6, one ulp below the 2.5e-5 a
+        // tolerance table writes for the same instant.
+        let stop = 25.0 * 1e-6;
+        assert!(stop < 2.5e-5);
+        let axis = vec![0.0, 1e-5, 2e-5, stop];
+        let series = vec![0.0, 1.0, 2.0, 2.5];
+        let mean = pwl_mean(&axis, &series, (2e-5, 2.5e-5)).unwrap();
+        assert!((mean - 2.25).abs() < 1e-9, "{mean}");
+        // A window that genuinely runs past the stop time is still refused.
+        assert!(pwl_mean(&axis, &series, (2e-5, 2.6e-5)).is_err());
+        assert!(pwl_mean(&axis, &series, (-1e-6, 1e-5)).is_err());
     }
 
     #[test]
