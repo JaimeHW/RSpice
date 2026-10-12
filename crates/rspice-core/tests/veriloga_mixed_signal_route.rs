@@ -4539,3 +4539,141 @@ module top(inp,p); inout inp,p; electrical inp,p; matrix u(inp,p); endmodule
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// System tasks on the mixed route (design P2 sections 4.3 and 5)
+// ---------------------------------------------------------------------------
+
+/// A clocked counter that prints each rising edge and finishes on the
+/// seventh, driving an RC through its D/A bridge.
+const TICKER: &str = r#"
+`timescale 1ns/1ns
+module ticker(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q, clk;
+    integer count;
+    initial begin clk = 0; q = 0; count = 0; end
+    always #5 clk = ~clk;
+    always @(posedge clk) begin
+        q <= ~q;
+        count = count + 1;
+        $display("edge %0d at %0t", count, $time);
+        if (count == 7) $finish(1);
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+fn ticker_deck(model: &ModelFile) -> String {
+    format!(
+        "* a clocked counter that prints and finishes\n\
+         x1 p 0 q ticker\n\
+         rp p 0 1meg\n\
+         r1 q out 1k\n\
+         c1 out 0 10p\n\
+         .va \"{}\" ticker\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+/// One run of the ticker deck: its outcome, every HDL output record the run
+/// released, and the number of timepoints its step controller rejected.
+fn run_ticker(
+    deck: &str,
+    max_step: f64,
+) -> (
+    rspice_core::SimulationOutcome<TransientResult>,
+    Vec<rspice_core::config::HdlOutputRecord>,
+    usize,
+) {
+    use rspice_core::config::HdlOutputCollector;
+    let collector = std::sync::Arc::new(HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    let engine = Engine::new(config);
+    let netlist = Netlist::parse(deck).expect("the deck parses");
+    let outcome = engine
+        .run_with_outcome(&rspice_core::NoAbort, |engine, signal| {
+            engine.run_tran_with_abort(&netlist, 200.0e-9, max_step, signal)
+        })
+        .expect("the run completes");
+    let rejections = engine.convergence_quality().timestep_reductions;
+    (outcome, collector.take(), rejections)
+}
+
+/// Design P2 section 4.3: a digital `$finish` is a model finish on the
+/// transient's accepted point — the run ends at the tick it was called in —
+/// and everything the design printed is released at that point's commit,
+/// stamped with it, once.
+#[test]
+fn a_digital_finish_ends_the_transient_at_its_tick() {
+    use rspice_core::config::{HdlPoint, HdlStream};
+    use rspice_core::{ModelFinishPoint, SimulationOutcome};
+    let model = ModelFile::new("ticker", TICKER);
+    let (outcome, records, _) = run_ticker(&ticker_deck(&model), 1.0e-9);
+    let SimulationOutcome::Finished {
+        result: Some(result),
+        finish,
+    } = outcome
+    else {
+        panic!("the seventh edge must finish the run, got {outcome:?}");
+    };
+    // `clk` rises at 5, 15, 25, ... ns, so the seventh rising edge is at 65 ns.
+    let ModelFinishPoint::Transient { time } = finish.point else {
+        panic!("a transient finish, got {:?}", finish.point);
+    };
+    assert!((time - 65.0e-9).abs() < 1e-15, "finished at {time:e}");
+    assert!(finish.instance.eq_ignore_ascii_case("x1"), "{finish:?}");
+    assert_eq!(finish.diagnostic_level, 1);
+    let last = *result.time.last().expect("a result");
+    assert!((last - 65.0e-9).abs() < 1e-15, "the run ended at {last:e}");
+
+    let printed: Vec<&str> = records
+        .iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| record.text.as_str())
+        .collect();
+    let expected: Vec<String> = (1..=7)
+        .map(|edge| format!("edge {edge} at {}\n", 10 * edge - 5))
+        .collect();
+    assert_eq!(printed, expected);
+    for record in &records {
+        let HdlPoint::Transient { time } = record.point else {
+            panic!("a transient record, got {:?}", record.point);
+        };
+        assert!((time - record.seconds).abs() < 1e-15, "{record:?}");
+    }
+    assert_eq!(
+        records.last().map(|record| &record.stream),
+        Some(&HdlStream::Finish {
+            stop: false,
+            level: 1
+        })
+    );
+}
+
+/// Design P2 section 5: output is released only when a trial is accepted, so a
+/// run whose step controller throws timepoints away prints exactly what a run
+/// that throws none away prints.
+#[test]
+fn a_rolled_back_trial_prints_nothing() {
+    let model = ModelFile::new("ticker_rollback", TICKER);
+    let deck = ticker_deck(&model);
+    let (_, coarse, coarse_rejections) = run_ticker(&deck, 4.0e-9);
+    let (_, fine, _) = run_ticker(&deck, 2.0e-11);
+    assert!(
+        coarse_rejections > 0,
+        "this test is vacuous unless the coarse run rejected timepoints"
+    );
+    let shape = |records: &[rspice_core::config::HdlOutputRecord]| {
+        records
+            .iter()
+            .map(|record| (record.tick, record.text.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(shape(&coarse), shape(&fine));
+    assert_eq!(coarse.len(), 8, "seven edges and the finish");
+}

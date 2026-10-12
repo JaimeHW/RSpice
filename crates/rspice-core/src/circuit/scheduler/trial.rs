@@ -599,6 +599,12 @@ impl Trial<'_> {
         Ok(earliest)
     }
 
+    /// The circuit's shared HDL runtime as this trial has settled it, for a
+    /// caller that reads what the settle decided (a design's `$finish`).
+    pub(in crate::circuit) fn coordinator(&self) -> Option<&MixedDigitalCoordinator> {
+        self.coordinator.as_ref()
+    }
+
     /// The static residual every instance contributes at the settled
     /// candidate, as one circuit-sized vector.
     pub(in crate::circuit) fn static_residual(

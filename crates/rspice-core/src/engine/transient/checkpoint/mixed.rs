@@ -3,7 +3,11 @@
 //! Elaborated circuit validation and typed reconstruction happen during inject.
 use super::*;
 
-pub(super) const FORMAT_VERSION: u32 = 57;
+/// Format 58 carries HDL host images of version 2 (threads and an effects
+/// section, design P2 section 5.4); a version 1 host image still restores.
+pub(super) const FORMAT_VERSION: u32 = 58;
+/// The format that introduced the mixed-runtime section.
+const MIXED_RUNTIME_FORMAT_VERSION: u32 = 57;
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,7 +67,7 @@ pub(super) fn read(
     version: u32,
     budget: &mut CheckpointParseBudget,
 ) -> Result<Option<Image>, String> {
-    if version < FORMAT_VERSION {
+    if version < MIXED_RUNTIME_FORMAT_VERSION {
         return Ok(None);
     }
     let header = lines.next().ok_or("missing mixed runtime image header")?;

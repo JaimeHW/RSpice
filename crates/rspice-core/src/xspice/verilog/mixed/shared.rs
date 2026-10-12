@@ -246,6 +246,18 @@ pub(crate) struct MixedDigitalCoordinator {
     /// Every A/D bit one settle pass moved, across every enrolled instance,
     /// ordered by the instant it crossed. Scratch, refilled per pass.
     publications: Vec<AdcPublication>,
+    /// Receives the HDL output each committed trial produced (design P2
+    /// section 4.3). Output of a trial the solver rejects never reaches it.
+    hdl_output: Option<Arc<dyn crate::config::HdlOutputSink>>,
+}
+
+/// A design-requested end of run, with where it was requested.
+pub(crate) struct CoordinatorFinish<'a> {
+    /// The enrolled instance whose process executed it.
+    pub instance: &'a str,
+    /// That instance's module.
+    pub module: &'a str,
+    pub finish: &'a super::super::effects::HdlFinishRequest,
 }
 
 /// The coordinator's half of a held-equilibrium image; see
@@ -605,6 +617,37 @@ impl MixedDigitalCoordinator {
             probes,
             drives: Vec::new(),
             publications: Vec::new(),
+            hdl_output: None,
+        })
+    }
+
+    /// Install the run's HDL options and output receiver before execution
+    /// starts.
+    pub(crate) fn configure_hdl(&mut self, config: &crate::config::HdlRunConfig) {
+        self.hdl_output = config.output.clone();
+        self.digital
+            .make_mut()
+            .configure_effects(super::super::effects::HdlEffectsConfig {
+                plusargs: config.plusargs.clone(),
+                seed: config.seed,
+            });
+    }
+
+    /// The `$finish`, `$stop` or `$fatal` the design executed, with the
+    /// enrolled instance and module it ran in.
+    pub(crate) fn hdl_finish(&self) -> Option<CoordinatorFinish<'_>> {
+        let finish = self.digital.hdl_finish()?;
+        let plan = self.digital.plan();
+        let site = plan.system_calls.get(finish.site as usize)?;
+        let scope = plan.scopes.get(site.scope.index());
+        // The scope's root is the instance it was linked as.
+        let instance = scope
+            .map(|scope| scope.path.split('.').next().unwrap_or(""))
+            .unwrap_or("");
+        Some(CoordinatorFinish {
+            instance,
+            module: scope.map_or("", |scope| scope.module.as_str()),
+            finish,
         })
     }
 
@@ -627,6 +670,7 @@ impl MixedDigitalCoordinator {
             probes: vec![None; self.probes.len()],
             drives: Vec::new(),
             publications: Vec::new(),
+            hdl_output: self.hdl_output.clone(),
         }
     }
 
@@ -1500,6 +1544,17 @@ impl MixedDigitalCoordinator {
             !cursor.probe,
             "a numerical probe cannot commit shared digital state"
         );
+        // The accepted trial's HDL output is released now and only now: a
+        // rejected trial's records were rolled back with its host image.
+        if self.digital.has_hdl_output() {
+            let records = self.digital.make_mut().drain_hdl_output();
+            if let Some(sink) = &self.hdl_output {
+                for mut record in records {
+                    record.point = crate::config::HdlPoint::Transient { time: cursor.time };
+                    sink.emit(&record);
+                }
+            }
+        }
         self.accepted_time = Some(cursor.time);
         self.accepted_observers = std::mem::take(&mut cursor.observers);
         self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);

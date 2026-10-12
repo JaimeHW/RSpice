@@ -9645,6 +9645,7 @@ impl Engine {
                 coordinator.set_interval_event_limit(
                     self.config.resource_limits.max_mixed_interval_events,
                 );
+                coordinator.configure_hdl(&self.config.hdl);
             }
             if circuit.has_coupled_event_nets() {
                 // Explicit and generated converters share the same physical

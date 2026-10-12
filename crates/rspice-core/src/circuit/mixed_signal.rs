@@ -959,6 +959,31 @@ impl CircuitData {
             if refinement.is_some() {
                 return Ok((refinement, false));
             }
+            // A design's `$finish`, `$stop` or `$fatal` (IEEE 1364-2005
+            // section 17.4.1) at this candidate ends the run on it, through the
+            // same request an analog `$finish` makes. The engine already
+            // breakpoints the HDL tick, so the accepted point is the tick's.
+            if kind == rspice_veriloga_runtime::AnalogTaskKind::Finish
+                && !validate_acceptance
+                && let Some(finish) = trial
+                    .coordinator()
+                    .and_then(crate::xspice::verilog::MixedDigitalCoordinator::hdl_finish)
+            {
+                consume(rspice_veriloga_runtime::AnalogTaskEvent {
+                    instance: finish.instance,
+                    model: finish.module,
+                    call: rspice_veriloga_runtime::AnalogTaskInvocation {
+                        kind: rspice_veriloga_runtime::AnalogTaskKind::Finish,
+                        site: finish.finish.site,
+                        time,
+                        arguments: Box::new([
+                            rspice_veriloga_runtime::AnalogTaskArgument::Integer(i64::from(
+                                finish.finish.level,
+                            )),
+                        ]),
+                    },
+                });
+            }
             for host in trial.hosts_mut() {
                 let inspected = (|| {
                     host.stamp(voltages, |_, _, _| {}, |_, _| {})?;
