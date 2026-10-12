@@ -317,7 +317,9 @@ fn assert_pnoise_oracle(result: &PnoiseAnalysisResult, label: &str) {
         &format!("{label} RD noise"),
     );
     assert_relative(
-        pnoise_contribution(result, "M1 channel thermal"),
+        // The native classic MOS publishes its channel source under the same
+        // `M1:ID` mechanism identity as ordinary noise's DNO(M1,ID).
+        pnoise_contribution(result, "M1:ID"),
         expected_channel,
         1.0e-8,
         &format!("{label} MOS channel noise"),

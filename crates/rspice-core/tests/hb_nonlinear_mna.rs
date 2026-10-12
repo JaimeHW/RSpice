@@ -142,9 +142,11 @@ fn nonlinear_hb_result_budget_counts_retained_mna_branch_spectra() {
     );
     let netlist = Netlist::parse(&deck).expect("result-budget fixture parses");
     let config = SimulationConfig {
-        // Two one-sided coefficients times one node and one MNA current,
-        // with real and imaginary components counted independently.
-        resource_limits: limits_with(|limits| limits.max_result_values = 7),
+        // Two one-sided coefficients times five retained spectra (one node,
+        // the native Meyer gate-rate coordinates gs/gd/gb and one MNA
+        // current), with real and imaginary components counted
+        // independently. Without the branch spectrum the count is 16.
+        resource_limits: limits_with(|limits| limits.max_result_values = 19),
         ..SimulationConfig::default()
     };
 
@@ -152,8 +154,8 @@ fn nonlinear_hb_result_budget_counts_retained_mna_branch_spectra() {
         Engine::new(config).run_hb(&netlist, HbConfig::new(F0).with_harmonics(1)),
         Err(SimulationError::ResourceLimit(ResourceLimitError {
             resource: ResourceKind::ResultValues,
-            requested: 8,
-            limit: 7,
+            requested: 20,
+            limit: 19,
         }))
     ));
 }
@@ -215,8 +217,9 @@ fn nonlinear_hb_matrix_budget_counts_branch_spectrum_unknowns() {
     let netlist = Netlist::parse(&deck).expect("matrix-budget fixture parses");
     let config = SimulationConfig {
         // The H=1 realified Newton state has three scalar components for each
-        // of the node-voltage and branch-current spectra.
-        resource_limits: limits_with(|limits| limits.max_matrix_unknowns = 5),
+        // of the node-voltage, native Meyer gate-rate (gs/gd/gb) and
+        // branch-current spectra. Without the branch spectrum the count is 12.
+        resource_limits: limits_with(|limits| limits.max_matrix_unknowns = 14),
         ..SimulationConfig::default()
     };
 
@@ -224,8 +227,8 @@ fn nonlinear_hb_matrix_budget_counts_branch_spectrum_unknowns() {
         Engine::new(config).run_hb(&netlist, HbConfig::new(F0).with_harmonics(1)),
         Err(SimulationError::ResourceLimit(ResourceLimitError {
             resource: ResourceKind::MatrixUnknowns,
-            requested: 6,
-            limit: 5,
+            requested: 15,
+            limit: 14,
         }))
     ));
 }
