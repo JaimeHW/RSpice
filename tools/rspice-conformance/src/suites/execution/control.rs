@@ -111,17 +111,16 @@ impl ControlContract {
                 ));
             }
         }
-        if let Some(characterization) = &contract.characterization {
-            if characterization.reason.trim().is_empty()
+        if let Some(characterization) = &contract.characterization
+            && (characterization.reason.trim().is_empty()
                 || characterization.qualification_case.is_empty()
                 || Path::new(&characterization.qualification_case)
                     .components()
                     .any(|part| !matches!(part, std::path::Component::Normal(_)))
                 || contract.runs.len() != 1
-                || !contract.runs[0].dataset.starts_with("tran")
-            {
-                return Err("characterization requires a reason, a corpus-relative qualification case and one transient run".into());
-            }
+                || !contract.runs[0].dataset.starts_with("tran"))
+        {
+            return Err("characterization requires a reason, a corpus-relative qualification case and one transient run".into());
         }
         Ok(contract)
     }
