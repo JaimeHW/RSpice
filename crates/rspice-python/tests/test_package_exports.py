@@ -7,3 +7,9 @@ def test_current_impulse_type_survives_package_star_import():
     exports = {}
     exec("from rspice import *", exports)
     assert exports["CurrentImpulseTrace"] is rspice.CurrentImpulseTrace
+
+
+def test_voltage_impulse_type_survives_package_star_import():
+    exports = {}
+    exec("from rspice import *", exports)
+    assert exports["VoltageImpulseTrace"] is rspice.VoltageImpulseTrace

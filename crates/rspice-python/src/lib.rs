@@ -257,6 +257,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "DeviceOperatingPoint",
             "TransientResult",
             "CurrentImpulseTrace",
+            "VoltageImpulseTrace",
             "DigitalEvent",
             "DigitalBus",
             "BusEvent",

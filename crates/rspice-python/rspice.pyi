@@ -34,6 +34,7 @@ __all__ = [
     "DeviceOperatingPoint",
     "TransientResult",
     "CurrentImpulseTrace",
+    "VoltageImpulseTrace",
     "DigitalEvent",
     "DigitalBus",
     "BusEvent",
