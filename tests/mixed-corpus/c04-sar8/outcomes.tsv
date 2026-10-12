@@ -1,21 +1,21 @@
 # variant	analysis	route	outcome	detail
-full	tran	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
-full	tran	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	tran	interp	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
+full	tran	native	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
 ports	tran	interp	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.000000e0, e=0.000000e0)
 ports	tran	native	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.000000e0, e=0.000000e0)
-full	op	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
-full	op	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	op	interp	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
+full	op	native	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
 ports	op	interp	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
 ports	op	native	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
-full	ac	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
-full	ac	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	ac	interp	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
+full	ac	native	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
 ports	ac	interp	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
 ports	ac	native	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
-full	noise	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
-full	noise	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	noise	interp	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
+full	noise	native	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
 ports	noise	interp	wrong	nz (O5-O1) [0] |a−e|=8.288e-15 allowed 9.946e-17 (a=1.657575e-15, e=9.945640e-15)
 ports	noise	native	wrong	nz (O5-O1) [0] |a−e|=8.288e-15 allowed 9.946e-17 (a=1.657575e-15, e=9.945640e-15)
-full	mc-tran	interp	refused	compile_refusal; label="net/sar8_full.v:17"; instance=net/sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v:17
-full	mc-tran	native	refused	compile_refusal; label="net/sar8_full.v:17"; instance=net/sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v:17
+full	mc-tran	interp	fail	simulation: CircuitError: Circuit error: transient timestep pinned at the minimum near t=6.400000e-18s (dt=1.000e-19s, delmin=1.000e-19s): integration restart did not escape; the circuit is numerically ill-conditioned at this operating point
+full	mc-tran	native	fail	simulation: CircuitError: Circuit error: transient timestep pinned at the minimum near t=6.400000e-18s (dt=1.000e-19s, delmin=1.000e-19s): integration restart did not escape; the circuit is numerically ill-conditioned at this operating point
 ports	mc-tran	interp	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]
 ports	mc-tran	native	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]
