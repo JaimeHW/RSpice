@@ -20,7 +20,7 @@ id = "op"
 analysis = "op"
 variants = ["mx"]
 kind = "op"
-signals = ["v(vout)", "v(og)", "v(fb)", "i(vin)"]
+signals = ["v(vout)", "v(og)", "v(fb)"]
 oracle = "O5-O1"
 ref = "ref/mx.op.O5-O1.out"
 abs = 1e-3
@@ -32,12 +32,44 @@ id = "op"
 analysis = "op"
 variants = ["mx"]
 kind = "op"
-signals = ["v(vout)", "v(og)", "v(fb)", "i(vin)"]
+signals = ["v(vout)", "v(fb)"]
 oracle = "O5-O4"
 ref = "ref/mx.op.O5-O4.out"
 abs = 3e-3
 rel = 3e-3
-why = "Xyce BSIM4 version differs"
+why = "Xyce BSIM4 version differs. v(og) is not compared here (manager ruling): Xyce runs a different BSIM4 VERSION, and og is the error amplifier's output, a high-gain internal node (loop gain ≈ 58) that amplifies model-version differences; RSpice agrees with ngspice on the same 4.8.2 equations and O5-O1 keeps v(og), as C2's O5-O1 leaves out cont"
+
+# The design's op tolerances are voltages (abs 1 mV / 3 mV); read literally on
+# i(vin) they would allow 1 mA / 3 mA on an 11.5 mA current. The input current
+# is set by v(vout) across rload (100 Ω; iload is 0 at the operating point),
+# so the same model-agreement allowance carried through the load is
+# abs 1 mV / 100 Ω = 10 µA (O5-O1) and 3 mV / 100 Ω = 30 µA (O5-O4), with the
+# design's rel terms unchanged. O5 keeps i(vin) in its row: §2.10 states that
+# tolerance in V|A.
+
+[[q]]
+id = "op.iin"
+analysis = "op"
+variants = ["mx"]
+kind = "op"
+signals = ["i(vin)"]
+oracle = "O5-O1"
+ref = "ref/mx.op.O5-O1.out"
+abs = 1e-5
+rel = 1e-3
+why = "same BSIM4 4.8.2 equations; the op row's 1 mV carried through rload (100 Ω) onto the input current"
+
+[[q]]
+id = "op.iin"
+analysis = "op"
+variants = ["mx"]
+kind = "op"
+signals = ["i(vin)"]
+oracle = "O5-O4"
+ref = "ref/mx.op.O5-O4.out"
+abs = 3e-5
+rel = 3e-3
+why = "Xyce BSIM4 version differs; the op row's 3 mV carried through rload (100 Ω) onto the input current"
 
 # ---- dc ------------------------------------------------------------------
 

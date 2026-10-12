@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-mx	op	interp	wrong	op (O5-O4) [1] |a−e|=5.861e-2 allowed 6.783e-3 (a=1.202269e0, e=1.260880e0)
-mx	op	native	wrong	op (O5-O4) [1] |a−e|=5.861e-2 allowed 6.783e-3 (a=1.202269e0, e=1.260880e0)
+mx	op	interp	pass	op.iin (O5-O4) [0] |a−e|=3.444e-5 allowed 6.474e-5 (a=-1.154600e-2, e=-1.158044e-2)
+mx	op	native	pass	op.iin (O5-O4) [0] |a−e|=3.444e-5 allowed 6.474e-5 (a=-1.154600e-2, e=-1.158044e-2)
 mx	dc-line	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
 mx	dc-line	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
 mx	dc-load	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
