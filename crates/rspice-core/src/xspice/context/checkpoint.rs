@@ -256,10 +256,11 @@ fn named<T, U>(map: &HashMap<String, T>, f: impl Fn(&T) -> U) -> Named<U> {
     v.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     v
 }
-fn restored<T, U>(v: &Named<T>, f: impl Fn(&T) -> U) -> HashMap<String, U> {
+fn restored<T, U>(v: &Named<T>, f: impl Fn(&T) -> U) -> CopyOnWrite<HashMap<String, U>> {
     v.iter()
         .map(|(name, value)| (name.clone(), f(value)))
-        .collect()
+        .collect::<HashMap<_, _>>()
+        .into()
 }
 fn ordered<T>(v: &Named<T>) -> Result<(), String> {
     if v.windows(2).any(|pair| pair[0].0 >= pair[1].0) {

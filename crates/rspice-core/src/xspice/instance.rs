@@ -6,6 +6,7 @@
 use super::context::{
     AnalogTransition, AnalogValue, CmContextCheckpoint, PendingDigitalEvent, PendingRealEvent,
 };
+use super::copy_on_write::CopyOnWrite;
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
     ParamSpec, ParamType, PortSpec, PortType, XspiceCheckpointSupport, XspiceEventScheduler,
@@ -887,18 +888,21 @@ pub struct XspiceInstance {
     pub name: String,
     /// Reference to the code model
     model: Arc<dyn CodeModel>,
+    // The port contract, connections and branch assignments are fixed once
+    // the circuit is elaborated, so an instance copy shares them
+    // (`super::copy_on_write`) instead of re-allocating every port's strings.
     /// Immutable port contract captured when the instance is constructed.
-    ports: Vec<PortSpec>,
+    ports: CopyOnWrite<Vec<PortSpec>>,
     /// Port connections (indexed by port spec order)
-    connections: Vec<PortConnection>,
+    connections: CopyOnWrite<Vec<PortConnection>>,
     /// Port name to index mapping
-    port_indices: HashMap<String, usize>,
+    port_indices: CopyOnWrite<HashMap<String, usize>>,
     /// Execution context
     context: CmContext,
     /// Optional MNA branch variable per port (for voltage-type outputs)
-    output_branches: Vec<Option<usize>>,
+    output_branches: CopyOnWrite<Vec<Option<usize>>>,
     /// Optional MNA branch variable per vector output element.
-    output_vector_branches: HashMap<(usize, usize), usize>,
+    output_vector_branches: CopyOnWrite<HashMap<(usize, usize), usize>>,
     /// Node-voltage count for the most recently supplied MNA solution.
     solution_num_nodes: usize,
     /// Node-voltage count used to build the current context port bindings.
@@ -1358,12 +1362,12 @@ impl XspiceInstance {
         Ok(Self {
             name,
             model,
-            ports,
-            connections,
-            port_indices,
+            ports: ports.into(),
+            connections: connections.into(),
+            port_indices: port_indices.into(),
             context,
-            output_branches: vec![None; port_count],
-            output_vector_branches: HashMap::new(),
+            output_branches: vec![None; port_count].into(),
+            output_vector_branches: CopyOnWrite::default(),
             solution_num_nodes: 0,
             port_context_solution_num_nodes: None,
             last_event_input_signature: None,
@@ -3247,7 +3251,7 @@ impl XspiceInstance {
             )))
         }
 
-        for connection in &mut self.connections {
+        for connection in self.connections.iter_mut() {
             match connection {
                 PortConnection::NamedBranchCurrent {
                     source_name,
@@ -3290,7 +3294,7 @@ impl XspiceInstance {
                 *node = to;
             }
         };
-        for connection in &mut self.connections {
+        for connection in self.connections.iter_mut() {
             match connection {
                 PortConnection::Digital(node)
                 | PortConnection::DigitalInverted(node)
@@ -3310,7 +3314,7 @@ impl XspiceInstance {
 
     /// Remap circuit node IDs after a topology-level reference-node rewrite.
     pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
-        for connection in &mut self.connections {
+        for connection in self.connections.iter_mut() {
             match connection {
                 PortConnection::Analog(node)
                 | PortConnection::Digital(node)

@@ -41,6 +41,7 @@
 
 pub mod conformance;
 mod context;
+mod copy_on_write;
 mod data_file;
 mod digital;
 mod event;

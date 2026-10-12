@@ -3,6 +3,7 @@
 //! Provides the runtime context passed to code models during evaluation.
 //! Handles port value access, parameter lookup, and state management.
 
+use super::copy_on_write::CopyOnWrite;
 use super::{
     CmError, CmResult, DigitalValue, PortType, ResourceEntry, ResourceTransactionScope,
     TransactionalContextResource,
@@ -436,6 +437,9 @@ impl fmt::Debug for ContextResources {
     }
 }
 
+/// Per inout port: every other driver's contribution and when it changed.
+type OtherDigitalDrivers = HashMap<String, Vec<Option<(DigitalValue, Value)>>>;
+
 #[derive(Debug, Clone)]
 pub struct CmContext {
     //-------------------------------------------------------------------------
@@ -479,62 +483,66 @@ pub struct CmContext {
     //-------------------------------------------------------------------------
     // Port Values
     //-------------------------------------------------------------------------
+    // Every string-keyed map below is copy-on-write: a context clone (an
+    // instance copy after a rollback capture, or the backup `evaluate` takes
+    // before each model call) shares it, and the first write copies that map
+    // alone. See `super::copy_on_write`.
     /// Input port values by name
-    inputs: HashMap<String, InputValue>,
+    inputs: CopyOnWrite<HashMap<String, InputValue>>,
     /// Executed digital output contributions sampled from the event bank.
     /// These are input observations, distinct from scheduled output targets.
-    committed_digital_outputs: HashMap<String, Vec<DigitalValue>>,
+    committed_digital_outputs: CopyOnWrite<HashMap<String, Vec<DigitalValue>>>,
     /// Resolved contributions excluding this port's driver, with the physical
     /// time they changed. Only circuit-enrolled inout ports populate this view.
-    other_digital_drivers: HashMap<String, Vec<Option<(DigitalValue, Value)>>>,
+    other_digital_drivers: CopyOnWrite<OtherDigitalDrivers>,
     /// Last event time for scalar digital input ports.
-    input_event_times: HashMap<String, Value>,
+    input_event_times: CopyOnWrite<HashMap<String, Value>>,
     /// Last event time for vector digital input ports, per element.
-    input_vector_event_times: HashMap<String, Vec<Option<Value>>>,
+    input_vector_event_times: CopyOnWrite<HashMap<String, Vec<Option<Value>>>>,
     /// ngspice-style total event-node load per scalar event port.
-    port_total_loads: HashMap<String, Value>,
+    port_total_loads: CopyOnWrite<HashMap<String, Value>>,
     /// ngspice-style total event-node load per vector event port element.
-    port_vector_total_loads: HashMap<String, Vec<Value>>,
+    port_vector_total_loads: CopyOnWrite<HashMap<String, Vec<Value>>>,
     /// Output port values by name
-    outputs: HashMap<String, OutputValue>,
+    outputs: CopyOnWrite<HashMap<String, OutputValue>>,
     /// Connected analog node index per scalar analog port (0 = ground).
-    port_nodes: HashMap<String, usize>,
+    port_nodes: CopyOnWrite<HashMap<String, usize>>,
     /// Connected terminal pair per scalar or differential analog port.
-    port_terminals: HashMap<String, (usize, usize)>,
+    port_terminals: CopyOnWrite<HashMap<String, (usize, usize)>>,
     /// Connected terminal pairs per analog vector port element.
-    port_vector_terminals: HashMap<String, Vec<(usize, usize)>>,
+    port_vector_terminals: CopyOnWrite<HashMap<String, Vec<(usize, usize)>>>,
     /// MNA matrix column for scalar branch-current control ports.
-    port_control_columns: HashMap<String, usize>,
+    port_control_columns: CopyOnWrite<HashMap<String, usize>>,
     /// Connected width per port. Scalar ports have width 1.
-    port_widths: HashMap<String, usize>,
+    port_widths: CopyOnWrite<HashMap<String, usize>>,
 
     //-------------------------------------------------------------------------
     // Parameters
     //-------------------------------------------------------------------------
     /// Instance parameters by name
-    params: HashMap<String, Value>,
+    params: CopyOnWrite<HashMap<String, Value>>,
     /// Complex parameters by name
-    complex_params: HashMap<String, Complex64>,
+    complex_params: CopyOnWrite<HashMap<String, Complex64>>,
     /// String parameters (paths, etc.)
-    string_params: HashMap<String, String>,
+    string_params: CopyOnWrite<HashMap<String, String>>,
     /// Monotonic revisions for string parameters by canonical name.
-    string_param_revisions: HashMap<String, u64>,
+    string_param_revisions: CopyOnWrite<HashMap<String, u64>>,
     /// Next revision assigned by `set_string_param`.
     next_string_param_revision: u64,
     /// String-vector parameters by name
-    string_vector_params: HashMap<String, Vec<String>>,
+    string_vector_params: CopyOnWrite<HashMap<String, Vec<String>>>,
     /// Complex-vector parameters by name
-    complex_vector_params: HashMap<String, Vec<Complex64>>,
+    complex_vector_params: CopyOnWrite<HashMap<String, Vec<Complex64>>>,
     /// Real-vector parameters by name
-    real_vector_params: HashMap<String, Vec<Value>>,
+    real_vector_params: CopyOnWrite<HashMap<String, Vec<Value>>>,
     /// Monotonic revisions for real-vector parameters by canonical name.
-    real_vector_param_revisions: HashMap<String, u64>,
+    real_vector_param_revisions: CopyOnWrite<HashMap<String, u64>>,
     /// Next revision assigned by `set_real_vector_param`.
     next_real_vector_param_revision: u64,
     /// Integer-vector parameters by name
-    integer_vector_params: HashMap<String, Vec<i64>>,
+    integer_vector_params: CopyOnWrite<HashMap<String, Vec<i64>>>,
     /// Parameters explicitly supplied by the instance or model card.
-    provided_params: HashSet<String>,
+    provided_params: CopyOnWrite<HashSet<String>>,
 
     //-------------------------------------------------------------------------
     // Internal State
@@ -546,13 +554,13 @@ pub struct CmContext {
     /// Integer state variables
     int_state: Vec<i64>,
     /// Per-instance transient sample histories keyed by model-defined names.
-    transient_histories: HashMap<String, Vec<TransientHistorySample>>,
+    transient_histories: CopyOnWrite<HashMap<String, Vec<TransientHistorySample>>>,
     /// Logical transition metadata for analog input vectors.
-    input_analog_vector_transitions: HashMap<String, Vec<Option<AnalogTransition>>>,
+    input_analog_vector_transitions: CopyOnWrite<HashMap<String, Vec<Option<AnalogTransition>>>>,
     /// Logical transition metadata emitted by analog outputs.
-    output_analog_transitions: HashMap<String, AnalogTransition>,
+    output_analog_transitions: CopyOnWrite<HashMap<String, AnalogTransition>>,
     /// Host/runtime resources owned by the model instance.
-    resources: ContextResources,
+    resources: CopyOnWrite<ContextResources>,
     resource_transaction: Option<ResourceTransactionScope>,
 
     //-------------------------------------------------------------------------
@@ -563,7 +571,7 @@ pub struct CmContext {
     /// Scheduled real-valued output events.
     pending_real_events: Vec<PendingRealEvent>,
     /// Per-output inertial-delay state for digital code models.
-    inertial_outputs: HashMap<String, InertialOutputState>,
+    inertial_outputs: CopyOnWrite<HashMap<String, InertialOutputState>>,
     /// Absolute transient times requested by analog code models.
     requested_breakpoints: Vec<Value>,
 
@@ -629,42 +637,42 @@ impl CmContext {
             evaluation_phase: EvaluationPhase::DirectEvaluation,
             iteration: 0,
             resource_limits: crate::resource::ResourceLimits::default(),
-            inputs: HashMap::new(),
-            committed_digital_outputs: HashMap::new(),
-            other_digital_drivers: HashMap::new(),
-            input_event_times: HashMap::new(),
-            input_vector_event_times: HashMap::new(),
-            port_total_loads: HashMap::new(),
-            port_vector_total_loads: HashMap::new(),
-            outputs: HashMap::new(),
-            port_nodes: HashMap::new(),
-            port_terminals: HashMap::new(),
-            port_vector_terminals: HashMap::new(),
-            port_control_columns: HashMap::new(),
-            port_widths: HashMap::new(),
-            params: HashMap::new(),
-            complex_params: HashMap::new(),
-            string_params: HashMap::new(),
-            string_param_revisions: HashMap::new(),
+            inputs: CopyOnWrite::default(),
+            committed_digital_outputs: CopyOnWrite::default(),
+            other_digital_drivers: CopyOnWrite::default(),
+            input_event_times: CopyOnWrite::default(),
+            input_vector_event_times: CopyOnWrite::default(),
+            port_total_loads: CopyOnWrite::default(),
+            port_vector_total_loads: CopyOnWrite::default(),
+            outputs: CopyOnWrite::default(),
+            port_nodes: CopyOnWrite::default(),
+            port_terminals: CopyOnWrite::default(),
+            port_vector_terminals: CopyOnWrite::default(),
+            port_control_columns: CopyOnWrite::default(),
+            port_widths: CopyOnWrite::default(),
+            params: CopyOnWrite::default(),
+            complex_params: CopyOnWrite::default(),
+            string_params: CopyOnWrite::default(),
+            string_param_revisions: CopyOnWrite::default(),
             next_string_param_revision: 1,
-            string_vector_params: HashMap::new(),
-            complex_vector_params: HashMap::new(),
-            real_vector_params: HashMap::new(),
-            real_vector_param_revisions: HashMap::new(),
+            string_vector_params: CopyOnWrite::default(),
+            complex_vector_params: CopyOnWrite::default(),
+            real_vector_params: CopyOnWrite::default(),
+            real_vector_param_revisions: CopyOnWrite::default(),
             next_real_vector_param_revision: 1,
-            integer_vector_params: HashMap::new(),
-            provided_params: HashSet::new(),
+            integer_vector_params: CopyOnWrite::default(),
+            provided_params: CopyOnWrite::default(),
             state: Vec::new(),
             state_prev: Vec::new(),
             int_state: Vec::new(),
-            transient_histories: HashMap::new(),
-            input_analog_vector_transitions: HashMap::new(),
-            output_analog_transitions: HashMap::new(),
-            resources: ContextResources::default(),
+            transient_histories: CopyOnWrite::default(),
+            input_analog_vector_transitions: CopyOnWrite::default(),
+            output_analog_transitions: CopyOnWrite::default(),
+            resources: CopyOnWrite::default(),
             resource_transaction: None,
             pending_events: Vec::new(),
             pending_real_events: Vec::new(),
-            inertial_outputs: HashMap::new(),
+            inertial_outputs: CopyOnWrite::default(),
             requested_breakpoints: Vec::new(),
             stamps: Vec::new(),
             rhs: Vec::new(),
