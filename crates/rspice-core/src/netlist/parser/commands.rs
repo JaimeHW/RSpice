@@ -206,6 +206,9 @@ pub(super) fn parse_command(
         ".GLOBAL" => {
             parse_global_command(stream, line_num, global_nodes)?;
         }
+        ".ESAVE" => {
+            options.xspice_event_trace_save = Some(parse_esave_command(stream, line_num)?);
+        }
         ".FUNC" => {
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
             parse_func_statement(stream, line_num, params)?;
@@ -2216,6 +2219,36 @@ fn parse_nonlinear_continuation_option(
             "unsupported .OPTIONS NONLIN CONTINUATION selector {selector}; expected 0, 1, 2, 3, 9, 34, or 35"
         ),
     })
+}
+
+/// `.ESAVE all | none | <net> ...`: ngspice's `esave` (`evtprint.c`
+/// `EVTsave`). A lone `all` or `none` selects every or no event net; any other
+/// list, including one that merely contains those words, names the nets to
+/// record. Each command replaces the previous selection.
+fn parse_esave_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<crate::netlist::EventSaveSelection, ParseError> {
+    let mut nets = Vec::new();
+    while !stream.is_eof() {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+        let net = expect_node(stream, line_num)?;
+        if !net.trim().is_empty() {
+            nets.push(net);
+        }
+    }
+    match nets.as_slice() {
+        [] => Err(ParseError::Syntax {
+            line: line_num,
+            message: ".ESAVE requires all, none, or at least one event net".to_string(),
+        }),
+        [word] if word.eq_ignore_ascii_case("all") => Ok(crate::netlist::EventSaveSelection::All),
+        [word] if word.eq_ignore_ascii_case("none") => Ok(crate::netlist::EventSaveSelection::None),
+        _ => Ok(crate::netlist::EventSaveSelection::Nets(nets)),
+    }
 }
 
 pub(super) fn parse_global_command(

@@ -166,13 +166,13 @@ pub(super) fn real_trace(result: &TransientResult, node: &str) -> PyResult<Vec<(
 /// A node the result recorded no event history for.
 ///
 /// The message says how a node comes to be missing rather than only that it
-/// is: event tracing is switched off by `.OPTIONS XSPICE ESAVE`, and a deck
-/// that names its outputs selects an event node by bare name only.
+/// is: event tracing is switched off by `.ESAVE none` (or `.OPTIONS XSPICE
+/// ESAVE=0`), and an `.ESAVE` list keeps only the nodes it names.
 fn unknown_digital_node_error(result: &TransientResult, node: &str) -> PyErr {
     crate::errors::key_error(format!(
         "no XSPICE digital event history was recorded for node '{node}'; this result carries {}. \
-         A node is absent when it is not an event node, when '.OPTIONS XSPICE ESAVE' switched \
-         event tracing off, or when the deck's output cards did not select it by bare name",
+         A node is absent when it is not an event node, when '.ESAVE none' switched event \
+         tracing off, or when an '.ESAVE' list did not name it",
         if result.digital_traces.is_empty() {
             "none".to_string()
         } else {

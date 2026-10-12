@@ -2692,12 +2692,8 @@ impl Netlist {
         if !command.eq_ignore_ascii_case("esave") {
             return None;
         }
-
-        match parts.next()?.to_ascii_lowercase().as_str() {
-            "none" => Some(".options xspice_esave=0".to_string()),
-            "all" => Some(".options xspice_esave=1".to_string()),
-            _ => None,
-        }
+        let nets = parts.collect::<Vec<_>>();
+        (!nets.is_empty()).then(|| format!(".esave {}", nets.join(" ")))
     }
 
     fn promote_control_codemodel_command(line: &str) -> Option<String> {

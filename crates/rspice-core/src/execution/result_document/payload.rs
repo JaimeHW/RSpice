@@ -592,11 +592,10 @@ pub struct FftChildReference {
 /// — the boundary that could is refused today — so a document's buses were
 /// declared by a frontend or read out of an imported artifact.
 ///
-/// Capture is also two gates wide, and a consumer that finds a node missing
-/// should look at both before concluding the node has no events: event tracing
-/// is switched off by `.OPTIONS XSPICE ESAVE` (on by default), and a deck that
-/// names its outputs selects event nodes by bare or raw name only — a typed
-/// `V(node)` save does not select one.
+/// Capture has one gate, ngspice's `esave`: every event node is recorded
+/// unless `.ESAVE none` (or `.OPTIONS XSPICE ESAVE=0`) switches event tracing
+/// off or `.ESAVE <nodes>` lists the ones to keep. A deck's `.SAVE` cards
+/// select analog outputs and never limit event nodes.
 ///
 /// # What is not carried
 ///

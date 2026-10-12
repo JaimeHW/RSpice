@@ -907,8 +907,13 @@ pub(in crate::netlist::parser) fn parse_options_command(
                 }
                 (Some("XSPICE"), "ESAVE" | "EVENT_SAVE" | "EVENTSAVE")
                 | (None, "XSPICE_ESAVE" | "XSPICE_EVENT_SAVE" | "XSPICE_EVENTSAVE") => {
-                    options.xspice_event_trace_save =
-                        Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+                    options.xspice_event_trace_save = Some(
+                        if parse_boolean_option(stream, line_num, params, has_equals)? {
+                            crate::netlist::EventSaveSelection::All
+                        } else {
+                            crate::netlist::EventSaveSelection::None
+                        },
+                    );
                 }
                 (_, "CHGTOL") => {
                     let value = expect_value(stream, line_num, params)?;

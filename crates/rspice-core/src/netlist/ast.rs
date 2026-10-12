@@ -4501,6 +4501,20 @@ impl TransientNoiseConfig {
     }
 }
 
+/// Which XSPICE event nets a transient records: ngspice's `esave`
+/// (`evtprint.c` `EVTsave`). Every event net is recorded unless this limits
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventSaveSelection {
+    /// Every event net: ngspice's default and `esave all`.
+    All,
+    /// No event net: `esave none`.
+    None,
+    /// Only these event nets, as the deck spells them: `esave n1 n2 ...`.
+    /// A listed bus records its members.
+    Nets(Vec<String>),
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -4751,8 +4765,9 @@ pub struct SimulationOptions {
     /// 2 = force transport, 3 = force inertial.
     pub digital_delay_type: Option<i64>,
     /// Ngspice `esave` event-output policy for XSPICE digital traces.
-    /// `None` keeps the default of recording event traces.
-    pub xspice_event_trace_save: Option<bool>,
+    /// `None` keeps the default of recording every event net; `.save`
+    /// selects analog outputs only and never limits event nets.
+    pub xspice_event_trace_save: Option<EventSaveSelection>,
     /// Maximum Newton-Raphson iterations (default: 150)
     pub itl1: Option<usize>,
     /// DC transfer curve iterations (default: 50)
@@ -5037,7 +5052,7 @@ impl SimulationOptions {
             self.digital_delay_type = other.digital_delay_type;
         }
         if other.xspice_event_trace_save.is_some() {
-            self.xspice_event_trace_save = other.xspice_event_trace_save;
+            self.xspice_event_trace_save = other.xspice_event_trace_save.clone();
         }
         if other.itl1.is_some() {
             self.itl1 = other.itl1;

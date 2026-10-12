@@ -18,10 +18,10 @@ use rspice_core::{Netlist, SimulationConfig, Value};
 /// One deck exercising every analog channel family plus XSPICE digital and
 /// real event traces in the same run.
 ///
-/// A bare `.SAVE` name selects an XSPICE event vector; a typed `V(node)`
-/// deliberately does not. The save set here therefore names the digital and
-/// real event nodes bare, keeps some analog channels and leaves others out, so
-/// the fixture also covers a deliberately not-projected channel.
+/// `.SAVE` selects analog channels and every event node is kept (only `esave`
+/// limits them). The save set here names the digital and real event nodes
+/// bare as well, keeps some analog channels and leaves others out, so the
+/// fixture also covers a deliberately not-projected channel.
 const MIXED_INVENTORY_DECK: &str = "\
 compressed transient container inventory\n\
 vin a 0 pwl(0 0 1n 0 1.1n 3.3)\n\

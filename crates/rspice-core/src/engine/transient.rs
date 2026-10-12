@@ -1451,15 +1451,24 @@ impl TransientCapturePlan {
                     })
             })
             .collect();
-        // XSPICE event vectors occupy a distinct result namespace. Bare/raw
-        // saves select them, while a typed V(node) request must not do so.
-        // Measurements remain conservative until their reducers are online.
+        // XSPICE event vectors occupy a distinct result namespace, and `.save`
+        // selects analog outputs only: every event net is kept unless
+        // ngspice's `esave` limits them (`evtprint.c` `EVTsave`, ruling D-I).
+        // `esave none` records no trace at all, so only a list narrows here;
+        // a listed bus keeps its members.
+        let listed = Self::esave_listed_nets(netlist);
         let mut event_nodes: Vec<bool> = node_names
             .iter()
-            .map(|name| retain_all || netlist.saves.selects_raw_name(name))
+            .map(|name| {
+                listed
+                    .as_ref()
+                    .is_none_or(|listed| listed.contains(&canonical_event_name(name)))
+            })
             .collect();
         Self::retain_declared_buses(&mut event_nodes, node_names, digital_buses, |bus| {
-            netlist.saves.selects_raw_name(bus)
+            listed
+                .as_ref()
+                .is_some_and(|listed| listed.contains(&canonical_event_name(bus)))
         });
         Self {
             voltages,
@@ -1479,6 +1488,50 @@ impl TransientCapturePlan {
     /// `DATA#3`..`DATA#0` has no node called `DATA`, so `.SAVE DATA` selects
     /// nothing at all by name; only the declaration says what it meant, and
     /// the whole point of carrying one is that a consumer may name the bus.
+    /// The canonical event names an `esave` list keeps, or `None` when every
+    /// event net is kept.
+    fn esave_listed_nets(netlist: &Netlist) -> Option<HashSet<String>> {
+        match &netlist.options.xspice_event_trace_save {
+            Some(crate::netlist::EventSaveSelection::Nets(nets)) => {
+                Some(nets.iter().map(|net| canonical_event_name(net)).collect())
+            }
+            _ => None,
+        }
+    }
+
+    /// Refuse an `esave` list naming something that is not an event net or a
+    /// declared bus of them, as ngspice's `esave` does ("Node %s is not an
+    /// event node"): recording nothing for a misspelled net would be a silent
+    /// omission.
+    fn validate_esave_list(
+        netlist: &Netlist,
+        nodes: TransientNodeNamespace<'_>,
+        buses: &[DigitalBusDeclaration],
+    ) -> Result<(), SimulationError> {
+        let Some(crate::netlist::EventSaveSelection::Nets(nets)) =
+            &netlist.options.xspice_event_trace_save
+        else {
+            return Ok(());
+        };
+        let known: HashSet<String> = nodes
+            .names
+            .iter()
+            .zip(nodes.event_only)
+            .filter(|(_, kind)| kind.is_some())
+            .map(|(name, _)| canonical_event_name(name))
+            .chain(buses.iter().map(|bus| canonical_event_name(&bus.name)))
+            .collect();
+        match nets
+            .iter()
+            .find(|net| !known.contains(&canonical_event_name(net)))
+        {
+            Some(net) => Err(SimulationError::Circuit(format!(
+                "esave: node '{net}' is not an event node"
+            ))),
+            None => Ok(()),
+        }
+    }
+
     fn retain_declared_buses(
         event_nodes: &mut [bool],
         node_names: &[String],
@@ -1783,15 +1836,13 @@ impl Engine {
         };
         // A `.SAVE` is a retention selector rather than a request for a
         // number, but only its BARE spelling is kind-agnostic: `.save q` and
-        // the CLI's `--save q` become `SaveSignal::Raw`, and a raw name
-        // selects the event trace, which is a retention this net really has.
-        // `.save v(q)` is the typed spelling, and event retention explicitly
-        // does not answer to it — the capture plan selects event vectors on
-        // `selects_raw_name` alone — so a typed save of an event-only net
-        // keeps nothing at all and has to be refused like every other typed
-        // operand. The frontend override path synthesizes a `V(q)` dependency
-        // from a `Raw`, so the two are told apart by the save set, not by the
-        // dependency.
+        // the CLI's `--save q` become `SaveSignal::Raw`, and a raw name names
+        // the event trace, which this net really has. `.save v(q)` is the
+        // typed spelling and asks for a voltage the net does not have, so it
+        // has to be refused like every other typed operand. (The event trace
+        // itself is kept whatever `.save` lists; only `esave` limits it.) The
+        // frontend override path synthesizes a `V(q)` dependency from a `Raw`,
+        // so the two are told apart by the save set, not by the dependency.
         let typed_save = |name: &str| {
             netlist.saves.signals.iter().any(|signal| match signal {
                 SaveSignal::Voltage(saved) => saved.eq_ignore_ascii_case(name),
@@ -4249,7 +4300,10 @@ impl Engine {
         let mut scheduled_checkpoint_cursor = 0_usize;
         let mut retained_scheduled_checkpoint_values = 0_usize;
         let mut retained_scheduled_transport_bytes = 0_usize;
-        let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
+        let record_xspice_event_traces = !matches!(
+            netlist.options.xspice_event_trace_save,
+            Some(crate::netlist::EventSaveSelection::None)
+        );
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         // Pre-simulation effects also belong to models with no matrix unknowns.
         // Run them before the empty-circuit shortcut can manufacture a trace.
@@ -5291,6 +5345,14 @@ impl Engine {
         // run publishes, and the live sample hook — and one producer is what
         // keeps them from drifting apart.
         let mut digital_buses = mixed_module_bus_declarations(&circuit, &node_names)?;
+        TransientCapturePlan::validate_esave_list(
+            netlist,
+            TransientNodeNamespace {
+                names: &node_names,
+                event_only: &event_only_nodes,
+            },
+            &digital_buses,
+        )?;
         let capture_plan = TransientCapturePlan::compile(
             netlist,
             TransientNodeNamespace {

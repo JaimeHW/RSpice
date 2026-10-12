@@ -106,8 +106,12 @@ use rspice_core::analysis::harmonic_balance::{
 // analysis feature tables and the CLI capabilities document); today's caller
 // is the core integration suite that runs every cell on a fixture of its
 // family (`tests/capability_refusals.rs`).
-// The census is 5,677, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5677;
+// The census was 5,677, with no slack.
+// One statement for `.ESAVE` lists: `netlist::EventSaveSelection`, the type of
+// the public `SimulationOptions::xspice_event_trace_save` field, which the
+// conformance runner's Xyce option contracts read and every frontend that
+// builds options names. The census is 5,678, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5678;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -1994,6 +1994,79 @@ esave none
     );
 }
 
+/// `.save` selects analog outputs; only `esave` limits event nets (ngspice
+/// `evtprint.c` `EVTsave`). A deck saving one voltage still records its event
+/// nets, `esave none` records none, a list records exactly the nets it names,
+/// in either spelling, and a name that is no event net is refused.
+#[test]
+fn esave_alone_limits_event_nets_and_save_does_not() {
+    let deck = |cards: &str| {
+        format!(
+            "* esave selects event nets\n\
+             a_src [d] src\n\
+             a_inv d dn inv\n\
+             a_dac [dn] [out] dac\n\
+             .model src d_source (input_file=\"stim.stim\")\n\
+             .model inv d_inverter\n\
+             .model dac dac_bridge (out_low=0 out_high=1)\n\
+             rload out 0 1k\n\
+             .save v(out)\n\
+             {cards}\n\
+             .end\n"
+        )
+    };
+    let event_nets = |result: &TransientResult| {
+        let mut names: Vec<_> = result
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.to_ascii_lowercase())
+            .collect();
+        names.sort();
+        names
+    };
+    let run = |cards: &str| {
+        run_temp_deck(
+            "rspice-esave-selection",
+            "0 0s\n1n 1s\n",
+            &deck(cards),
+            2.0e-9,
+            100.0e-12,
+        )
+    };
+
+    let saved = run("");
+    assert_eq!(
+        event_nets(&saved),
+        ["d", "dn"],
+        "a voltage save keeps event nets"
+    );
+    assert!(
+        !transient_node_series(&saved, "out").is_empty(),
+        "and the saved voltage"
+    );
+    assert!(event_nets(&run(".esave none")).is_empty());
+    assert_eq!(event_nets(&run(".esave all")), ["d", "dn"]);
+    assert_eq!(event_nets(&run(".esave dn")), ["dn"]);
+    assert_eq!(event_nets(&run(".control\nesave d\n.endc")), ["d"]);
+
+    let dir = unique_temp_dir("rspice-esave-unknown");
+    fs::create_dir_all(&dir).expect("create esave fixture dir");
+    fs::write(dir.join("stim.stim"), "0 0s\n1n 1s\n").expect("write stimulus");
+    let deck_path = dir.join("deck.cir");
+    fs::write(&deck_path, deck(".esave dn out")).expect("write deck");
+    let error = Engine::default()
+        .run_tran(&parse_file(&deck_path), 2.0e-9, 100.0e-12)
+        .expect_err("an analog node is not an event node");
+    let _ = fs::remove_dir_all(dir);
+    assert!(
+        error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("'out' is not an event node"),
+        "{error}"
+    );
+}
+
 #[test]
 fn d_buffer_inertial_unknown_third_value_uses_stable_previous_delay_like_ngspice() {
     let result = run_temp_deck(
