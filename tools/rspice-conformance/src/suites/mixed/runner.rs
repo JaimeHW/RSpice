@@ -2,9 +2,9 @@
 //! then held against (or recorded into) `outcomes.tsv`. Also `capture`, the
 //! maintenance command that (re)captures checked-in oracle references.
 //!
-//! Cells run concurrently, at most `--jobs` children at a time. Reports and
-//! records are assembled in declared order whatever the completion order, so
-//! `outcomes.tsv` and the summary do not depend on N.
+//! Cells run concurrently, at most `--jobs` children at a time, slowest
+//! first. Reports and records are assembled in declared order whatever the
+//! completion order, so `outcomes.tsv` and the summary do not depend on N.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -39,6 +39,9 @@ pub struct RunOptions {
     pub work: PathBuf,
     /// The most cells running at once; 0 means [`default_jobs`].
     pub jobs: usize,
+    /// Where each cell's last wall time on this machine is kept, to start the
+    /// slowest cells first. A scheduling hint only; `None` keeps none.
+    pub timings: Option<PathBuf>,
 }
 
 impl RunOptions {
@@ -166,24 +169,42 @@ pub fn run(options: &RunOptions) -> Result<Vec<DesignReport>, String> {
             reports[index] = Some(finish(options, design, Vec::new())?);
         }
     }
-    let order: Vec<usize> = (0..tasks.len()).collect();
+    let previous = options
+        .timings
+        .as_deref()
+        .map(load_timings)
+        .unwrap_or_default();
+    let key = |task: &Task| {
+        (
+            designs[task.design].slug.clone(),
+            task.variant.clone(),
+            task.analysis.clone(),
+        )
+    };
+    let order = slowest_first(&tasks, |task| previous.get(&key(task)).copied());
     let mut assembly = Assembly {
         pending,
         finished: vec![Vec::new(); designs.len()],
     };
-    execute(
+    let mut measured = Vec::new();
+    let outcome = execute(
         &tasks,
         &order,
         options.jobs(),
         |task| run_cell(options, &designs[task.design], task),
         |index, cell| {
             let design = tasks[index].design;
+            measured.push((key(&tasks[index]), cell.elapsed_s));
             if let Some(cells) = assembly.complete(design, index, cell) {
                 reports[design] = Some(finish(options, &designs[design], cells)?);
             }
             Ok(())
         },
-    )?;
+    );
+    if let Some(path) = &options.timings {
+        store_timings(path, previous, measured);
+    }
+    outcome?;
     Ok(reports
         .into_iter()
         .map(|report| report.expect("every design finished"))
@@ -325,6 +346,62 @@ fn execute<T: Sync, R: Send>(
         }
         outcome
     })
+}
+
+/// The order cells start in: by their last wall time on this machine,
+/// slowest first, so the run is not left waiting on a slow cell that started
+/// last. A cell with no recorded time goes ahead of the timed ones, largest
+/// declared budget first, as the likeliest straggler. Ties keep the declared
+/// order.
+fn slowest_first(tasks: &[Task], previous: impl Fn(&Task) -> Option<f64>) -> Vec<usize> {
+    let keys: Vec<(bool, f64)> = tasks
+        .iter()
+        .map(|task| match previous(task) {
+            Some(seconds) => (false, seconds),
+            None => (true, task.timeout_s as f64),
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..tasks.len()).collect();
+    order.sort_by(|&a, &b| {
+        keys[b]
+            .0
+            .cmp(&keys[a].0)
+            .then(keys[b].1.total_cmp(&keys[a].1))
+    });
+    order
+}
+
+type TimingKey = (String, String, String);
+
+/// `slug variant analysis seconds` per line; anything unreadable is ignored.
+fn load_timings(path: &Path) -> HashMap<TimingKey, f64> {
+    let text = fs::read_to_string(path).unwrap_or_default();
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            let key = (
+                fields.next()?.to_owned(),
+                fields.next()?.to_owned(),
+                fields.next()?.to_owned(),
+            );
+            let seconds: f64 = fields.next()?.parse().ok()?;
+            seconds.is_finite().then_some((key, seconds))
+        })
+        .collect()
+}
+
+/// Merge this run's times over the previous ones and replace the file. A
+/// concurrent runner's update may be lost; the file is only a hint.
+fn store_timings(path: &Path, previous: HashMap<TimingKey, f64>, measured: Vec<(TimingKey, f64)>) {
+    let merged: BTreeMap<TimingKey, f64> = previous.into_iter().chain(measured).collect();
+    let mut text = String::new();
+    for ((slug, variant, analysis), seconds) in merged {
+        text.push_str(&format!("{slug}\t{variant}\t{analysis}\t{seconds:.3}\n"));
+    }
+    let staged = path.with_extension(format!("{}.tmp", std::process::id()));
+    if fs::write(&staged, text).is_ok() && fs::rename(&staged, path).is_err() {
+        let _ = fs::remove_file(&staged);
+    }
 }
 
 /// The first `design.toml` feature this build did not compile, if any. Each
@@ -1189,6 +1266,32 @@ mod tests {
             analysis: "tran".to_owned(),
             timeout_s,
         }
+    }
+
+    #[test]
+    fn untimed_cells_start_first_then_the_slowest() {
+        let tasks = vec![
+            task(0, "fast", 300),
+            task(0, "new-small", 300),
+            task(0, "slow", 300),
+            task(1, "new-big", 1800),
+            task(1, "tie-a", 300),
+            task(1, "tie-b", 300),
+        ];
+        let previous = |task: &Task| match task.variant.as_str() {
+            "fast" => Some(0.5),
+            "slow" => Some(600.0),
+            "tie-a" | "tie-b" => Some(10.0),
+            _ => None,
+        };
+        let order: Vec<&str> = slowest_first(&tasks, previous)
+            .into_iter()
+            .map(|index| tasks[index].variant.as_str())
+            .collect();
+        assert_eq!(
+            order,
+            ["new-big", "new-small", "slow", "tie-a", "tie-b", "fast"]
+        );
     }
 
     /// Run fake cells through the real queue and assembly at `jobs`; each

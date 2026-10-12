@@ -164,7 +164,8 @@ debug profile costs five to ten times as much on the IR passes.
 the default is a quarter of the hardware threads, between 2 and 8, because a
 Monte Carlo cell already runs its trials in parallel. Reports and
 `outcomes.tsv` are assembled in declared order, so they are the same for any
-N. Each `--record` rewrites a design's `outcomes.tsv` under an exclusive lock
+N. Cells start slowest first, by their last wall time on the machine (kept
+per route in the temp directory). Each `--record` rewrites a design's `outcomes.tsv` under an exclusive lock
 on the file itself, so the interpreter and native builds can record the same
 design at once. A recorded detail names files relative to its design (or to
 the corpus root), so a re-record on another machine or worktree leaves the

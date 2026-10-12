@@ -202,9 +202,15 @@ fn check_route(expected: Option<&str>) -> Result<(), String> {
 fn options() -> Result<runner::RunOptions, String> {
     let bin = std::env::current_exe().map_err(|error| error.to_string())?;
     let work = std::env::temp_dir().join(format!("rspice-mixed-corpus-{}", std::process::id()));
+    // Per route: the two builds' cells take different times.
+    let timings = std::env::temp_dir().join(format!(
+        "rspice-mixed-corpus-timings-{}.tsv",
+        Route::compiled().token()
+    ));
     Ok(runner::RunOptions {
         bin,
         work,
+        timings: Some(timings),
         ..Default::default()
     })
 }
