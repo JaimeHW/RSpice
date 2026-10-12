@@ -65,6 +65,49 @@ pub fn decode_port(entry: &str) -> Option<PortSpec> {
     })
 }
 
+/// Why a typed port entry was refused by [`parse_port_entry`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortEntryError {
+    /// The entry has nothing before its direction.
+    MissingName,
+    /// The text after the entry's last top-level colon names no direction.
+    UnknownDirection(String),
+}
+
+/// One `name:direction` entry a person typed, split by the rule
+/// [`decode_port`] reads stored metadata with.
+///
+/// Stored metadata is read generously: a direction this codec does not know
+/// reads as `inout`, because the value was written by something. A person's
+/// entry is not: `inp:inn` is a typo, not an inout port named `inp`. So the
+/// direction must be one this codec writes, or `input` or `output`, and an
+/// entry with no direction is the default `inout` as before.
+pub fn parse_port_entry(entry: &str) -> Result<PortSpec, PortEntryError> {
+    let entry = entry.trim();
+    let (name, direction) = match last_top_level_colon(entry) {
+        Some(index) => {
+            let keyword = entry[index + 1..].trim();
+            let direction = match keyword.to_ascii_lowercase().as_str() {
+                "in" | "input" => PortDirection::In,
+                "out" | "output" => PortDirection::Out,
+                "inout" => PortDirection::InOut,
+                "supply" => PortDirection::Supply,
+                _ => return Err(PortEntryError::UnknownDirection(keyword.to_owned())),
+            };
+            (&entry[..index], direction)
+        }
+        None => (entry, PortDirection::InOut),
+    };
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(PortEntryError::MissingName);
+    }
+    Ok(PortSpec {
+        name: name.to_owned(),
+        direction,
+    })
+}
+
 fn last_top_level_colon(entry: &str) -> Option<usize> {
     let mut depth = 0_usize;
     let mut last = None;
@@ -149,6 +192,33 @@ mod tests {
             ]
         );
         assert_eq!(decode_port(":in"), None);
+    }
+
+    /// Stored metadata reads an unknown direction as inout; a typed entry
+    /// refuses it, while a bus range's own colon still stays in the name.
+    #[test]
+    fn a_typed_entry_refuses_a_direction_the_codec_does_not_write() {
+        assert_eq!(
+            parse_port_entry("d[7:0]:inout"),
+            Ok(port("d[7:0]", PortDirection::InOut))
+        );
+        assert_eq!(
+            parse_port_entry("inp:input"),
+            Ok(port("inp", PortDirection::In))
+        );
+        assert_eq!(
+            parse_port_entry("vss"),
+            Ok(port("vss", PortDirection::InOut))
+        );
+        assert_eq!(
+            parse_port_entry("inp:inn"),
+            Err(PortEntryError::UnknownDirection("inn".to_owned()))
+        );
+        assert_eq!(
+            decode_port("inp:inn"),
+            Some(port("inp", PortDirection::InOut))
+        );
+        assert_eq!(parse_port_entry(":out"), Err(PortEntryError::MissingName));
     }
 
     #[test]
