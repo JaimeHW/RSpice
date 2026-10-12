@@ -110,8 +110,26 @@ use rspice_core::analysis::harmonic_balance::{
 // One statement for `.ESAVE` lists: `netlist::EventSaveSelection`, the type of
 // the public `SimulationOptions::xspice_event_trace_save` field, which the
 // conformance runner's Xyce option contracts read and every frontend that
-// builds options names. The census is 5,678, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5678;
+// builds options names. The census was 5,678, with no slack.
+// Seventeen statements for HDL runs (design P2 lane L1), after narrowing
+// eight that have no caller outside the core:
+// - `config`: the output record vocabulary `HdlOutputRecord`, `HdlPoint`,
+//   `HdlStream`, `HdlOrigin`, `HdlSeverity` and `HdlSeverity::label`, which
+//   the CLI console renders (`rspice-cli` console.rs) and the headless
+//   transient result carries (`rspice-simulation` results.rs `hdl_output`);
+//   the `HdlOutputSink` trait the CLI console and the simulation bridge's
+//   capture implement; the bounded `HdlOutputCollector` with `new` and `take`,
+//   which the simulation bridge collects a transient's output with; and
+//   `HdlRunConfig` and `HdlDelaySelect`, the types of the public
+//   `SimulationConfig::hdl` field and its `delay_select`, which the CLI's run
+//   flags set.
+// - `xspice::verilog`: `run_digital_testbench` with `HdlTestbenchOptions`,
+//   `HdlSchedule`, `HdlTestbenchEnd` and `HdlTestbenchReport`, the design's
+//   self-checking testbench entry point (P2 section 2.3) for the ivtest
+//   conformance harness; today the core's testbench suite calls it, and
+//   restricted visibility would leave it dead code in a non-test build.
+// The census is 5,695, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5695;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
