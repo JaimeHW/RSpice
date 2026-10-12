@@ -1,0 +1,41 @@
+schema = "rspice-mixed-tolerance/1"
+time_precision = 1e-12
+
+# Decisive assertion (design §4a): sample standard deviation over [0.1 µs, 2 µs]
+# of ~1900 independent held samples; χ² 99% ⇒ ±4.2%.
+
+[[q]]
+id = "sigma.mixed"
+analysis = "trnoise"
+variants = ["base"]
+kind = "stat"
+stat = "std"
+over = "samples"
+of = { kind = "held_at", signal = "v(p)", times = { start = 1e-7, step = 1e-9, count = 1901 } }
+interval = [0.0214, 0.0233]
+oracle = "O6"
+why = "√(1e-18 A²/Hz · (1 kΩ)² · 500 MHz) = 22.36 mV: the mixed module's white_noise must reach the transient"
+
+[[q]]
+id = "sigma.va"
+analysis = "trnoise"
+variants = ["base"]
+kind = "stat"
+stat = "std"
+over = "samples"
+of = { kind = "held_at", signal = "v(pv)", times = { start = 1e-7, step = 1e-9, count = 1901 } }
+interval = [0.0214, 0.0233]
+oracle = "O6"
+why = "the analog-only twin: the same 22.36 mV"
+
+[[q]]
+id = "sigma.resistor"
+analysis = "trnoise"
+variants = ["base"]
+kind = "stat"
+stat = "std"
+over = "samples"
+of = { kind = "held_at", signal = "v(pn)", times = { start = 1e-7, step = 1e-9, count = 1901 } }
+interval = [8.72e-5, 9.48e-5]
+oracle = "O6"
+why = "control: √(4kT · 1 kΩ · 500 MHz) = 91.0 µV at 300.15 K"

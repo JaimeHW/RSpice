@@ -1,0 +1,8 @@
+// P0.6a: a mixed module whose analog block declares a white-noise source.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module noisy_mixed(p, n, q);
+  inout p, n; electrical p, n; output q; reg q;
+  initial q = 1'b0; always #50 q = ~q;
+  analog I(p, n) <+ V(p, n)/1000.0 + white_noise(1e-18, "w");
+endmodule

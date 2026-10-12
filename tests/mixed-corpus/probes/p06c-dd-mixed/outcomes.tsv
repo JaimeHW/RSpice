@@ -1,0 +1,3 @@
+# variant	analysis	route	outcome	detail
+base	tran	interp	pass	delay.mixed (O6) worst k=1115 (t=2.0605e-8): |v(o)[k] − v(a)[k−1]|=4.441e-16 allowed 1.0e-9 over 1249 points
+base	tran	native	pass	delay.mixed (O6) worst k=1115 (t=2.0605e-8): |v(o)[k] − v(a)[k−1]|=4.441e-16 allowed 1.0e-9 over 1249 points

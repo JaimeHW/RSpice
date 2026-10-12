@@ -1,0 +1,10 @@
+* P0.6b Monte Carlo of a transient on a mixed design
+.hdl "../net/cnt.vams"
+vp p 0 1
+x1 p 0 q cnt
+rp p 0 {r}
+rq q 0 10k
+.param r={agauss(1k,100,1)}
+.mc 4 seed 9
+.tran 1n 100n
+.end

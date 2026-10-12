@@ -1,0 +1,9 @@
+// P0.6c: a variable read before it is assigned in a mixed module's analog
+// block. `seen` must carry `held` from the previous accepted point.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module held_mixed(a, o, n, q); inout a, o, n; electrical a, o, n; output q; reg q;
+  initial q = 1'b0; always #1000 q = ~q;
+  real held, seen;
+  analog begin seen = held; held = V(a, n); V(o, n) <+ seen; end
+endmodule

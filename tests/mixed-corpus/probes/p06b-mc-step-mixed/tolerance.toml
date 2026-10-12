@@ -1,0 +1,68 @@
+schema = "rspice-mixed-tolerance/1"
+time_precision = 1e-12
+
+# Decisive assertion (design §4b): per point / trial the first q rise is at
+# exactly 30 ns, i(vp) = −(1 mA + 1 V/r_k), 3 points / 4 trials, and i(vp)
+# differs across MC trials. The q edge is read on the module's digital port
+# (its built-in converter's event endpoint), not on the converted voltage.
+
+[[q]]
+id = "rise"
+analysis = "step-tran"
+variants = ["base"]
+kind = "per_trial"
+of = { kind = "cross", nets = ["x1.q__event_0"], edge = "rise" }
+trials = 3
+oracle = "O6"
+expect = "p06b::first_rise"
+abs = 1e-12
+why = "initial blocks re-run per point: c reaches 3 at the third 10 ns tick"
+
+[[q]]
+id = "ivp"
+analysis = "step-tran"
+variants = ["base"]
+kind = "per_trial"
+of = { kind = "held_at", signal = "i(vp)", at = [5e-8] }
+trials = 3
+oracle = "O6"
+expect = "p06b::ivp"
+abs = 1e-9
+why = "the point's own r: 1 mA through the module plus 1 V/r_k through rp"
+
+[[q]]
+id = "rise"
+analysis = "mc-tran"
+variants = ["base"]
+kind = "per_trial"
+of = { kind = "cross", nets = ["x1.q__event_0"], edge = "rise" }
+trials = 4
+oracle = "O6"
+expect = "p06b::first_rise"
+abs = 1e-12
+why = "initial blocks re-run per trial: c reaches 3 at the third 10 ns tick"
+
+[[q]]
+id = "ivp"
+analysis = "mc-tran"
+variants = ["base"]
+kind = "per_trial"
+of = { kind = "held_at", signal = "i(vp)", at = [5e-8] }
+trials = 4
+oracle = "O6"
+expect = "p06b::ivp"
+abs = 1e-9
+why = "the trial's own drawn r: 1 mA through the module plus 1 V/r_k through rp"
+
+[[q]]
+id = "spread"
+analysis = "mc-tran"
+variants = ["base"]
+kind = "stat"
+stat = "std"
+over = "trials"
+of = { kind = "held_at", signal = "i(vp)", at = [5e-8] }
+trials = 4
+interval = [1e-12, 1.0]
+oracle = "O6"
+why = "the agauss draw reached the circuit: i(vp) differs across trials"

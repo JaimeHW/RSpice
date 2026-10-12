@@ -1,0 +1,9 @@
+// P0.6b: a mixed module whose digital state starts from its initial block on
+// every point: q rises at the third 10 ns tick, exactly 30 ns.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module cnt(p, n, q); inout p, n; electrical p, n; output q; reg q; integer c;
+  initial begin q = 0; c = 0; end
+  always #10 begin c = c + 1; q = (c == 3); end
+  analog I(p, n) <+ V(p, n)/1000.0;
+endmodule

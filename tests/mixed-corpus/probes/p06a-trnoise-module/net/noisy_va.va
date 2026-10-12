@@ -1,0 +1,6 @@
+// P0.6a: the analog-only twin of noisy_mixed.
+`include "disciplines.vams"
+module noisy_va(p, n);
+  inout p, n; electrical p, n;
+  analog I(p, n) <+ V(p, n)/1000.0 + white_noise(1e-18, "w");
+endmodule

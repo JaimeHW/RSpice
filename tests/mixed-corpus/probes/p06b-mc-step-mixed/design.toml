@@ -1,0 +1,25 @@
+schema = "rspice-mixed-design/1"
+id = "P06b"
+title = "P0.6b: MC and .step of a transient on a mixed design"
+exit_phases = ["P0"]
+dialect = "best-available"
+features = []
+
+[[variant]]
+name = "base"
+families = ["spice", "vams-digital", "vams-analog"]
+today = "runs"
+
+[[analysis]]
+id = "step-tran"
+variants = ["base"]
+oracles = ["O6"]
+timeout_s = 600
+phase = "P0"
+
+[[analysis]]
+id = "mc-tran"
+variants = ["base"]
+oracles = ["O6"]
+timeout_s = 600
+phase = "P0"

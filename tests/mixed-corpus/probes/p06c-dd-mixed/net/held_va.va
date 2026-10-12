@@ -1,0 +1,6 @@
+// P0.6c: the analog-only twin of held_mixed.
+`include "disciplines.vams"
+module held_va(a, o, n); inout a, o, n; electrical a, o, n;
+  real held, seen;
+  analog begin seen = held; held = V(a, n); V(o, n) <+ seen; end
+endmodule

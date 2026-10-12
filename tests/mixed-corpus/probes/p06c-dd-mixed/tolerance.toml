@@ -1,0 +1,28 @@
+schema = "rspice-mixed-tolerance/1"
+time_precision = 1e-12
+
+# Decisive assertion (design §4c): for every accepted point k ≥ 1,
+# V(o)[k] = V(a)[k−1] within 1 nV, for the mixed module and its twin, on the
+# route this build is.
+
+[[q]]
+id = "delay.mixed"
+analysis = "tran"
+variants = ["base"]
+kind = "assert"
+signals = ["v(o)", "v(a)"]
+oracle = "O6"
+expect = "p06c::one_step"
+abs = 1e-9
+why = "D-D: a read-before-assign variable holds its value from the previous accepted point"
+
+[[q]]
+id = "delay.va"
+analysis = "tran"
+variants = ["base"]
+kind = "assert"
+signals = ["v(ot)", "v(a)"]
+oracle = "O6"
+expect = "p06c::one_step"
+abs = 1e-9
+why = "the analog-only twin, the same rule"

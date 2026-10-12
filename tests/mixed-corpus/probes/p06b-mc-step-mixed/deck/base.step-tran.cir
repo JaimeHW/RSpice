@@ -1,0 +1,10 @@
+* P0.6b .step of a transient on a mixed design
+.hdl "../net/cnt.vams"
+vp p 0 1
+x1 p 0 q cnt
+rp p 0 {r}
+rq q 0 10k
+.param r=1k
+.step param r list 1k 2k 3k
+.tran 1n 100n
+.end

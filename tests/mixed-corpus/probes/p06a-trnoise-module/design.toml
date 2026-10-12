@@ -1,0 +1,18 @@
+schema = "rspice-mixed-design/1"
+id = "P06a"
+title = "P0.6a: mixed-module noise in transient noise"
+exit_phases = ["P0"]
+dialect = "best-available"
+features = []
+
+[[variant]]
+name = "base"
+families = ["spice", "va-runtime", "vams-digital", "vams-analog"]
+today = "runs"
+
+[[analysis]]
+id = "trnoise"
+variants = ["base"]
+oracles = ["O6"]
+timeout_s = 900
+phase = "P0"
