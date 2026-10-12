@@ -60,6 +60,7 @@ impl Editor {
                         InlineEditField::Instance,
                         "Instance",
                         "",
+                        PropertyRowCaption::default(),
                     );
                     edit_row_with_hint(
                         ui,
@@ -68,6 +69,7 @@ impl Editor {
                         InlineEditField::Value,
                         "Value",
                         "",
+                        PropertyRowCaption::default(),
                     );
                     edit_row_with_hint(
                         ui,
@@ -76,6 +78,7 @@ impl Editor {
                         InlineEditField::Parameter("note".to_owned()),
                         "Note",
                         "",
+                        PropertyRowCaption::default(),
                     );
                     edit_row_with_hint(
                         ui,
@@ -84,6 +87,7 @@ impl Editor {
                         InlineEditField::Parameters,
                         "Parameters",
                         "",
+                        PropertyRowCaption::default(),
                     );
                 });
             },

@@ -37,6 +37,13 @@ fn authoritative_cell_instance_sheet(
         return Ok(None);
     };
     let bound_view = cell.get_view(&binding.view);
+    // A Verilog-A view whose compile stated its module's parameters: one
+    // typed field each, read from the contract the netlister binds.
+    if let Some(view) =
+        bound_view.filter(|view| super::veriloga_parameters::states_compiled_parameters(cell, view))
+    {
+        return super::veriloga_parameters::compiled_parameter_sheet(cell, view).map(Some);
+    }
 
     // Current publications keep the definition at cell scope. The view scan
     // is a deterministic compatibility path for early versioned documents;
@@ -144,7 +151,7 @@ fn cell_contract_property_sheet(
 
 /// The one editable control for `m`, typed so the engine's rule — finite and
 /// strictly positive — is enforced before the value can reach a deck.
-fn instance_multiplicity_definition() -> PropertyDefinition {
+pub(super) fn instance_multiplicity_definition() -> PropertyDefinition {
     let mut definition = PropertyDefinition::new(crate::state::InstanceMultiplicity::PARAMETER_NAME)
         .with_display_name("Multiplicity (m)")
         .with_description(

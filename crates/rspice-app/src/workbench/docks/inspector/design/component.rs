@@ -569,17 +569,7 @@ pub(super) fn parameters_section(
         "inherit · {} °C",
         app.state.sim_setup.reference_pvt.temperature_celsius
     );
-    let supports_temperature = component
-        .library_cell
-        .as_ref()
-        .filter(|binding| binding.is_executable_builtin())
-        .is_none_or(|binding| {
-            binding
-                .parameter_order
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case(TEMPERATURE_PARAM))
-        });
-    let mut rejection = supports_temperature
+    let mut rejection = supports_instance_temperature(&app.state, component)
         .then(|| {
             edit_row_with_hint(
                 ui,
@@ -588,6 +578,7 @@ pub(super) fn parameters_section(
                 InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned()),
                 "Temperature",
                 &inherited,
+                PropertyRowCaption::default(),
             )
         })
         .flatten();
@@ -611,6 +602,7 @@ pub(super) fn parameters_section(
             raw_field,
             "Parameters",
             "instance value",
+            PropertyRowCaption::default(),
         );
         rejection = rejection.or(raw_rejection);
         if editable {
@@ -622,22 +614,56 @@ pub(super) fn parameters_section(
         }
         return;
     }
+    let mut removed = None;
     for parameter in parameter_contract {
-        if parameter.editable {
+        let caption = PropertyRowCaption {
+            unit: parameter.unit.as_deref(),
+            description: parameter.description.as_deref(),
+        };
+        if parameter.undeclared {
+            let value = declared
+                .get(&parameter.key.to_ascii_lowercase())
+                .map_or("", String::as_str);
+            if editable {
+                if property_row_flagged(
+                    ui,
+                    &parameter.label,
+                    value,
+                    UNDECLARED_PARAMETER_NOTE,
+                    Tokens::get(ui.ctx()).color.warn,
+                    REMOVE_UNDECLARED_PARAMETER,
+                ) {
+                    removed = Some(parameter.key);
+                }
+            } else {
+                property_row_status(
+                    ui,
+                    &parameter.label,
+                    &format!("{value} {UNDECLARED_PARAMETER_NOTE}"),
+                    Tokens::get(ui.ctx()).color.warn,
+                    StatusMark::Warning,
+                );
+            }
+        } else if parameter.editable {
             let row_rejection = edit_row_with_hint(
                 ui,
                 app,
                 component,
-                InlineEditField::Parameter(parameter.key),
+                InlineEditField::Parameter(parameter.key.clone()),
                 &parameter.label,
                 &parameter.hint,
+                caption,
             );
             rejection = rejection.or(row_rejection);
         } else {
             let value = declared
                 .get(&parameter.key)
                 .map_or(parameter.hint.as_str(), String::as_str);
-            property_row(ui, &parameter.label, value);
+            if caption.unit.is_some() || caption.description.is_some() {
+                property_row_captioned(ui, &parameter.label, value, caption);
+            } else {
+                property_row(ui, &parameter.label, value);
+            }
         }
     }
     if editable {
@@ -647,6 +673,47 @@ pub(super) fn parameters_section(
             rejection.as_deref(),
         );
     }
+    if let Some(key) = removed
+        && app.state.commit_pending_inspector_edit()
+    {
+        match app
+            .state
+            .remove_undeclared_instance_parameter(component.id, &key)
+        {
+            Ok(true) => app.invalidate_simulation_preflight(),
+            Ok(false) => {}
+            Err(error) => app.state.push_user_message(ConsoleMessage::warning(format!(
+                "{key} was not removed from {}: {error}",
+                component.name
+            ))),
+        }
+    }
+}
+
+/// What an undeclared parameter's row says after its value.
+pub(super) const UNDECLARED_PARAMETER_NOTE: &str = "not in module";
+/// The action that takes an undeclared parameter's value off the instance.
+pub(super) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
+
+/// Whether `component` takes the SPICE instance temperature `temp`.
+///
+/// A built-in takes it when its compiled contract names it. An instance of a
+/// Verilog-A view never does: a module reads `$temperature`, and takes `temp`
+/// only as a parameter it declares, which its own typed row then offers.
+pub(super) fn supports_instance_temperature(state: &AppState, component: &Component) -> bool {
+    if crate::workbench::app::instantiates_veriloga_view(state, component) {
+        return false;
+    }
+    component
+        .library_cell
+        .as_ref()
+        .filter(|binding| binding.is_executable_builtin())
+        .is_none_or(|binding| {
+            binding
+                .parameter_order
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(TEMPERATURE_PARAM))
+        })
 }
 
 /// `true` while one of the identity group's editable fields holds the open
@@ -677,6 +744,14 @@ pub(super) struct InlineParameterContract {
     pub(super) label: String,
     pub(super) hint: String,
     pub(super) editable: bool,
+    /// The unit the sheet states the value in.
+    pub(super) unit: Option<String>,
+    /// What the sheet says the parameter is, shown on the label's hover.
+    pub(super) description: Option<String>,
+    /// A value the instance sets for a parameter its compiled module no
+    /// longer declares: shown, flagged, and offered for removal, because the
+    /// netlister refuses it rather than emitting or dropping it.
+    pub(super) undeclared: bool,
 }
 
 pub(super) fn inline_parameter_contract(
@@ -685,6 +760,12 @@ pub(super) fn inline_parameter_contract(
     declared: &HashMap<String, String>,
 ) -> Vec<InlineParameterContract> {
     let primary = crate::properties::property_bridge::get_primary_property_name(component.kind);
+    // `temp` has its own row where the instance takes the SPICE instance
+    // temperature; anywhere else a `temp` the sheet declares is an ordinary
+    // parameter row.
+    let temperature_row = supports_instance_temperature(state, component);
+    let is_temperature = |key: &str| temperature_row && key.eq_ignore_ascii_case(TEMPERATURE_PARAM);
+    let compiled = crate::workbench::app::has_compiled_parameter_sheet(state, component);
     let mut rows = Vec::new();
     let mut seen = HashSet::new();
     if let Ok(Some(sheet)) =
@@ -695,27 +776,34 @@ pub(super) fn inline_parameter_contract(
                 && definition.name != "name"
                 && definition.name != "symbol"
                 && !definition.name.eq_ignore_ascii_case(primary)
-                && definition.name != TEMPERATURE_PARAM
+                && !is_temperature(&definition.name)
         }) {
-            let hint = match &definition.default_value {
-                PropertyValue::Expression(source) => source.clone(),
-                value => value.display_string(),
-            };
+            let hint = definition.default_hint.clone().unwrap_or_else(|| {
+                match &definition.default_value {
+                    PropertyValue::Expression(source) => source.clone(),
+                    value => value.display_string(),
+                }
+            });
             seen.insert(definition.name.to_ascii_lowercase());
             rows.push(InlineParameterContract {
                 key: definition.name.clone(),
                 label: definition.display_name.clone(),
                 hint,
                 editable: !definition.read_only && definition.display_mode != DisplayMode::Readonly,
+                unit: definition.unit.clone().filter(|unit| !unit.is_empty()),
+                description: Some(definition.description.clone())
+                    .filter(|description| !description.trim().is_empty()),
+                undeclared: false,
             });
         }
     }
 
-    if let Some(binding) = component.library_cell.as_ref() {
+    // A compiled module's sheet is its current contract; the placement's
+    // copy of an older one names nothing the sheet does not.
+    if let Some(binding) = component.library_cell.as_ref().filter(|_| !compiled) {
         for key in &binding.parameter_order {
             let normalized = key.to_ascii_lowercase();
-            if normalized == primary || normalized == TEMPERATURE_PARAM || !seen.insert(normalized)
-            {
+            if normalized == primary || is_temperature(&normalized) || !seen.insert(normalized) {
                 continue;
             }
             rows.push(InlineParameterContract {
@@ -723,6 +811,9 @@ pub(super) fn inline_parameter_contract(
                 label: key.clone(),
                 hint: "inherit".to_owned(),
                 editable: true,
+                unit: None,
+                description: None,
+                undeclared: false,
             });
         }
     }
@@ -730,7 +821,7 @@ pub(super) fn inline_parameter_contract(
     let mut extensions = declared
         .keys()
         .filter(|key| {
-            key.as_str() != TEMPERATURE_PARAM
+            !is_temperature(key)
                 && !key.eq_ignore_ascii_case(primary)
                 && !seen.contains(&key.to_ascii_lowercase())
         })
@@ -741,7 +832,10 @@ pub(super) fn inline_parameter_contract(
         label: key.clone(),
         key,
         hint: "instance value".to_owned(),
-        editable: true,
+        editable: !compiled,
+        unit: None,
+        description: None,
+        undeclared: compiled,
     }));
     rows
 }

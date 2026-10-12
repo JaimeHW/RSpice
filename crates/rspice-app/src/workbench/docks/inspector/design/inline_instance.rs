@@ -16,8 +16,18 @@ pub(super) fn field_value(component: &Component, field: &InlineEditField) -> Str
         InlineEditField::Instance => component.name.clone(),
         InlineEditField::Value => component.value.clone(),
         InlineEditField::Parameters => component.params.clone(),
+        // A cell instance's `m` is its typed multiplicity, never text.
+        InlineEditField::Parameter(key)
+            if crate::workbench::app::is_instance_multiplicity(component, key) =>
+        {
+            component
+                .multiplicity
+                .map(|multiplicity| multiplicity.to_string())
+                .unwrap_or_default()
+        }
+        // Parameter text is keyed case-insensitively, and stored lower-case.
         InlineEditField::Parameter(key) => crate::state::parse_params_string(&component.params)
-            .get(key)
+            .get(&key.to_ascii_lowercase())
             .cloned()
             .unwrap_or_default(),
     }
@@ -214,6 +224,19 @@ fn edited_component(
         InlineEditField::Parameters => {
             crate::state::params_string::validate_parameter_text(candidate)?;
             component.params = candidate.trim().to_owned();
+        }
+        // The multiplicity goes back to the typed field it is read from, and
+        // the plain 1 that means "stands for itself" is no multiplier at all,
+        // as the component editor stores it.
+        InlineEditField::Parameter(key)
+            if crate::workbench::app::is_instance_multiplicity(&component, key) =>
+        {
+            component.multiplicity = if candidate.trim().is_empty() {
+                None
+            } else {
+                Some(crate::state::InstanceMultiplicity::parse(candidate)?)
+                    .filter(|multiplicity| multiplicity.value() != 1.0)
+            };
         }
         InlineEditField::Parameter(key) => {
             component.params = crate::state::params_string::set_parameter_value(
@@ -690,11 +713,23 @@ pub(super) fn edit_row(
     field: InlineEditField,
     label: &str,
 ) -> Option<String> {
-    edit_row_with_hint(ui, app, component, field, label, "")
+    edit_row_with_hint(
+        ui,
+        app,
+        component,
+        field,
+        label,
+        "",
+        PropertyRowCaption::default(),
+    )
 }
 
 /// An editable row whose empty authoritative value presents inherited/default
 /// copy. The hint is never written into the design.
+///
+/// A parameter whose sheet states its unit or what it is passes them as
+/// `caption`: the unit sits inside the field's trailing edge and the
+/// description on the label's hover, editable or not.
 pub(super) fn edit_row_with_hint(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -702,11 +737,18 @@ pub(super) fn edit_row_with_hint(
     field: InlineEditField,
     label: &str,
     hint: &str,
+    caption: PropertyRowCaption<'_>,
 ) -> Option<String> {
+    let captioned = caption.unit.is_some() || caption.description.is_some();
     let editable = !app.state.schematic_edit_read_only();
     if !editable {
         let value = field_value(component, &field);
-        property_row(ui, label, if value.is_empty() { hint } else { &value });
+        let shown = if value.is_empty() { hint } else { &value };
+        if captioned {
+            property_row_captioned(ui, label, shown, caption);
+        } else {
+            property_row(ui, label, shown);
+        }
         return None;
     }
 
@@ -763,6 +805,18 @@ pub(super) fn edit_row_with_hint(
                     },
                 );
                 (edit, Some(action))
+            } else if captioned {
+                (
+                    property_row_input_captioned(
+                        ui,
+                        label,
+                        &mut buffer,
+                        hint,
+                        rejection.is_some(),
+                        caption,
+                    ),
+                    None,
+                )
             } else {
                 (
                     property_row_input_with_hint(ui, label, &mut buffer, hint, rejection.is_some()),
