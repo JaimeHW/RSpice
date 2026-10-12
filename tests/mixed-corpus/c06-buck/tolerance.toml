@@ -57,23 +57,38 @@ edge_abs = 1e-12
 why = "ls rises 2 ticks (62.5 ns) after each hs fall and falls 2 ticks before the next hs rise; every edge on the 31.25 ns tick"
 
 # --- inductor current (settled, 2 ohm) ---------------------------------------
-# The design's ripple quantity is peak-to-peak i(L) against
-# (Vin − Vout)·D·T/L = 0.1047·(22u/L) A, rel 10 %. The harness measures one
-# extreme per quantity, so `ripple` measures −max(i) and expects
-# −(min(i) + 0.1047·22u/L), the minimum taken from the same run and window:
-# that is the peak-to-peak check, with 10 % of 0.1047 A as its allowance.
+# Peak-to-peak i(L) (the `pp` kind). The design's (Vin − Vout)·D·T/L with
+# D = Vout/Vin = 0.1047·(22u/L) A is the lossless continuous-duty figure; the
+# controller cannot produce it (derivation fixed 2026-10-12, before the
+# re-comparison):
+#   - the duty that holds Vout = 922/512 V at I = Vout/2 = 0.9004 A, with the
+#     switch on-resistance 20 mΩ for 60 of 64 ticks, the inductor DCR and the
+#     body diode (Vf(I) = nVt·ln(I/Is) + I·rs = 0.721 V) for the 4 dead ticks,
+#     is d* = (64(Vout + I·DCR) + 60·I·Ron + 4·Vf)/Vin = 24.07 ticks, so the
+#     first-order sigma-delta dithers between 24 and 25 ticks (1 in ~14 at 25);
+#   - the rise in a 25-tick period is s_on·25τ, s_on = (Vin − Vout − I(Ron +
+#     DCR))/L = 0.14378 A/us at 22 uH, i.e. 0.11233 A;
+#   - the sigma-delta's accumulated duty error never exceeds one tick, so the
+#     period-start current drifts by at most one tick's step, Vin·τ/L =
+#     7.10 mA, over a dither cycle.
+# So pp lies in [s_on·25τ, s_on·25τ + Vin·τ/L] = [0.11233, 0.11943]·(22u/L) A:
+# the expectation is the centre, 0.11588·(22u/L) A, and the allowance its
+# half-width, 3.06 %, plus 0.4 % for the loss terms in s_on (the ripple moves
+# I by ±0.06 A): rel 3.5 %. Every term scales as 1/L, so it holds per Monte
+# Carlo trial. (Cross-check: the switched circuit integrated from its own
+# equations with the controller's integer law gives 0.11699 A.)
 
 [[q]]
 id = "ripple"
 analysis = "tran"
 variants = ["vdig", "vams"]
-kind = "min"
-signal = "-i(lbuck)"
+kind = "pp"
+signal = "i(lbuck)"
 window = [4e-4, 5e-4]
 oracle = "O6"
 expect = "c06::ripple"
-abs = 1.047e-2
-why = "peak-to-peak i(L) = (Vin − Vout)·D·T/L = 0.1047 A, rel 10 % for losses and dead time (design)"
+rel = 0.035
+why = "pp i(L) in [s_on·25τ, s_on·25τ + Vin·τ/L]: the 24/25-tick dither, losses and dead time (derivation above)"
 
 [[q]]
 id = "ilmean"
@@ -89,6 +104,49 @@ why = "charge balance: the mean inductor current is the load current (922/512)/2
 
 
 # --- load-step envelope: one-period means of v(vout) -------------------------
+# Derivation of the allowances, fixed 2026-10-12 before the re-comparison.
+# A once-per-period sampled controller and the averaged model differ by:
+#   ADC LSB      the loop regulates round(512·v) at tick 1: ±1/1024 V on the
+#                sample, which the integral passes to vout.
+#   PWM ticks    duty = acc/64 is truncated to 1/16 tick (Vin/1024 = 4.9 mV of
+#                switch-node average) before the dither.
+#   dither       the 4-bit sigma-delta adds one 78 mV-period to the switch node
+#                every 16/m periods; the period-start inductor current drifts
+#                by up to Vin·τ/L = 7.1 mA over a dither cycle, a few mV on a
+#                one-period mean.
+#   ripple and   the sample sits at the ripple's valley (tick 1), not at its
+#   dead time    mean: mean − sample = ΔI·T(1 − 2D)/(12C) + ESR·ΔI/2 = 1.0 +
+#                0.6 mV. The averaged switch node is exact for the linear
+#                stage; the diode's 4 dead ticks at the valley and peak
+#                currents differ from Vf(mean current) by under 0.1 mV.
+#   alignment    the averaged model integrates the error continuously and
+#                feeds it back through a one-period Padé delay; the
+#                controller sums one sample per period (taken at tick 1, acted
+#                on from tick 2) and holds the duty for the period. On the
+#                load step's recovery (vout rising ~23 mV/us) a fraction of a
+#                period of misalignment is several mV to tens of mV.
+# Each term per window, from the switched circuit (net/stage.cir) integrated
+# from its own equations under the controller's integer law, one effect
+# switched off at a time [mV, signed, circuit − averaged model]:
+#   window (us)  ADC   ticks+dither  ripple+dead  alignment  |total|
+#   500-502      −0.8  −1.6           0.9          0.0        1.5
+#   510-512      −2.4   1.2           1.2          3.5        3.5
+#   530-532       1.0   0.6           1.8         11.7       15.0
+#   560-562      −0.4   1.2           0.3         −5.3        4.3
+#   620-622      −1.5   1.8           0.5         −6.8        6.1
+# An equally valid sampled realization moves a one-period mean by at most
+# 2.6 mV (the code read 10 ns stale, as O2's quantizer can read it: 2.1 mV;
+# ±1 count on 5 % of the samples: 2.6 mV; +1 count once: 2.2 mV), and the
+# realization RSpice produces is one of them: 3 mV.
+# O6 averaged (the O1 reference): allowance = |total| + 3 mV per window, so the
+# 10 mV the design set without this derivation becomes 4.5, 6.5, 18.1, 7.3
+# and 9.1 mV. The averaged model is itself 15 mV off the circuit at 530 us.
+# O2 (the same digital law in d_cosim on the same stage): no alignment,
+# ripple or quantization term differs between the two, only the realization
+# (3 mV) and the two simulators' integration of the mean, so the design's
+# 5 mV stands. The O2 reference keeps these windows' rows whole (the oracle
+# deck's `rspice-full-rows`); the 20,001-row decimation had dropped the
+# switching corners from them.
 
 [[q]]
 id = "env500"
@@ -99,8 +157,8 @@ signal = "v(vout)"
 window = [5e-4, 5.02e-4]
 oracle = "O1"
 ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
-abs = 0.010
-why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+abs = 0.0045
+why = "the averaged model (O6 averaged, solved by ngspice): its own error here 1.5 mV, plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env510"
@@ -111,8 +169,8 @@ signal = "v(vout)"
 window = [5.1e-4, 5.12e-4]
 oracle = "O1"
 ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
-abs = 0.010
-why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+abs = 0.0065
+why = "the averaged model (O6 averaged, solved by ngspice): its own error here 3.5 mV, plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env530"
@@ -123,8 +181,8 @@ signal = "v(vout)"
 window = [5.3e-4, 5.32e-4]
 oracle = "O1"
 ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
-abs = 0.010
-why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+abs = 0.0181
+why = "the averaged model (O6 averaged, solved by ngspice): its own error here 15.0 mV (sampling alignment on the recovery), plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env560"
@@ -135,8 +193,8 @@ signal = "v(vout)"
 window = [5.6e-4, 5.62e-4]
 oracle = "O1"
 ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
-abs = 0.010
-why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+abs = 0.0073
+why = "the averaged model (O6 averaged, solved by ngspice): its own error here 4.3 mV, plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env620"
@@ -147,8 +205,8 @@ signal = "v(vout)"
 window = [6.2e-4, 6.22e-4]
 oracle = "O1"
 ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
-abs = 0.010
-why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+abs = 0.0091
+why = "the averaged model (O6 averaged, solved by ngspice): its own error here 6.1 mV, plus 3 mV realization (derivation above)"
 
 [[q]]
 id = "env500"
@@ -245,12 +303,12 @@ id = "ripple"
 analysis = "mc-tran"
 variants = ["vdig", "vams"]
 kind = "per_trial"
-of = { kind = "min", signal = "-i(lbuck)", window = [4e-4, 5e-4] }
+of = { kind = "pp", signal = "i(lbuck)", window = [4e-4, 5e-4] }
 trials = 3
 oracle = "O6"
 expect = "c06::ripple"
-abs = 1.047e-2
-why = "as ripple with the trial's L: 0.1047·(22u/L) A peak-to-peak"
+rel = 0.035
+why = "as ripple with the trial's L: 0.11588·(22u/L) A peak-to-peak, rel 3.5 % (derivation at ripple)"
 
 [[q]]
 id = "ilmean"

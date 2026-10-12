@@ -1,15 +1,15 @@
 # variant	analysis	route	outcome	detail
-vdig	tran	interp	wrong	env530 (O1) [0] |a−e|=1.606e-2 allowed 1.000e-2 (a=1.631947e0, e=1.615887e0)
-vdig	tran	native	wrong	env530 (O1) [0] |a−e|=1.606e-2 allowed 1.000e-2 (a=1.631947e0, e=1.615887e0)
+vdig	tran	interp	wrong	env500 (O2) [0] |a−e|=7.148e-3 allowed 5.000e-3 (a=1.632883e0, e=1.625735e0)
+vdig	tran	native	wrong	env500 (O2) [0] |a−e|=7.148e-3 allowed 5.000e-3 (a=1.632883e0, e=1.625735e0)
 vams	tran	interp	refused	compile_refusal; label="net/buck_ctrl_ams.vams"; instance=buck_ctrl form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams
 vams	tran	native	refused	compile_refusal; label="net/buck_ctrl_ams.vams"; instance=buck_ctrl form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams
 p3	tran	interp	refused	compile_refusal; label="net/buck_ctrl_p3.vams"; instance=buck_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_p3.vams
 p3	tran	native	refused	compile_refusal; label="net/buck_ctrl_p3.vams"; instance=buck_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_p3.vams
-vdig	ckpt	interp	pass	vss_step (O6) [0] |a−e|=1.300e-3 allowed 6.000e-3 (a=1.802081e0, e=1.800781e0)
-vdig	ckpt	native	pass	vss_step (O6) [0] |a−e|=1.300e-3 allowed 6.000e-3 (a=1.802081e0, e=1.800781e0)
+vdig	ckpt	interp	wrong	malformed-refusal:instance,analysis; analysis.tran.checkpoint_capability: unsupported capability [analysis.tran.checkpoint_capability]: transient checkpoint capability preflight failed: accepted integration runtime: voltage-controlled switch accepted hysteresis state is not checkpointed
+vdig	ckpt	native	wrong	malformed-refusal:instance,analysis; analysis.tran.checkpoint_capability: unsupported capability [analysis.tran.checkpoint_capability]: transient checkpoint capability preflight failed: accepted integration runtime: voltage-controlled switch accepted hysteresis state is not checkpointed
 vams	ckpt	interp	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20
 vams	ckpt	native	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20
-vdig	mc-tran	interp	wrong	ripple (O6) trial 0: [0] |a−e|=1.373e-2 allowed 1.047e-2 (a=-9.664667e-1, e=-9.527415e-1)
-vdig	mc-tran	native	wrong	ripple (O6) trial 0: [0] |a−e|=1.373e-2 allowed 1.047e-2 (a=-9.664667e-1, e=-9.527415e-1)
+vdig	mc-tran	interp	pass	ripple (O6) trial 1: [0] |a−e|=1.021e-3 allowed 3.325e-3 (a=9.601630e-2, e=9.499542e-2)
+vdig	mc-tran	native	pass	ripple (O6) trial 1: [0] |a−e|=1.021e-3 allowed 3.325e-3 (a=9.601630e-2, e=9.499542e-2)
 vams	mc-tran	interp	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20
 vams	mc-tran	native	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20
