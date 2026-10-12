@@ -5,6 +5,8 @@
 .include ../net/loopf_mx.cir
 .include ../net/pll-models.cir
 .param r1v=300 c1v=10n
-.pss 10meg 20u
-.pnoise v(vco_out) dec 10 1k 10meg
+* Driven PSS as in deck/mx.pss.cir, then periodic noise at the VCO output
+* (`xvco`'s `out` port is node vco_out) over the design's 1k..10meg offsets.
+.pss fund=10meg tstab=20u
+.pnoise dec 10 1k 10meg out=v(vco_out)
 .end

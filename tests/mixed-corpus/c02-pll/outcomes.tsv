@@ -15,9 +15,9 @@ xs	mc-tran	interp	fail	convergence: ConvergenceError: Convergence failed after 1
 xs	mc-tran	native	fail	convergence: ConvergenceError: Convergence failed after 10 iterations
 mx	mc-tran	interp	fail	convergence: ConvergenceError: Convergence failed after 9 iterations
 mx	mc-tran	native	fail	convergence: ConvergenceError: Convergence failed after 9 iterations
-xs	pss	interp	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
-xs	pss	native	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
-mx	pss	interp	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
-mx	pss	native	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
-mx	pnoise	interp	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
-mx	pnoise	native	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
+xs	pss	interp	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+xs	pss	native	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+mx	pss	interp	fail	parse: parse: line 140: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c02-pll/vco_pwl.va:0: module '__rspice_project__/mixed-corpus/c02-pll/vco_pwl.va': the Verilog-A source could not be read: this se
+mx	pss	native	fail	parse: parse: line 140: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c02-pll/vco_pwl.va:0: module '__rspice_project__/mixed-corpus/c02-pll/vco_pwl.va': the Verilog-A source could not be read: this se
+mx	pnoise	interp	fail	parse: parse: line 139: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c02-pll/vco_pwl.va:0: module '__rspice_project__/mixed-corpus/c02-pll/vco_pwl.va': the Verilog-A source could not be read: this se
+mx	pnoise	native	fail	parse: parse: line 139: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c02-pll/vco_pwl.va:0: module '__rspice_project__/mixed-corpus/c02-pll/vco_pwl.va': the Verilog-A source could not be read: this se
