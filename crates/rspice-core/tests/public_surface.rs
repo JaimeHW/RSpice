@@ -96,8 +96,18 @@ use rspice_core::analysis::harmonic_balance::{
 // IO), rspice-wasm (control handles and deck runners) and the engine-adapter
 // tests import through, and `ResultScalarError`, the error
 // `ResultScalar::new` returns now that the constructor cannot name a
-// result-document error. The census is 5,661, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5661;
+// result-document error. The census was 5,661, with no slack.
+// Sixteen statements export the family-by-analysis capability matrix
+// (`engine::analysis_capability`, re-exported from `engine`): the
+// `CapabilityFamily`, `CapabilityAnalysis`, `InstanceGate` and `CellSupport`
+// types with their `ALL` inventories and `tag`/`label`/`kind`/`status`
+// accessors, `capability_cell` and `capability_matrix`. The design's
+// intended callers are the frontends' support tables (the application's
+// analysis feature tables and the CLI capabilities document); today's caller
+// is the core integration suite that runs every cell on a fixture of its
+// family (`tests/capability_refusals.rs`).
+// The census is 5,677, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5677;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
