@@ -134,11 +134,14 @@ fn xyce_level10_bsimsoi_rejects_unresolved_native_model_params() {
         .expect_err("native BSIMSOI must reject unresolved model parameters")
         .to_string();
 
+    // Native model expressions resolve at construction; the common resolver
+    // names the model, the parameter and the missing binding.
     assert!(
-        message.contains("native BSIMSOI")
-            && message.contains("U0=missing_u0")
-            && message.contains("finite numeric literals"),
-        "unresolved BSIMSOI model parameter should fail closed with a native-model message: {message}"
+        message.contains("Model 'NMOS'")
+            && message.contains("parameter 'U0'")
+            && message.contains("could not be resolved")
+            && message.contains("Undefined parameter: MISSING_U0"),
+        "unresolved BSIMSOI model parameter should fail closed naming the binding: {message}"
     );
 }
 

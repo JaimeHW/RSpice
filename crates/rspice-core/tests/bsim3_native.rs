@@ -175,13 +175,16 @@ fn native_bsim3_rejects_unresolved_model_params_before_defaulting() {
         .expect_err("unresolved BSIM3 model parameter must not fall back to the default")
         .to_string();
 
+    // Native model expressions resolve at construction; the common resolver
+    // names the model, the parameter and the missing binding.
     assert!(
-        message.contains("BSIM3") && message.contains("NQSMOD"),
+        message.contains("Model 'N018'") && message.contains("parameter 'NQSMOD'"),
         "error should identify the unresolved native BSIM3 model parameter: {message}"
     );
     assert!(
-        message.contains("unresolved") && message.contains("finite numeric literal"),
-        "error should explain native BSIM3 params must be numeric: {message}"
+        message.contains("could not be resolved")
+            && message.contains("Undefined parameter: NATIVE_NQS"),
+        "error should name the missing binding: {message}"
     );
 }
 
