@@ -139,7 +139,7 @@ impl CircuitData {
         {
             return Err("mixed checkpoint has a pending candidate ledger".into());
         }
-        if self.scheduler.mixed_digital_coordinator.is_some() != !self.mixed_signal_hosts.is_empty()
+        if self.scheduler.mixed_digital_coordinator.is_some() == self.mixed_signal_hosts.is_empty()
         {
             return Err("mixed checkpoint requires a complete enrolled circuit".into());
         }

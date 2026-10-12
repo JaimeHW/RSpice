@@ -85,6 +85,7 @@ impl std::io::Write for HashWriter {
 }
 
 impl XspiceInstance {
+    #[cfg(feature = "veriloga")]
     pub(crate) fn runtime_checkpoint_resume_blocker(&self) -> Option<String> {
         self.require_runtime_checkpoint_support()
             .and_then(|()| {
@@ -99,6 +100,7 @@ impl XspiceInstance {
     }
 
     /// Resolve receiving-circuit loads without evaluating model inputs or body.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn prepare_checkpoint_loads(
         &mut self,
         loads: &HashMap<usize, Value>,
@@ -187,14 +189,14 @@ impl XspiceInstance {
     }
 
     fn validate_runtime_signature(&mut self, accepted: f64) -> Result<(), String> {
-        if let Some(signature) = &self.last_event_input_signature {
-            if signature.iter().any(|entry| {
+        if let Some(signature) = &self.last_event_input_signature
+            && signature.iter().any(|entry| {
                 entry
                     .event_time
                     .is_some_and(|t| !t.is_finite() || t < 0.0 || t > accepted)
-            }) {
-                return Err("invalid XSPICE checkpoint input-signature time".into());
-            }
+            })
+        {
+            return Err("invalid XSPICE checkpoint input-signature time".into());
         }
         if self.should_track_event_input_signature(AnalysisType::Transient) {
             if self.event_inputs_dirty || self.last_event_input_signature.is_none() {

@@ -192,7 +192,7 @@ fn gp_phase_promoted_companion_retains_the_limited_newton_anchor() {
                 Some(&raw),
             )
             .unwrap();
-            for row in 0..raw.len() {
+            for (row, direct) in direct.iter().enumerate() {
                 let movement = raw
                     .iter()
                     .zip(&limited)
@@ -201,9 +201,9 @@ fn gp_phase_promoted_companion_retains_the_limited_newton_anchor() {
                     .sum::<Value>();
                 let residual = expected.residual[row] + movement;
                 assert!(
-                    (-direct[row] - residual).abs() < 1e-11 + 1e-11 * residual.abs(),
+                    (-direct - residual).abs() < 1e-11 + 1e-11 * residual.abs(),
                     "direct p={p} private={private} row={row}: {} != {residual}",
-                    -direct[row]
+                    -direct
                 );
                 assert!(
                     (actual.residual[row] - residual).abs() < 1e-11 + 1e-11 * residual.abs(),

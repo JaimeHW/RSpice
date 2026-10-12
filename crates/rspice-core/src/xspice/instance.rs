@@ -2275,7 +2275,7 @@ impl XspiceInstance {
         self.for_each_typed_event_output_driver(false, visit);
     }
 
-    #[cfg(any(feature = "veriloga", test))]
+    #[cfg(feature = "veriloga")]
     pub(crate) fn for_each_real_output_driver(
         &self,
         visit: impl FnMut(super::event_scheduler::EventTarget),

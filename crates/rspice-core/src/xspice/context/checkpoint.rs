@@ -68,23 +68,21 @@ impl ContextPortLayout {
                 C::Null => None,
                 _ => Some((0, false)),
             };
-            if matches!(port.direction, D::In | D::InOut) {
-                if let Some((domain, vector)) = input_shape {
-                    if layout
-                        .inputs
-                        .insert(
-                            port.name.clone(),
-                            ContextPortShape {
-                                domain,
-                                vector,
-                                width,
-                            },
-                        )
-                        .is_some()
-                    {
-                        return Err("duplicate XSPICE context input port".into());
-                    }
-                }
+            if matches!(port.direction, D::In | D::InOut)
+                && let Some((domain, vector)) = input_shape
+                && layout
+                    .inputs
+                    .insert(
+                        port.name.clone(),
+                        ContextPortShape {
+                            domain,
+                            vector,
+                            width,
+                        },
+                    )
+                    .is_some()
+            {
+                return Err("duplicate XSPICE context input port".into());
             }
             if matches!(port.direction, D::Out | D::InOut) {
                 let domain = match port.default_type {
@@ -331,6 +329,7 @@ macro_rules! port_size {
 }
 
 impl CmContext {
+    #[cfg(feature = "veriloga")]
     pub(crate) fn has_checkpoint_host_resources(&self) -> bool {
         !self.resources.values.is_empty() || !self.resources.transactional.is_empty()
     }
@@ -877,7 +876,7 @@ impl ContextRuntimeCheckpoint {
             }
         }
         for (name, v) in &self.output_transitions {
-            if !ports.outputs.get(name).is_some_and(|p| p.domain == 0) || !transition_valid(v) {
+            if ports.outputs.get(name).is_none_or(|p| p.domain != 0) || !transition_valid(v) {
                 return Err("invalid XSPICE analog output transition metadata".into());
             }
         }

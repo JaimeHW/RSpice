@@ -40,12 +40,15 @@ fn fixture() -> (MixedDigitalCoordinator, MixedSignalHost) {
     (coordinator, host)
 }
 
+/// Matrix `(row, column, bits)` and right-hand-side `(row, bits)` stamps.
+type StampBits = (Vec<(usize, usize, u64)>, Vec<(usize, u64)>);
+
 fn step(
     coordinator: &mut MixedDigitalCoordinator,
     host: &mut MixedSignalHost,
     time: f64,
     solution: &[f64],
-) -> (Vec<(usize, usize, u64)>, Vec<(usize, u64)>) {
+) -> StampBits {
     let dt = time - host.state.accepted_time;
     let mut cursor = coordinator.open_trial(time, false).unwrap();
     host.begin_trial(
