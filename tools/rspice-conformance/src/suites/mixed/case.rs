@@ -82,9 +82,8 @@ impl CaseResult {
 ///
 /// `form` records where each identity came from: `structured` when the
 /// producer's error type carried it, `prose` when the classifier can only find
-/// it in the message. The headless runner flattens
-/// `UnsupportedCapabilityError` into message text, so its capability token is
-/// `prose` on that path by construction.
+/// it in the message. Both runners carry a capability refusal's token,
+/// analysis kind, instance and module as typed fields.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorRecord {
@@ -106,6 +105,10 @@ pub struct ErrorRecord {
     /// Structured analysis instance identity, when the error carried one.
     #[serde(default)]
     pub analysis: Option<String>,
+    /// Tag of the analysis kind that refused (`ac`, `pss`), when the error
+    /// carried one but no authored card identity.
+    #[serde(default)]
+    pub analysis_kind: Option<String>,
     #[serde(default)]
     pub location: Option<String>,
     /// `preparation`, `compile` or `execution`.

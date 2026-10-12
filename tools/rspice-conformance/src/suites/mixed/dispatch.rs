@@ -906,6 +906,29 @@ fn simulation_error(error: &rspice_simulation::error::SimulationError) -> ErrorR
             display,
             ..Default::default()
         },
+        E::UnsupportedCapability {
+            capability,
+            analysis_kind,
+            instance,
+            module,
+            message,
+        } => ErrorRecord {
+            category: "capability".into(),
+            token: Some(capability.clone()),
+            token_form: Some("structured".into()),
+            instance: instance.clone(),
+            module: module.clone(),
+            analysis_kind: analysis_kind.clone(),
+            stage: Some("execution".into()),
+            // The reason without the token: the message is the core
+            // rendering, `unsupported capability [token] ...: reason`.
+            detail: prose_capability(message)
+                .map(|(_, _, detail)| detail)
+                .filter(|detail| !detail.is_empty())
+                .unwrap_or_else(|| message.clone()),
+            display,
+            ..Default::default()
+        },
         E::ParseError(_) => from_prose("parse", display, "execution"),
         E::CircuitError(_) => from_prose("simulation", display, "execution"),
         E::SolverError(_) => from_prose("solver", display, "execution"),
@@ -983,6 +1006,12 @@ fn core_error(error: &rspice_core::SimulationError) -> ErrorRecord {
             token: Some(refusal.capability.to_owned()),
             token_form: Some("structured".into()),
             analysis: refusal.analysis.map(|analysis| analysis.to_string()),
+            analysis_kind: error
+                .descriptor()
+                .analysis_kind
+                .map(|kind| kind.tag().to_owned()),
+            instance: refusal.instance.clone(),
+            module: refusal.module.clone(),
             location: refusal.location.as_ref().map(ToString::to_string),
             stage: Some("execution".into()),
             detail: refusal.detail.clone(),

@@ -10,16 +10,17 @@
 //! `wrong(malformed-refusal:<missing>)`; one whose label names a different
 //! analysis is `wrong(misnamed-analysis)`.
 //!
-//! [`REQUIRE_STRUCTURED_REFUSAL`] is off at P0.5 (amendment A2): an instance
-//! or analysis found only in the prose counts, recorded as `form=prose`. It
-//! flips at P1.2's exit, after which prose identities are malformed.
+//! [`REQUIRE_STRUCTURED_REFUSAL`] was off at P0.5 (amendment A2), when an
+//! instance or analysis found only in the prose counted as `form=prose`. It
+//! flipped at P1.2's exit: every runner now carries the refusal's instance and
+//! analysis kind as typed fields, so a prose-only identity is malformed.
 
 use super::Outcome;
 use super::case::{CaseResult, ErrorRecord};
 use super::compare::Verdict;
 
-/// Flip at the exit of P1.2 (design §7 D2 / amendment A2).
-pub const REQUIRE_STRUCTURED_REFUSAL: bool = false;
+/// Flipped at the exit of P1.2 (design §7 D2 / amendment A2).
+pub const REQUIRE_STRUCTURED_REFUSAL: bool = true;
 
 /// The fixed analysis labels a refusal may use, per card kind.
 pub fn analysis_labels(kind: &str) -> &'static [&'static str] {
@@ -242,8 +243,18 @@ fn classify_error(error: &ErrorRecord, kind: &str, instances: &[String]) -> Clas
         missing.push("instance");
     }
     let stage_refusal = matches!(error.category.as_str(), "elaboration" | "parse");
+    if let Some(refused) = &error.analysis_kind
+        && !kind_names_card(refused, kind)
+    {
+        return Classification::new(
+            Outcome::Wrong,
+            format!("misnamed-analysis: {token}; kind=\"{refused}\" on a {kind} card"),
+        );
+    }
     let (analysis_form, label) = if let Some(analysis) = &error.analysis {
         ("structured", analysis.clone())
+    } else if let Some(refused) = &error.analysis_kind {
+        ("structured", refused.clone())
     } else if stage_refusal && error.location.is_some() {
         ("location", error.location.clone().unwrap_or_default())
     } else if let Some(label) = analysis_labels(kind)
@@ -295,6 +306,21 @@ fn classify_error(error: &ErrorRecord, kind: &str, instances: &[String]) -> Clas
                 .unwrap_or_default()
         ),
     )
+}
+
+/// Whether a refusal's structured analysis kind tag is the analysis of a
+/// `card` of this kind. Only the labelled kinds are checked; a transient card
+/// of any flavour is a `tran` refusal, and a DC sweep may refuse at the
+/// operating point it starts from.
+fn kind_names_card(refused: &str, card: &str) -> bool {
+    let card = match card {
+        "trnoise" | "ckpt" | "mc-tran" | "step-tran" => "tran",
+        other => other,
+    };
+    if !LABELLED_KINDS.contains(&card) || !LABELLED_KINDS.contains(&refused) {
+        return true;
+    }
+    refused == card || (card == "dc" && refused == "op")
 }
 
 /// Whether `label` starts a word in `text` ("AC analysis" is not inside
@@ -353,14 +379,58 @@ mod tests {
         CaseEnd::Completed(Box::new(result))
     }
 
+    fn structured(kind: &str) -> CaseEnd {
+        let mut result = CaseResult::new("interp", "simulation");
+        result = result.failed(ErrorRecord {
+            category: "capability".into(),
+            token: Some("analysis.mixed_signal.discrete_state".into()),
+            token_form: Some("structured".into()),
+            instance: Some("xq".into()),
+            module: Some("sdq".into()),
+            analysis_kind: Some(kind.into()),
+            detail: "mixed host 'xq' cannot take part in PSS analysis".into(),
+            display: "unsupported capability [analysis.mixed_signal.discrete_state]".into(),
+            stage: Some("execution".into()),
+            ..Default::default()
+        });
+        CaseEnd::Completed(Box::new(result))
+    }
+
     #[test]
-    fn a_precise_prose_refusal_is_refused_at_p05() {
+    fn a_prose_only_refusal_is_malformed_after_p12() {
         let end = refusal(
             "AC analysis cannot run with mixed-signal instance 'xq' holding discrete state",
         );
         let class = classify(&end, "ac", &["xq".into()], &[]);
+        assert_eq!(class.outcome, Outcome::Wrong, "{}", class.detail);
+        assert!(
+            class
+                .detail
+                .starts_with("malformed-refusal:instance,analysis"),
+            "{}",
+            class.detail
+        );
+    }
+
+    #[test]
+    fn a_structured_refusal_is_refused_on_its_own_card_only() {
+        let class = classify(&structured("pss"), "pss", &["xq".into()], &[]);
         assert_eq!(class.outcome, Outcome::Refused, "{}", class.detail);
-        assert!(class.detail.contains("form=prose"), "{}", class.detail);
+        assert!(class.detail.contains("form=structured"), "{}", class.detail);
+        assert!(
+            class.detail.contains("analysis-form=structured"),
+            "{}",
+            class.detail
+        );
+        let misnamed = classify(&structured("ac"), "pss", &["xq".into()], &[]);
+        assert_eq!(misnamed.outcome, Outcome::Wrong);
+        assert!(
+            misnamed.detail.starts_with("misnamed-analysis"),
+            "{}",
+            misnamed.detail
+        );
+        let transient = classify(&structured("tran"), "trnoise", &["xq".into()], &[]);
+        assert_eq!(transient.outcome, Outcome::Refused, "{}", transient.detail);
     }
 
     #[test]
