@@ -1546,15 +1546,7 @@ impl MixedDigitalCoordinator {
         );
         // The accepted trial's HDL output is released now and only now: a
         // rejected trial's records were rolled back with its host image.
-        if self.digital.has_hdl_output() {
-            let records = self.digital.make_mut().drain_hdl_output();
-            if let Some(sink) = &self.hdl_output {
-                for mut record in records {
-                    record.point = crate::config::HdlPoint::Transient { time: cursor.time };
-                    sink.emit(&record);
-                }
-            }
-        }
+        self.release_hdl_output(crate::config::HdlPoint::Transient { time: cursor.time });
         self.accepted_time = Some(cursor.time);
         self.accepted_observers = std::mem::take(&mut cursor.observers);
         self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
@@ -1614,10 +1606,28 @@ impl MixedDigitalCoordinator {
             !cursor.probe,
             "a numerical probe cannot commit shared digital state"
         );
+        // Design P2 section 4.3: output is printed once per committed
+        // equilibrium. The store kept here has run its time-zero activations,
+        // so a transient that continues from it does not print them again.
+        self.release_hdl_output(crate::config::HdlPoint::OperatingPoint);
         self.accepted_observers = std::mem::take(&mut cursor.observers);
         self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
         self.trial_open = false;
         cursor.rollback = None;
+    }
+
+    /// Hand the digital host's journal to the run's sink, stamped with the
+    /// point that accepted it.
+    fn release_hdl_output(&mut self, point: crate::config::HdlPoint) {
+        if self.digital.has_hdl_output() {
+            let records = self.digital.make_mut().drain_hdl_output();
+            if let Some(sink) = &self.hdl_output {
+                for mut record in records {
+                    record.point = point;
+                    sink.emit(&record);
+                }
+            }
+        }
     }
 
     /// Put the wheel back where the cursor's trial found it.

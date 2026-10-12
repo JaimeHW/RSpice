@@ -4655,6 +4655,37 @@ fn a_digital_finish_ends_the_transient_at_its_tick() {
     );
 }
 
+/// Design P2 section 4.3: an operating point prints the time-zero output once,
+/// at its committed equilibrium, stamped as the operating point.
+#[test]
+fn an_operating_point_prints_its_time_zero_output_once() {
+    use rspice_core::config::{HdlOutputCollector, HdlPoint, HdlStream};
+    let model = ModelFile::new(
+        "op_banner",
+        "module op_banner(p, n); inout p, n; electrical p, n; integer gain;\n\
+         initial begin gain = 2; $display(\"gain %0d\", gain); end\n\
+         analog I(p, n) <+ gain * V(p, n) / 1000.0; endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* an initial block that prints\nV1 a 0 1\nR1 a p 1k\nX1 p 0 op_banner\n.va \"{}\" op_banner\n.end\n",
+        model.deck_path()
+    ))
+    .expect("the deck parses");
+    let collector = std::sync::Arc::new(HdlOutputCollector::new());
+    let mut config = SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    Engine::new(config)
+        .run_dc_op(&netlist)
+        .expect("the operating point solves");
+    let printed: Vec<_> = collector
+        .take()
+        .into_iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| (record.point, record.text))
+        .collect();
+    assert_eq!(printed, [(HdlPoint::OperatingPoint, "gain 2\n".to_owned())]);
+}
+
 /// Design P2 section 5: output is released only when a trial is accepted, so a
 /// run whose step controller throws timepoints away prints exactly what a run
 /// that throws none away prints.
