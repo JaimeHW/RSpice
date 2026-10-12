@@ -1835,10 +1835,11 @@ impl MixedSignalHost {
         &self.analog
     }
 
-    /// Instantaneous D/A level or impedance changes cannot be compared with
-    /// smooth analog history. Report the final candidate's actual electrical
-    /// change, including Z release, to the integration restart contract. A
-    /// purely event-connected bit or an intermediate delta glitch adds none.
+    /// Instantaneous D/A level or impedance changes, and a four-state value an
+    /// analog block reads changing under it, cannot be compared with smooth
+    /// analog history. Report the final candidate's actual electrical change,
+    /// including Z release, to the integration restart contract. A purely
+    /// event-connected bit or an intermediate delta glitch adds none.
     pub(crate) fn candidate_discontinuity(&self) -> bool {
         if self.analog.discontinuity_rising() || self.converted_output_changed() {
             return true;
@@ -1846,6 +1847,25 @@ impl MixedSignalHost {
         let Some(trial) = &self.trial else {
             return false;
         };
+        // A four-state or integer quantity an analog block reads has no value
+        // between two of its own, so whatever moved it this candidate moved
+        // the analog equations by a step, and the step is the digital half's.
+        // A real-valued read is left to the truncation estimate: a V-to-real
+        // converter publishes a fresh sample of the solution at every point,
+        // which is continuous at the timepoints, and naming each sample a
+        // discontinuity would restart integration at every one of them.
+        let four_state_read_moved = self
+            .discrete_inputs
+            .iter()
+            .zip(&trial.vectors.discrete_at_trial_start)
+            .any(|(input, was)| {
+                !self.state.digital.is_real(input.signal)
+                    && read_discrete_input(&self.state, input).map(f64::to_bits)
+                        != was.map(f64::to_bits)
+            });
+        if four_state_read_moved {
+            return true;
+        }
         self.state.bridges.dac.iter().any(|bridge| {
             let level = |digital: &MixedDigital| {
                 bridge.driven_level(
