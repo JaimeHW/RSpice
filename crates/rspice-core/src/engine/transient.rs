@@ -11533,12 +11533,28 @@ impl Engine {
             {
                 timestep.force_step(control.next_step.max(timestep.hard_min_dt()));
             }
+            // Every device truncation limit opens at `2 * dt` — `CKTtrunc`'s
+            // growth ceiling, which measures how far the controller may stretch
+            // a width it chose itself. A scheduled event's landing did not
+            // choose its width: the event cut the interval, and the restart
+            // above already measures from the proposal the event interrupted.
+            // Letting the ceiling of the cut width cap that restart undoes it
+            // exactly where the cut is smallest — a landing one hard minimum
+            // past an A/D threshold the solver had just landed on (deck A's
+            // `a_adc` at 48.48 ps) hands the next step 2e-20 s, and the
+            // controller doubles out of the floor one accepted point at a
+            // time. So on such a landing only a limit an error term set below
+            // that ceiling caps the restart. Physical clocks keep the rule
+            // they share with ngspice.
+            let growth_ceiling_of_an_event_cut =
+                |limit: Value| landed_device_event && !physical_event && limit >= 2.0 * dt;
             if !xyce_iteration_error_control
                 && !first_accepted_transient_step
                 && let Some(limit) = candidate_truncation_limit
                 && limit.is_finite()
                 && limit > 0.0
                 && limit + 1e-18 < timestep.dt()
+                && !growth_ceiling_of_an_event_cut(limit)
             {
                 if t > 9.5e-8 && dt < 1.0e-15 {
                     log::warn!(
