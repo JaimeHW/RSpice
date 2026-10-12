@@ -1189,7 +1189,10 @@ const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
     match view_type {
         ViewType::Schematic | ViewType::Testbench => WorkbenchIcon::Design,
         ViewType::Symbol => WorkbenchIcon::Models,
-        ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => WorkbenchIcon::Netlist,
+        // A Verilog-A module is edited in its own tab beside the schematic it
+        // describes; borrowing the netlist mark made it read as a deck.
+        ViewType::VerilogA => WorkbenchIcon::VerilogA,
+        ViewType::Spice | ViewType::Verilog => WorkbenchIcon::Netlist,
         _ => WorkbenchIcon::File,
     }
 }
@@ -1243,6 +1246,23 @@ mod tests {
         state.workspace.content.netlist_document = Some(owned);
         state.simulation.source.netlist_content = ROOT.to_owned();
         state
+    }
+
+    /// Every Design tab is a cell view, so the icon is what tells a module
+    /// from the schematic and the symbol beside it. A Verilog-A module wore
+    /// the netlist mark, which named a deck that is not what the tab opens.
+    #[test]
+    fn a_veriloga_tab_wears_its_own_icon() {
+        let icon = icon_for_view(ViewType::VerilogA);
+        assert_eq!(icon, WorkbenchIcon::VerilogA);
+        for other in [
+            ViewType::Schematic,
+            ViewType::Symbol,
+            ViewType::Spice,
+            ViewType::Verilog,
+        ] {
+            assert_ne!(icon, icon_for_view(other), "{other:?} shares the mark");
+        }
     }
 
     #[test]
