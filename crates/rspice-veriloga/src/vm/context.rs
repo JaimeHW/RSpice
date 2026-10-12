@@ -1794,10 +1794,35 @@ impl VmContext {
         }
     }
 
+    /// Present each event-owned variable's candidate as its evaluation input.
+    ///
+    /// A static DAE probe replays no event body: the analysis-phase events and
+    /// every detector read as not firing. An event-owned variable therefore
+    /// keeps the value its event body published in the candidate. Executable
+    /// CFG kernels read such a variable through its evaluation input, which
+    /// the numerical pass pinned to the accepted value, so without this the
+    /// probe would observe the accepted value instead of the candidate the
+    /// bytecode route reads from the variable itself. Procedural inputs keep
+    /// their pinned value; [`Self::prepare_procedural_replay`] replays from it.
+    fn present_event_candidates_as_inputs(&mut self) {
+        for (slot, &index) in self.event_state_indices.iter().enumerate() {
+            if self.evaluation_input_slots.binary_search(&slot).is_ok() {
+                continue;
+            }
+            if let (Some(input), Some(&candidate)) = (
+                self.evaluation_state_inputs.get_mut(slot),
+                self.variables.get(index),
+            ) {
+                *input = candidate;
+            }
+        }
+    }
+
     pub(crate) fn begin_stateful_evaluation_with_tasks(&mut self, record_tasks: bool) {
         if !self.evaluation_mode.dynamic_operators_enabled() {
             self.begin_stateful_observation();
             self.prepare_procedural_replay();
+            self.present_event_candidates_as_inputs();
             return;
         }
         self.evaluation_state_inputs
