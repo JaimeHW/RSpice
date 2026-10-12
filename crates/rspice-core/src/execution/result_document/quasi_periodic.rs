@@ -72,7 +72,9 @@ pub(super) fn validate_primary(
     limits: &crate::ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<(), ResultDocumentError> {
-    use super::builders::quasi_periodic::*;
+    use super::builders::quasi_periodic::{
+        qpac_projection, qpnoise_projection, qpss_projection, qpxf_projection,
+    };
     let projection = match document.payload() {
         ResultPayload::Qpss(payload) => {
             let grid = crate::analysis::quasi_periodic::QuasiPeriodicGrid::new_with_abort(

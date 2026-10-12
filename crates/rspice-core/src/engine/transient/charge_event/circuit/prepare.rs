@@ -110,7 +110,11 @@ impl<'a> PreparedEventCircuit<'a> {
     }
 
     fn admitted_family(family: PeriodicDeviceFamily) -> bool {
-        use PeriodicDeviceFamily::*;
+        use PeriodicDeviceFamily::{
+            BehavioralSource, Bjt, Capacitor, Cccs, Ccvs, CoupledInductorPair, CurrentSource,
+            Diode, Inductor, InductorCoupling, Resistor, ResistorBranch, TransmissionLine, Vccs,
+            Vcvs, VoltageSource,
+        };
         matches!(
             family,
             Resistor
@@ -186,7 +190,10 @@ impl<'a> PreparedEventCircuit<'a> {
     pub(in crate::engine::transient) fn supports_linear_events(
         circuit: &crate::CircuitData,
     ) -> bool {
-        use PeriodicDeviceFamily::*;
+        use PeriodicDeviceFamily::{
+            Capacitor, Cccs, Ccvs, CoupledInductorPair, CurrentSource, Inductor, InductorCoupling,
+            Resistor, ResistorBranch, Vccs, Vcvs, VoltageSource,
+        };
         // A purely algebraic circuit has no charge/flux to transfer and
         // keeps its established DC/IC startup contract.
         (!circuit.capacitors.is_empty() || !circuit.inductors.is_empty())

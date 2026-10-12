@@ -77,7 +77,7 @@ fn spectral_envelope_event_retains_rc_charge_rl_flux_and_separate_source_impulse
     sources[2][dc] = Complex64::new(2.0, 0.0);
     let mut slopes = vec![vec![Complex64::ZERO; grid.len()]; 4];
     slopes[2][dc] = Complex64::new(200.0, 0.0);
-    use SpectralEnvelopeEventEquation::*;
+    use SpectralEnvelopeEventEquation::{Charge, VoltageSource};
     let rows = [
         Charge,
         Charge,
@@ -229,7 +229,7 @@ fn spectral_envelope_event_projects_nonlinear_charge_and_outgoing_carrier_curren
     let v_rate = transform
         .to_real_samples_with_abort(&slopes[1], &NoAbort)
         .unwrap();
-    use SpectralEnvelopeEventEquation::*;
+    use SpectralEnvelopeEventEquation::{Charge, VoltageSource};
     let event = solver
         .transition_spectral_envelope_with_abort(
             &state,
@@ -323,7 +323,7 @@ fn spectral_envelope_event_preserves_floating_charge_and_audits_replaced_kcl() {
     let dc = grid.dc_index();
     sources[0][dc] = Complex64::new(1e-3, 0.0);
     let slopes = vec![vec![Complex64::ZERO; grid.len()]; 2];
-    use SpectralEnvelopeEventEquation::*;
+    use SpectralEnvelopeEventEquation::{Algebraic, Charge};
     let rows = [Algebraic(vec![(0, 1.0), (1, 1.0)]), Charge];
     let event = solver
         .transition_spectral_envelope_with_abort(

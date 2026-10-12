@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[cfg(test)]
-#[path = "checkpoint_tests.rs"]
 mod tests;
 
 type Named<T> = Vec<(String, T)>;

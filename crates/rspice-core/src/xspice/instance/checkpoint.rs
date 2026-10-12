@@ -443,5 +443,4 @@ impl XspiceInstance {
 }
 
 #[cfg(test)]
-#[path = "checkpoint_tests.rs"]
 mod tests;

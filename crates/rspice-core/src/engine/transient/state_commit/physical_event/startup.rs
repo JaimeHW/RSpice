@@ -15,7 +15,6 @@ pub(in crate::engine::transient) struct OperatingPointStartup {
 }
 
 #[cfg(test)]
-#[path = "startup_contract_tests.rs"]
 mod contract_tests;
 
 impl Engine {

@@ -69,7 +69,7 @@ pub(super) fn select<'a>(dataset: &'a ControlNamedDataset, name: &str) -> Option
     if !matches!(dataset.result, ControlAnalysisResult::Stability(_)) {
         return None;
     }
-    use StabilityColumn::*;
+    use StabilityColumn::{Decibels, LoopGain, Magnitude, Metric, Phase};
     let db = || SignalUnit::Custom("dB".into());
     let (column, signal, unit) = match name.to_ascii_lowercase().as_str() {
         "loopgain" | "loop_gain" => (LoopGain, "loop_gain", SignalUnit::Dimensionless),

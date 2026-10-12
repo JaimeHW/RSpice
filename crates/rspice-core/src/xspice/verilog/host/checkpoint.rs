@@ -3,7 +3,10 @@
 use super::super::store::checkpoint::StoreCheckpoint;
 use super::*;
 use crate::xspice::event_scheduler::{SchedulerCheckpoint, SchedulerCheckpointLimits};
-use rspice_veriloga::canonical_ir::digital_eval::checkpoint::*;
+use rspice_veriloga::canonical_ir::digital_eval::checkpoint::{
+    DigitalCheckpointLimits, DigitalCheckpointReader, DigitalDeferredCheckpoint,
+    DigitalEventCountCheckpoint, DigitalResumeCheckpoint, DigitalWaitCheckpoint,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug)]

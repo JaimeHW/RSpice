@@ -47,7 +47,9 @@ pub(super) fn select<'a>(dataset: &'a ControlNamedDataset, name: &str) -> Option
     let ControlAnalysisResult::DcMatch(result) = &dataset.result else {
         return None;
     };
-    use DcMatchColumn::*;
+    use DcMatchColumn::{
+        Contribution, Mismatch, Nominal, ParameterSigma, Process, Quoted, Sensitivity, Share, Total,
+    };
     let signal = name.to_ascii_lowercase();
     let column = match signal.as_str() {
         "nominal_value" => Nominal,

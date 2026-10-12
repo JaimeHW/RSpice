@@ -315,7 +315,7 @@ fn driver_width(
     signal: &DigitalSignal,
     select: &rspice_veriloga::canonical_ir::digital::DigitalWriteSelect,
 ) -> Result<u32, String> {
-    use rspice_veriloga::canonical_ir::digital::DigitalWriteSelect::*;
+    use rspice_veriloga::canonical_ir::digital::DigitalWriteSelect::{Bit, Part, Whole};
     match select {
         Whole => Ok(signal.width),
         Bit(_) => Ok(1),
