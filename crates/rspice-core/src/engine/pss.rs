@@ -119,8 +119,8 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 6.055_454_452_393_343e-6;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-// Central shooting sensitivities use a roundoff-balanced perturbation.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 105;
+// Diode junction limiters start every period from the solved orbit bias.
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 106;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());

@@ -1025,6 +1025,15 @@ impl PssCircuit {
                     - self.solution_scratch[diode.node_cathode];
                 (voltage, diode.junction_charge_and_capacitance(voltage).0)
             }));
+        // The orbit point is a solved bias, so it anchors each junction
+        // limiter for the period's first Newton load, as for the MOSFET
+        // families below. Without it a fresh diode takes its operating-point
+        // MODEINITJCT seed at tVcrit, and any later one limits against a
+        // previous integration's last iterate.
+        for diode in &mut circuit.diodes.devices {
+            let voltage = diode.terminal_voltage(&self.solution_scratch[1..]);
+            diode.seed_accepted_periodic_bias(voltage);
+        }
         if self.basis.descriptor.is_some() {
             for (index, &branch) in circuit.inductors.branch_indices.iter().enumerate() {
                 circuit.inductors.i_prev[index] =
@@ -1105,6 +1114,10 @@ impl PssCircuit {
             solution,
             super::super::transient::ReactiveHistorySeed::SolvedBias,
         );
+        for diode in &mut self.circuit.diodes.devices {
+            let voltage = diode.terminal_voltage(solution);
+            diode.seed_accepted_periodic_bias(voltage);
+        }
         for device in &mut self.circuit.mosfets.devices {
             device.seed_accepted_periodic_bias(solution);
         }
