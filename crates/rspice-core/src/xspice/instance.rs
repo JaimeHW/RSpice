@@ -1381,6 +1381,12 @@ impl XspiceInstance {
         self.model.name()
     }
 
+    /// The model's converter output conductances at this instance's present
+    /// state; see [`super::CodeModel::converter_noise_conductances`].
+    pub(crate) fn converter_noise_conductances(&self) -> Vec<(usize, Value)> {
+        self.model.converter_noise_conductances(&self.context)
+    }
+
     #[cfg(feature = "veriloga")]
     pub(crate) fn analog_input_thresholds(&self) -> CmResult<Vec<super::AnalogInputThreshold>> {
         let thresholds = self.model.analog_input_thresholds(&self.context)?;

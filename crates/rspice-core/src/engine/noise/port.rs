@@ -20,8 +20,6 @@ pub(in crate::engine) struct PortNoiseLinearization {
     noise_temperatures: Vec<Option<Value>>,
     private_bjts: Vec<usize>,
     correlated_noise_sources: Vec<CorrelatedNoisePair>,
-    runtime_devices: HashSet<String>,
-    generated_devices: HashSet<String>,
     port_rhs: Vec<Complex64>,
     num_ports: usize,
     norton_nodes: Vec<(usize, usize)>,
@@ -216,7 +214,7 @@ impl Engine {
             }
         }
         Self::ensure_model_run_active(abort)?;
-        let mut circuit = match circuit {
+        let circuit = match circuit {
             Some(circuit) => circuit,
             None => self.build_circuit_with_abort(netlist, abort)?,
         };
@@ -225,8 +223,6 @@ impl Engine {
             "SP noise",
             "intrinsic XSPICE device-noise sources are not collected because ngspice MIF code models expose DEVnoise = NULL",
         );
-        Self::ensure_no_mixed_signal_analysis(&circuit, "SP noise analysis")?;
-        Self::ensure_supported_dynamic_charges(&circuit, "SP noise")?;
         if !circuit.ekv3s.is_empty() {
             return Err(SimulationError::unsupported_capability(
                 "analysis.noise.device.ekv3_vanoise",
@@ -234,46 +230,18 @@ impl Engine {
             ));
         }
 
-        circuit
-            .begin_veriloga_equilibrium_analysis(3)
-            .map_err(SimulationError::Circuit)?;
-        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
-        circuit
-            .prepare_veriloga_equilibrium_analysis_point(3, true, false)
-            .map_err(SimulationError::Circuit)?;
-        let mut matrix = self.build_matrix(&circuit)?;
-        circuit.link_indices(&matrix);
-        let dc_solution =
-            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
-        if circuit.has_nonlinear_devices() {
-            self.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
-        }
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        if let Some(message) = circuit.take_xspice_evaluation_error() {
-            return Err(SimulationError::Circuit(format!(
-                "XSPICE evaluation failed: {message}"
-            )));
-        }
-        self.accept_frequency_operating_point(
+        let crate::engine::small_signal_bias::SmallSignalBias {
+            circuit,
+            matrix,
+            bias: dc_solution,
+        } = self.prepare_small_signal_bias(
             netlist,
-            &mut circuit,
-            &mut matrix,
-            &dc_solution,
+            Some(circuit),
+            crate::engine::CapabilityAnalysis::Sp,
             3,
+            crate::engine::small_signal_bias::BiasSource::OperatingPoint,
             abort,
         )?;
-        circuit
-            .finish_veriloga_equilibrium_operating_point(3)
-            .map_err(SimulationError::Circuit)?;
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        if circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(&dc_solution);
-        }
-        circuit
-            .prepare_behavioral_small_signal(&dc_solution)
-            .map_err(SimulationError::Circuit)?;
         let CollectedNoiseSources {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
@@ -285,9 +253,6 @@ impl Engine {
             &mut correlated_noise_sources,
             self.config.spice_dialect,
         );
-        let runtime_veriloga_device_names = Self::runtime_veriloga_device_names(&circuit);
-        let generated_veriloga_device_names =
-            Self::generated_grouped_veriloga_device_names(&circuit);
         let mut branch_matrix_indices = Vec::with_capacity(port_sources.len());
         for source_name in port_sources {
             let source_index = circuit
@@ -336,8 +301,6 @@ impl Engine {
                 noise_temperatures: elementary_absolute_temperatures,
                 private_bjts,
                 correlated_noise_sources,
-                runtime_devices: runtime_veriloga_device_names,
-                generated_devices: generated_veriloga_device_names,
                 port_rhs,
                 num_ports,
                 norton_nodes: Vec::new(),
@@ -495,13 +458,9 @@ impl PortNoiseLinearization {
                 sources.1.as_slice()
             });
         let point_correlated_noise_sources = self.correlated_noise_sources.as_slice();
-        #[cfg(feature = "veriloga")]
-        let point_veriloga_processes = Engine::try_collect_veriloga_noise_processes_at_frequency(
-            circuit, &self.bias, frequency,
-        )?;
-        #[cfg(feature = "veriloga-builtins-base")]
-        let point_generated_processes =
-            Engine::try_collect_generated_veriloga_noise_processes_at_frequency(
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let point_processes =
+            crate::engine::transient::device_noise::processes::collect_noise_processes(
                 circuit, &self.bias, frequency,
             )?;
         let mut covariance = vec![vec![zero; self.num_ports]; self.num_ports];
@@ -580,10 +539,7 @@ impl PortNoiseLinearization {
                 return Err(SimulationError::Aborted);
             }
             let device_name = source.identity.device.to_ascii_lowercase();
-            if self.runtime_devices.contains(&device_name)
-                || self.generated_devices.contains(&device_name)
-                || self.termination_devices.contains(&device_name)
-            {
+            if self.termination_devices.contains(&device_name) {
                 continue;
             }
             let source_temperature =
@@ -600,9 +556,9 @@ impl PortNoiseLinearization {
             Engine::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
         }
 
-        #[cfg(feature = "veriloga")]
-        for (instance, process) in &point_veriloga_processes {
-            let density = Engine::evaluated_veriloga_process_density(instance, process, frequency)?;
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        for process in &point_processes {
+            let density = Engine::collected_process_density(process, frequency)?;
             if density == 0.0 {
                 continue;
             }
@@ -617,7 +573,7 @@ impl PortNoiseLinearization {
                     Engine::add_complex_bin(
                         &mut amplitude_sums[slot],
                         transfer * injection.gain,
-                        &process.name,
+                        &process.mechanism,
                         frequency,
                     )?;
                 }
@@ -626,30 +582,8 @@ impl PortNoiseLinearization {
             let amplitude = amplitude_sums
                 .into_iter()
                 .map(|sum| {
-                    Engine::finish_complex_bins(sum, &process.name, frequency)
+                    Engine::finish_complex_bins(sum, &process.mechanism, frequency)
                         .map(|value| value * scale)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Engine::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;
-        }
-
-        #[cfg(feature = "veriloga-builtins-base")]
-        for (instance, process) in &point_generated_processes {
-            let density =
-                Engine::evaluated_generated_process_density(instance, process, frequency)?;
-            if density == 0.0 {
-                continue;
-            }
-            let scale = density.sqrt();
-            let amplitude = (0..self.num_ports)
-                .map(|port| {
-                    Engine::generated_process_transfer_from_adjoint(
-                        &workspace.port_adjoint
-                            [port * self.bias.len()..(port + 1) * self.bias.len()],
-                        process,
-                        frequency,
-                    )
-                    .map(|value| value * scale)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             Engine::add_port_noise_outer_product(&mut covariance, &mut compensation, &amplitude)?;

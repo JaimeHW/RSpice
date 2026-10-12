@@ -760,6 +760,18 @@ pub trait CodeModel: Send + Sync {
         )
     }
 
+    /// The thermal-noise conductances of a converter's finite-resistance
+    /// outputs at its present state, as `(output element, conductance)`.
+    ///
+    /// A converter that drives its output through a physical resistance is a
+    /// physical driver, and that resistance is noisy at the circuit
+    /// temperature like any other: noise analyses add `4kT·G` across each
+    /// listed element. An element in high impedance drives nothing and is not
+    /// listed. The default is a model with no such output.
+    fn converter_noise_conductances(&self, _ctx: &super::CmContext) -> Vec<(usize, Value)> {
+        Vec::new()
+    }
+
     /// Effective static input thresholds after instance parameter resolution.
     /// A mixed circuit uses these observations to localize analog crossings
     /// before publishing this model's event outputs. An empty list declares

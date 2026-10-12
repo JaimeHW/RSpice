@@ -11,6 +11,10 @@ use super::{Engine, SimulationError};
 /// A probed noise-source set: one source per contribution, and the absolute
 /// temperature each was evaluated at where the model reports one.
 type ProbedNoiseSources = (Vec<NoiseSource>, Vec<Option<Value>>);
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+use super::transient::device_noise::processes::{
+    CollectedNoiseProcess, NoiseProcessSpectrum, collect_noise_processes,
+};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::noise::{
     Bsim3FlickerNoise, Bsim4FlickerNoise, CorrelatedNoisePair, NoiseContribution, NoisePort,
@@ -42,23 +46,6 @@ pub(in crate::engine) struct CollectedNoiseSources {
     pub(in crate::engine) correlated: Vec<CorrelatedNoisePair>,
     /// Appended noise-node blocks, in BJT_INTERNAL_STATE_DIM units after MNA.
     pub(in crate::engine) private_bjts: Vec<usize>,
-}
-
-#[cfg(feature = "veriloga-builtins-base")]
-struct EvaluatedGeneratedNoiseInjection {
-    node_pos: usize,
-    node_neg: usize,
-    gain: Complex64,
-}
-
-#[cfg(feature = "veriloga-builtins-base")]
-struct EvaluatedGeneratedNoiseProcess {
-    name: String,
-    kind: NoiseSourceType,
-    psd: Value,
-    exponent: Option<Value>,
-    table: Option<(Vec<(Value, Value)>, bool)>,
-    injections: Vec<EvaluatedGeneratedNoiseInjection>,
 }
 
 /// Complex amplitude represented as `value * 2^exponent`.  Keeping the power
@@ -1043,154 +1030,6 @@ impl Engine {
         )
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn generated_noise_process(
-        circuit: &CircuitData,
-        instance_name: &str,
-        process: crate::device::veriloga_builtins::BuiltinEvaluatedNoiseProcess,
-    ) -> Result<EvaluatedGeneratedNoiseProcess, SimulationError> {
-        use crate::device::veriloga_builtins::{GeneratedNoiseInjection, GeneratedNoiseKind};
-
-        let descriptor = process.descriptor;
-        let name = descriptor
-            .label
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| format!("noise{}", descriptor.process_id));
-        let invalid = |detail: String| {
-            SimulationError::Circuit(format!(
-                "Generated Verilog-A device '{instance_name}' coherent noise process '{}' is invalid: {detail}",
-                name
-            ))
-        };
-        if !process.psd.is_finite() || process.psd < 0.0 {
-            return Err(invalid(format!(
-                "PSD must be finite and nonnegative, got {}",
-                process.psd
-            )));
-        }
-        let (kind, table) = match descriptor.kind {
-            GeneratedNoiseKind::White => {
-                if descriptor.table_len != 0
-                    || process.exponent.is_some()
-                    || !process.table_operands.is_empty()
-                {
-                    return Err(invalid(
-                        "white noise carried flicker or table metadata".to_string(),
-                    ));
-                }
-                (NoiseSourceType::White, None)
-            }
-            GeneratedNoiseKind::Flicker => {
-                if descriptor.table_len != 0 || !process.table_operands.is_empty() {
-                    return Err(invalid("flicker noise carried table metadata".to_string()));
-                }
-                if process.exponent.is_none() {
-                    return Err(invalid(
-                        "active flicker noise has no frequency exponent".to_string(),
-                    ));
-                }
-                (NoiseSourceType::Flicker, None)
-            }
-            GeneratedNoiseKind::Table => {
-                if process.exponent.is_some() {
-                    return Err(invalid(
-                        "table noise carried a flicker exponent".to_string(),
-                    ));
-                }
-                if descriptor.table_len == 0
-                    || !descriptor.table_len.is_multiple_of(2)
-                    || process.table_operands.len() != descriptor.table_len
-                {
-                    return Err(invalid(format!(
-                        "table metadata declares {} operands and evaluated {}",
-                        descriptor.table_len,
-                        process.table_operands.len()
-                    )));
-                }
-                let mut points = Vec::with_capacity(descriptor.table_len / 2);
-                for pair in process.table_operands.chunks_exact(2) {
-                    let frequency = pair[0];
-                    let power = pair[1];
-                    let valid = if !frequency.is_finite() || !power.is_finite() {
-                        false
-                    } else if descriptor.table_log_interp {
-                        frequency > 0.0 && power > 0.0
-                    } else {
-                        frequency >= 0.0 && power >= 0.0
-                    };
-                    if !valid {
-                        return Err(invalid(format!(
-                            "table point ({frequency}, {power}) violates {} interpolation requirements",
-                            if descriptor.table_log_interp {
-                                "positive log-log"
-                            } else {
-                                "nonnegative linear"
-                            }
-                        )));
-                    }
-                    points.push((frequency, power));
-                }
-                points.sort_by(|left, right| left.0.total_cmp(&right.0));
-                if let Some(duplicate) = points
-                    .windows(2)
-                    .find(|adjacent| adjacent[0].0 == adjacent[1].0)
-                {
-                    return Err(invalid(format!(
-                        "table frequency points must be unique; duplicate frequency {}",
-                        duplicate[0].0
-                    )));
-                }
-                (
-                    NoiseSourceType::Table,
-                    Some((points, descriptor.table_log_interp)),
-                )
-            }
-        };
-        let mut injections = Vec::with_capacity(process.injections.len());
-        for injection in process.injections {
-            let (node_pos, node_neg) = match injection.mapped.injection {
-                GeneratedNoiseInjection::Current { node_pos, node_neg } => {
-                    if node_pos > circuit.num_nodes() || node_neg > circuit.num_nodes() {
-                        return Err(invalid(format!(
-                            "mapped current endpoints ({node_pos}, {node_neg}) exceed the {} circuit nodes",
-                            circuit.num_nodes()
-                        )));
-                    }
-                    (node_pos, node_neg)
-                }
-                GeneratedNoiseInjection::Potential { branch } => {
-                    if branch == 0 || branch > circuit.num_branches() {
-                        return Err(invalid(format!(
-                            "mapped potential branch {branch} is outside the {} circuit branches",
-                            circuit.num_branches()
-                        )));
-                    }
-                    (circuit.get_branch_matrix_index(branch), 0)
-                }
-            };
-            let gain = Complex64::new(injection.gain.re, injection.gain.im);
-            if !gain.re.is_finite() || !gain.im.is_finite() {
-                return Err(invalid(format!(
-                    "injection gain ({}, {}) is non-finite",
-                    gain.re, gain.im
-                )));
-            }
-            injections.push(EvaluatedGeneratedNoiseInjection {
-                node_pos,
-                node_neg,
-                gain,
-            });
-        }
-        Ok(EvaluatedGeneratedNoiseProcess {
-            name,
-            kind,
-            psd: process.psd,
-            exponent: process.exponent,
-            table,
-            injections,
-        })
-    }
-
     /// Canonical mechanism name for an interpreted Verilog-A noise source.
     ///
     /// The label is whatever string literal the module passed to
@@ -1952,107 +1791,136 @@ impl Engine {
         Ok(noise_sources)
     }
 
-    #[cfg(feature = "veriloga")]
-    fn try_collect_veriloga_noise_processes_at_frequency(
+    /// The thermal noise of every finite-resistance converter output at the
+    /// held state (design S11): `4kT·G` at the circuit temperature across each
+    /// D/A element not driving Z, for the built-in converters and for a mixed
+    /// module's own bridges. This is the physical driver the output
+    /// resistance models, and it keeps a converter and a held-source twin of
+    /// it (whose resistor is noisy) equivalent.
+    fn converter_thermal_noise_sources(
         circuit: &CircuitData,
-        dc_solution: &[Value],
-        frequency: Value,
-    ) -> Result<Vec<(String, rspice_veriloga::device::EvaluatedNoiseProcess)>, SimulationError>
-    {
-        let mut processes = Vec::new();
-        for device in circuit.veriloga_devices().iter() {
-            if !device.has_grouped_noise_processes() {
-                continue;
+    ) -> Result<Vec<NoiseSource>, SimulationError> {
+        let mut sources = Vec::new();
+        let invalid = |instance: &str, conductance: Value| {
+            SimulationError::Circuit(format!(
+                "converter '{instance}' reports an invalid noise conductance {conductance:e} S"
+            ))
+        };
+        for instance in &circuit.xspice_instances {
+            let conductances = instance.converter_noise_conductances();
+            let vector = conductances.len() > 1;
+            for (element, conductance) in conductances {
+                if !conductance.is_finite() || conductance <= 0.0 {
+                    return Err(invalid(&instance.name, conductance));
+                }
+                let Some((node_pos, node_neg)) =
+                    Self::xspice_output_element_nodes(instance, element)
+                else {
+                    continue;
+                };
+                let mechanism = if vector {
+                    format!("THERMAL{element}")
+                } else {
+                    "THERMAL".to_owned()
+                };
+                sources.push(
+                    NoiseSource::thermal(
+                        instance.name.clone(),
+                        node_pos,
+                        node_neg,
+                        1.0 / conductance,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(
+                            instance.name.clone(),
+                            mechanism,
+                        ),
+                    ),
+                );
             }
-            let mut probe = device.clone();
-            let instance = probe.name.to_string();
-            probe.try_set_analysis_type(3).map_err(|err| {
-                SimulationError::Circuit(format!(
-                    "Verilog-A device '{instance}' noise analysis setup failed: {err}"
-                ))
-            })?;
-            let evaluated = probe
-                .try_noise_processes_at_frequency(dc_solution, frequency)
-                .map_err(|err| {
-                    SimulationError::Circuit(format!(
-                        "Verilog-A device '{instance}' coherent noise evaluation failed at {frequency:e} Hz: {err}"
-                    ))
-                })?;
-            processes.extend(
-                evaluated
-                    .into_iter()
-                    .map(|process| (instance.clone(), process)),
-            );
         }
-        Ok(processes)
-    }
-
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn try_collect_generated_veriloga_noise_processes_at_frequency(
-        circuit: &CircuitData,
-        dc_solution: &[Value],
-        frequency: Value,
-    ) -> Result<Vec<(String, EvaluatedGeneratedNoiseProcess)>, SimulationError> {
-        let mut processes = Vec::new();
-        for device in circuit.generated_veriloga_devices().iter() {
-            if !device.has_grouped_noise_processes() {
-                continue;
-            }
-            let instance = device.instance_name.clone();
-            let evaluated = device
-                .evaluate_noise_processes_at_frequency(
-                    dc_solution,
-                    circuit.num_nodes(),
-                    frequency,
-                    circuit.generated_simulation_parameters,
-                )
-                .map_err(|err| {
-                    SimulationError::Circuit(format!(
-                        "Generated Verilog-A device '{instance}' coherent noise evaluation failed at {frequency:e} Hz: {err}"
-                    ))
-                })?;
-            for process in evaluated
-                .into_iter()
-                .filter(|process| process.active && !process.injections.is_empty())
+        #[cfg(feature = "veriloga")]
+        for host in &circuit.mixed_signal_hosts {
+            for (index, (node_pos, node_neg, conductance)) in
+                host.bridge_noise_conductances().into_iter().enumerate()
             {
-                processes.push((
-                    instance.clone(),
-                    Self::generated_noise_process(circuit, &instance, process)?,
-                ));
+                if !conductance.is_finite() || conductance <= 0.0 {
+                    return Err(invalid(host.instance_name(), conductance));
+                }
+                sources.push(
+                    NoiseSource::thermal(
+                        host.instance_name().to_owned(),
+                        node_pos,
+                        node_neg,
+                        1.0 / conductance,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(
+                            host.instance_name().to_owned(),
+                            format!("BRIDGE{index}"),
+                        ),
+                    ),
+                );
             }
         }
-        Ok(processes)
+        Ok(sources)
     }
 
-    #[cfg(feature = "veriloga")]
-    fn grouped_veriloga_noise_contribution_catalog(
+    /// The terminal pair one element of a code model's analog output drives.
+    fn xspice_output_element_nodes(
+        instance: &crate::xspice::XspiceInstance,
+        element: usize,
+    ) -> Option<(usize, usize)> {
+        use crate::xspice::{AnalogInputConnection, PortConnection, PortDirection};
+        instance
+            .ports()
+            .iter()
+            .enumerate()
+            .filter(|(_, port)| {
+                matches!(port.direction, PortDirection::Out | PortDirection::InOut)
+                    && port.default_type.is_analog()
+            })
+            .find_map(|(index, _)| match instance.connection_at(index)? {
+                PortConnection::Analog(node) => (element == 0).then_some((*node, 0)),
+                PortConnection::Differential(pos, neg) => (element == 0).then_some((*pos, *neg)),
+                PortConnection::AnalogVector(nodes) => nodes.get(element).map(|node| (*node, 0)),
+                PortConnection::TypedAnalogVector(elements) => match elements.get(element)? {
+                    AnalogInputConnection::Node(node) => Some((*node, 0)),
+                    AnalogInputConnection::Differential(pos, neg)
+                    | AnalogInputConnection::CurrentOutput { pos, neg }
+                    | AnalogInputConnection::VoltageOutput { pos, neg }
+                    | AnalogInputConnection::Hybrid { pos, neg, .. } => Some((*pos, *neg)),
+                    _ => None,
+                },
+                _ => None,
+            })
+    }
+
+    /// Every Verilog-A noise process the analysis reports, by identity, and
+    /// independently of whether the process is active at the bias: runtime and
+    /// generated devices with grouped processes, and every mixed module's
+    /// analog half (S11). The order is the shared collector's.
+    fn veriloga_noise_process_catalog(
         circuit: &CircuitData,
     ) -> Vec<crate::analysis::NoiseSourceIdentity> {
         let mut catalog = Vec::new();
+        #[cfg(feature = "veriloga")]
+        let runtime_catalog =
+            |catalog: &mut Vec<_>,
+             instance: &str,
+             device: &rspice_veriloga::device::VerilogADevice| {
+                for (_, label) in device.grouped_noise_process_catalog() {
+                    catalog.push(crate::analysis::NoiseSourceIdentity::mechanism(
+                        instance.to_owned(),
+                        Self::canonical_veriloga_noise_mechanism(&label),
+                    ));
+                }
+            };
+        #[cfg(feature = "veriloga")]
         for device in circuit.veriloga_devices().iter() {
-            let instance = device.name.to_string();
-            for (_, label) in device.grouped_noise_process_catalog() {
-                catalog.push(crate::analysis::NoiseSourceIdentity::mechanism(
-                    instance.clone(),
-                    Self::canonical_veriloga_noise_mechanism(&label),
-                ));
-            }
+            runtime_catalog(&mut catalog, &device.name, device);
         }
-        catalog
-    }
-
-    #[cfg(not(feature = "veriloga"))]
-    fn grouped_veriloga_noise_contribution_catalog(
-        _circuit: &CircuitData,
-    ) -> Vec<crate::analysis::NoiseSourceIdentity> {
-        Vec::new()
-    }
-
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn grouped_generated_noise_contribution_catalog(
-        circuit: &CircuitData,
-    ) -> Vec<crate::analysis::NoiseSourceIdentity> {
-        let mut catalog = Vec::new();
+        #[cfg(feature = "veriloga-builtins-base")]
         for device in circuit.generated_veriloga_devices().iter() {
             for (process_id, label) in device.grouped_noise_process_catalog() {
                 let mechanism = if label == "NOISE" {
@@ -2066,96 +1934,51 @@ impl Engine {
                 ));
             }
         }
+        #[cfg(feature = "veriloga")]
+        for host in &circuit.mixed_signal_hosts {
+            runtime_catalog(&mut catalog, host.instance_name(), host.analog_device());
+        }
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
+        let _ = circuit;
         catalog
     }
 
-    #[cfg(not(feature = "veriloga-builtins-base"))]
-    fn grouped_generated_noise_contribution_catalog(
-        _circuit: &CircuitData,
-    ) -> Vec<crate::analysis::NoiseSourceIdentity> {
-        Vec::new()
-    }
-
-    #[cfg(feature = "veriloga")]
-    fn runtime_veriloga_device_names(circuit: &CircuitData) -> HashSet<String> {
-        circuit
-            .veriloga_devices()
-            .iter()
-            .filter(|device| device.has_grouped_noise_processes())
-            .map(|device| device.name.to_ascii_lowercase())
-            .collect()
-    }
-
-    #[cfg(not(feature = "veriloga"))]
-    fn runtime_veriloga_device_names(_circuit: &CircuitData) -> HashSet<String> {
-        HashSet::new()
-    }
-
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn generated_grouped_veriloga_device_names(circuit: &CircuitData) -> HashSet<String> {
-        circuit
-            .generated_veriloga_devices()
-            .iter()
-            .filter(|device| device.has_grouped_noise_processes())
-            .map(|device| device.instance_name.to_ascii_lowercase())
-            .collect()
-    }
-
-    #[cfg(not(feature = "veriloga-builtins-base"))]
-    fn generated_grouped_veriloga_device_names(_circuit: &CircuitData) -> HashSet<String> {
-        HashSet::new()
-    }
-
-    #[cfg(feature = "veriloga")]
-    fn evaluated_veriloga_process_density(
-        instance: &str,
-        process: &rspice_veriloga::device::EvaluatedNoiseProcess,
+    /// One collected process's density at `frequency`.
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    fn collected_process_density(
+        process: &CollectedNoiseProcess,
         frequency: Value,
     ) -> Result<Value, SimulationError> {
-        let source = match (&process.table, process.exponent) {
-            (Some((points, log_interp)), _) => NoiseSource::tabulated(
-                instance.to_owned(),
-                0,
-                0,
-                process.psd,
-                points.clone(),
-                *log_interp,
-            ),
-            (None, None) => NoiseSource::white(instance.to_owned(), 0, 0, process.psd),
-            (None, Some(exponent)) => {
-                NoiseSource::flicker_psd(instance.to_owned(), 0, 0, process.psd, exponent)
+        let instance = process.instance.clone();
+        let source = match &process.spectrum {
+            NoiseProcessSpectrum::Table { points, log_interp } => {
+                NoiseSource::tabulated(instance, 0, 0, process.psd, points.clone(), *log_interp)
+            }
+            NoiseProcessSpectrum::White => NoiseSource::white(instance, 0, 0, process.psd),
+            NoiseProcessSpectrum::Flicker { exponent } => {
+                NoiseSource::flicker_psd(instance, 0, 0, process.psd, *exponent)
             }
         };
         Self::evaluated_noise_density(&source, frequency, T_NOMINAL)
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn evaluated_generated_process_density(
-        instance: &str,
-        process: &EvaluatedGeneratedNoiseProcess,
-        frequency: Value,
-    ) -> Result<Value, SimulationError> {
-        let source = match (&process.table, process.exponent) {
-            (Some((points, log_interp)), _) => NoiseSource::tabulated(
-                instance.to_owned(),
-                0,
-                0,
-                process.psd,
-                points.clone(),
-                *log_interp,
-            ),
-            (None, None) => NoiseSource::white(instance.to_owned(), 0, 0, process.psd),
-            (None, Some(exponent)) => {
-                NoiseSource::flicker_psd(instance.to_owned(), 0, 0, process.psd, exponent)
-            }
-        };
-        Self::evaluated_noise_density(&source, frequency, T_NOMINAL)
+    /// The contribution kind a collected process reports as.
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    fn collected_process_noise_type(process: &CollectedNoiseProcess) -> NoiseSourceType {
+        match process.spectrum {
+            NoiseProcessSpectrum::White => NoiseSourceType::White,
+            NoiseProcessSpectrum::Flicker { .. } => NoiseSourceType::Flicker,
+            NoiseProcessSpectrum::Table { .. } => NoiseSourceType::Table,
+        }
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn generated_process_transfer_from_adjoint(
+    /// The coherent transfer of one process to an output: its injections
+    /// share one unit train, so their transfers add before squaring (LRM 2.4
+    /// §4.6.4.6).
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    fn collected_process_transfer_from_adjoint(
         adjoint: &[Complex64],
-        process: &EvaluatedGeneratedNoiseProcess,
+        process: &CollectedNoiseProcess,
         frequency: Value,
     ) -> Result<Complex64, SimulationError> {
         let mut transfer_sum = ComplexBinAccumulator::default();
@@ -2164,11 +1987,11 @@ impl Engine {
                 &mut transfer_sum,
                 Self::noise_transfer_from_adjoint(adjoint, injection.node_pos, injection.node_neg)
                     * injection.gain,
-                &process.name,
+                &process.mechanism,
                 frequency,
             )?;
         }
-        Self::finish_complex_bins(transfer_sum, &process.name, frequency)
+        Self::finish_complex_bins(transfer_sum, &process.mechanism, frequency)
     }
 
     fn has_veriloga_noise_devices(circuit: &CircuitData) -> bool {
@@ -2340,6 +2163,8 @@ impl Engine {
                 );
             }
         }
+
+        noise_sources.extend(Self::converter_thermal_noise_sources(circuit)?);
 
         for bsim3 in &circuit.bsim3v3.devices {
             noise_sources.extend(Self::collect_bsim3v3_noise_sources(bsim3)?);
@@ -3470,7 +3295,7 @@ impl Engine {
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
-        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         let resolve_node = |name: &str| {
             circuit.get_node_by_name(name.trim()).ok_or_else(|| {
                 SimulationError::Circuit(format!(
@@ -3491,54 +3316,19 @@ impl Engine {
             "Noise",
             "intrinsic XSPICE device-noise sources are not collected because ngspice MIF code models expose DEVnoise = NULL",
         );
-        Self::ensure_no_mixed_signal_analysis(&circuit, "noise analysis")?;
-        Self::ensure_supported_dynamic_charges(&circuit, "Noise")?;
-        circuit
-            .begin_veriloga_equilibrium_analysis(3)
-            .map_err(SimulationError::Circuit)?;
-        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
-        circuit
-            .prepare_veriloga_equilibrium_analysis_point(3, true, false)
-            .map_err(SimulationError::Circuit)?;
-        let mut matrix = engine.build_matrix(&circuit)?;
-        circuit.link_indices(&matrix);
-
-        // Get DC operating point for bias-dependent noise.
-        let dc_solution = engine.solve_dc_operating_point_with_abort(
+        // Bias-dependent noise is evaluated at the held equilibrium.
+        let super::small_signal_bias::SmallSignalBias {
+            mut circuit,
+            mut matrix,
+            bias: dc_solution,
+        } = engine.prepare_small_signal_bias(
             netlist,
-            &mut circuit,
-            &mut matrix,
-            abort,
-        )?;
-        if circuit.has_nonlinear_devices() {
-            engine.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
-        }
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        if let Some(message) = circuit.take_xspice_evaluation_error() {
-            return Err(SimulationError::Circuit(format!(
-                "XSPICE evaluation failed: {message}"
-            )));
-        }
-        engine.accept_frequency_operating_point(
-            netlist,
-            &mut circuit,
-            &mut matrix,
-            &dc_solution,
+            Some(circuit),
+            super::CapabilityAnalysis::Noise,
             3,
+            super::small_signal_bias::BiasSource::OperatingPoint,
             abort,
         )?;
-        circuit
-            .finish_veriloga_equilibrium_operating_point(3)
-            .map_err(SimulationError::Circuit)?;
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        if circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(&dc_solution);
-        }
-        circuit
-            .prepare_behavioral_small_signal(&dc_solution)
-            .map_err(SimulationError::Circuit)?;
         let CollectedNoiseSources {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,
@@ -3564,16 +3354,13 @@ impl Engine {
             &elementary_absolute_temperatures,
             engine.config.spice_dialect,
         )?;
-        let grouped_veriloga_catalog = Self::grouped_veriloga_noise_contribution_catalog(&circuit);
-        let grouped_generated_catalog =
-            Self::grouped_generated_noise_contribution_catalog(&circuit);
+        let process_catalog = Self::veriloga_noise_process_catalog(&circuit);
         let maximum_elementary_sources = final_veriloga_noise_sources
             .as_ref()
             .map_or(noise_sources.len(), |sources| {
                 noise_sources.len().max(sources.0.len())
             })
-            .saturating_add(grouped_veriloga_catalog.len())
-            .saturating_add(grouped_generated_catalog.len());
+            .saturating_add(process_catalog.len());
         engine.ensure_result_shape(
             frequencies.len(),
             circuit
@@ -3600,8 +3387,7 @@ impl Engine {
         if let Some((final_sources, _)) = &final_veriloga_noise_sources {
             contribution_catalog.extend(final_sources.iter().map(|source| source.identity.clone()));
         }
-        contribution_catalog.extend(grouped_veriloga_catalog);
-        contribution_catalog.extend(grouped_generated_catalog);
+        contribution_catalog.extend(process_catalog);
         for mos in &circuit.mosfets.devices {
             contribution_catalog.extend(["RD", "RS", "ID", "FN"].map(|mechanism| {
                 crate::analysis::NoiseSourceIdentity::mechanism(&mos.name, mechanism)
@@ -3685,9 +3471,6 @@ impl Engine {
         // output; ngspice 46 and BestAvailable use the selected unit source.
         let ac_excitation_rhs = Self::build_ac_excitation_rhs(&circuit);
         let noise_dialect = engine.config.spice_dialect;
-        let runtime_veriloga_device_names = Self::runtime_veriloga_device_names(&circuit);
-        let generated_veriloga_device_names =
-            Self::generated_grouped_veriloga_device_names(&circuit);
 
         // Solve one frequency using caller-owned workspaces. Keeping every
         // mutable cache/work vector explicit lets the sequential path reuse a
@@ -3741,19 +3524,10 @@ impl Engine {
                     sources.1.as_slice()
                 });
             let point_correlated_noise_sources = correlated_noise_sources.as_slice();
-            #[cfg(feature = "veriloga")]
-            let point_veriloga_processes = Self::try_collect_veriloga_noise_processes_at_frequency(
-                circuit,
-                &dc_solution,
-                freq,
-            )?;
-            #[cfg(feature = "veriloga-builtins-base")]
-            let point_generated_processes =
-                Self::try_collect_generated_veriloga_noise_processes_at_frequency(
-                    circuit,
-                    &dc_solution,
-                    freq,
-                )?;
+            // Every grouped Verilog-A process, mixed modules' included, from
+            // the one collector transient noise also draws from.
+            #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+            let point_processes = collect_noise_processes(circuit, &dc_solution, freq)?;
 
             match ac_matrix.solve_into(&ac_excitation_rhs, ac_solution) {
                 Ok(()) => {}
@@ -3838,13 +3612,6 @@ impl Engine {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                if runtime_veriloga_device_names
-                    .contains(&source.identity.device.to_ascii_lowercase())
-                    || generated_veriloga_device_names
-                        .contains(&source.identity.device.to_ascii_lowercase())
-                {
-                    continue;
-                }
                 let source_temperature =
                     Self::elementary_noise_temperature(temperature, absolute_temperature);
                 let si = Self::evaluated_noise_density(source, freq, source_temperature)?;
@@ -3880,75 +3647,20 @@ impl Engine {
                 });
             }
 
-            #[cfg(feature = "veriloga")]
-            for (instance, process) in &point_veriloga_processes {
+            #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+            for process in &point_processes {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
                 }
-                let density = Self::evaluated_veriloga_process_density(instance, process, freq)?;
-                let mut transfer_sum = ComplexBinAccumulator::default();
-                for injection in &process.injections {
-                    Self::add_complex_bin(
-                        &mut transfer_sum,
-                        Self::noise_transfer_from_adjoint(
-                            transfer_solution,
-                            injection.node_pos,
-                            injection.node_neg,
-                        ) * injection.gain,
-                        &process.name,
-                        freq,
-                    )?;
-                }
-                let transfer = Self::finish_complex_bins(transfer_sum, &process.name, freq)?;
-                let identity = crate::analysis::NoiseSourceIdentity::mechanism(
-                    instance.clone(),
-                    Self::canonical_veriloga_noise_mechanism(&process.name),
-                );
-                let output_v2 = if density > 0.0 {
-                    Self::transferred_noise_density(
-                        &Self::noise_source_label(&identity),
-                        density,
-                        transfer,
-                        freq,
-                    )?
-                } else {
-                    0.0
-                };
-                if output_v2 > 0.0 {
-                    Self::add_noise_density(
-                        &mut total_noise_v2_hz,
-                        &mut total_noise_compensation,
-                        output_v2,
-                        freq,
-                    )?;
-                }
-                contributions.push(NoiseContribution {
-                    identity,
-                    noise_type: match process.table {
-                        Some(_) => NoiseSourceType::Table,
-                        None if process.exponent.is_some() => NoiseSourceType::Flicker,
-                        None => NoiseSourceType::White,
-                    },
-                    output_contribution: output_v2,
-                    input_contribution: 0.0,
-                    percentage: 0.0,
-                });
-            }
-
-            #[cfg(feature = "veriloga-builtins-base")]
-            for (instance, process) in &point_generated_processes {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
-                }
-                let density = Self::evaluated_generated_process_density(instance, process, freq)?;
-                let transfer = Self::generated_process_transfer_from_adjoint(
+                let density = Self::collected_process_density(process, freq)?;
+                let transfer = Self::collected_process_transfer_from_adjoint(
                     transfer_solution,
                     process,
                     freq,
                 )?;
                 let identity = crate::analysis::NoiseSourceIdentity::mechanism(
-                    instance.clone(),
-                    Self::canonical_veriloga_noise_mechanism(&process.name),
+                    process.instance.clone(),
+                    process.mechanism.clone(),
                 );
                 let output_v2 = if density > 0.0 {
                     Self::transferred_noise_density(
@@ -3970,7 +3682,7 @@ impl Engine {
                 }
                 contributions.push(NoiseContribution {
                     identity,
-                    noise_type: process.kind,
+                    noise_type: Self::collected_process_noise_type(process),
                     output_contribution: output_v2,
                     input_contribution: 0.0,
                     percentage: 0.0,
@@ -4202,62 +3914,65 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::super::super::Engine;
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    use super::super::transient::device_noise::processes::{
+        CollectedNoiseProcess, NoiseProcessInjection, NoiseProcessRoute, NoiseProcessSpectrum,
+    };
     use super::ComplexBinAccumulator;
-    #[cfg(feature = "veriloga-builtins-base")]
-    use super::{EvaluatedGeneratedNoiseInjection, EvaluatedGeneratedNoiseProcess};
     use crate::Netlist;
-    #[cfg(feature = "veriloga-builtins-base")]
-    use crate::analysis::NoiseSourceType;
     use crate::circuit::ResistorValues;
 
-    #[cfg(feature = "veriloga-builtins-base")]
-    fn generated_process(gains: &[crate::Complex64]) -> EvaluatedGeneratedNoiseProcess {
-        EvaluatedGeneratedNoiseProcess {
-            name: "same-label".to_string(),
-            kind: NoiseSourceType::White,
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    fn collected_process(gains: &[crate::Complex64]) -> CollectedNoiseProcess {
+        CollectedNoiseProcess {
+            instance: "x1".to_string(),
+            module: "m".to_string(),
+            route: NoiseProcessRoute::Generated,
+            process_id: 0,
+            mechanism: "SAME-LABEL".to_string(),
+            spectrum: NoiseProcessSpectrum::White,
             psd: 1.0,
-            exponent: None,
-            table: None,
             injections: gains
                 .iter()
                 .copied()
-                .map(|gain| EvaluatedGeneratedNoiseInjection {
+                .map(|gain| NoiseProcessInjection {
                     node_pos: 1,
                     node_neg: 0,
                     gain,
                 })
                 .collect(),
+            non_rational_operators: Vec::new(),
         }
     }
 
-    #[cfg(feature = "veriloga-builtins-base")]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     #[test]
-    fn generated_process_transfer_is_coherent_and_same_label_processes_stay_independent() {
+    fn process_transfer_is_coherent_and_same_label_processes_stay_independent() {
         let adjoint = [crate::Complex64::new(1.0, 0.0)];
-        let reused = generated_process(&[
+        let reused = collected_process(&[
             crate::Complex64::new(1.0, 0.0),
             crate::Complex64::new(1.0, 0.0),
         ]);
         let reused_transfer =
-            Engine::generated_process_transfer_from_adjoint(&adjoint, &reused, 1.0)
+            Engine::collected_process_transfer_from_adjoint(&adjoint, &reused, 1.0)
                 .expect("coherent reused process transfer");
         assert_eq!(reused_transfer.norm_sqr(), 4.0);
 
-        let cancelled = generated_process(&[
+        let cancelled = collected_process(&[
             crate::Complex64::new(1.0, 0.0),
             crate::Complex64::new(-1.0, 0.0),
         ]);
         let cancelled_transfer =
-            Engine::generated_process_transfer_from_adjoint(&adjoint, &cancelled, 1.0)
+            Engine::collected_process_transfer_from_adjoint(&adjoint, &cancelled, 1.0)
                 .expect("opposite injections cancel");
         assert_eq!(cancelled_transfer, crate::Complex64::new(0.0, 0.0));
 
-        let first = generated_process(&[crate::Complex64::new(1.0, 0.0)]);
-        let second = generated_process(&[crate::Complex64::new(1.0, 0.0)]);
+        let first = collected_process(&[crate::Complex64::new(1.0, 0.0)]);
+        let second = collected_process(&[crate::Complex64::new(1.0, 0.0)]);
         let independent_total = [&first, &second]
             .into_iter()
             .map(|process| {
-                Engine::generated_process_transfer_from_adjoint(&adjoint, process, 1.0)
+                Engine::collected_process_transfer_from_adjoint(&adjoint, process, 1.0)
                     .expect("independent process transfer")
                     .norm_sqr()
             })
@@ -5249,22 +4964,19 @@ r1 a 0 rmod
             .finish_veriloga_equilibrium_operating_point(3)
             .unwrap();
 
-        let sources = Engine::try_collect_generated_veriloga_noise_processes_at_frequency(
-            &circuit, &solution, 1.0e3,
-        )
-        .expect("R2 generated noise state initializes");
+        let sources = super::collect_noise_processes(&circuit, &solution, 1.0e3)
+            .expect("R2 generated noise state initializes");
         let r2_sources = sources
             .iter()
-            .filter(|(instance, _)| instance.eq_ignore_ascii_case("r1"))
-            .map(|(_, process)| process)
+            .filter(|process| process.instance.eq_ignore_ascii_case("r1"))
             .collect::<Vec<_>>();
         assert_eq!(r2_sources.len(), 2, "R2 exports two canonical mechanisms");
         let mechanisms = r2_sources
             .iter()
-            .map(|source| source.name.as_str())
+            .map(|source| source.mechanism.as_str())
             .collect::<std::collections::HashSet<_>>();
-        assert!(mechanisms.contains("thermal"));
-        assert!(mechanisms.contains("flicker"));
+        assert!(mechanisms.contains("THERMAL"));
+        assert!(mechanisms.contains("FLICKER"));
         for source in &r2_sources {
             assert_eq!(source.injections.len(), 1);
             assert_eq!(source.injections[0].node_neg, 0);
@@ -5273,7 +4985,7 @@ r1 a 0 rmod
         assert!(
             r2_sources
                 .iter()
-                .find(|source| source.name == "thermal")
+                .find(|source| source.mechanism == "THERMAL")
                 .expect("thermal mechanism")
                 .psd
                 > 0.0
@@ -5315,31 +5027,28 @@ r1 a 0 rmod
             .finish_veriloga_equilibrium_operating_point(3)
             .unwrap();
 
-        let sources = Engine::try_collect_generated_veriloga_noise_processes_at_frequency(
-            &circuit, &solution, 1.0e3,
-        )
-        .expect("VBIC13 generated noise state initializes");
+        let sources = super::collect_noise_processes(&circuit, &solution, 1.0e3)
+            .expect("VBIC13 generated noise state initializes");
         let vbic = sources
             .iter()
-            .filter(|(instance, _)| instance.eq_ignore_ascii_case("q1"))
-            .map(|(_, process)| process)
+            .filter(|process| process.instance.eq_ignore_ascii_case("q1"))
             .collect::<Vec<_>>();
         assert_eq!(
             vbic.len(),
             expected_mechanisms,
             "Q1 exports one source per canonical mechanism; got {:?}",
             vbic.iter()
-                .map(|source| source.name.as_str())
+                .map(|source| source.mechanism.as_str())
                 .collect::<Vec<_>>()
         );
         assert!(vbic.iter().all(|source| source.psd.is_finite()));
-        assert!(
-            vbic.iter()
-                .all(|source| source.exponent.is_none_or(|value| value.is_finite()))
-        );
+        assert!(vbic.iter().all(|source| match source.spectrum {
+            super::NoiseProcessSpectrum::Flicker { exponent } => exponent.is_finite(),
+            _ => true,
+        }));
         // The grouped catalog names logical noise processes independently of
         // their injection equations. Retain every public mechanism identity.
-        let catalog = Engine::grouped_generated_noise_contribution_catalog(&circuit);
+        let catalog = Engine::veriloga_noise_process_catalog(&circuit);
         let mechanisms = catalog
             .iter()
             .filter(|identity| identity.device.eq_ignore_ascii_case("q1"))

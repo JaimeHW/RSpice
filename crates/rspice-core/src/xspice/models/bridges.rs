@@ -432,6 +432,26 @@ impl CodeModel for MixedDacBridge {
     fn excludes_output_from_transient_voltage_lte(&self, port: &str) -> bool {
         DacBridge.excludes_output_from_transient_voltage_lte(port)
     }
+    /// Every element not driving Z is its level behind `output_resistance`,
+    /// which is the physical driver's resistance and so noisy (design S11).
+    fn converter_noise_conductances(&self, ctx: &CmContext) -> Vec<(usize, Value)> {
+        let (Ok(width), Ok(resistance)) = (
+            bridge_vector_width(ctx, self.name()),
+            finite_bridge_param(ctx, self.name(), "output_resistance"),
+        ) else {
+            return Vec::new();
+        };
+        let conductance = 1.0 / resistance;
+        if resistance <= 0.0 || !conductance.is_finite() {
+            return Vec::new();
+        }
+        (0..width)
+            .filter(|&index| {
+                digital_vector_input_value(ctx, "in", index).state != DigitalState::HighZ
+            })
+            .map(|index| (index, conductance))
+            .collect()
+    }
 }
 
 /// The first of the built-in converter's per-bit release slots, after the ramp
