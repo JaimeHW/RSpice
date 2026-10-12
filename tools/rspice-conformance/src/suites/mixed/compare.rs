@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 use num_complex::Complex64;
 
+use super::case::Observation;
 use super::design::Quantity;
 use super::events::Trace;
 use super::measure::Measured;
@@ -355,6 +356,143 @@ pub fn lattice(traces: &BTreeMap<String, Trace>, t0: f64, period: f64, edge_abs:
     worst
 }
 
+/// `identical`: a resumed run against the uninterrupted run it was
+/// checkpointed from, over `window` (default: all of the resumed run).
+///
+/// Analog signals (`signals`, or every real signal of the uninterrupted run)
+/// are compared at the accepted times the two runs share exactly, within
+/// `abs + rel·|e|`; a window in which they share none fails, and the detail
+/// says how many of the uninterrupted run's times the resumed one shares.
+/// Event nets (`nets`, or every net of the uninterrupted run) must hold the
+/// same value at the window's start and change to the same values at times
+/// within `edge_abs` (0: exactly), the same number of times.
+pub fn identical(
+    uninterrupted: &Observation,
+    resumed: &Observation,
+    signals: &[String],
+    nets: &[String],
+    window: (f64, f64),
+    tolerance: Tolerance,
+) -> Verdict {
+    let start = window
+        .0
+        .max(resumed.axis.first().copied().unwrap_or(f64::INFINITY));
+    let (_, stop) = window;
+    let mut worst = Verdict::pass(0.0, "identical".into());
+    let mut shared = 0usize;
+    let mut offered = 0usize;
+    let names: Vec<String> = if signals.is_empty() {
+        uninterrupted.real.keys().cloned().collect()
+    } else {
+        signals.to_vec()
+    };
+    for name in &names {
+        let (Some(reference), Some(series)) =
+            (uninterrupted.real.get(name), resumed.real.get(name))
+        else {
+            return Verdict::fail(format!("{name} is absent from one of the runs"));
+        };
+        for (index, time) in uninterrupted.axis.iter().enumerate() {
+            if *time < start || *time > stop {
+                continue;
+            }
+            offered += 1;
+            let Ok(position) = resumed.axis.binary_search_by(|at| at.total_cmp(time)) else {
+                continue;
+            };
+            shared += 1;
+            let (a, e) = (series[position], reference[index]);
+            let diff = (a - e).abs();
+            let allowed = tolerance.allowed(e);
+            let severity = if allowed > 0.0 {
+                diff / allowed
+            } else if diff == 0.0 {
+                0.0
+            } else {
+                f64::INFINITY
+            };
+            if severity > worst.severity {
+                worst = Verdict::from_severity(
+                    severity,
+                    format!("{name} at {time:e}: |a−e|={diff:.3e} allowed {allowed:.3e}"),
+                );
+            }
+        }
+    }
+    if !names.is_empty() && shared == 0 {
+        return Verdict::fail(format!(
+            "the runs share no accepted time in [{start:e}, {stop:e}]"
+        ));
+    }
+    let nets: Vec<String> = if nets.is_empty() {
+        uninterrupted.events.keys().cloned().collect()
+    } else {
+        nets.to_vec()
+    };
+    for net in &nets {
+        let (Some(reference), Some(trace)) =
+            (uninterrupted.events.get(net), resumed.events.get(net))
+        else {
+            return Verdict::fail(format!("event net {net} is absent from one of the runs"));
+        };
+        let (reference, trace) = (changes(reference, start, stop), changes(trace, start, stop));
+        if reference.len() != trace.len() {
+            return Verdict::fail(format!(
+                "net {net}: {} values from {start:e} resumed vs {} uninterrupted",
+                trace.len(),
+                reference.len()
+            ));
+        }
+        for ((at, av), (et, ev)) in trace.iter().zip(&reference) {
+            if av != ev {
+                return Verdict::fail(format!("net {net}: {av} vs {ev} at {et:e}"));
+            }
+            let diff = (at - et).abs();
+            let severity = if tolerance.edge_abs > 0.0 {
+                diff / tolerance.edge_abs
+            } else if diff == 0.0 {
+                0.0
+            } else {
+                f64::INFINITY
+            };
+            if severity > worst.severity {
+                worst = Verdict::from_severity(
+                    severity,
+                    format!(
+                        "net {net} edge at {et:e}: |Δt|={diff:.3e} allowed {:.3e}",
+                        tolerance.edge_abs
+                    ),
+                );
+            }
+        }
+    }
+    worst.detail = format!(
+        "{}; {shared} of {offered} accepted times shared, {} nets",
+        worst.detail,
+        nets.len()
+    );
+    worst
+}
+
+/// A trace as the value it holds at `start` followed by its changes in
+/// `(start, stop]`, so a run that restates its value at the resume instant
+/// reads the same as one that does not.
+fn changes(trace: &Trace, start: f64, stop: f64) -> Trace {
+    let held = trace
+        .iter()
+        .take_while(|(time, _)| *time <= start)
+        .last()
+        .map(|(_, value)| value.clone())
+        .unwrap_or_else(|| "x".to_owned());
+    let mut out: Trace = vec![(start, held)];
+    for (time, value) in trace {
+        if *time > start && *time <= stop && out.last().is_some_and(|(_, last)| last != value) {
+            out.push((*time, value.clone()));
+        }
+    }
+    out
+}
+
 /// A statistic against the oracle's own statistic, as a ratio interval.
 pub fn ratio(actual: f64, expected: f64, [low, high]: [f64; 2]) -> Verdict {
     let value = actual / expected;
@@ -485,6 +623,70 @@ mod tests {
                 tolerance
             )
             .pass
+        );
+    }
+
+    #[test]
+    fn a_resumed_run_is_identical_on_shared_times_and_event_changes() {
+        let run = |axis: Vec<f64>, values: Vec<f64>, events: Vec<(f64, &str)>| {
+            let mut observation = Observation {
+                axis,
+                ..Default::default()
+            };
+            observation.real.insert("v(a)".into(), values);
+            observation.events.insert(
+                "q".into(),
+                events
+                    .into_iter()
+                    .map(|(time, value)| (time, value.to_owned()))
+                    .collect(),
+            );
+            observation
+        };
+        let uninterrupted = run(
+            vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            vec![(0.0, "0"), (1.5, "1"), (3.5, "0")],
+        );
+        // Resumed at 2: restates q's held value at the resume instant.
+        let resumed = run(
+            vec![2.0, 3.0, 4.0],
+            vec![2.0, 3.0 + 1e-12, 4.0],
+            vec![(2.0, "1"), (3.5, "0")],
+        );
+        let tolerance = Tolerance {
+            abs: 1e-9,
+            ..Default::default()
+        };
+        let window = (2.0, 4.0);
+        let verdict = identical(&uninterrupted, &resumed, &[], &[], window, tolerance);
+        assert!(verdict.pass, "{verdict:?}");
+        assert!(
+            verdict.detail.contains("3 of 3 accepted times shared"),
+            "{}",
+            verdict.detail
+        );
+        // An analog difference beyond abs, an event at another time, a
+        // missing change, and runs with no time in common all fail.
+        let off = run(
+            vec![2.0, 3.0, 4.0],
+            vec![2.0, 3.1, 4.0],
+            vec![(2.0, "1"), (3.5, "0")],
+        );
+        assert!(!identical(&uninterrupted, &off, &[], &[], window, tolerance).pass);
+        let late = run(
+            vec![2.0, 3.0, 4.0],
+            vec![2.0, 3.0, 4.0],
+            vec![(2.0, "1"), (3.6, "0")],
+        );
+        assert!(!identical(&uninterrupted, &late, &[], &[], window, tolerance).pass);
+        let stuck = run(vec![2.0, 3.0, 4.0], vec![2.0, 3.0, 4.0], vec![(2.0, "1")]);
+        assert!(!identical(&uninterrupted, &stuck, &[], &[], window, tolerance).pass);
+        let elsewhere = run(vec![2.5, 3.5], vec![2.5, 3.5], vec![(2.0, "1"), (3.5, "0")]);
+        let verdict = identical(&uninterrupted, &elsewhere, &[], &[], window, tolerance);
+        assert!(
+            !verdict.pass && verdict.detail.contains("share no accepted time"),
+            "{verdict:?}"
         );
     }
 

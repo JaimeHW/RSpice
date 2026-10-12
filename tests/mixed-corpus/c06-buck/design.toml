@@ -39,7 +39,7 @@ phase = "P2"
 [[analysis]]
 id = "ckpt"
 variants = ["vdig", "vams"]
-oracles = ["O6", "O2"]
+oracles = ["O6", "O2", "O7"]
 timeout_s = 40
 checkpoint_at = [4e-4]
 phase = "P8"

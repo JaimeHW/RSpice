@@ -211,33 +211,20 @@ abs = 0.005
 why = "the same switching circuit under the same digital law (d_cosim)"
 
 # --- checkpoint / resume -----------------------------------------------------
-# The resume-equals-uninterrupted check (`identical`) has no evaluator in the
-# harness (reported gap). Instead both runs are held to O6: the uninterrupted
-# run with the checkpoint schedule, and the run resumed from 400 us.
+# The design's continuation contract: the run resumed from the 400 us
+# checkpoint is the uninterrupted run from there on (supporting evidence, O7;
+# the waveform itself is gated by vss and env).
 
 [[q]]
-id = "vss_step"
+id = "resume"
 analysis = "ckpt"
 variants = ["vdig", "vams"]
-kind = "mean"
-signal = "v(vout)"
-window = [7.5e-4, 8e-4]
-oracle = "O6"
-expect = "c06::vss"
-abs = 6e-3
-why = "the uninterrupted run, settled after the 1 ohm step"
-
-[[q]]
-id = "resumed"
-analysis = "ckpt"
-variants = ["vdig", "vams"]
-kind = "per_trial"
-of = { kind = "mean", signal = "v(vout)", window = [7.5e-4, 8e-4] }
+kind = "identical"
+window = [4e-4, 8e-4]
 trials = 1
-oracle = "O6"
-expect = "c06::vss"
-abs = 6e-3
-why = "the run resumed from the 400 us checkpoint reaches the same regulation after the step"
+oracle = "O7"
+abs = 1e-9
+why = "resumed = uninterrupted over [400 us, 800 us]: every event exact; every analog signal within 1 nV at the accepted times the runs share (design)"
 
 # --- Monte Carlo: L and C at 10 % sigma ------------------------------------
 

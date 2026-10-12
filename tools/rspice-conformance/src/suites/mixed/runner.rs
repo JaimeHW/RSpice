@@ -645,6 +645,10 @@ fn evaluate_quantity(
             Err(error) => QuantityOutcome::Unmeasurable(error),
         };
     }
+    // A resumed run is compared with the uninterrupted one in the same result.
+    if kind == "identical" {
+        return identical_quantity(quantity, variant, rspice, tolerance);
+    }
     // A captured reference names signals as its own deck does: one variant's
     // reference may serve another (C1's `xs` O1 tables serve `vams`), so the
     // oracle side is measured with the reference's variant spellings.
@@ -866,6 +870,69 @@ fn stat_quantity(
         Err(error) => return QuantityOutcome::OracleError(format!("oracle side: {error}")),
     };
     QuantityOutcome::Compared(ratio(value, expected, bounds))
+}
+
+/// `identical` (ckpt): every resumed run, held in the case's trials, against
+/// the uninterrupted run that is the case's own observation.
+fn identical_quantity(
+    quantity: &Quantity,
+    variant: &str,
+    rspice: &Observation,
+    tolerance: Tolerance,
+) -> QuantityOutcome {
+    if let Some(expected) = quantity.trials
+        && rspice.trials.len() != expected
+    {
+        return QuantityOutcome::Compared(Verdict {
+            pass: false,
+            severity: f64::INFINITY,
+            detail: format!("{} resumed runs, expected {expected}", rspice.trials.len()),
+        });
+    }
+    if rspice.trials.is_empty() {
+        return QuantityOutcome::Missing("no resumed run".into());
+    }
+    let measure = &quantity.measure;
+    let signals: Vec<String> = measure
+        .signals
+        .clone()
+        .or_else(|| {
+            measure
+                .signal
+                .as_ref()
+                .and_then(|signal| signal.for_variant(variant))
+                .map(|signal| vec![signal])
+        })
+        .unwrap_or_default()
+        .iter()
+        .map(|name| super::case::canonical_signal(name))
+        .collect();
+    let nets: Vec<String> = measure
+        .nets
+        .as_ref()
+        .and_then(|nets| nets.for_variant(variant))
+        .unwrap_or_default()
+        .iter()
+        .map(|net| net.to_ascii_lowercase())
+        .collect();
+    let window = measure
+        .window
+        .map_or((f64::NEG_INFINITY, f64::INFINITY), |[start, stop]| {
+            (start, stop)
+        });
+    let mut worst: Option<Verdict> = None;
+    for trial in &rspice.trials {
+        let mut verdict =
+            super::compare::identical(rspice, trial, &signals, &nets, window, tolerance);
+        verdict.detail = format!("{}: {}", trial.label, verdict.detail);
+        if worst
+            .as_ref()
+            .is_none_or(|worst| verdict.severity > worst.severity)
+        {
+            worst = Some(verdict);
+        }
+    }
+    QuantityOutcome::Compared(worst.expect("at least one resumed run"))
 }
 
 /// The inner measure per trial against the O6 expectation for that trial.
