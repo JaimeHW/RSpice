@@ -1,3 +1,8 @@
+//! One accepted checkpoint through every file action. Export writes the packed
+//! bytes unchanged; an import that lands after the design changed is dropped;
+//! the byte limit is enforced before decoding; a repeated import is stored once
+//! and survives a project round trip; a stale inspection closes.
+
 use super::*;
 
 #[test]
