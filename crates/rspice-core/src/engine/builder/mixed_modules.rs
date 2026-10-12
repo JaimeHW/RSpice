@@ -352,24 +352,10 @@ fn classify_boundary_ports(
         let Some(signal) = signal else {
             continue;
         };
-        let direction = match port.direction.as_str() {
-            "input" => BoundaryDirection::AnalogToDiscrete,
-            "output" => BoundaryDirection::DiscreteToAnalog,
-            "inout" => BoundaryDirection::Bidirectional,
-            other => {
-                return Err(refuse(
-                    &element.name,
-                    subckt_name,
-                    ElaborationErrorKind::PortDiscipline,
-                    format!(
-                        "declares discrete port '{}' as `{other}`; a bidirectional discrete \
-                         boundary needs a bridge that arbitrates which side is driving, and this \
-                         route has an analog-to-discrete and a discrete-to-analog bridge and no \
-                         third kind",
-                        port.name
-                    ),
-                ));
-            }
+        let direction = match port.direction {
+            rspice_veriloga::ast::PortDirection::Input => BoundaryDirection::AnalogToDiscrete,
+            rspice_veriloga::ast::PortDirection::Output => BoundaryDirection::DiscreteToAnalog,
+            rspice_veriloga::ast::PortDirection::Inout => BoundaryDirection::Bidirectional,
         };
         // IEEE 1364-2005 section 12.3.3's `inout_declaration` takes a net type
         // and nothing else: a bidirectional port's value is resolved from every

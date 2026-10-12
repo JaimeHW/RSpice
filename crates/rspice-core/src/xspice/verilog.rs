@@ -289,15 +289,10 @@ impl CompiledDigitalDesign {
             else {
                 continue;
             };
-            let direction = match port.direction.as_str() {
-                "input" => DigitalLinkDirection::Input,
-                "output" => DigitalLinkDirection::Output,
-                "inout" => DigitalLinkDirection::Inout,
-                direction => {
-                    return Err(DigitalRunError::Compile {
-                        detail: format!("invalid direction '{direction}' for port '{}'", port.name),
-                    });
-                }
+            let direction = match port.direction {
+                rspice_veriloga::ast::PortDirection::Input => DigitalLinkDirection::Input,
+                rspice_veriloga::ast::PortDirection::Output => DigitalLinkDirection::Output,
+                rspice_veriloga::ast::PortDirection::Inout => DigitalLinkDirection::Inout,
             };
             ports.push(DigitalLinkPort {
                 name: port.name.to_string(),
