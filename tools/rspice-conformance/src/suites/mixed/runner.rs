@@ -926,7 +926,7 @@ fn o3_observation(
         }
         Err(absent) => return Err(QuantityOutcome::OracleAbsent(absent.to_string())),
     };
-    let template_dir = design.dir.join("oracle").join(format!("{variant}.o3"));
+    let template_dir = design.o3_dir(variant);
     let template = fs::read_to_string(template_dir.join("tb.v"))
         .map_err(|error| QuantityOutcome::OracleError(format!("O3 template: {error}")))?;
     let inputs: Vec<String> = oracle::icarus::template_directive(&template, "rspice-o3-inputs")

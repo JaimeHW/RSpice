@@ -8,7 +8,10 @@ time_precision = 1e-12
 # MSB first in natural port order, just before each rise of the strobe d_stb.
 # O1 is the ISCAS transistor-level deck run by ngspice-46 with A/D probes at
 # 0.9 V on the same outputs (oracle/<c>-xs.tran.ngspice.cir); O6 is the
-# netlist's Boolean function of the applied inputs (analytic/c10.rs).
+# netlist's Boolean function of the applied inputs (analytic/c10.rs). O3 runs
+# the Verilog rendering net/<c>.v in Icarus on the inputs and strobe each
+# RSpice vector run converted (oracle/<variant>.o3/tb.v; both variants replay
+# into the same netlist), live on every run, and reads its outputs the same way.
 
 # ---- lfsr / cnt_xs --------------------------------------------------------
 
@@ -99,6 +102,17 @@ expect = "c10::vec"
 why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
 
 [[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c432-xs", "c432-vlog"]
+kind = "codes"
+nets = { c432-xs = ["d_g426", "d_g427", "d_g428", "d_g429", "d_g430", "d_g431", "d_g432"], c432-vlog = ["xdut.g426__event_0", "xdut.g427__event_0", "xdut.g428__event_0", "xdut.g429__event_0", "xdut.g430__event_0", "xdut.g431__event_0", "xdut.g432__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O3"
+why = "Icarus's outputs of net/c432.v on the replayed vectors, read 8 ns into each vector as RSpice's are; digital, exact"
+
+[[q]]
 id = "pi.0"
 analysis = "tran-vec"
 variants = ["c432-xs", "c432-vlog"]
@@ -159,6 +173,17 @@ window = [0.0, 6.4e-07]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c499-xs", "c499-vlog"]
+kind = "codes"
+nets = { c499-xs = ["d_g468", "d_g469", "d_g470", "d_g471", "d_g472", "d_g473", "d_g474", "d_g475", "d_g476", "d_g477", "d_g478", "d_g479", "d_g480", "d_g481", "d_g482", "d_g483", "d_g484", "d_g485", "d_g486", "d_g487", "d_g488", "d_g489", "d_g490", "d_g491", "d_g492", "d_g493", "d_g494", "d_g495", "d_g496", "d_g497", "d_g498", "d_g499"], c499-vlog = ["xdut.g468__event_0", "xdut.g469__event_0", "xdut.g470__event_0", "xdut.g471__event_0", "xdut.g472__event_0", "xdut.g473__event_0", "xdut.g474__event_0", "xdut.g475__event_0", "xdut.g476__event_0", "xdut.g477__event_0", "xdut.g478__event_0", "xdut.g479__event_0", "xdut.g480__event_0", "xdut.g481__event_0", "xdut.g482__event_0", "xdut.g483__event_0", "xdut.g484__event_0", "xdut.g485__event_0", "xdut.g486__event_0", "xdut.g487__event_0", "xdut.g488__event_0", "xdut.g489__event_0", "xdut.g490__event_0", "xdut.g491__event_0", "xdut.g492__event_0", "xdut.g493__event_0", "xdut.g494__event_0", "xdut.g495__event_0", "xdut.g496__event_0", "xdut.g497__event_0", "xdut.g498__event_0", "xdut.g499__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O3"
+why = "Icarus's outputs of net/c499.v on the replayed vectors, read 8 ns into each vector as RSpice's are; digital, exact"
 
 [[q]]
 id = "pi.0"
@@ -223,6 +248,17 @@ expect = "c10::vec"
 why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
 
 [[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c880-xs", "c880-vlog"]
+kind = "codes"
+nets = { c880-xs = ["d_g855", "d_g856", "d_g857", "d_g858", "d_g859", "d_g860", "d_g861", "d_g862", "d_g863", "d_g864", "d_g865", "d_g866", "d_g867", "d_g868", "d_g869", "d_g870", "d_g871", "d_g872", "d_g873", "d_g874", "d_g875", "d_g876", "d_g877", "d_g878", "d_g879", "d_g880"], c880-vlog = ["xdut.g855__event_0", "xdut.g856__event_0", "xdut.g857__event_0", "xdut.g858__event_0", "xdut.g859__event_0", "xdut.g860__event_0", "xdut.g861__event_0", "xdut.g862__event_0", "xdut.g863__event_0", "xdut.g864__event_0", "xdut.g865__event_0", "xdut.g866__event_0", "xdut.g867__event_0", "xdut.g868__event_0", "xdut.g869__event_0", "xdut.g870__event_0", "xdut.g871__event_0", "xdut.g872__event_0", "xdut.g873__event_0", "xdut.g874__event_0", "xdut.g875__event_0", "xdut.g876__event_0", "xdut.g877__event_0", "xdut.g878__event_0", "xdut.g879__event_0", "xdut.g880__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O3"
+why = "Icarus's outputs of net/c880.v on the replayed vectors, read 8 ns into each vector as RSpice's are; digital, exact"
+
+[[q]]
 id = "pi.0"
 analysis = "tran-vec"
 variants = ["c880-xs", "c880-vlog"]
@@ -283,6 +319,17 @@ window = [0.0, 6.4e-07]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c1355-xs", "c1355-vlog"]
+kind = "codes"
+nets = { c1355-xs = ["d_g1324", "d_g1325", "d_g1326", "d_g1327", "d_g1328", "d_g1329", "d_g1330", "d_g1331", "d_g1332", "d_g1333", "d_g1334", "d_g1335", "d_g1336", "d_g1337", "d_g1338", "d_g1339", "d_g1340", "d_g1341", "d_g1342", "d_g1343", "d_g1344", "d_g1345", "d_g1346", "d_g1347", "d_g1348", "d_g1349", "d_g1350", "d_g1351", "d_g1352", "d_g1353", "d_g1354", "d_g1355"], c1355-vlog = ["xdut.g1324__event_0", "xdut.g1325__event_0", "xdut.g1326__event_0", "xdut.g1327__event_0", "xdut.g1328__event_0", "xdut.g1329__event_0", "xdut.g1330__event_0", "xdut.g1331__event_0", "xdut.g1332__event_0", "xdut.g1333__event_0", "xdut.g1334__event_0", "xdut.g1335__event_0", "xdut.g1336__event_0", "xdut.g1337__event_0", "xdut.g1338__event_0", "xdut.g1339__event_0", "xdut.g1340__event_0", "xdut.g1341__event_0", "xdut.g1342__event_0", "xdut.g1343__event_0", "xdut.g1344__event_0", "xdut.g1345__event_0", "xdut.g1346__event_0", "xdut.g1347__event_0", "xdut.g1348__event_0", "xdut.g1349__event_0", "xdut.g1350__event_0", "xdut.g1351__event_0", "xdut.g1352__event_0", "xdut.g1353__event_0", "xdut.g1354__event_0", "xdut.g1355__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O3"
+why = "Icarus's outputs of net/c1355.v on the replayed vectors, read 8 ns into each vector as RSpice's are; digital, exact"
 
 [[q]]
 id = "pi.0"
@@ -347,6 +394,17 @@ expect = "c10::vec"
 why = "the netlist's Boolean function of each of the 64 random vectors, read 8 ns into the vector; exact"
 
 [[q]]
+id = "vec"
+analysis = "tran-vec"
+variants = ["c1908-xs", "c1908-vlog"]
+kind = "codes"
+nets = { c1908-xs = ["d_g1884", "d_g1885", "d_g1886", "d_g1887", "d_g1888", "d_g1889", "d_g1890", "d_g1891", "d_g1892", "d_g1893", "d_g1894", "d_g1895", "d_g1896", "d_g1897", "d_g1898", "d_g1899", "d_g1900", "d_g1901", "d_g1902", "d_g1903", "d_g1904", "d_g1905", "d_g1906", "d_g1907", "d_g1908"], c1908-vlog = ["xdut.g1884__event_0", "xdut.g1885__event_0", "xdut.g1886__event_0", "xdut.g1887__event_0", "xdut.g1888__event_0", "xdut.g1889__event_0", "xdut.g1890__event_0", "xdut.g1891__event_0", "xdut.g1892__event_0", "xdut.g1893__event_0", "xdut.g1894__event_0", "xdut.g1895__event_0", "xdut.g1896__event_0", "xdut.g1897__event_0", "xdut.g1898__event_0", "xdut.g1899__event_0", "xdut.g1900__event_0", "xdut.g1901__event_0", "xdut.g1902__event_0", "xdut.g1903__event_0", "xdut.g1904__event_0", "xdut.g1905__event_0", "xdut.g1906__event_0", "xdut.g1907__event_0", "xdut.g1908__event_0"] }
+strobe = "d_stb"
+window = [0.0, 6.4e-07]
+oracle = "O3"
+why = "Icarus's outputs of net/c1908.v on the replayed vectors, read 8 ns into each vector as RSpice's are; digital, exact"
+
+[[q]]
 id = "pi.0"
 analysis = "tran-vec"
 variants = ["c1908-xs", "c1908-vlog"]
@@ -407,6 +465,17 @@ window = [0.0, 8.0e-08]
 oracle = "O6"
 expect = "c10::vec"
 why = "the netlist's Boolean function of each of the 8 random vectors, read 8 ns into the vector; exact"
+
+[[q]]
+id = "vec"
+analysis = "tran-vec-c6288"
+variants = ["c6288-xs", "c6288-vlog"]
+kind = "codes"
+nets = { c6288-xs = ["d_g6257", "d_g6258", "d_g6259", "d_g6260", "d_g6261", "d_g6262", "d_g6263", "d_g6264", "d_g6265", "d_g6266", "d_g6267", "d_g6268", "d_g6269", "d_g6270", "d_g6271", "d_g6272", "d_g6273", "d_g6274", "d_g6275", "d_g6276", "d_g6277", "d_g6278", "d_g6279", "d_g6280", "d_g6281", "d_g6282", "d_g6283", "d_g6284", "d_g6285", "d_g6286", "d_g6287", "d_g6288"], c6288-vlog = ["xdut.g6257__event_0", "xdut.g6258__event_0", "xdut.g6259__event_0", "xdut.g6260__event_0", "xdut.g6261__event_0", "xdut.g6262__event_0", "xdut.g6263__event_0", "xdut.g6264__event_0", "xdut.g6265__event_0", "xdut.g6266__event_0", "xdut.g6267__event_0", "xdut.g6268__event_0", "xdut.g6269__event_0", "xdut.g6270__event_0", "xdut.g6271__event_0", "xdut.g6272__event_0", "xdut.g6273__event_0", "xdut.g6274__event_0", "xdut.g6275__event_0", "xdut.g6276__event_0", "xdut.g6277__event_0", "xdut.g6278__event_0", "xdut.g6279__event_0", "xdut.g6280__event_0", "xdut.g6281__event_0", "xdut.g6282__event_0", "xdut.g6283__event_0", "xdut.g6284__event_0", "xdut.g6285__event_0", "xdut.g6286__event_0", "xdut.g6287__event_0", "xdut.g6288__event_0"] }
+strobe = "d_stb"
+window = [0.0, 8.0e-08]
+oracle = "O3"
+why = "Icarus's outputs of net/c6288.v on the replayed vectors, read 8 ns into each vector as RSpice's are; digital, exact"
 
 [[q]]
 id = "pi.0"

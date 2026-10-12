@@ -81,6 +81,11 @@ pub fn deck_for_reference(design_dir: &Path, reference_name: &str) -> Result<Pat
             let variant = base.split('.').next().unwrap_or(base);
             oracle_dir.join(format!("{variant}.o2")).join("deck.cir")
         }
+        "O3" => {
+            return Err(format!(
+                "reference {reference_name}: O3 runs live on every run and has no captured reference"
+            ));
+        }
         other => {
             return Err(format!(
                 "reference {reference_name}: oracle {other} is not captured"

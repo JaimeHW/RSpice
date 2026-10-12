@@ -385,6 +385,11 @@ impl Design {
         self.dir.join("oracle").join(format!("{variant}.o5.cir"))
     }
 
+    /// The directory of a variant's O3 testbench template, `tb.v`.
+    pub fn o3_dir(&self, variant: &str) -> PathBuf {
+        self.dir.join("oracle").join(format!("{variant}.o3"))
+    }
+
     pub fn analysis(&self, id: &str) -> Option<&AnalysisEntry> {
         self.file.analyses.iter().find(|analysis| analysis.id == id)
     }
@@ -688,6 +693,7 @@ fn check_quantity(design: &Design, quantity: &Quantity, findings: &mut Vec<Findi
             None => findings.push(format!("{slug}: quantity {id}: O6 needs `expect`")),
         },
         "O5" | "O7" => {}
+        "O3" => check_o3_templates(design, quantity, findings),
         _ => {
             if quantity.reference.is_none() {
                 findings.push(format!(
@@ -706,7 +712,10 @@ fn check_quantity(design: &Design, quantity: &Quantity, findings: &mut Vec<Findi
             }
         }
     }
-    if let Some(reference) = &quantity.reference {
+    // An O3 `ref` was reported above; there is no deck to bind it to.
+    if let Some(reference) = &quantity.reference
+        && quantity.oracle != "O3"
+    {
         for variant in &quantity.variants {
             let Some(path) = reference.for_variant(variant) else {
                 findings.push(format!(
@@ -715,6 +724,49 @@ fn check_quantity(design: &Design, quantity: &Quantity, findings: &mut Vec<Findi
                 continue;
             };
             check_reference_binding(design, &path, findings);
+        }
+    }
+}
+
+/// O3 runs Icarus live on every run (design of record §2.9), replaying the
+/// boundary events RSpice produced on the inputs the template names (C7's
+/// testbenches name none: their modules drive the whole protocol), so like O5
+/// it has nothing captured to bind: it takes no `ref`. Each variant instead
+/// needs its template `oracle/<v>.o3/tb.v`, with the stimulus marker, a
+/// timescale the runner reads, and sources that exist.
+fn check_o3_templates(design: &Design, quantity: &Quantity, findings: &mut Vec<Finding>) {
+    use super::oracle::icarus::{STIMULUS_MARKER, template_directive};
+    let slug = &design.slug;
+    let id = &quantity.id;
+    if quantity.reference.is_some() {
+        findings.push(format!(
+            "{slug}: quantity {id}: O3 runs live on every run and takes no `ref`"
+        ));
+    }
+    for variant in &quantity.variants {
+        let dir = design.o3_dir(variant);
+        let Ok(template) = fs::read_to_string(dir.join("tb.v")) else {
+            findings.push(format!(
+                "{slug}: quantity {id}: missing oracle/{variant}.o3/tb.v"
+            ));
+            continue;
+        };
+        let at = format!("{slug}: oracle/{variant}.o3/tb.v");
+        if !template.contains(STIMULUS_MARKER) {
+            findings.push(format!("{at} lacks {STIMULUS_MARKER}"));
+        }
+        if let Some(scale) = template_directive(&template, "rspice-o3-timescale")
+            && !matches!(scale.as_str(), "1ps" | "1ns" | "1fs")
+        {
+            findings.push(format!("{at}: timescale {scale} is not 1ps, 1ns or 1fs"));
+        }
+        for source in template_directive(&template, "rspice-o3-sources")
+            .unwrap_or_default()
+            .split_whitespace()
+        {
+            if !dir.join(source).is_file() {
+                findings.push(format!("{at} names missing source {source}"));
+            }
         }
     }
 }
@@ -793,6 +845,67 @@ mod tests {
         .unwrap();
         assert_eq!(map.for_variant("vams").as_deref(), Some("v(a)"));
         assert_eq!(map.for_variant("other"), None);
+    }
+
+    #[test]
+    fn o3_takes_a_template_not_a_ref() {
+        let dir = tempfile::tempdir().unwrap();
+        let file: DesignFile = toml::from_str(
+            "schema = \"rspice-mixed-design/1\"\nid = \"C10\"\ntitle = \"t\"\nexit_phases = [\"P2\"]\ndialect = \"d\"\n\
+             [[variant]]\nname = \"a\"\nfamilies = [\"spice\"]\ntoday = \"runs\"\n\
+             [[variant]]\nname = \"b\"\nfamilies = [\"spice\"]\ntoday = \"runs\"\n\
+             [[analysis]]\nid = \"tran\"\nvariants = [\"a\", \"b\"]\noracles = [\"O3\"]\ntimeout_s = 10\nphase = \"P2\"\n",
+        )
+        .unwrap();
+        let quantity = "[[q]]\nid = \"vec\"\nanalysis = \"tran\"\nvariants = [\"a\", \"b\"]\nkind = \"codes\"\nnets = [\"o\"]\nstrobe = \"s\"\noracle = \"O3\"\nwhy = \"w\"\n";
+        let tolerance = |extra: &str| -> ToleranceFile {
+            toml::from_str(&format!(
+                "schema = \"rspice-mixed-tolerance/1\"\ntime_precision = 1e-12\n{quantity}{extra}"
+            ))
+            .unwrap()
+        };
+        let template = |dir: &Path, text: &str| {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(dir.join("tb.v"), text).unwrap();
+        };
+        let design = Design {
+            dir: dir.path().to_path_buf(),
+            slug: "c10".into(),
+            file,
+            tolerance: tolerance(""),
+        };
+        fs::create_dir_all(dir.path().join("net")).unwrap();
+        fs::write(dir.path().join("net/x.v"), "module x; endmodule\n").unwrap();
+        template(
+            &design.o3_dir("a"),
+            "// rspice-o3-sources: ../../net/x.v\n// rspice-o3-inputs: i s\n// rspice-o3-timescale: 1ps\nmodule tb;\n// RSPICE-O3-STIMULUS\nendmodule\n",
+        );
+        let findings = |design: &Design| {
+            let mut findings = Vec::new();
+            check_quantity(design, &design.tolerance.quantities[0], &mut findings);
+            findings
+        };
+        assert_eq!(
+            findings(&design),
+            ["c10: quantity vec: missing oracle/b.o3/tb.v"]
+        );
+        template(
+            &design.o3_dir("b"),
+            "// rspice-o3-sources: ../../net/y.v\n// rspice-o3-timescale: 1us\nmodule tb;\nendmodule\n",
+        );
+        let with_ref = Design {
+            tolerance: tolerance("ref = \"ref/a.tran.O3.out\"\n"),
+            ..design.clone()
+        };
+        assert_eq!(
+            findings(&with_ref),
+            [
+                "c10: quantity vec: O3 runs live on every run and takes no `ref`",
+                "c10: oracle/b.o3/tb.v lacks // RSPICE-O3-STIMULUS",
+                "c10: oracle/b.o3/tb.v: timescale 1us is not 1ps, 1ns or 1fs",
+                "c10: oracle/b.o3/tb.v names missing source ../../net/y.v",
+            ]
+        );
     }
 
     #[test]

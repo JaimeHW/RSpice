@@ -16,12 +16,18 @@ expect = "c07::proto"
 abs = 0.0
 why = "the script's bits: 0x54 ACK 0xC5 ACK stop | 0x55 ACK 0xC5 NACK stop | 0x66 NACK stop; SDA changes only mid-SCL-low, so every sample is race-free"
 
-# The O3 twin of `proto` (Icarus on a tri1 bus, oracle/<variant>.o3/tb.v) is
-# not declared: the integrity check requires a captured `ref` for every
-# oracle other than O5/O6/O7, and no reference file can name O3 (a harness
-# gap, reported). When the check admits live O3, add:
-#   id = "proto", oracle = "O3", same measure, abs = 0.0,
-#   why = "the same modules on an Icarus tri1 bus: protocol bits at SCL rises match exactly"
+# The O3 twin of `proto`: Icarus runs the variant's modules on a tri1 bus
+# (oracle/<variant>.o3/tb.v), live on every run; nothing is replayed.
+[[q]]
+id = "proto"
+analysis = "tran"
+variants = ["flat", "tasks"]
+kind = "codes"
+nets = ["sda_d"]
+strobe = "scl_d"
+oracle = "O3"
+abs = 0.0
+why = "the same modules on an Icarus tri1 bus: protocol bits at SCL rises match exactly"
 
 # --- analog timing of the first SCL release (20 us) and fall (25 us) ------
 # The controller held SCL at V_OL = 3.3·20/2220 before the release; Rp·Cbus =
