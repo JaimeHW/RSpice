@@ -89,8 +89,8 @@ impl Mosfet {
                 (self.node_source, -gss),
             ],
         );
-        let (ibs, gbs) = self.body_source_junction_current_and_conductance(vbs);
-        let (ibd, gbd) = self.body_drain_junction_current_and_conductance(vds, vbs);
+        let (ibs, gbs) = self.body_source_junction_physical_current_and_conductance(vbs);
+        let (ibd, gbd) = self.body_drain_junction_physical_current_and_conductance(vds, vbs);
         let (qbs, cbs) = self.body_source_junction_charge_and_capacitance_at(vbs);
         let (qbd, cbd) = self.body_drain_junction_charge_and_capacitance_at(vds, vbs);
         for ((pos, neg), current, conductance, charge, capacitance) in [
@@ -180,8 +180,8 @@ impl Mosfet {
         let rates = self.periodic_gate_rates(solution, rate_nodes)?;
         let (vgs, vds, vbs) = self.unlimited_branch_voltages_at(solution);
         let (id, _, _, _, _, _, _) = self.linearized_operating_point(vgs, vds, vbs);
-        let (ibs, _) = self.body_source_junction_current_and_conductance(vbs);
-        let (ibd, _) = self.body_drain_junction_current_and_conductance(vds, vbs);
+        let (ibs, _) = self.body_source_junction_physical_current_and_conductance(vbs);
+        let (ibd, _) = self.body_drain_junction_physical_current_and_conductance(vds, vbs);
         let (qbs, _) = self.body_source_junction_charge_and_capacitance_at(vbs);
         let (qbd, _) = self.body_drain_junction_charge_and_capacitance_at(vds, vbs);
         let (gate_current, gate_charge) = if let Some(q) = self.legacy_gate_charge_at(vgs, vds, vbs)

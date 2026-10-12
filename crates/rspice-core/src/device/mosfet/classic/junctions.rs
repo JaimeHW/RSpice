@@ -409,6 +409,32 @@ impl Mosfet {
         self.junction_diode_current_and_conductance(isat, vd, self.junction_gmin)
     }
 
+    /// Body-source junction law without the DC/transient conditioning GMIN.
+    /// Periodic analyses linearize the authored device equations, so the
+    /// shunt a Newton solver adds for conditioning is not part of them.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn body_source_junction_physical_current_and_conductance(
+        &self,
+        vbs: Value,
+    ) -> (Value, Value) {
+        let vd = self.body_source_diode_voltage(vbs);
+        let isat = self.effective_body_junction_saturation_current(self.source_area);
+        self.junction_diode_current_and_conductance(isat, vd, 0.0)
+    }
+
+    /// Body-drain counterpart of
+    /// [`Self::body_source_junction_physical_current_and_conductance`].
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn body_drain_junction_physical_current_and_conductance(
+        &self,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, Value) {
+        let vd = self.body_drain_diode_voltage(vds, vbs);
+        let isat = self.effective_body_junction_saturation_current(self.drain_area);
+        self.junction_diode_current_and_conductance(isat, vd, 0.0)
+    }
+
     #[inline]
     pub(in crate::device::mosfet::classic) fn body_drain_junction_current_and_conductance_with_constants(
         &self,
