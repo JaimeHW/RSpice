@@ -13,12 +13,14 @@ const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
 const RELEASE_TAG: &str = "Release-7.10.0";
 const GENERATED_MODEL: &str = "vbic13";
 const GENERATED_SOURCE_DIGEST: &str = "aa00e2e747501388";
-// Qualified with generated semantics v29 (2964cdc82): DDT candidates and
-// derivatives share accepted history. The v1 pin predates typed parameter,
-// branch, integration and event semantics. Keep an explicit artifact pin;
-// the complete pair/M=2/single-device oracle qualifies each replacement.
+// Qualified with generated semantics v30 (8ca9e2a3b): numeric parameter
+// arrays execute in declaration storage. The checked-in bundle carried the v30
+// identity from its regeneration in 29b3b20d4. The v1 pin predates typed
+// parameter, branch, integration and event semantics. Keep an explicit
+// artifact pin; the complete pair/M=2/single-device oracle qualifies each
+// replacement.
 const GENERATED_CHECKPOINT_IDENTITY: &str =
-    "44336fea23fea05d835374bfe0d5c15b104e17a8bc7477e68716e21aa5ace833";
+    "cbc45f5e0269ac716699dcef82f10bd8a19990dec9536ec8513bf8997cb1e5c5";
 
 const OWNER_NAME: &str = "vbic_3T_et_cf.cir";
 const CONTROL_NAME: &str = "vbic_3T_et_cf_m2.cir";
