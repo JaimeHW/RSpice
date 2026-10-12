@@ -77,9 +77,17 @@ pub fn deck_for_reference(design_dir: &Path, reference_name: &str) -> Result<Pat
         "O4" => oracle_dir.join(format!("{base}.xyce.cir")),
         "O5-O1" => oracle_dir.join(format!("{base}.o5.ngspice.cir")),
         "O5-O4" => oracle_dir.join(format!("{base}.o5.xyce.cir")),
+        // One O2 deck per (variant, analysis) where the design has one, so a
+        // variant's O2 can cover its op as well as its tran; otherwise the
+        // variant's deck serves every analysis.
         "O2" => {
-            let variant = base.split('.').next().unwrap_or(base);
-            oracle_dir.join(format!("{variant}.o2")).join("deck.cir")
+            let per_analysis = oracle_dir.join(format!("{base}.o2")).join("deck.cir");
+            if per_analysis.is_file() {
+                per_analysis
+            } else {
+                let variant = base.split('.').next().unwrap_or(base);
+                oracle_dir.join(format!("{variant}.o2")).join("deck.cir")
+            }
         }
         "O3" => {
             return Err(format!(
@@ -593,5 +601,26 @@ mod tests {
             dir.join("oracle/vams.o2/deck.cir")
         );
         assert!(deck_for_reference(dir, "xs.tran.O6.out").is_err());
+    }
+
+    #[test]
+    fn an_o2_deck_per_analysis_takes_precedence_over_the_variant_deck() {
+        let dir = tempfile::tempdir().unwrap();
+        let design = dir.path();
+        let op = design.join("oracle/mx.op.o2");
+        fs::create_dir_all(&op).unwrap();
+        fs::write(op.join("deck.cir"), "t\n.op\n.end\n").unwrap();
+        assert_eq!(
+            deck_for_reference(design, "mx.op.O2.out").unwrap(),
+            op.join("deck.cir")
+        );
+        assert_eq!(
+            deck_for_reference(design, "mx.op.O2.events.tsv").unwrap(),
+            op.join("deck.cir")
+        );
+        assert_eq!(
+            deck_for_reference(design, "mx.tran.O2.out").unwrap(),
+            design.join("oracle/mx.o2/deck.cir")
+        );
     }
 }
