@@ -29,7 +29,7 @@
 //! train: the contributions of one call are coherent, and two calls are
 //! independent even when they share a name.
 //!
-//! Two shapes of density cover every mechanism that can be rendered:
+//! Three shapes of density cover every mechanism that can be rendered:
 //!
 //! * **Frequency-flat** — thermal (`4kT/R`), shot (`2qI`), an explicit
 //!   Verilog-A `white_noise(pwr)`, and a `1/f^ef` law with `ef = 0`. A flat
@@ -61,11 +61,16 @@
 //!   interpolates raw amplitudes — so there is no ngspice normalization to
 //!   agree with; only the generator is shared.
 //!
+//! * **Tabulated** — Verilog-A `noise_table`/`noise_table_log` and the native
+//!   EKV3 VANOISE export. Unit white noise is shaped by a zero-phase filter
+//!   whose magnitude follows the table on a grid of `fmax/fmin` bins
+//!   ([`table`]), and `a_k = sqrt(scale)` with the table's own scale.
+//!
 //! A train is drawn once from the run seed and a key naming the mechanism,
 //! so its samples depend only on that key and the sample index. The spectral
-//! operand a train was drawn for — a flicker exponent — is frozen for the
-//! run, and a bias that moves it refuses the run by name rather than
-//! rendering a spectrum the model no longer states.
+//! operands a train was drawn for — a flicker exponent, a table — are frozen
+//! for the run, and a bias that moves them refuses the run by name rather
+//! than rendering a spectrum the model no longer states.
 //!
 //! # What is refused
 //!
@@ -73,8 +78,6 @@
 //! refused by name rather than approximated, because guessing the missing
 //! degree of freedom would be inventing physics:
 //!
-//! * a tabulated density (Verilog-A `noise_table`), which is an arbitrary
-//!   spectrum;
 //! * a Verilog-A process whose injection gain depends on frequency — noise the
 //!   module shapes through `ddt`, `idt` or `laplace_*` — is refused as
 //!   `analysis.tran.noise.shaped_process`, and one from a module carrying
@@ -94,6 +97,7 @@
 //! `.NOISE`.
 
 pub(in crate::engine) mod processes;
+mod table;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -118,13 +122,14 @@ use processes::{
     CollectedNoiseProcess, NoiseProcessKey, NoiseProcessSpectrum, collect_noise_processes,
     has_structural_noise_processes,
 };
+use table::{TableShape, tabulated_unit_train};
 
 /// Total materialized samples one run may hold, across every source.
 ///
-/// A flat mechanism costs no memory at all, so this bounds the materialized
-/// trains, warm-ups included: 16M values is 128 MB, past which a deck should
-/// raise `NOISEFMAX`'s reciprocal or shorten the run rather than have the
-/// simulator quietly take the machine.
+/// A flat mechanism costs no memory at all, so this bounds the flicker and
+/// tabulated trains, warm-ups included: 16M values is 128 MB, past which a
+/// deck should raise `NOISEFMAX`'s reciprocal or shorten the run rather than
+/// have the simulator quietly take the machine.
 const MAX_TOTAL_MATERIALIZED_SAMPLES: usize = 1 << 24;
 
 /// The largest `1/f^ef` exponent the fractional integrator represents.
@@ -158,6 +163,8 @@ enum AmplitudeLaw {
     Flat,
     /// `A/f^ef`: `sqrt(A)`, with `A` the density at 1 Hz.
     PowerLaw,
+    /// A table times its scale: `sqrt(scale)`.
+    Tabulated,
 }
 
 /// Which law renders one mechanism, or why none does.
@@ -174,7 +181,12 @@ fn rendering_law(source: &NoiseSource) -> Result<Option<AmplitudeLaw>, String> {
         NoiseSourceType::Flicker
         | NoiseSourceType::Bsim3Flicker
         | NoiseSourceType::Bsim4Flicker => flicker_law(source.ef, &named).map(Some),
-        NoiseSourceType::Table => Err(tabulated_refusal(&named)),
+        NoiseSourceType::Table => match &source.table {
+            Some(_) => Ok(Some(AmplitudeLaw::Tabulated)),
+            None => Err(format!(
+                "transient noise cannot render '{named}': its tabulated density carries no table"
+            )),
+        },
         NoiseSourceType::Burst => Err(format!(
             "transient noise cannot render '{named}': its Lorentzian plateau and corner \
              frequency fix two of the three parameters of the random-telegraph process that \
@@ -200,15 +212,6 @@ fn flicker_law(ef: Value, named: &str) -> Result<AmplitudeLaw, String> {
     })
 }
 
-/// Why a tabulated density is not rendered.
-fn tabulated_refusal(named: &str) -> String {
-    format!(
-        "transient noise cannot render '{named}': a tabulated spectral density is neither \
-         frequency-flat nor a power law, and rendering it as either would report a spectrum \
-         the model does not state. Use .NOISE for this device."
-    )
-}
-
 /// The law one Verilog-A process renders with.
 fn process_law(process: &CollectedNoiseProcess) -> Result<AmplitudeLaw, SimulationError> {
     match &process.spectrum {
@@ -216,16 +219,14 @@ fn process_law(process: &CollectedNoiseProcess) -> Result<AmplitudeLaw, Simulati
         NoiseProcessSpectrum::Flicker { exponent } => {
             flicker_law(*exponent, &process.describe()).map_err(SimulationError::Circuit)
         }
-        NoiseProcessSpectrum::Table { .. } => Err(SimulationError::Circuit(tabulated_refusal(
-            &process.describe(),
-        ))),
+        NoiseProcessSpectrum::Table { .. } => Ok(AmplitudeLaw::Tabulated),
     }
 }
 
 /// The spectral operands a train was drawn for.
 ///
-/// A train is materialized once, so the exponent it realizes has to stay
-/// what it was for the whole run. A refresh that finds it moved refuses
+/// A train is materialized once, so the exponent or table it realizes has to
+/// stay what it was for the whole run. A refresh that finds it moved refuses
 /// rather than injecting a spectrum the model no longer states.
 #[derive(Clone, Debug, PartialEq)]
 enum FrozenOperands {
@@ -233,6 +234,11 @@ enum FrozenOperands {
     None,
     /// A `1/f^ef` exponent, including `ef = 0`.
     Exponent(Value),
+    /// A tabulated shape.
+    Table {
+        points: Vec<(Value, Value)>,
+        log_interp: bool,
+    },
 }
 
 impl FrozenOperands {
@@ -241,14 +247,25 @@ impl FrozenOperands {
             NoiseSourceType::Flicker
             | NoiseSourceType::Bsim3Flicker
             | NoiseSourceType::Bsim4Flicker => Self::Exponent(source.ef),
+            NoiseSourceType::Table => match &source.table {
+                Some(table) => Self::Table {
+                    points: table.0.clone(),
+                    log_interp: table.1,
+                },
+                None => Self::None,
+            },
             _ => Self::None,
         }
     }
 
     fn of_process(spectrum: &NoiseProcessSpectrum) -> Self {
         match spectrum {
+            NoiseProcessSpectrum::White => Self::None,
             NoiseProcessSpectrum::Flicker { exponent } => Self::Exponent(*exponent),
-            NoiseProcessSpectrum::White | NoiseProcessSpectrum::Table { .. } => Self::None,
+            NoiseProcessSpectrum::Table { points, log_interp } => Self::Table {
+                points: points.clone(),
+                log_interp: *log_interp,
+            },
         }
     }
 
@@ -260,6 +277,23 @@ impl FrozenOperands {
         match (self, now) {
             (Self::None, Self::None) => false,
             (Self::Exponent(before), Self::Exponent(after)) => apart(*before, *after),
+            (
+                Self::Table {
+                    points: before,
+                    log_interp: before_log,
+                },
+                Self::Table {
+                    points: after,
+                    log_interp: after_log,
+                },
+            ) => {
+                before_log != after_log
+                    || before.len() != after.len()
+                    || before
+                        .iter()
+                        .zip(after)
+                        .any(|(left, right)| apart(left.0, right.0) || apart(left.1, right.1))
+            }
             _ => true,
         }
     }
@@ -586,23 +620,30 @@ impl TransientNoiseRuntime {
         source: &NoiseSource,
         entry: &AmplitudeEntry,
     ) -> Result<Value, SimulationError> {
-        let temperature = Engine::elementary_noise_temperature(
-            self.ambient_temperature,
-            entry.absolute_temperature,
-        );
-        // Both laws are evaluated at 1 Hz: a flat density ignores the
-        // frequency, and a power law's value there is its coefficient.
-        let density = source
-            .try_spectral_density(1.0, temperature)
-            .map_err(|error| {
-                SimulationError::Circuit(format!(
-                    "transient noise source '{}' is not evaluable: {error}",
-                    describe(&entry.identity)
-                ))
-            })?;
-        let coefficient = match entry.law {
-            AmplitudeLaw::Flat => density * self.grid.fmax,
-            AmplitudeLaw::PowerLaw => density,
+        let coefficient = if entry.law == AmplitudeLaw::Tabulated {
+            // The train carries the table's shape; what moves with bias is
+            // its scale.
+            source.parameter
+        } else {
+            let temperature = Engine::elementary_noise_temperature(
+                self.ambient_temperature,
+                entry.absolute_temperature,
+            );
+            // Both remaining laws are evaluated at 1 Hz: a flat density
+            // ignores the frequency, and a power law's value there is its
+            // coefficient.
+            let density = source
+                .try_spectral_density(1.0, temperature)
+                .map_err(|error| {
+                    SimulationError::Circuit(format!(
+                        "transient noise source '{}' is not evaluable: {error}",
+                        describe(&entry.identity)
+                    ))
+                })?;
+            match entry.law {
+                AmplitudeLaw::Flat => density * self.grid.fmax,
+                AmplitudeLaw::PowerLaw | AmplitudeLaw::Tabulated => density,
+            }
         };
         self.checked_amplitude(coefficient, &describe(&entry.identity))
     }
@@ -626,7 +667,7 @@ impl TransientNoiseRuntime {
     ) -> Result<Value, SimulationError> {
         let coefficient = match law {
             AmplitudeLaw::Flat => psd * self.grid.fmax,
-            AmplitudeLaw::PowerLaw => psd,
+            AmplitudeLaw::PowerLaw | AmplitudeLaw::Tabulated => psd,
         };
         self.checked_amplitude(coefficient, named)
     }
@@ -653,6 +694,20 @@ impl TransientNoiseRuntime {
                     abort,
                 )?),
             },
+            (AmplitudeLaw::Tabulated, FrozenOperands::Table { points, log_interp }) => {
+                NoiseTrain::Materialized {
+                    samples: Arc::new(tabulated_unit_train(
+                        &TableShape::new(points, *log_interp),
+                        grid.nt,
+                        grid.sample_count,
+                        grid.fmin,
+                        seed,
+                        &mut self.materialized_budget,
+                        named,
+                        abort,
+                    )?),
+                }
+            }
             _ => {
                 return Err(SimulationError::Circuit(format!(
                     "transient noise source '{named}' has no operands for its rendering law"
@@ -911,7 +966,7 @@ fn shaped_process_refusal(process: &CollectedNoiseProcess, time: Value) -> Simul
         .into()
 }
 
-/// The refusal for a mechanism whose spectral operand moved with the bias.
+/// The refusal for a mechanism whose exponent or table moved with the bias.
 fn bias_dependent_spectrum_refusal(
     instance: &str,
     module: Option<&str>,
@@ -922,7 +977,7 @@ fn bias_dependent_spectrum_refusal(
         "analysis.tran.noise.bias_dependent_spectrum",
         format!(
             "transient noise cannot follow noise mechanism '{mechanism}' of instance \
-             '{instance}' at t={time:e} s: its spectral exponent changed with the bias, \
+             '{instance}' at t={time:e} s: its spectral exponent or table changed with the bias, \
              and a rendered train realizes the shape it was drawn for. Use .NOISE at the \
              operating points of interest."
         ),

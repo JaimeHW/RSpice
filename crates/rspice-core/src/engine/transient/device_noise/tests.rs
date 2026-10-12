@@ -633,12 +633,11 @@ fn transient_noise_tracks_the_instantaneous_bias() {
 /// A mechanism whose spectrum the time domain cannot represent is refused
 /// by name rather than approximated.
 ///
-/// The classification is tested directly because the two refused shapes
-/// reach a deck by different routes: a tabulated density arrives from any
-/// EKV3 card and from Verilog-A `noise_table`, while the Lorentzian is a
+/// The classification is tested directly because the Lorentzian is a
 /// density `NoiseSource::burst` can carry that no shipping device model
 /// currently exports — so the refusal has to be proven on the source, not
-/// on a deck that happens to produce one today.
+/// on a deck that happens to produce one today. A tabulated density, which
+/// arrives from any EKV3 card and from Verilog-A `noise_table`, renders.
 #[test]
 fn an_unrenderable_noise_mechanism_is_refused_by_name() {
     let tabulated = NoiseSource::tabulated(
@@ -649,10 +648,10 @@ fn an_unrenderable_noise_mechanism_is_refused_by_name() {
         vec![(1.0, 1.0e-20), (1.0e6, 1.0e-22)],
         true,
     );
-    let message = rendering_law(&tabulated).expect_err("a table cannot be rendered");
-    assert!(
-        message.contains("X1") && message.contains("tabulated"),
-        "{message}"
+    assert_eq!(
+        rendering_law(&tabulated),
+        Ok(Some(AmplitudeLaw::Tabulated)),
+        "a tabulated density renders through its table filter"
     );
 
     let burst = NoiseSource::burst("Q1".to_string(), 1, 0, 1.0e-12, 2.0, 1.0e-6, 1.0e3)
@@ -745,6 +744,100 @@ fn a_deck_without_noise_mechanisms_runs_deterministically() {
         .expect("an empty plan schedules nothing");
     assert!(breakpoints.times().is_empty());
 }
+
+/// A tabulated native density renders: an EKV3 instance, whose VANOISE
+/// export is always a table, installs a filtered train whose spectrum follows
+/// the device's own table in two bands two decades apart.
+#[test]
+fn a_tabulated_native_density_renders_its_table() {
+    const FMAX: Value = 1.0e9;
+    const SAMPLES: usize = 1 << 16;
+    let nt = 1.0 / (2.0 * FMAX);
+    let tstop = SAMPLES as Value * nt;
+    let config = TransientNoiseConfig {
+        fmax: FMAX,
+        fmin: None,
+        seed: Some(17),
+        scale: 1.0,
+    };
+    let (circuit, runtime, solution) = installed(
+        &format!(
+            "EKV3 tabulated noise\n\
+             {EKV3_NMOS150_MODEL}\n\
+             M1 d g 0 0 NMOS150 W=150e-9 L=150e-9 NF=1\n\
+             Vg g 0 0.5\n\
+             Vd dd 0 1\n\
+             Rd dd d 10k\n\
+             .options temp=25\n\
+             .END\n"
+        ),
+        config,
+        tstop,
+    );
+    let position = runtime
+        .entries
+        .iter()
+        .position(|entry| entry.identity.device.eq_ignore_ascii_case("M1"))
+        .expect("the EKV3 instance exports its tabulated density");
+    assert_eq!(runtime.entries[position].law, AmplitudeLaw::Tabulated);
+
+    let source = Engine::try_collect_noise_sources(
+        &circuit,
+        &solution,
+        crate::config::SpiceDialect::BestAvailable,
+    )
+    .expect("the catalog collects")
+    .elementary
+    .into_iter()
+    .find(|source| source.identity.device.eq_ignore_ascii_case("M1"))
+    .expect("the tabulated source is in the catalog");
+    let estimate = welch_one_sided(&injected_train(&circuit, position), nt, 1 << 12);
+    // 2^16 samples in 4096-sample Hann segments at 50% overlap are 31
+    // segments; each band below holds at least 24 bins of 244 kHz, so the
+    // band mean has a relative standard error under 4%. 10% is 2.5 of them
+    // even before the bins' overlap correlation is credited.
+    for (low, high) in [(5.0e6, 1.2e7), (2.0e8, 4.0e8)] {
+        let measured = band_average(&estimate, low, high);
+        let expected = band_average(
+            &estimate
+                .iter()
+                .map(|(frequency, _)| (*frequency, source.spectral_density(*frequency, T)))
+                .collect::<Vec<_>>(),
+            low,
+            high,
+        );
+        against_oracle(
+            &format!("EKV3 tabulated density over {low:e}-{high:e} Hz (A^2/Hz)"),
+            measured,
+            expected,
+            0.10,
+        );
+    }
+}
+
+/// The NMOS150 card of Xyce 7.10's VANOISE regression deck.
+const EKV3_NMOS150_MODEL: &str = r#"
+.MODEL NMOS150 NMOS
++ LEVEL=301
++ SIGN = 1 TG = -1
++ SCALE = 1.0 XL = 0.0 XW = 0.0
++ COX = 8.58E-3 GAMMAG = 18.4 AQMA = 0.0 AQMI = 0.0 ETAQM = 0.75
++ VTO = 400.0E-3 PHIF = 450.0E-3 GAMMA = 300.0E-3 XJ = 30.0E-9 N0 = 1.025
++ KP = 390.0E-6 E0 = 438.0E+6 E1 = 159.0E+6 ETA = 0.57 ZC = 1.0E-6 THC = 0.0
++ PDITS = 2.58E-6 PDITSD = 0.91 PDITSL = 0.0 FPROUT = 1.85E+6 DDITS = 0.1
++ AVTO = 0.0 AKP = 0.0 AGAMMA = 0.0
++ UCRIT = 5.0E+6 DELTA = 1.5 LAMBDA = 0.5 ACLM = 0.85
++ DL = -16.7E-9 DLC = -23.0E-9 WDL = 0.0 LL = 0.0 LLN = 1.0 DW = -45.3E-9 DWC = 0.0 LDW = 0.0
++ LETA0 = 1.0E+6 LETA = 1.3 LETA2 = 0.0 WETA = 1.0 NCS = 0.5
++ ETAD = 0.75 SIGMAD = 1.0
++ LR = 100E-9 QLR = 580E-6 NLR = 100.0E-3 FLR = 2
++ WR = 80.0E-9 QWR = 500.0E-6 NWR = 12.0E-3
++ RLX = 170.0E-6
++ LOV = 25.0E-9 GAMMAOV = 5.0 VFBOV = 0.0 KJF = 150.0E-12 CJF = 300.0E-3
++ KG = 50.0E-6 XB = 5.5 EB = 21.0E+9 LOVIG = 40.0E-12
++ TNOM = 30.0 TCV = 600.0E-6 BEX = -1.6 TE0EX = -4.15 TE1EX = 0.0 TETA = 2.0E-3
++ UCEX = 1.2 TLAMBDA = 0.15 TCVL = 0.0 TCVW = 0.0 TCVWL = 0.0
+"#;
 
 /// A one-sided Welch periodogram of a sampled sequence, in units of the
 /// sequence's square per hertz.

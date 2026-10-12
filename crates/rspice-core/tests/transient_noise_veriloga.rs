@@ -8,7 +8,7 @@
 //!   hosts and in generated devices — are rendered, at their own densities;
 //! * one noise-function call reaching several branches is one coherent
 //!   process, and two calls are independent whatever their names;
-//! * flicker densities keep their shape in time;
+//! * flicker and tabulated densities keep their shape in time;
 //! * noise shaped by the module itself is refused by name until it can be
 //!   rendered;
 //! * the run is a function of its seed alone, rejected steps included;
@@ -557,6 +557,42 @@ endmodule
             0.9,
             1.1,
         );
+    }
+
+    /// Test 4: `noise_table` renders its interpolated table in time.
+    ///
+    /// The table falls linearly from 1e-18 A²/Hz at 1 kHz to 1e-20 A²/Hz at
+    /// 1 MHz and is clamped above, so through the module's own 1 kΩ the node
+    /// holds `1e6·T(f)` V²/Hz. Two bands two decades apart: 100–600 kHz on
+    /// the slope and 5–20 MHz on the clamp. 2048-sample segments give 288
+    /// periodograms over the bank, about 6% per bin; the narrower band holds
+    /// 11 bins, so its mean's standard error is under 3% and 10% is over 3σ.
+    #[test]
+    fn a_noise_table_renders_its_interpolated_density() {
+        let estimate = bank_estimate(
+            "tabled",
+            r#"
+`include "disciplines.vams"
+module tabled(p, n);
+  inout p, n; electrical p, n;
+  analog I(p, n) <+ V(p, n)/1000.0 + noise_table('{1e3, 1e-18, 1e6, 1e-20}, "t");
+endmodule
+"#,
+            2048,
+        );
+        let table = |f: f64| {
+            let clamped = f.clamp(1.0e3, 1.0e6);
+            1.0e6 * (1.0e-18 + (clamped - 1.0e3) / (1.0e6 - 1.0e3) * (1.0e-20 - 1.0e-18))
+        };
+        for (low, high) in [(100.0e3, 600.0e3), (5.0e6, 20.0e6)] {
+            let (measured, model) = band(&estimate, low, high, table);
+            assert_within(
+                &format!("table density over {low:e}–{high:e} Hz (ratio)"),
+                measured / model,
+                0.9,
+                1.1,
+            );
+        }
     }
 
     /// Test 6: noise the module shapes itself is refused by name until it can

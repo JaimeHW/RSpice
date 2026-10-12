@@ -65,9 +65,9 @@ pub(crate) enum NoiseTrain {
     /// so a flat source costs no memory whatever the run's length.
     Flat { stream_seed: u64 },
     /// A shaped unit process — a `1/f^ef` Kasdin fractional-integration
-    /// sequence whose unit coefficient is one at 1 Hz. It cannot be addressed
-    /// without the samples before it, so it is materialized once, and it is
-    /// never changed afterwards.
+    /// sequence, or a filtered train following a tabulated density. It cannot
+    /// be addressed without the samples before it, so it is materialized
+    /// once, and it is never changed afterwards.
     Materialized { samples: Arc<Vec<Value>> },
 }
 
@@ -107,7 +107,8 @@ pub(crate) struct InjectedNoiseSource {
     pub(crate) train: NoiseTrain,
     /// Complete multiplier applied to the unit process, refreshed from the
     /// solution at every accepted step: `NOISESCALE · sqrt(S·fmax)` for a flat
-    /// source and `NOISESCALE · sqrt(A)` for a `A/f^ef` source.
+    /// source, `NOISESCALE · sqrt(A)` for a `A/f^ef` source and
+    /// `NOISESCALE · sqrt(scale)` for a tabulated one.
     pub(crate) amplitude: Value,
     /// Where the scaled process is injected, each with its own gain.
     pub(crate) injections: Vec<NoiseInjection>,
