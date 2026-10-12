@@ -17,25 +17,13 @@ pub(crate) enum ArchiveReadError {
 ///
 /// ZIP64 uses the same fixed central header and name/extra/comment lengths.
 /// The backend supplies its resolved directory offset, including any prefix.
-/// The backend first admits the advertised count before reserving metadata.
+/// ZIP64 footer counts are admitted before the backend reserves metadata.
 pub(crate) fn open_unique_archive(
     bytes: &[u8],
     max_members: usize,
 ) -> Result<ZipArchive<Cursor<&[u8]>>, ArchiveReadError> {
-    let archive = ZipArchive::with_config(
-        zip::read::Config {
-            max_files: Some(max_members),
-            ..Default::default()
-        },
-        Cursor::new(bytes),
-    )
-    .map_err(|error| match error {
-        ZipError::FileCountLimit { files, limit } => ArchiveReadError::MemberCount {
-            members: files,
-            limit,
-        },
-        error => ArchiveReadError::Zip(error),
-    })?;
+    admit_zip64_member_counts(bytes, max_members)?;
+    let archive = ZipArchive::new(Cursor::new(bytes)).map_err(ArchiveReadError::Zip)?;
     if archive.len() > max_members {
         return Err(ArchiveReadError::MemberCount {
             members: archive.len(),
@@ -84,6 +72,38 @@ pub(crate) fn open_unique_archive(
         )));
     }
     Ok(archive)
+}
+
+const ZIP64_END_SIGNATURE: &[u8] = b"PK\x06\x06";
+const ZIP64_END_BYTES: usize = 56;
+const CENTRAL_HEADER_BYTES: u64 = 46;
+
+/// The backend reserves its member index from the footer's declared count
+/// before decoding a single entry. A ZIP32 footer declares at most 65,535, but
+/// the backend accepts any ZIP64 count whose directory, at 46 bytes per entry,
+/// fits before the record: a 64 MiB source could reserve hundreds of MiB.
+/// Refuse every ZIP64 end record the backend could accept with a count above
+/// the limit, not only the last, because the backend falls back to earlier
+/// footers when a later one fails to decode.
+fn admit_zip64_member_counts(bytes: &[u8], max_members: usize) -> Result<(), ArchiveReadError> {
+    let limit = u64::try_from(max_members).unwrap_or(u64::MAX);
+    for (position, record) in bytes.windows(ZIP64_END_BYTES).enumerate() {
+        if !record.starts_with(ZIP64_END_SIGNATURE) {
+            continue;
+        }
+        let field = |offset: usize| u64::from_le_bytes(std::array::from_fn(|i| record[offset + i]));
+        let members = field(32);
+        let directory_end = members
+            .saturating_mul(CENTRAL_HEADER_BYTES)
+            .saturating_add(field(48));
+        if members > limit && u64::try_from(position).is_ok_and(|start| directory_end <= start) {
+            return Err(ArchiveReadError::MemberCount {
+                members: usize::try_from(members).unwrap_or(usize::MAX),
+                limit: max_members,
+            });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -2,11 +2,9 @@ use super::*;
 use crate::zip::deterministic_stored_zip;
 use std::io::{Read as _, Write as _};
 
-fn invalid_member_metadata(zip64: bool) -> Vec<u8> {
+fn zip64_with_invalid_member_metadata() -> Vec<u8> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    if zip64 {
-        writer.set_raw_zip64_extensible_data_sector(Box::new([]));
-    }
+    writer.set_raw_zip64_extensible_data_sector(Box::new([]));
     for name in ["first", "second"] {
         writer
             .start_file(
@@ -21,40 +19,48 @@ fn invalid_member_metadata(zip64: bool) -> Vec<u8> {
     let archive = ZipArchive::new(Cursor::new(bytes.as_slice())).unwrap();
     let header = archive.central_directory_start() as usize;
     // Claim a name longer than the source. The advertised entry limit must
-    // win before the backend reserves that name or decodes the first entry.
+    // win before the backend reserves its index or decodes the first entry.
     bytes[header + 28..header + 30].copy_from_slice(&u16::MAX.to_le_bytes());
     bytes
 }
 
 #[test]
-fn metadata_limit_precedes_central_entry_allocation_and_decoding() {
-    for zip64 in [false, true] {
-        let bytes = invalid_member_metadata(zip64);
-        for limit in [0, 1] {
-            assert!(
-                matches!(open_unique_archive(&bytes, limit), Err(ArchiveReadError::MemberCount { members: 2, limit: refused }) if refused == limit)
-            );
-        }
-        assert!(matches!(
-            open_unique_archive(&bytes, 2),
-            Err(ArchiveReadError::Zip(_))
-        ));
+fn zip64_member_count_precedes_central_entry_allocation_and_decoding() {
+    let bytes = zip64_with_invalid_member_metadata();
+    for limit in [0, 1] {
+        assert!(
+            matches!(open_unique_archive(&bytes, limit), Err(ArchiveReadError::MemberCount { members: 2, limit: refused }) if refused == limit)
+        );
     }
+    assert!(matches!(
+        open_unique_archive(&bytes, 2),
+        Err(ArchiveReadError::Zip(_))
+    ));
 }
 
 #[test]
-fn metadata_limit_cannot_fall_back_to_an_earlier_archive() {
-    for zip64 in [false, true] {
-        let mut bytes = deterministic_stored_zip(&[("earlier", b"old samples")]).unwrap();
-        bytes.extend(invalid_member_metadata(zip64));
-        assert!(matches!(
-            open_unique_archive(&bytes, 1),
-            Err(ArchiveReadError::MemberCount {
-                members: 2,
-                limit: 1
-            })
-        ));
-    }
+fn zip64_member_count_cannot_fall_back_to_an_earlier_archive() {
+    let mut bytes = deterministic_stored_zip(&[("earlier", b"old samples")]).unwrap();
+    bytes.extend(zip64_with_invalid_member_metadata());
+    assert!(matches!(
+        open_unique_archive(&bytes, 1),
+        Err(ArchiveReadError::MemberCount {
+            members: 2,
+            limit: 1
+        })
+    ));
+}
+
+#[test]
+fn zip64_admission_ignores_records_whose_directory_cannot_fit() {
+    // Member bytes that spell a ZIP64 end record with a million entries, too
+    // many for the bytes before it, so the backend could never select it.
+    let mut record = b"PK\x06\x06".to_vec();
+    record.resize(32, 0);
+    record.extend(1_000_000u64.to_le_bytes());
+    record.resize(56, 0);
+    let bytes = deterministic_stored_zip(&[("first", &record), ("second", b"ok")]).unwrap();
+    assert_eq!(open_unique_archive(&bytes, 2).unwrap().len(), 2);
 }
 
 #[test]
