@@ -1,0 +1,8 @@
+* C6 digitally controlled buck converter, variant vams, ckpt
+* The tran deck, checkpointed at 400 us (design.toml) and resumed to 800 us.
+.param lv=22u cv=4.7u
+.hdl "../net/buck_ctrl_ams.vams"
+.include ../net/stage.cir
+xctrl vout ghs gls buck_ctrl
+.tran 50n 0.8m
+.end

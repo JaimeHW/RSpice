@@ -1,0 +1,278 @@
+schema = "rspice-mixed-tolerance/1"
+# buck_ctrl*.vams: `timescale 1ps/1ps; one tick is 31.25 ns.
+time_precision = 1e-12
+
+# --- regulation --------------------------------------------------------------
+# The integral law drives the mean sampled code to ref = 922: vout = 922/512.
+
+[[q]]
+id = "vss"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [4e-4, 5e-4]
+oracle = "O6"
+expect = "c06::vss"
+abs = 6e-3
+why = "ADC LSB 1.95 mV + sampling-phase ripple ±3 mV (2 ohm load, settled)"
+
+[[q]]
+id = "vss_step"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [7.5e-4, 8e-4]
+oracle = "O6"
+expect = "c06::vss"
+abs = 6e-3
+why = "as vss, settled again after the 1 ohm step"
+
+# --- digital timing --------------------------------------------------------
+
+[[q]]
+id = "tper"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "period"
+nets = ["xctrl.hs__event_0"]
+window = [4e-4, 5e-4]
+oracle = "O6"
+expect = "c06::tper"
+abs = 1e-12
+why = "hs rises at tick 2 of every 64-tick period: 2 us exactly"
+
+[[q]]
+id = "dead"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "events"
+nets = ["xctrl.ls__event_0"]
+window = [4e-4, 4.2e-4]
+lattice = { t0 = 0.0, period = 3.125e-8 }
+oracle = "O6"
+expect = "c06::dead"
+edge_abs = 1e-12
+why = "ls rises 2 ticks (62.5 ns) after each hs fall and falls 2 ticks before the next hs rise; every edge on the 31.25 ns tick"
+
+# --- inductor current (settled, 2 ohm) ---------------------------------------
+# The design's ripple quantity is peak-to-peak i(L) against
+# (Vin − Vout)·D·T/L = 0.1047·(22u/L) A, rel 10 %. The harness measures one
+# extreme per quantity, so `ripple` measures −max(i) and expects
+# −(min(i) + 0.1047·22u/L), the minimum taken from the same run and window:
+# that is the peak-to-peak check, with 10 % of 0.1047 A as its allowance.
+
+[[q]]
+id = "ripple"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "min"
+signal = "-i(lbuck)"
+window = [4e-4, 5e-4]
+oracle = "O6"
+expect = "c06::ripple"
+abs = 1.047e-2
+why = "peak-to-peak i(L) = (Vin − Vout)·D·T/L = 0.1047 A, rel 10 % for losses and dead time (design)"
+
+[[q]]
+id = "ilmean"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "i(lbuck)"
+window = [4e-4, 5e-4]
+oracle = "O6"
+expect = "c06::ilmean"
+abs = 3e-3
+why = "charge balance: the mean inductor current is the load current (922/512)/2 = 0.9004 A; vout's 6 mV allowance over 2 ohm"
+
+
+# --- load-step envelope: one-period means of v(vout) -------------------------
+
+[[q]]
+id = "env500"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5e-4, 5.02e-4]
+oracle = "O1"
+ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+abs = 0.010
+why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+
+[[q]]
+id = "env510"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5.1e-4, 5.12e-4]
+oracle = "O1"
+ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+abs = 0.010
+why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+
+[[q]]
+id = "env530"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5.3e-4, 5.32e-4]
+oracle = "O1"
+ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+abs = 0.010
+why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+
+[[q]]
+id = "env560"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5.6e-4, 5.62e-4]
+oracle = "O1"
+ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+abs = 0.010
+why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+
+[[q]]
+id = "env620"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [6.2e-4, 6.22e-4]
+oracle = "O1"
+ref = { vdig = "ref/vdig.tran.O1.out", vams = "ref/vdig.tran.O1.out" }
+abs = 0.010
+why = "the averaged model (O6 averaged, solved by ngspice): period averaging, ADC quantization and dither"
+
+[[q]]
+id = "env500"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5e-4, 5.02e-4]
+oracle = "O2"
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+abs = 0.005
+why = "the same switching circuit under the same digital law (d_cosim)"
+
+[[q]]
+id = "env510"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5.1e-4, 5.12e-4]
+oracle = "O2"
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+abs = 0.005
+why = "the same switching circuit under the same digital law (d_cosim)"
+
+[[q]]
+id = "env530"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5.3e-4, 5.32e-4]
+oracle = "O2"
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+abs = 0.005
+why = "the same switching circuit under the same digital law (d_cosim)"
+
+[[q]]
+id = "env560"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [5.6e-4, 5.62e-4]
+oracle = "O2"
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+abs = 0.005
+why = "the same switching circuit under the same digital law (d_cosim)"
+
+[[q]]
+id = "env620"
+analysis = "tran"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [6.2e-4, 6.22e-4]
+oracle = "O2"
+ref = { vdig = "ref/vdig.tran.O2.out", vams = "ref/vdig.tran.O2.out" }
+abs = 0.005
+why = "the same switching circuit under the same digital law (d_cosim)"
+
+# --- checkpoint / resume -----------------------------------------------------
+# The resume-equals-uninterrupted check (`identical`) has no evaluator in the
+# harness (reported gap). Instead both runs are held to O6: the uninterrupted
+# run with the checkpoint schedule, and the run resumed from 400 us.
+
+[[q]]
+id = "vss_step"
+analysis = "ckpt"
+variants = ["vdig", "vams"]
+kind = "mean"
+signal = "v(vout)"
+window = [7.5e-4, 8e-4]
+oracle = "O6"
+expect = "c06::vss"
+abs = 6e-3
+why = "the uninterrupted run, settled after the 1 ohm step"
+
+[[q]]
+id = "resumed"
+analysis = "ckpt"
+variants = ["vdig", "vams"]
+kind = "per_trial"
+of = { kind = "mean", signal = "v(vout)", window = [7.5e-4, 8e-4] }
+trials = 1
+oracle = "O6"
+expect = "c06::vss"
+abs = 6e-3
+why = "the run resumed from the 400 us checkpoint reaches the same regulation after the step"
+
+# --- Monte Carlo: L and C at 10 % sigma ------------------------------------
+
+[[q]]
+id = "vss"
+analysis = "mc-tran"
+variants = ["vdig", "vams"]
+kind = "per_trial"
+of = { kind = "mean", signal = "v(vout)", window = [4e-4, 5e-4] }
+trials = 3
+oracle = "O6"
+expect = "c06::vss"
+abs = 6e-3
+why = "regulation does not depend on L or C"
+
+[[q]]
+id = "ripple"
+analysis = "mc-tran"
+variants = ["vdig", "vams"]
+kind = "per_trial"
+of = { kind = "min", signal = "-i(lbuck)", window = [4e-4, 5e-4] }
+trials = 3
+oracle = "O6"
+expect = "c06::ripple"
+abs = 1.047e-2
+why = "as ripple with the trial's L: 0.1047·(22u/L) A peak-to-peak"
+
+[[q]]
+id = "ilmean"
+analysis = "mc-tran"
+variants = ["vdig", "vams"]
+kind = "per_trial"
+of = { kind = "mean", signal = "i(lbuck)", window = [4e-4, 5e-4] }
+trials = 3
+oracle = "O6"
+expect = "c06::ilmean"
+abs = 3e-3
+why = "charge balance does not depend on L or C"

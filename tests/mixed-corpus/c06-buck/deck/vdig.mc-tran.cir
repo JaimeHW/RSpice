@@ -1,0 +1,10 @@
+* C6 digitally controlled buck converter, variant vdig, mc-tran
+* L and C each drawn with a 10 % sigma; three trials of the settled 2 ohm
+* operation (to 500 us) so the case runs in seconds.
+.param lv={agauss(22u,2.2u,1)} cv={agauss(4.7u,0.47u,1)}
+.hdl "../net/buck_ctrl.vams"
+.include ../net/stage.cir
+xctrl vout ghs gls buck_ctrl
+.mc 3 seed 5
+.tran 50n 0.5m
+.end

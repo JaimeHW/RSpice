@@ -1,0 +1,20 @@
+* C6 buck power stage (RSpice-authored): 5 V in, ideal switches with a
+* low-side body diode, 22 uH (20 mohm DCR) and 4.7 uF (10 mohm ESR), 2 ohm
+* load stepping to 1 ohm at 500 us. fb is vout. The decks name the
+* inductor and output capacitor values (lv, cv) and add the controller.
+.param vcc=5
+vin vin 0 5
+shs vin sw ghs 0 swp
+sls sw 0 gls 0 swp
+.model swp sw vt=2.5 vh=0.1 ron=20m roff=1e9
+dls 0 sw dbody
+.model dbody d(is=1e-12 rs=10m)
+lbuck sw lx {lv}
+rdcr lx vout 20m
+cout vout ce {cv}
+resr ce 0 10m
+rload vout 0 2
+sload vout lo2 gstep 0 swl
+rload2 lo2 0 2
+vstep gstep 0 pwl(0 0 500u 0 500.01u 1)
+.model swl sw vt=0.5 vh=0.1 ron=1m roff=1e9

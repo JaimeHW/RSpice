@@ -1,0 +1,10 @@
+* C6 digitally controlled buck converter, variant vdig, tran
+* Soft start to 1.8 V by ~400 us, load step 2 -> 1 ohm at 500 us. The design's
+* 3 ms (922-period soft start) is compressed: the reference ramps 16 codes per
+* period, so the case runs in seconds.
+.param lv=22u cv=4.7u
+.hdl "../net/buck_ctrl.vams"
+.include ../net/stage.cir
+xctrl vout ghs gls buck_ctrl
+.tran 50n 0.8m
+.end

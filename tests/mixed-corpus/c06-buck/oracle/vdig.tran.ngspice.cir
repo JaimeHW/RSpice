@@ -1,0 +1,35 @@
+* C6 buck converter: averaged model (design §3 C6 "O6 averaged"), solved by ngspice
+* RSpice-authored. The period-averaged switch node drives the same L, C and
+* loads as net/stage.cir:
+*   v(sw) = vin·duty − (60/64)·ron·i − (4/64)·Vf(i)
+* (d ticks through the high-side switch, 60 − d through the low-side switch,
+* four dead ticks through the body diode; duty clamped to 1..58 ticks). The
+* controller is the continuous form of the per-period integral law:
+* d(duty·1024)/dt = fs/64·(ref − 512·v(fb)), with the feedback through a
+* one-period first-order Padé delay and the soft-start staircase replaced by
+* its mean (16 codes per period, centred half a period early).
+.param fs=500k td=2u
+vin vin 0 5
+vref ref 0 pwl(0 8 114.25u 922 1 922)
+bfb fbu 0 v = v(vout)
+rpd fbu fblp 1
+cpd fblp 0 {td/2}
+bfd fbd 0 v = 2*v(fblp) - v(fbu)
+gint 0 dq value = {fs/64}*(v(ref) - 512*v(fbd))
+cint dq 0 1
+bsw swa 0 v = 5*min(max(v(dq)/1024, 1/64), 58/64) - (60/64)*0.02*i(vsense)
++ - (4/64)*(0.025865*ln(max(i(vsense), 1e-6)/1e-12 + 1) + 0.01*max(i(vsense), 0))
+vsense swa sw 0
+lbuck sw lx 22u
+rdcr lx vout 20m
+cout vout ce 4.7u
+resr ce 0 10m
+rload vout 0 2
+sload vout lo2 gstep 0 swl
+rload2 lo2 0 2
+vstep gstep 0 pwl(0 0 500u 0 500.01u 1)
+.model swl sw vt=0.5 vh=0.1 ron=1m roff=1e9
+.ic v(dq)=0 v(vout)=0 v(fblp)=0
+.tran 50n 0.8m uic
+.save v(vout)
+.end

@@ -1,0 +1,39 @@
+* C6 buck converter, variants vdig and vams, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* The same power stage (../../net/stage.cir) under the digital half of the
+* controller (buck_digital.v) in d_cosim. A B-source quantizer gives it the
+* code the RSpice controller computes from V(fb) (round(V·512), clipped to
+* 0..1023) as ten bits through adc_bridges; the gate outputs reach the
+* switch controls through a dac_bridge 0/vcc (X at vcc/2), 1 ps edges, behind
+* 20 ohm, as the built-in D/A converters do. d_cosim's output delay is its
+* 1 ps minimum. TMAX 10 ns keeps the quantized code current at the sample.
+* The capture keeps at most 20 001 rows of this run (uniform by index), which
+* drops switching corners, so only window means of v(vout) are compared.
+.param lv=22u cv=4.7u
+.include ../../net/stage.cir
+
+bcode qc 0 v = min(max(floor(v(vout)*512 + 0.5), 0), 1023)
+bb9 b9 0 v = floor(v(qc)/512) - 2*floor(v(qc)/1024)
+bb8 b8 0 v = floor(v(qc)/256) - 2*floor(v(qc)/512)
+bb7 b7 0 v = floor(v(qc)/128) - 2*floor(v(qc)/256)
+bb6 b6 0 v = floor(v(qc)/64) - 2*floor(v(qc)/128)
+bb5 b5 0 v = floor(v(qc)/32) - 2*floor(v(qc)/64)
+bb4 b4 0 v = floor(v(qc)/16) - 2*floor(v(qc)/32)
+bb3 b3 0 v = floor(v(qc)/8) - 2*floor(v(qc)/16)
+bb2 b2 0 v = floor(v(qc)/4) - 2*floor(v(qc)/8)
+bb1 b1 0 v = floor(v(qc)/2) - 2*floor(v(qc)/4)
+bb0 b0 0 v = v(qc) - 2*floor(v(qc)/2)
+aq [b9 b8 b7 b6 b5 b4 b3 b2 b1 b0] [c9 c8 c7 c6 c5 c4 c3 c2 c1 c0] adc_bit
+.model adc_bit adc_bridge(in_low = 0.5 in_high = 0.5)
+
+actl [c9 c8 c7 c6 c5 c4 c3 c2 c1 c0] [d_hs d_ls] buck
+.model buck d_cosim simulation="ivlng" sim_args=["buck_digital"] delay=1e-12
+
+agate [d_hs d_ls] [hs_h ls_h] dac_gate
+.model dac_gate dac_bridge(out_low = 0 out_high = 5 out_undef = 2.5
++ t_rise = 1e-12 t_fall = 1e-12)
+rhs hs_h ghs 20
+rls ls_h gls 20
+
+.tran 50n 0.8m 0 10n
+.save v(vout)
+.end

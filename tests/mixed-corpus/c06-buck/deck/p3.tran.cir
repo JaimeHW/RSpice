@@ -1,0 +1,9 @@
+* C6 digitally controlled buck converter, variant p3 (supply-aware gate-drive
+* connect module, P3.2), tran
+.param lv=22u cv=4.7u
+.hdl "../net/buck_ctrl_p3.vams"
+.include ../net/stage.cir
+.options connectrules=gate_rules
+xctrl vout ghs gls buck_ctrl
+.tran 50n 0.8m
+.end
