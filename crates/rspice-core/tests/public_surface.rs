@@ -63,8 +63,27 @@ use rspice_core::analysis::harmonic_balance::{
 // transient post-processor. Reconciled their seven added source declarations
 // against the prior five-item gap. Four further AC/noise table measurement
 // adapters (scalar and continuous) serve CLI run/frequency.rs while keeping
-// resolved parameter snapshots internal. The census is 5,560, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5560;
+// resolved parameter snapshots internal. The census was 5,560, with no slack.
+// The 7-9 October checkpoint, stability and observation work added 111 public
+// statements and removed 14; two serde helpers are narrowed again. The rest
+// have callers outside the crate:
+// - rspice-simulation: streamed transient checkpoints (start, stream,
+//   observer, request validation, runner), transient event changes, impulse
+//   trace views and Fourier impulse analysis, stability margins and pole
+//   spectra, control analysis classification, output-schedule errors.
+// - rspice-cli: control analysis naming and support checks, Touchstone
+//   versions, numeric JSON documents and decimal rounding checks, RAW axis and
+//   coordinate validation, circuit storage re-exports, circuit-pole evidence.
+// - rspice-python, rspice-results, rspice-formats, rspice-engine-adapter and
+//   rspice-simulation-contract: stability verdicts and assessments, pole
+//   spectra, voltage impulse traces, Monte Carlo documents with units, the
+//   document version, and frequency-table parameter names.
+// - The XSPICE code-model API: analog input thresholds and their behaviour,
+//   rational transfer descriptors, and committed/other digital drivers.
+// - Core integration tests: scheduler checkpoints, pole-spectrum runners,
+//   mixed observer/bridge controls and small-signal descriptors.
+// The census is 5,655, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5655;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

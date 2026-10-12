@@ -10,14 +10,14 @@ const VERSION: u32 = 1;
 // survive a 64-bit desktop / 32-bit Wasm boundary without becoming a real index.
 pub(super) mod target_index {
     use serde::{Deserialize, Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(value: &usize, serializer: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(value: &usize, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_u64(if *value == usize::MAX {
             u64::MAX
         } else {
             *value as u64
         })
     }
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<usize, D::Error> {
         let value = u64::deserialize(deserializer)?;
         if value == u64::MAX {
             return Ok(usize::MAX);
