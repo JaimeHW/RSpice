@@ -182,6 +182,46 @@ fn policies() -> [crate::quantity::QuantityPresentationPolicy; 2] {
     [strict, inferring]
 }
 
+#[test]
+fn transient_checkpoint_interval_edit_reaches_the_authored_plan() {
+    let mut route = Route::analyses(AnalysisKind::Transient);
+    let selected = route.app.state.workbench.active_analysis_instance.unwrap();
+    route
+        .app
+        .state
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .unwrap()
+        .edit(selected, |draft| {
+            let AnalysisDraft::Transient(draft) = draft else {
+                unreachable!()
+            };
+            draft.checkpoint = Some(Default::default());
+        })
+        .unwrap();
+    route.pass(Vec::new());
+    route.pass(Vec::new());
+    route.retype("Checkpoint interval", "7n");
+    let plan = route.app.state.sim_setup.stable_analysis_plan().unwrap();
+    let instance = plan
+        .instances()
+        .iter()
+        .find(|instance| instance.id() == selected)
+        .unwrap();
+    let AnalysisDraft::Transient(draft) = instance.draft() else {
+        unreachable!()
+    };
+    let interval = draft
+        .checkpoint
+        .as_ref()
+        .unwrap()
+        .capture_interval()
+        .unwrap()
+        .unwrap();
+    assert!((interval - 7e-9).abs() < 1e-23);
+}
+
 /// A spelling the deck already reads is kept exactly as it was typed.
 ///
 /// Blurring rewrote every quantity field that parsed to `{value:.17e}`, so a

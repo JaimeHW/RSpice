@@ -17,6 +17,7 @@ mod fourier;
 mod harmonic_balance;
 mod monte_carlo;
 pub(super) use monte_carlo::checkpoint_sources;
+pub(super) use transient::checkpoint_sources as transient_checkpoint_sources;
 mod noise;
 mod operating_point;
 mod optimization;

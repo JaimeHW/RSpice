@@ -19,6 +19,7 @@ mod pages;
 mod participation;
 mod plan_issue_wording;
 mod plan_manager;
+mod transient_checkpoint_exchange;
 mod variable_import;
 mod workflows;
 mod workload;
@@ -369,6 +370,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// stated its refusal is drawn on one route.
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
     checkpoint_exchange::poll(ctx, app);
+    transient_checkpoint_exchange::poll(ctx, app);
     simulation_workflow_dialog(ctx, app);
     analysis_catalog(ctx, app);
     drain_lifecycle_refusal(ctx, &mut app.state);
@@ -2381,6 +2383,15 @@ fn analysis_form_body(
             if let AnalysisDraft::MonteCarlo(setup) = draft {
                 *checkpoint_action =
                     analysis_form::checkpoint_sources(ui, setup, &app.state.simulation, selected);
+            }
+            if let AnalysisDraft::Transient(setup) = draft {
+                *checkpoint_action = analysis_form::transient_checkpoint_sources(
+                    ui,
+                    setup,
+                    &app.state.simulation,
+                    selected,
+                )
+                .map(checkpoint_exchange::Action::Transient);
             }
             *option_edits = analysis_form::options::fields(ui, app, draft, selected);
         })

@@ -62,6 +62,9 @@ use std::path::Path;
 
 use egui::{Context, Id};
 
+mod binary;
+pub(crate) use binary::{open_binary_file, take_opened_binary};
+
 /// What a picker offers, and how its refusals name the file.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FileKind {
@@ -214,6 +217,7 @@ pub(crate) fn take_saved(ctx: &Context, id: Id) -> Option<Outcome<SavedFile>> {
 pub(crate) fn discard_exchange(ctx: &Context, id: Id) {
     ctx.data_mut(|data| {
         data.remove::<Mailbox<OpenedFile>>(id);
+        data.remove::<Mailbox<binary::OpenedBinaryFile>>(id);
         data.remove::<Mailbox<SavedFile>>(id);
     });
 }
@@ -386,15 +390,26 @@ fn decode_bounded_utf8(bytes: Vec<u8>, kind: FileKind, max_bytes: usize) -> Resu
 /// without being loaded.
 #[cfg(not(target_arch = "wasm32"))]
 fn read_bounded_utf8(path: &Path, kind: FileKind, max_bytes: usize) -> Result<String, String> {
+    decode_bounded_utf8(read_bounded_bytes(path, kind, max_bytes)?, kind, max_bytes)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_bounded_bytes(path: &Path, kind: FileKind, max_bytes: usize) -> Result<Vec<u8>, String> {
     use std::io::Read as _;
 
     let file = std::fs::File::open(path)
         .map_err(|error| format!("{} could not be opened: {error}", kind.subject))?;
     let mut bytes = Vec::new();
-    file.take((max_bytes + 1) as u64)
+    file.take((max_bytes as u64).saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(|error| format!("{} could not be read: {error}", kind.subject))?;
-    decode_bounded_utf8(bytes, kind, max_bytes)
+    if bytes.len() > max_bytes {
+        return Err(format!(
+            "{} exceeds the {max_bytes} byte limit.",
+            kind.subject
+        ));
+    }
+    Ok(bytes)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

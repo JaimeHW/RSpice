@@ -837,7 +837,13 @@ published packed image in a separate transient queue. Receiving run budgets
 apply to bytes and decoded state; cancelled runs preserve previously delivered
 images. Native request/transport tests cover mixed HDL-to-SPICE continuation and
 horizon extension. Browser transport is wired separately and requires browser
-runtime qualification; UI checkpoint selection and durable retention remain open.
+runtime qualification. Project results retain accepted images and imported
+checkpoint libraries. The transient editor provides bounded capture schedules,
+per-point resume selection, binary import/export, and accepted-time inspection.
+`Engine::validate_transient_checkpoint_request` checks the resolved source and
+numerical policy without executing a transient; runtime restore still validates
+every saved state contract. `NOISEFMAX` stream state and unversioned live host
+resources remain unsupported for checkpoint continuation.
 
 The internal HDL signal-store checkpoint retains typed signal values, each
 driver's contribution (including never-driven state), analog samples, activation

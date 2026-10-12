@@ -7,6 +7,7 @@ use crate::state::MonteCarloCheckpointEvidence;
 use crate::workbench::{AppState, RSpiceApp};
 
 pub(super) enum Action {
+    Transient(super::transient_checkpoint_exchange::Action),
     Import,
     Export(MonteCarloCheckpointEvidence),
     Inspect(String, MonteCarloCheckpointEvidence),
@@ -14,6 +15,7 @@ pub(super) enum Action {
 }
 pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
     match action {
+        Action::Transient(action) => super::transient_checkpoint_exchange::apply(ctx, app, action),
         Action::Import => begin_import(ctx, &mut app.state),
         Action::Export(checkpoint) => begin_export(ctx, &mut app.state, &checkpoint),
         Action::Inspect(label, checkpoint) => inspect(ctx, &mut app.state, label, checkpoint),

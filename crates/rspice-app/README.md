@@ -120,6 +120,28 @@ CSV retain those three parent identities alongside the selected startup policy.
 Older results without parent metadata still load; older results without a complete
 source-bound solver state cannot supply a previous guess.
 
+## Transient checkpoints
+
+In the transient analysis form, enable **Retain checkpoints** and set the
+**Checkpoint interval**. Capture follows absolute simulation time and includes
+the requested stop time. Each image records an accepted solver boundary, which
+can fall just after its nominal capture time. The latest complete image survives
+Stop, terminal errors, waveform updates, and project recovery.
+
+Under **Resume transient**, select retained images or import `.rspice-tran`
+files. Inspection shows the accepted time and content identity; export preserves
+the packed binary image. Imported images are saved with the project. Resume
+requires a stop time after the selected state. The new run contains the continued
+trajectory; earlier samples remain in the original run.
+
+For a Run Set, every requested point must match exactly one selected image.
+Preparation checks the materialized circuit, effective temperature/supply, and
+resolved solver policy. Missing, ambiguous, incompatible, or unused selections
+are errors. Clear the selection to start fresh. Fourier and FFT windows cannot
+begin before the resumed trajectory. `NOISEFMAX` and models with unversioned live
+resource state still cannot be checkpointed. Browser runtime and physical tablet
+qualification are separate from native tests and WebAssembly compilation.
+
 ## PSS in configured studies
 
 Monte Carlo and optimization can select shooting PSS as a base. The study freezes
