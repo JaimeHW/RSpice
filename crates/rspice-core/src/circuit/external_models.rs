@@ -217,8 +217,14 @@ impl XspiceAcceptanceRollback {
 /// `xspice_evaluation_error` is deliberately not part of this: the image the
 /// device snapshot restored did not carry it either, so an evaluation failure
 /// inside a trial stays reported rather than being swallowed with the state.
+///
+/// An instance whose transient probes run on the live instance
+/// ([`crate::xspice::XspiceInstance::runs_probe_on_live_instance`]) has no
+/// entry: the trial writes nothing to it that the next evaluation does not
+/// overwrite, and holding a reference here would make that write copy the
+/// whole instance only to drop the copy again at the restore.
 pub(crate) struct XspiceTrialState {
-    instances: Vec<SharedXspiceInstance>,
+    instances: Vec<Option<SharedXspiceInstance>>,
     values: SharedXspiceEventValues,
     queue: SharedXspiceEventQueue,
 }
@@ -2051,7 +2057,11 @@ impl CircuitData {
     /// Capture the state a trial evaluation can write. See [`XspiceTrialState`].
     pub(crate) fn capture_xspice_trial_state(&self) -> XspiceTrialState {
         XspiceTrialState {
-            instances: self.xspice_instances.clone(),
+            instances: self
+                .xspice_instances
+                .iter()
+                .map(|instance| (!instance.probes_on_live_instance()).then(|| instance.clone()))
+                .collect(),
             values: self.scheduler.xspice_event_values.clone(),
             queue: self.scheduler.xspice_event_queue.clone(),
         }
@@ -2059,7 +2069,11 @@ impl CircuitData {
 
     /// Put back what a trial evaluation wrote.
     pub(crate) fn restore_xspice_trial_state(&mut self, trial: XspiceTrialState) {
-        self.xspice_instances = trial.instances;
+        for (instance, image) in self.xspice_instances.iter_mut().zip(trial.instances) {
+            if let Some(image) = image {
+                *instance = image;
+            }
+        }
         self.scheduler.xspice_event_values = trial.values;
         self.scheduler.xspice_event_queue = trial.queue;
     }

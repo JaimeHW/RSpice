@@ -921,6 +921,9 @@ pub struct XspiceInstance {
     /// direction only — set when in doubt — and it is maintained in lockstep
     /// with `last_event_input_signature` so the two never disagree.
     event_inputs_dirty: bool,
+    /// The model's [`super::CodeModel::probe_writes_only_outputs`], read once:
+    /// a transient probe of this instance may run on the live instance.
+    probe_writes_only_outputs: bool,
     /// Has been initialized
     initialized: bool,
     /// A coupled trial has bound this instance's declared input thresholds.
@@ -1359,6 +1362,7 @@ impl XspiceInstance {
             }
         }
 
+        let probe_writes_only_outputs = model.probe_writes_only_outputs();
         Ok(Self {
             name,
             model,
@@ -1375,6 +1379,7 @@ impl XspiceInstance {
             // No signature has been recorded, so the first evaluation must
             // happen. Nothing else establishes that base case.
             event_inputs_dirty: true,
+            probe_writes_only_outputs,
             initialized: false,
             mixed_input_thresholds_bound: false,
         })
@@ -2123,6 +2128,10 @@ impl XspiceInstance {
             }
         }
 
+        if self.runs_probe_on_live_instance(analysis, phase) {
+            return self.evaluate_output_only_probe();
+        }
+
         let context_before_evaluate = self.context.clone();
         match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
             Ok(Ok(())) => {
@@ -2146,6 +2155,56 @@ impl XspiceInstance {
             }
             Err(payload) => {
                 self.context = context_before_evaluate;
+                Err(self.model_panic_error("evaluation", payload))
+            }
+        }
+    }
+
+    /// Whether an evaluation in `phase` may run on this live instance rather
+    /// than on a copy a rollback discards: a transient probe of a model that
+    /// declares [`super::CodeModel::probe_writes_only_outputs`]. Such a probe
+    /// leaves nothing the next evaluation of the instance does not overwrite,
+    /// so the circuit's probe image need not hold the instance at all.
+    #[inline]
+    pub(crate) fn runs_probe_on_live_instance(
+        &self,
+        analysis: AnalysisType,
+        phase: EvaluationPhase,
+    ) -> bool {
+        self.probe_writes_only_outputs
+            && analysis == AnalysisType::Transient
+            && phase == EvaluationPhase::RollbackableProbe
+    }
+
+    /// Whether this instance's transient probes run on the live instance; see
+    /// [`Self::runs_probe_on_live_instance`].
+    #[inline]
+    pub(crate) fn probes_on_live_instance(&self) -> bool {
+        self.probe_writes_only_outputs
+    }
+
+    /// The model call of [`Self::evaluate`] for a probe that writes only its
+    /// outputs. A failing call puts back the outputs alone, which by the
+    /// model's declaration is the whole of what it could have written; the
+    /// full-context backup an ordinary evaluation takes would restore the same
+    /// image at the cost of copying every part of the context.
+    fn evaluate_output_only_probe(&mut self) -> CmResult<()> {
+        let outputs_before_evaluate = self.context.capture_outputs();
+        #[cfg(debug_assertions)]
+        let context_before_evaluate = self.context.clone();
+        let result = catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context)));
+        #[cfg(debug_assertions)]
+        self.context
+            .debug_assert_only_outputs_written(&context_before_evaluate, self.model.name());
+        match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => {
+                self.context.restore_outputs(outputs_before_evaluate);
+                self.port_context_solution_num_nodes = None;
+                Err(err)
+            }
+            Err(payload) => {
+                self.context.restore_outputs(outputs_before_evaluate);
                 Err(self.model_panic_error("evaluation", payload))
             }
         }

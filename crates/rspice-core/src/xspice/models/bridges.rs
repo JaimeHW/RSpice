@@ -114,6 +114,11 @@ impl CodeModel for AdcBridge {
         XspiceCheckpointSupport::Serializable
     }
 
+    /// A probe reads the input and commits nothing: no output, state or event.
+    fn probe_writes_only_outputs(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &str {
         "adc_bridge"
     }
@@ -1441,6 +1446,13 @@ fn dac_bridge_out_undef(ctx: &CmContext, out_low: Value, out_high: Value) -> CmR
 impl CodeModel for DacBridge {
     fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
         XspiceCheckpointSupport::Serializable
+    }
+
+    /// A transient probe sets every output element from the accepted ramp
+    /// state and its inputs; the ramp state and the completion breakpoint are
+    /// written only outside a probe (see `evaluate_dac_bridge`).
+    fn probe_writes_only_outputs(&self) -> bool {
+        true
     }
 
     fn name(&self) -> &str {

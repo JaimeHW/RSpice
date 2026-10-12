@@ -706,6 +706,22 @@ pub trait CodeModel: Send + Sync {
         false
     }
 
+    /// Whether a [`super::EvaluationPhase::RollbackableProbe`] evaluation of
+    /// this model writes nothing but its analog output values and partials.
+    ///
+    /// Such a probe changes no state, integer state, event, breakpoint,
+    /// history, transition or resource, and reads no output value the model
+    /// wrote earlier. Nothing it leaves behind outlives the next evaluation,
+    /// which overwrites every output the probe set, so the engine may run the
+    /// probe on the live instance instead of on a copy it then discards.
+    ///
+    /// The default is false. A model whose probe does anything else -- an
+    /// event it schedules, a state it advances, a previous output it reads --
+    /// must keep it.
+    fn probe_writes_only_outputs(&self) -> bool {
+        false
+    }
+
     /// Whether this code model needs global conservative Newton damping.
     ///
     /// Most XSPICE models are behavioral sources with explicit operating-point

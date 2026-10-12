@@ -129,7 +129,13 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     // Shared with the circuit until something writes through it. Capture is a
     // reference-count bump per instance; the copy is deferred to whatever the
     // step attempt actually touches. See `SharedXspiceInstance`.
-    xspice_instances: Vec<SharedXspiceInstance>,
+    //
+    // `None` is an instance the image does not hold: a transient trial image
+    // of a circuit whose code models are evaluated only by Newton probes
+    // leaves out the instances whose probes run on the live instance, since
+    // nothing such a probe writes outlives the next evaluation. See
+    // `CircuitData::transient_trial_images_hold_live_probes`.
+    xspice_instances: Vec<Option<SharedXspiceInstance>>,
     // The event world, on the same terms: capture is two reference-count
     // bumps, and the copy is deferred to the first event the attempt drains
     // or schedules. D5 clause 1 asks that a rejected step roll the event
@@ -897,6 +903,36 @@ impl CircuitData {
         self.nonlinear_state_snapshot_impl(true)
     }
 
+    /// Whether a transient trial image must hold the instances whose probes
+    /// run on the live instance
+    /// ([`crate::xspice::XspiceInstance::runs_probe_on_live_instance`]).
+    ///
+    /// A trial image spans an attempted step, or a merit checkpoint inside
+    /// one, and is restored only before that attempt is accepted. When the
+    /// code models are evaluated independently of every other participant,
+    /// the only evaluations inside that span are Newton probes, so such an
+    /// instance holds nothing there the next evaluation does not overwrite
+    /// and the image need not hold it. Coupled event nets and Verilog-A or
+    /// mixed participants evaluate code models in other phases inside the
+    /// span (circuit trials, event-root inspection), and then every instance
+    /// is held.
+    pub(crate) fn transient_trial_images_hold_live_probes(&self) -> bool {
+        self.has_coupled_event_nets() || self.has_any_veriloga_devices()
+    }
+
+    /// Refill `image` with this circuit's instances, leaving out the ones
+    /// whose probes run on the live instance unless `hold_all`.
+    fn capture_xspice_instance_image(
+        &self,
+        image: &mut Vec<Option<SharedXspiceInstance>>,
+        hold_all: bool,
+    ) {
+        image.clear();
+        image.extend(self.xspice_instances.iter().map(|instance| {
+            (hold_all || !instance.probes_on_live_instance()).then(|| instance.clone())
+        }));
+    }
+
     fn nonlinear_state_snapshot_impl(
         &self,
         include_fixed_reactive_stores: bool,
@@ -934,7 +970,14 @@ impl CircuitData {
             iswitches: self.iswitches.clone(),
             generic_switches: self.generic_switches.clone(),
             behavioral_sources: self.behavioral_sources.clone(),
-            xspice_instances: self.xspice_instances.clone(),
+            xspice_instances: {
+                let mut instances = Vec::new();
+                self.capture_xspice_instance_image(
+                    &mut instances,
+                    include_fixed_reactive_stores || self.transient_trial_images_hold_live_probes(),
+                );
+                instances
+            },
             xspice_event_values: self.scheduler.xspice_event_values.clone(),
             xspice_event_queue: self.scheduler.xspice_event_queue.clone(),
             #[cfg(feature = "veriloga")]
@@ -1014,7 +1057,10 @@ impl CircuitData {
         snapshot
             .behavioral_sources
             .clone_from(&self.behavioral_sources);
-        snapshot.xspice_instances.clone_from(&self.xspice_instances);
+        self.capture_xspice_instance_image(
+            &mut snapshot.xspice_instances,
+            include_fixed_reactive_stores || self.transient_trial_images_hold_live_probes(),
+        );
         snapshot
             .xspice_event_values
             .clone_from(&self.scheduler.xspice_event_values);
@@ -1160,7 +1206,15 @@ impl CircuitData {
             switch.retain_initial_load_progress(phase);
         }
         self.behavioral_sources = snapshot.behavioral_sources;
-        self.xspice_instances = snapshot.xspice_instances;
+        for (instance, image) in self
+            .xspice_instances
+            .iter_mut()
+            .zip(snapshot.xspice_instances)
+        {
+            if let Some(image) = image {
+                *instance = image;
+            }
+        }
         self.scheduler.xspice_event_values = snapshot.xspice_event_values;
         self.scheduler.xspice_event_queue = snapshot.xspice_event_queue;
         // The recorded iterates were the rejected attempt's, and the attempt

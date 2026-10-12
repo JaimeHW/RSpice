@@ -56,6 +56,10 @@ impl CodeModel for MetadataOverlayModel {
         self.inner.can_skip_unchanged_event_inputs()
     }
 
+    fn probe_writes_only_outputs(&self) -> bool {
+        self.inner.probe_writes_only_outputs()
+    }
+
     fn requires_conservative_newton_damping(&self) -> bool {
         self.inner.requires_conservative_newton_damping()
     }

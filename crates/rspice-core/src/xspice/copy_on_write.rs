@@ -31,6 +31,13 @@ impl<T> CopyOnWrite<T> {
     pub(crate) fn new(value: T) -> Self {
         Self(Arc::new(value))
     }
+
+    /// Whether both handles still share one value: neither has been written
+    /// since one was cloned from the other.
+    #[cfg(debug_assertions)]
+    pub(crate) fn ptr_eq(a: &Self, b: &Self) -> bool {
+        Arc::ptr_eq(&a.0, &b.0)
+    }
 }
 
 impl<T> Clone for CopyOnWrite<T> {

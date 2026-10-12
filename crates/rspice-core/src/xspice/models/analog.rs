@@ -187,6 +187,10 @@ impl CodeModel for Gain {
         true
     }
 
+    fn probe_writes_only_outputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let gain = finite_analog_scalar_param(ctx, "gain", "gain")?;
         let in_offset = finite_analog_scalar_param(ctx, "gain", "in_offset")?;
@@ -340,6 +344,10 @@ impl CodeModel for Summer {
     }
 
     fn has_memoryless_linear_transient_stamp(&self) -> bool {
+        true
+    }
+
+    fn probe_writes_only_outputs(&self) -> bool {
         true
     }
 

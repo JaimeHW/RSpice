@@ -106,14 +106,21 @@ const MAX_INSTANCE_EVALUATIONS: u64 = 13_900;
 
 /// Ceiling on deep copies of an instance cell over the whole run.
 ///
-/// Measured at 13,398, a little under the evaluation count. That the two are
-/// close is the design working, not failing: an instance the settle loop
-/// writes to is usually one a rollback snapshot still shares, so that write
-/// pays for a copy. What copy-on-write removed was never those — it was the
-/// copy of the *other* seventy-odd instances a capture used to take whether or
-/// not they had moved. Reverting it puts this count at captures × instances,
-/// which is bounded below by the event-world copy count times the deck's 74
-/// instances, i.e. several times what it reads now.
+/// Measured at 13,398 when this ratchet landed, a little under the evaluation
+/// count. That the two were close was the design working, not failing: an
+/// instance the settle loop writes to is usually one a rollback snapshot still
+/// shares, so that write pays for a copy. What copy-on-write removed was never
+/// those — it was the copy of the *other* seventy-odd instances a capture used
+/// to take whether or not they had moved. Reverting it puts this count at
+/// captures × instances, which is bounded below by the event-world copy count
+/// times the deck's 74 instances, i.e. several times what it reads now.
+///
+/// Lowered from 13,800 to 6,700 when the deck's two bridges stopped being
+/// copied at every Newton probe: a model whose probe writes only its outputs
+/// is probed on the live instance, and neither the probe image nor the step
+/// image holds it (`CodeModel::probe_writes_only_outputs`). The count read
+/// 13,562 before that change and 6,492 after, with evaluations unchanged at
+/// 13,641; what remains is the gates' copies and the bridges' acceptance.
 ///
 /// Every write site shares this counter, not just the settle loop's:
 /// `mark_fanout_dirty`, timestep acceptance and the breakpoint drain all reach
@@ -129,7 +136,7 @@ const MAX_INSTANCE_EVALUATIONS: u64 = 13_900;
 /// uniquely owned, so the guard saves nothing *on this deck*. It is a real
 /// guard on decks with a different capture rhythm, but do not read a green
 /// build here as evidence that it is still in place.
-const MAX_INSTANCE_DEEP_COPIES: u64 = 13_800;
+const MAX_INSTANCE_DEEP_COPIES: u64 = 6_700;
 
 /// Ceiling on deep copies of the event world — the six resolved-value maps
 /// plus the scheduler — over the whole run.

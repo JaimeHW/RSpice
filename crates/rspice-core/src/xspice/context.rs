@@ -682,6 +682,10 @@ pub struct CmContext {
     static_rhs: Vec<(usize, Value)>,
 }
 
+/// A context's output values and partials, captured by
+/// [`CmContext::capture_outputs`].
+pub(crate) struct ContextOutputsImage(CopyOnWrite<HashMap<String, OutputValue>>);
+
 /// Serializable code-model context state captured in transient checkpoints.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CmContextCheckpoint {
@@ -2776,6 +2780,64 @@ impl CmContext {
         if !self.output_analog_transitions.is_empty() {
             self.output_analog_transitions.clear();
         }
+    }
+
+    /// The output values and partials alone: the whole of what a probe of a
+    /// model that declares [`super::CodeModel::probe_writes_only_outputs`]
+    /// can write. A reference-count bump, like every copy-on-write field.
+    pub(crate) fn capture_outputs(&self) -> ContextOutputsImage {
+        ContextOutputsImage(self.outputs.clone())
+    }
+
+    /// Put back outputs captured by [`Self::capture_outputs`].
+    pub(crate) fn restore_outputs(&mut self, image: ContextOutputsImage) {
+        self.outputs = image.0;
+    }
+
+    /// Debug-build check of the [`super::CodeModel::probe_writes_only_outputs`]
+    /// contract: everything but the outputs is what `before` held.
+    ///
+    /// Copy-on-write maps are compared by identity: `before` shares each of
+    /// them, so a write through this context would have copied the map it
+    /// wrote, and a setter that stores what is already there does not write.
+    #[cfg(debug_assertions)]
+    pub(crate) fn debug_assert_only_outputs_written(&self, before: &CmContext, model: &str) {
+        fn same<T>(a: &CopyOnWrite<T>, b: &CopyOnWrite<T>) -> bool {
+            CopyOnWrite::ptr_eq(a, b)
+        }
+        let unchanged = self.state == before.state
+            && self.state_prev == before.state_prev
+            && self.int_state == before.int_state
+            && self.pending_events.len() == before.pending_events.len()
+            && self.pending_real_events.len() == before.pending_real_events.len()
+            && self.requested_breakpoints == before.requested_breakpoints
+            && self.stamps == before.stamps
+            && self.rhs == before.rhs
+            && self.static_stamps == before.static_stamps
+            && self.static_rhs == before.static_rhs
+            && same(&self.inputs, &before.inputs)
+            && same(
+                &self.committed_digital_outputs,
+                &before.committed_digital_outputs,
+            )
+            && same(&self.other_digital_drivers, &before.other_digital_drivers)
+            && same(&self.inertial_outputs, &before.inertial_outputs)
+            && same(&self.transient_histories, &before.transient_histories)
+            && same(
+                &self.input_analog_vector_transitions,
+                &before.input_analog_vector_transitions,
+            )
+            && same(
+                &self.output_analog_transitions,
+                &before.output_analog_transitions,
+            )
+            && same(&self.resources, &before.resources)
+            && same(&self.params, &before.params);
+        debug_assert!(
+            unchanged,
+            "code model '{model}' declares that a probe writes only its outputs, \
+             but its probe wrote other context state"
+        );
     }
 
     //-------------------------------------------------------------------------
