@@ -6572,35 +6572,39 @@ struct VerificationCoverage {
 fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
     let run = app.state.simulation.active_run();
     let total = app.state.workspace.content.specs.len();
-    let values =
-        app.state
-            .workspace
-            .content
-            .specs
-            .iter()
-            .map(|spec| {
-                run.and_then(|run| {
-                    run.analyses.iter().find_map(|analysis| {
-                        if !analysis.success || analysis.provenance.is_none() {
-                            return None;
+    let values = app
+        .state
+        .workspace
+        .content
+        .specs
+        .iter()
+        .map(|spec| {
+            run.and_then(|run| {
+                run.analyses.iter().find_map(|analysis| {
+                    if !analysis.success || analysis.provenance.is_none() {
+                        return None;
+                    }
+                    analysis.measurements.iter().find_map(|measurement| {
+                        if measurement.name.eq_ignore_ascii_case(&spec.measurement) {
+                            // A measurement that missed its own GOAL/TOL or
+                            // FAILVALUE contract keeps its value: it was
+                            // executed, and it cannot pass.
+                            measurement
+                                .value_in_unit(&spec.unit)
+                                .ok()
+                                .flatten()
+                                .filter(|value| value.is_finite())
+                                .map(|value| {
+                                    (value, measurement.passed && measurement.error.is_none())
+                                })
+                        } else {
+                            None
                         }
-                        analysis.measurements.iter().find_map(|measurement| {
-                            if measurement.name.eq_ignore_ascii_case(&spec.measurement) {
-                                measurement.value_in_unit(&spec.unit).ok().flatten().filter(
-                                    |value| {
-                                        value.is_finite()
-                                            && measurement.passed
-                                            && measurement.error.is_none()
-                                    },
-                                )
-                            } else {
-                                None
-                            }
-                        })
                     })
                 })
             })
-            .collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
     let mapped = app
         .state
         .workspace
@@ -6617,7 +6621,9 @@ fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
         .specs
         .iter()
         .zip(&values)
-        .filter(|(spec, value)| value.is_some_and(|value| spec.passes(value)))
+        .filter(|(spec, value)| {
+            value.is_some_and(|(value, contract_held)| contract_held && spec.passes(value))
+        })
         .count();
     let pvt_points = run
         .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Corner))
