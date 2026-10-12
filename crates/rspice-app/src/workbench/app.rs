@@ -1474,6 +1474,9 @@ mod veriloga_cell_source_tests;
 mod veriloga_interface_tests;
 
 #[cfg(test)]
+mod veriloga_placement_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::product::ProcessCorner;

@@ -811,34 +811,58 @@ fn interface_strip(
     let messages = state.ui.messages();
     let veriloga = &state.ui.code_workspace.veriloga;
     let receipt = veriloga_receipt(veriloga, state.workspace.content.project.id(), selected);
-    let Some(finding) = interface_finding(veriloga, receipt, reference) else {
-        return;
-    };
-    let (text, tone, detail, offers_update) = match finding {
-        VerilogAInterfaceFinding::SchematicMismatch { schematic, module } => (
+    let (text, tone, detail, action) = match interface_finding(veriloga, receipt, reference) {
+        Some(VerilogAInterfaceFinding::SchematicMismatch { schematic, module }) => (
             messages.text(MessageId::VerilogAInterfaceMismatchStrip),
             t.color.err,
             Some(interface_mismatch_detail(reference, schematic, module)),
-            false,
+            StripAction::None,
         ),
-        VerilogAInterfaceFinding::Refused(reason) => (
+        Some(VerilogAInterfaceFinding::Refused(reason)) => (
             messages.format(
                 MessageId::VerilogAInterfaceRefusedStrip,
                 &[("reason", reason)],
             ),
             t.color.warn,
             None,
-            false,
+            StripAction::None,
         ),
-        VerilogAInterfaceFinding::SymbolDrift(drift) => (
+        Some(VerilogAInterfaceFinding::SymbolDrift(drift)) => (
             messages.format(
                 MessageId::VerilogASymbolStrip,
                 &[("drift", &symbol_drift_text(drift, messages))],
             ),
             t.color.warn,
             None,
-            true,
+            StripAction::UpdateSymbol,
         ),
+        // With nothing to fix, the compile result of a device New Verilog-A
+        // device… created hands it back to the schematic it came from.
+        None => {
+            let Some((receipt, target)) = receipt.and_then(|receipt| {
+                let handoff = receipt.placement.as_ref()?;
+                (&handoff.view == reference)
+                    .then(|| state.veriloga_placement_target(handoff))
+                    .flatten()
+                    .map(|target| (receipt, target))
+            }) else {
+                return;
+            };
+            let ports = receipt.compilation.report().abi.formal_ports.len();
+            let text = if ports == 1 {
+                messages.format(
+                    MessageId::VerilogAPlaceReadyOne,
+                    &[("cell", &reference.cell)],
+                )
+            } else {
+                messages.format(
+                    MessageId::VerilogAPlaceReady,
+                    &[("cell", &reference.cell), ("count", &ports.to_string())],
+                )
+            };
+            let place = messages.format(MessageId::VerilogAPlaceIn, &[("schematic", &target.cell)]);
+            (text, t.color.text_dim, None, StripAction::Place(place))
+        }
     };
     let (strip, response) = ui.allocate_exact_size(
         Vec2::new(
@@ -864,16 +888,25 @@ fn interface_strip(
             ))
             .layout(Layout::right_to_left(Align::Center)),
     );
-    let update = offers_update
-        && Button::new(&messages.text(MessageId::VerilogAUpdateSymbol))
+    let clicked = match &action {
+        StripAction::None => false,
+        StripAction::UpdateSymbol => Button::new(&messages.text(MessageId::VerilogAUpdateSymbol))
             .show(&mut actions)
-            .clicked();
+            .clicked(),
+        StripAction::Place(label) => Button::new(label).show(&mut actions).clicked(),
+    };
     let text_right = actions.min_rect().left().min(content.right()) - 8.0;
     let icon = egui::Rect::from_center_size(
         egui::pos2(content.left() + 7.0, content.center().y),
         Vec2::splat(14.0),
     );
-    crate::workbench::design_system::WorkbenchIcon::Warning.paint(ui.painter(), icon, tone);
+    let glyph = match action {
+        StripAction::Place(_) => crate::workbench::design_system::WorkbenchIcon::Instance,
+        StripAction::None | StripAction::UpdateSymbol => {
+            crate::workbench::design_system::WorkbenchIcon::Warning
+        }
+    };
+    glyph.paint(ui.painter(), icon, tone);
     let text_clip = egui::Rect::from_min_max(
         egui::pos2(icon.right() + 7.0, strip.top()),
         egui::pos2(text_right.max(icon.right() + 7.0), strip.bottom()),
@@ -888,9 +921,32 @@ fn interface_strip(
     if let Some(detail) = detail {
         response.on_hover_text(detail);
     }
-    if update {
-        state.update_active_veriloga_symbol();
+    if !clicked {
+        return;
     }
+    match action {
+        StripAction::None => {}
+        StripAction::UpdateSymbol => state.update_active_veriloga_symbol(),
+        StripAction::Place(_) => match state.place_offered_veriloga_device() {
+            Ok(armed) => {
+                state.push_user_message(ConsoleMessage::info(armed));
+                // The canvas takes the keyboard, as the shelf leaves it, so
+                // R, M and Esc work before the pointer reaches the sheet.
+                rspice_schematic_editor::view::canvas::request_focus(ui.ctx());
+            }
+            Err(error) => state.push_user_message(ConsoleMessage::warning(error)),
+        },
+    }
+}
+
+/// What the interface strip's one button does.
+enum StripAction {
+    /// The strip states a finding with nothing to press.
+    None,
+    /// Reconcile a hand-edited symbol with the module's ports.
+    UpdateSymbol,
+    /// Place the new device in the schematic named by the label.
+    Place(String),
 }
 
 fn current_diagnostics(

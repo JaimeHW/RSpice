@@ -69,7 +69,7 @@ fn conductance(module: &str, header: &str, declarations: &str) -> String {
 
 /// Compile the open view and publish the result through the frame loop's
 /// poll, exactly as a worker's answer is published.
-fn compile_and_publish(app: &mut RSpiceApp) {
+pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
     let selected = code_workspace::selected_veriloga_source(app).expect("a Verilog-A view is open");
     let receipt = code_workspace::compile_project_bundle_receipt(
         app.state.workspace.content.project.id(),
@@ -101,7 +101,7 @@ fn compile_and_publish(app: &mut RSpiceApp) {
 }
 
 /// Replace the open view's root source with `source`.
-fn edit_source(app: &mut RSpiceApp, source: &str) {
+pub(super) fn edit_source(app: &mut RSpiceApp, source: &str) {
     let selected = code_workspace::selected_veriloga_source(app).expect("a Verilog-A view is open");
     let path = selected.document().logical_path().to_owned();
     assert!(

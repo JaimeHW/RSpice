@@ -14,6 +14,7 @@ pub(in crate::workbench) mod sheets;
 pub(in crate::workbench) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 mod symbol;
+mod veriloga_placement;
 mod veriloga_symbol;
 pub(in crate::workbench) mod workspace;
 

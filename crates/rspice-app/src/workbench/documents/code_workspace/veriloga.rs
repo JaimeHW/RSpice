@@ -1106,10 +1106,16 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                                     "The module compiled, but its ports did not become the cell's interface: {reason}."
                                 )));
                             }
-                            super::veriloga_interface::with_interface_outcome(
+                            let receipt = super::veriloga_interface::with_interface_outcome(
                                 receipt,
                                 reference,
                                 applied.outcome,
+                            );
+                            super::veriloga_interface::offer_placement(
+                                &mut app.state.ui.code_workspace.veriloga,
+                                receipt,
+                                reference,
+                                report.abi.formal_ports.len(),
                             )
                         }
                         _ => receipt,
@@ -1433,6 +1439,7 @@ fn receipt_projection(
         diagnostics,
         compilation,
         interface: None,
+        placement: None,
     })
 }
 

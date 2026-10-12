@@ -13,6 +13,10 @@
 //! transaction. The draft is measured against the live catalog every frame,
 //! so a catalog that moves while the form is open is judged as it is now
 //! rather than refused for having moved.
+//!
+//! The schematic the form was opened from is remembered. Once the reader's
+//! own compile gives the module a port, the compile result offers to place
+//! the device there.
 
 use std::collections::HashSet;
 
@@ -33,24 +37,31 @@ use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::dialogs::state::NewVerilogADeviceFormState;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{
-    VerilogACompileReceipt, apply_receipt_interface, compile_project_bundle_receipt,
-    writable_libraries,
+    VerilogACompileReceipt, VerilogAPlacementHandoff, apply_receipt_interface,
+    compile_project_bundle_receipt, writable_libraries,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
-/// Open New Verilog-A device… on the library holding the active design.
+/// Open New Verilog-A device… on the library holding the active design,
+/// remembering the schematic it was opened from.
 pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
     let libraries = writable_libraries(&state.library_manager);
-    let active = &state.workspace.content.active_view.library;
+    let active = &state.workspace.content.active_view;
     let library = libraries
         .iter()
-        .find(|name| *name == active)
+        .find(|name| **name == active.library)
         .or_else(|| libraries.first())
         .cloned()
         .unwrap_or_default();
+    let origin = matches!(
+        state.workspace.content.active_view_type(),
+        ViewType::Schematic | ViewType::Testbench
+    )
+    .then(|| active.clone());
     state.dialogs.new_veriloga_device = NewVerilogADeviceFormState {
         open: true,
         library,
+        origin,
         ..NewVerilogADeviceFormState::default()
     };
 }
@@ -359,7 +370,15 @@ impl RSpiceApp {
         self.state.workspace.content.project_sources_dirty = true;
         self.state.library_manager = libraries;
         self.state.publish_project_library_mutation(prepared);
-        self.state.dialogs.new_veriloga_device = NewVerilogADeviceFormState::default();
+        let form = std::mem::take(&mut self.state.dialogs.new_veriloga_device);
+        // The starter compile above is not the reader's: the device is offered
+        // for placement after the first compile they start leaves it a port.
+        let handoffs = &mut self.state.ui.code_workspace.veriloga.placement_handoffs;
+        handoffs.retain(|handoff| handoff.view != reference);
+        handoffs.push(VerilogAPlacementHandoff {
+            view: reference.clone(),
+            schematic: form.origin,
+        });
         if library == VERILOGA_LIBRARY_NAME {
             self.persist_global_veriloga_library_with_feedback();
         }

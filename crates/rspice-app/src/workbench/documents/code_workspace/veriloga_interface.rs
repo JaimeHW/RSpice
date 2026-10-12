@@ -328,6 +328,33 @@ pub(crate) fn apply_receipt_interface(
     Ok(with_interface_outcome(receipt, reference, applied.outcome))
 }
 
+/// `receipt`, offering to place the device New Verilog-A device… created at
+/// `reference` when this compile is the first a reader started that leaves
+/// it placeable: its `ports` became the cell's interface, or agree with the
+/// schematic that defines it, and there is at least one. A starter compile
+/// at creation never comes through here, and the offer is made once.
+pub(crate) fn offer_placement(
+    state: &mut VerilogAWorkbenchState,
+    mut receipt: VerilogACompileReceipt,
+    reference: &CellViewRef,
+    ports: usize,
+) -> VerilogACompileReceipt {
+    let placeable = ports > 0
+        && matches!(
+            receipt.interface,
+            Some(VerilogAInterfaceOutcome::Defined | VerilogAInterfaceOutcome::MatchesSchematic)
+        );
+    if placeable
+        && let Some(index) = state
+            .placement_handoffs
+            .iter()
+            .position(|handoff| &handoff.view == reference)
+    {
+        receipt.placement = Some(state.placement_handoffs.remove(index));
+    }
+    receipt
+}
+
 /// Whether a schematic's interface and a module's agree: the same names in
 /// the same order, each pointing the same way. A supply pin is an `inout`
 /// port, because a module has no other way to declare one.

@@ -732,6 +732,9 @@ pub(crate) struct NewVerilogADeviceFormState {
     pub(crate) ports: String,
     /// Why the last commit was refused. Any edit clears it.
     pub(crate) error: Option<String>,
+    /// The schematic the form was opened from: where the device is offered
+    /// for placement once its module compiles with a port.
+    pub(crate) origin: Option<crate::state::CellViewRef>,
 }
 
 /// Draft for Create pins.

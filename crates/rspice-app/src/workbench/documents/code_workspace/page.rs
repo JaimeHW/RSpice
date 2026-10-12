@@ -187,6 +187,21 @@ pub struct VerilogACompileReceipt {
     /// What this compile did to its cell's interface. `None` for a compile
     /// that was not a cell view's published result.
     pub interface: Option<super::veriloga_interface::VerilogAInterfaceOutcome>,
+    /// The device this compile made placeable, for the editor to offer
+    /// "Place in <schematic>": the first clean compile a reader starts of a
+    /// device New Verilog-A device… created, once it has a port.
+    pub placement: Option<VerilogAPlacementHandoff>,
+}
+
+/// A device New Verilog-A device… created, and the schematic the form was
+/// opened from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogAPlacementHandoff {
+    /// The device's Verilog-A cell view.
+    pub view: crate::state::CellViewRef,
+    /// The schematic to place it in. `None` when the form was opened from
+    /// anything else; the design's top schematic is offered then.
+    pub schematic: Option<crate::state::CellViewRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +241,9 @@ pub struct VerilogAWorkbenchState {
     pub last_failure_token: Option<VerilogASourceOperationToken>,
     /// Where the open view's cell symbol stands against its interface.
     pub symbol_standing: super::veriloga_interface::VerilogASymbolStanding,
+    /// Devices New Verilog-A device… created whose module the reader has not
+    /// yet compiled into something placeable.
+    pub placement_handoffs: Vec<VerilogAPlacementHandoff>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
