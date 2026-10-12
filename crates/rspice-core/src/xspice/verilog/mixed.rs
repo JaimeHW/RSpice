@@ -3618,7 +3618,18 @@ impl MixedSignalHost {
             // movement may have happened in a Newton probe the solver has
             // already rolled back, and because a bridge that published before
             // it crossed on the circuit's own account and keeps its instant.
-            let carried = digital_feedback || scratch.ledger.carries(time_seconds, index);
+            //
+            // The endpoint is also the only instant for a crossing that
+            // leaves a threshold the accepted sample sat on exactly by no more
+            // than floating-point resolution: see `crossing_below_resolution`.
+            let carried = digital_feedback
+                || scratch.ledger.carries(time_seconds, index)
+                || (self.state.started
+                    && crossing_below_resolution(
+                        self.state.accepted_adc_voltages[index],
+                        voltage,
+                        threshold,
+                    ));
             let crossing = if carried {
                 time_seconds
             } else {
@@ -4899,6 +4910,33 @@ impl MixedSignalHost {
 /// disagree about whether a landing had been reached.
 fn endpoint_root_window(time: f64, start: f64, floor: f64) -> f64 {
     (64.0 * f64::EPSILON * time.abs().max(start.abs())).max(floor)
+}
+
+/// Whether both samples of a crossing lie within floating-point resolution of
+/// the threshold — 64 ulps of the larger magnitude, the trust
+/// [`endpoint_root_window`] gives an interpolation.
+///
+/// Such a crossing has no instant inside the interval: the signal never left
+/// the threshold by more than roundoff across it, so the interpolated root is
+/// roundoff too. Refining towards it cannot converge. A landed sample reads
+/// the threshold to within the same few ulps and the decision law may hold the
+/// old state there, so the next interval chases a root from that sample, one
+/// solver floor at a time. That pinned C4's `full` SAR at the floor from
+/// t = 0: its comparator output rests on exactly `vcc/2`, the converter's
+/// threshold, while the top plate is grounded, and drifts a few ulps either
+/// side of it at every step. The first instant the decision law reads the new
+/// state is the candidate endpoint, so the transition is dated there; its
+/// error is bounded by an interval across which the signal sat on the
+/// threshold.
+///
+/// A crossing with either sample farther away — including an edge driven
+/// through a converter resting on the threshold — is interpolated and refined
+/// as before.
+fn crossing_below_resolution(accepted: f64, voltage: f64, threshold: f64) -> bool {
+    let at_threshold = |sample: f64| {
+        (sample - threshold).abs() <= 64.0 * f64::EPSILON * threshold.abs().max(sample.abs())
+    };
+    at_threshold(accepted) && at_threshold(voltage)
 }
 
 /// Put the bits one settle moved, their crossing times, and how each of those
