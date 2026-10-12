@@ -2858,6 +2858,13 @@ mod tests {
     /// qbody and cb** are pre-overlap quantities in ngspice and map directly
     /// onto RSpice's charge.qb / gcb** (the overlap lump never touches the
     /// body row).
+    ///
+    /// The charge is ngspice's to 1e-6. ngspice's capacitances are not quite
+    /// the derivatives of that charge: central differences of qb give
+    /// cbgb -6.264765149e-15, cbdb -1.482517146e-15, cbsb -8.674656963e-15
+    /// and cbeb -2.308062309e-15, up to 4.7e-5 from ngspice's cb**. RSpice
+    /// stamps those derivatives (`derivative_tests` holds every entry to
+    /// that standard).
     #[test]
     fn body_charge_matches_ngspice_oracle_at_ramp_bias() {
         let model = B3SoiDdModel::from_params(&n1_params(), false, 300.15);
@@ -2879,28 +2886,30 @@ mod tests {
         )
         .charge
         .unwrap();
-        let ok = |actual: Value, oracle: Value| (actual - oracle).abs() <= 1e-6 * oracle.abs();
-        assert!(ok(charge.qb, -5.755219597e-15), "qb={:.9e}", charge.qb);
+        let within = |actual: Value, oracle: Value, rel: Value| {
+            (actual - oracle).abs() <= rel * oracle.abs()
+        };
         assert!(
-            ok(charge.gcbgb, -6.264670704e-15),
-            "gcbgb={:.9e}",
-            charge.gcbgb
+            within(charge.qb, -5.755219597e-15, 1e-6),
+            "qb={:.9e}",
+            charge.qb
         );
-        assert!(
-            ok(charge.gcbdb, -1.482516887e-15),
-            "gcbdb={:.9e}",
-            charge.gcbdb
-        );
-        assert!(
-            ok(charge.gcbsb, -8.674246038e-15),
-            "gcbsb={:.9e}",
-            charge.gcbsb
-        );
-        assert!(
-            ok(charge.gcbeb, -2.308017492e-15),
-            "gcbeb={:.9e}",
-            charge.gcbeb
-        );
+        // (stamped, ngspice cb**, central difference of qb)
+        for (name, stamped, ngspice, derivative) in [
+            ("gcbgb", charge.gcbgb, -6.264670704e-15, -6.264765149e-15),
+            ("gcbdb", charge.gcbdb, -1.482516887e-15, -1.482517146e-15),
+            ("gcbsb", charge.gcbsb, -8.674246038e-15, -8.674656963e-15),
+            ("gcbeb", charge.gcbeb, -2.308017492e-15, -2.308062309e-15),
+        ] {
+            assert!(
+                within(stamped, derivative, 1e-8),
+                "{name}={stamped:.9e} is not dqb/dv {derivative:.9e}"
+            );
+            assert!(
+                within(stamped, ngspice, 5e-5),
+                "{name}={stamped:.9e} strays from ngspice {ngspice:.9e}"
+            );
+        }
     }
 
     #[test]
