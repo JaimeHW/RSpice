@@ -166,6 +166,8 @@ Monte Carlo cell already runs its trials in parallel. Reports and
 `outcomes.tsv` are assembled in declared order, so they are the same for any
 N. Each `--record` rewrites a design's `outcomes.tsv` under an exclusive lock
 on the file itself, so the interpreter and native builds can record the same
-design at once.
+design at once. A recorded detail names files relative to its design (or to
+the corpus root), so a re-record on another machine or worktree leaves the
+table unchanged.
 
 Licensed under the [RSpice Personal Use License](../../LICENSE).

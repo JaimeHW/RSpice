@@ -7,7 +7,9 @@
 //! without being re-recorded. `run --record` rewrites the rows of the routes it
 //! ran from what it observed; the landing manager reviews that diff. The detail
 //! column is informational (it carries measured numbers that move in the last
-//! digit between machines) and is not compared.
+//! digit between machines) and is not compared; the paths it names are written
+//! relative to the design ([`normalize_paths`]) so a re-record on another
+//! machine or worktree does not churn the file.
 //!
 //! The interpreter and native routes are separate builds, so two runners may
 //! record one design at once. Each read-merge-write holds an exclusive lock on
@@ -269,6 +271,191 @@ pub fn record_locked(
     Ok(())
 }
 
+/// Rewrite the absolute paths in a cell's detail so the table reads the same
+/// on every machine and worktree. A path inside `design_dir` is written
+/// relative to it, any other relative to `corpus_root`; separators become `/`,
+/// `.` and `..` are resolved lexically, and a trailing `:line[:column]` is
+/// kept. Windows (`C:\`, `C:/`, `\\?\C:\`) and Unix spellings are both read
+/// whatever the host, and Windows components compare case-insensitively.
+pub fn normalize_paths(detail: &str, corpus_root: &str, design_dir: &str) -> String {
+    let (Some(corpus), Some(design)) = (Lexical::parse(corpus_root), Lexical::parse(design_dir))
+    else {
+        return detail.to_owned();
+    };
+    let mut out = String::with_capacity(detail.len());
+    let mut index = 0;
+    let mut previous = None;
+    while let Some(tail) = detail.get(index..).filter(|tail| !tail.is_empty()) {
+        if let Some(length) = path_token(tail, previous, &corpus) {
+            let token = &tail[..length];
+            match rewrite(token, &corpus, &design) {
+                Some(relative) => out.push_str(&relative),
+                None => out.push_str(token),
+            }
+            previous = token.chars().last();
+            index += length;
+            continue;
+        }
+        let character = tail.chars().next().expect("non-empty");
+        out.push(character);
+        previous = Some(character);
+        index += character.len_utf8();
+    }
+    out
+}
+
+/// An absolute path split into its root and lexically resolved components.
+#[derive(Debug, PartialEq)]
+struct Lexical {
+    /// The upper-case drive letter, or `None` for a Unix root.
+    drive: Option<char>,
+    parts: Vec<String>,
+}
+
+impl Lexical {
+    fn parse(path: &str) -> Option<Self> {
+        let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+        let (drive, rest) = match path.as_bytes() {
+            [letter, b':', b'\\' | b'/', ..] if letter.is_ascii_alphabetic() => {
+                (Some(letter.to_ascii_uppercase() as char), &path[3..])
+            }
+            [b'/', ..] => (None, &path[1..]),
+            _ => return None,
+        };
+        let mut parts: Vec<String> = Vec::new();
+        for part in rest.split(['\\', '/']) {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    parts.pop();
+                }
+                other => parts.push(other.to_owned()),
+            }
+        }
+        Some(Self { drive, parts })
+    }
+
+    fn same(&self, a: &str, b: &str) -> bool {
+        if self.drive.is_some() {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    }
+
+    /// `target`'s components below `self`, if `self` contains it.
+    fn below(&self, target: &Self) -> Option<Vec<String>> {
+        (self.drive == target.drive
+            && target.parts.len() >= self.parts.len()
+            && self
+                .parts
+                .iter()
+                .zip(&target.parts)
+                .all(|(a, b)| self.same(a, b)))
+        .then(|| target.parts[self.parts.len()..].to_vec())
+    }
+
+    /// `target` relative to `self`, climbing with `..` where it must.
+    fn relative(&self, target: &Self) -> Option<Vec<String>> {
+        if self.drive != target.drive {
+            return None;
+        }
+        let common = self
+            .parts
+            .iter()
+            .zip(&target.parts)
+            .take_while(|(a, b)| self.same(a, b))
+            .count();
+        let mut parts = vec!["..".to_owned(); self.parts.len() - common];
+        parts.extend(target.parts[common..].iter().cloned());
+        Some(parts)
+    }
+}
+
+/// Characters that end a path inside a detail.
+fn ends_path(character: char) -> bool {
+    character.is_whitespace()
+        || matches!(
+            character,
+            '"' | '\'' | ';' | ',' | '|' | '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}' | '*'
+        )
+}
+
+/// The byte length of the absolute path `text` starts with, if it starts one.
+/// A path runs to the first [`ends_path`] character, except that the corpus
+/// root's own components are matched first, so a checkout under a directory
+/// with a space in its name still reads as one path.
+fn path_token(text: &str, previous: Option<char>, corpus: &Lexical) -> Option<usize> {
+    let verbatim = if text.starts_with(r"\\?\") { 4 } else { 0 };
+    let body = &text[verbatim..];
+    let (anchor, drive) = match body.as_bytes() {
+        [letter, b':', b'\\' | b'/', ..] if letter.is_ascii_alphabetic() => {
+            let boundary = previous.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            (boundary || verbatim > 0).then_some((3, true))?
+        }
+        // A Unix path starts a word, so prose with a slash in it is not one.
+        [b'/', next, ..] if verbatim == 0 && *next != b'/' && !ends_path(*next as char) => {
+            let boundary =
+                previous.is_none_or(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '=' | '('));
+            boundary.then_some((1, false))?
+        }
+        _ => return None,
+    };
+    let mut start = anchor;
+    if drive == corpus.drive.is_some() {
+        for part in &corpus.parts {
+            let rest = &body[start..];
+            let Some(head) = rest
+                .get(..part.len())
+                .filter(|head| corpus.same(head, part))
+            else {
+                break;
+            };
+            match rest[head.len()..].chars().next() {
+                Some('\\' | '/') => start += head.len() + 1,
+                Some(c) if !ends_path(c) => break,
+                _ => {
+                    start += head.len();
+                    break;
+                }
+            }
+        }
+    }
+    let end = start + body[start..].find(ends_path).unwrap_or(body.len() - start);
+    // A lone `/word` is more likely prose than a path.
+    if !drive
+        && body[..end]
+            .split(['\\', '/'])
+            .filter(|part| !part.is_empty())
+            .count()
+            < 2
+    {
+        return None;
+    }
+    Some(verbatim + end)
+}
+
+/// One path token, relative to the design or the corpus root.
+fn rewrite(token: &str, corpus: &Lexical, design: &Lexical) -> Option<String> {
+    let mut end = token.len();
+    // A trailing `:line[:column]` is kept as written.
+    while let Some(colon) = token[..end].rfind(':') {
+        let digits = &token[colon + 1..end];
+        if colon < 3 || digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            break;
+        }
+        end = colon;
+    }
+    let target = Lexical::parse(&token[..end])?;
+    let parts = design.below(&target).or_else(|| corpus.relative(&target))?;
+    let path = if parts.is_empty() {
+        ".".to_owned()
+    } else {
+        parts.join("/")
+    };
+    Some(path + &token[end..])
+}
+
 /// The table must hold exactly the declared cells for every route it names.
 pub fn coverage(rows: &[Row], cells: &[(String, String)]) -> Vec<String> {
     let mut findings = Vec::new();
@@ -378,6 +565,90 @@ mod tests {
         ]
         .concat();
         assert!(!coverage(&extra, &cells).is_empty());
+    }
+
+    #[test]
+    fn windows_paths_normalize_relative_to_the_design() {
+        let corpus = r"C:\work\RSpice\tools\rspice-conformance\..\..\tests\mixed-corpus";
+        let design = format!(r"{corpus}\c04-sar8");
+        let deck = r"C:\work\RSpice\tests\mixed-corpus\c04-sar8\deck\../net/sar8_full.v";
+        let detail = format!(
+            "compile_refusal; label=\"{deck}\"; instance=sar8_full.v form=structured; site={deck}"
+        );
+        assert_eq!(
+            normalize_paths(&detail, corpus, &design),
+            "compile_refusal; label=\"net/sar8_full.v\"; instance=sar8_full.v form=structured; site=net/sar8_full.v"
+        );
+        let verbatim = r"\\?\C:\work\RSpice\tests\mixed-corpus\c04-sar8\net\sar8_full.v:17";
+        let detail = format!(
+            r#"compile_refusal; label="{verbatim}"; instance=c:\WORK\RSpice\tests\mixed-corpus\c04-sar8\deck\..\net\sar8_full.v form=structured; site={verbatim}"#
+        );
+        assert_eq!(
+            normalize_paths(&detail, corpus, &design),
+            "compile_refusal; label=\"net/sar8_full.v:17\"; instance=net/sar8_full.v form=structured; site=net/sar8_full.v:17"
+        );
+        // Outside the design: relative to the corpus root, climbing out of it.
+        assert_eq!(
+            normalize_paths(
+                r"see C:/work/RSpice/tests/mixed-corpus/c05-ldo-trim/net/trim.v:3:9 and C:\work\RSpice\tests\verilog\a.v",
+                corpus,
+                &design
+            ),
+            "see c05-ldo-trim/net/trim.v:3:9 and ../verilog/a.v"
+        );
+        // Another drive cannot be made relative and is left alone.
+        assert_eq!(
+            normalize_paths(r"D:\tools\x.v", corpus, &design),
+            r"D:\tools\x.v"
+        );
+    }
+
+    #[test]
+    fn unix_paths_normalize_relative_to_the_design() {
+        let corpus = "/home/ci/RSpice/tools/rspice-conformance/../../tests/mixed-corpus";
+        let design = format!("{corpus}/probes/p06c-dd-mixed");
+        let detail = "compile_refusal; label=\"/home/ci/RSpice/tools/rspice-conformance/../../tests/mixed-corpus/probes/p06c-dd-mixed/deck/../net/dd.v:4\"; site=/home/ci/RSpice/tests/mixed-corpus/probes/p06c-dd-mixed/net/dd.v";
+        assert_eq!(
+            normalize_paths(detail, corpus, &design),
+            "compile_refusal; label=\"net/dd.v:4\"; site=net/dd.v"
+        );
+        assert_eq!(
+            normalize_paths(
+                "include /home/ci/RSpice/tests/mixed-corpus/c01-sigma-delta/net/q.v",
+                corpus,
+                &design
+            ),
+            "include c01-sigma-delta/net/q.v"
+        );
+    }
+
+    #[test]
+    fn prose_and_relative_paths_are_left_alone() {
+        let corpus = "/r/tests/mixed-corpus";
+        let design = "/r/tests/mixed-corpus/c05-ldo-trim";
+        for detail in [
+            "analysis.mixed_signal.discrete_state; label=\"ac analysis\"; instance=xtrim form=prose",
+            "ac (O6) |a−e|=1.0e-3 for 100/(1 + jf/31.83 MHz) and a / b",
+            "dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]",
+            "label=\"net/sar8_full.v:17\"; instance=net/sar8_full.v",
+            "ratio /x only",
+        ] {
+            assert_eq!(normalize_paths(detail, corpus, design), detail);
+        }
+    }
+
+    #[test]
+    fn a_corpus_root_with_a_space_still_reads_as_one_path() {
+        let corpus = r"C:\Users\Jo Smith\RSpice\tests\mixed-corpus";
+        let design = format!(r"{corpus}\c09-por");
+        assert_eq!(
+            normalize_paths(
+                r"site=C:\Users\Jo Smith\RSpice\tests\mixed-corpus\c09-por\net\por.vams; x",
+                corpus,
+                &design
+            ),
+            "site=net/por.vams; x"
+        );
     }
 
     fn cells() -> Vec<(String, String)> {

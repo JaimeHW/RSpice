@@ -260,7 +260,11 @@ fn run_cell(options: &RunOptions, design: &Design, task: &Task) -> CellReport {
     };
     let (classification, dispatch, route) =
         evaluate_cell(options, design, variant, analysis, &end, budget);
-    let detail = classification.detail;
+    let detail = outcomes::normalize_paths(
+        &classification.detail,
+        &super::corpus_root().display().to_string(),
+        &design.dir.display().to_string(),
+    );
     let elapsed_s = started.elapsed().as_secs_f64();
     eprintln!(
         "mixed-corpus: {} {variant} {analysis} {route}: {} — {detail} ({elapsed_s:.1} s, {dispatch})",
