@@ -5,20 +5,20 @@ p3	tran	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=p
 p3	tran	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 live	tran	interp	wrong	track (O6) [0] |a−e|=1.650e0 allowed 8.250e-2 (a=3.300000e0, e=1.650000e0)
 live	tran	native	wrong	track (O6) [0] |a−e|=1.650e0 allowed 8.250e-2 (a=3.300000e0, e=1.650000e0)
-base	dc	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
-base	dc	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
+base	dc	interp	pass	porn_up.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+base	dc	native	pass	porn_up.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 p3	dc	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 p3	dc	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 live	dc	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
 live	dc	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
-base	dc-down	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
-base	dc-down	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
+base	dc-down	interp	pass	porn_down.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+base	dc-down	native	pass	porn_down.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 p3	dc-down	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 p3	dc-down	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 live	dc-down	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
 live	dc-down	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xpor form=prose; token-form=prose; analysis-form=prose
-base	dc-restart	interp	fail	parse: parse: Netlist parse error: Syntax error at line 27: Expected value, found Equals
-base	dc-restart	native	fail	parse: parse: Netlist parse error: Syntax error at line 27: Expected value, found Equals
+base	dc-restart	interp	pass	porn_restart.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+base	dc-restart	native	pass	porn_restart.hi (O6) [0] |a−e|=6.573e-14 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
 p3	dc-restart	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 p3	dc-restart	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 live	dc-restart	interp	fail	parse: parse: Netlist parse error: Syntax error at line 27: Expected value, found Equals

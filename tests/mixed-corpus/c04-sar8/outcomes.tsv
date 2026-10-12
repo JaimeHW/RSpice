@@ -9,8 +9,8 @@ ports	op	interp	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.8000
 ports	op	native	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
 full	ac	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
 full	ac	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
-ports	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
-ports	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
+ports	ac	interp	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
+ports	ac	native	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
 full	noise	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
 full	noise	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
 ports	noise	interp	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
