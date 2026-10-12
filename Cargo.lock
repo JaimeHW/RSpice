@@ -5481,12 +5481,18 @@ dependencies = [
  "clap",
  "log",
  "num-complex",
+ "rspice-app-types",
  "rspice-core",
+ "rspice-results",
+ "rspice-simulation",
+ "rspice-simulation-contract",
+ "rspice-veriloga",
  "rustix 1.1.5",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "toml",
  "windows-sys 0.61.2",
 ]
 

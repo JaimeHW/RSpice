@@ -41,6 +41,12 @@ pub mod deadline;
 pub mod execution;
 #[cfg(feature = "circuit-suites")]
 pub mod gf180mcu;
+/// The mixed-signal reference corpus: designs mixing SPICE, XSPICE and
+/// Verilog-AMS, run through the application's headless execution path and
+/// classified against oracles per design × variant × analysis × route.
+#[cfg(feature = "mixed-corpus")]
+pub mod mixed;
+
 #[cfg(feature = "circuit-suites")]
 pub mod ngspice;
 

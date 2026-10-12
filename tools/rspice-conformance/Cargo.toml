@@ -22,7 +22,26 @@ rust-version.workspace = true
 # surface. Verilog-A tooling depends on this crate with `default-features =
 # false` so it can reuse only the generated-model oracle and benchmark harness
 # without compiling unrelated ngspice/Xyce runners or their corpora.
-default = ["circuit-suites", "verilog-digital"]
+default = ["circuit-suites", "verilog-digital", "mixed-corpus"]
+# The mixed-signal reference corpus (`suites::mixed`, `rspice-mixed-corpus`).
+# Its cases execute through `rspice-simulation`'s headless preparation and
+# runner, the code the desktop app, the browser worker and `rspice study`
+# use, so the corpus measures the simulator a user gets rather than a private
+# copy of analysis dispatch. Optional so the oracle-harness-only build keeps
+# its small dependency tree.
+mixed-corpus = [
+    "circuit-suites",
+    "verilog-digital",
+    "dep:rspice-simulation",
+    "dep:rspice-simulation-contract",
+    "dep:rspice-app-types",
+    "dep:rspice-results",
+    "dep:rspice-veriloga",
+    "dep:toml",
+]
+# The corpus's native route: the x64/AArch64 Verilog-A JIT with no
+# interpreter fallback. The route is the build; there is no runtime switch.
+veriloga-native = ["verilog-digital", "rspice-core/veriloga-native"]
 # The digital Verilog oracle harness's own arm. `rspice-core/veriloga` is what
 # links the front end that compiles a corpus case and the host that runs it;
 # without it the RSpice arm has nothing to call and reports so by name rather
@@ -160,6 +179,12 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile = "3.20"
+rspice-simulation = { workspace = true, optional = true }
+rspice-simulation-contract = { workspace = true, optional = true }
+rspice-app-types = { workspace = true, optional = true }
+rspice-results = { workspace = true, optional = true }
+rspice-veriloga = { path = "../../crates/rspice-veriloga", version = "0.1.0", optional = true }
+toml = { workspace = true, optional = true }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }
