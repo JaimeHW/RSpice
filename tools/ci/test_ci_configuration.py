@@ -1073,6 +1073,30 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("--release", step)
         self.assertIn("--nocapture", step)
 
+    def test_mixed_corpus_runs_nightly_once_per_route_and_never_on_push(self) -> None:
+        """The mixed-signal reference corpus (plan P0.4) is a nightly gate.
+
+        Every design runs every listed analysis against `outcomes.tsv`, which
+        takes far longer than a push budget allows; per push, the corpus's
+        integrity checks run inside `--lib`. The route is the build, so the job
+        is a matrix over both, and `RSPICE_MIXED_ROUTE` lets the test refuse a
+        binary built as the other route rather than record its outcomes under
+        the wrong name.
+        """
+        ci_workflow = read_text(".github/workflows/ci.yml")
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertNotIn("--test mixed_corpus", ci_workflow)
+
+        job = nightly_workflow.split("\n  mixed-corpus:\n", 1)[1]
+        job = re.split(r"\n  [a-z][a-z0-9-]*:\n", job, maxsplit=1)[0]
+        self.assertIn("--test mixed_corpus", job)
+        self.assertIn("--release", job)
+        self.assertIn("route: [interp, native]", job)
+        self.assertIn("--features veriloga-native", job)
+        self.assertIn("RSPICE_MIXED_ROUTE: ${{ matrix.route }}", job)
+        self.assertNotIn("continue-on-error", job)
+
     def test_nightly_qualifies_shipped_models_through_native_x64(self) -> None:
         nightly_workflow = read_text(".github/workflows/nightly.yml")
 

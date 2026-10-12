@@ -374,6 +374,41 @@ jobs:
             serial.log
           if-no-files-found: error
 
+  mixed-corpus:
+    name: Mixed-signal reference corpus (${{ matrix.route }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        route: [interp, native]
+    env:
+      CARGO_BUILD_JOBS: "1"
+      # The route is the build; the test refuses a binary built as the other.
+      RSPICE_MIXED_ROUTE: ${{ matrix.route }}
+      RSPICE_MIXED_EXTENDED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          key: mixed-corpus-${{ matrix.route }}
+      # O3 replays RSpice's boundary inputs through Icarus live; the checked-in
+      # O1/O2/O4/O5 references need no simulator here.
+      - name: Install Icarus Verilog for O3 replay
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y iverilog
+          iverilog -V
+      # Every design x variant x analysis cell against tests/mixed-corpus/*/outcomes.tsv.
+      - name: Mixed corpus (${{ matrix.route }})
+        shell: bash
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          ${{ matrix.route == 'native' && '--features veriloga-native' || '' }}
+          --test mixed_corpus -- --nocapture --test-threads 1
+
   release-build:
     name: Release build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
