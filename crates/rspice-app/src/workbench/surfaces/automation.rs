@@ -713,6 +713,7 @@ fn code_pane(
         editor_id,
         editable,
         true,
+        false,
     );
     let search_input =
         crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(

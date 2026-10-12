@@ -403,11 +403,15 @@ pub(crate) fn take_queued_caret_char_index(
 /// it rather than carrying a second copy of the width.
 pub(crate) const EDITOR_COMMAND_MENU_LABEL: &str = "Editor";
 
+/// The Editor menu. `replace_from_file` adds "Replace source from file…",
+/// which asks the owning surface to replace the document from a picked file;
+/// the surface takes the request with [`take_replace_source_request`].
 pub(crate) fn editor_command_menu(
     ui: &mut Ui,
     editor_id: Id,
     editable: bool,
     source_bundle_search: bool,
+    replace_from_file: bool,
 ) {
     ui.menu_button(EDITOR_COMMAND_MENU_LABEL, |ui| {
         for command in [
@@ -502,7 +506,32 @@ pub(crate) fn editor_command_menu(
             });
             ui.close();
         }
+        if replace_from_file {
+            ui.separator();
+            if ui
+                .add_enabled(
+                    editable,
+                    egui::Button::new("Replace source from file\u{2026}"),
+                )
+                .clicked()
+            {
+                queue_replace_source_request(ui.ctx(), editor_id);
+                ui.close();
+            }
+        }
     });
+}
+
+pub(crate) fn queue_replace_source_request(context: &egui::Context, editor_id: Id) {
+    context.data_mut(|data| {
+        data.insert_temp(editor_id.with("replace-source-from-file"), true);
+    });
+}
+
+pub(crate) fn take_replace_source_request(ui: &Ui, editor_id: Id) -> bool {
+    ui.ctx()
+        .data_mut(|data| data.remove_temp::<bool>(editor_id.with("replace-source-from-file")))
+        .unwrap_or(false)
 }
 
 pub(crate) fn queue_format_document(context: &egui::Context, editor_id: Id) {

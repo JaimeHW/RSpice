@@ -1,5 +1,6 @@
-//! File > Import Verilog-A, with no Verilog-A view in front: the file becomes
-//! cell views of its own.
+//! File > Import Verilog-A: the file becomes cell views of its own, whatever
+//! view is in front. Replacing an open view's source from a file is the
+//! Verilog-A editor's own command, and waits for the confirmation below.
 //!
 //! The form asks one question, which library, and states what the answer
 //! makes: one cell per top module the file declares, each with a `veriloga`
@@ -78,13 +79,12 @@ fn planned_cells(
         .collect()
 }
 
-/// The derived line: the cell views the commit makes. A module is named once
-/// when its cell takes its name, and with the cell it lands in when the name
-/// was taken.
+/// The Creates row: the cell views the commit makes, one per top module. A
+/// module is named once when its cell takes its name, and with the cell it
+/// lands in when the name was taken.
 fn plan_line(plan: &[(DeclaredModule, CellViewRef, bool)]) -> Option<String> {
     (!plan.is_empty()).then(|| {
-        let cells = plan
-            .iter()
+        plan.iter()
             .map(|(module, reference, new_cell)| {
                 let mut entry = if module.name == reference.cell {
                     module.name.clone()
@@ -97,13 +97,7 @@ fn plan_line(plan: &[(DeclaredModule, CellViewRef, bool)]) -> Option<String> {
                 entry
             })
             .collect::<Vec<_>>()
-            .join(", ");
-        let noun = if plan.len() == 1 {
-            "cell view"
-        } else {
-            "cell views"
-        };
-        format!("{} {noun}: {cells}", plan.len())
+            .join(", ")
     })
 }
 
@@ -129,11 +123,14 @@ impl RSpiceApp {
         let title = messages.text(MessageId::VerilogAImportTitle);
         let primary = messages.text(MessageId::VerilogAImportPrimary);
         let description = messages.text(MessageId::VerilogAImportDescription);
+        let file_label = messages.text(MessageId::VerilogAImportFile);
         let library_label = messages.text(MessageId::VerilogAImportLibrary);
+        let creates_label = messages.text(MessageId::VerilogAImportCreates);
         let line = plan_line(&plan);
         let mut picked = None;
+        // Every refusal is known from the file and the libraries when the form
+        // opens, so the status takes room only when it has something to say.
         let choice = CommandForm::new(&title, &primary)
-            .context(Some(form.file_name.as_str()))
             .describe(&description)
             .primary_enabled(ready)
             .fields_enabled(form.modules.is_ok() && !libraries.is_empty())
@@ -142,7 +139,9 @@ impl RSpiceApp {
                 None => Ok(None),
             })
             .status_lines(2)
+            .status_fixed_at_open()
             .show(ctx, |rows| {
+                rows.value_mono(&file_label, &form.file_name);
                 picked = rows.select(
                     &library_label,
                     "workbench.veriloga-import.library",
@@ -150,7 +149,7 @@ impl RSpiceApp {
                     &libraries,
                 );
                 if let Some(line) = line.as_deref() {
-                    rows.derived(line);
+                    rows.value_mono(&creates_label, line);
                 }
                 None
             });
@@ -173,6 +172,57 @@ impl RSpiceApp {
                 self.state.ui.code_workspace.veriloga.import_form = None;
             }
             DialogChoice::Primary | DialogChoice::None | DialogChoice::Secondary => {}
+        }
+    }
+
+    /// The confirmation "Replace source from file…" opens once a file is
+    /// picked: which file it replaces, with what, and whether the text it
+    /// replaces can be restored. Nothing is replaced until it is confirmed.
+    pub(in crate::workbench) fn render_veriloga_replace_dialog(&mut self, ctx: &Context) {
+        let Some(review) = self.state.ui.code_workspace.veriloga.replace_review.clone() else {
+            return;
+        };
+        let messages = self.state.ui.messages();
+        let title = messages.text(MessageId::VerilogAReplaceTitle);
+        let primary = messages.text(MessageId::VerilogAReplacePrimary);
+        let description = messages.text(MessageId::VerilogAReplaceDescription);
+        let view_label = messages.text(MessageId::VerilogAReplaceView);
+        let replaces = messages.text(MessageId::VerilogAReplaceFile);
+        let with = messages.text(MessageId::VerilogAReplaceWith);
+        let note = if review.restorable {
+            messages.text(MessageId::VerilogAReplaceRestorable)
+        } else {
+            messages.format(
+                MessageId::VerilogAReplaceNotRestorable,
+                &[("file", &review.target.logical_path)],
+            )
+        };
+        let view = review.target.view.display_path();
+        let choice = CommandForm::new(&title, &primary)
+            .describe(&description)
+            .status(Ok(Some(note.as_str())))
+            .status_lines(2)
+            .status_fixed_at_open()
+            .show(ctx, |rows| {
+                rows.value_mono(&view_label, &view);
+                rows.value_mono(&replaces, &review.target.logical_path);
+                rows.value_mono(&with, &review.file_name);
+                None
+            });
+        match choice {
+            DialogChoice::Primary => {
+                if let Err(error) =
+                    crate::workbench::documents::code_workspace::commit_veriloga_source_replacement(
+                        self,
+                    )
+                {
+                    self.state.push_user_message(ConsoleMessage::error(error));
+                }
+            }
+            DialogChoice::Ghost | DialogChoice::Cancelled => {
+                self.state.ui.code_workspace.veriloga.replace_review = None;
+            }
+            DialogChoice::None | DialogChoice::Secondary => {}
         }
     }
 

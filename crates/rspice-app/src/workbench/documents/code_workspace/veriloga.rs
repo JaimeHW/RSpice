@@ -21,7 +21,7 @@ use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
     TargetQualification, VerilogACompileDialogState, VerilogACompileOutcome,
     VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState,
-    VerilogAQualificationHistoryRow,
+    VerilogAQualificationHistoryRow, VerilogAReplaceReview, VerilogAReplaceTarget,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -190,7 +190,14 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let dependency_import = app.state.ui.code_workspace.veriloga.import_target.is_some();
-        let extensions: &[&str] = if dependency_import {
+        let replacement = app
+            .state
+            .ui
+            .code_workspace
+            .veriloga
+            .replace_target
+            .is_some();
+        let extensions: &[&str] = if dependency_import || replacement {
             &["va", "vams"]
         } else {
             &["va"]
@@ -199,13 +206,15 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
             .add_filter("Verilog-A", extensions)
             .set_title(if dependency_import {
                 "Import Verilog-A dependency"
+            } else if replacement {
+                "Replace Verilog-A source from file"
             } else {
                 "Import Verilog-A source"
             })
             .pick_file()
         else {
             app.state.ui.code_workspace.veriloga.import_target = None;
-            app.state.ui.code_workspace.veriloga.root_import_target = None;
+            app.state.ui.code_workspace.veriloga.replace_target = None;
             return;
         };
         let result = (|| {
@@ -236,7 +245,7 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
             Ok((file_name, contents)) => apply_import(app, file_name, contents),
             Err(error) => {
                 app.state.ui.code_workspace.veriloga.import_target = None;
-                app.state.ui.code_workspace.veriloga.root_import_target = None;
+                app.state.ui.code_workspace.veriloga.replace_target = None;
                 app.state.push_user_message(ConsoleMessage::error(format!(
                     "Verilog-A import failed: {error}"
                 )));
@@ -246,13 +255,21 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
 
     #[cfg(target_arch = "wasm32")]
     {
-        let dependency_import = app.state.ui.code_workspace.veriloga.import_target.is_some();
+        let dependency_import = app.state.ui.code_workspace.veriloga.import_target.is_some()
+            || app
+                .state
+                .ui
+                .code_workspace
+                .veriloga
+                .replace_target
+                .is_some();
         let token = match crate::workbench::browser::file_import::try_begin_text_import(
             crate::workbench::browser::file_import::BrowserTextImportKind::VerilogA,
         ) {
             Ok(token) => token,
             Err(error) => {
                 app.state.ui.code_workspace.veriloga.import_target = None;
+                app.state.ui.code_workspace.veriloga.replace_target = None;
                 app.state.push_user_message(ConsoleMessage::error(format!(
                     "Verilog-A import failed: {error}"
                 )));
@@ -290,11 +307,11 @@ fn poll_browser_import_completion(app: &mut RSpiceApp) {
         Ok(Some(file)) => apply_import(app, file.name, file.contents),
         Ok(None) => {
             app.state.ui.code_workspace.veriloga.import_target = None;
-            app.state.ui.code_workspace.veriloga.root_import_target = None;
+            app.state.ui.code_workspace.veriloga.replace_target = None;
         }
         Err(error) => {
             app.state.ui.code_workspace.veriloga.import_target = None;
-            app.state.ui.code_workspace.veriloga.root_import_target = None;
+            app.state.ui.code_workspace.veriloga.replace_target = None;
             app.state.push_user_message(ConsoleMessage::error(format!(
                 "Verilog-A import failed: {error}"
             )));
@@ -309,7 +326,7 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
     // completion can leave the workspace permanently locked in "pending".
     app.state.ui.code_workspace.veriloga.import_requested = false;
     if let Some(target) = app.state.ui.code_workspace.veriloga.import_target.take() {
-        app.state.ui.code_workspace.veriloga.root_import_target = None;
+        app.state.ui.code_workspace.veriloga.replace_target = None;
         let target_is_current = app.state.workspace.content.project.id() == target.project_id
             && app
                 .state
@@ -347,80 +364,169 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
         }
         return;
     }
-    let root_target = app
+    let Some(target) = app.state.ui.code_workspace.veriloga.replace_target.take() else {
+        // File > Import never touches an open view: the file becomes cell
+        // views of its own, and the form says which, and where, before any is
+        // made. That holds whether or not a Verilog-A view is in front.
+        open_veriloga_import_form(app, file_name, contents);
+        return;
+    };
+    // "Replace source from file…" replaces nothing here either: the picked
+    // file waits for the reader to confirm which file it replaces.
+    let Some(bundle) = current_replace_bundle(app, &target) else {
+        app.state.push_user_message(ConsoleMessage::error(format!(
+            "Replacing {} from {file_name} was discarded because the source changed while the picker was open.",
+            target.logical_path
+        )));
+        return;
+    };
+    let restorable = replacement_keeps_previous_text(bundle, &target.logical_path, &contents);
+    app.state.ui.code_workspace.veriloga.replace_review = Some(VerilogAReplaceReview {
+        target,
+        file_name,
+        contents,
+        restorable,
+    });
+}
+
+/// What the picker delivers when a file is chosen, for tests that cannot
+/// open a native picker.
+#[cfg(test)]
+pub(crate) fn complete_veriloga_file_pick(app: &mut RSpiceApp, file_name: &str, contents: &str) {
+    apply_import(app, file_name.to_owned(), contents.to_owned());
+}
+
+/// Read `contents` into File > Import's form.
+fn open_veriloga_import_form(app: &mut RSpiceApp, file_name: String, contents: String) {
+    app.state.ui.code_workspace.veriloga.import_form =
+        Some(VerilogAImportFormState::read(app, file_name, contents));
+}
+
+/// The bundle a replacement was asked for, while it is exactly the revision
+/// the editor showed and still holds the file.
+fn current_replace_bundle<'a>(
+    app: &'a RSpiceApp,
+    target: &VerilogAReplaceTarget,
+) -> Option<&'a ProjectSourceBundle> {
+    (target.project_id == app.state.workspace.content.project.id())
+        .then(|| {
+            app.state
+                .workspace
+                .content
+                .project_sources
+                .get_bundle(target.bundle_id)
+        })
+        .flatten()
+        .filter(|bundle| {
+            bundle.revision().get() == target.bundle_revision
+                && bundle.closure_digest() == target.closure_digest
+                && bundle.contains_file(&target.logical_path)
+        })
+}
+
+/// Whether replacing `logical_path` with `contents` leaves the text it holds
+/// now in the bundle's revision history, where the source history restores
+/// it. Measured on a copy, by doing the replacement.
+fn replacement_keeps_previous_text(
+    bundle: &ProjectSourceBundle,
+    logical_path: &str,
+    contents: &str,
+) -> bool {
+    let Some(previous) = bundle.file_content(logical_path) else {
+        return false;
+    };
+    let mut replaced = bundle.clone();
+    replaced
+        .replace_file_content(logical_path, contents.to_owned())
+        .is_ok_and(|changed| changed)
+        && replaced
+            .revision_snapshot(bundle.revision())
+            .and_then(|snapshot| snapshot.file_content(logical_path))
+            == Some(previous)
+}
+
+/// Ask for a file to replace the one the editor is showing.
+///
+/// Opens the picker bound to that exact file; the replacement itself waits
+/// for the confirmation the picked file opens.
+pub(crate) fn request_veriloga_source_replacement(
+    app: &mut RSpiceApp,
+    logical_path: &str,
+) -> Result<(), String> {
+    if let Some(reason) =
+        super::source_file_mutation_block_reason(app, ProjectSourceLanguage::VerilogA)
+    {
+        return Err(reason.to_owned());
+    }
+    if app.state.ui.code_workspace.veriloga.import_requested {
+        return Err("A Verilog-A file is already being chosen.".to_owned());
+    }
+    let selected = selected_veriloga_source(app)?;
+    if !super::source_bundle_document_is_editable(
+        app,
+        ProjectSourceLanguage::VerilogA,
+        selected.bundle().id(),
+        logical_path,
+    ) {
+        return Err(format!("{logical_path} cannot be edited."));
+    }
+    app.state.ui.code_workspace.veriloga.replace_target = Some(VerilogAReplaceTarget {
+        project_id: app.state.workspace.content.project.id(),
+        view: app.state.workspace.content.active_view.clone(),
+        bundle_id: selected.bundle().id(),
+        bundle_revision: selected.bundle().revision().get(),
+        closure_digest: selected.bundle().closure_digest(),
+        logical_path: logical_path.to_owned(),
+    });
+    app.state.ui.code_workspace.veriloga.import_target = None;
+    app.state.ui.code_workspace.veriloga.import_requested = true;
+    Ok(())
+}
+
+/// Replace the file a confirmed review names with the picked file, when that
+/// file is still exactly what the editor showed.
+pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<(), String> {
+    let review = app
         .state
         .ui
         .code_workspace
         .veriloga
-        .root_import_target
+        .replace_review
         .take()
-        .unwrap_or_else(|| current_root_import_target(app));
-    if root_target.project_id != app.state.workspace.content.project.id() {
-        app.state.push_user_message(ConsoleMessage::error(
-            "Verilog-A import was discarded because the active project changed while the picker was open.",
+        .ok_or_else(|| "No source replacement is waiting for confirmation.".to_owned())?;
+    if current_replace_bundle(app, &review.target).is_none() {
+        return Err(format!(
+            "{} changed after the replacement was chosen; nothing was replaced.",
+            review.target.logical_path
         ));
-        return;
     }
-    let Some((bundle_id, revision, digest)) = root_target.bundle_identity else {
-        // With no Verilog-A view in front the file becomes cell views of its
-        // own; the import form says which, and where, before any is made.
-        app.state.ui.code_workspace.veriloga.import_form =
-            Some(VerilogAImportFormState::read(app, file_name, contents));
-        return;
-    };
-    let current = app
+    let changed = app
         .state
         .workspace
         .content
         .project_sources
-        .get_bundle(bundle_id)
-        .is_some_and(|bundle| {
-            bundle.revision().get() == revision && bundle.closure_digest() == digest
-        });
-    if !current {
-        app.state.push_user_message(ConsoleMessage::error(
-            "Verilog-A import was discarded because the exact source bundle changed while the picker was open.",
-        ));
-        return;
-    }
-    let selected = match selected_veriloga_source(app) {
-        Ok(selected) => selected,
-        Err(error) => {
-            app.state.push_user_message(ConsoleMessage::error(format!(
-                "Verilog-A import failed: {error}"
-            )));
-            return;
-        }
-    };
-    match replace_selected_veriloga_source(app, &selected, contents) {
-        Ok(true) => {
-            app.state.ui.code_workspace.veriloga = Default::default();
-            app.state.push_user_message(ConsoleMessage::info(format!(
-                "Imported project-owned Verilog-A source {file_name} into {}; compile is required.",
-                selected.document().logical_path()
-            )));
-        }
-        Ok(false) => app.state.push_user_message(ConsoleMessage::info(format!(
-            "Verilog-A source {file_name} is already current."
-        ))),
-        Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-            "Verilog-A import failed: {error}"
-        ))),
-    }
-}
-
-fn current_root_import_target(app: &RSpiceApp) -> super::VerilogARootImportTarget {
-    let bundle_identity = selected_veriloga_source(app).ok().map(|selected| {
-        (
-            selected.bundle().id(),
-            selected.bundle().revision().get(),
-            selected.bundle().closure_digest(),
+        .replace_bundle_file_content(
+            review.target.bundle_id,
+            &review.target.logical_path,
+            review.contents,
         )
-    });
-    super::VerilogARootImportTarget {
-        project_id: app.state.workspace.content.project.id(),
-        bundle_identity,
+        .map_err(|error| error.to_string())?;
+    if changed {
+        invalidate_veriloga_evidence(app, review.target.bundle_id);
     }
+    app.state
+        .push_user_message(ConsoleMessage::info(if changed {
+            format!(
+                "Replaced {} with {}; compile is required.",
+                review.target.logical_path, review.file_name
+            )
+        } else {
+            format!(
+                "{} already holds the text of {}.",
+                review.target.logical_path, review.file_name
+            )
+        }));
+    Ok(())
 }
 
 impl VerilogAImportFormState {
@@ -486,8 +592,9 @@ pub(crate) fn import_dropped_veriloga_source(
             crate::state::MAX_PROJECT_CODE_SOURCE_BYTES
         ));
     }
-    app.state.ui.code_workspace.veriloga.root_import_target = Some(current_root_import_target(app));
-    apply_import(app, file_name, contents);
+    // A file dropped on an editor is a file to import, not a replacement for
+    // the source under the pointer: it goes to the import form like any other.
+    open_veriloga_import_form(app, file_name, contents);
     Ok(())
 }
 
@@ -584,18 +691,10 @@ fn mark_bundle_unsaved(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
     }
 }
 
-/// Replace the selected root's exact UTF-8 bytes only when the same bundle
-/// identity is still active. The registry performs the edit transaction on a
-/// clone, increments the bundle revision, invalidates validation evidence, and
+/// Replace one file's exact UTF-8 bytes only when the same bundle identity is
+/// still active. The registry performs the edit transaction on a clone,
+/// increments the bundle revision, invalidates validation evidence, and
 /// commits only after the complete closure remains valid.
-pub(crate) fn replace_selected_veriloga_source(
-    app: &mut RSpiceApp,
-    expected: &SelectedVerilogASource,
-    contents: String,
-) -> Result<bool, String> {
-    replace_selected_veriloga_file(app, expected, expected.document().logical_path(), contents)
-}
-
 pub(crate) fn replace_selected_veriloga_file(
     app: &mut RSpiceApp,
     expected: &SelectedVerilogASource,
@@ -1419,6 +1518,7 @@ mod tests {
     /// `source`.
     fn module_source_with(module: &str, source: &str) -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.authority.open_session();
         let reference = add_module_view(&mut app, "legacy", "legacy.va", module, source);
         app.state.workspace.open_view(reference, ViewType::VerilogA);
         app
@@ -1596,17 +1696,84 @@ mod tests {
         assert_eq!(selected.selected_module(), Some("shared_model"));
     }
 
+    /// A file dropped while a Verilog-A view is open is a file to import: it
+    /// goes to the import form and the open view's source is left as it was.
     #[test]
-    fn dropped_veriloga_source_reuses_the_exact_import_transition() {
+    fn a_dropped_source_goes_to_the_import_form_and_never_replaces_the_open_view() {
         let mut app = portless_module();
-        let selected = selected_veriloga_source(&app).unwrap();
-        let bundle_id = selected.bundle().id();
-        let before = selected.bundle().revision().get();
+        let sources_before = app.state.workspace.content.project_sources.clone();
         let source = "module dropped(p, n); inout p, n; electrical p, n; endmodule\n";
 
         import_dropped_veriloga_source(&mut app, "dropped.va".to_owned(), source.to_owned())
             .expect("drop import");
 
+        assert_eq!(app.state.workspace.content.project_sources, sources_before);
+        let form = app
+            .state
+            .ui
+            .code_workspace
+            .veriloga
+            .import_form
+            .as_ref()
+            .expect("the drop opened the import form");
+        assert_eq!(form.file_name, "dropped.va");
+        assert!(
+            app.state
+                .ui
+                .code_workspace
+                .veriloga
+                .replace_review
+                .is_none()
+        );
+    }
+
+    /// "Replace source from file…" replaces nothing when the file arrives: it
+    /// opens the review, and only committing that review rewrites the file,
+    /// whose previous text stays in the revision history.
+    #[test]
+    fn a_source_replacement_waits_for_its_confirmation() {
+        let mut app = portless_module();
+        let selected = selected_veriloga_source(&app).unwrap();
+        let bundle_id = selected.bundle().id();
+        let root = selected.document().logical_path().to_owned();
+        let original = selected.document().content().to_owned();
+        let replacement = "module legacy(p, n); inout p, n; electrical p, n; endmodule\n";
+
+        request_veriloga_source_replacement(&mut app, &root).unwrap();
+        assert!(app.state.ui.code_workspace.veriloga.import_requested);
+        apply_import(&mut app, "next.va".to_owned(), replacement.to_owned());
+
+        let review = app
+            .state
+            .ui
+            .code_workspace
+            .veriloga
+            .replace_review
+            .clone()
+            .expect("the picked file waits for confirmation");
+        assert_eq!(review.target.logical_path, root);
+        assert!(review.restorable);
+        let content = |app: &RSpiceApp| {
+            app.state
+                .workspace
+                .content
+                .project_sources
+                .get_bundle(bundle_id)
+                .unwrap()
+                .root()
+                .content()
+                .to_owned()
+        };
+        assert_eq!(
+            content(&app),
+            original,
+            "nothing is replaced before confirming"
+        );
+        assert!(app.state.ui.code_workspace.veriloga.import_form.is_none());
+
+        commit_veriloga_source_replacement(&mut app).unwrap();
+
+        assert_eq!(content(&app), replacement);
         let bundle = app
             .state
             .workspace
@@ -1614,8 +1781,14 @@ mod tests {
             .project_sources
             .get_bundle(bundle_id)
             .unwrap();
-        assert!(bundle.revision().get() > before);
-        assert_eq!(bundle.root().content(), source);
+        assert_eq!(
+            bundle
+                .revision_history()
+                .last()
+                .and_then(|snapshot| snapshot.file_content(&root)),
+            Some(original.as_str()),
+            "the replaced text stays restorable"
+        );
     }
 
     /// With no Verilog-A view in front, an imported file is read into the
@@ -1655,15 +1828,13 @@ mod tests {
     }
 
     #[test]
-    fn root_import_rejects_a_bundle_changed_while_the_picker_is_open() {
+    fn a_source_replacement_rejects_a_bundle_changed_while_the_picker_is_open() {
         let mut app = portless_module();
         let selected = selected_veriloga_source(&app).unwrap();
         let bundle_id = selected.bundle().id();
         let root = selected.document().logical_path().to_owned();
 
-        app.state.ui.code_workspace.veriloga.root_import_target =
-            Some(current_root_import_target(&app));
-        app.state.ui.code_workspace.veriloga.import_requested = true;
+        request_veriloga_source_replacement(&mut app, &root).unwrap();
         app.state
             .workspace
             .content
@@ -1695,8 +1866,17 @@ mod tests {
                 .ui
                 .code_workspace
                 .veriloga
-                .root_import_target
+                .replace_target
                 .is_none()
+        );
+        assert!(
+            app.state
+                .ui
+                .code_workspace
+                .veriloga
+                .replace_review
+                .is_none(),
+            "a stale replacement is discarded, not offered"
         );
     }
 
@@ -1722,9 +1902,10 @@ mod tests {
         let before = selected.token(app.state.workspace.content.project.id());
 
         assert!(
-            replace_selected_veriloga_source(
+            replace_selected_veriloga_file(
                 &mut app,
                 &selected,
+                "shared.va",
                 "module shared_model(p, n); inout p, n; electrical p, n; real changed; endmodule\n"
                     .to_owned(),
             )

@@ -892,6 +892,7 @@ impl RSpiceApp {
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
         self.render_veriloga_import_dialog(ctx);
+        self.render_veriloga_replace_dialog(ctx);
         self.process_copy_cell_dialog(ctx);
         self.process_rename_cell_dialog(ctx);
         self.process_library_deletion_review_dialog(ctx);

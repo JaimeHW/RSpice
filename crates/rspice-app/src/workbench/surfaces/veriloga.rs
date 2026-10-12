@@ -646,7 +646,19 @@ fn source_editor(
         editor_id,
         true,
         true,
+        true,
     );
+    // Replacing the file from disk is this menu's explicit, confirmed
+    // transaction; File > Import never does it.
+    if crate::workbench::documents::text_editor_commands::take_replace_source_request(ui, editor_id)
+        && let Err(error) =
+            crate::workbench::documents::code_workspace::request_veriloga_source_replacement(
+                app,
+                active_path,
+            )
+    {
+        app.state.push_user_message(ConsoleMessage::warning(error));
+    }
     let search_input =
         crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
             ui, editor_id,

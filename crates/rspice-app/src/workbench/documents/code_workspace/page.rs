@@ -204,13 +204,17 @@ pub struct VerilogAWorkbenchState {
     pub compile_requested: bool,
     pub compile_dialog: Option<VerilogACompileDialogState>,
     /// A dependency import is bound to the exact bundle/importer that launched
-    /// the asynchronous picker. `None` retains File > Import's root-source
-    /// replacement behavior.
+    /// the asynchronous picker.
     pub import_target: Option<VerilogAImportTarget>,
-    pub root_import_target: Option<VerilogARootImportTarget>,
-    /// File > Import's form for a file read with no Verilog-A view in front,
-    /// which becomes cell views of its own.
+    /// "Replace source from file…" is bound to the exact bundle and file the
+    /// editor showed when the picker opened. With neither target the picked
+    /// file is File > Import's, and becomes cell views of its own.
+    pub replace_target: Option<VerilogAReplaceTarget>,
+    /// File > Import's form: a read file that becomes cell views of its own.
     pub import_form: Option<VerilogAImportFormState>,
+    /// A picked file waiting for the confirmation that it replaces the file
+    /// it was picked for. Nothing is replaced until it is confirmed.
+    pub replace_review: Option<VerilogAReplaceReview>,
     /// Selected source document in the model-project navigator.
     pub selected_file: Option<VerilogAFileSelection>,
     pub pending: Option<PendingVerilogACompile>,
@@ -228,18 +232,28 @@ pub struct VerilogAImportTarget {
     pub importer_path: String,
 }
 
-/// Root-source import authority captured before an asynchronous native or
-/// browser picker opens: the exact bundle of the Verilog-A view in front,
-/// whose root the file replaces, or `None` when no Verilog-A view was in
-/// front and the file becomes cell views of its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VerilogARootImportTarget {
-    pub project_id: crate::product::ProjectId,
-    pub bundle_identity: Option<(
-        crate::state::ProjectSourceId,
-        u64,
-        crate::product::ContentDigest,
-    )>,
+/// The file "Replace source from file…" was asked for, captured before the
+/// picker opens: the exact bundle revision and the logical path the editor
+/// was showing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogAReplaceTarget {
+    pub project_id: ProjectId,
+    pub view: crate::state::CellViewRef,
+    pub bundle_id: ProjectSourceId,
+    pub bundle_revision: u64,
+    pub closure_digest: ContentDigest,
+    pub logical_path: String,
+}
+
+/// A picked file and the file it would replace, waiting for confirmation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogAReplaceReview {
+    pub target: VerilogAReplaceTarget,
+    pub file_name: String,
+    pub contents: String,
+    /// Whether the text being replaced stays in the bundle's revision
+    /// history, where the source history restores it.
+    pub restorable: bool,
 }
 
 /// A Verilog-A file read for File > Import that becomes cell views: one per

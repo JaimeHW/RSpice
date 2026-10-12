@@ -299,6 +299,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                         &app.state,
                     ),
                     false,
+                    false,
                 );
             })
             .response
@@ -487,6 +488,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                     crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
                         &app.state,
                     ),
+                    false,
                     false,
                 );
             })

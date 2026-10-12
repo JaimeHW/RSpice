@@ -47,7 +47,7 @@ pub use page::{
     CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken, TargetQualification,
     VerilogACompileDialogState, VerilogACompileOutcome, VerilogACompileReceipt,
     VerilogAFileSelection, VerilogAImportFormState, VerilogAQualificationHistoryRow,
-    VerilogARootImportTarget,
+    VerilogAReplaceReview, VerilogAReplaceTarget,
 };
 pub(crate) use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
@@ -62,10 +62,13 @@ pub(crate) use source_search::{
     open_active_source_search, open_source_search, open_source_search_in_bundle,
     source_search_query_id, source_search_results,
 };
+#[cfg(test)]
+pub(crate) use veriloga::complete_veriloga_file_pick;
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, commit_veriloga_compile_dialog,
-    compile_project_bundle_receipt, compile_project_bundle_virtual_for_provenance,
-    import_dropped_veriloga_source, replace_selected_veriloga_file,
+    commit_veriloga_source_replacement, compile_project_bundle_receipt,
+    compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_source,
+    replace_selected_veriloga_file, request_veriloga_source_replacement,
     selected_veriloga_editor_snapshot, selected_veriloga_source, writable_libraries,
 };
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
