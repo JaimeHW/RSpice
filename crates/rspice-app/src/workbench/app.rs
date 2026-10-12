@@ -1478,6 +1478,9 @@ mod veriloga_cell_source_tests;
 mod veriloga_interface_tests;
 
 #[cfg(test)]
+mod veriloga_parameter_tests;
+
+#[cfg(test)]
 mod veriloga_placement_tests;
 
 #[cfg(test)]

@@ -26,7 +26,12 @@ const LIBRARY: &str = "behavioral";
 
 /// A writable library cell `cell` whose `veriloga` view owns `source`, and
 /// states the names-only interface New View used to write.
-fn add_module_cell(state: &mut AppState, cell: &str, module: &str, source: &str) -> CellViewRef {
+pub(super) fn add_module_cell(
+    state: &mut AppState,
+    cell: &str,
+    module: &str,
+    source: &str,
+) -> CellViewRef {
     add_module_cell_in(state, LIBRARY, cell, module, source)
 }
 
@@ -121,7 +126,11 @@ pub(super) fn edit_source(app: &mut RSpiceApp, source: &str) {
     );
 }
 
-fn view<'a>(app: &'a RSpiceApp, reference: &CellViewRef, name: &str) -> Option<&'a View> {
+pub(super) fn view<'a>(
+    app: &'a RSpiceApp,
+    reference: &CellViewRef,
+    name: &str,
+) -> Option<&'a View> {
     app.state
         .library_manager
         .get_library(&reference.library)?
@@ -267,12 +276,19 @@ fn place_configured_instance_at(state: &mut AppState, reference: &CellViewRef, a
             .metadata,
     )
     .expect("the view states its ports");
-    let top = CellViewRef::default_top();
-    state.open_workspace_view(top.clone());
+    state.open_workspace_view(CellViewRef::default_top());
     let mut binding =
         LibraryCellInstance::new(&reference.library, &reference.cell, &reference.view);
     binding.bind_interface(&ports);
     let id = state.schematic.add_library_cell_component(at, binding);
+    ensure_veriloga_configuration(state);
+    id
+}
+
+/// A configuration rooted at the top schematic that executes `veriloga`
+/// views, unless the project already has one.
+pub(super) fn ensure_veriloga_configuration(state: &mut AppState) {
+    let top = CellViewRef::default_top();
     if state
         .workspace
         .content
@@ -299,12 +315,11 @@ fn place_configured_instance_at(state: &mut AppState, reference: &CellViewRef, a
             })
             .expect("create the executable configuration");
     }
-    id
 }
 
 /// The deck for the top schematic as configured, after its Verilog-A
 /// runtimes prepared: what a run would emit, or why it refuses.
-fn configured_deck(app: &RSpiceApp) -> Result<String, String> {
+pub(super) fn configured_deck(app: &RSpiceApp) -> Result<String, String> {
     let state = &app.state;
     let projection = state
         .workspace
