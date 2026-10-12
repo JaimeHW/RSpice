@@ -95,39 +95,55 @@ pub(super) fn shooting_fields(ui: &mut Ui, setup: &mut QpssDraft) {
     );
     input_row(ui, "Maximum backtracks", &mut setup.max_backtracks);
     switch_row(ui, "Autonomous oscillator", &mut setup.autonomous);
+    // The oscillator rows are greyed rather than hidden outside autonomous
+    // mode: a row that disappears takes its reason with it, and moves every
+    // row below it.
+    let autonomous = setup.autonomous;
     input_row_enabled(
         ui,
         "Oscillator node",
         &mut setup.oscillator_node,
-        setup.autonomous,
+        autonomous,
     );
-    if setup.autonomous {
-        input_row(ui, "Free tone number", &mut setup.oscillator_tone);
-        ui.small("Tone numbers start at 1. Its frequency above is the starting guess. Sources must drive only the other tones.");
-        input_row(
-            ui,
-            "Phase tuple (blank: fundamental)",
-            &mut setup.oscillator_phase_tuple,
-        );
-        input_row(
-            ui,
-            "Startup amplitude (V peak)",
-            &mut setup.oscillator_amplitude,
-        );
-        input_row(
-            ui,
-            "Minimum oscillation (V peak)",
-            &mut setup.oscillator_minimum_amplitude,
-        );
-        input_row(
-            ui,
-            "Maximum relative frequency step",
-            &mut setup.oscillator_frequency_step,
-        );
-        input_row(ui, "Additional startup seeds", &mut setup.oscillator_seeds);
-        ui.small("Seeds use node,amplitude,phase-degrees separated by semicolons, such as quadrature,0.1,-90. They initialize the selected tuple; they do not drive the circuit.");
-        ui.small("Autonomous QPAC, QPXF and QPNOISE require nonzero probe offsets. Absolute oscillator phase has no finite DC response.");
-    }
+    input_row_enabled(
+        ui,
+        "Free tone number",
+        &mut setup.oscillator_tone,
+        autonomous,
+    );
+    ui.small("Tone numbers start at 1. Its frequency above is the starting guess. Sources must drive only the other tones.");
+    input_row_enabled(
+        ui,
+        "Phase tuple (blank: fundamental)",
+        &mut setup.oscillator_phase_tuple,
+        autonomous,
+    );
+    input_row_enabled(
+        ui,
+        "Startup amplitude (V peak)",
+        &mut setup.oscillator_amplitude,
+        autonomous,
+    );
+    input_row_enabled(
+        ui,
+        "Minimum oscillation (V peak)",
+        &mut setup.oscillator_minimum_amplitude,
+        autonomous,
+    );
+    input_row_enabled(
+        ui,
+        "Maximum relative frequency step",
+        &mut setup.oscillator_frequency_step,
+        autonomous,
+    );
+    input_row_enabled(
+        ui,
+        "Additional startup seeds",
+        &mut setup.oscillator_seeds,
+        autonomous,
+    );
+    ui.small("Seeds use node,amplitude,phase-degrees separated by semicolons, such as quadrature,0.1,-90. They initialize the selected tuple; they do not drive the circuit.");
+    ui.small("Autonomous QPAC, QPXF and QPNOISE require nonzero probe offsets. Absolute oscillator phase has no finite DC response.");
 }
 
 /// Render the QPAC fields.
