@@ -178,7 +178,7 @@ impl Engine {
             mut matrix,
             linearization,
             excitation: _,
-        } = engine.prepare_ac_circuit(netlist, circuit, abort)?;
+        } = engine.prepare_ac_circuit(netlist, circuit, super::CapabilityAnalysis::Sp, abort)?;
         engine.ensure_result_shape(
             frequencies.len(),
             ac_bias.matrix_size().saturating_mul(2).saturating_add(1),

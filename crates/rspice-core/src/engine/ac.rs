@@ -2134,6 +2134,38 @@ impl Engine {
                         ))
                     })?;
             }
+            // A mixed module's analog half is the same runtime device and
+            // linearizes the same way, at the held equilibrium: its discrete
+            // inputs are state slots of the device, frozen in the clone, so the
+            // digital half contributes no derivative (S2, S5(a)). Its own D/A
+            // bridges add the conductance of their held level (S3).
+            for host in &circuit.mixed_signal_hosts {
+                let mut cloned = host.analog_device().clone();
+                let instance = host.instance_name();
+                cloned
+                    .try_set_analysis_type(physical_analysis.runtime_code())
+                    .map_err(|err| {
+                        SimulationError::Circuit(format!(
+                            "mixed Verilog-AMS instance '{instance}' small-signal analysis setup failed: {err}"
+                        ))
+                    })?;
+                cloned
+                    .try_stamp_small_signal_complex(
+                        op_voltages,
+                        frequency_hz,
+                        |row, col, real, imag| {
+                            matrix.add(row, col, Complex64::new(real, imag));
+                        },
+                    )
+                    .map_err(|err| {
+                        SimulationError::Circuit(format!(
+                            "mixed Verilog-AMS instance '{instance}' small-signal stamping failed: {err}"
+                        ))
+                    })?;
+                host.stamp_small_signal_bridges(|row, col, conductance| {
+                    matrix.add(row, col, Complex64::new(conductance, 0.0));
+                });
+            }
         }
         #[cfg(feature = "veriloga-builtins-base")]
         if circuit.has_generated_veriloga_devices() {
@@ -3086,7 +3118,7 @@ impl Engine {
             mut matrix,
             linearization,
             excitation,
-        } = engine.prepare_ac_analysis(netlist, abort)?;
+        } = engine.prepare_ac_analysis(netlist, super::CapabilityAnalysis::Ac, abort)?;
         let dc_solution = &linearization.bias;
 
         let num_nodes = circuit.num_nodes();

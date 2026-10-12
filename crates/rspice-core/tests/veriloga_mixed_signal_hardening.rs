@@ -887,26 +887,28 @@ endmodule
 //=============================================================================
 
 /// **Attack 2.** Every analysis that hands a worker its own `CircuitData`
-/// refuses a mixed module before any copy is taken.
+/// copies a mixed module only after its held equilibrium is committed.
 ///
 /// This is the structural claim in `circuit::mixed_signal`'s documentation —
-/// "a `CircuitData` clone … never captures speculative state" — and the reason
-/// it holds is not that a clone would be safe. It is that no clone happens: the
-/// three analyses that call `circuit.clone()` to feed worker threads (AC's
-/// frequency chunks, noise's frequency chunks, PSS's shooting columns) all pass
-/// through `ensure_no_mixed_signal_analysis` first, and so do the seven that
-/// linearize without cloning.
+/// "a `CircuitData` clone … never captures speculative state". AC's and
+/// noise's frequency chunks clone the circuit to feed worker threads, and
+/// distortion rebuilds its operator at offset biases; all three now run on a
+/// mixed module, so the claim is held by the bias preparation instead of by a
+/// refusal: the time-zero settle is committed before any copy is taken, so
+/// every copy holds the same settled state, and no copy can run the discrete
+/// half. Two identical runs therefore answer bit-for-bit alike, and a serial
+/// and a chunked AC sweep agree exactly.
 ///
-/// Named individually rather than looped over a list, so a refusal that
-/// disappears from one analysis fails on that analysis's name.
+/// Named individually rather than looped over a list, so a regression on one
+/// analysis fails on that analysis's name.
 #[test]
-fn every_analysis_that_copies_the_circuit_refuses_a_mixed_module_first() {
-    let model = ModelFile::new("clone_refusals", CLOCK_DIVIDER);
+fn every_analysis_that_copies_the_circuit_copies_the_held_equilibrium() {
+    let model = ModelFile::new("clone_held", CLOCK_DIVIDER);
     let deck = format!(
-        "* a mixed module asked for answers no interleave has\n\
+        "* a mixed module linearized around its held equilibrium\n\
          x1 p 0 qdiv clock_divider\n\
          rp p 0 1meg\n\
-         vac p 0 ac 1\n\
+         vac p 0 dc 0.1 ac 1 distof1 0.01\n\
          rload qdiv 0 1k\n\
          .va \"{}\" clock_divider\n\
          .end\n",
@@ -914,52 +916,55 @@ fn every_analysis_that_copies_the_circuit_refuses_a_mixed_module_first() {
     );
     let netlist = Netlist::parse(&deck).expect("the deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    let frequencies = [1.0e5, 1.0e6];
+    // Enough points that the AC and noise sweeps take their chunked path.
+    let frequencies = (0..64)
+        .map(|index| 1.0e3 * 1.2f64.powi(index))
+        .collect::<Vec<_>>();
 
-    let refusal = |analysis: &str, error: Option<String>| {
-        let error = error.unwrap_or_else(|| {
-            panic!("{analysis} must refuse a mixed module rather than omit or approximate it")
-        });
-        let lowered = error.to_lowercase();
-        assert!(
-            lowered.contains(&analysis.to_lowercase()) && lowered.contains("x1"),
-            "the {analysis} refusal must name the analysis and the instance: {error}"
+    let ac = engine
+        .run_ac(&netlist, &frequencies)
+        .expect("AC analysis runs on the held equilibrium");
+    let again = engine
+        .run_ac(&netlist, &frequencies)
+        .expect("AC analysis runs twice");
+    for (first, second) in ac.iter().zip(&again) {
+        assert_eq!(
+            first
+                .voltages
+                .iter()
+                .map(|value| (value.re.to_bits(), value.im.to_bits()))
+                .collect::<Vec<_>>(),
+            second
+                .voltages
+                .iter()
+                .map(|value| (value.re.to_bits(), value.im.to_bits()))
+                .collect::<Vec<_>>(),
+            "two AC runs differ at {} Hz",
+            first.frequency
         );
-        assert!(
-            lowered.contains("around a settled discrete state is not available yet"),
-            "the refusal must name the capability it is missing: {error}"
-        );
-    };
-
-    refusal(
-        "AC analysis",
-        engine
-            .run_ac(&netlist, &frequencies)
-            .err()
-            .map(|error| error.to_string()),
+    }
+    let noise = engine
+        .run_noise(&netlist, 1, &frequencies, 300.15)
+        .expect("noise analysis runs on the held equilibrium");
+    assert!(
+        noise
+            .iter()
+            .all(|point| point.output_noise_density.is_finite()),
+        "every noise point is finite"
     );
-    refusal(
-        "noise analysis",
-        engine
-            .run_noise(&netlist, 1, &frequencies, 300.15)
-            .err()
-            .map(|error| error.to_string()),
-    );
-    refusal(
-        "distortion analysis",
-        engine
-            .run_distortion(&netlist, &frequencies, None)
-            .err()
-            .map(|error| error.to_string()),
-    );
+    engine
+        .run_distortion(&netlist, &frequencies[..2], None)
+        .expect("distortion analysis runs on the held equilibrium");
 }
 
-/// **Attack 2, periodic half.** The periodic small-signal analyses refuse a
-/// mixed module too, and refuse it for the same reason and in the same words.
+/// **Attack 2, periodic half.** The periodic small-signal analyses still refuse
+/// a mixed module — a periodic steady state with its discrete half running
+/// has no formulation yet (P7) — with one typed token, the analysis kind, the
+/// instance and its module.
 ///
-/// These are the routes the refusal was missing from. `ensure_no_mixed_signal_analysis`
-/// was called by AC, the DC sweep, distortion, HB, noise, PSS, PSS-noise, sensitivity and
-/// STB, but by nothing under `engine/hb/`. So a deck whose periodic operating
+/// These are the routes the refusal was once missing from: the old mixed
+/// guard was called by the small-signal and PSS/HB entries but by nothing
+/// under `engine/hb/`. So a deck whose periodic operating
 /// point was solved by PAC or driven pnoise itself — no retained `.PSS` or
 /// `.HB` carrier in front of it — reached the harmonic solver with the mixed
 /// host's equations simply not stamped, and answered. The answer was a real
@@ -998,19 +1003,25 @@ fn every_periodic_small_signal_analysis_refuses_a_mixed_module_first() {
                 "{route} must refuse a mixed module rather than assemble the periodic \
                  system without it; it answered with {answer}"
             ),
-            Err(error) => error.to_string(),
+            Err(error) => error,
         };
-        let lowered = error.to_lowercase();
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("the {route} refusal is a typed capability refusal: {error}");
+        };
+        assert_eq!(
+            refusal.capability, "analysis.mixed_signal.discrete_state",
+            "{error}"
+        );
+        assert_eq!(refusal.instance.as_deref(), Some("x1"), "{error}");
+        assert_eq!(refusal.module.as_deref(), Some("clock_divider"), "{error}");
+        assert!(refusal.analysis_kind.is_some(), "{error}");
+        let lowered = error.to_string().to_lowercase();
         assert!(
             lowered.contains(&analysis.to_lowercase()),
             "the {route} refusal must name the analysis: {error}"
         );
         assert!(
-            lowered.contains("x1"),
-            "the {route} refusal must name the instance: {error}"
-        );
-        assert!(
-            lowered.contains("around a settled discrete state is not available yet"),
+            lowered.contains("running discrete state"),
             "the {route} refusal must name the capability it is missing: {error}"
         );
     };

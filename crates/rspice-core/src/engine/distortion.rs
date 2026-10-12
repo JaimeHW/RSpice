@@ -49,26 +49,22 @@ impl Engine {
 
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_analysis_points(frequencies.len())?;
-        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "distortion analysis")?;
-        if !circuit.coupled_tlines.is_empty() {
-            return Err(SimulationError::unsupported_capability(
-                "analysis.disto.device.coupled_transmission_line",
-                "Distortion analysis does not support coupled multiconductor (CPL) transmission lines",
-            ));
-        }
-        Self::ensure_supported_dynamic_charges(&circuit, "Distortion")?;
-
-        let mut matrix = engine.build_matrix(&circuit)?;
-        circuit.link_indices(&matrix);
-        let dc_solution = engine.solve_dc_operating_point_with_abort(
+        // The Volterra operator is rebuilt at offset biases through the same
+        // small-signal matrix, which reads a mixed module's held state without
+        // running its discrete half, so the frozen discrete state holds there
+        // by construction.
+        let super::small_signal_bias::SmallSignalBias {
+            mut circuit,
+            matrix,
+            bias: dc_solution,
+        } = engine.prepare_small_signal_bias(
             netlist,
-            &mut circuit,
-            &mut matrix,
+            None,
+            super::CapabilityAnalysis::Disto,
+            1,
+            super::small_signal_bias::BiasSource::OperatingPoint,
             abort,
         )?;
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
 
         let rhs_f1 = build_distortion_rhs(&circuit, DistortionInputTone::F1)?;
         if rhs_f1.iter().all(is_zero_complex) {

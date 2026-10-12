@@ -420,24 +420,6 @@ impl Engine {
         }
     }
 
-    /// Refuse an analysis a mixed Verilog-AMS module cannot take part in.
-    ///
-    /// Placed beside the XSPICE MIF boundary warning because it answers the
-    /// same shape of question at the same point of every small-signal and
-    /// steady-state analysis: what does this circuit contain that this analysis
-    /// cannot represent. The difference is that a code model still linearizes
-    /// and a process does not, so this refuses where that one warns.
-    pub(in crate::engine) fn ensure_no_mixed_signal_analysis(
-        circuit: &CircuitData,
-        analysis: &str,
-    ) -> Result<(), SimulationError> {
-        #[cfg(feature = "veriloga")]
-        circuit.ensure_no_mixed_signal_hosts(analysis)?;
-        #[cfg(not(feature = "veriloga"))]
-        let _ = (circuit, analysis);
-        Ok(())
-    }
-
     pub(in crate::engine) fn warn_xspice_mif_analysis_boundary(
         circuit: &CircuitData,
         analysis: &str,
@@ -740,7 +722,7 @@ impl Engine {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
-        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        let circuit = self.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
             "Pole-zero",
@@ -791,13 +773,19 @@ impl Engine {
             ));
         }
 
-        let mut matrix = self.build_matrix(&circuit)?;
-        circuit.link_indices(&matrix);
-        let dc_solution =
-            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
+        let super::small_signal_bias::SmallSignalBias {
+            circuit,
+            matrix,
+            bias: dc_solution,
+        } = self.prepare_small_signal_bias(
+            netlist,
+            Some(circuit),
+            super::CapabilityAnalysis::Pz,
+            1,
+            super::small_signal_bias::BiasSource::OperatingPoint,
+            abort,
+        )?;
         abort.observe_progress(0.25);
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
         let descriptor = Self::linearized_pz_descriptor(
             &circuit,
             &matrix,

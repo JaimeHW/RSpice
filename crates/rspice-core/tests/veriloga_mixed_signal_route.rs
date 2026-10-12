@@ -1143,29 +1143,51 @@ fn a_portless_mixed_initializer_finishes_without_contribution_equations() {
     }
 }
 
+/// AC linearizes a mixed module around the operating point it holds (P1
+/// design S1), so a portless module's analog block runs at that operating
+/// point exactly as `.op` runs it: whatever its `$finish` does to the
+/// operating point, it does to AC's.
 #[test]
-fn ac_equilibrium_refuses_portless_mixed_models() {
+fn ac_runs_a_portless_mixed_models_operating_point_as_op_does() {
+    use rspice_core::{NoAbort, SimulationOutcome};
     let model = ModelFile::new(
         "portless_ac",
         "module portless_ac; reg q; initial q=0; always #1 q=~q; analog $finish(0); endmodule",
     );
     let netlist = Netlist::parse(&format!(
-        "* portless mixed model still requires an implemented analysis host\nX1 portless_ac\n.va \"{}\" portless_ac\n.end\n",
+        "* portless mixed model at its held operating point\nX1 portless_ac\n.va \"{}\" portless_ac\n.end\n",
         model.deck_path(),
     )).unwrap();
-    let error = Engine::default()
-        .run_ac(&netlist, &[1e3, 1e4])
-        .expect_err("AC must not omit the portless mixed model");
-    let message = error.to_string().to_ascii_lowercase();
-    assert!(
-        message.contains("ac analysis") && message.contains("x1"),
-        "{error}"
+    let finish = |ac: bool| {
+        let outcome = Engine::default()
+            .run_with_outcome(&NoAbort, |engine, signal| {
+                if ac {
+                    engine
+                        .run_ac_with_abort(&netlist, &[1e3, 1e4], signal)
+                        .map(|_| ())
+                } else {
+                    engine.run_dc_op_with_abort(&netlist, signal).map(|_| ())
+                }
+            })
+            .unwrap_or_else(|error| panic!("ac={ac}: {error}"));
+        match outcome {
+            SimulationOutcome::Finished { finish, .. } => Some(finish.point),
+            SimulationOutcome::Completed(()) => None,
+        }
+    };
+    assert_eq!(
+        finish(true),
+        finish(false),
+        "AC runs the same operating point"
     );
 }
 
+/// AC on a mixed deck is the AC of its held equilibrium: the clock divider's
+/// input pin is driven straight by the AC source, and its divided output is a
+/// held discrete level with no small-signal path from the input.
 #[test]
-fn a_mixed_module_is_refused_by_the_analyses_that_cannot_represent_it() {
-    let model = ModelFile::new("ac_refusal", CLOCK_DIVIDER);
+fn a_mixed_module_takes_part_in_ac_around_its_held_state() {
+    let model = ModelFile::new("ac_held", CLOCK_DIVIDER);
     let deck = format!(
         "* a mixed module asked for a small-signal answer\n\
          x1 p 0 qdiv clock_divider\n\
@@ -1177,16 +1199,22 @@ fn a_mixed_module_is_refused_by_the_analyses_that_cannot_represent_it() {
         model.deck_path()
     );
     let netlist = Netlist::parse(&deck).expect("the deck parses");
-    let error = Engine::new(SimulationConfig::default())
+    let points = Engine::new(SimulationConfig::default())
         .run_ac(&netlist, &[1.0e3, 1.0e4])
-        .err()
-        .map(|error| error.to_string())
-        .expect("AC analysis must refuse a mixed module rather than omit it");
-    let lowered = error.to_lowercase();
-    assert!(
-        lowered.contains("ac analysis") && lowered.contains("x1"),
-        "the refusal must name the analysis and the instance: {error}"
-    );
+        .unwrap_or_else(|error| panic!("AC runs around the held state: {error}"));
+    assert_eq!(points.len(), 2);
+    for point in &points {
+        let voltage = |name: &str| {
+            let index = point
+                .node_names
+                .iter()
+                .position(|node| node.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("{name} in {:?}", point.node_names));
+            point.voltages[index]
+        };
+        assert!((voltage("p") - rspice_core::Complex64::new(1.0, 0.0)).norm() < 1e-12);
+        assert!(voltage("qdiv").norm() < 1e-12, "{}", voltage("qdiv"));
+    }
 }
 
 /// A module whose analog conductance is scaled by an integer its discrete half

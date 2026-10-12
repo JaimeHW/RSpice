@@ -72,7 +72,7 @@ pub(super) fn extraction_error(error: PoleZeroAnalysisError) -> SimulationError 
 
 impl Engine {
     pub(super) fn ensure_pz_circuit(circuit: &CircuitData) -> Result<(), SimulationError> {
-        Self::ensure_no_mixed_signal_analysis(circuit, "pole-zero analysis")?;
+        Self::ensure_analysis_capability(circuit, crate::engine::CapabilityAnalysis::Pz)?;
         Self::ensure_supported_dynamic_charges(circuit, "Pole-zero")?;
         Self::ensure_supported_pz_dynamic_state_descriptors(circuit)
     }
@@ -163,16 +163,20 @@ impl Engine {
         let progress = StudyProgress::new(abort)?;
         let setup = progress.stage(0.0, 0.2);
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit_with_abort(netlist, &setup)?;
+        let circuit = engine.build_circuit_with_abort(netlist, &setup)?;
         Self::ensure_pz_circuit(&circuit)?;
-        let mut matrix = engine.build_matrix(&circuit)?;
-        circuit.link_indices(&matrix);
         progress.report(0.2)?;
         let bias = progress.stage(0.2, 0.6);
-        let operating_point = engine.solve_dc_operating_point_with_abort(
+        let crate::engine::small_signal_bias::SmallSignalBias {
+            mut circuit,
+            matrix,
+            bias: operating_point,
+        } = engine.prepare_small_signal_bias(
             netlist,
-            &mut circuit,
-            &mut matrix,
+            Some(circuit),
+            crate::engine::CapabilityAnalysis::Pz,
+            1,
+            crate::engine::small_signal_bias::BiasSource::OperatingPoint,
             &bias,
         )?;
         progress.report(0.6)?;

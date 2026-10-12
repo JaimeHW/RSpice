@@ -121,7 +121,13 @@ impl Engine {
             mut matrix,
             linearization,
             excitation,
-        } = engine.prepare_ac_circuit_with_excitation(netlist, circuit, Some(excitation), abort)?;
+        } = engine.prepare_ac_circuit_with_excitation(
+            netlist,
+            circuit,
+            Some(excitation),
+            super::CapabilityAnalysis::Tf,
+            abort,
+        )?;
         engine.ensure_result_shape(1, 3)?;
         let mut workspace = ComplexMatrix::from_real_structure(&matrix);
         let solve = |circuit: &mut CircuitData, final_step| {

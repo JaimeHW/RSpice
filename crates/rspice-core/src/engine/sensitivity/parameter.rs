@@ -421,7 +421,12 @@ impl Engine {
     ) -> Result<LinearParameterResponse, SimulationError> {
         *runs = runs.saturating_add(1);
         self.ensure_batch_runs(*runs)?;
-        let mut prepared = self.prepare_ac_circuit(netlist, circuit, abort)?;
+        let mut prepared = self.prepare_ac_circuit(
+            netlist,
+            circuit,
+            crate::engine::CapabilityAnalysis::Sens,
+            abort,
+        )?;
         let circuit = &prepared.circuit;
         let size = circuit.matrix_size();
         let points = frequencies.unwrap_or(&[0.0]);

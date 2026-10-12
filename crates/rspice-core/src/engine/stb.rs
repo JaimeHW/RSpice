@@ -200,11 +200,13 @@ impl Engine {
             .map_err(map_stb_analysis_error)?;
 
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         if circuit.num_nodes() == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
-        Self::ensure_no_mixed_signal_analysis(&circuit, "STB analysis")?;
+        // Refused before the probe is validated, as they always were; the bias
+        // preparation below asks both again on the circuit it solves.
+        Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Stb)?;
         Self::ensure_supported_dynamic_charges(&circuit, "STB")?;
 
         let probe_idx = circuit
@@ -249,20 +251,21 @@ impl Engine {
 
         let br_ordinal = circuit.voltage_sources.branch_indices[probe_idx];
 
-        let mut matrix = engine.build_matrix(&circuit)?;
-        circuit.link_indices(&matrix);
-
         progress.report(0.15)?;
         let bias = progress.stage(0.15, 0.35);
         let abort: &dyn AbortSignal = &bias;
-        let dc_solution = engine.solve_dc_operating_point_with_abort(
+        let super::small_signal_bias::SmallSignalBias {
+            mut circuit,
+            matrix,
+            bias: dc_solution,
+        } = engine.prepare_small_signal_bias(
             netlist,
-            &mut circuit,
-            &mut matrix,
+            Some(circuit),
+            super::CapabilityAnalysis::Stb,
+            1,
+            super::small_signal_bias::BiasSource::OperatingPoint,
             abort,
         )?;
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
 
         let size = circuit.matrix_size();
         progress.report(0.35)?;

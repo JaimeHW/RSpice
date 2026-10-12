@@ -1,6 +1,8 @@
 //! Prepared AC bias and certified solves shared by AC and every SP excitation.
 
 use super::*;
+use crate::engine::CapabilityAnalysis;
+use crate::engine::small_signal_bias::{BiasSource, SmallSignalBias};
 
 pub(in crate::engine) struct PreparedAc {
     pub circuit: CircuitData,
@@ -107,10 +109,11 @@ impl Engine {
     pub(in crate::engine) fn prepare_ac_analysis(
         &self,
         netlist: &Netlist,
+        analysis: CapabilityAnalysis,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedAc, SimulationError> {
         let circuit = self.build_circuit_with_abort(netlist, abort)?;
-        self.prepare_ac_circuit(netlist, circuit, abort)
+        self.prepare_ac_circuit(netlist, circuit, analysis, abort)
     }
 
     /// SP retains elaborated port metadata before initializing this same AC state.
@@ -118,95 +121,42 @@ impl Engine {
         &self,
         netlist: &Netlist,
         circuit: CircuitData,
+        analysis: CapabilityAnalysis,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedAc, SimulationError> {
-        self.prepare_ac_circuit_with_excitation(netlist, circuit, None, abort)
+        self.prepare_ac_circuit_with_excitation(netlist, circuit, None, analysis, abort)
     }
 
     /// An explicit excitation suppresses authored AC drives after elaboration,
     /// without changing the netlist, device topology, or operating point.
+    ///
+    /// `analysis` is the caller's own analysis — AC, S-parameters, transfer
+    /// function or AC sensitivity — which is what a refusal raised while the
+    /// shared bias is prepared names.
     pub(in crate::engine) fn prepare_ac_circuit_with_excitation(
         &self,
         netlist: &Netlist,
-        mut circuit: CircuitData,
+        circuit: CircuitData,
         excitation: Option<AcExcitation>,
+        analysis: CapabilityAnalysis,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedAc, SimulationError> {
-        circuit
-            .begin_veriloga_equilibrium_analysis(1)
-            .map_err(SimulationError::Circuit)?;
-        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "AC analysis")?;
-        // Coupled multiconductor lines have no small-signal load (ngspice's
-        // CPL registers none and its AC solve fails with a singular matrix);
-        // refuse explicitly instead of returning silently dead ports.
-        if !circuit.coupled_tlines.is_empty() {
-            return Err(SimulationError::unsupported_capability(
-                "analysis.ac.device.coupled_transmission_line",
-                "AC analysis does not support coupled multiconductor (CPL) transmission lines",
-            ));
-        }
-        Self::ensure_supported_ac_dynamic_charges(&circuit)?;
-        circuit
-            .prepare_veriloga_equilibrium_analysis_point(1, true, false)
-            .map_err(SimulationError::Circuit)?;
-        let mut matrix = if circuit.matrix_size() == 0 {
-            Self::model_observation_matrix()?
-        } else {
-            self.build_matrix(&circuit)?
-        };
-        circuit.link_indices(&matrix);
+        let SmallSignalBias {
+            circuit,
+            matrix,
+            bias: dc_solution,
+        } = self.prepare_small_signal_bias(
+            netlist,
+            Some(circuit),
+            analysis,
+            1,
+            BiasSource::OperatingPoint,
+            abort,
+        )?;
         let excitation = match excitation {
             Some(excitation) => excitation,
             None => AcExcitation::new(&circuit)?,
         };
-
-        // Get DC operating point
-        let has_nonlinear = circuit.has_nonlinear_devices();
-        let dc_solution = if circuit.matrix_size() == 0 {
-            Vec::new()
-        } else if circuit.can_use_zero_bias_for_explicit_xspice_ac() {
-            log::debug!(
-                "using zero-bias small-signal state for explicit XSPICE transmission-line AC"
-            );
-            vec![0.0; circuit.matrix_size()]
-        } else {
-            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
-        };
-        if has_nonlinear && !dc_solution.is_empty() {
-            self.try_observe_dc_operating_point(&mut circuit, &mut matrix, &dc_solution)?;
-        }
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        if let Some(message) = circuit.take_xspice_evaluation_error() {
-            return Err(SimulationError::Circuit(format!(
-                "XSPICE evaluation failed: {message}"
-            )));
-        }
-        self.accept_frequency_operating_point(
-            netlist,
-            &mut circuit,
-            &mut matrix,
-            &dc_solution,
-            1,
-            abort,
-        )?;
-        circuit
-            .finish_veriloga_equilibrium_operating_point(1)
-            .map_err(SimulationError::Circuit)?;
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        if has_nonlinear {
-            // Align stateful nonlinear models (limited junction voltages,
-            // operating region) with the final converged operating point.
-            Self::prepare_small_signal_state(&mut circuit, &dc_solution)?;
-        } else {
-            // Behavioral source caches may still be present on an otherwise
-            // linear circuit.
-            circuit
-                .prepare_behavioral_small_signal(&dc_solution)
-                .map_err(SimulationError::Circuit)?;
-        }
 
         let size = circuit.matrix_size();
         let ac_solve_denominator_floor = if excitation.projection.is_empty() {
