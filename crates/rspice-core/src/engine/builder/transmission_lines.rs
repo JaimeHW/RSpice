@@ -373,6 +373,7 @@ pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
     netlist: &Netlist,
     element: &crate::netlist::Element,
     model_name: &str,
+    truncation_factor: Value,
 ) -> Result<(), SimulationError> {
     if element.nodes.len() < 6 || !element.nodes.len().is_multiple_of(2) {
         return Err(SimulationError::Circuit(format!(
@@ -419,6 +420,9 @@ pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
         params.length,
     )
     .map_err(SimulationError::Circuit)?;
+    // The history interpolation limit joins the transient's other truncation
+    // estimates, so it answers to the same multiplier (TRTOL; one for Xyce).
+    coupled_tline.set_interpolation_truncation_factor(truncation_factor);
     if params.exact_lossless_frequency_model {
         // The CPL transient kernel floors an authored zero R matrix to keep
         // its convolution setup nonsingular. Preserve the authored, physical

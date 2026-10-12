@@ -84,6 +84,13 @@ pub struct CoupledTransmissionLine {
     modal_from_physical_current: Vec<Vec<Value>>,
     modal_to_physical_current: Vec<Vec<Value>>,
     port_admittance: Vec<Vec<Value>>,
+    /// Lossless characteristic impedance, the inverse of `port_admittance`:
+    /// the voltage a port current carries along the line.
+    characteristic_impedance: Vec<Vec<Value>>,
+    /// The transient's truncation-error multiplier (ngspice TRTOL, one for
+    /// Xyce), applied to the history interpolation budget as to every other
+    /// truncation estimate. The builder sets it; a bare line stays strict.
+    interpolation_truncation_factor: Value,
     modal_conductances: Vec<Value>,
     dc_series_resistances: Vec<Value>,
     native_branch_ordinals: Option<CplBranchCurrents>,
@@ -223,6 +230,22 @@ impl CoupledTransmissionLine {
             &modal_to_physical_current,
             &modal_conductances,
         );
+        // Z_c = C^-1/2 U diag(z) U^T C^-1/2, the inverse of `port_admittance`.
+        let characteristic_impedance = (0..conductors)
+            .map(|row| {
+                (0..conductors)
+                    .map(|col| {
+                        (0..conductors)
+                            .map(|mode| {
+                                modal_from_physical_current[mode][row]
+                                    * modal_from_physical_current[mode][col]
+                                    / modal_conductances[mode]
+                            })
+                            .sum()
+                    })
+                    .collect()
+            })
+            .collect();
         let dc_series_resistances = (0..conductors)
             .map(|idx| {
                 let resistance = r[idx][idx].max(0.0) * length;
@@ -255,6 +278,8 @@ impl CoupledTransmissionLine {
             modal_from_physical_current,
             modal_to_physical_current,
             port_admittance,
+            characteristic_impedance,
+            interpolation_truncation_factor: 1.0,
             modal_conductances,
             dc_series_resistances,
             native_branch_ordinals: None,
@@ -298,6 +323,14 @@ impl CoupledTransmissionLine {
     /// transient CPL setup has introduced its private numerical R floor.
     pub(crate) fn set_exact_lossless_frequency_model(&mut self) {
         self.exact_lossless_frequency_model = true;
+    }
+
+    /// Grant the history interpolation estimate the transient's truncation
+    /// budget multiplier.
+    pub(crate) fn set_interpolation_truncation_factor(&mut self, factor: Value) {
+        if factor.is_finite() && factor > 0.0 {
+            self.interpolation_truncation_factor = factor;
+        }
     }
 
     #[inline]
@@ -492,13 +525,17 @@ impl CoupledTransmissionLine {
     }
 
     /// Limit the candidate interval before its port histories are committed.
+    ///
+    /// The engine's current tolerance does not enter: a port current is
+    /// judged by the voltage it carries along the line (see
+    /// [`NativeCplViHistory::interpolation_step_limit_ps`]).
     pub(crate) fn native_interpolation_step_limit(
         &self,
         candidate_solution: &[Value],
         candidate_time: Value,
         reltol: Value,
         voltage_abstol: Value,
-        current_abstol: Value,
+        _current_abstol: Value,
     ) -> Option<Value> {
         let native = self.native.as_ref()?;
         let branches = self.native_branch_matrix_indices()?;
@@ -526,9 +563,10 @@ impl CoupledTransmissionLine {
             .interpolation_step_limit_ps(
                 candidate_time * 1e12,
                 [&near_v, &far_v, &near_i, &far_i],
+                &self.characteristic_impedance,
                 reltol,
                 voltage_abstol,
-                current_abstol,
+                self.interpolation_truncation_factor,
             )
             .map(|picoseconds| picoseconds * 1e-12)
     }

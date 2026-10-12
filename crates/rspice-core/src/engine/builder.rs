@@ -8920,6 +8920,7 @@ impl Engine {
                                     netlist,
                                     element,
                                     model_name,
+                                    self.transient_trtol(),
                                 )?;
                                 continue;
                             }

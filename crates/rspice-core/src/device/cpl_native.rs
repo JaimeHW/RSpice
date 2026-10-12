@@ -1116,15 +1116,26 @@ impl NativeCplViHistory {
 
     /// Bound the error of the linear VI history before storing a new interval.
     /// For a quadratic through the last two accepted values and the candidate,
-    /// the maximum difference from the new interval's chord is |v''|*h^2/8.
+    /// the maximum difference from the new interval's chord is |x''|*h^2/8.
     /// Checking only the later delayed query cannot recover lost curvature.
+    ///
+    /// Every port is judged in volts: its voltage, and its current through
+    /// the line's characteristic impedance (`Z_c i`, the voltage that current
+    /// carries along the line to the far end). Both answer to the transient's
+    /// truncation budget, `truncation_factor * (voltage_abstol + reltol * w)`,
+    /// where `w` is the port's wave magnitude, the largest of `|v|` and
+    /// `|Z_c i|` over the three samples. Judging a port current in amperes
+    /// against the device current tolerance instead held nanoampere load
+    /// currents to picoamperes, so trapezoidal ringing in them read as
+    /// curvature and collapsed the step at every edge.
     pub(crate) fn interpolation_step_limit_ps(
         &self,
         candidate_time_ps: f64,
         candidate_vi: [&[f64]; 4],
+        characteristic_impedance: &[Vec<f64>],
         reltol: f64,
         voltage_abstol: f64,
-        current_abstol: f64,
+        truncation_factor: f64,
     ) -> Option<f64> {
         let current = self.samples.back()?;
         let previous = self.samples.get(self.samples.len().checked_sub(2)?)?;
@@ -1133,36 +1144,59 @@ impl NativeCplViHistory {
         if !h.is_finite() || h <= 0.0 || !previous_h.is_finite() || previous_h <= 0.0 {
             return None;
         }
-        let current_vi = [&current.v_i, &current.v_o, &current.i_i, &current.i_o];
-        let previous_vi = [&previous.v_i, &previous.v_o, &previous.i_i, &previous.i_o];
-        let mut worst_error: f64 = 0.0;
-        for field in 0..4 {
-            let abstol = if field < 2 {
-                voltage_abstol
-            } else {
-                current_abstol
+        let n = self.no_l;
+        if characteristic_impedance.len() != n
+            || characteristic_impedance.iter().any(|row| row.len() != n)
+            || candidate_vi.iter().any(|field| field.len() != n)
+        {
+            return None;
+        }
+        // [near v, far v, near Z_c i, far Z_c i] of one sample, in volts.
+        let in_volts = |vi: [&[f64]; 4]| {
+            let carried = |currents: &[f64]| -> Vec<f64> {
+                characteristic_impedance
+                    .iter()
+                    .map(|row| row.iter().zip(currents).map(|(z, i)| z * i).sum())
+                    .collect()
             };
-            for conductor in 0..self.no_l {
-                let candidate = *candidate_vi[field].get(conductor)?;
-                let current = current_vi[field][conductor];
-                let previous = previous_vi[field][conductor];
-                // Arrange the divided difference as voltage/current increments,
-                // avoiding h^2 and derivatives that can overflow at tiny steps.
-                let chord_error = 0.25
-                    * (h / (h + previous_h))
-                    * ((candidate - current) - (current - previous) * (h / previous_h)).abs();
-                let scale = candidate.abs().max(current.abs()).max(previous.abs());
-                let tolerance = abstol + reltol * scale;
-                if tolerance.is_finite() && tolerance > 0.0 {
+            [
+                vi[0].to_vec(),
+                vi[1].to_vec(),
+                carried(vi[2]),
+                carried(vi[3]),
+            ]
+        };
+        let samples = [
+            in_volts([&previous.v_i, &previous.v_o, &previous.i_i, &previous.i_o]),
+            in_volts([&current.v_i, &current.v_o, &current.i_i, &current.i_o]),
+            in_volts(candidate_vi),
+        ];
+        let mut worst_error: f64 = 0.0;
+        for end in 0..2 {
+            for conductor in 0..n {
+                let mut wave: f64 = 0.0;
+                for sample in &samples {
+                    wave = wave
+                        .max(sample[end][conductor].abs())
+                        .max(sample[end + 2][conductor].abs());
+                }
+                let tolerance = truncation_factor * (voltage_abstol + reltol * wave);
+                if !tolerance.is_finite() || tolerance <= 0.0 {
+                    continue;
+                }
+                for field in [end, end + 2] {
+                    let [previous, current, candidate] =
+                        [0, 1, 2].map(|sample| samples[sample][field][conductor]);
+                    // Arrange the divided difference as voltage increments,
+                    // avoiding h^2 and derivatives that can overflow at tiny steps.
+                    let chord_error = 0.25
+                        * (h / (h + previous_h))
+                        * ((candidate - current) - (current - previous) * (h / previous_h)).abs();
                     worst_error = worst_error.max(chord_error / tolerance);
                 }
             }
         }
-        if worst_error > 0.0 {
-            Some(h * (0.9 / worst_error.sqrt()).min(2.0))
-        } else {
-            None
-        }
+        (worst_error > 0.0).then(|| h * (0.9 / worst_error.sqrt()).min(2.0))
     }
 
     pub(crate) fn delayed_vi_samples_ps(
@@ -3165,6 +3199,9 @@ mod tests {
         // v(t)=t^2: over [1, 2.5], its chord is 0.5625 V above the
         // exact midpoint value. A 0.01 V budget gives h=0.2 before the
         // controller's 0.9 safety factor, independently of the time unit.
+        // Currents are a thousandth of the voltages on a 1 kohm line, so the
+        // voltage they carry, Z_c i, is the same quadratic.
+        let impedance = vec![vec![1000.0, 0.0], vec![0.0, 1000.0]];
         for time_scale in [1.0, 1.0 / 1024.0] {
             for field in 0..4 {
                 let value_scale = if field < 2 { 1.0 } else { 1e-3 };
@@ -3192,26 +3229,38 @@ mod tests {
                     &candidate[2][..],
                     &candidate[3][..],
                 ];
-                let limit = history
-                    .interpolation_step_limit_ps(2.5 * time_scale, refs, 0.0, 0.01, 1e-5)
-                    .unwrap();
+                let limit_for = |refs, abstol, factor| {
+                    history.interpolation_step_limit_ps(
+                        2.5 * time_scale,
+                        refs,
+                        &impedance,
+                        0.0,
+                        abstol,
+                        factor,
+                    )
+                };
+                let limit = limit_for(refs, 0.01, 1.0).unwrap();
                 assert!(
                     (limit / time_scale - 0.18).abs() < 1e-14,
                     "field {field}: {limit}"
                 );
-                let tighter = history
-                    .interpolation_step_limit_ps(2.5 * time_scale, refs, 0.0, 0.0025, 2.5e-6)
-                    .unwrap();
+                let tighter = limit_for(refs, 0.0025, 1.0).unwrap();
                 assert!((tighter / limit - 0.5).abs() < 1e-14);
-                candidate[field][1] = 2.5 * value_scale;
-                let refs = [
-                    &candidate[0][..],
-                    &candidate[1][..],
-                    &candidate[2][..],
-                    &candidate[3][..],
-                ];
+                // The truncation factor scales the budget like the abstol.
+                assert_eq!(limit_for(refs, 0.0025, 4.0), Some(limit));
+                let mut linear = [[0.0; 2]; 4];
+                linear[field][1] = 2.5 * value_scale;
                 assert_eq!(
-                    history.interpolation_step_limit_ps(2.5 * time_scale, refs, 0.0, 0.01, 1e-5),
+                    limit_for(
+                        [
+                            &linear[0][..],
+                            &linear[1][..],
+                            &linear[2][..],
+                            &linear[3][..]
+                        ],
+                        0.01,
+                        1.0
+                    ),
                     None,
                     "an exactly linear history needs no curvature restriction"
                 );
@@ -3221,6 +3270,69 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Trapezoidal ringing in a capacitive load's nanoampere current and a
+    /// sharp voltage corner under a large wave: the samples the estimator saw
+    /// at the edges of paranoia `cpl1_4_line`, where amperes judged against
+    /// the 1 pA device tolerance cut the step without bound.
+    #[test]
+    fn cpl_history_judges_port_currents_by_the_voltage_they_carry() {
+        // Conductor 0 carries the case; conductor 1 stays at rest.
+        let impedance = vec![vec![50.0, 0.0], vec![0.0, 50.0]];
+        let mut history = NativeCplViHistory::new(2, vec![0.0; 2], vec![0.0; 2]).unwrap();
+        for (time, far_current) in [(0.0, 1e-9), (1.0, -1e-9)] {
+            history
+                .push_sample(NativeCplViSample::new(
+                    time,
+                    vec![1e-3, 0.0],
+                    vec![0.0; 2],
+                    vec![0.0; 2],
+                    vec![far_current, 0.0],
+                ))
+                .unwrap();
+        }
+        // The current's second difference is 4 nA, 200 nV through 50 ohm, so
+        // the chord misses by 25 nV against a 1 uV budget: the step may grow
+        // by the controller's full factor of two. In amperes against a 1 pA
+        // tolerance the same samples allowed 0.057 of the step.
+        let ringing = [
+            &[1e-3, 0.0][..],
+            &[0.0; 2][..],
+            &[0.0; 2][..],
+            &[1e-9, 0.0][..],
+        ];
+        assert_eq!(
+            history.interpolation_step_limit_ps(2.0, ringing, &impedance, 1e-3, 1e-6, 1.0),
+            Some(2.0)
+        );
+        // A 1 V wave (20 mA) on a near-shorted far end: its voltage corner is
+        // judged against the wave, not against the 20 mV the port shows.
+        let mut history = NativeCplViHistory::new(2, vec![0.0; 2], vec![0.0; 2]).unwrap();
+        for time in [0.0, 1.0] {
+            history
+                .push_sample(NativeCplViSample::new(
+                    time,
+                    vec![0.0; 2],
+                    vec![0.0; 2],
+                    vec![0.0; 2],
+                    vec![0.02, 0.0],
+                ))
+                .unwrap();
+        }
+        let corner = [
+            &[0.0; 2][..],
+            &[0.02, 0.0][..],
+            &[0.0; 2][..],
+            &[0.02, 0.0][..],
+        ];
+        let limit = history
+            .interpolation_step_limit_ps(2.0, corner, &impedance, 1e-3, 1e-6, 1.0)
+            .unwrap();
+        // The chord misses the 20 mV corner by 0.25 * 0.5 * 20 mV = 2.5 mV,
+        // judged against 1 uV + 1e-3 * 1 V rather than against 21 uV.
+        let expected = 0.9 / (2.5e-3_f64 / 1.001e-3).sqrt();
+        assert!((limit - expected).abs() < 1e-12, "{limit} vs {expected}");
     }
 
     #[test]
