@@ -651,10 +651,32 @@ fn the_same_deck_shape_still_runs_when_the_module_is_analog_only() {
         module_result.digital_traces.is_empty(),
         "an analog-only module must not open a digital trace channel"
     );
+    // The same timepoints, to rounding rather than to the bit. A deck with an
+    // ordinary capacitor solves transient Newton in correction form (since
+    // faaf0e809), where each device's current enters the residual as that
+    // device assembles it: the resistor through the conductance matrix, the
+    // module through its own evaluated contribution. The two sums round
+    // differently even when the module's equation is written with the
+    // resistor's own conductance, so a time can land an ulp or two apart. A
+    // 64-epsilon relative band is far below the controller's minimum step at
+    // every time this run reaches, so it cannot hide a different timepoint.
     assert_eq!(
-        module_result.time, resistor_result.time,
-        "the analog-only module must accept the same timepoints its equivalent resistor does"
+        module_result.time.len(),
+        resistor_result.time.len(),
+        "the analog-only module must accept as many timepoints as its equivalent resistor does"
     );
+    for (index, (module_time, resistor_time)) in module_result
+        .time
+        .iter()
+        .zip(&resistor_result.time)
+        .enumerate()
+    {
+        assert!(
+            (module_time - resistor_time).abs() <= 64.0 * f64::EPSILON * resistor_time.abs(),
+            "timepoint {index}: the analog-only module accepted {module_time:e} s where its \
+             equivalent resistor accepted {resistor_time:e} s"
+        );
+    }
     let module_mid = waveform(&module_result, "mid");
     let resistor_mid = waveform(&resistor_result, "mid");
     assert_eq!(module_mid.len(), resistor_mid.len());
