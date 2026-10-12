@@ -99,8 +99,19 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// Nothing else in this file moved: deck C2 keeps its pinned point count, deck
 /// E its sampled voltages, and deck A its pinned analog solution at every
 /// digital instant.
-const DECK_A_POINTS: usize = 1132;
-const DECK_A_GRID_HASH: u64 = 0x9485_9e98_f8c7_6df9;
+///
+/// Re-measured for P0.10 at 1139. Main had drifted to 1166 since 2f5a150284
+/// gave the explicit converters root detection: `a_adc` lands its 1.6 V root
+/// with V exactly at `in_low`, its move to `x` is then a root at that point
+/// itself and is landed one hard minimum later, and the restart after that
+/// landing was capped at twice its 1e-20 s width and doubled out of the floor
+/// over 20 accepted points (D10). It now restarts from the proposal the event
+/// interrupted. The left-limit D/A drive (D9) adds one landing after each of
+/// the six `q` edges, where the interval leaving the edge asks its crossing
+/// one hard minimum past it first. 1132 + those 7 single landings is 1139,
+/// and every accepted step below 1e-14 s is one of them.
+const DECK_A_POINTS: usize = 1139;
+const DECK_A_GRID_HASH: u64 = 0x36f3_4a2e_1cf1_7f86;
 
 /// Deck A's node waveforms, re-measured after R2.15 took the digital-only nets
 /// out of the analog namespace.
@@ -113,7 +124,14 @@ const DECK_A_GRID_HASH: u64 = 0x9485_9e98_f8c7_6df9;
 /// `DECK_A_GRID_HASH` did not move at all, which is the proof the change is
 /// results-only and left the accepted grid and every solved level alone. The
 /// structure assertions beside the pin say the same thing by name.
-const DECK_A_VOLT_HASH: u64 = 0x1b54_c78e_1859_dae5;
+///
+/// Re-measured with the grid for P0.10: all 90 digital trace points are
+/// bit-identical to main's, `q` against its 10k-loaded drive, held from before
+/// each edge on the edge's own point, errs at most 6.6e-14 V where main's
+/// right-limit edges erred 3.2934 V, and the analog solution at every pinned
+/// digital instant is unchanged to 1 uV
+/// (`deck_a_digital_instants_keep_their_pre_fix_analog_solution`).
+const DECK_A_VOLT_HASH: u64 = 0xdd89_3fbe_1613_e538;
 
 /// Deck A's fingerprint, from the three constants above.
 const DECK_A_FINGERPRINT: Fingerprint = Fingerprint {
@@ -131,10 +149,15 @@ const DECK_C2_POINTS: usize = 265;
 /// "the unloaded deck lands on the same grid, at the same levels, every time".
 /// Deck C2 carries two mixed modules and no native source at all, so it is the
 /// one deck here whose whole timeline is the discrete halves' schedule.
+///
+/// The voltage hash was re-measured for the left-limit D/A drive (P0.10 D9):
+/// the same 265 points on the same grid, every event bit-identical, and `c`
+/// against its 10k-loaded drive, held from before each edge on the edge's own
+/// point, worst 3.2934 V -> 6.6e-14 V.
 const DECK_C2_FINGERPRINT: Fingerprint = Fingerprint {
     points: DECK_C2_POINTS,
     grid_hash: 0x28ff_9ed5_d9c9_59f2,
-    volt_hash: 0x3748_a5da_95de_f3d7,
+    volt_hash: 0x60a2_2915_8352_c32b,
 };
 
 /// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2
