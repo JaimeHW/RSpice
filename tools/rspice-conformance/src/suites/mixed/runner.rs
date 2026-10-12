@@ -978,15 +978,18 @@ pub struct CaptureReport {
     pub status: String,
 }
 
-/// (Re)capture every reference of `oracle` in the selected designs. Without
-/// `update`, a reference must reproduce byte for byte.
+/// (Re)capture every reference of `oracle` in the selected designs, `jobs`
+/// at a time where [`captures_in_parallel`] allows. Without `update`, a
+/// reference must reproduce byte for byte. Reports keep the declared order.
 pub fn capture(
     designs: &[String],
     oracle_id: &str,
     update: bool,
+    jobs: usize,
 ) -> Result<Vec<CaptureReport>, String> {
-    let mut reports = Vec::new();
-    for design in selected_designs(designs)? {
+    let designs = selected_designs(designs)?;
+    let mut work: Vec<(usize, String)> = Vec::new();
+    for (index, design) in designs.iter().enumerate() {
         let mut references: BTreeSet<String> = BTreeSet::new();
         for quantity in &design.tolerance.quantities {
             if quantity.oracle != oracle_id {
@@ -1000,18 +1003,47 @@ pub fn capture(
                 }
             }
         }
-        for reference in references {
-            let status = match capture_one(&design, &reference, oracle_id, update) {
-                Ok(status) => status,
-                Err(error) => format!("FAILED: {error}"),
-            };
-            reports.push(CaptureReport {
-                reference: format!("{}/{reference}", design.slug),
-                status,
-            });
-        }
+        work.extend(references.into_iter().map(|reference| (index, reference)));
     }
-    Ok(reports)
+    let jobs = if captures_in_parallel(oracle_id) {
+        jobs
+    } else {
+        1
+    };
+    let order: Vec<usize> = (0..work.len()).collect();
+    let mut statuses: Vec<Option<String>> = vec![None; work.len()];
+    execute(
+        &work,
+        &order,
+        jobs,
+        |(design, reference)| match capture_one(&designs[*design], reference, oracle_id, update) {
+            Ok(status) => status,
+            Err(error) => format!("FAILED: {error}"),
+        },
+        |index, status| {
+            statuses[index] = Some(status);
+            Ok(())
+        },
+    )?;
+    Ok(work
+        .iter()
+        .zip(statuses)
+        .map(|((design, reference), status)| CaptureReport {
+            reference: format!("{}/{reference}", designs[*design].slug),
+            status: status.expect("every reference ran"),
+        })
+        .collect())
+}
+
+/// Whether one oracle's captures may run side by side. ngspice (O1, O5-O1)
+/// and Xyce (O4, O5-O4) write their tables and logs into a fresh temporary
+/// directory per run, and what they leave beside the deck is named per run
+/// (ngspice's control deck) or per deck (Xyce's `.NOISE` side file), and every
+/// reference has its own deck. O2 is serial: every reference of one variant
+/// builds the same `oracle/<v>.o2/` Verilog image in place and deletes it
+/// after its run, so two captures of one variant would race on it.
+pub fn captures_in_parallel(oracle_id: &str) -> bool {
+    matches!(oracle_id, "O1" | "O5-O1" | "O4" | "O5-O4")
 }
 
 fn capture_one(

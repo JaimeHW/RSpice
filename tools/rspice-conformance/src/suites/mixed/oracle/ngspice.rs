@@ -139,8 +139,12 @@ pub(crate) fn run_source(
         text.push_str(&format!("eprvcd {nets} > {}\n", forward(&vcd)));
     }
     text.push_str("quit\n.endc\n.end\n");
-    // The deck must sit beside the original so relative includes resolve.
-    let temporary = directory.join(format!(".rspice-capture-{}.cir", std::process::id()));
+    // The deck must sit beside the original so relative includes resolve. Its
+    // name is unique per run, so captures running side by side in one
+    // process never share it.
+    static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let run = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporary = directory.join(format!(".rspice-capture-{}-{run}.cir", std::process::id()));
     fs::write(&temporary, text).map_err(|error| error.to_string())?;
     let log_path = scratch.path().join("ngspice.log");
     let log_file = fs::File::create(&log_path).map_err(|error| error.to_string())?;

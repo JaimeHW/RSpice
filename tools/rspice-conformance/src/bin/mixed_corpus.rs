@@ -4,12 +4,12 @@
 //! rspice-mixed-corpus run [--design C1,C5] [--variant v] [--analysis a] [--record] [--extended]
 //!                         [--producer "<cmd>"] [--expect-route interp|native] [--jobs N]
 //! rspice-mixed-corpus case <design-dir> <variant> <analysis> <out.json> [--budget-s N] [--o5]
-//! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4 [--design C1] [--update]
+//! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4 [--design C1] [--update] [--jobs N]
 //! rspice-mixed-corpus probe a|b|c [--record] [--jobs N]
 //! ```
 //!
 //! The route is the build: `--features veriloga-native` is the native route.
-//! `--jobs` is the most cells running at once; the default is
+//! `--jobs` is the most cells (or captures) running at once; the default is
 //! `runner::default_jobs()`.
 
 use std::path::PathBuf;
@@ -69,6 +69,8 @@ enum Commands {
         design: Vec<String>,
         #[arg(long)]
         update: bool,
+        #[arg(long, value_parser = job_count)]
+        jobs: Option<usize>,
     },
     /// Run one P0.6 probe.
     Probe {
@@ -165,8 +167,10 @@ fn run() -> Result<ExitCode, String> {
             oracle,
             design,
             update,
+            jobs,
         } => {
-            let reports = runner::capture(&design, &oracle, update)?;
+            let jobs = jobs.unwrap_or_else(runner::default_jobs);
+            let reports = runner::capture(&design, &oracle, update, jobs)?;
             let mut failed = false;
             for report in &reports {
                 println!("{}: {}", report.reference, report.status);

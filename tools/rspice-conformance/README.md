@@ -160,9 +160,11 @@ cargo run --release -p rspice-conformance --features veriloga-native --bin rspic
 Release is not optional advice: these suites run thousands of decks, and the
 debug profile costs five to ten times as much on the IR passes.
 
-`rspice-mixed-corpus run` takes `--jobs N`, the most cells running at once;
-the default is a quarter of the hardware threads, between 2 and 8, because a
-Monte Carlo cell already runs its trials in parallel. Reports and
+`rspice-mixed-corpus run` and `capture` take `--jobs N`, the most cells (or
+oracle captures) running at once; the default is a quarter of the hardware
+threads, between 2 and 8, because a Monte Carlo cell already runs its trials
+in parallel. O2 captures stay serial: the references of one variant build
+the same Verilog image beside their deck. Reports and
 `outcomes.tsv` are assembled in declared order, so they are the same for any
 N. Cells start slowest first, by their last wall time on the machine (kept
 per route in the temp directory). Each `--record` rewrites a design's `outcomes.tsv` under an exclusive lock
