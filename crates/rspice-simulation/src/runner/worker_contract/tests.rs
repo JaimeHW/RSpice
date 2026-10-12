@@ -729,6 +729,22 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
     }
 }
 
+/// The wasm transport test builds its requests by hand and runs only on CI's
+/// browser job, so this pins its transport revisions and execution policy to
+/// the Rust contract where every protocol bump is tested.
+#[test]
+fn the_wasm_transport_test_speaks_the_current_worker_transport() {
+    const TRANSPORT_TEST: &str =
+        include_str!("../../../../rspice-worker/tests/browser_worker_transport.rs");
+    for declaration in [
+        format!("const REQUEST_PROTOCOL: u8 = {WORKER_REQUEST_TRANSPORT_PROTOCOL};"),
+        format!("const RESPONSE_PROTOCOL: u8 = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"),
+        "\"execution_limits\": rspice_core::ResourceLimits::default(),".to_owned(),
+    ] {
+        assert!(TRANSPORT_TEST.contains(&declaration), "{declaration}");
+    }
+}
+
 #[test]
 fn standalone_connection_worker_transport_retains_selected_physics() {
     let (sources, deck) = crate::veriloga::tests::standalone_connection_fixture();

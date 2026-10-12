@@ -12,6 +12,40 @@ extern "C" {
     fn structured_clone(value: &JsValue) -> JsValue;
 }
 
+/// The request revision this worker accepts and the response revision it
+/// answers with. The worker-contract tests in `rspice-simulation` pin both to
+/// the Rust transport constants, so a protocol bump fails natively first.
+const REQUEST_PROTOCOL: u8 = 45;
+const RESPONSE_PROTOCOL: u8 = 37;
+
+/// One analysis request as the browser host transfers it: the shipping
+/// default execution resource policy, no dependencies and no buffers.
+fn worker_request(id: u64, spec: serde_json::Value, netlist: &str) -> JsValue {
+    let request = serde_json::json!({
+        "protocolVersion": REQUEST_PROTOCOL,
+        "request": {
+            "request": {
+                "execution_limits": rspice_core::ResourceLimits::default(),
+                "id": id,
+                "request": {"Spec": {"spec": spec, "options": {}}},
+                "netlist": netlist,
+                "source_path": null,
+                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
+            },
+            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
+            "dependency_buffer_count": 0
+        },
+        "buffers": [], "byteBuffers": []
+    });
+    js_sys::JSON::parse(&request.to_string()).unwrap()
+}
+
+fn response_protocol(response: &JsValue) -> Option<f64> {
+    js_sys::Reflect::get(response, &"protocolVersion".into())
+        .unwrap()
+        .as_f64()
+}
+
 fn transferred_series(
     buffers: &js_sys::Array,
     reference: &serde_json::Value,
@@ -36,27 +70,16 @@ fn run(seed: u64, source: &str) -> serde_json::Value {
     let netlist = format!(
         "MC worker boundary\n.param rval={resistance}\nV1 in 0 1\nR1 in out {{rval}}\nR2 out 0 1k\n.mc 4 seed {seed} DIST UNIFORM SPREAD .05\n.end ; done\n"
     );
-    let request = serde_json::json!({
-        "protocolVersion": 42,
-        "request": {
-            "request": {
-                "id": 1,
-                "request": {"Spec": {"spec": {"MonteCarlo": {"variation_source": source}}, "options": {}}},
-                "netlist": netlist,
-                "source_path": null,
-                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
-            },
-            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
-            "dependency_buffer_count": 0
-        },
-        "buffers": [], "byteBuffers": []
-    });
-    let value = js_sys::JSON::parse(&request.to_string()).unwrap();
+    let value = worker_request(
+        1,
+        serde_json::json!({"MonteCarlo": {"variation_source": source}}),
+        &netlist,
+    );
     let response = rspice_worker::run_rspice_ui_worker_request(value)
         .expect("worker must return valid Monte Carlo results");
     let response = structured_clone(&response);
     let response: serde_json::Value = serde_wasm_bindgen::from_value(response).unwrap();
-    assert_eq!(response["protocolVersion"], 36);
+    assert_eq!(response["protocolVersion"], RESPONSE_PROTOCOL);
     assert_eq!(response["response"]["id"].as_u64(), Some(1));
     let result = response["response"]["outcome"]["Success"]["Inline"]["MonteCarlo"].clone();
     assert_eq!(result["seed"].as_u64(), Some(seed), "{response}");
@@ -85,6 +108,46 @@ fn complete_seed_range_survives_the_worker_and_structured_clone() {
 }
 
 #[wasm_bindgen_test]
+fn a_host_on_another_revision_is_refused_as_a_protocol_mismatch() {
+    // A host from before revision 44 sends no `execution_limits`. The
+    // refusal must name the revision, not the first field the host omitted.
+    let stale = worker_request(
+        5,
+        serde_json::json!({"Transient": {
+            "stop_time": 1.0, "step_time": 0.1, "start_time": 0.0,
+            "max_timestep": null, "uic": false
+        }}),
+        "Stale host\nV1 out 0 1\nR1 out 0 1k\n.end\n",
+    );
+    js_sys::Reflect::set(
+        &stale,
+        &"protocolVersion".into(),
+        &JsValue::from(REQUEST_PROTOCOL - 1),
+    )
+    .unwrap();
+    let metadata = js_sys::Reflect::get(&stale, &"request".into()).unwrap();
+    let request = js_sys::Reflect::get(&metadata, &"request".into()).unwrap();
+    assert!(
+        js_sys::Reflect::delete_property(
+            request.unchecked_ref::<js_sys::Object>(),
+            &"execution_limits".into()
+        )
+        .unwrap()
+    );
+    let error = rspice_worker::run_rspice_ui_worker_request(stale)
+        .expect_err("a stale request revision must be refused")
+        .as_string()
+        .unwrap();
+    assert_eq!(
+        error,
+        format!(
+            "unsupported worker request transport protocol {}",
+            REQUEST_PROTOCOL - 1
+        )
+    );
+}
+
+#[wasm_bindgen_test]
 fn deck_statistics_retain_full_width_trial_identities() {
     let result = run(7, "deck_statistics");
     let members = result["member_measurements"].as_array().unwrap();
@@ -102,34 +165,19 @@ fn deck_statistics_retain_full_width_trial_identities() {
 
 #[wasm_bindgen_test]
 fn transient_quality_survives_the_worker_and_structured_clone_before_output_cropping() {
-    let request = serde_json::json!({
-        "protocolVersion": 42,
-        "request": {
-            "request": {
-                "id": 2,
-                "request": {"Spec": {"spec": {"Transient": {
-                    "stop_time": 1.0, "step_time": 0.01, "start_time": 0.5,
-                    "max_timestep": null, "uic": false
-                }}, "options": {}}},
-                "netlist": "Worker convergence\nV1 out 0 1\nR1 out 0 1k\n.end\n",
-                "source_path": null,
-                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
-            },
-            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
-            "dependency_buffer_count": 0
-        },
-        "buffers": [], "byteBuffers": []
-    });
-    let response = rspice_worker::run_rspice_ui_worker_request(
-        js_sys::JSON::parse(&request.to_string()).unwrap(),
-    )
-    .unwrap();
+    let request = worker_request(
+        2,
+        serde_json::json!({"Transient": {
+            "stop_time": 1.0, "step_time": 0.01, "start_time": 0.5,
+            "max_timestep": null, "uic": false
+        }}),
+        "Worker convergence\nV1 out 0 1\nR1 out 0 1k\n.end\n",
+    );
+    let response = rspice_worker::run_rspice_ui_worker_request(request).unwrap();
     let response = structured_clone(&response);
     assert_eq!(
-        js_sys::Reflect::get(&response, &"protocolVersion".into())
-            .unwrap()
-            .as_f64(),
-        Some(36.0)
+        response_protocol(&response),
+        Some(f64::from(RESPONSE_PROTOCOL))
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -159,29 +207,19 @@ fn transient_quality_survives_the_worker_and_structured_clone_before_output_crop
 
 #[wasm_bindgen_test]
 fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone() {
-    let request = serde_json::json!({
-        "protocolVersion": 42,
-        "request": {
-            "request": {"id":3,"request":{"Spec":{"spec":{"DcSweep":{
-                "source_name":"V1","start":1.0,"stop":0.0,"step":-0.5,
-                "source2":"V2","start2":1e-7,"stop2":3e-7,"step2":1e-7,"hysteresis":false
-            }},"options":{}}},
-            "netlist":"Nested worker DC\nV1 in 0 0\nV2 out 0 0\nR1 in out 1k\n.end\n","source_path":null,
-            "project_veriloga_runtimes":{"runtimes":[],"connections":[]}},
-            "dependency_metadata":"{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
-            "dependency_buffer_count":0
-        },"buffers":[], "byteBuffers":[]
-    });
-    let response = rspice_worker::run_rspice_ui_worker_request(
-        js_sys::JSON::parse(&request.to_string()).unwrap(),
-    )
-    .unwrap();
+    let request = worker_request(
+        3,
+        serde_json::json!({"DcSweep": {
+            "source_name": "V1", "start": 1.0, "stop": 0.0, "step": -0.5,
+            "source2": "V2", "start2": 1e-7, "stop2": 3e-7, "step2": 1e-7, "hysteresis": false
+        }}),
+        "Nested worker DC\nV1 in 0 0\nV2 out 0 0\nR1 in out 1k\n.end\n",
+    );
+    let response = rspice_worker::run_rspice_ui_worker_request(request).unwrap();
     let response = structured_clone(&response);
     assert_eq!(
-        js_sys::Reflect::get(&response, &"protocolVersion".into())
-            .unwrap()
-            .as_f64(),
-        Some(36.0)
+        response_protocol(&response),
+        Some(f64::from(RESPONSE_PROTOCOL))
     );
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -236,32 +274,20 @@ fn nested_dc_curves_and_exact_traversal_survive_the_worker_and_structured_clone(
 
 #[wasm_bindgen_test]
 fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
-    let request = serde_json::json!({
-        "protocolVersion": 42,
-        "request": {
-            "request": {
-                "id": 4,
-                "request": {"Spec": {"spec": {"Soa": {
-                    "stop_time": 1e-8, "step_time": 1e-9,
-                    "observation": {"start_time": 2e-9, "max_step": 5e-10, "devices": ["M1"]},
-                    "rules": [{"parameter": "Id", "max_value": 0.004, "models": ["NM"]}],
-                    "check_vgs_max": false, "max_vgs": 1.8,
-                    "check_vds_max": false, "max_vds": 3.3,
-                    "check_vbe_max": false, "max_vbe": 0.9,
-                    "check_vce_max": false, "max_vce": 5.0
-                }}, "options": {}}},
-                "netlist": "Browser SOA\nVd d 0 3\nVg g 0 2\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS LEVEL=1 VTO=1 KP=1m LAMBDA=0\n.save V(d)\n.end\n",
-                "source_path": null,
-                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
-            },
-            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
-            "dependency_buffer_count": 0
-        }, "buffers": [], "byteBuffers": []
-    });
-    let response = rspice_worker::run_rspice_ui_worker_request(
-        js_sys::JSON::parse(&request.to_string()).unwrap(),
-    )
-    .unwrap();
+    let request = worker_request(
+        4,
+        serde_json::json!({"Soa": {
+            "stop_time": 1e-8, "step_time": 1e-9,
+            "observation": {"start_time": 2e-9, "max_step": 5e-10, "devices": ["M1"]},
+            "rules": [{"parameter": "Id", "max_value": 0.004, "models": ["NM"]}],
+            "check_vgs_max": false, "max_vgs": 1.8,
+            "check_vds_max": false, "max_vds": 3.3,
+            "check_vbe_max": false, "max_vbe": 0.9,
+            "check_vce_max": false, "max_vce": 5.0
+        }}),
+        "Browser SOA\nVd d 0 3\nVg g 0 2\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS LEVEL=1 VTO=1 KP=1m LAMBDA=0\n.save V(d)\n.end\n",
+    );
+    let response = rspice_worker::run_rspice_ui_worker_request(request).unwrap();
     let response = structured_clone(&response);
     let buffers = js_sys::Reflect::get(&response, &"buffers".into())
         .unwrap()
@@ -299,32 +325,19 @@ fn scoped_soa_current_rules_reach_the_solver_and_transfer_complete_evidence() {
 
 #[wasm_bindgen_test]
 fn optimization_expression_reaches_a_current_target_through_the_worker() {
-    let request = serde_json::json!({
-        "protocolVersion": 42,
-        "request": {
-            "request": {
-                "id": 6,
-                "request": {"Spec": {"spec": {"Optimization": {
-                    "variables": [{"name": "RLOAD", "min": 500.0, "max": 5000.0, "initial": 4000.0}],
-                    "objective_expression": "I(V1)",
-                    "objective_node": "", "objective_ref": "",
-                    "goal": "Target", "target": -0.001, "algorithm": "PatternSearch",
-                    "max_iterations": 180, "cost_tolerance": 1e-16,
-                    "fd_step": 1e-4, "initial_step": 0.1, "min_step": 1e-8
-                }}, "options": {}}},
-                "netlist": "Worker current target\n.param RLOAD=2k\nV1 in 0 1\nR1 in 0 {RLOAD}\n.save V(in)\n.end\n",
-                "source_path": null,
-                "project_veriloga_runtimes": {"runtimes": [], "connections": []}
-            },
-            "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
-            "dependency_buffer_count": 0
-        },
-        "buffers": [], "byteBuffers": []
-    });
-    let response = rspice_worker::run_rspice_ui_worker_request(
-        js_sys::JSON::parse(&request.to_string()).unwrap(),
-    )
-    .unwrap();
+    let request = worker_request(
+        6,
+        serde_json::json!({"Optimization": {
+            "variables": [{"name": "RLOAD", "min": 500.0, "max": 5000.0, "initial": 4000.0}],
+            "objective_expression": "I(V1)",
+            "objective_node": "", "objective_ref": "",
+            "goal": "Target", "target": -0.001, "algorithm": "PatternSearch",
+            "max_iterations": 180, "cost_tolerance": 1e-16,
+            "fd_step": 1e-4, "initial_step": 0.1, "min_step": 1e-8
+        }}),
+        "Worker current target\n.param RLOAD=2k\nV1 in 0 1\nR1 in 0 {RLOAD}\n.save V(in)\n.end\n",
+    );
+    let response = rspice_worker::run_rspice_ui_worker_request(request).unwrap();
     let response = structured_clone(&response);
     let metadata: serde_json::Value = serde_wasm_bindgen::from_value(
         js_sys::Reflect::get(&response, &"response".into()).unwrap(),
@@ -339,34 +352,21 @@ fn optimization_expression_reaches_a_current_target_through_the_worker() {
 #[wasm_bindgen_test]
 fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transport() {
     let run = |method: &str, iterations: u32| {
-        let request = serde_json::json!({
-            "protocolVersion": 42,
-            "request": {
-                "request": {
-                    "id": 7,
-                    "request": {"Spec": {"spec": {"Envelope": {
-                        "initialization": {"max_iterations": iterations, "damping": 0.5,
-                            "pss_stabilization_periods": 0, "pss_points_per_period": 64,
-                            "hb_collocation_points": 17, "hb_oversample": 4,
-                            "hb_use_krylov": true, "hb_gmres_restart": 12},
-                        "fundamental_freq": 1e6, "additional_carrier_tones": [], "stop_time": 4e-6,
-                        "num_harmonics": 3, "envelope_step": 0.5e-6,
-                        "modulation_sources": ["Vmod"], "initial_periodic_solve": method,
-                        "adaptive_mode": "fixed_envelope_step", "extraction_path": "projection"
-                    }}, "options": {}}},
-                    "netlist": "Initializer controls\nV1 in mod SIN(0 1 1Meg)\nVmod mod 0 PWL(0 0 10u 0)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
-                    "source_path": null,
-                    "project_veriloga_runtimes": {"runtimes": [], "connections": []}
-                },
-                "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
-                "dependency_buffer_count": 0
-            },
-            "buffers": [], "byteBuffers": []
-        });
-        let response = rspice_worker::run_rspice_ui_worker_request(
-            js_sys::JSON::parse(&request.to_string()).unwrap(),
-        )
-        .unwrap();
+        let request = worker_request(
+            7,
+            serde_json::json!({"Envelope": {
+                "initialization": {"max_iterations": iterations, "damping": 0.5,
+                    "pss_stabilization_periods": 0, "pss_points_per_period": 64,
+                    "hb_collocation_points": 17, "hb_oversample": 4,
+                    "hb_use_krylov": true, "hb_gmres_restart": 12},
+                "fundamental_freq": 1e6, "additional_carrier_tones": [], "stop_time": 4e-6,
+                "num_harmonics": 3, "envelope_step": 0.5e-6,
+                "modulation_sources": ["Vmod"], "initial_periodic_solve": method,
+                "adaptive_mode": "fixed_envelope_step", "extraction_path": "projection"
+            }}),
+            "Initializer controls\nV1 in mod SIN(0 1 1Meg)\nVmod mod 0 PWL(0 0 10u 0)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        );
+        let response = rspice_worker::run_rspice_ui_worker_request(request).unwrap();
         let response = structured_clone(&response);
         serde_wasm_bindgen::from_value::<serde_json::Value>(
             js_sys::Reflect::get(&response, &"response".into()).unwrap(),
@@ -405,30 +405,18 @@ fn envelope_initializer_settings_execute_and_pss_budget_survives_worker_transpor
 #[wasm_bindgen_test]
 fn optimization_rejects_failed_and_overflowed_costs_through_the_worker() {
     let run = |expression: &str, goal: &str, target: f64| {
-        let request = serde_json::json!({
-            "protocolVersion": 42,
-            "request": {
-                "request": {
-                    "id": 8,
-                    "request": {"Spec": {"spec": {"Optimization": {
-                        "variables": [{"name": "X", "min": 0.0, "max": 1.0, "initial": 0.51}],
-                        "objective_expression": expression, "objective_node": "", "objective_ref": "",
-                        "goal": goal, "target": target, "algorithm": "PatternSearch",
-                        "max_iterations": 40, "cost_tolerance": 1e-8,
-                        "fd_step": 0.1, "initial_step": 0.1, "min_step": 1e-8
-                    }}, "options": {}}},
-                    "netlist": "Worker objective validity\n.param X=0.51\nV1 in 0 {X}\nR1 in 0 1k\n.end\n",
-                    "source_path": null,
-                    "project_veriloga_runtimes": {"runtimes": [], "connections": []}
-                },
-                "dependency_metadata": "{\"snapshot_digest\":null,\"bindings\":[],\"artifacts\":[]}",
-                "dependency_buffer_count": 0
-            }, "buffers": [], "byteBuffers": []
-        });
-        let response = rspice_worker::run_rspice_ui_worker_request(
-            js_sys::JSON::parse(&request.to_string()).unwrap(),
-        )
-        .unwrap();
+        let request = worker_request(
+            8,
+            serde_json::json!({"Optimization": {
+                "variables": [{"name": "X", "min": 0.0, "max": 1.0, "initial": 0.51}],
+                "objective_expression": expression, "objective_node": "", "objective_ref": "",
+                "goal": goal, "target": target, "algorithm": "PatternSearch",
+                "max_iterations": 40, "cost_tolerance": 1e-8,
+                "fd_step": 0.1, "initial_step": 0.1, "min_step": 1e-8
+            }}),
+            "Worker objective validity\n.param X=0.51\nV1 in 0 {X}\nR1 in 0 1k\n.end\n",
+        );
+        let response = rspice_worker::run_rspice_ui_worker_request(request).unwrap();
         let response = structured_clone(&response);
         serde_wasm_bindgen::from_value::<serde_json::Value>(
             js_sys::Reflect::get(&response, &"response".into()).unwrap(),

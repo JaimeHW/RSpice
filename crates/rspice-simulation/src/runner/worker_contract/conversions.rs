@@ -651,6 +651,14 @@ pub(super) fn worker_request_from_value(
         .ok_or_else(|| {
             JsValue::from_str("worker request transport protocolVersion must be an unsigned byte")
         })?;
+    // The revision decides the metadata schema, so refuse another revision
+    // before decoding: a stale host must read as a protocol mismatch, not as
+    // whichever field its revision lacks.
+    if protocol != WORKER_REQUEST_TRANSPORT_PROTOCOL {
+        return Err(JsValue::from_str(&format!(
+            "unsupported worker request transport protocol {protocol}"
+        )));
+    }
 
     let request = js_sys::Reflect::get(&value, &JsValue::from_str("request"))
         .map_err(worker_request_js_error)?;
