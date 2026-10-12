@@ -338,6 +338,14 @@ impl BoundaryNetHistory {
     }
 }
 
+/// One instance's accepted boundary histories, as an acceptance would leave
+/// them: parallel to `bridges.adc`, `bridges.dac` and `event_ports`.
+struct BoundaryHistories {
+    adc: Vec<BoundaryNetHistory>,
+    dac: Vec<BoundaryNetHistory>,
+    ports: Vec<BoundaryNetHistory>,
+}
+
 /// What is remembered about one candidate timepoint across the Newton probes
 /// the solver rolls back.
 ///
@@ -989,6 +997,7 @@ struct TrialScratch {
     /// anything is committed so a chattering boundary can still be refused.
     adc_history: Vec<BoundaryNetHistory>,
     dac_history: Vec<BoundaryNetHistory>,
+    port_history: Vec<BoundaryNetHistory>,
     /// The candidate-scoped facts a rolled-back probe must not erase, held
     /// here for the life of one trial and parked on the circuit's scheduler
     /// between trials.
@@ -1071,6 +1080,13 @@ struct MixedState {
     /// Recent accepted history of each D/A boundary net, parallel to
     /// `bridges.dac`.
     dac_history: Vec<BoundaryNetHistory>,
+    /// Recent accepted history of each event port, parallel to
+    /// `MixedSignalHost::event_ports`. Only a converted port's entry is ever
+    /// written: a shared converter stands between that port and the deck, so
+    /// its bit is a boundary net in exactly the sense a bridge's is, and a loop
+    /// closed through the converter moves it at every accepted timepoint. A
+    /// pure event connection has no analog side to take part in one.
+    port_history: Vec<BoundaryNetHistory>,
     accepted_tick: u64,
     accepted_time: f64,
     started: bool,
@@ -1647,6 +1663,7 @@ impl MixedSignalHost {
                 accepted_probe_values: initial_probe_values,
                 adc_history: Vec::new(),
                 dac_history: Vec::new(),
+                port_history: Vec::new(),
                 accepted_tick: 0,
                 accepted_time: 0.0,
                 started: false,
@@ -1705,6 +1722,7 @@ impl MixedSignalHost {
         }
         self.state.adc_history.fill(BoundaryNetHistory::default());
         self.state.dac_history.fill(BoundaryNetHistory::default());
+        self.state.port_history.fill(BoundaryNetHistory::default());
         self.state.accepted_tick = 0;
         self.state.accepted_time = 0.0;
         self.state.started = false;
@@ -2062,6 +2080,7 @@ impl MixedSignalHost {
         self.state.accepted_adc_transition_times = vec![None; bridges.adc.len()];
         self.state.adc_history = vec![BoundaryNetHistory::default(); bridges.adc.len()];
         self.state.dac_history = vec![BoundaryNetHistory::default(); bridges.dac.len()];
+        self.state.port_history = vec![BoundaryNetHistory::default(); self.event_ports.len()];
     }
 
     /// Every circuit node this module's matrix contributions can reach, in
@@ -3745,19 +3764,20 @@ impl MixedSignalHost {
         // accepted timepoint is refused with the analog integrator still where
         // the trial found it. Folded into the scratch pair rather than a fresh
         // one, so the refusal that never fires costs no allocation.
-        let mut histories = (
-            std::mem::take(&mut self.scratch.adc_history),
-            std::mem::take(&mut self.scratch.dac_history),
-        );
-        self.fold_boundary_histories(&trial, &mut histories.0, &mut histories.1);
-        if let Some(oscillation) = self.boundary_flip_run(&histories.0, &histories.1, trial.tick) {
-            self.scratch.adc_history = histories.0;
-            self.scratch.dac_history = histories.1;
+        let mut histories = BoundaryHistories {
+            adc: std::mem::take(&mut self.scratch.adc_history),
+            dac: std::mem::take(&mut self.scratch.dac_history),
+            ports: std::mem::take(&mut self.scratch.port_history),
+        };
+        self.fold_boundary_histories(&trial, &mut histories);
+        let oscillation = self.boundary_flip_run(&histories, trial.tick);
+        self.scratch.adc_history = histories.adc;
+        self.scratch.dac_history = histories.dac;
+        self.scratch.port_history = histories.ports;
+        if let Some(oscillation) = oscillation {
             self.unwind(trial);
             return Err(oscillation);
         }
-        self.scratch.adc_history = histories.0;
-        self.scratch.dac_history = histories.1;
         Ok(trial)
     }
 
@@ -3770,6 +3790,7 @@ impl MixedSignalHost {
         self.prepared_analog.invalidate();
         std::mem::swap(&mut self.state.adc_history, &mut self.scratch.adc_history);
         std::mem::swap(&mut self.state.dac_history, &mut self.scratch.dac_history);
+        std::mem::swap(&mut self.state.port_history, &mut self.scratch.port_history);
         self.analog.make_mut().apply_validated_advance_state();
         self.state.accepted_tick = trial.tick;
         self.state.accepted_time = trial.time_seconds;
@@ -4190,12 +4211,8 @@ impl MixedSignalHost {
     /// is committed. A net whose signal has disappeared from the store — which
     /// `stamp` and `dac_values` both refuse on — is recorded as high impedance
     /// rather than skipped, so the parallel indexing holds.
-    fn fold_boundary_histories(
-        &self,
-        trial: &ActiveTrial,
-        adc: &mut Vec<BoundaryNetHistory>,
-        dac: &mut Vec<BoundaryNetHistory>,
-    ) {
+    fn fold_boundary_histories(&self, trial: &ActiveTrial, histories: &mut BoundaryHistories) {
+        let BoundaryHistories { adc, dac, ports } = histories;
         let read_bit = |signal, bit| {
             self.state
                 .digital
@@ -4242,6 +4259,28 @@ impl MixedSignalHost {
             );
             dac.push(entry);
         }
+        // A converted port moved in this trial exactly when its bit differs
+        // from the image the trial opened with: the converter, not the host,
+        // carries it across the boundary, so there is no per-pass move vector
+        // for it and the store is the record.
+        ports.clear();
+        for (index, port) in self.event_ports.iter().enumerate() {
+            let mut entry = self
+                .state
+                .port_history
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            if let Some((bit, _)) = port.converted_bit() {
+                let now = read_bit(port.signal, bit);
+                let before = trial
+                    .rollback
+                    .read(port.signal)
+                    .map_or(FourStateBit::HighImpedance, |value| value.bit(bit));
+                entry.push(now, classify(now != before));
+            }
+            ports.push(entry);
+        }
     }
 
     /// The diagnostic for a boundary that has moved at every accepted timepoint
@@ -4254,23 +4293,73 @@ impl MixedSignalHost {
     /// compared against.
     fn boundary_flip_run(
         &self,
-        adc_history: &[BoundaryNetHistory],
-        dac_history: &[BoundaryNetHistory],
+        histories: &BoundaryHistories,
         tick: u64,
     ) -> Option<MixedSignalError> {
-        let tripped = adc_history
+        let tripped = histories
+            .adc
             .iter()
-            .chain(dac_history)
+            .chain(&histories.dac)
+            .chain(&histories.ports)
             .any(|entry| entry.run > MAX_CONSECUTIVE_BOUNDARY_FLIPS);
         if !tripped {
             return None;
         }
-        let mut nets: Vec<BoundaryNetActivity> = self
-            .state
-            .bridges
+        Some(MixedSignalError::BoundaryOscillation {
+            tick,
+            limit: MAX_CONSECUTIVE_BOUNDARY_FLIPS,
+            within_one_timepoint: false,
+            nets: self.accepted_boundary_activity(histories, 1),
+        })
+    }
+
+    /// The loop the accepted histories already show, for a caller that is about
+    /// to refuse the run for a reason of its own.
+    ///
+    /// Every move of a zero-delay loop is now a move at its own accepted point:
+    /// a drive acts from the first instant after the point that stepped it, so
+    /// the crossing it carries is landed one minimum step later, and that
+    /// landing steps the drive again. The run of such points is pinned at the
+    /// solver floor, and the stepper's floor guard ends it long before
+    /// [`MAX_CONSECUTIVE_BOUNDARY_FLIPS`] does. What the floor guard can say is
+    /// that the step will not grow; what it cannot say is why. When every one
+    /// of the points it counted also moved a boundary net with nothing
+    /// scheduled to explain it, this is why, and these are the participants.
+    pub(crate) fn accepted_boundary_loop(&self, minimum_run: u32) -> Option<MixedSignalError> {
+        let histories = BoundaryHistories {
+            adc: self.state.adc_history.clone(),
+            dac: self.state.dac_history.clone(),
+            ports: self.state.port_history.clone(),
+        };
+        let longest = histories
             .adc
             .iter()
-            .zip(adc_history)
+            .chain(&histories.dac)
+            .chain(&histories.ports)
+            .map(|entry| entry.run)
+            .max()
+            .filter(|run| *run >= minimum_run.max(1))?;
+        Some(MixedSignalError::BoundaryOscillation {
+            tick: self.state.accepted_tick,
+            limit: longest,
+            within_one_timepoint: false,
+            nets: self.accepted_boundary_activity(&histories, minimum_run),
+        })
+    }
+
+    /// Every boundary net whose run of unexplained accepted moves has reached
+    /// `minimum`, rendered busiest first and then in wiring order, so two runs
+    /// of one deck report the participants in one order.
+    fn accepted_boundary_activity(
+        &self,
+        histories: &BoundaryHistories,
+        minimum: u32,
+    ) -> Vec<String> {
+        let bridges = &self.state.bridges;
+        let mut nets: Vec<BoundaryNetActivity> = bridges
+            .adc
+            .iter()
+            .zip(&histories.adc)
             .map(|(bridge, entry)| BoundaryNetActivity {
                 signal: bridge.signal_name.clone(),
                 node: bridge.positive,
@@ -4279,11 +4368,10 @@ impl MixedSignalHost {
                 recent: entry.values(),
             })
             .chain(
-                self.state
-                    .bridges
+                bridges
                     .dac
                     .iter()
-                    .zip(dac_history)
+                    .zip(&histories.dac)
                     .map(|(bridge, entry)| BoundaryNetActivity {
                         signal: bridge.signal_name.clone(),
                         node: bridge.positive,
@@ -4292,17 +4380,26 @@ impl MixedSignalHost {
                         recent: entry.values(),
                     }),
             )
-            .filter(|net| net.moves > 0)
+            .chain(
+                self.event_ports
+                    .iter()
+                    .zip(&histories.ports)
+                    .filter_map(|(port, entry)| {
+                        let (bit, node) = port.converted_bit()?;
+                        Some(BoundaryNetActivity {
+                            signal: self.event_port_net_name(port, bit),
+                            node,
+                            read_by_module: port.direction
+                                == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input,
+                            moves: entry.run,
+                            recent: entry.values(),
+                        })
+                    }),
+            )
+            .filter(|net| net.moves >= minimum.max(1))
             .collect();
-        // Busiest first, and stable in wiring order under a tie, so two runs of
-        // one deck report the participants in one order.
         nets.sort_by(|left, right| right.moves.cmp(&left.moves));
-        Some(MixedSignalError::BoundaryOscillation {
-            tick,
-            limit: MAX_CONSECUTIVE_BOUNDARY_FLIPS,
-            within_one_timepoint: false,
-            nets: nets.iter().map(BoundaryNetActivity::to_string).collect(),
-        })
+        nets.iter().map(BoundaryNetActivity::to_string).collect()
     }
 
     /// The diagnostic for a trial whose boundary settle never reported quiet.
@@ -4361,6 +4458,22 @@ impl MixedSignalHost {
                         recent: vec![spelling(read(bridge.signal, bridge.bit))],
                     }),
             )
+            .chain(self.event_ports.iter().filter_map(|port| {
+                let (bit, node) = port.converted_bit()?;
+                let now = read(port.signal, bit);
+                let before = trial
+                    .rollback
+                    .read(port.signal)
+                    .map_or(FourStateBit::HighImpedance, |value| value.bit(bit));
+                Some(BoundaryNetActivity {
+                    signal: self.event_port_net_name(port, bit),
+                    node,
+                    read_by_module: port.direction
+                        == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input,
+                    moves: u32::from(now != before),
+                    recent: vec![spelling(now)],
+                })
+            }))
             .filter(|net| net.moves > 0)
             .collect();
         nets.sort_by(|left, right| right.moves.cmp(&left.moves));

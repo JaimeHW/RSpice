@@ -6603,6 +6603,16 @@ impl Engine {
                     if livelock_streak >= LIVELOCK_STREAK_RESTART {
                         livelock_streak = 0;
                         if !livelock_restart!() {
+                            // A zero-delay loop through a converter pins the
+                            // stepper exactly this way, one landed crossing per
+                            // point, and moves its boundary at every one of
+                            // them: name the loop rather than the floor.
+                            #[cfg(feature = "veriloga")]
+                            if let Some(error) =
+                                circuit.mixed_boundary_loop(LIVELOCK_STREAK_RESTART as u32)
+                            {
+                                return Err(error);
+                            }
                             return Err(SimulationError::Circuit(format!(
                                 "transient timestep pinned at the minimum near t={:.6e}s \
                                  (dt={:.3e}s, delmin={:.3e}s): integration restart did not \

@@ -35,7 +35,14 @@ pub(crate) struct ParticipantCheckpoint {
     probes: Vec<Option<u64>>,
     adc_history: Vec<HistoryImage>,
     dac_history: Vec<HistoryImage>,
+    /// One entry per converted event port, in port order.
+    port_history: Vec<HistoryImage>,
 }
+
+/// Version 2 added `port_history`: a loop closed through a shared converter is
+/// counted, and an interval leaving a stepped converted output is recognized,
+/// from those entries, so a resume without them would forget both.
+const PARTICIPANT_CHECKPOINT_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -265,6 +272,13 @@ impl MixedSignalHost {
         ))
     }
 
+    fn converted_port_count(&self) -> usize {
+        self.event_ports
+            .iter()
+            .filter(|port| port.converted_bit().is_some())
+            .count()
+    }
+
     fn participant_budget(
         &self,
         image: &ParticipantCheckpoint,
@@ -280,6 +294,7 @@ impl MixedSignalHost {
             image.probes.len(),
             image.adc_history.len(),
             image.dac_history.len(),
+            image.port_history.len(),
         ];
         let adc = self.state.bridges.adc.len();
         if sizes
@@ -290,6 +305,7 @@ impl MixedSignalHost {
                 self.analog_probes.len(),
                 adc,
                 self.state.bridges.dac.len(),
+                self.converted_port_count(),
             ]
         {
             return Err("participant checkpoint boundary dimensions differ".into());
@@ -318,7 +334,7 @@ impl MixedSignalHost {
         }
         let analog = self.analog.checkpoint_state().map_err(|e| e.to_string())?;
         let image = ParticipantCheckpoint {
-            version: 1,
+            version: PARTICIPANT_CHECKPOINT_VERSION,
             topology: self.participant_topology()?,
             analog_identity: [
                 analog.instance_name.to_string(),
@@ -366,6 +382,13 @@ impl MixedSignalHost {
                 .iter()
                 .map(HistoryImage::capture)
                 .collect(),
+            port_history: self
+                .event_ports
+                .iter()
+                .zip(&self.state.port_history)
+                .filter(|(port, _)| port.converted_bit().is_some())
+                .map(|(_, history)| HistoryImage::capture(history))
+                .collect(),
         };
         self.participant_budget(&image, limits)?;
         image.inputs.restore(self.state.accepted_time)?;
@@ -386,7 +409,9 @@ impl MixedSignalHost {
         if !self.state.digital.is_view() || self.standalone.is_some() {
             return Err("participant restore requires a circuit-owned module".into());
         }
-        if image.version != 1 || image.topology != self.participant_topology()? {
+        if image.version != PARTICIPANT_CHECKPOINT_VERSION
+            || image.topology != self.participant_topology()?
+        {
             return Err("participant checkpoint source, topology or time policy differs".into());
         }
         self.participant_budget(image, limits)?;
@@ -512,6 +537,32 @@ impl MixedSignalHost {
             if history.recent & 3 != BoundaryNetHistory::code(bit) {
                 return Err("DAC checkpoint history differs from restored signal".into());
             }
+        }
+        let mut port_images = image.port_history.iter();
+        restored.state.port_history = Vec::with_capacity(restored.event_ports.len());
+        for port in &restored.event_ports {
+            let history = match port.converted_bit() {
+                Some((bit, _)) => {
+                    let history = port_images
+                        .next()
+                        .ok_or("participant checkpoint boundary dimensions differ")?
+                        .restore()?;
+                    let bit = restored
+                        .state
+                        .digital
+                        .read(port.signal)
+                        .ok_or("missing converted port signal")?
+                        .bit(bit);
+                    if history.recent & 3 != BoundaryNetHistory::code(bit) {
+                        return Err(
+                            "converted port checkpoint history differs from restored signal".into(),
+                        );
+                    }
+                    history
+                }
+                None => BoundaryNetHistory::default(),
+            };
+            restored.state.port_history.push(history);
         }
         restored
             .analog

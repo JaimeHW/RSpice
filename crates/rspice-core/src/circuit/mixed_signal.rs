@@ -68,6 +68,21 @@ impl CircuitData {
         SimulationError::Circuit(detail)
     }
 
+    /// The cross-domain loop the instances' accepted boundary histories show,
+    /// named by instance, when a boundary net has moved at `minimum_run`
+    /// consecutive accepted points with nothing scheduled to explain any of
+    /// them. `None` when no instance's history shows one.
+    ///
+    /// For a guard that is refusing the run for a reason of its own — the
+    /// stepper pinned at its floor — and should say why when the reason is a
+    /// zero-delay loop: see `MixedSignalHost::accepted_boundary_loop`.
+    pub(crate) fn mixed_boundary_loop(&self, minimum_run: u32) -> Option<SimulationError> {
+        self.mixed_signal_hosts.iter().find_map(|host| {
+            host.accepted_boundary_loop(minimum_run)
+                .and_then(|error| named::<()>(host, Err(error)).err())
+        })
+    }
+
     /// Whether any mixed Verilog-AMS module is instantiated.
     #[inline]
     pub(crate) fn has_mixed_signal_hosts(&self) -> bool {
