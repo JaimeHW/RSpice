@@ -69,14 +69,14 @@ impl BehavioralSources {
             .iter()
             .map(|source| {
                 (
-                    &source.ast,
+                    &*source.ast,
                     source.periodicity_context(),
                     criteria.voltage_tolerance(),
                 )
             })
             .chain(self.current_sources.iter().map(|source| {
                 (
-                    &source.ast,
+                    &*source.ast,
                     source.periodicity_context(),
                     criteria.current_tolerance(),
                 )

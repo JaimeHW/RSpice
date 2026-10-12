@@ -16,6 +16,7 @@ use crate::expr::{
 use crate::expr::{Derivative, derivative_pair};
 use crate::solver::StaticMatrix;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 pub(crate) mod breakpoints;
@@ -239,9 +240,12 @@ pub struct BehavioralVoltageSource {
     /// Branch ordinal for MNA (1-based, converted to matrix index at stamp time)
     pub branch_ordinal: usize,
     /// Parsed expression used for structural analysis such as breakpoint extraction.
-    ast: Expr,
+    ///
+    /// Shared, as is `program`: neither changes after the source is built,
+    /// and every rollback image of the device family clones the source.
+    ast: Arc<Expr>,
     /// Compiled expression
-    pub program: CompiledExpr,
+    pub program: Arc<CompiledExpr>,
     /// Explicit accepted integral coordinates and their input equations.
     integral_equations: Option<integrals::IntegralEquations>,
     /// VM for evaluation
@@ -403,8 +407,8 @@ impl BehavioralVoltageSource {
             node_pos,
             node_neg,
             branch_ordinal,
-            ast,
-            program,
+            ast: Arc::new(ast),
+            program: Arc::new(program),
             integral_equations,
             vm: Vm::new(),
             node_bindings: Vec::new(),
@@ -2100,9 +2104,12 @@ pub struct BehavioralCurrentSource {
     /// Negative node (current flows out of)
     pub node_neg: usize,
     /// Parsed expression used for structural analysis such as breakpoint extraction.
-    ast: Expr,
+    ///
+    /// Shared, as is `program`: neither changes after the source is built,
+    /// and every rollback image of the device family clones the source.
+    ast: Arc<Expr>,
     /// Compiled expression
-    pub program: CompiledExpr,
+    pub program: Arc<CompiledExpr>,
     /// Explicit accepted integral coordinates and their input equations.
     integral_equations: Option<integrals::IntegralEquations>,
     /// VM for evaluation
@@ -2212,8 +2219,8 @@ impl BehavioralCurrentSource {
             name,
             node_pos,
             node_neg,
-            ast,
-            program,
+            ast: Arc::new(ast),
+            program: Arc::new(program),
             integral_equations,
             vm: Vm::new(),
             node_bindings: Vec::new(),

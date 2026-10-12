@@ -41,7 +41,7 @@ impl BehavioralVoltageSource {
 
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         (!self.is_solution_dependent() && self.program.sdt_count == 0)
-            .then(|| (&self.program, self.periodicity_context()))
+            .then(|| (&*self.program, self.periodicity_context()))
     }
 
     pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {
@@ -97,7 +97,7 @@ impl BehavioralCurrentSource {
 
     pub(crate) fn prescribed_time_program(&self) -> Option<(&CompiledExpr, Context<'_>)> {
         (!self.is_solution_dependent() && self.program.sdt_count == 0)
-            .then(|| (&self.program, self.periodicity_context()))
+            .then(|| (&*self.program, self.periodicity_context()))
     }
 
     pub(crate) fn minimum_pss_interval(&self, events_resolved: bool) -> Option<Value> {

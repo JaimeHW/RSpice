@@ -374,8 +374,8 @@ macro_rules! lift_source {
                     .iter()
                     .map(|(name, &index)| (name.clone(), self.branch_bindings[index]))
                     .collect();
-                self.ast = ast;
-                self.program = compile(&self.ast);
+                self.program = Arc::new(compile(&ast));
+                self.ast = Arc::new(ast);
                 self.vm = Vm::new();
                 self.bind_references(
                     |name| {

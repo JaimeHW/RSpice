@@ -405,11 +405,11 @@ impl BehavioralSources {
         collect_expression_breakpoints(
             self.voltage_sources
                 .iter()
-                .map(|source| (&source.ast, source.periodicity_context()))
+                .map(|source| (&*source.ast, source.periodicity_context()))
                 .chain(
                     self.current_sources
                         .iter()
-                        .map(|source| (&source.ast, source.periodicity_context())),
+                        .map(|source| (&*source.ast, source.periodicity_context())),
                 ),
             tstop,
             breakpoints,
