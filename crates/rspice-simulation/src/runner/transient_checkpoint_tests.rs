@@ -271,7 +271,8 @@ fn transient_checkpoint_worker_roundtrip_resumes_mixed_events_and_extended_horiz
                 input.clone(),
                 Arc::new(AtomicBool::new(false)),
                 RunStreams::default(),
-            ).unwrap();
+            )
+            .unwrap();
             assert_continuation(&baseline, &resumed_without_sink, saved.time);
             // Complete pending process, bridge, solver and controller state agrees too.
             let decode = |q: &crate::transient_checkpoint::CheckpointQueue| {
