@@ -847,8 +847,7 @@ endmodule
     );
     let error = compiler
         .compile_runtime(&invalid, Some("top"))
-        .err()
-        .expect("resized arrays require replacement")
+        .expect_err("resized arrays require replacement")
         .to_string();
     assert!(error.contains("replacement array"), "{error}");
 }
