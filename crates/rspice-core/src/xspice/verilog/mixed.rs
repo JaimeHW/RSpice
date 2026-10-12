@@ -1344,6 +1344,13 @@ struct DiscreteAnalogInput {
     signed: bool,
     real: bool,
     name: String,
+    /// Whether this quantity is a real-valued port fed by a code model that
+    /// samples the analog solution — a V-to-real converter, inserted or
+    /// authored. Such a value is republished at every accepted point and is
+    /// continuous across them, so its moves are not steps of the analog
+    /// equations. Set by [`MixedSignalHost::declare_analog_sampled_reals`]
+    /// once the circuit's code models are known.
+    analog_sample: bool,
 }
 
 impl DiscreteAnalogInput {
@@ -1614,6 +1621,7 @@ impl MixedSignalHost {
                     signed: signal.integer && selection.is_none(),
                     real: signal.kind.is_real(),
                     name: signal.name.to_string(),
+                    analog_sample: false,
                 })
             })
             .collect::<Result<Vec<_>, MixedSignalError>>()?;
@@ -1853,7 +1861,7 @@ impl MixedSignalHost {
         &self.analog
     }
 
-    /// Instantaneous D/A level or impedance changes, and a four-state value an
+    /// Instantaneous D/A level or impedance changes, and a discrete value an
     /// analog block reads changing under it, cannot be compared with smooth
     /// analog history. Report the final candidate's actual electrical change,
     /// including Z release, to the integration restart contract. A purely
@@ -1865,23 +1873,26 @@ impl MixedSignalHost {
         let Some(trial) = &self.trial else {
             return false;
         };
-        // A four-state or integer quantity an analog block reads has no value
-        // between two of its own, so whatever moved it this candidate moved
-        // the analog equations by a step, and the step is the digital half's.
-        // A real-valued read is left to the truncation estimate: a V-to-real
-        // converter publishes a fresh sample of the solution at every point,
-        // which is continuous at the timepoints, and naming each sample a
+        // A quantity the discrete half writes has no value between two of its
+        // own, so whatever moved it this candidate moved the analog equations
+        // by a step, and the step is the digital half's. A real is no
+        // exception when a process or an event wrote it: `gain = 2.0` steps
+        // the source exactly as `gain = 2` does, and leaving it to the
+        // truncation estimate walked the step down into the edge one halving
+        // at a time. The exception is a real a code model samples off the
+        // analog solution — a V-to-real converter republishes a sample at
+        // every point, continuous at the timepoints, and naming each one a
         // discontinuity would restart integration at every one of them.
-        let four_state_read_moved = self
+        let read_moved = self
             .discrete_inputs
             .iter()
             .zip(&trial.vectors.discrete_at_trial_start)
             .any(|(input, was)| {
-                !self.state.digital.is_real(input.signal)
+                !input.analog_sample
                     && read_discrete_input(&self.state, input).map(f64::to_bits)
                         != was.map(f64::to_bits)
             });
-        if four_state_read_moved {
+        if read_moved {
             return true;
         }
         self.state.bridges.dac.iter().any(|bridge| {
@@ -1894,6 +1905,30 @@ impl MixedSignalHost {
             };
             level(&trial.rollback) != level(&self.state.digital)
         })
+    }
+
+    /// Mark the real-valued ports whose event net a code model drives from the
+    /// analog solution — `nodes` is every such net in the circuit — so their
+    /// per-point samples are not reported as steps of the analog equations.
+    /// See [`Self::candidate_discontinuity`].
+    pub(crate) fn declare_analog_sampled_reals(
+        &mut self,
+        nodes: &std::collections::BTreeSet<usize>,
+    ) {
+        let sampled: Vec<DigitalSignalId> = self
+            .event_ports
+            .iter()
+            .filter(|port| {
+                port.bit.is_none()
+                    && port.direction
+                        != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
+                    && nodes.contains(&port.node)
+            })
+            .map(|port| port.signal)
+            .collect();
+        for input in &mut self.discrete_inputs {
+            input.analog_sample = input.real && sampled.contains(&input.signal);
+        }
     }
 
     /// A converted output can jump, release its impedance, or start/retarget

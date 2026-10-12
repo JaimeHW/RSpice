@@ -198,6 +198,9 @@ fn digital_points(result: &TransientResult, net: &str) -> Vec<(f64, String)> {
 ///   `newton_work_never_reaches_the_module`, which run one deck many times
 ///   under a changing configuration: the interesting object there is the
 ///   relation between the runs, which each case already asserts;
+/// * `a_real_a_process_writes_is_a_step_of_the_analog_equations_like_an_integer`,
+///   whose subject is likewise the relation between two runs, and which
+///   asserts it bit for bit;
 /// * `an_analog_only_veriloga_deck_still_resumes`, whose deck has no discrete
 ///   half at all;
 /// * `a_feedback_carried_crossing_is_landed_on_once_rather_than_bisected_into`
@@ -3052,6 +3055,109 @@ fn a_feedback_carried_crossing_is_landed_on_once_rather_than_bisected_into() {
         closest > 1.0e-12,
         "the nearest two accepted points are {closest:e} s apart, which is a \
          bisection rung rather than a step: {accepted:?}"
+    );
+}
+
+/// [`FEEDBACK_DECK`]'s feedback reduced to one source, its `gain` declared
+/// with the type the deck names.
+fn gain_feedback_source(kind: &str, one: &str, two: &str) -> String {
+    format!(
+        r#"
+`timescale 1ns/1ns
+`include "disciplines.vams"
+module gain_feedback(p, n, ca);
+    inout p, n;
+    electrical p, n;
+    input ca;
+    wire ca;
+    {kind} gain;
+    initial gain = {one};
+    always @(posedge ca) gain = {two};
+    analog I(p, n) <+ (V(p, n) - gain * 1.0) / 1000.0;
+endmodule
+"#
+    )
+}
+
+/// **Property 5, case d⁗.** A real a process writes is a step of the analog
+/// equations exactly as an integer is.
+///
+/// `gain` steps the source the analog block pushes into `p` at `ca`'s 10.6 ns
+/// crossing, and the step is the digital half's whether `gain` is declared
+/// `integer` or `real`. A real read used to be left to the truncation
+/// estimate, because a V-to-real converter republishes a sample of the
+/// solution at every point; but a process write is no sample, and the estimate
+/// compared the step against smooth history and walked the step down into the
+/// edge one halving at a time, down to the solver floor — 115 accepted points
+/// against the integer deck's 44. Only a real a
+/// code model samples off the analog solution is exempt now, so the two decks
+/// are one run: the same accepted grid and the same solution, bit for bit.
+#[test]
+fn a_real_a_process_writes_is_a_step_of_the_analog_equations_like_an_integer() {
+    let run_with = |kind: &str, one: &str, two: &str| {
+        let model = ModelFile::new("gain_feedback", &gain_feedback_source(kind, one, two));
+        run(
+            &format!(
+                "* a gain a process writes on an A/D edge, read by the analog block\n\
+                 vramp ca 0 pwl(0 0 21.2n 3.3)\n\
+                 x1 p 0 ca gain_feedback\n\
+                 rfb p q 1k\n\
+                 cq q 0 1p\n\
+                 rq q 0 1meg\n\
+                 .va \"{}\" gain_feedback\n\
+                 .tran 1n 20n\n\
+                 .end\n",
+                model.deck_path()
+            ),
+            20.0e-9,
+            1.0e-9,
+        )
+    };
+    let integer = run_with("integer", "1", "2");
+    let real = run_with("real", "1.0", "2.0");
+    let near_crossing = |result: &TransientResult| {
+        result
+            .time
+            .iter()
+            .filter(|time| (**time - 10.6e-9).abs() < 1.0e-9)
+            .count()
+    };
+    println!(
+        "integer: {} points, {} near the crossing; real: {} points, {} near the crossing",
+        integer.time.len(),
+        near_crossing(&integer),
+        real.time.len(),
+        near_crossing(&real)
+    );
+    let bits = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        bits(&real.time),
+        bits(&integer.time),
+        "a real gain must land on the integer gain's accepted grid: {} points against {}",
+        real.time.len(),
+        integer.time.len()
+    );
+    assert_eq!(real.node_names, integer.node_names);
+    for (node, (real, integer)) in real
+        .node_names
+        .iter()
+        .zip(real.voltages.iter().zip(&integer.voltages))
+    {
+        assert_eq!(
+            bits(real),
+            bits(integer),
+            "V({node}) must not depend on whether `gain` is a real"
+        );
+    }
+    assert!(
+        near_crossing(&real) <= 8,
+        "one crossing costs a handful of accepted points, not a ladder: {}",
+        near_crossing(&real)
     );
 }
 

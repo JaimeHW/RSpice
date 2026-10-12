@@ -136,6 +136,10 @@ impl CircuitData {
                     return Err(error);
                 }
             };
+            let sampled = self.analog_sampled_real_nodes();
+            for host in &mut self.mixed_signal_hosts {
+                host.declare_analog_sampled_reals(&sampled);
+            }
             for (node, real) in coordinator.event_domains() {
                 self.net_kinds.register(
                     node,
@@ -150,6 +154,24 @@ impl CircuitData {
             self.scheduler.mixed_xspice_bindings = bindings.map(std::sync::Arc::new);
         }
         Ok(())
+    }
+
+    /// Every real event net a code model drives from the analog solution: an
+    /// instance that reads a node voltage and publishes a real, which is what a
+    /// V-to-real converter is whether elaboration inserted it or the deck
+    /// authored it.
+    fn analog_sampled_real_nodes(&self) -> std::collections::BTreeSet<usize> {
+        let mut nodes = std::collections::BTreeSet::new();
+        for instance in &self.xspice_instances {
+            let mut reads_analog = false;
+            instance.for_each_analog_input_net(|_| reads_analog = true);
+            if reads_analog {
+                instance.for_each_real_output_driver(|target| {
+                    nodes.insert(target.node_id);
+                });
+            }
+        }
+        nodes
     }
 
     /// Check the existing electrical-boundary adapter against the complete
