@@ -751,7 +751,6 @@ endmodule
     replayed.canonical_ir.validate().unwrap();
 }
 
-
 #[test]
 fn computed_mixed_connections_replay_shapes_and_preserve_selector_guards() {
     let source = r#"
@@ -1040,7 +1039,6 @@ endmodule
     }
 }
 
-
 #[test]
 fn real_net_array_connections_replay_shared_element_identity() {
     let source = r#"
@@ -1116,7 +1114,6 @@ endmodule
         );
     }
 }
-
 
 #[test]
 fn real_net_disciplines_survive_array_specialization_and_source_replay() {
@@ -1274,7 +1271,6 @@ fn real_net_alias_artifacts_preserve_identity_validate_and_link_transitively() {
     );
 }
 
-
 #[test]
 fn real_buses_preserve_local_ranges_driver_groups_and_specialized_replay() {
     let source = r#"
@@ -1403,7 +1399,6 @@ endmodule
     assert_eq!(ir.digital.real_aliases.len(), 4);
 }
 
-
 #[test]
 fn conservative_arrays_preserve_custom_probes_branches_and_specialized_replay() {
     let source = r#"
@@ -1528,7 +1523,6 @@ endmodule
         .unwrap();
 }
 
-
 #[test]
 fn real_net_types_propagate_per_occurrence_and_replay_after_specialization() {
     let source = r#"
@@ -1651,7 +1645,6 @@ endmodule
     let bad = source.replace("module sink(inout tri", "module sink(inout wrealavg");
     assert!(compiler().compile_runtime(&bad, Some("top")).is_err());
 }
-
 
 #[test]
 fn concatenated_interconnect_types_preserve_separate_real_driver_groups() {
@@ -2350,7 +2343,6 @@ endmodule
     }
 }
 
-
 #[test]
 fn foreign_physical_shapes_share_storage_and_replay() {
     let source = r#"
@@ -2407,7 +2399,6 @@ fn foreign_physical_references_reject_variables_and_bad_coordinates() {
         );
     }
 }
-
 
 #[test]
 fn foreign_explicit_branch_selectors_specialize_in_caller_scope_and_replay() {
@@ -2505,7 +2496,6 @@ fn foreign_explicit_branches_reject_missing_or_incompatible_targets() {
         assert!(error.contains(diagnostic), "{usage}: {error}");
     }
 }
-
 
 #[test]
 fn foreign_explicit_branch_terminals_reject_nested_branch_calls() {

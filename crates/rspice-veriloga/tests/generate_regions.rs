@@ -511,7 +511,6 @@ endmodule
     assert!(plan.signals.iter().any(|signal| signal.name == "result"));
 }
 
-
 #[test]
 fn generated_storage_and_local_constants_preserve_each_scope() {
     let source = r#"
@@ -666,7 +665,6 @@ fn generated_declarations_reject_invalid_interface_and_cyclic_schemes() {
         assert!(message.contains(expected), "{body}: {message}");
     }
 }
-
 
 #[test]
 fn directly_nested_conditionals_share_the_outer_scope_level() {

@@ -1273,7 +1273,11 @@ fn a_comparison_sizes_its_operands_to_each_other_only() {
     harness.set("b", "00001111");
 
     expect_finished(harness.run());
-    assert_eq!(harness.get("product"), "0000000000000001", "equal at eight bits");
+    assert_eq!(
+        harness.get("product"),
+        "0000000000000001",
+        "equal at eight bits"
+    );
 
     harness.set("b", "10001111");
     expect_finished(harness.run());
@@ -1303,7 +1307,11 @@ fn an_unsized_literal_takes_a_context_wider_than_thirty_two_bits() {
     expected.push('1');
     expected.push_str(&"0".repeat(35));
     assert_eq!(expected.len(), 40);
-    assert_eq!(harness.get("product"), expected, "bit 35 is set and nothing else");
+    assert_eq!(
+        harness.get("product"),
+        expected,
+        "bit 35 is set and nothing else"
+    );
 }
 
 /// The floor is still thirty-two: a concatenation's operands are
@@ -1327,7 +1335,11 @@ fn an_unsized_literal_in_a_concatenation_is_exactly_thirty_two_bits() {
     expected.push_str(&"0".repeat(31));
     expected.push('1');
     assert_eq!(expected.len(), 36);
-    assert_eq!(harness.get("product"), expected, "`a` sits above a 32-bit one");
+    assert_eq!(
+        harness.get("product"),
+        expected,
+        "`a` sits above a 32-bit one"
+    );
 }
 
 /// Table 5-22 gives `~i` the size of `i`, and makes `i` context-determined.

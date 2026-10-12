@@ -84,9 +84,9 @@
     clippy::unnecessary_unwrap
 )]
 
-pub mod analog_tasks;
 #[doc(hidden)]
 pub mod analog_occurrences;
+pub mod analog_tasks;
 mod array_index;
 mod array_values;
 pub mod ast;
@@ -1225,7 +1225,8 @@ impl VerilogACompiler {
                 .iter_mut()
                 .find_map(|item| match item {
                     ast::Item::Module(module) | ast::Item::ConnectModule(module)
-                        if Some(module.name.as_str()) == module_name => {
+                        if Some(module.name.as_str()) == module_name =>
+                    {
                         Some(module)
                     }
                     _ => None,

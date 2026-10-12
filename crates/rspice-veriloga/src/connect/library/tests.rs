@@ -320,7 +320,13 @@ endmodule
 "#,
     );
     let analyzed = crate::SemanticAnalyzer::new().analyze(&file).unwrap();
-    assert_eq!(analyzed.modules["a2d_with_body"].digital.analog_events.len(), 1);
+    assert_eq!(
+        analyzed.modules["a2d_with_body"]
+            .digital
+            .analog_events
+            .len(),
+        1
+    );
 }
 
 /// The probe on its own — section 7.3.3's read, without section 7.3.5's

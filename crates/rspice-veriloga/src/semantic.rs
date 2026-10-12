@@ -377,35 +377,35 @@ const EDGE_EVENT_AS_CROSS_CODE: &str = "VA-SEM-EDGE-EVENT-AS-CROSS";
 /// the declaration that produced it.
 pub(crate) const MAX_DIGITAL_VECTOR_WIDTH: u32 = 65_536;
 
-mod analyzed;
 mod analog_events;
+mod analyzed;
 pub use analog_events::AnalogEventBinding;
 mod array_coordinates;
-mod parameter_arrays;
 mod bounded_loop;
 mod constant_dependencies;
 mod digital;
 mod digital_elaborate;
-mod hierarchy_connections;
-mod net_types;
-mod node_vectors;
 mod digital_walk;
 mod discrete_projection;
 mod elaboration;
 mod flow_probes;
+mod hierarchy_connections;
+mod net_types;
+mod node_vectors;
+mod parameter_arrays;
 pub(crate) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&Expression)) {
     flow_probes::visit_expression(expression, visit);
 }
 mod function_effects;
 mod implicit_integrator;
 mod instance_parameters;
-pub(crate) mod source_references;
 mod packed_parameters;
 mod parameter_assignments;
 mod parameter_constants;
 mod parameter_defaults;
 pub(crate) mod parameter_given;
 mod retained_inputs;
+pub(crate) mod source_references;
 mod switch_branches;
 mod symbols;
 
@@ -597,7 +597,10 @@ impl SemanticAnalyzer {
             }
             _ => false,
         });
-        let has_connections = source.items.iter().any(|item| matches!(item, Item::ConnectModule(_)));
+        let has_connections = source
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::ConnectModule(_)));
         if !hierarchical || (ordinary == 1 && !has_connections) {
             return self.analyze(source);
         }
@@ -1312,7 +1315,9 @@ impl SemanticAnalyzer {
                     continue;
                 }
 
-                if self.disciplines.get_discipline(&discipline)
+                if self
+                    .disciplines
+                    .get_discipline(&discipline)
                     .is_some_and(|discipline| discipline.domain == Domain::Discrete)
                 {
                     self.define_symbol(Symbol {
@@ -1563,30 +1568,30 @@ impl SemanticAnalyzer {
                 if localparam.param_type == ParamType::String {
                     local_defaults.insert_string(localparam.name.clone());
                 } else if let Some(default) = &default {
-                    let converted = if matches!(default, Expression::Digital(DigitalExpr::FourState(_)))
-                    {
-                        default.clone()
-                    } else {
-                        let target = if localparam.type_is_explicit {
-                            match localparam.param_type {
-                                ParamType::Real => ValueType::Real,
-                                ParamType::Integer => ValueType::Integer,
-                                ParamType::String => ValueType::String,
-                            }
+                    let converted =
+                        if matches!(default, Expression::Digital(DigitalExpr::FourState(_))) {
+                            default.clone()
                         } else {
-                            self.infer_type(default)?
+                            let target = if localparam.type_is_explicit {
+                                match localparam.param_type {
+                                    ParamType::Real => ValueType::Real,
+                                    ParamType::Integer => ValueType::Integer,
+                                    ParamType::String => ValueType::String,
+                                }
+                            } else {
+                                self.infer_type(default)?
+                            };
+                            let (mut value, source_type) =
+                                self.coerce_assignment_expression(default.clone(), target)?;
+                            if target == ValueType::Real && source_type != ValueType::Real {
+                                value = Expression::Unary(UnaryExpr {
+                                    op: UnaryOp::ToReal,
+                                    span: value.span(),
+                                    operand: Box::new(value),
+                                });
+                            }
+                            value
                         };
-                        let (mut value, source_type) =
-                            self.coerce_assignment_expression(default.clone(), target)?;
-                        if target == ValueType::Real && source_type != ValueType::Real {
-                            value = Expression::Unary(UnaryExpr {
-                                op: UnaryOp::ToReal,
-                                span: value.span(),
-                                operand: Box::new(value),
-                            });
-                        }
-                        value
-                    };
                     local_defaults.insert(localparam.name.clone(), converted);
                 }
                 localparam_defaults[parameter_index] = default;
@@ -3811,7 +3816,9 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
-        if self.symbols.lookup(&for_stmt.var)
+        if self
+            .symbols
+            .lookup(&for_stmt.var)
             .is_some_and(|symbol| symbol.kind == SymbolKind::LoopVar)
         {
             return self.unroll_analog_genvar(for_stmt, module, sink);
@@ -6220,7 +6227,9 @@ impl SemanticAnalyzer {
                 }
                 let mut function = SystemFunction {
                     name: function.name.clone(),
-                    args: function.args.iter()
+                    args: function
+                        .args
+                        .iter()
                         .map(|arg| self.materialize_output_function_calls(arg, module, sink))
                         .collect::<CompileResult<Vec<_>>>()?,
                     span: function.span,
@@ -6234,15 +6243,31 @@ impl SemanticAnalyzer {
                             continue;
                         }
                         self.local_counter += 1;
-                        let name: SmolStr = format!("__limit_argument{}", self.local_counter).into();
+                        let name: SmolStr =
+                            format!("__limit_argument{}", self.local_counter).into();
                         let var_type = if self.infer_type(argument)? == ValueType::Integer {
                             VarType::Integer
-                        } else { VarType::Real };
-                        self.register_function_temp(module, name.clone(), var_type, argument.span())?;
-                        self.analyze_assignment(&AssignmentStmt {
-                            target: LValue::Variable { name, span: argument.span() },
-                            value: argument.clone(), span: argument.span(),
-                        }, module, sink)?;
+                        } else {
+                            VarType::Real
+                        };
+                        self.register_function_temp(
+                            module,
+                            name.clone(),
+                            var_type,
+                            argument.span(),
+                        )?;
+                        self.analyze_assignment(
+                            &AssignmentStmt {
+                                target: LValue::Variable {
+                                    name,
+                                    span: argument.span(),
+                                },
+                                value: argument.clone(),
+                                span: argument.span(),
+                            },
+                            module,
+                            sink,
+                        )?;
                     }
                     function.args.truncate(1);
                 }
@@ -6256,19 +6281,36 @@ impl SemanticAnalyzer {
                     let value_type = self.infer_type(expr)?;
                     self.local_counter += 1;
                     let name: SmolStr = format!("__conditional{}", self.local_counter).into();
-                    let var_type = if value_type == ValueType::Integer { VarType::Integer } else { VarType::Real };
+                    let var_type = if value_type == ValueType::Integer {
+                        VarType::Integer
+                    } else {
+                        VarType::Real
+                    };
                     self.register_function_temp(module, name.clone(), var_type, conditional.span)?;
-                    let assignment = |value: &Expression| Box::new(AnalogStatement::Assignment(AssignmentStmt {
-                        target: LValue::Variable { name: name.clone(), span: conditional.span },
-                        value: value.clone(), span: conditional.span,
-                    }));
-                    self.analyze_statement(&AnalogStatement::Conditional(ConditionalStmt {
-                        condition: (*conditional.condition).clone(),
-                        then_branch: assignment(&conditional.then_expr),
-                        else_branch: Some(assignment(&conditional.else_expr)),
+                    let assignment = |value: &Expression| {
+                        Box::new(AnalogStatement::Assignment(AssignmentStmt {
+                            target: LValue::Variable {
+                                name: name.clone(),
+                                span: conditional.span,
+                            },
+                            value: value.clone(),
+                            span: conditional.span,
+                        }))
+                    };
+                    self.analyze_statement(
+                        &AnalogStatement::Conditional(ConditionalStmt {
+                            condition: (*conditional.condition).clone(),
+                            then_branch: assignment(&conditional.then_expr),
+                            else_branch: Some(assignment(&conditional.else_expr)),
+                            span: conditional.span,
+                        }),
+                        module,
+                        sink,
+                    )?;
+                    return Ok(Expression::Identifier(Identifier {
+                        name,
                         span: conditional.span,
-                    }), module, sink)?;
-                    return Ok(Expression::Identifier(Identifier { name, span: conditional.span }));
+                    }));
                 }
                 Expression::Conditional(ConditionalExpr {
                     condition: Box::new(self.materialize_output_function_calls(
@@ -6290,7 +6332,8 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::Call(call) => {
-                if call.name == "idt" && call.args.len() == 1
+                if call.name == "idt"
+                    && call.args.len() == 1
                     && !matches!(call.args[0], Expression::NullArgument(_))
                 {
                     return self.materialize_implicit_integrator(call, module, sink);
@@ -6343,16 +6386,24 @@ impl SemanticAnalyzer {
             }
             Expression::ArrayAccess(access) => {
                 let index = Box::new(self.materialize_output_function_calls(
-                    &access.index, module, sink,
+                    &access.index,
+                    module,
+                    sink,
                 )?);
-                let packed = access.packed.as_ref().map(|packed| {
-                    Ok::<_, CompileError>(PackedArrayIndex {
-                        bit: Box::new(self.materialize_output_function_calls(
-                            &packed.bit, module, sink,
-                        )?),
-                        layout: packed.layout,
+                let packed = access
+                    .packed
+                    .as_ref()
+                    .map(|packed| {
+                        Ok::<_, CompileError>(PackedArrayIndex {
+                            bit: Box::new(self.materialize_output_function_calls(
+                                &packed.bit,
+                                module,
+                                sink,
+                            )?),
+                            layout: packed.layout,
+                        })
                     })
-                }).transpose()?;
+                    .transpose()?;
                 Expression::ArrayAccess(ArrayAccessExpr {
                     normalized: access.normalized,
                     packed,
@@ -6556,7 +6607,8 @@ impl SemanticAnalyzer {
                 .any(|child| self.expression_contains_output_function_call(child)),
             Expression::Call(call) => {
                 (call.name == "idt" && call.args.len() == 1)
-                    || self.user_function_for_call(call)
+                    || self
+                        .user_function_for_call(call)
                         .is_some_and(|func| self.function_needs_materialization(func))
                     || call
                         .args
@@ -7036,12 +7088,15 @@ impl SemanticAnalyzer {
                 )));
             }
             Expression::Identifier(id) => {
-                if self.symbols.lookup(&id.name)
+                if self
+                    .symbols
+                    .lookup(&id.name)
                     .is_some_and(|symbol| symbol.kind == SymbolKind::LoopVar)
                     && self.lookup_substitution(&id.name).is_none()
                 {
                     return Err(node_vectors::error(
-                        format!("genvar '{}' requires an active analog for loop", id.name), id.span,
+                        format!("genvar '{}' requires an active analog for loop", id.name),
+                        id.span,
                     ));
                 }
                 if self.parameter_arrays.contains(&id.name) {

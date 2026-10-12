@@ -276,7 +276,12 @@ impl DisciplineDb {
         self.add_discipline(Discipline::builtin("logic", Domain::Discrete, None, None));
         // Retain the conventional name previously accepted on wreal declarations
         // as its own explicit discipline, rather than discarding the annotation.
-        self.add_discipline(Discipline::builtin("ddiscrete", Domain::Discrete, None, None));
+        self.add_discipline(Discipline::builtin(
+            "ddiscrete",
+            Domain::Discrete,
+            None,
+            None,
+        ));
     }
 
     /// Resolve an access function to its nature

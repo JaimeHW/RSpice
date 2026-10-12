@@ -14,8 +14,8 @@ use super::{
 };
 use crate::ast::{
     AccessKind, AnalogOperator, ArrayAccessExpr, ArrayLiteralElement, ArrayLiteralExpr, BinaryExpr,
-    BinaryOp, BranchAccess, CallExpr, ConditionalExpr, Expression, Identifier, Item,
-    Module, ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, UnaryOp, VarType,
+    BinaryOp, BranchAccess, CallExpr, ConditionalExpr, Expression, Identifier, Item, Module,
+    ModuleInstance, NoiseSource, NumberLit, SystemFunction, UnaryExpr, UnaryOp, VarType,
 };
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::source::Span;
@@ -65,7 +65,10 @@ pub(crate) fn elaborate_executable_module<'a>(
         .map(|module| (&module.source, &module.analyzed))
         .unwrap_or((root, selected));
     let mut elaborator = HierarchyElaborator::new(analyzed, source_modules, selected.clone());
-    elaborator.flattened.elaboration_warnings.extend(hierarchy.warnings);
+    elaborator
+        .flattened
+        .elaboration_warnings
+        .extend(hierarchy.warnings);
     elaborator.shared_occurrences = hierarchy.occurrences;
     elaborator.digital_frames = hierarchy
         .instances
@@ -171,8 +174,14 @@ struct ScopeMap {
 
 impl ScopeMap {
     fn unnamed_branch(&self, pos: &str, neg: &str) -> Option<(&AnalyzedBranch, f64)> {
-        let pos = self.node_reference_aliases.get(pos).map_or(pos, SmolStr::as_str);
-        let neg = self.node_reference_aliases.get(neg).map_or(neg, SmolStr::as_str);
+        let pos = self
+            .node_reference_aliases
+            .get(pos)
+            .map_or(pos, SmolStr::as_str);
+        let neg = self
+            .node_reference_aliases
+            .get(neg)
+            .map_or(neg, SmolStr::as_str);
         let (pos, neg, sign) =
             super::flow_probes::canonical_node_pair(pos, neg, &self.ground_nodes);
         self.unnamed_branches
@@ -554,8 +563,13 @@ impl<'a> HierarchyElaborator<'a> {
                 continue;
             }
             self.pending_port_terms.push((
-                scope.instance_path.clone().unwrap_or_else(|| self.flattened.name.clone()),
-                binding.clone(), branch.clone(), sign,
+                scope
+                    .instance_path
+                    .clone()
+                    .unwrap_or_else(|| self.flattened.name.clone()),
+                binding.clone(),
+                branch.clone(),
+                sign,
             ));
         }
     }
@@ -660,11 +674,12 @@ impl<'a> HierarchyElaborator<'a> {
         };
         self.flattened.hierarchical_connections |= child.hierarchical_connections;
         let mut branch_inventory = super::flow_probes::hierarchy_branches(child);
-        let node_reference_aliases = references::canonicalize_node_references(
-            child_source, child, &mut branch_inventory,
-        );
-        self.references.request(child_source, child, relative, &branch_inventory);
-        self.references.extend_inventory(child_source, child, relative, &mut branch_inventory);
+        let node_reference_aliases =
+            references::canonicalize_node_references(child_source, child, &mut branch_inventory);
+        self.references
+            .request(child_source, child, relative, &branch_inventory);
+        self.references
+            .extend_inventory(child_source, child, relative, &mut branch_inventory);
         let connections = self.bind_connections(instance, child, parent_scope, path)?;
         let noise_process_base = self.next_noise_process;
         self.next_noise_process = self
@@ -1086,7 +1101,8 @@ impl<'a> HierarchyElaborator<'a> {
             self.flattened.branches.push(branch);
         }
 
-        self.references.register(child_source, child, relative, &scope)?;
+        self.references
+            .register(child_source, child, relative, &scope)?;
 
         // One base for both spaces, taken before anything is appended, so the
         // two lowerings of an inlined instance keep naming each other.
@@ -1518,8 +1534,16 @@ pub(super) fn bind_parameter_overrides(
     child: &AnalyzedModule,
     path: &str,
 ) -> CompileResult<HashMap<usize, Expression>> {
-    let names: Vec<_> = child.parameters.iter().map(|parameter| parameter.name.clone()).collect();
-    let aliases = child.param_aliases.iter().map(|alias| (alias.alias.clone(), alias.target)).collect();
+    let names: Vec<_> = child
+        .parameters
+        .iter()
+        .map(|parameter| parameter.name.clone())
+        .collect();
+    let aliases = child
+        .param_aliases
+        .iter()
+        .map(|alias| (alias.alias.clone(), alias.target))
+        .collect();
     super::instance_parameters::bind_overrides(instance, &names, &aliases, path)
 }
 

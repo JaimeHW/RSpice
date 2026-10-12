@@ -659,7 +659,9 @@ impl Parser<'_> {
                 self.advance();
                 Ok(DigitalStatement::Null(start))
             }
-            TokenKind::SystemIdentifier if self.is_root_reference() => self.parse_digital_assignment(),
+            TokenKind::SystemIdentifier if self.is_root_reference() => {
+                self.parse_digital_assignment()
+            }
             TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::LBrace => {
                 self.parse_digital_assignment()
             }

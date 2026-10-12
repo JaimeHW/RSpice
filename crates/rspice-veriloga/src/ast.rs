@@ -223,8 +223,10 @@ pub struct Module {
     /// Structured source references, interned under collision-free AST symbols.
     pub hierarchical_names: std::collections::BTreeMap<SmolStr, HierarchicalName>,
     /// Concrete source scopes retained for design-level reference binding.
-    pub(crate) hierarchical_scopes: std::collections::HashMap<Vec<HierarchicalScopeKey>, HierarchicalScope>,
-    pub(crate) pending_hierarchical_references: std::collections::BTreeMap<SmolStr, ScopedHierarchicalReference>,
+    pub(crate) hierarchical_scopes:
+        std::collections::HashMap<Vec<HierarchicalScopeKey>, HierarchicalScope>,
+    pub(crate) pending_hierarchical_references:
+        std::collections::BTreeMap<SmolStr, ScopedHierarchicalReference>,
     /// Source declarations shared by concrete reference specializations.
     pub(crate) reference_sources: Option<std::sync::Arc<ReferenceSourceCatalog>>,
     /// Concrete path below the selected HDL root, when analyzed in a design.
@@ -359,9 +361,13 @@ pub(crate) struct ReferenceDesign {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ForeignPhysicalKind {
-    Node { is_port: bool },
+    Node {
+        is_port: bool,
+    },
     Branch,
-    Unnamed { pairs: Vec<(ForeignPhysicalNode, ForeignPhysicalNode)> },
+    Unnamed {
+        pairs: Vec<(ForeignPhysicalNode, ForeignPhysicalNode)>,
+    },
 }
 
 impl ForeignPhysicalKind {

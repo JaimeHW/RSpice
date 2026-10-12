@@ -319,7 +319,7 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
                         real: false,
                     }
                 }
-            },
+            }
             _ => Shape {
                 width: lowerer.self_width_leaf(expression),
                 signed: lowerer.self_signed_leaf(expression),

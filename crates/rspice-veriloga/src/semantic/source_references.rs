@@ -652,7 +652,10 @@ impl Resolver {
         super::instance_parameters::validate_array_replacements(
             source,
             &child,
-            &specialization.iter().map(|(index, _)| *index).collect::<Vec<_>>(),
+            &specialization
+                .iter()
+                .map(|(index, _)| *index)
+                .collect::<Vec<_>>(),
             &path,
         )?;
         crate::parser::expand_specialized_generates(&mut child)?;

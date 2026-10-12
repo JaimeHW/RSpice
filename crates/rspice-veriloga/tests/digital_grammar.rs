@@ -1931,7 +1931,10 @@ fn unelaborated_instance_constructs_refuse_by_name() {
         ),
         (
             "an undeclared connection name",
-            hierarchy(NAND2, "`default_nettype none\n    wire a, b;\n     nand2 g1(y, a, b);"),
+            hierarchy(
+                NAND2,
+                "`default_nettype none\n    wire a, b;\n     nand2 g1(y, a, b);",
+            ),
             vec!["implicit net", "default_nettype none"],
         ),
         (
@@ -2877,7 +2880,6 @@ fn computed_and_resized_input_connections_elaborate() {
     plan(&resized, "top").validate().unwrap();
 }
 
-
 #[test]
 fn real_net_dimensions_do_not_consume_the_net_name_as_a_discipline() {
     for declaration in [
@@ -2898,7 +2900,6 @@ fn real_net_dimensions_do_not_consume_the_net_name_as_a_discipline() {
         );
     }
 }
-
 
 #[test]
 fn inline_discrete_disciplines_and_port_prefixes_retain_the_declared_domain() {

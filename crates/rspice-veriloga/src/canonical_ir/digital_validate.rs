@@ -603,7 +603,9 @@ impl CanonicalDigitalPlan {
                             }
                             check_terms(terms)
                         }
-                        DigitalWait::Expressions(terms) => check_expressions(function, terms, self, &event_signals),
+                        DigitalWait::Expressions(terms) => {
+                            check_expressions(function, terms, self, &event_signals)
+                        }
                         DigitalWait::Delay(value) => {
                             if !matches!(
                                 function.value(*value).value_type,
