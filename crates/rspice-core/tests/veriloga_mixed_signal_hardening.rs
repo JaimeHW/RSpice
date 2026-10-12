@@ -234,28 +234,35 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     (
         "a_mixed_checkpoint_restores_external_clock_state_without_initial_replay",
         "hardening_external_toggle",
+        // Re-measured for the left-limit D/A drive (P0.10 D9): the same 508
+        // points on the same grid, every event bit-identical, and QS against
+        // its 10k-loaded drive, held from before each edge on the edge's own
+        // point, worst 3.2934 V -> 6.6e-14 V (mean 6.5e-2 -> 3.2e-14 V).
         Fingerprint {
             points: 508,
             grid_hash: 0x4b39_7d58_993e_1a2a,
-            volt_hash: 0x4c8e_70bd_98cd_39d5,
+            volt_hash: 0xb968_47e1_1630_c101,
         },
     ),
     (
         "every_digital_activation_becomes_a_bit_exact_accepted_timepoint",
         "hardening_clock_divider",
-        // Re-measured twice. 02921aeeb put the output behind an XSPICE
+        // Re-measured three times. 02921aeeb put the output behind an XSPICE
         // converter, which takes the deck off device truncation and onto the
         // voltage LTE (1607 -> 1856 points); faaf0e809's centred capacitor
-        // current moved the grid by at most 4.7e-21 s and OUT by 1.2e-12 V.
-        // Across both, all 101 `qdiv` transitions are bit-identical, all 200
-        // activations are accepted with their own bits, and OUT's error
-        // against the analytic 1020-ohm x 10 pF response of those transitions
-        // is unchanged (worst 0.2566 V in both: the edge is integrated over
-        // the step that ends on it).
+        // current moved the grid by at most 4.7e-21 s and OUT by 1.2e-12 V;
+        // both left OUT's error against the analytic 1020-ohm x 10 pF response
+        // at 0.2566 V, the edge integrated over the step that ends on it. The
+        // left-limit D/A drive (P0.10 D9) solves each edge's own point with
+        // the drive from before it and restarts the step leaving it: worst
+        // 0.2566 -> 4.87e-3 V, mean 0.1116 -> 1.32e-3 V, the error one edge
+        // adds 0.269 -> 4.1e-3 V (1856 -> 1861 points). All 101 `qdiv`
+        // transitions stay bit-identical and all 200 activations are accepted
+        // with their own bits.
         Fingerprint {
-            points: 1856,
-            grid_hash: 0xfb94_b2fd_dd9b_2faf,
-            volt_hash: 0x9083_25a6_c39e_d66d,
+            points: 1861,
+            grid_hash: 0x9de2_c05a_18ce_21c1,
+            volt_hash: 0xcef4_36a6_60ff_bfb2,
         },
     ),
     (
@@ -267,13 +274,18 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
             volt_hash: 0x97a0_1311_2bfb_0170,
         },
     ),
+    // The three feedback decks were re-measured for the left-limit D/A drive
+    // (P0.10 D9) together: the same 36 points on the same grid, every event
+    // bit-identical, and YA/YB against their 10k-loaded drives, held from
+    // before each edge on the edge's own point, worst 3.2934 V -> 6.6e-14 V
+    // (mean 9.1e-2 -> 2.0e-14 V) in all three.
     (
         "the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing",
         "hardening_feedback",
         Fingerprint {
             points: 36,
             grid_hash: 0xde34_c01f_9d47_f6dd,
-            volt_hash: 0xee07_5c9b_cd38_f53f,
+            volt_hash: 0x3300_2d53_5f8d_efc7,
         },
     ),
     (
@@ -282,7 +294,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         Fingerprint {
             points: 36,
             grid_hash: 0xde34_c01f_9d47_f6dd,
-            volt_hash: 0xea1b_78e7_8d12_a0e3,
+            volt_hash: 0x59d9_7a0d_d724_2903,
         },
     ),
     (
@@ -291,33 +303,49 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         Fingerprint {
             points: 36,
             grid_hash: 0xde34_c01f_9d47_f6dd,
-            volt_hash: 0xee07_5c9b_cd38_f53f,
+            volt_hash: 0x3300_2d53_5f8d_efc7,
         },
     ),
     (
         "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
         "hardening_two_crossings",
+        // Re-measured for P0.10. The restart after a landing no longer
+        // doubles out of the solver floor (D10): of the 22 accepted steps
+        // below 1e-14 s around `clk`'s 2/3 ns fall, the 3 landings of the
+        // root chase itself remain and the 19 doubling rungs after them are
+        // gone, 88 -> 65 points. The left-limit D/A drive (D9) holds QA/QB at
+        // their old level on each edge's own point: against their 1k-loaded
+        // drives, worst 0.980 V -> 1.9e-14 V. Every event is bit-identical but
+        // that fall, dated 1.0000e-20 s past the exact 2/3 ns before and
+        // 0.9988e-20 s past it now. All the crossing assertions of the case
+        // are unchanged.
         Fingerprint {
-            points: 88,
-            grid_hash: 0x7128_f749_178c_4a38,
+            points: 65,
+            grid_hash: 0xee86_6d7c_e348_7336,
             // Raw binary64 self-agreement is qualified per platform: Rust's
-            // f64::sin does not promise identical platform math. Linux x64 GNU
-            // and Windows x64 MSVC traces have the same 88 time/step words,
-            // events and CA/QA/QB voltages. Only CLK samples 38 and 55 differ
-            // by one ULP. At angles 0x4002bb2ea8b66d08/0x4004f1a6ca8803ce,
-            // independent 100-digit sine evaluation rounds to Linux's
-            // 0x3fe6f5b1bdc3a35a/0x3fdfffffe224cbe2. Windows is <0.558 ULP
-            // from that high-precision value. Both Linux execution routes
-            // agree. Keep exact child-process checks and crossing physics;
-            // do not quantize waveforms or widen the solver's tolerances.
+            // f64::sin does not promise identical platform math. At 88 points
+            // Linux x64 GNU and Windows x64 MSVC traces had the same time/step
+            // words, events and CA/QA/QB voltages, and only CLK samples 38 and
+            // 55 differed by one ULP: at angles 0x4002bb2ea8b66d08 and
+            // 0x4004f1a6ca8803ce, independent 100-digit sine evaluation rounds
+            // to Linux's 0x3fe6f5b1bdc3a35a and 0x3fdfffffe224cbe2, and Windows
+            // is <0.558 ULP from that high-precision value. On the 65-point
+            // grid the first of those angles is sample 37 and the second is
+            // no longer sampled. The Linux hash below is the Windows trace with
+            // every CLK sample replaced by the correctly rounded sine of its own
+            // angle; the same reconstruction of the 88-point trace reproduces
+            // the Linux pin it replaces, 0xcf573f880596171d, exactly. Both
+            // Linux execution routes agreed before. Keep exact child-process
+            // checks and crossing physics; do not quantize waveforms or widen
+            // the solver's tolerances.
             volt_hash: if cfg!(all(
                 target_os = "linux",
                 target_arch = "x86_64",
                 target_env = "gnu"
             )) {
-                0xcf57_3f88_0596_171d
+                0x5489_3dae_0a25_7514
             } else {
-                0xc781_f898_d407_8ce1
+                0x83fa_7abb_88bd_1fc3
             },
         },
     ),
@@ -328,10 +356,22 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // points, 23 of them moved by at most 3.5e-22 s, OUT by at most
         // 8.2e-14 V, every CLK/FROMX/QDIV event bit-identical, and OUT's error
         // against the analytic RC response unchanged (worst 1.949e-3 V).
+        //
+        // Re-measured again for the left-limit D/A drive (P0.10 D9): every
+        // CLK/FROMX/QDIV event bit-identical, 190 -> 191 points. The error a
+        // QDIV edge adds to OUT fell 3.20e-4 -> 2.7e-5 V (the 1 ps edge is now
+        // exact, 3.2e-4 V before). OUT's run-wide worst rose 1.949e-3 ->
+        // 2.465e-3 V and its mean 8.3e-4 -> 9.6e-4 V, and neither is at a D/A
+        // edge: both come from the order-one steps the stepper lands on the
+        // HDL clock's own activations at 5 and 10 ns with. That error scales
+        // with the square of the approach step, which the moved grid happens
+        // to reach 5 ns with at 0.312 ns rather than 0.222 ns (two
+        // equalization steps instead of three), and the 10 ns landing adds
+        // the same 1.7e-3 V in both runs.
         Fingerprint {
-            points: 190,
-            grid_hash: 0xbdd3_79e1_23b1_2106,
-            volt_hash: 0x2bbc_a1c2_e87a_b0a8,
+            points: 191,
+            grid_hash: 0x222e_573a_9897_3b6f,
+            volt_hash: 0x0084_ce96_a2ed_a11b,
         },
     ),
     (
@@ -355,10 +395,15 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     (
         "a_toggling_boundary_clock_is_not_refused_as_a_zero_delay_loop",
         "hardening_toggling_two_minimums",
+        // Both toggling clocks were re-measured for the left-limit D/A drive
+        // (P0.10 D9): the same grids, every event bit-identical, and Q against
+        // its 10k-loaded drive worst 3.2934 V -> 6.6e-14 V (means 1.77 V and
+        // 8.1e-3 V -> 3.2e-14 V; the two-minimum clock moves at every point,
+        // so before the change nearly every sample held the next level).
         Fingerprint {
             points: 253,
             grid_hash: 0xafa3_0bb3_a9bd_6ed8,
-            volt_hash: 0xa079_d0b7_6960_aed0,
+            volt_hash: 0x97ab_7459_2a54_2098,
         },
     ),
     (
@@ -367,7 +412,7 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         Fingerprint {
             points: 407,
             grid_hash: 0x0938_e26a_18bd_cc5f,
-            volt_hash: 0x9240_cc5e_db58_0b5a,
+            volt_hash: 0x0772_361c_591a_51ab,
         },
     ),
 ];
