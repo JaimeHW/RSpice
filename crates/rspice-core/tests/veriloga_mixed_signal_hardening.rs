@@ -178,7 +178,7 @@ fn digital_points(result: &TransientResult, net: &str) -> Vec<(f64, String)> {
 
 /// Every fixture in this file whose transient is fingerprinted, as
 /// `(test name, key, fingerprint)`. All three hashes first measured
-/// 2026-09-13; none of them replaces an existing pin.
+/// 2026-09-13; an entry re-measured since says why, and against what, beside it.
 ///
 /// # What is in, and what is not
 ///
@@ -240,10 +240,19 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     (
         "every_digital_activation_becomes_a_bit_exact_accepted_timepoint",
         "hardening_clock_divider",
+        // Re-measured twice. 02921aeeb put the output behind an XSPICE
+        // converter, which takes the deck off device truncation and onto the
+        // voltage LTE (1607 -> 1856 points); faaf0e809's centred capacitor
+        // current moved the grid by at most 4.7e-21 s and OUT by 1.2e-12 V.
+        // Across both, all 101 `qdiv` transitions are bit-identical, all 200
+        // activations are accepted with their own bits, and OUT's error
+        // against the analytic 1020-ohm x 10 pF response of those transitions
+        // is unchanged (worst 0.2566 V in both: the edge is integrated over
+        // the step that ends on it).
         Fingerprint {
-            points: 1607,
-            grid_hash: 0x9b79_51a1_df70_ef07,
-            volt_hash: 0x580c_c8e8_10b4_854c,
+            points: 1856,
+            grid_hash: 0xfb94_b2fd_dd9b_2faf,
+            volt_hash: 0x9083_25a6_c39e_d66d,
         },
     ),
     (
@@ -312,10 +321,14 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     (
         "an_off_grid_xspice_wake_is_dated_at_the_tick_at_or_after_it",
         "hardening_ceil_wake",
+        // Re-measured for faaf0e809's centred capacitor current: the same 190
+        // points, 23 of them moved by at most 3.5e-22 s, OUT by at most
+        // 8.2e-14 V, every CLK/FROMX/QDIV event bit-identical, and OUT's error
+        // against the analytic RC response unchanged (worst 1.949e-3 V).
         Fingerprint {
             points: 190,
-            grid_hash: 0x65d2_d612_1d71_429b,
-            volt_hash: 0x5aa4_5fdb_f382_38d5,
+            grid_hash: 0xbdd3_79e1_23b1_2106,
+            volt_hash: 0x2bbc_a1c2_e87a_b0a8,
         },
     ),
     (
