@@ -463,7 +463,9 @@ where
                 *eval_error.borrow_mut() = Some(error);
                 Value::INFINITY.into()
             }
-            Err(error @ ServiceRunError::Failure(_)) => {
+            Err(
+                error @ (ServiceRunError::Failure(_) | ServiceRunError::UnsupportedCapability(_)),
+            ) => {
                 if eval_error.borrow().is_none() {
                     *eval_error.borrow_mut() = Some(error);
                 }

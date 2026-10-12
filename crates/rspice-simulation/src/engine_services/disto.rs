@@ -103,6 +103,8 @@ enum DistoRunError {
     ResourceFailure(rspice_simulation_contract::resource_failure::ResourceFailure),
     Aborted,
     ResourceLimit(rspice_core::ResourceLimitError),
+    /// A capability refusal, carried through unchanged.
+    Refused(Box<crate::error::CapabilityRefusal>),
     Validation(String),
     Parse(String),
     Execution(String),
@@ -115,6 +117,7 @@ impl fmt::Display for DistoRunError {
             Self::ResourceFailure(error) => fmt::Display::fmt(error, f),
             Self::Aborted => f.write_str("Simulation aborted"),
             Self::ResourceLimit(error) => fmt::Display::fmt(error, f),
+            Self::Refused(refusal) => f.write_str(&refusal.message),
             Self::Validation(message)
             | Self::Parse(message)
             | Self::Execution(message)
@@ -131,6 +134,7 @@ impl DistoRunError {
             ServiceRunError::ResourceFailure(error) => Self::ResourceFailure(error),
             ServiceRunError::Aborted => Self::Aborted,
             ServiceRunError::ResourceLimit(error) => Self::ResourceLimit(error),
+            ServiceRunError::UnsupportedCapability(refusal) => Self::Refused(refusal),
             ServiceRunError::Failure(message) => classify(message),
         }
     }
@@ -140,6 +144,7 @@ impl DistoRunError {
             ServiceRunError::ResourceFailure(error) => Self::ResourceFailure(error),
             ServiceRunError::Aborted => Self::Aborted,
             ServiceRunError::ResourceLimit(error) => Self::ResourceLimit(error),
+            ServiceRunError::UnsupportedCapability(refusal) => Self::Refused(refusal),
             ServiceRunError::Failure(message) => Self::Execution(message),
         }
     }
@@ -149,6 +154,7 @@ impl DistoRunError {
             Self::ResourceFailure(error) => ServiceRunError::ResourceFailure(error),
             Self::Aborted => ServiceRunError::Aborted,
             Self::ResourceLimit(error) => ServiceRunError::ResourceLimit(error),
+            Self::Refused(refusal) => ServiceRunError::UnsupportedCapability(refusal),
             other => ServiceRunError::Failure(other.to_string()),
         }
     }

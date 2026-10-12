@@ -365,22 +365,7 @@ impl From<rspice_core::SimulationError> for SimulationError {
             // grows a distinct presentation for it.
             rspice_core::SimulationError::TimeLimitExceeded => SimulationError::Aborted,
             rspice_core::SimulationError::UnsupportedCapability(refusal) => {
-                let message = refusal.to_string();
-                let refusal = *refusal;
-                // The descriptor's rule: the card's kind when the refusal
-                // names a card, else the kind the refusal site recorded.
-                let analysis_kind = refusal
-                    .analysis
-                    .map(|analysis| analysis.kind())
-                    .or(refusal.analysis_kind)
-                    .map(|kind| kind.tag().to_owned());
-                SimulationError::UnsupportedCapability {
-                    capability: refusal.capability.to_owned(),
-                    analysis_kind,
-                    instance: refusal.instance,
-                    module: refusal.module,
-                    message,
-                }
+                CapabilityRefusal::from(*refusal).into()
             }
             // Categories this bridge has no dedicated presentation for yet.
             // They keep their full message, which already names the
@@ -607,9 +592,65 @@ pub enum ServiceRunError {
     /// A configurable production resource budget was exceeded.
     #[error(transparent)]
     ResourceLimit(#[from] rspice_core::ResourceLimitError),
+    /// The engine deliberately declined the analysis. Kept typed through the
+    /// service layers, and never prefixed with a stage context, so the
+    /// runner reports the refusal's own identity rather than prose.
+    #[error("{}", .0.message)]
+    UnsupportedCapability(Box<CapabilityRefusal>),
     /// Validation, parsing, circuit, or solver failure.
     #[error("{0}")]
     Failure(String),
+}
+
+/// A capability refusal's identity as every runner error carries it: the
+/// engine's token, the tag of the analysis kind that refused, the deck
+/// instance and module it refused, and the engine's own sentence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityRefusal {
+    pub capability: String,
+    pub analysis_kind: Option<String>,
+    pub instance: Option<String>,
+    pub module: Option<String>,
+    pub message: String,
+}
+
+impl From<rspice_core::UnsupportedCapabilityError> for CapabilityRefusal {
+    fn from(refusal: rspice_core::UnsupportedCapabilityError) -> Self {
+        let message = refusal.to_string();
+        // The descriptor's rule: the card's kind when the refusal names a
+        // card, else the kind the refusal site recorded.
+        let analysis_kind = refusal
+            .analysis
+            .map(|analysis| analysis.kind())
+            .or(refusal.analysis_kind)
+            .map(|kind| kind.tag().to_owned());
+        Self {
+            capability: refusal.capability.to_owned(),
+            analysis_kind,
+            instance: refusal.instance,
+            module: refusal.module,
+            message,
+        }
+    }
+}
+
+impl From<CapabilityRefusal> for SimulationError {
+    fn from(refusal: CapabilityRefusal) -> Self {
+        let CapabilityRefusal {
+            capability,
+            analysis_kind,
+            instance,
+            module,
+            message,
+        } = refusal;
+        Self::UnsupportedCapability {
+            capability,
+            analysis_kind,
+            instance,
+            module,
+            message,
+        }
+    }
 }
 
 /// Result type for cancellable simulation-service APIs.
@@ -673,6 +714,9 @@ impl From<rspice_core::SimulationError> for ServiceRunError {
                 rspice_core::SimulationConfigError::ResourceLimit(error),
             )
             | rspice_core::SimulationError::ResourceLimit(error) => Self::ResourceLimit(error),
+            rspice_core::SimulationError::UnsupportedCapability(refusal) => {
+                Self::UnsupportedCapability(Box::new(CapabilityRefusal::from(*refusal)))
+            }
             other => Self::Failure(other.to_string()),
         }
     }
@@ -732,6 +776,7 @@ impl From<ServiceRunError> for SimulationError {
                 requested: error.requested,
                 limit: error.limit,
             },
+            ServiceRunError::UnsupportedCapability(refusal) => (*refusal).into(),
             ServiceRunError::Failure(message) => SimulationError::InvalidConfig(message),
         }
     }

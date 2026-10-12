@@ -173,7 +173,7 @@ fn output_failures_round_trip_through_worker_contract() {
 #[test]
 fn a_capability_refusal_stays_typed_through_the_worker_contract() {
     let refusal = rspice_core::UnsupportedCapabilityError::new(
-        "analysis.discrete_state",
+        "analysis.mixed_signal.discrete_state",
         "mixed Verilog-AMS host 'x1' cannot take part in PSS analysis",
     )
     .for_analysis_kind(rspice_core::identity::AnalysisKind::Pss)
@@ -186,7 +186,7 @@ fn a_capability_refusal_stays_typed_through_the_worker_contract() {
     assert_eq!(
         expected,
         SimulationError::UnsupportedCapability {
-            capability: "analysis.discrete_state".to_string(),
+            capability: "analysis.mixed_signal.discrete_state".to_string(),
             analysis_kind: Some("pss".to_string()),
             instance: Some("x1".to_string()),
             module: Some("clock_divider".to_string()),
@@ -200,6 +200,22 @@ fn a_capability_refusal_stays_typed_through_the_worker_contract() {
     let decoded: WorkerSimulationError =
         serde_json::from_str(&encoded).expect("worker error deserializes");
     assert_eq!(SimulationError::from(decoded), expected);
+
+    // A service stage (the PSS runner says "PSS error") keeps the refusal
+    // typed and unprefixed rather than folding it into its failure prose.
+    let refusal = rspice_core::UnsupportedCapabilityError::new(
+        "analysis.mixed_signal.discrete_state",
+        "mixed Verilog-AMS host 'x1' cannot take part in PSS analysis",
+    )
+    .for_analysis_kind(rspice_core::identity::AnalysisKind::Pss)
+    .for_instance("x1")
+    .for_module("clock_divider");
+    let service = crate::error::ServiceRunError::from_core(
+        "PSS error",
+        rspice_core::SimulationError::UnsupportedCapability(Box::new(refusal)),
+    );
+    assert_eq!(service.to_string(), message);
+    assert_eq!(SimulationError::from(service), expected);
 }
 
 pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatingPoint {
