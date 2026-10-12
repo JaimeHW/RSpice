@@ -527,6 +527,8 @@ impl TransientNoiseRuntime {
         abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
         if (self.entries.is_empty() && !self.tracks_processes) || !self.bias_moved(solution) {
+            #[cfg(test)]
+            tests::record_accepted_refresh(time, circuit);
             return Ok(());
         }
         if !self.entries.is_empty() {
@@ -545,6 +547,8 @@ impl TransientNoiseRuntime {
         self.reference.clear();
         self.reference.extend_from_slice(solution);
         self.refreshes = self.refreshes.saturating_add(1);
+        #[cfg(test)]
+        tests::record_accepted_refresh(time, circuit);
         Ok(())
     }
 

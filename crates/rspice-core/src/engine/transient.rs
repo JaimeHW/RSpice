@@ -10704,6 +10704,12 @@ impl Engine {
                     ));
 
                     solution.clone_from(&new_solution);
+                    // A force-accepted point is an accepted point: the next
+                    // step's injected densities follow its bias exactly as
+                    // they follow an ordinary acceptance's.
+                    if let Some(runtime) = transient_noise.as_mut() {
+                        runtime.refresh(&mut circuit, &solution, t, abort)?;
+                    }
                     if let Some(history) = xyce_static_history_candidate {
                         xyce_static_history = Some(history);
                     }

@@ -9,6 +9,46 @@ use super::*;
 use crate::abort_signal::NoAbort;
 use crate::analysis::transient::TransientResult;
 use crate::netlist::Netlist;
+use std::cell::RefCell;
+
+/// One accepted-point refresh, as the plan stood after it.
+#[derive(Clone, Debug)]
+pub(super) struct AcceptedRefresh {
+    time: Value,
+    amplitudes: Vec<Value>,
+}
+
+thread_local! {
+    /// Every accepted-point refresh this thread's runs make, while a test
+    /// is recording. The engine runs a transient on its caller's thread.
+    static ACCEPTED_REFRESHES: RefCell<Option<Vec<AcceptedRefresh>>> =
+        const { RefCell::new(None) };
+}
+
+/// Called by [`TransientNoiseRuntime::refresh`] at every accepted point.
+pub(super) fn record_accepted_refresh(time: Value, circuit: &CircuitData) {
+    ACCEPTED_REFRESHES.with(|cell| {
+        if let Some(log) = cell.borrow_mut().as_mut() {
+            log.push(AcceptedRefresh {
+                time,
+                amplitudes: circuit
+                    .transient_device_noise()
+                    .map(TransientDeviceNoise::amplitudes)
+                    .unwrap_or_default(),
+            });
+        }
+    });
+}
+
+/// Run `body` with accepted-point refreshes recorded, returning both.
+fn recording_refreshes<T>(body: impl FnOnce() -> T) -> (T, Vec<AcceptedRefresh>) {
+    ACCEPTED_REFRESHES.with(|cell| *cell.borrow_mut() = Some(Vec::new()));
+    let value = body();
+    let log = ACCEPTED_REFRESHES
+        .with(|cell| cell.borrow_mut().take())
+        .unwrap_or_default();
+    (value, log)
+}
 
 /// The analysis temperature every fixture here runs at.
 const T: Value = crate::constants::TEMP_REFERENCE;
@@ -743,6 +783,101 @@ fn a_deck_without_noise_mechanisms_runs_deterministically() {
     Engine::add_transient_noise_breakpoints(&mut breakpoints, &circuit, tstop, 1_000_000)
         .expect("an empty plan schedules nothing");
     assert!(breakpoints.times().is_empty());
+}
+
+/// G6b: a force-accepted point is an accepted point. The densities the next
+/// step injects must be the ones the force-accepted bias implies, exactly as
+/// after an ordinary acceptance; before the fix the force-accept commit left
+/// the amplitudes of the point before it in place.
+///
+/// The deck forces the accept. An XSPICE gain block keeps the deck on the
+/// generic node-voltage truncation estimate (no family's charge walk covers
+/// an XSPICE deck), and an ideal behavioral step drives a 1 ps RC between two
+/// noise sample boundaries, where no step down to the minimum resolves it.
+/// The noise source whose amplitude is checked is a diode's shot noise, `2qI`,
+/// carried by a ramped current, so the bias moves through the run and the
+/// oracle is the junction law at the accepted node voltage.
+#[test]
+fn a_force_accepted_point_refreshes_the_injected_densities() {
+    const FMAX: Value = 5.0e5;
+    const SATURATION: Value = 1.0e-14;
+    let nt = 1.0 / (2.0 * FMAX);
+    let tstop = 10.0 * nt;
+    let max_step = 1.0e-8;
+    // The behavioral edge sits 0.3 ns past the sample boundary at 5 µs, so no
+    // breakpoint announces it.
+    let threshold = (5.0003 * nt) / tstop;
+    let deck = format!(
+        "force-accepted transient noise\n\
+         VX x 0 PWL(0 0 {tstop:e} 1)\n\
+         A9 x xo gainblk\n\
+         Rxo xo 0 1k\n\
+         .MODEL gainblk gain(gain=1)\n\
+         B1 s 0 V=if(V(x)>{threshold:.12},1,0)\n\
+         R1 s a 1m\n\
+         C1 a 0 1p\n\
+         I1 0 d PWL(0 1u {tstop:e} 100u)\n\
+         D1 d 0 DM\n\
+         .MODEL DM D IS={SATURATION:e} N=1\n\
+         .TRAN {max_step:e} {tstop:e} NOISEFMAX={FMAX:e} NOISESEED=41\n\
+         .END\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let engine = engine();
+    let (result, refreshes) = recording_refreshes(|| {
+        engine
+            .run_tran(&netlist, tstop, max_step)
+            .expect("the deck runs")
+    });
+    let quality = engine.convergence_quality();
+    assert!(
+        quality.force_accepted_points > 0,
+        "the deck must force-accept a point to exercise the commit under test"
+    );
+    let anode = result
+        .try_voltage_waveform_named("d")
+        .expect("the diode's anode is retained");
+    // The plan installs native sources in catalog order, so the shot-noise
+    // mechanism's position is the one an installation of the same deck gives.
+    let config = netlist
+        .options
+        .transient_noise
+        .expect("the card requests noise");
+    let (_, runtime, _) = installed(&deck, config, tstop);
+    let position = runtime
+        .entries
+        .iter()
+        .position(|entry| {
+            entry.identity.device.eq_ignore_ascii_case("D1")
+                && entry.noise_type == NoiseSourceType::Shot
+        })
+        .expect("the diode exports shot noise");
+    let thermal_voltage = crate::constants::K_BOLTZMANN * T / crate::constants::Q_ELECTRON;
+    let charge = crate::analysis::noise::NoisePhysicalConstants::MODERN.electron_charge;
+    for &index in &quality.force_accepted_indices {
+        let time = result.time[index];
+        let refresh = refreshes
+            .iter()
+            .rev()
+            .find(|refresh| refresh.time == time)
+            .unwrap_or_else(|| {
+                panic!("the force-accepted point at t={time:e} s did not refresh the densities")
+            });
+        let voltage = anode[index];
+        let current = SATURATION * ((voltage / thermal_voltage).exp() - 1.0);
+        let expected = (2.0 * charge * current * FMAX).sqrt();
+        // A refresh may keep amplitudes derived from a solution within
+        // Newton's own same-bias test, `RELTOL·|v| + VNTOL` (defaults 1e-3 and
+        // 1e-6 V). Through `sqrt(I) ∝ exp(v/2Vt)` that bounds the relative
+        // amplitude difference by `exp((1e-3·|v| + 1e-6)/(2·Vt)) - 1`.
+        let tolerance = ((1.0e-3 * voltage.abs() + 1.0e-6) / (2.0 * thermal_voltage)).exp() - 1.0;
+        against_oracle(
+            &format!("shot-noise amplitude after the force-accepted point at t={time:e} s"),
+            refresh.amplitudes[position],
+            expected,
+            tolerance + 1.0e-6,
+        );
+    }
 }
 
 /// A tabulated native density renders: an EKV3 instance, whose VANOISE
