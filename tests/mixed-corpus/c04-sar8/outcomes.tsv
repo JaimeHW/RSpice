@@ -13,8 +13,8 @@ ports	ac	interp	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB
 ports	ac	native	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
 full	noise	interp	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
 full	noise	native	fail	harness: harness: Verilog-A runtime source key '__rspice_project__/mixed-corpus/c04-sar8/sar8_full.v' is duplicated
-ports	noise	interp	wrong	nz (O5-O1) [0] |a−e|=8.288e-15 allowed 9.946e-17 (a=1.657575e-15, e=9.945640e-15)
-ports	noise	native	wrong	nz (O5-O1) [0] |a−e|=8.288e-15 allowed 9.946e-17 (a=1.657575e-15, e=9.945640e-15)
+ports	noise	interp	pass	nz (O6) [2] |a−e|=2.629e-18 allowed 1.810e-16 (a=9.049596e-15, e=9.052224e-15)
+ports	noise	native	pass	nz (O6) [2] |a−e|=2.629e-18 allowed 1.810e-16 (a=9.049596e-15, e=9.052224e-15)
 full	mc-tran	interp	wrong	unmeasurable: dnl (O6) mean window [5e-7, 1.65e-5] is not inside the run
 full	mc-tran	native	wrong	unmeasurable: dnl (O6) mean window [5e-7, 1.65e-5] is not inside the run
 ports	mc-tran	interp	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]
