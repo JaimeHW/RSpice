@@ -171,24 +171,20 @@ pub fn sections(kind: &str, prn: &str, deck: &str) -> Result<BTreeMap<String, Ta
     let mut index = first;
     while index < header.len() {
         let name = header[index].to_ascii_lowercase();
-        if kind == "ac" {
-            // AC prints re/im pairs: `Re(V(OUT)) Im(V(OUT))`.
-            if let Some(inner) = name
-                .strip_prefix("re(")
-                .and_then(|rest| rest.strip_suffix(')'))
-            {
-                let im = columns.get(index + 1).ok_or("Re column without Im")?;
-                table.complex.insert(
-                    column_name(inner),
-                    columns[index]
-                        .iter()
-                        .zip(im)
-                        .map(|(re, im)| [*re, *im])
-                        .collect(),
-                );
-                index += 2;
-                continue;
-            }
+        if kind == "ac"
+            && let Some(signal) = complex_pair(&name, header.get(index + 1))
+        {
+            let im = columns.get(index + 1).ok_or("real column without its imaginary")?;
+            table.complex.insert(
+                signal,
+                columns[index]
+                    .iter()
+                    .zip(im)
+                    .map(|(re, im)| [*re, *im])
+                    .collect(),
+            );
+            index += 2;
+            continue;
         }
         let series = if has_axis {
             columns[index].clone()
@@ -196,14 +192,14 @@ pub fn sections(kind: &str, prn: &str, deck: &str) -> Result<BTreeMap<String, Ta
             vec![*columns[index].last().ok_or("empty column")?]
         };
         let key = if kind == "noise" {
-            // Xyce prints amplitude densities; the corpus compares powers.
+            // Xyce's ONOISE/INOISE are power densities already (V²/Hz: a
+            // 1 kΩ resistor prints 4kTR = 1.6576e-17), which is what the corpus
+            // compares; ngspice's are amplitudes and are squared there.
             let key = name
                 .replace("_spectrum", "")
                 .replace("v(", "")
                 .replace(')', "");
-            table
-                .real
-                .insert(key, series.iter().map(|value| value * value).collect());
+            table.real.insert(key, series);
             index += 1;
             continue;
         } else if matches!(kind, "sens" | "tf") {
@@ -220,6 +216,33 @@ pub fn sections(kind: &str, prn: &str, deck: &str) -> Result<BTreeMap<String, Ta
     let mut sections = BTreeMap::new();
     sections.insert(label.to_owned(), table);
     Ok(sections)
+}
+
+/// The canonical signal a real/imaginary column pair prints, when `name`
+/// (lower case) opens one and `next` closes it. Xyce spells the pair
+/// `Re(V(OUT)) Im(V(OUT))` for `.PRINT AC V(OUT)` and `VR(OUT) VI(OUT)` (or
+/// `IR(V1) II(V1)`) when the deck prints the parts by name; either is the
+/// complex `v(out)` (`i(v1)`), never a signal called `vr(out)`.
+fn complex_pair(name: &str, next: Option<&String>) -> Option<String> {
+    let next = next?.to_ascii_lowercase();
+    let inner = |text: &str, prefix: &str| -> Option<String> {
+        text.strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(')'))
+            .map(str::to_owned)
+    };
+    for (real, imaginary, quantity) in [("re(", "im(", ""), ("vr(", "vi(", "v"), ("ir(", "ii(", "i")]
+    {
+        if let (Some(a), Some(b)) = (inner(name, real), inner(&next, imaginary))
+            && a == b
+        {
+            return Some(if quantity.is_empty() {
+                column_name(&a)
+            } else {
+                column_name(&format!("{quantity}({a})"))
+            });
+        }
+    }
+    None
 }
 
 /// The sweep values of the deck's single linear `.dc` card.
@@ -269,5 +292,23 @@ mod tests {
         assert_eq!(table.axis.len(), 3);
         assert!((table.axis[2] - 1.6).abs() < 1e-12);
         assert_eq!(table.real["v(out)"], vec![1.0, 1.5, 2.0]);
+    }
+
+    #[test]
+    fn named_real_and_imaginary_parts_are_one_complex_signal() {
+        let ac = "Index FREQ VR(VOUT) VI(VOUT) IR(VIN) II(VIN)\n0 10 0.5 -0.25 1e-3 2e-3\nEnd of Xyce(TM) Simulation\n";
+        let table = &sections("ac", ac, "").unwrap()["ac"];
+        assert_eq!(table.complex["v(vout)"], vec![[0.5, -0.25]]);
+        assert_eq!(table.complex["i(vin)"], vec![[1e-3, 2e-3]]);
+        assert!(table.real.is_empty() && table.complex.len() == 2, "{table:?}");
+    }
+
+    #[test]
+    fn noise_densities_are_kept_as_the_power_densities_xyce_prints() {
+        // A 1 kΩ resistor: Xyce prints ONOISE = 4kTR = 1.6576e-17 V²/Hz.
+        let noise = "Index FREQ ONOISE INOISE\n0 1000 1.65757549e-17 1.6575755e-17\nEnd of Xyce(TM) Simulation\n";
+        let table = &sections("noise", noise, "").unwrap()["noise"];
+        assert_eq!(table.real["onoise"], vec![1.65757549e-17]);
+        assert_eq!(table.real["inoise"], vec![1.6575755e-17]);
     }
 }
