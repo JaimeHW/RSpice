@@ -2456,3 +2456,107 @@ fn vdmos_off_keyword_selects_the_bistable_operating_point_branch() {
          m2 OFF ({m2_off_d1}, {m2_off_d2})"
     );
 }
+
+/// ngspice-46 `.noise` of a VDMOS stage (`vdmos/vdmosnoi.c`): RD and RS
+/// thermal noise, 2/3·|gm| channel noise and KF·|Id|^AF/(f·Cox²) flicker with
+/// ngspice's fixed 100 nm oxide, in V/√Hz from `print onoise_*`
+/// (`numdgt=15`). Columns: frequency, total, `_id`, `_rd`, `_rs`, `_1overf`.
+const VDMOS_NOISE_NGSPICE46: [[f64; 6]; 6] = [
+    [
+        1.0,
+        7.103_700_174_124_755e-10,
+        1.074_067_795_626_642e-10,
+        8.785_826_872_897_895e-11,
+        7.748_968_447_472_617e-11,
+        6.908_999_007_201_626e-10,
+    ],
+    [
+        1.0e1,
+        2.738_925_995_805_082e-10,
+        1.074_067_795_626_528e-10,
+        8.785_826_872_897_639e-11,
+        7.748_968_447_471_795e-11,
+        2.184_817_321_459_69e-10,
+    ],
+    [
+        1.0e2,
+        1.790_427_757_578_041e-10,
+        1.074_067_795_615_227e-10,
+        8.785_826_872_872_104e-11,
+        7.748_968_447_390_142e-11,
+        6.908_999_007_128_198e-11,
+    ],
+    [
+        1.0e3,
+        1.666_140_193_656_918e-10,
+        1.074_067_794_485_034e-10,
+        8.785_826_870_319_114e-11,
+        7.748_968_439_224_383e-11,
+        2.184_817_319_137_717e-11,
+    ],
+    [
+        1.0e4,
+        1.653_197_461_667_787e-10,
+        1.074_067_681_465_768e-10,
+        8.785_826_615_020_054e-11,
+        7.748_967_622_648_494e-11,
+        6.908_998_272_855_646e-12,
+    ],
+    [
+        1.0e5,
+        1.651_883_814_400_208e-10,
+        1.074_056_379_719_226e-10,
+        8.785_801_085_618_048e-11,
+        7.748_885_966_360_166e-11,
+        2.184_794_099_767_246e-12,
+    ],
+];
+
+#[test]
+fn ngspice_vdmos_noise_matches_the_ngspice46_oracle() {
+    let deck = "* vdmos noise\n\
+                vdd vdd 0 dc 12\n\
+                vin g 0 dc 3 ac 1\n\
+                rl vdd d 100\n\
+                m1 d g 0 0 vd\n\
+                .model vd vdmos (vto=2 kp=0.5 rd=0.5 rs=0.2 lambda=0.01 kf=1e-25 af=1.2)\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("VDMOS noise deck parses");
+    let frequencies: Vec<f64> = VDMOS_NOISE_NGSPICE46.iter().map(|row| row[0]).collect();
+    let results = Engine::new(SimulationConfig {
+        spice_dialect: rspice_core::engine::SpiceDialect::Ngspice,
+        ..Default::default()
+    })
+    .run_noise_named_with_input_source(&netlist, "d", None, "vin", &frequencies, 300.15)
+    .expect("VDMOS noise analysis runs");
+    assert_eq!(results.len(), VDMOS_NOISE_NGSPICE46.len());
+    for (result, row) in results.iter().zip(VDMOS_NOISE_NGSPICE46) {
+        let frequency = row[0];
+        let mechanism = |name: &str| {
+            result
+                .contributions
+                .iter()
+                .find(|contribution| {
+                    contribution.identity.device.eq_ignore_ascii_case("m1")
+                        && contribution.identity.mechanism.as_deref() == Some(name)
+                })
+                .unwrap_or_else(|| panic!("m1 exports {name} at {frequency} Hz"))
+                .output_contribution
+        };
+        for (label, actual, reference) in [
+            ("total", result.output_noise_density, row[1]),
+            ("ID", mechanism("ID"), row[2]),
+            ("RD", mechanism("RD"), row[3]),
+            ("RS", mechanism("RS"), row[4]),
+            ("FN", mechanism("FN"), row[5]),
+        ] {
+            let expected = reference * reference;
+            let relative = (actual - expected).abs() / expected;
+            assert!(
+                relative <= 1.0e-4,
+                "{label} at {frequency} Hz: RSpice {actual:.9e} V^2/Hz against ngspice-46 \
+                 {expected:.9e} (rel {relative:.3e})"
+            );
+        }
+    }
+}

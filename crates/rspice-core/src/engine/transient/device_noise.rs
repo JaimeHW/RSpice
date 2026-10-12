@@ -1078,6 +1078,10 @@ impl Engine {
         solution: &[Value],
         grid: &NoiseGrid,
     ) -> Result<TransientNoiseRenderPlan, SimulationError> {
+        Self::ensure_device_noise_implemented(
+            circuit,
+            crate::engine::CapabilityAnalysis::TranNoise,
+        )?;
         let mut native =
             Self::try_collect_noise_sources(circuit, solution, self.config.spice_dialect)?;
         Self::configure_noise_physical_constants(

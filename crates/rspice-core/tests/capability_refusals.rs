@@ -130,6 +130,43 @@ fn noise_refuses_a_charge_model_it_does_not_implement() {
 }
 
 #[test]
+fn noise_refuses_a_device_whose_reference_noise_it_does_not_implement() {
+    // ngspice and Xyce both give a BSIMSOI device noise sources
+    // (`b3soi*noi.c`, `N_DEV_MOSFET_B3SOI.C`) that the native SOI ports do
+    // not implement. A noise result that left the device out would be a
+    // silent wrong answer, so the analysis declines it and names it.
+    let netlist = parse(
+        "soi noise capability\n\
+         m1 3 2 0 0 nmos w=4u l=1u\n\
+         rsource 1 2 100k\n\
+         rload 3 vdd 25k\n\
+         vdd1 vdd 0 5\n\
+         vin 1 0 1.44 ac .1\n\
+         .model nmos nmos level=10\n\
+         .end\n",
+    );
+    let error = Engine::default()
+        .run_noise_named_with_input_source(&netlist, "3", None, "vin", &[1.0e3], 300.15)
+        .expect_err("a SOI device's unimplemented noise must not read as zero");
+    assert_eq!(capability_token(&error), "analysis.noise.device");
+    let SimulationError::UnsupportedCapability(refusal) = &error else {
+        panic!("a noise refusal is a capability refusal: {error}");
+    };
+    assert_eq!(
+        refusal.instance.as_deref().map(str::to_ascii_lowercase),
+        Some("m1".to_owned())
+    );
+    assert_eq!(
+        refusal.analysis_kind,
+        Some(rspice_core::identity::AnalysisKind::Noise)
+    );
+    // The same deck still solves every analysis that needs no noise source.
+    Engine::default()
+        .run_dc_op(&netlist)
+        .expect("the SOI deck's operating point solves");
+}
+
+#[test]
 fn rlgc_ltra_with_shunt_conductance_is_refused_before_any_solve() {
     let netlist = parse(
         "ltra capability\n\

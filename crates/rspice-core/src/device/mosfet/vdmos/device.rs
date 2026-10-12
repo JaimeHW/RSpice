@@ -28,6 +28,21 @@ pub struct VdmosIndices {
     pub rhs_si: Option<usize>,
 }
 
+/// The quantities ngspice's VDMOS noise sources are evaluated from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VdmosNoiseOperatingPoint {
+    /// `(pos, neg, RD)` of the series drain resistor, when it is a branch.
+    pub(crate) drain_resistor: Option<(NodeId, NodeId, Value)>,
+    /// `(pos, neg, RS)` of the series source resistor, when it is a branch.
+    pub(crate) source_resistor: Option<(NodeId, NodeId, Value)>,
+    /// The channel's internal drain and source.
+    pub(crate) channel: (NodeId, NodeId),
+    /// Channel transconductance at the bias, the multiplicity included.
+    pub(crate) transconductance: Value,
+    /// Channel drain current at the bias, the multiplicity included.
+    pub(crate) drain_current: Value,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct VdmosLinearization {
     id: Value,
@@ -83,6 +98,10 @@ pub struct Vdmos {
     pub rs: Value,
     /// Gate resistance (Ω)
     pub rg: Value,
+    /// Flicker-noise coefficient `KF` (ngspice VDMOS default 0).
+    pub flicker_kf: Value,
+    /// Flicker-noise current exponent `AF` (ngspice VDMOS default 1).
+    pub flicker_af: Value,
     /// Channel length modulation (V⁻¹)
     pub lambda: Value,
     /// ngspice VDMOS triode-region drain-voltage multiplier.
@@ -375,6 +394,8 @@ impl Vdmos {
             rd: 0.1,
             rs: 0.01,
             rg: 1.0,
+            flicker_kf: 0.0,
+            flicker_af: 1.0,
             lambda: 0.01,
             mtriode: 1.0,
             ngspice_theta: 0.0,
@@ -615,6 +636,12 @@ impl Vdmos {
         }
         if let Some(&v) = params.get("RG") {
             self.rg = v;
+        }
+        if let Some(&v) = params.get("KF") {
+            self.flicker_kf = v;
+        }
+        if let Some(&v) = params.get("AF") {
+            self.flicker_af = v;
         }
         if let Some(&v) = params.get("LAMBDA") {
             self.lambda = v;
@@ -1499,6 +1526,45 @@ impl Vdmos {
         let derivative =
             conductance - vdrop * conductance * conductance * self.xyce_drift_param_b * d_abs;
         (current, derivative.max(1.0e-12))
+    }
+
+    /// What ngspice's VDMOS noise (`vdmos/vdmosnoi.c`) is evaluated from at
+    /// `solution`: the series drain and source resistors where the builder
+    /// put them on internal nodes, and the channel's internal terminal pair
+    /// with the transconductance and drain current the small-signal stamp
+    /// uses there.
+    pub(crate) fn noise_operating_point(&self, solution: &[Value]) -> VdmosNoiseOperatingPoint {
+        let voltage = |node: NodeId| {
+            if node == 0 {
+                0.0
+            } else {
+                solution.get(node - 1).copied().unwrap_or(Value::NAN)
+            }
+        };
+        let drain_prime = self.drain_int.unwrap_or(self.drain);
+        let drain_drift = self.drain_drift_node();
+        let source_prime = self.source_int.unwrap_or(self.source);
+        let vsi = voltage(source_prime);
+        let (drain_current, _, transconductance, _, _, _) = self.linearized_operating_point(
+            voltage(self.gate) - vsi,
+            voltage(drain_prime) - vsi,
+            voltage(self.bulk) - vsi,
+        );
+        VdmosNoiseOperatingPoint {
+            drain_resistor: (self.rd > 1e-12 && drain_prime != drain_drift).then_some((
+                drain_drift,
+                drain_prime,
+                self.rd,
+            )),
+            source_resistor: (self.rs > 1e-12 && source_prime != self.source).then_some((
+                self.source,
+                source_prime,
+                self.rs,
+            )),
+            channel: (drain_prime, source_prime),
+            transconductance,
+            drain_current,
+        }
     }
 
     #[inline]

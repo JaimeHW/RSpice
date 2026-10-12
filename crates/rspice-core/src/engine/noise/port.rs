@@ -229,6 +229,7 @@ impl Engine {
                 "SP noise does not support the restricted EKV3 LEVEL=301 VANOISE oracle slice",
             ));
         }
+        Self::ensure_device_noise_implemented(&circuit, crate::engine::CapabilityAnalysis::Sp)?;
 
         let crate::engine::small_signal_bias::SmallSignalBias {
             circuit,

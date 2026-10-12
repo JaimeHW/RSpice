@@ -27,6 +27,27 @@ fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
 
+/// Both references give a SOI device noise sources (ngspice `b3soi*noi.c`,
+/// Xyce `N_DEV_MOSFET_B3SOI.C`) that the native ports do not implement, so
+/// a noise analysis declines the device by name rather than reporting it as
+/// silent. Every other small-signal analysis of the same deck runs.
+fn assert_noise_declines_the_soi_device(netlist: &Netlist, label: &str) {
+    let error = engine()
+        .run_noise(netlist, 1, &[1.0e6], 300.15)
+        .expect_err("SOI noise is not implemented and must not read as zero");
+    match &error {
+        rspice_core::SimulationError::UnsupportedCapability(refusal) => {
+            assert_eq!(refusal.capability, "analysis.noise.device", "{label}");
+            assert_eq!(
+                refusal.instance.as_deref().map(str::to_ascii_lowercase),
+                Some("m1".to_owned()),
+                "{label}"
+            );
+        }
+        other => panic!("{label}: expected a noise capability refusal, got {other}"),
+    }
+}
+
 fn xyce_level10_default_gain_stage() -> &'static str {
     "* Xyce ACtests/bsim3soi/gain-stagesoi_default.cir\n\
      m1 3 2 0 0 nmos w=4u l=1u\n\
@@ -667,9 +688,7 @@ fn xyce_level10_capmod3_pd_other_charge_analyses_run_natively() {
         .end\n";
     let netlist = Netlist::parse(deck).expect("deck parses");
 
-    engine()
-        .run_noise(&netlist, 1, &[1.0e6], 300.15)
-        .expect("noise should use native PD CAPMOD=3 charge model");
+    assert_noise_declines_the_soi_device(&netlist, "PD CAPMOD=3");
 
     let pz_engine = engine();
     let pz_circuit = pz_engine
@@ -767,9 +786,7 @@ fn native_soi_dd_capmod2_charge_analyses_run_natively() {
     engine()
         .run_tran(&netlist, 1.0e-9, 0.1e-9)
         .expect("DD CAPMOD=2 transient should run");
-    engine()
-        .run_noise(&netlist, 1, &[1.0e6], 300.15)
-        .expect("DD CAPMOD=2 noise should run");
+    assert_noise_declines_the_soi_device(&netlist, "DD CAPMOD=2");
     let pz_engine = engine();
     let pz_circuit = pz_engine
         .build_circuit(&netlist)
@@ -824,9 +841,7 @@ fn native_soi_fd_capmod2_charge_analyses_run_natively() {
     engine()
         .run_tran(&netlist, 1.0e-9, 0.1e-9)
         .expect("FD CAPMOD=2 transient should run");
-    engine()
-        .run_noise(&netlist, 1, &[1.0e6], 300.15)
-        .expect("FD CAPMOD=2 noise should run");
+    assert_noise_declines_the_soi_device(&netlist, "FD CAPMOD=2");
     let pz_engine = engine();
     let pz_circuit = pz_engine
         .build_circuit(&netlist)

@@ -1939,6 +1939,55 @@ impl Engine {
         Ok(sources)
     }
 
+    /// Refuse a noise analysis over a device whose reference simulators give
+    /// it noise this build does not model, naming the instance, instead of
+    /// returning that device's silent zero.
+    ///
+    /// The native BSIMSOI ports (ngspice levels 55/56/57 and 10, Xyce
+    /// level 10) are the one such family: ngspice evaluates their drain,
+    /// source and channel noise, flicker and floating-body shot noise
+    /// (`bsim3soi_dd/b3soiddnoi.c`, `bsim3soi_fd/b3soifdnoi.c`,
+    /// `bsim3soi_pd/b3soipdnoi.c`, `bsimsoi/b4soinoi.c`), and Xyce its
+    /// B3SOI's (`N_DEV_MOSFET_B3SOI.C`, `getNumNoiseSources`).
+    pub(in crate::engine) fn ensure_device_noise_implemented(
+        circuit: &CircuitData,
+        analysis: super::CapabilityAnalysis,
+    ) -> Result<(), SimulationError> {
+        let unmodeled =
+            circuit
+                .b3soi
+                .devices
+                .first()
+                .map(|device| (device.name.as_str(), "BSIMSOI dynamic-depletion (B3SOIDD)"))
+                .or_else(|| {
+                    circuit
+                        .b3soi_fd
+                        .devices
+                        .first()
+                        .map(|device| (device.name.as_str(), "BSIMSOI fully-depleted (B3SOIFD)"))
+                })
+                .or_else(|| {
+                    circuit.b3soi_pd.devices.first().map(|device| {
+                        (device.name.as_str(), "BSIMSOI partially-depleted (B3SOIPD)")
+                    })
+                });
+        let Some((instance, family)) = unmodeled else {
+            return Ok(());
+        };
+        Err(super::UnsupportedCapabilityError::new(
+            "analysis.noise.device",
+            format!(
+                "{} does not support {family} instance '{instance}': its drain, source, channel, \
+                 flicker and floating-body noise sources are not implemented, and a noise result \
+                 without them would silently omit the device",
+                analysis.label()
+            ),
+        )
+        .for_analysis_kind(analysis.kind())
+        .for_instance(instance)
+        .into())
+    }
+
     /// The terminal pair one element of a code model's analog output drives.
     fn xspice_output_element_nodes(
         instance: &crate::xspice::XspiceInstance,
@@ -2851,6 +2900,60 @@ impl Engine {
             }
         }
 
+        // VDMOS: thermal noise of the series drain and source resistors,
+        // 2/3·|gm| channel thermal noise and KF·|Id|^AF/(f·Cox²) flicker
+        // across the channel, as ngspice's `vdmos/vdmosnoi.c` gives them.
+        // A VDMOS card has no oxide, so ngspice fixes Cox at a 100 nm oxide
+        // (`vdmos/vdmosset.c:233`) and takes the drain current with its
+        // multiplicity. Xyce's VDMOS exports no noise; its LEVEL=18 card is
+        // the same resistors and channel, so it carries the same sources.
+        for vdmos in &circuit.vdmoses.devices {
+            const VDMOS_OXIDE_CAPACITANCE: Value = 3.9 * 8.854214871e-12 / 1e-7;
+            let op = vdmos.noise_operating_point(dc_solution);
+            for (mechanism, resistor) in [("RD", op.drain_resistor), ("RS", op.source_resistor)] {
+                if let Some((node_pos, node_neg, resistance)) = resistor {
+                    noise_sources.push(
+                        NoiseSource::thermal(vdmos.name.clone(), node_pos, node_neg, resistance)
+                            .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                                &vdmos.name,
+                                mechanism,
+                            )),
+                    );
+                }
+            }
+            let (drain, source) = op.channel;
+            let label = format!("{}:ID", vdmos.name);
+            let conductance =
+                Self::checked_noise_product(&label, 2.0 / 3.0, op.transconductance.abs())?;
+            if let Some(resistance) = Self::noise_resistance_from_conductance(&label, conductance)?
+            {
+                noise_sources.push(
+                    NoiseSource::thermal(vdmos.name.clone(), drain, source, resistance)
+                        .with_identity(crate::analysis::NoiseSourceIdentity::mechanism(
+                            &vdmos.name,
+                            "ID",
+                        )),
+                );
+            }
+            if vdmos.flicker_kf != 0.0 {
+                noise_sources.push(Self::semiconductor_flicker_source(
+                    NoiseSource::flicker_with_frequency_exponent(
+                        vdmos.name.clone(),
+                        drain,
+                        source,
+                        vdmos.flicker_kf / (VDMOS_OXIDE_CAPACITANCE * VDMOS_OXIDE_CAPACITANCE),
+                        vdmos.flicker_af,
+                        1.0,
+                        op.drain_current,
+                    )
+                    .with_identity(
+                        crate::analysis::NoiseSourceIdentity::mechanism(&vdmos.name, "FN"),
+                    ),
+                    1.0,
+                )?);
+            }
+        }
+
         // A ranked contributor row is named after the mechanism its source
         // carries, and a frontend persists that name verbatim, so a source
         // whose mechanism falls outside the persistable shape writes a result
@@ -3375,6 +3478,7 @@ impl Engine {
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        Self::ensure_device_noise_implemented(&circuit, super::CapabilityAnalysis::Noise)?;
         let resolve_node = |name: &str| {
             circuit.get_node_by_name(name.trim()).ok_or_else(|| {
                 SimulationError::Circuit(format!(
