@@ -8744,6 +8744,12 @@ impl Engine {
                 // factorization fails, matching DampedNewton's terminal
                 // one-based `nlStep_` accounting.
                 nonlinear_iterations = _iter.saturating_add(1);
+                // The public count is one per linearized Newton solve, the
+                // unit ngspice reports as "Transient iterations". Merit trials
+                // that restamp without solving are not iterations.
+                self.record_convergence(|quality| {
+                    quality.total_iterations = quality.total_iterations.saturating_add(1);
+                });
                 match solve_result {
                     Ok(()) => {
                         let sol = &mut linear_solution;

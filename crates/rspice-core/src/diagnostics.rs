@@ -249,7 +249,9 @@ impl ConvergenceDiagnostic {
 #[derive(Debug, Clone, Default)]
 pub struct ConvergenceQuality {
     /// Total nonlinear Newton Jacobian assemblies across the analysis.
-    /// Residual-only verification probes are deliberately excluded.
+    /// Residual-only verification probes are deliberately excluded. A
+    /// transient counts one per linearized Newton solve at each attempted
+    /// timepoint, in addition to its operating point's assemblies.
     pub total_iterations: usize,
     /// Number of times GMIN stepping was used
     pub gmin_stepping_count: usize,
