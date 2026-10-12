@@ -339,7 +339,14 @@ fn execute_with_destinations(
         });
         for (deck, outcome) in plan.iter().zip(outcomes) {
             let label = deck.label.as_deref().unwrap_or("base");
-            let outcome = outcome?;
+            let outcome = match outcome {
+                Ok(outcome) => outcome,
+                // A run the deadline or an interrupt stopped still owes the
+                // summary and reports their verdict; the abort handling below
+                // records it.
+                Err(_) if crate::abort::reason().is_some() => continue,
+                Err(error) => return Err(error),
+            };
             if !quiet {
                 if outcome.reports.iter().all(|report| report.passed) {
                     let duration: f64 = outcome
@@ -378,7 +385,15 @@ fn execute_with_destinations(
                     deck.label.as_deref().unwrap_or("base")
                 ))?;
             }
-            let outcome = prepared.run(&args, config, verbose, quiet, deck.label.as_deref())?;
+            let outcome = match prepared.run(&args, config, verbose, quiet, deck.label.as_deref()) {
+                Ok(outcome) => outcome,
+                // A run the deadline or an interrupt stopped wherever it was
+                // — even before its first analysis reported — still owes the
+                // summary and reports their verdict; the abort handling below
+                // records it. Later runs of the plan are not started.
+                Err(_) if crate::abort::reason().is_some() => break,
+                Err(error) => return Err(error),
+            };
             report_budget.admit_reports(&outcome.reports)?;
             if first_error.is_none() {
                 first_error = first_reported_failure(&outcome.reports);
