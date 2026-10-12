@@ -89,6 +89,44 @@ RSpice-authored: `net/pll-mx.cir`, `net/loopf_mx.cir` (loopf without its
 `net/div20_pfd.v` (divide-by-20 and PFD), the O5 and O2 oracle decks. The O5
 circuit drops the VCO, which does not load `cont`.
 
+## C3 — d_cosim examples (`c03-dcosim`)
+
+Upstream: ngspice-46 `examples/xspice/{verilator,icarus_verilog}`.
+
+| File | Upstream | SHA-256 of upstream |
+|---|---|---|
+| `net/555.v` | `verilator/555.v` | `b8dbd124bfd71d722699cf557aa27ac544f4e4540b14f147139cc012c05a4ae6` |
+| `net/adc.v`, `net/adc_nd.v` | `verilator/adc.v` | `bcb5902df556a686ede3bdb6c56858160ba0cd47eacd7b8b0571b600e2530e91` |
+| `net/delay.v`, `net/delay_v2005.v` | `verilator/delay.v` | `1a4624c315abcdc356cf406f965d525ba6ddf058f9430835afdd3b8ec2287244` |
+| `net/pwm.v` | `verilator/pwm.v` | `908762c0405d7829be2b50ceaa3f95492ccf6cc4814bd4ce8639b0a5e60f7728` |
+| `net/555.shared`, `oracle/555.o2/deck.cir` | `verilator/555.shared`, `icarus_verilog/555.cir` | `0547e5cfd5b4510a3864358ccaeb628e0f7a51276f27725cb6a20f6e261885a2`, `93523ac827e7da28adb103a1422f215483f40cd52c86be5eec89f853a5ebef8c` |
+| `net/adc.shared`, `oracle/adc.o2/deck.cir` | `verilator/adc.shared`, `icarus_verilog/adc.cir` | `d55c5efde9a3c73673db9f6b81188c9d73aaca14ab17301de10e80df7d4f68c4`, `90849d6e1ddc408108039de7889db6ee2064a8dd00ea50787feb17e92365eb92` |
+| `net/delay.cir`, `oracle/delay.o2/deck.cir` | `icarus_verilog/delay.cir` | `4a5de34aac40ffa71dfb57f4e0e4453177375958b1ee1958e409afcc505958ee` |
+| `net/pwm.cir`, `oracle/pwm.o2/deck.cir` | `icarus_verilog/pwm.cir` | `a93c823b4d48c4b4e0c3d8a06a2b2a829b8189dfa0a366968f54e529ecd92b46` |
+
+Edits:
+- `555.v`, `adc.v`, `delay.v`, `pwm.v`: none (verbatim, so they flip when P2
+  lane L1 lands).
+- `adc_nd.v`: `adc.v` without its `$display` line. `delay_v2005.v`:
+  `out = out << 1;` for `out <<= 1;`, `endmodule` without `;`.
+- `555.shared`: the d_cosim instance becomes
+  `xverilog under_trigger over_threshold reset output qbar vl555`; the
+  `.control` block is removed.
+- `adc.shared`: the d_cosim instance becomes
+  `xdut Clk Comp Start Sample Valid r5 r4 r3 r2 r1 r0 adc` plus six 1 ps
+  `d_inverter`s into d5..d0 (replacing the inverted `~d5..~d0` ports);
+  `.control` and `.end` removed.
+- `delay.cir`, `pwm.cir`: the d_cosim instance and model become the decks'
+  X-card (pwm with `cycles=100 samples=100`); `.control` removed.
+- O2 decks: the upstream circuits inlined with explicit bridges where RSpice
+  inserts built-in converters (adc_bridge at vcc/2; dac_bridge 0/vcc, 1 ps
+  edges, behind 20 ohm), d_cosim `delay=1e-12`, adc wired through the same
+  1 ps inverters, pwm built with `-Ppwm.Cycles=100 -Ppwm.Samples=100`,
+  `.control` replaced by one card.
+
+RSpice-authored: `net/adc_observe.cir` (a 10 ns `valid_d` strobe) and the
+decks.
+
 ## C4 — 8-bit SAR ADC (`c04-sar8`)
 
 RSpice-authored throughout: the register (`net/sar8.v`), the testbench and
@@ -130,6 +168,12 @@ generated JUNCAP200; the ngspice decks use `juncap200.osdi`, the Xyce decks
 ngspice noise deck names `vin` as the input source because ngspice needs an AC
 value on it and `vref` has none; the output spectrum compared does not depend
 on the choice.
+
+## C6, C7, C8, C11 (`c06-buck`, `c07-i2c`, `c08-ladder`, `c11-sc`)
+
+All RSpice-authored. C8's transistor rung includes
+`../../c05-ldo-trim/net/models-bsim4.cir` (the BSIM4 benchmark cards recorded
+under C5) in place, unmodified.
 
 ## C9 — power-on reset under a supply ramp (`c09-por`)
 
