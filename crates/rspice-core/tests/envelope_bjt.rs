@@ -4,6 +4,7 @@ use rspice_core::analysis::HbConfig;
 use rspice_core::config::{ConvergenceConfig, SpiceDialect};
 use rspice_core::engine::{
     Engine, HbEnvelopeStateGuarantee, SimulationConfig, TransientCheckpoint,
+    TransientCheckpointEncoding,
 };
 use rspice_core::numerics::integration::IntegrationMethod;
 use rspice_core::{Netlist, NoAbort};
@@ -13,6 +14,8 @@ use std::f64::consts::{FRAC_PI_4, TAU};
 fn envelope_bjt_restores_transport_depletion_and_substrate_currents() {
     for (kind, polarity, method) in [
         ("NPN", 1.0, IntegrationMethod::Trapezoidal),
+        ("NPN", 1.0, IntegrationMethod::Gear2),
+        ("PNP", -1.0, IntegrationMethod::Trapezoidal),
         ("PNP", -1.0, IntegrationMethod::Gear2),
     ] {
         let deck = Netlist::parse(&format!(
@@ -122,6 +125,49 @@ fn envelope_bjt_restores_transport_depletion_and_substrate_currents() {
         let checkpoint =
             TransientCheckpoint::from_text(&result.final_checkpoint().to_text()).unwrap();
         assert!(checkpoint.capability().is_resumable());
+        let packed = TransientCheckpoint::from_bytes(
+            &result
+                .final_checkpoint()
+                .to_bytes(TransientCheckpointEncoding::Packed)
+                .unwrap(),
+        )
+        .unwrap();
+        for checkpoint in [checkpoint, packed] {
+            let (resumed, _) = engine
+                .run_tran_resume(&deck, &checkpoint, 0.36e-3, 0.25e-6)
+                .unwrap();
+            assert_eq!(resumed.time.first(), transient.time.last());
+            assert_eq!(resumed.time.last(), Some(&0.36e-3));
+            for (terminal, (parameter, source)) in
+                [("IC", "VC"), ("IB", "VB"), ("IE", "VE"), ("IS", "VS")]
+                    .into_iter()
+                    .enumerate()
+            {
+                let current = resumed
+                    .try_device_op_waveform_named("Q1", parameter)
+                    .unwrap();
+                let supply = resumed.try_branch_current_waveform_named(source).unwrap();
+                assert_eq!(
+                    current.first(),
+                    transient
+                        .try_device_op_waveform_named("Q1", parameter)
+                        .unwrap()
+                        .last(),
+                );
+                for ((&time, &value), &source_value) in resumed.time.iter().zip(current).zip(supply)
+                {
+                    assert!(
+                        (value - expected(time)[terminal]).abs() < 2e-7,
+                        "{kind}/{method:?} resumed {parameter} at {time}: {value}"
+                    );
+                    assert!(
+                        (value + source_value).abs() < 2e-9,
+                        "{kind}/{method:?} resumed {parameter} KCL at {time}: {value} + {source_value}"
+                    );
+                }
+            }
+            assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+        }
     }
 }
 

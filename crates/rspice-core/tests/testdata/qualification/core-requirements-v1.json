@@ -43,7 +43,7 @@
       "id": "C06",
       "status": "open",
       "requirement": "Native semiconductor periodic support",
-      "qualification_task": "Public periodic residual, small-signal, shooting and envelope evidence per model/instance restriction, including conservation and independent references."
+      "qualification_task": "Public periodic residual, small-signal, shooting and envelope evidence per model/instance restriction, including conservation and independent references. envelope_bjt::envelope_bjt_restores_transport_depletion_and_substrate_currents checks independent terminal-current and charge laws for both polarities and trapezoidal/Gear2 integration, including text and packed continuation. Periodic history initialization binds the same native MNA representation as transient before capturing runtime identity; strict history compatibility checks remain intact."
     },
     {
       "id": "C07",

@@ -510,9 +510,9 @@ impl Engine {
         Ok(history)
     }
 
-    /// Restore native BJT storage from periodic samples. A prepared copy exposes
-    /// the same charge derivatives for collapsed and promoted device topology;
-    /// the original device keeps its checkpoint/runtime identity.
+    /// Restore native BJT storage using the MNA topology required by transient
+    /// continuation. Collapsed states alias existing terminals, so preparation
+    /// preserves the solved basis while aligning charge history and runtime tags.
     pub(in crate::engine) fn initialize_periodic_bjt_history(
         circuit: &mut crate::circuit::CircuitData,
         solutions: [&[Value]; 3],
@@ -545,7 +545,10 @@ impl Engine {
         let older_storage = BjtTransientHistory::try_unseeded(count)?;
         let previous_storage = BjtTransientHistory::try_unseeded(count)?;
         let current_storage = BjtTransientHistory::try_unseeded(count)?;
+        let nodes = circuit.num_nodes();
         for bjt in &mut circuit.bjts.devices {
+            bjt.prepare_periodic_mna(nodes)
+                .map_err(SimulationError::Circuit)?;
             bjt.seed_accepted_periodic_bias(solutions[2]);
         }
         let older = Self::seed_bjt_history(
@@ -573,11 +576,7 @@ impl Engine {
         history.vcs_prev_prev = previous.vcs_prev;
         history.dynamic_internal_prev_prev = previous.dynamic_internal_prev;
         history.dynamic_linear_prev_prev = previous.dynamic_linear_prev;
-        for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
-            let mut model = bjt.clone();
-            model
-                .prepare_periodic_mna(circuit.num_nodes())
-                .map_err(SimulationError::Circuit)?;
+        for (index, model) in circuit.bjts.devices.iter().enumerate() {
             let (branches, _, _) = model.mna_charge_state_at_solution(solutions[2]);
             let internal_rates: [Value; BJT_INTERNAL_STATE_DIM] =
                 std::array::from_fn(|i| Self::node_voltage(node_rates, model.mna_internal_node(i)));
@@ -618,13 +617,13 @@ impl Engine {
             {
                 return Err(SimulationError::Circuit(format!(
                     "BJT '{}' has nonfinite periodic currents",
-                    bjt.name
+                    model.name
                 )));
             }
             history.charge_cq_prev[index] = currents;
             history.accepted_external_bc_current[index] = currents[BJT_QBCX_BRANCH_INDEX];
             history.accepted_terminal_currents[index] = Some(terminal);
-            if !bjt.mna_promoted() {
+            if !model.mna_promoted() {
                 history.ibe_prev[index] = currents[BJT_QBE_BRANCH_INDEX];
                 history.ibc_prev[index] = currents[BJT_QBC_BRANCH_INDEX];
                 history.ics_prev[index] = currents[BJT_QBCP_BRANCH_INDEX];
