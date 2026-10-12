@@ -13,7 +13,9 @@
 //! notices when they are missing:
 //!
 //! - The status slot is allocated whether or not it says anything, so the
-//!   footer does not move under the pointer as a draft becomes valid.
+//!   footer does not move under the pointer as a draft becomes valid. A form
+//!   whose status is settled when it opens says so, and reserves only what
+//!   its status says.
 //! - Every control is named to AccessKit by the label its row states. The
 //!   labels here are painted, not laid out as widgets, so nothing else would
 //!   name them.
@@ -45,6 +47,10 @@ const CONTEXT_GAP: f32 = 10.0;
 const STACKED_MAX_WIDTH: f32 = 300.0;
 /// Air between a stacked row's label and its control.
 const STACKED_LABEL_GAP: f32 = 4.0;
+/// Where a value starts inside its control: the inset a select and a text
+/// field give the value they show. A read-only value starts there too, so
+/// every value in a form starts at one x.
+const VALUE_INSET: f32 = 8.0;
 
 /// The rows of one command form, laid out on a fixed label column.
 ///
@@ -173,6 +179,42 @@ impl<'u> FormRows<'u> {
         self.row(label, |ui, width| {
             select(ui, id_salt, label, selected, options, width)
         })
+    }
+
+    /// One read-only fact, on the same grid as the controls: its label in the
+    /// label column, its value where a control's value would start. What a
+    /// form acts on is stated in a row, never in an unlabelled line above it.
+    pub fn value(&mut self, label: &str, value: &str) {
+        self.value_row(label, value, theme::sans(tokens::FS_0, FontWeight::Regular));
+    }
+
+    /// [`Self::value`] for a path or an identifier, which is set in mono. A
+    /// value too long for the row is shortened from the middle, so both ends
+    /// of a path survive.
+    pub fn value_mono(&mut self, label: &str, value: &str) {
+        self.value_row(label, value, theme::mono(tokens::FS_0, FontWeight::Regular));
+    }
+
+    fn value_row(&mut self, label: &str, value: &str, font: egui::FontId) {
+        self.row(label, |ui, width| {
+            let t = Tokens::get(ui.ctx());
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), egui::Sense::hover());
+            let shown = middle_elided(ui, value, &font, t.color.text, width - VALUE_INSET);
+            ui.painter().text(
+                egui::pos2(rect.left() + VALUE_INSET, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                shown,
+                font,
+                t.color.text,
+            );
+            let (label, value) = (label.to_owned(), value.to_owned());
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_role(egui::accesskit::Role::Label);
+                node.set_label(label.clone());
+                node.set_value(value.clone());
+            });
+        });
     }
 
     /// A computed line under the control it reads off, indented to the control
@@ -313,6 +355,7 @@ pub struct CommandForm<'a> {
     fields_enabled: bool,
     status: Result<Option<&'a str>, &'a str>,
     status_lines: usize,
+    status_reserved: bool,
 }
 
 impl<'a> CommandForm<'a> {
@@ -326,6 +369,7 @@ impl<'a> CommandForm<'a> {
             fields_enabled: true,
             status: Ok(None),
             status_lines: 1,
+            status_reserved: true,
         }
     }
 
@@ -371,6 +415,17 @@ impl<'a> CommandForm<'a> {
         self
     }
 
+    /// For a form whose status is settled when it opens — a refusal known
+    /// from what it was opened on, a fact about it — rather than one a draft
+    /// can raise as it is edited. Nothing can appear mid-interaction, so
+    /// there is no footer to hold still: with nothing to say the form
+    /// reserves no slot, and with something the slot is as tall as what it
+    /// says, up to [`Self::status_lines`].
+    pub fn status_fixed_at_open(mut self) -> Self {
+        self.status_reserved = false;
+        self
+    }
+
     /// Show the form. `body` returns the control that takes initial focus.
     pub fn show(
         self,
@@ -379,6 +434,7 @@ impl<'a> CommandForm<'a> {
     ) -> DialogChoice {
         let status = self.status;
         let status_lines = self.status_lines;
+        let status_reserved = self.status_reserved;
         let context = self.context;
         let fields_enabled = self.fields_enabled;
         // Cancel is the only word any form in this family has for leaving, and
@@ -409,7 +465,7 @@ impl<'a> CommandForm<'a> {
                 let mut rows = FormRows::new(&mut *ui, form::LABEL_COL);
                 body(&mut rows)
             };
-            paint_status(ui, status, status_lines);
+            paint_status(ui, status, status_lines, status_reserved);
             focused_field = requested;
             requested
         });
@@ -442,17 +498,26 @@ fn paint_context_line(ui: &mut Ui, context: &str) {
     });
 }
 
-/// The status slot, always `lines` lines tall.
-fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>, lines: usize) {
+/// The status slot: `lines` lines tall when `reserved`, whatever it says;
+/// otherwise only as tall as what it says, and absent when it says nothing.
+fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>, lines: usize, reserved: bool) {
     let t = Tokens::get(ui.ctx());
+    let message = match status {
+        Ok(None) => None,
+        Ok(Some(message)) => Some((message, t.color.text_dim)),
+        Err(message) => Some((message, t.color.err)),
+    };
+    if !reserved && message.is_none() {
+        return;
+    }
     ui.add_space(ROW_GAP);
     let width = ui.available_width();
-    let height = STATUS_LINE_H * lines as f32;
-    let (rect, response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
-    let (message, color) = match status {
-        Ok(None) => return,
-        Ok(Some(message)) => (message, t.color.text_dim),
-        Err(message) => (message, t.color.err),
+    let Some((message, color)) = message else {
+        ui.allocate_exact_size(
+            vec2(width, STATUS_LINE_H * lines as f32),
+            egui::Sense::hover(),
+        );
+        return;
     };
     let mut job = egui::text::LayoutJob::single_section(
         message.to_owned(),
@@ -469,6 +534,15 @@ fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>, lines: usize) {
         ..Default::default()
     };
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let shown_lines = if reserved {
+        lines
+    } else {
+        galley.rows.len().clamp(1, lines)
+    };
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(width, STATUS_LINE_H * shown_lines as f32),
+        egui::Sense::hover(),
+    );
     ui.painter()
         .galley(egui::pos2(rect.left(), rect.top()), galley, color);
     let message = message.to_owned();
@@ -596,6 +670,40 @@ mod tests {
             valid.rect_of("Place").map(|rect| rect.top()),
             invalid.rect_of("Place").map(|rect| rect.top()),
         );
+    }
+
+    /// A form whose status is fixed at open has no dead band under its last
+    /// row: no slot when it says nothing, one line for a one-line fact.
+    #[test]
+    fn a_status_fixed_at_open_reserves_only_what_it_says() {
+        let screen = egui::vec2(1024.0, 640.0);
+        let height = |fixed: bool, status: Result<Option<&str>, &str>| {
+            painted_runs(screen, Mode::Dark, 3, |ctx| {
+                let mut form = CommandForm::new("Confirm", "Go")
+                    .status(status)
+                    .status_lines(2);
+                if fixed {
+                    form = form.status_fixed_at_open();
+                }
+                let _ = form.show(ctx, |rows| {
+                    rows.value_mono("File", "pair.va");
+                    None
+                });
+            })
+            .surface
+            .height()
+        };
+        let reserved = height(false, Ok(None));
+        let close = |actual: f32, expected: f32| (actual - expected).abs() < 0.5;
+        assert!(close(height(false, Ok(Some("One line."))), reserved));
+        assert!(close(
+            height(true, Ok(None)),
+            reserved - (ROW_GAP + 2.0 * STATUS_LINE_H)
+        ));
+        assert!(close(
+            height(true, Ok(Some("One line."))),
+            reserved - STATUS_LINE_H
+        ));
     }
 
     /// The card is 420 pt wide wherever it fits, and is inset rather than
