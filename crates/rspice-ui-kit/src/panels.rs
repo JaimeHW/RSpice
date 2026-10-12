@@ -4,7 +4,12 @@
 //! the shared palette and typography assets, but none of the retired layout's
 //! layout or widget implementations are reused.
 
+mod captioned;
 pub mod inspector;
+
+pub use captioned::{
+    PropertyRowCaption, property_row_captioned, property_row_flagged, property_row_input_captioned,
+};
 
 use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 use std::hash::Hash;
