@@ -3892,6 +3892,26 @@ impl Engine {
         Ok(TransientCheckpointCapability::from_blockers(blockers))
     }
 
+    /// Whether [`Self::capture_scheduled_checkpoint_if_due`] captures at
+    /// `accepted_time`.
+    ///
+    /// The capture needs the runtime resume-blocker inventory and the
+    /// DampedNewton boundary image, and both are rebuilt from the whole
+    /// circuit: the inventory formats one string per stateful XSPICE
+    /// instance. An accepted point asks this first and builds them only when
+    /// a checkpoint is actually due, which on a run without a schedule is
+    /// never; building them at every point cost a quarter of a gate-level
+    /// transient.
+    fn scheduled_checkpoint_is_due(
+        scheduled_times: &[Value],
+        cursor: usize,
+        accepted_time: Value,
+    ) -> bool {
+        scheduled_times
+            .get(cursor)
+            .is_some_and(|&requested| xyce_restart_schedule_is_due(accepted_time, requested))
+    }
+
     fn capture_scheduled_checkpoint_if_due(
         &self,
         point: ScheduledCheckpointPoint<'_>,
@@ -11028,15 +11048,28 @@ impl Engine {
                     debug_assert_eq!(xyce_step_failure_count, 0);
                     debug_assert_eq!(stale_accept_count, 0);
                     debug_assert!(!circuit.xyce_core_trial_invalid());
-                    let runtime_resume_blockers = Self::exact_integration_runtime_resume_blockers(
-                        &circuit,
-                        accepted_interval_count,
+                    let checkpoint_due = Self::scheduled_checkpoint_is_due(
+                        scheduled_checkpoint_times,
+                        scheduled_checkpoint_cursor,
+                        t,
                     );
-                    let damped_status_checkpoint = xyce_damped_status
-                        .as_ref()
-                        .map(|status| status.capture_accepted_boundary_checkpoint())
-                        .transpose()
-                        .map_err(SimulationError::Circuit)?;
+                    let runtime_resume_blockers = if checkpoint_due {
+                        Self::exact_integration_runtime_resume_blockers(
+                            &circuit,
+                            accepted_interval_count,
+                        )
+                    } else {
+                        Vec::new()
+                    };
+                    let damped_status_checkpoint = if checkpoint_due {
+                        xyce_damped_status
+                            .as_ref()
+                            .map(|status| status.capture_accepted_boundary_checkpoint())
+                            .transpose()
+                            .map_err(SimulationError::Circuit)?
+                    } else {
+                        None
+                    };
                     self.capture_scheduled_checkpoint_if_due(
                         ScheduledCheckpointPoint {
                             scheduled_times: scheduled_checkpoint_times,
@@ -11796,13 +11829,25 @@ impl Engine {
             debug_assert_eq!(xyce_step_failure_count, 0);
             debug_assert_eq!(stale_accept_count, 0);
             debug_assert!(!circuit.xyce_core_trial_invalid());
-            let runtime_resume_blockers =
-                Self::exact_integration_runtime_resume_blockers(&circuit, accepted_interval_count);
-            let damped_status_checkpoint = xyce_damped_status
-                .as_ref()
-                .map(|status| status.capture_accepted_boundary_checkpoint())
-                .transpose()
-                .map_err(SimulationError::Circuit)?;
+            let checkpoint_due = Self::scheduled_checkpoint_is_due(
+                scheduled_checkpoint_times,
+                scheduled_checkpoint_cursor,
+                t,
+            );
+            let runtime_resume_blockers = if checkpoint_due {
+                Self::exact_integration_runtime_resume_blockers(&circuit, accepted_interval_count)
+            } else {
+                Vec::new()
+            };
+            let damped_status_checkpoint = if checkpoint_due {
+                xyce_damped_status
+                    .as_ref()
+                    .map(|status| status.capture_accepted_boundary_checkpoint())
+                    .transpose()
+                    .map_err(SimulationError::Circuit)?
+            } else {
+                None
+            };
             self.capture_scheduled_checkpoint_if_due(
                 ScheduledCheckpointPoint {
                     scheduled_times: scheduled_checkpoint_times,
