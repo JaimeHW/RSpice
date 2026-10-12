@@ -128,6 +128,11 @@ fn walk_roots(
                         pending.push(Work::Statement(statement));
                     }
                 }
+                DigitalStatement::SystemTask(task) => {
+                    for argument in &task.args {
+                        visit(argument, &locals);
+                    }
+                }
                 DigitalStatement::Null(_) => {}
             },
             Work::Assignment(assign) => {
@@ -242,6 +247,11 @@ pub(super) fn rewrite_roots(body: &mut DigitalStatement, visit: &mut impl FnMut(
                         pending.push(Work::Statement(statement));
                     }
                 }
+                DigitalStatement::SystemTask(task) => {
+                    for argument in &mut task.args {
+                        visit(argument);
+                    }
+                }
                 DigitalStatement::Null(_) => {}
             },
             Work::Assignment(assign) => {
@@ -284,6 +294,48 @@ pub(super) fn rewrite_roots(body: &mut DigitalStatement, visit: &mut impl FnMut(
     }
 }
 
+/// The variable a system call writes through an output or in-out argument
+/// (`$random(seed)` writes `seed`), by its base name.
+pub(crate) fn system_call_output_name(argument: &Expression) -> Option<&smol_str::SmolStr> {
+    match argument {
+        Expression::Identifier(identifier) => Some(&identifier.name),
+        Expression::ArrayAccess(access) => Some(&access.array),
+        Expression::Digital(DigitalExpr::PartSelect(select)) => Some(&select.name),
+        Expression::Digital(DigitalExpr::ArraySelect(select)) => Some(&select.name),
+        _ => None,
+    }
+}
+
+/// The variables one system call writes through its output and in-out
+/// arguments.
+pub(crate) fn call_output_names(call: &SystemFunction, names: &mut Vec<smol_str::SmolStr>) {
+    use crate::canonical_ir::digital::{DigitalArgumentUse, DigitalSystemCallKind};
+    let Some(kind) = DigitalSystemCallKind::from_name(&call.name) else {
+        return;
+    };
+    for (index, argument) in call.args.iter().enumerate() {
+        if matches!(
+            kind.argument_use(index),
+            DigitalArgumentUse::Output
+                | DigitalArgumentUse::InOut
+                | DigitalArgumentUse::ArrayOutput
+        ) && let Some(name) = system_call_output_name(argument)
+        {
+            names.push(name.clone());
+        }
+    }
+}
+
+/// Every variable a system function call inside `root` writes through an
+/// output argument, including calls nested in other calls' arguments.
+pub(crate) fn expression_call_output_names(root: &Expression, names: &mut Vec<smol_str::SmolStr>) {
+    crate::ast::visit_expression(root, &mut |expression: &Expression| {
+        if let Expression::SystemFunction(call) = expression {
+            call_output_names(call, names);
+        }
+    });
+}
+
 /// Collect assignments to module storage without mistaking lexical locals for
 /// same-named module variables. Inactive branches still establish ownership.
 pub(super) fn collect_module_writes(
@@ -296,6 +348,17 @@ pub(super) fn collect_module_writes(
         Leave(Vec<&'a smol_str::SmolStr>),
     }
     let mut locals = std::collections::HashMap::<&smol_str::SmolStr, usize>::new();
+    // A system call's output argument writes its variable as surely as an
+    // assignment does, wherever in an expression the call sits.
+    let record = |names: Vec<smol_str::SmolStr>,
+                  locals: &std::collections::HashMap<&smol_str::SmolStr, usize>,
+                  written: &mut std::collections::HashSet<smol_str::SmolStr>| {
+        for name in names {
+            if !locals.contains_key(&name) {
+                written.insert(name);
+            }
+        }
+    };
     let mut pending = vec![Work::Statement(body)];
     while let Some(work) = pending.pop() {
         match work {
@@ -314,8 +377,20 @@ pub(super) fn collect_module_writes(
                         written.insert(name.clone());
                     }
                 }
+                let mut names = Vec::new();
+                expression_call_output_names(&assign.value, &mut names);
+                record(names, &locals, written);
+            }
+            Work::Statement(DigitalStatement::SystemTask(task)) => {
+                let mut names = Vec::new();
+                call_output_names(task, &mut names);
+                for argument in &task.args {
+                    expression_call_output_names(argument, &mut names);
+                }
+                record(names, &locals, written);
             }
             Work::Statement(statement) => match statement {
+                DigitalStatement::SystemTask(_) => unreachable!("handled above"),
                 DigitalStatement::Null(_) => {}
                 DigitalStatement::Block(block) => {
                     let names: Vec<_> = block
@@ -340,12 +415,18 @@ pub(super) fn collect_module_writes(
                     pending.push(Work::Assignment(assign))
                 }
                 DigitalStatement::Conditional(conditional) => {
+                    let mut names = Vec::new();
+                    expression_call_output_names(&conditional.condition, &mut names);
+                    record(names, &locals, written);
                     if let Some(branch) = &conditional.else_branch {
                         pending.push(Work::Statement(branch));
                     }
                     pending.push(Work::Statement(&conditional.then_branch));
                 }
                 DigitalStatement::Case(case) => {
+                    let mut names = Vec::new();
+                    expression_call_output_names(&case.selector, &mut names);
+                    record(names, &locals, written);
                     if let Some(branch) = &case.default {
                         pending.push(Work::Statement(branch));
                     }
@@ -356,14 +437,32 @@ pub(super) fn collect_module_writes(
                     );
                 }
                 DigitalStatement::For(loop_) => {
+                    let mut names = Vec::new();
+                    expression_call_output_names(&loop_.condition, &mut names);
+                    record(names, &locals, written);
                     pending.push(Work::Assignment(&loop_.init));
                     pending.push(Work::Assignment(&loop_.update));
                     pending.push(Work::Statement(&loop_.body));
                 }
-                DigitalStatement::While(loop_) => pending.push(Work::Statement(&loop_.body)),
-                DigitalStatement::Repeat(loop_) => pending.push(Work::Statement(&loop_.body)),
+                DigitalStatement::While(loop_) => {
+                    let mut names = Vec::new();
+                    expression_call_output_names(&loop_.condition, &mut names);
+                    record(names, &locals, written);
+                    pending.push(Work::Statement(&loop_.body))
+                }
+                DigitalStatement::Repeat(loop_) => {
+                    let mut names = Vec::new();
+                    expression_call_output_names(&loop_.count, &mut names);
+                    record(names, &locals, written);
+                    pending.push(Work::Statement(&loop_.body))
+                }
                 DigitalStatement::Forever(loop_) => pending.push(Work::Statement(&loop_.body)),
                 DigitalStatement::Timing(timing) => {
+                    if let TimingControl::Delay(delay) = &timing.control {
+                        let mut names = Vec::new();
+                        expression_call_output_names(&delay.value, &mut names);
+                        record(names, &locals, written);
+                    }
                     if let Some(statement) = &timing.statement {
                         pending.push(Work::Statement(statement));
                     }

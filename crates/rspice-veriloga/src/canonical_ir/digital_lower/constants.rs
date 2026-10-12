@@ -80,6 +80,7 @@ fn scalar_impl(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
@@ -451,6 +452,7 @@ fn resolve_one(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
@@ -659,6 +661,7 @@ pub(super) fn initializer(
     let mut probes = Vec::new();
     let mut signals = Vec::new();
     let mut lowerer = ProcessLowerer {
+        calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
@@ -742,6 +745,11 @@ fn collect_parameters(
     };
     match statement {
         DigitalStatement::Null(_) => {}
+        DigitalStatement::SystemTask(task) => {
+            for argument in &task.args {
+                expression(argument, reads);
+            }
+        }
         DigitalStatement::Block(block) => {
             let mut locals = locals.clone();
             locals.extend(block.variables.iter().flat_map(|declaration| {

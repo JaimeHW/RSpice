@@ -674,6 +674,18 @@ fn kernel_region_metrics(
                     region.name()
                 )
             }
+            CfgValueKind::DigitalSystemTask { site, args } => {
+                write!(out, "digital-system-task:{}:{}", site.0, args.len())
+            }
+            CfgValueKind::DigitalSystemFunction { site, args } => {
+                write!(out, "digital-system-function:{}:{}", site.0, args.len())
+            }
+            CfgValueKind::DigitalCallOutput { index, .. } => {
+                write!(out, "digital-call-output:{index}")
+            }
+            CfgValueKind::DigitalPure { function, args } => {
+                write!(out, "digital-pure:{function:?}:{}", args.len())
+            }
         }
         .expect("write value signature");
         out

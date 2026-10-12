@@ -342,7 +342,26 @@ use super::*;
 // Version 128 normalizes explicitly continuous wire storage (HIR 146).
 // Version 129 retains generated local declarations and analog bodies (HIR 147).
 // Version 130 preserves generated analog order and scope identities (HIR 148).
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 139;
+//
+// Version 140 follows the canonical IR's schema from 158 to 159, which changes
+// what a cached digital plan means (design P2 lane L1). A plan now carries a
+// site table, one row per system task or function call with its arguments,
+// outputs, `%m` scope, `$finish` level and source line; a scope table, which
+// is always present because the root module is a scope; and observer functions
+// for `$strobe` and `$monitor`. Process functions gain four value kinds —
+// system task, system function, call output and pure function — and linking
+// relocates every site, scope and observer and renames each instance's scope
+// root to the instance name. A version-139 record predates all of this: it was
+// refused at every system call, so no record holds one, but its plan
+// deserializes with empty tables and its content identity is computed over a
+// tuple that no longer includes them. Reading it beside a linker that numbers
+// sites and scopes per instance, and a host that authenticates a checkpoint
+// against the plan's identity, would answer to an identity this build never
+// produces for that source. The identity is not recoverable from the record,
+// so rebuilding is the only reading; this constant moves with the schema so
+// the refusal happens at the cache boundary, where the diagnostic names the
+// cache file.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 140;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -872,6 +872,613 @@ pub struct CanonicalDigitalPlan {
     pub analog_probes: Vec<DigitalAnalogProbe>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub absdelta: Vec<DigitalAbsDeltaObserver>,
+    /// Hierarchical scopes a system call can name (`%m`), root first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scopes: Vec<DigitalScope>,
+    /// One entry per system task or function call site (IEEE 1364-2005
+    /// section 17), in lowering order. A call node names its entry here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub system_calls: Vec<DigitalSystemCall>,
+    /// The argument functions of `$strobe` and `$monitor` sites, which the
+    /// host evaluates in the monitor region rather than at the call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observers: Vec<DigitalObserver>,
+}
+
+/// Dense identity of one system task or function call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DigitalSystemCallId(pub u32);
+
+impl DigitalSystemCallId {
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl std::fmt::Display for DigitalSystemCallId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "site#{}", self.0)
+    }
+}
+
+/// Dense identity of one hierarchical scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DigitalScopeId(pub u32);
+
+impl DigitalScopeId {
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// What kind of declarative region a scope is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalScopeKind {
+    /// A module instance (or the root module).
+    Module,
+    /// A named `begin : name` block (IEEE 1364-2005 section 9.8.3).
+    Block,
+}
+
+/// One hierarchical scope, named the way `%m` prints it (IEEE 1364-2005
+/// section 17.1.1.4): the full path including the root module name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalScope {
+    pub id: DigitalScopeId,
+    pub parent: Option<DigitalScopeId>,
+    pub path: SmolStr,
+    /// The definition name of the module instance this scope belongs to.
+    pub module: SmolStr,
+    pub kind: DigitalScopeKind,
+    /// That module's `timescale` (`$printtimescale`, `%t`).
+    pub time_scale: crate::time_scale::ModuleTimeScale,
+}
+
+/// The radix a display-family task formats an unformatted argument in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalRadix {
+    Decimal,
+    Binary,
+    Octal,
+    Hex,
+}
+
+impl DigitalRadix {
+    const fn suffix(self) -> &'static str {
+        match self {
+            Self::Decimal => "",
+            Self::Binary => "b",
+            Self::Octal => "o",
+            Self::Hex => "h",
+        }
+    }
+
+    fn from_suffix(suffix: &str) -> Option<Self> {
+        Some(match suffix {
+            "" => Self::Decimal,
+            "b" => Self::Binary,
+            "o" => Self::Octal,
+            "h" => Self::Hex,
+            _ => return None,
+        })
+    }
+}
+
+/// The P2 lane that implements a system call kind's host behaviour.
+///
+/// Every kind of design P2 section 1.3 is registered and lowered now, so a
+/// later lane changes only the host. A kind whose lane has not landed is
+/// refused when it runs, naming the lane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalSystemLane {
+    /// Display, control, severity, random and plusargs (P2 lane L1).
+    Effects,
+    /// File I/O, `$sformat`, `$readmem*` and VCD tasks (P2 lane L5).
+    Files,
+}
+
+/// How a system call uses one argument position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigitalArgumentUse {
+    /// Read (a value, a string literal, or an empty argument).
+    Input,
+    /// Written: the position must be a variable target.
+    Output,
+    /// Read and written back (`$random(seed)`).
+    InOut,
+    /// A whole unpacked array the host writes (`$readmemh`, `$fread`).
+    ArrayOutput,
+    /// A scope or signal named rather than read (`$dumpvars`, `$printtimescale`).
+    Reference,
+}
+
+/// Every system task and function the digital subset registers (design P2
+/// section 1.3). Pure functions (`$signed`, `$clog2`, math, conversions) are
+/// not here: they are ordinary operators of the expression graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalSystemCallKind {
+    Display(DigitalRadix),
+    Write(DigitalRadix),
+    Strobe(DigitalRadix),
+    Monitor(DigitalRadix),
+    MonitorOn,
+    MonitorOff,
+    Finish,
+    Stop,
+    TimeFormat,
+    PrintTimeScale,
+    Info,
+    Warning,
+    Error,
+    Fatal,
+    Random,
+    DistUniform,
+    DistNormal,
+    DistExponential,
+    DistPoisson,
+    DistChiSquare,
+    DistT,
+    DistErlang,
+    Urandom,
+    UrandomRange,
+    TestPlusargs,
+    ValuePlusargs,
+    Fopen,
+    Fclose,
+    Fdisplay(DigitalRadix),
+    Fwrite(DigitalRadix),
+    Fstrobe(DigitalRadix),
+    Fmonitor(DigitalRadix),
+    Fflush,
+    Fgetc,
+    Ungetc,
+    Fgets,
+    Fscanf,
+    Sscanf,
+    Fread,
+    Ftell,
+    Fseek,
+    Rewind,
+    Feof,
+    Ferror,
+    Sformat,
+    Swrite(DigitalRadix),
+    Readmemb,
+    Readmemh,
+    Dumpfile,
+    Dumpvars,
+    Dumpon,
+    Dumpoff,
+    Dumpall,
+    Dumplimit,
+    Dumpflush,
+}
+
+impl DigitalSystemCallKind {
+    /// The kind a `$name` spells, or `None` for a name outside the subset.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let radix = |prefix: &str| {
+            name.strip_prefix(prefix)
+                .and_then(DigitalRadix::from_suffix)
+        };
+        if let Some(radix) = radix("$display") {
+            return Some(Self::Display(radix));
+        }
+        if let Some(radix) = radix("$write") {
+            return Some(Self::Write(radix));
+        }
+        if let Some(radix) = radix("$strobe") {
+            return Some(Self::Strobe(radix));
+        }
+        if let Some(radix) = radix("$monitor") {
+            return Some(Self::Monitor(radix));
+        }
+        if let Some(radix) = radix("$fdisplay") {
+            return Some(Self::Fdisplay(radix));
+        }
+        if let Some(radix) = radix("$fwrite") {
+            return Some(Self::Fwrite(radix));
+        }
+        if let Some(radix) = radix("$fstrobe") {
+            return Some(Self::Fstrobe(radix));
+        }
+        if let Some(radix) = radix("$fmonitor") {
+            return Some(Self::Fmonitor(radix));
+        }
+        if let Some(radix) = radix("$swrite") {
+            return Some(Self::Swrite(radix));
+        }
+        Some(match name {
+            "$monitoron" => Self::MonitorOn,
+            "$monitoroff" => Self::MonitorOff,
+            "$finish" => Self::Finish,
+            "$stop" => Self::Stop,
+            "$timeformat" => Self::TimeFormat,
+            "$printtimescale" => Self::PrintTimeScale,
+            "$info" => Self::Info,
+            "$warning" => Self::Warning,
+            "$error" => Self::Error,
+            "$fatal" => Self::Fatal,
+            "$random" => Self::Random,
+            "$dist_uniform" => Self::DistUniform,
+            "$dist_normal" => Self::DistNormal,
+            "$dist_exponential" => Self::DistExponential,
+            "$dist_poisson" => Self::DistPoisson,
+            "$dist_chi_square" => Self::DistChiSquare,
+            "$dist_t" => Self::DistT,
+            "$dist_erlang" => Self::DistErlang,
+            "$urandom" => Self::Urandom,
+            "$urandom_range" => Self::UrandomRange,
+            "$test$plusargs" => Self::TestPlusargs,
+            "$value$plusargs" => Self::ValuePlusargs,
+            "$fopen" => Self::Fopen,
+            "$fclose" => Self::Fclose,
+            "$fflush" => Self::Fflush,
+            "$fgetc" => Self::Fgetc,
+            "$ungetc" => Self::Ungetc,
+            "$fgets" => Self::Fgets,
+            "$fscanf" => Self::Fscanf,
+            "$sscanf" => Self::Sscanf,
+            "$fread" => Self::Fread,
+            "$ftell" => Self::Ftell,
+            "$fseek" => Self::Fseek,
+            "$rewind" => Self::Rewind,
+            "$feof" => Self::Feof,
+            "$ferror" => Self::Ferror,
+            "$sformat" => Self::Sformat,
+            "$readmemb" => Self::Readmemb,
+            "$readmemh" => Self::Readmemh,
+            "$dumpfile" => Self::Dumpfile,
+            "$dumpvars" => Self::Dumpvars,
+            "$dumpon" => Self::Dumpon,
+            "$dumpoff" => Self::Dumpoff,
+            "$dumpall" => Self::Dumpall,
+            "$dumplimit" => Self::Dumplimit,
+            "$dumpflush" => Self::Dumpflush,
+            _ => return None,
+        })
+    }
+
+    /// The spelling a diagnostic names.
+    pub fn name(self) -> String {
+        let radix = |base: &str, radix: DigitalRadix| format!("{base}{}", radix.suffix());
+        match self {
+            Self::Display(r) => radix("$display", r),
+            Self::Write(r) => radix("$write", r),
+            Self::Strobe(r) => radix("$strobe", r),
+            Self::Monitor(r) => radix("$monitor", r),
+            Self::Fdisplay(r) => radix("$fdisplay", r),
+            Self::Fwrite(r) => radix("$fwrite", r),
+            Self::Fstrobe(r) => radix("$fstrobe", r),
+            Self::Fmonitor(r) => radix("$fmonitor", r),
+            Self::Swrite(r) => radix("$swrite", r),
+            Self::MonitorOn => "$monitoron".into(),
+            Self::MonitorOff => "$monitoroff".into(),
+            Self::Finish => "$finish".into(),
+            Self::Stop => "$stop".into(),
+            Self::TimeFormat => "$timeformat".into(),
+            Self::PrintTimeScale => "$printtimescale".into(),
+            Self::Info => "$info".into(),
+            Self::Warning => "$warning".into(),
+            Self::Error => "$error".into(),
+            Self::Fatal => "$fatal".into(),
+            Self::Random => "$random".into(),
+            Self::DistUniform => "$dist_uniform".into(),
+            Self::DistNormal => "$dist_normal".into(),
+            Self::DistExponential => "$dist_exponential".into(),
+            Self::DistPoisson => "$dist_poisson".into(),
+            Self::DistChiSquare => "$dist_chi_square".into(),
+            Self::DistT => "$dist_t".into(),
+            Self::DistErlang => "$dist_erlang".into(),
+            Self::Urandom => "$urandom".into(),
+            Self::UrandomRange => "$urandom_range".into(),
+            Self::TestPlusargs => "$test$plusargs".into(),
+            Self::ValuePlusargs => "$value$plusargs".into(),
+            Self::Fopen => "$fopen".into(),
+            Self::Fclose => "$fclose".into(),
+            Self::Fflush => "$fflush".into(),
+            Self::Fgetc => "$fgetc".into(),
+            Self::Ungetc => "$ungetc".into(),
+            Self::Fgets => "$fgets".into(),
+            Self::Fscanf => "$fscanf".into(),
+            Self::Sscanf => "$sscanf".into(),
+            Self::Fread => "$fread".into(),
+            Self::Ftell => "$ftell".into(),
+            Self::Fseek => "$fseek".into(),
+            Self::Rewind => "$rewind".into(),
+            Self::Feof => "$feof".into(),
+            Self::Ferror => "$ferror".into(),
+            Self::Sformat => "$sformat".into(),
+            Self::Readmemb => "$readmemb".into(),
+            Self::Readmemh => "$readmemh".into(),
+            Self::Dumpfile => "$dumpfile".into(),
+            Self::Dumpvars => "$dumpvars".into(),
+            Self::Dumpon => "$dumpon".into(),
+            Self::Dumpoff => "$dumpoff".into(),
+            Self::Dumpall => "$dumpall".into(),
+            Self::Dumplimit => "$dumplimit".into(),
+            Self::Dumpflush => "$dumpflush".into(),
+        }
+    }
+
+    /// The lane whose host implements this kind.
+    pub const fn lane(self) -> DigitalSystemLane {
+        match self {
+            Self::Fopen
+            | Self::Fclose
+            | Self::Fdisplay(_)
+            | Self::Fwrite(_)
+            | Self::Fstrobe(_)
+            | Self::Fmonitor(_)
+            | Self::Fflush
+            | Self::Fgetc
+            | Self::Ungetc
+            | Self::Fgets
+            | Self::Fscanf
+            | Self::Sscanf
+            | Self::Fread
+            | Self::Ftell
+            | Self::Fseek
+            | Self::Rewind
+            | Self::Feof
+            | Self::Ferror
+            | Self::Sformat
+            | Self::Swrite(_)
+            | Self::Readmemb
+            | Self::Readmemh
+            | Self::Dumpfile
+            | Self::Dumpvars
+            | Self::Dumpon
+            | Self::Dumpoff
+            | Self::Dumpall
+            | Self::Dumplimit
+            | Self::Dumpflush => DigitalSystemLane::Files,
+            _ => DigitalSystemLane::Effects,
+        }
+    }
+
+    /// Whether a call returns a value (IEEE 1364-2005 section 17's system
+    /// *functions*). A function may also be enabled as a task, which discards
+    /// its value but still performs its outputs.
+    pub const fn is_function(self) -> bool {
+        matches!(
+            self,
+            Self::Random
+                | Self::DistUniform
+                | Self::DistNormal
+                | Self::DistExponential
+                | Self::DistPoisson
+                | Self::DistChiSquare
+                | Self::DistT
+                | Self::DistErlang
+                | Self::Urandom
+                | Self::UrandomRange
+                | Self::TestPlusargs
+                | Self::ValuePlusargs
+                | Self::Fopen
+                | Self::Fgetc
+                | Self::Ungetc
+                | Self::Fgets
+                | Self::Fscanf
+                | Self::Sscanf
+                | Self::Fread
+                | Self::Ftell
+                | Self::Fseek
+                | Self::Rewind
+                | Self::Feof
+                | Self::Ferror
+        )
+    }
+
+    /// Whether the value a function returns is signed (IEEE 1364-2005 section
+    /// 17.9.1 makes `$random` a signed integer; 1800 section 18.13 makes
+    /// `$urandom` unsigned). Every function returns 32 bits.
+    pub const fn result_signed(self) -> bool {
+        !matches!(self, Self::Urandom | Self::UrandomRange | Self::Fopen)
+    }
+
+    /// Whether the call's arguments are evaluated when the monitor region
+    /// runs rather than when the call executes (IEEE 1364-2005 sections
+    /// 17.1.2 and 17.1.3).
+    pub const fn is_observer(self) -> bool {
+        matches!(
+            self,
+            Self::Strobe(_) | Self::Monitor(_) | Self::Fstrobe(_) | Self::Fmonitor(_)
+        )
+    }
+
+    /// Whether the call formats its arguments the way `$display` does.
+    pub const fn formats(self) -> bool {
+        matches!(
+            self,
+            Self::Display(_)
+                | Self::Write(_)
+                | Self::Strobe(_)
+                | Self::Monitor(_)
+                | Self::Fdisplay(_)
+                | Self::Fwrite(_)
+                | Self::Fstrobe(_)
+                | Self::Fmonitor(_)
+                | Self::Swrite(_)
+                | Self::Sformat
+                | Self::Info
+                | Self::Warning
+                | Self::Error
+                | Self::Fatal
+        )
+    }
+
+    /// Ends the calling thread (IEEE 1364-2005 section 17.4; 1800 section
+    /// 20.10 for `$fatal`).
+    pub const fn halts(self) -> bool {
+        matches!(self, Self::Finish | Self::Stop | Self::Fatal)
+    }
+
+    /// The fewest and most arguments a call may be written with. `None` is
+    /// unbounded.
+    pub const fn arity(self) -> (usize, Option<usize>) {
+        match self {
+            Self::MonitorOn
+            | Self::MonitorOff
+            | Self::Dumpon
+            | Self::Dumpoff
+            | Self::Dumpall
+            | Self::Dumpflush => (0, Some(0)),
+            Self::Finish | Self::Stop => (0, Some(1)),
+            Self::TimeFormat => (0, Some(4)),
+            Self::PrintTimeScale => (0, Some(1)),
+            Self::Random | Self::Urandom => (0, Some(1)),
+            Self::DistUniform | Self::DistNormal | Self::DistErlang => (3, Some(3)),
+            Self::DistExponential | Self::DistPoisson | Self::DistChiSquare | Self::DistT => {
+                (2, Some(2))
+            }
+            Self::UrandomRange => (1, Some(2)),
+            Self::TestPlusargs => (1, Some(1)),
+            Self::ValuePlusargs => (2, Some(2)),
+            Self::Fopen => (1, Some(2)),
+            Self::Fclose | Self::Fgetc | Self::Ftell | Self::Rewind | Self::Feof => (1, Some(1)),
+            Self::Fflush => (0, Some(1)),
+            Self::Ungetc | Self::Fgets | Self::Ferror => (2, Some(2)),
+            Self::Fseek => (3, Some(3)),
+            Self::Fscanf | Self::Sscanf | Self::Sformat => (2, None),
+            Self::Fread => (2, Some(4)),
+            Self::Readmemb | Self::Readmemh => (2, Some(4)),
+            Self::Dumpfile | Self::Dumplimit => (1, Some(1)),
+            Self::Fdisplay(_)
+            | Self::Fwrite(_)
+            | Self::Fstrobe(_)
+            | Self::Fmonitor(_)
+            | Self::Swrite(_) => (1, None),
+            Self::Fatal => (0, None),
+            Self::Display(_)
+            | Self::Write(_)
+            | Self::Strobe(_)
+            | Self::Monitor(_)
+            | Self::Info
+            | Self::Warning
+            | Self::Error
+            | Self::Dumpvars => (0, None),
+        }
+    }
+
+    /// How argument `index` is used.
+    pub const fn argument_use(self, index: usize) -> DigitalArgumentUse {
+        use DigitalArgumentUse::*;
+        match (self, index) {
+            (
+                Self::Random
+                | Self::DistUniform
+                | Self::DistNormal
+                | Self::DistExponential
+                | Self::DistPoisson
+                | Self::DistChiSquare
+                | Self::DistT
+                | Self::DistErlang,
+                0,
+            ) => InOut,
+            (Self::ValuePlusargs, 1) => Output,
+            (Self::Fgets | Self::Sformat | Self::Swrite(_), 0) => Output,
+            (Self::Ferror, 1) => Output,
+            (Self::Fscanf | Self::Sscanf, index) if index >= 2 => Output,
+            (Self::Fread, 0) => ArrayOutput,
+            (Self::Readmemb | Self::Readmemh, 1) => ArrayOutput,
+            (Self::Dumpvars, index) if index >= 1 => Reference,
+            (Self::PrintTimeScale, 0) => Reference,
+            _ => Input,
+        }
+    }
+}
+
+/// The type an argument or result value carries across the call boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalValueClass {
+    FourState { width: u32, signed: bool },
+    Real,
+}
+
+/// One argument of a call site, as the host sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalSystemArgument {
+    /// An empty argument: `$display(a,,b)` prints a space for it.
+    Empty,
+    /// A string literal, escapes already decoded (a format or text argument).
+    String(SmolStr),
+    /// An evaluated operand. `operand` indexes the call node's arguments.
+    Value {
+        operand: u32,
+        class: DigitalValueClass,
+    },
+    /// A variable written back through `DigitalCallOutput { index: output }`.
+    /// `operand` is the value read first, for an in-out argument.
+    Output {
+        output: u32,
+        operand: Option<u32>,
+        class: DigitalValueClass,
+    },
+    /// A whole unpacked array the host writes element by element.
+    Array {
+        array: DigitalArrayRef,
+        class: DigitalValueClass,
+    },
+    /// A module instance or named block named by a reference argument.
+    Scope(DigitalScopeId),
+    /// A net or variable named by a reference argument.
+    Signal(DigitalSignalId),
+}
+
+/// The source line a call was written on, for its diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalSourceLine {
+    pub file: SmolStr,
+    pub line: u32,
+}
+
+/// One system task or function call site.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalSystemCall {
+    pub id: DigitalSystemCallId,
+    pub kind: DigitalSystemCallKind,
+    pub arguments: Vec<DigitalSystemArgument>,
+    /// How many `DigitalCallOutput` values the call produces.
+    pub outputs: u32,
+    /// The value a function call returns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<DigitalValueClass>,
+    /// The innermost scope the call is written in (`%m`).
+    pub scope: DigitalScopeId,
+    /// The owning process's module time scale, which a `%t` argument and
+    /// `$timeformat` read their operands in.
+    pub time_scale: crate::time_scale::ModuleTimeScale,
+    /// `$finish(n)`, `$stop(n)` and `$fatal(n, ...)`'s constant level; the
+    /// default 1 when it is omitted. A `$fatal` level is not a display
+    /// argument, so it is absent from `arguments`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<u8>,
+    /// The `$strobe`/`$monitor` argument function, for an observer kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observer: Option<u32>,
+    pub span: SourceSpanRef,
+    /// Where the call was written, once a source map has resolved the span.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<DigitalSourceLine>,
+}
+
+/// The argument function of a `$strobe` or `$monitor` site.
+///
+/// Its entry block evaluates the arguments and ends in the site's own
+/// `DigitalSystemTask` node, then returns; it never suspends. Every value it
+/// reads is a signal — a process-local the arguments name is promoted to
+/// signal storage — so it can run outside its process's activation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalObserver {
+    pub site: DigitalSystemCallId,
+    pub process: DigitalProcessId,
+    pub function: CfgFunction,
+    /// Every signal the arguments read, ascending: a `$monitor` prints when
+    /// one of them changes.
+    pub dependencies: Vec<DigitalSignalId>,
 }
 
 /// An interpolated analog event site. Operands refer to normal analog evaluation

@@ -2235,6 +2235,10 @@ pub enum DigitalStatement {
     Forever(DigitalForever),
     /// `@(...) stmt` or `#delay stmt`, the process's suspension points.
     Timing(DigitalTiming),
+    /// A system task enable, `$display(...);` or `$finish;` (IEEE 1364-2005
+    /// section 17). An empty argument (`$display(a,,b)`) is
+    /// [`Expression::NullArgument`].
+    SystemTask(SystemFunction),
     /// A lone `;`.
     Null(Span),
 }
@@ -2251,6 +2255,7 @@ impl DigitalStatement {
             Self::Repeat(statement) => statement.span,
             Self::Forever(statement) => statement.span,
             Self::Timing(timing) => timing.span,
+            Self::SystemTask(task) => task.span,
             Self::Null(span) => *span,
         }
     }
@@ -2283,7 +2288,7 @@ impl DigitalStatement {
             Self::BlockingAssign(assign) | Self::NonblockingAssign(assign) => {
                 assign.timing.is_some()
             }
-            Self::Null(_) => false,
+            Self::SystemTask(_) | Self::Null(_) => false,
         }
     }
 }

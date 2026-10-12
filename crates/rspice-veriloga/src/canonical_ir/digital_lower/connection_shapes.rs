@@ -61,6 +61,7 @@ impl<'a> ConnectionShapes<'a> {
     pub(crate) fn four_state_width(&mut self, expression: &Expression) -> Option<u32> {
         let mut probes = Vec::new();
         let lowerer = ProcessLowerer {
+            calls: Default::default(),
             analog_local_inputs: HashMap::new(),
             process: None,
             local_arrays: Vec::new(),

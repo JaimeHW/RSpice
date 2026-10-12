@@ -157,6 +157,25 @@ impl CanonicalDigitalPlan {
         self.seal()
     }
 
+    /// Record where each system call was written, from the byte offset of its
+    /// span in the source the plan was compiled from, then reseal.
+    ///
+    /// The lowering sees only spans; the source map that turns an offset in
+    /// the preprocessed text into an original file and line belongs to the
+    /// compile that owns the text, which calls this once.
+    pub fn locate_system_calls(
+        mut self,
+        locate: impl Fn(super::SourceSpanRef) -> Option<DigitalSourceLine>,
+    ) -> Result<Self, Vec<IrDiagnostic>> {
+        if self.system_calls.is_empty() {
+            return Ok(self);
+        }
+        for site in &mut self.system_calls {
+            site.origin = locate(site.span);
+        }
+        self.seal()
+    }
+
     /// Validate decoded or edited plans before sharing them with a runtime.
     /// The runtime may then compare the stored identity at constant cost.
     pub fn validate(&self) -> IrValidationResult {
@@ -200,13 +219,21 @@ impl CanonicalDigitalPlan {
                 &self.drivers,
                 &self.analog_probes,
                 &self.absdelta,
+                &self.scopes,
+                &self.system_calls,
+                &self.observers,
             ),
         )
         .map_err(|detail| error(format!("cannot hash digital plan: {detail}")))?;
         // JSON maps all non-finite floats to null. Preserve the exact real
         // constant bits as well, including NaN payloads and signed zero.
-        for process in &self.processes {
-            for function in process_functions(&process.function) {
+        for function in self
+            .processes
+            .iter()
+            .map(|process| &process.function)
+            .chain(self.observers.iter().map(|observer| &observer.function))
+        {
+            for function in process_functions(function) {
                 for value in &function.values {
                     if let CfgValueKind::RealConstant(number) = value.kind {
                         writer.0.update(&number.to_bits().to_le_bytes());
@@ -1160,6 +1187,12 @@ impl CanonicalDigitalPlan {
                             )?;
                             written_drivers.insert(*driver);
                         }
+                        CfgValueKind::DigitalSystemTask { .. }
+                        | CfgValueKind::DigitalSystemFunction { .. }
+                        | CfgValueKind::DigitalCallOutput { .. }
+                        | CfgValueKind::DigitalPure { .. } => {
+                            self.check_call_value(function, value, false)?;
+                        }
                         _ => {}
                     }
                 }
@@ -1167,6 +1200,326 @@ impl CanonicalDigitalPlan {
         }
         if written_drivers.len() != self.drivers.len() {
             return Err(error("digital driver has no corresponding write"));
+        }
+        self.validate_system_calls()
+    }
+
+    /// The call node and its site agree: the site exists, the operand count
+    /// is the site's, a function's type is its result, an output names a call
+    /// in the same function with that many outputs, and an observer kind's
+    /// arguments arrive only in its observer function.
+    fn check_call_value(
+        &self,
+        function: &super::CfgFunction,
+        value: &super::CfgValue,
+        in_observer: bool,
+    ) -> IrValidationResult {
+        use super::digital::{DigitalSystemArgument, DigitalValueClass};
+        use super::digital_value::DigitalPureFunction;
+        let class_type = |class: DigitalValueClass| match class {
+            DigitalValueClass::FourState { width, .. } => CfgValueType::FourState { width },
+            DigitalValueClass::Real => CfgValueType::Real,
+        };
+        match &value.kind {
+            CfgValueKind::DigitalSystemTask { site, args }
+            | CfgValueKind::DigitalSystemFunction { site, args } => {
+                let Some(entry) = self.system_calls.get(site.index()) else {
+                    return Err(error("digital call names an undeclared system call site"));
+                };
+                let task = matches!(value.kind, CfgValueKind::DigitalSystemTask { .. });
+                let operands = entry
+                    .arguments
+                    .iter()
+                    .filter(|argument| {
+                        matches!(
+                            argument,
+                            DigitalSystemArgument::Value { .. }
+                                | DigitalSystemArgument::Output {
+                                    operand: Some(_),
+                                    ..
+                                }
+                        )
+                    })
+                    .count();
+                let expected_operands = if entry.kind.is_observer() && !in_observer {
+                    0
+                } else {
+                    operands
+                };
+                let expected_type = if task {
+                    Some(CfgValueType::Effect)
+                } else {
+                    entry.result.map(class_type)
+                };
+                if entry.id != *site
+                    || args.len() != expected_operands
+                    || Some(value.value_type) != expected_type
+                    || (!task && !entry.kind.is_function())
+                    || (in_observer && !entry.kind.is_observer())
+                {
+                    return Err(error(
+                        "digital system call disagrees with its site's arguments or result",
+                    ));
+                }
+                for argument in &entry.arguments {
+                    let (operand, class) = match argument {
+                        DigitalSystemArgument::Value { operand, class } => (*operand, *class),
+                        DigitalSystemArgument::Output {
+                            operand: Some(operand),
+                            class,
+                            ..
+                        } => (*operand, *class),
+                        _ => continue,
+                    };
+                    if expected_operands == 0 {
+                        break;
+                    }
+                    let Some(argument) = args.get(operand as usize) else {
+                        return Err(error("digital system call operand index is out of range"));
+                    };
+                    let actual = function.value(*argument).value_type;
+                    if actual != class_type(class)
+                        && !matches!(
+                            (class, actual),
+                            (DigitalValueClass::FourState { .. }, CfgValueType::Integer)
+                        )
+                    {
+                        return Err(error(
+                            "digital system call operand has the wrong value domain or width",
+                        ));
+                    }
+                }
+            }
+            CfgValueKind::DigitalCallOutput { call, index } => {
+                let (CfgValueKind::DigitalSystemTask { site, .. }
+                | CfgValueKind::DigitalSystemFunction { site, .. }) = &function.value(*call).kind
+                else {
+                    return Err(error("digital call output names no system call"));
+                };
+                let entry = self
+                    .system_calls
+                    .get(site.index())
+                    .ok_or_else(|| error("digital call output names an undeclared site"))?;
+                let class = entry.arguments.iter().find_map(|argument| match argument {
+                    DigitalSystemArgument::Output { output, class, .. } if output == index => {
+                        Some(*class)
+                    }
+                    _ => None,
+                });
+                if *index >= entry.outputs || class.map(class_type) != Some(value.value_type) {
+                    return Err(error(
+                        "digital call output disagrees with its site's outputs",
+                    ));
+                }
+            }
+            CfgValueKind::DigitalPure {
+                function: pure,
+                args,
+            } => {
+                let valid = match pure {
+                    DigitalPureFunction::Math(math) => {
+                        args.len() == math.arity()
+                            && value.value_type == CfgValueType::Real
+                            && args
+                                .iter()
+                                .all(|arg| function.value(*arg).value_type == CfgValueType::Real)
+                    }
+                    DigitalPureFunction::Clog2 => {
+                        args.len() == 1
+                            && value.value_type == (CfgValueType::FourState { width: 32 })
+                            && matches!(
+                                function.value(args[0]).value_type,
+                                CfgValueType::FourState { .. }
+                            )
+                    }
+                };
+                if !valid {
+                    return Err(error(
+                        "digital pure function has the wrong arity or domains",
+                    ));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The scope, site and observer tables are dense and agree with each
+    /// other, and every observer function is a straight-line evaluation that
+    /// ends in its own site's call.
+    fn validate_system_calls(&self) -> IrValidationResult {
+        use super::digital::{DigitalSystemArgument, DigitalValueClass};
+        for (index, scope) in self.scopes.iter().enumerate() {
+            scope.time_scale.validate().map_err(error)?;
+            if scope.id.index() != index
+                || scope.path.is_empty()
+                || scope.parent.is_some_and(|parent| parent.index() >= index)
+            {
+                return Err(error(
+                    "digital scopes must be dense, named, and follow their parents",
+                ));
+            }
+        }
+        let mut observed = vec![false; self.observers.len()];
+        for (index, site) in self.system_calls.iter().enumerate() {
+            site.time_scale.validate().map_err(error)?;
+            if site.id.index() != index || site.scope.index() >= self.scopes.len() {
+                return Err(error(
+                    "digital system call sites must be dense and name a declared scope",
+                ));
+            }
+            // A function enabled as a task has no result; a task never has one.
+            if site.result.is_some() && !site.kind.is_function() {
+                return Err(error("digital system call result disagrees with its kind"));
+            }
+            if site.level.is_some_and(|level| level > 2)
+                || site.level.is_some() != site.kind.halts()
+            {
+                return Err(error(
+                    "digital system call finish level is invalid for its kind",
+                ));
+            }
+            let mut outputs = 0u32;
+            for argument in &site.arguments {
+                match argument {
+                    DigitalSystemArgument::Output { output, .. } => {
+                        if *output != outputs {
+                            return Err(error(
+                                "digital system call outputs must be numbered in order",
+                            ));
+                        }
+                        outputs += 1;
+                    }
+                    DigitalSystemArgument::Array { array, class } => {
+                        let cells = self
+                            .arrays
+                            .iter()
+                            .find(|declared| declared.storage == *array)
+                            .and_then(|declared| self.signal(declared.storage.base));
+                        let valid = cells.is_some_and(|cell| match class {
+                            DigitalValueClass::Real => cell.kind.is_real(),
+                            DigitalValueClass::FourState { width, .. } => {
+                                !cell.kind.is_real() && cell.width == *width
+                            }
+                        });
+                        if !valid {
+                            return Err(error(
+                                "digital system call array argument names no declared array",
+                            ));
+                        }
+                    }
+                    DigitalSystemArgument::Scope(scope) => {
+                        if scope.index() >= self.scopes.len() {
+                            return Err(error("digital system call names an undeclared scope"));
+                        }
+                    }
+                    DigitalSystemArgument::Signal(signal) => {
+                        if self.signal(*signal).is_none() {
+                            return Err(error("digital system call names an undeclared signal"));
+                        }
+                    }
+                    DigitalSystemArgument::Empty
+                    | DigitalSystemArgument::String(_)
+                    | DigitalSystemArgument::Value { .. } => {}
+                }
+            }
+            if outputs != site.outputs {
+                return Err(error("digital system call output count disagrees"));
+            }
+            match (site.kind.is_observer(), site.observer) {
+                (true, Some(observer)) => {
+                    let Some(slot) = observed.get_mut(observer as usize) else {
+                        return Err(error("digital system call names an undeclared observer"));
+                    };
+                    if std::mem::replace(slot, true)
+                        || self.observers[observer as usize].site != site.id
+                    {
+                        return Err(error("digital observer and system call site disagree"));
+                    }
+                }
+                (false, None) => {}
+                _ => return Err(error("digital observer kind and function disagree")),
+            }
+        }
+        if observed.iter().any(|seen| !seen) {
+            return Err(error("digital observer has no system call site"));
+        }
+        for observer in &self.observers {
+            let function = &observer.function;
+            function
+                .validate()
+                .map_err(|detail| error(format!("digital observer: {detail}")))?;
+            if self.process(observer.process).is_none()
+                || !function.block(function.entry).params.is_empty()
+                || !observer
+                    .dependencies
+                    .windows(2)
+                    .all(|pair| pair[0] < pair[1])
+                || observer
+                    .dependencies
+                    .iter()
+                    .any(|signal| self.signal(*signal).is_none())
+            {
+                return Err(error(
+                    "digital observer has an invalid process, entry or dependency list",
+                ));
+            }
+            let mut calls = 0;
+            for block in &function.blocks {
+                if !matches!(
+                    block.terminator,
+                    CfgTerminator::Return
+                        | CfgTerminator::Jump { .. }
+                        | CfgTerminator::Branch { .. }
+                ) {
+                    return Err(error("digital observer function must not suspend"));
+                }
+            }
+            for value in &function.values {
+                if !value.kind.is_digital()
+                    && !matches!(
+                        value.kind,
+                        CfgValueKind::RealConstant(_) | CfgValueKind::BlockParameter
+                    )
+                {
+                    return Err(error("analog value kind in digital observer"));
+                }
+                match &value.kind {
+                    CfgValueKind::DigitalSystemTask { site, .. } => {
+                        if *site != observer.site {
+                            return Err(error("digital observer calls a site other than its own"));
+                        }
+                        calls += 1;
+                        self.check_call_value(function, value, true)?;
+                    }
+                    CfgValueKind::DigitalSystemFunction { .. }
+                    | CfgValueKind::DigitalCallOutput { .. }
+                    | CfgValueKind::DigitalBlockingWrite { .. }
+                    | CfgValueKind::DigitalNonblockingWrite { .. }
+                    | CfgValueKind::DigitalDriverWrite { .. }
+                    | CfgValueKind::DigitalBitBlockingWrite { .. }
+                    | CfgValueKind::DigitalBitNonblockingWrite { .. }
+                    | CfgValueKind::DigitalArrayBlockingWrite { .. }
+                    | CfgValueKind::DigitalArrayNonblockingWrite { .. } => {
+                        return Err(error("digital observer must only read and report"));
+                    }
+                    CfgValueKind::DigitalSignalRead { signal }
+                    | CfgValueKind::DigitalRealSignalRead { signal } => {
+                        if self.signal(*signal).is_none() {
+                            return Err(error("digital observer reads an undeclared signal"));
+                        }
+                    }
+                    CfgValueKind::DigitalPure { .. } => {
+                        self.check_call_value(function, value, true)?;
+                    }
+                    _ => {}
+                }
+            }
+            if calls != 1 {
+                return Err(error(
+                    "digital observer must report through exactly one call",
+                ));
+            }
         }
         Ok(())
     }
@@ -1202,6 +1555,9 @@ pub(crate) fn event_expression_schedule(
             || matches!(
                 value.kind,
                 CfgValueKind::BlockParameter
+                    | CfgValueKind::DigitalSystemTask { .. }
+                    | CfgValueKind::DigitalSystemFunction { .. }
+                    | CfgValueKind::DigitalCallOutput { .. }
                     | CfgValueKind::DigitalArrayBlockingWrite { .. }
                     | CfgValueKind::DigitalBitBlockingWrite { .. }
                     | CfgValueKind::DigitalBitNonblockingWrite { .. }
@@ -1314,6 +1670,9 @@ fn expression_dependencies(
         if matches!(
             value.kind,
             CfgValueKind::DigitalExpression { .. }
+                | CfgValueKind::DigitalSystemTask { .. }
+                | CfgValueKind::DigitalSystemFunction { .. }
+                | CfgValueKind::DigitalCallOutput { .. }
                 | CfgValueKind::DigitalArrayBlockingWrite { .. }
                 | CfgValueKind::DigitalBitBlockingWrite { .. }
                 | CfgValueKind::DigitalBitNonblockingWrite { .. }

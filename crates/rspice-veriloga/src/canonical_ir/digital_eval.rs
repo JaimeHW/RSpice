@@ -70,8 +70,8 @@ use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use super::cfg::{CfgFunction, CfgTerminator, CfgValueKind, DigitalWait, is_leaf_kind};
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalEventExpression,
-    DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalSignal, DigitalWriteSelect,
-    DigitalWriteTarget,
+    DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalSignal, DigitalSystemCallId,
+    DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{self, FourStateValue, truth};
 use super::ids::{BlockId, DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId, ValueId};
@@ -222,6 +222,70 @@ pub trait DigitalEnvironment {
     ///
     /// The value is already resized to the target's width per section 5.2.1.
     fn drive_signal(&mut self, drive: DigitalDrive);
+
+    /// Perform a system task enable (IEEE 1364-2005 section 17).
+    ///
+    /// `args` are the site's evaluated operands, in the order its
+    /// [`DigitalSystemArgument::Value`](super::digital::DigitalSystemArgument::Value)
+    /// and in-out entries name them; the plan's site table describes the
+    /// rest. The host decides what the task does — an environment that hosts
+    /// no system tasks refuses rather than skipping one, because a skipped
+    /// `$finish` is a run that does not end where its author said.
+    fn system_task(
+        &mut self,
+        site: DigitalSystemCallId,
+        _args: &[DigitalScalar],
+    ) -> Result<DigitalTaskOutcome, DigitalEvalError> {
+        Err(DigitalEvalError::SystemCallUnavailable {
+            site,
+            detail: "this environment hosts no system tasks".into(),
+        })
+    }
+
+    /// Call a system function, returning its value and its outputs.
+    fn system_function(
+        &mut self,
+        site: DigitalSystemCallId,
+        _args: &[DigitalScalar],
+    ) -> Result<DigitalFunctionOutcome, DigitalEvalError> {
+        Err(DigitalEvalError::SystemCallUnavailable {
+            site,
+            detail: "this environment hosts no system functions".into(),
+        })
+    }
+}
+
+/// Whether the calling thread continues after a system task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigitalTaskControl {
+    Continue,
+    /// `$finish`, `$stop` and `$fatal`: the thread ends here (IEEE 1364-2005
+    /// section 17.4), and the interpreter reports
+    /// [`DigitalProcessOutcome::Halted`].
+    Halt,
+}
+
+/// What a system task produced.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalTaskOutcome {
+    pub control: DigitalTaskControl,
+    /// One value per output the site declares, written back by the lowering.
+    pub outputs: Vec<DigitalScalar>,
+}
+
+impl DigitalTaskOutcome {
+    pub const CONTINUE: Self = Self {
+        control: DigitalTaskControl::Continue,
+        outputs: Vec::new(),
+    };
+}
+
+/// What a system function produced.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalFunctionOutcome {
+    pub value: DigitalScalar,
+    /// One value per output the site declares, written back by the lowering.
+    pub outputs: Vec<DigitalScalar>,
 }
 
 /// Time belongs to an activation, including its zero-delay consequences.
@@ -345,6 +409,9 @@ pub enum DigitalProcessOutcome {
     /// is what makes the kind a description of the graph rather than a flag the
     /// runtime has to agree with.
     Finished,
+    /// A system task at this site ended the thread (`$finish`, `$stop`,
+    /// `$fatal`). Any process kind can halt; it never runs again.
+    Halted(DigitalSystemCallId),
 }
 
 /// A suspended process: what it is waiting for, and how to start it again.
@@ -640,6 +707,19 @@ pub enum DigitalEvalError {
     UnknownBitsToReal(ValueId),
     /// The process ran this many blocks without suspending or returning.
     StepLimitExceeded(usize),
+    /// The plan names a system call site it does not declare, or a call node
+    /// disagrees with its site.
+    InvalidSystemCall(ValueId),
+    /// The environment cannot perform this system call.
+    SystemCallUnavailable {
+        site: DigitalSystemCallId,
+        detail: String,
+    },
+    /// The system call ran and refused its arguments.
+    SystemCallFailed {
+        site: DigitalSystemCallId,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for DigitalEvalError {
@@ -770,6 +850,15 @@ impl std::fmt::Display for DigitalEvalError {
                 f,
                 "the process entered {limit} blocks without suspending or returning"
             ),
+            Self::InvalidSystemCall(value) => write!(
+                f,
+                "value {} names a system call the plan does not declare consistently",
+                usize::from(*value)
+            ),
+            Self::SystemCallUnavailable { site, detail } => {
+                write!(f, "system call {site} cannot run here: {detail}")
+            }
+            Self::SystemCallFailed { site, detail } => write!(f, "system call {site}: {detail}"),
         }
     }
 }
@@ -1260,6 +1349,9 @@ pub struct DigitalEvalScratch {
     terms: Vec<DigitalSensitivityTerm>,
     /// A spare argument list for the next suspension's resume state.
     resume: Vec<DigitalScalar>,
+    /// Outputs of the system calls this activation made, by call node, read
+    /// back by `DigitalCallOutput` in the same block.
+    call_outputs: Vec<(ValueId, Vec<DigitalScalar>)>,
 }
 
 impl DigitalEvalScratch {
@@ -1432,6 +1524,43 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
     }
 }
 
+/// Run a `$strobe`/`$monitor` argument function (IEEE 1364-2005 sections
+/// 17.1.2 and 17.1.3): evaluate the arguments now, in the monitor region, and
+/// hand them to the environment through the site's own task call.
+///
+/// The function reads only signals and never suspends, so it runs outside
+/// any activation of the process it belongs to; that process supplies its
+/// module's time unit to `$time` and `%t`.
+pub fn run_observer<E: DigitalEnvironment + ?Sized>(
+    plan: &CanonicalDigitalPlan,
+    observer: usize,
+    environment: &mut E,
+    scratch: &mut DigitalEvalScratch,
+) -> Result<(), DigitalEvalError> {
+    if plan.content_identity == [0; 32] {
+        return Err(DigitalEvalError::UnsealedPlan);
+    }
+    let Some(observer) = plan.observers.get(observer) else {
+        return Err(DigitalEvalError::InvalidSystemCall(ValueId::from(0usize)));
+    };
+    let process = plan
+        .process(observer.process)
+        .ok_or(DigitalEvalError::ProcessNotInPlan(observer.process))?;
+    let function = &observer.function;
+    if !function.block(function.entry).params.is_empty() {
+        return Err(DigitalEvalError::EntryBlockHasParameters(function.entry));
+    }
+    scratch.arguments.clear();
+    match Interpreter::with_function(plan, process, function, environment, scratch)
+        .run(function.entry, function.blocks.len())?
+    {
+        DigitalProcessOutcome::Finished => Ok(()),
+        DigitalProcessOutcome::Suspended(_) | DigitalProcessOutcome::Halted(_) => {
+            Err(DigitalEvalError::InvalidSystemCall(ValueId::from(0usize)))
+        }
+    }
+}
+
 // The containing artifact is validated before publication; this check remains
 // constant-time on every activation. Callers must keep that plan immutable.
 fn validate_process_membership(
@@ -1529,6 +1658,9 @@ struct Interpreter<'a, 's, E: ?Sized> {
     /// process read a value the lowering never routed through a parameter, and
     /// the bug would surface as a backend that disagreed.
     scratch: &'s mut DigitalEvalScratch,
+    /// Set by a system task that ends the thread; checked after each
+    /// instruction so nothing after the call runs.
+    halted: Option<DigitalSystemCallId>,
 }
 
 impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
@@ -1559,12 +1691,14 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             scratch.analog_read_plans.clear();
             scratch.event_identity = Some(plan.content_identity);
         }
+        scratch.call_outputs.clear();
         Self {
             plan,
             process,
             function,
             environment,
             scratch,
+            halted: None,
         }
     }
 
@@ -1611,6 +1745,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     value => value?,
                 };
                 self.scratch.table.define(instruction.result, value);
+                if let Some(site) = self.halted {
+                    return Ok(DigitalProcessOutcome::Halted(site));
+                }
             }
             first_instruction = 0;
 
@@ -1755,6 +1892,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     /// both its operands at once without copying either.
     fn scalar(&self, id: ValueId) -> Result<ScalarRef<'_>, DigitalEvalError> {
         self.scratch.table.get(self.function(), id)
+    }
+
+    /// A system call's evaluated operands, owned: the host keeps them past
+    /// this activation (a `$strobe`'s values, a journaled record).
+    fn call_arguments(&self, args: &[ValueId]) -> Result<Vec<DigitalScalar>, DigitalEvalError> {
+        args.iter()
+            .map(|argument| match self.scalar(*argument)? {
+                ScalarRef::Effect => Err(DigitalEvalError::EffectValueRead(*argument)),
+                value => Ok(value.into_owned()),
+            })
+            .collect()
     }
 
     /// Read a value as four-state.
@@ -2072,10 +2220,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                         .table
                         .get(function, *result)
                         .map(ScalarRef::into_owned),
-                    DigitalProcessOutcome::Suspended(_) => {
+                    DigitalProcessOutcome::Suspended(_) | DigitalProcessOutcome::Halted(_) => {
                         Err(DigitalEvalError::InvalidEventExpression {
                             value: id,
-                            detail: "an event expression must not suspend".into(),
+                            detail: "an event expression must not suspend or halt".into(),
                         })
                     }
                 });
@@ -2450,6 +2598,51 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     })?;
                 Ok(DigitalScalar::FourState(value))
             }
+            CfgValueKind::DigitalSystemTask { site, args } => {
+                let arguments = self.call_arguments(args)?;
+                let outcome = self.environment.system_task(*site, &arguments)?;
+                if outcome.control == DigitalTaskControl::Halt {
+                    self.halted = Some(*site);
+                }
+                self.scratch.call_outputs.push((id, outcome.outputs));
+                Ok(DigitalScalar::Effect)
+            }
+            CfgValueKind::DigitalSystemFunction { site, args } => {
+                let arguments = self.call_arguments(args)?;
+                let outcome = self.environment.system_function(*site, &arguments)?;
+                self.scratch.call_outputs.push((id, outcome.outputs));
+                Ok(outcome.value)
+            }
+            CfgValueKind::DigitalCallOutput { call, index } => self
+                .scratch
+                .call_outputs
+                .iter()
+                .rev()
+                .find(|(owner, _)| owner == call)
+                .and_then(|(_, outputs)| outputs.get(*index as usize))
+                .cloned()
+                .ok_or(DigitalEvalError::InvalidSystemCall(id)),
+            CfgValueKind::DigitalPure { function, args } => match function {
+                digital_value::DigitalPureFunction::Math(math) => {
+                    if args.len() != math.arity() {
+                        return Err(DigitalEvalError::InvalidSystemCall(id));
+                    }
+                    let mut operands = [0.0f64; 2];
+                    for (slot, argument) in operands.iter_mut().zip(args) {
+                        *slot = self.real(*argument)?;
+                    }
+                    Ok(DigitalScalar::Real(math.apply(&operands[..args.len()])))
+                }
+                digital_value::DigitalPureFunction::Clog2 => {
+                    let [argument] = args.as_slice() else {
+                        return Err(DigitalEvalError::InvalidSystemCall(id));
+                    };
+                    let value = self.four_state(*argument)?;
+                    Ok(DigitalScalar::FourState(digital_value::clog2(
+                        value.as_ref(),
+                    )))
+                }
+            },
             // IEEE 754 bit-pattern operations are separate from numeric conversion.
             CfgValueKind::DigitalRealToBits { input } => {
                 let value = self.real(*input)?;

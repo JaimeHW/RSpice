@@ -320,6 +320,12 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
                     }
                 }
             }
+            Expression::SystemFunction(function) => system_function_shape(function, get)
+                .unwrap_or_else(|| Shape {
+                    width: lowerer.self_width_leaf(expression),
+                    signed: lowerer.self_signed_leaf(expression),
+                    real: lowerer.is_real_expression_leaf(expression),
+                }),
             _ => Shape {
                 width: lowerer.self_width_leaf(expression),
                 signed: lowerer.self_signed_leaf(expression),
@@ -329,6 +335,49 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
         result.values.insert(key(expression), shape);
     }
     result
+}
+
+/// The self-determined shape of a system function call, for the calls this
+/// module types itself; `None` leaves the leaf rules to answer.
+///
+/// IEEE 1364-2005 section 5.5.1 makes `$signed`/`$unsigned` return their
+/// self-determined operand at its own width with the named signedness;
+/// section 17.8 makes `$rtoi` a 32-bit signed integer and `$itor` a real;
+/// section 17.11 makes `$clog2` an integer and the math functions real; and
+/// every host-called function returns a 32-bit integer, signed except
+/// `$urandom`/`$urandom_range` (1800 section 18.13) and `$fopen`.
+fn system_function_shape(
+    function: &crate::ast::SystemFunction,
+    argument: impl Fn(&Expression) -> Shape,
+) -> Option<Shape> {
+    use super::super::digital::DigitalSystemCallKind;
+    let integer = |signed| Shape {
+        width: 32,
+        signed,
+        real: false,
+    };
+    let real = Shape {
+        width: 0,
+        signed: true,
+        real: true,
+    };
+    Some(match function.name.as_str() {
+        "$signed" | "$unsigned" => {
+            let operand = argument(function.args.first()?);
+            Shape {
+                width: operand.width,
+                signed: function.name == "$signed",
+                real: false,
+            }
+        }
+        "$rtoi" | "$clog2" => integer(true),
+        "$itor" => real,
+        name if super::super::digital_value::DigitalMathFunction::from_name(name).is_some() => real,
+        name => match DigitalSystemCallKind::from_name(name) {
+            Some(kind) if kind.is_function() => integer(kind.result_signed()),
+            _ => return None,
+        },
+    })
 }
 
 pub(super) fn shape(lowerer: &ProcessLowerer<'_>, expression: &Expression) -> Shape {
@@ -360,6 +409,12 @@ enum Operation {
     MathBinary(super::super::CfgBinaryOp),
     BitsToReal,
     RealToBits,
+    /// A section 17.11.2 math function over real operands.
+    Math(super::super::digital_value::DigitalMathFunction),
+    /// `$rtoi`: truncate toward zero, then take the 32-bit integer.
+    RealToIntegerTruncated,
+    /// `$clog2` of a self-determined operand.
+    Clog2,
 }
 
 enum Work<'a> {
@@ -817,6 +872,89 @@ pub(super) fn lower_prepared(
                     values.push(lowerer.unknown(REAL_BIT_PATTERN_WIDTH));
                 }
             }
+            // IEEE 1364-2005 section 5.5.1: the operand is self-determined and
+            // keeps its bits; only the signedness the shape reports changes,
+            // and the enclosing operator extends by it.
+            Expression::SystemFunction(function)
+                if matches!(function.name.as_str(), "$signed" | "$unsigned") =>
+            {
+                match function.args.as_slice() {
+                    [argument] if !shapes.get(argument).real => pending.push(Work::Expression(
+                        block,
+                        argument,
+                        Mode::Bits(Context::SELF_DETERMINED),
+                    )),
+                    _ => {
+                        lowerer.error(
+                            format!("`{}` takes one integral argument", function.name),
+                            function.span,
+                        );
+                        values.push(lowerer.unknown(1));
+                    }
+                }
+            }
+            Expression::SystemFunction(function) if function.name == "$itor" && real => {
+                match function.args.as_slice() {
+                    [argument] => pending.push(Work::Expression(block, argument, Mode::Real)),
+                    _ => values.push(lowerer.real_constant(0.0)),
+                }
+            }
+            Expression::SystemFunction(function) if function.name == "$rtoi" && !real => {
+                match function.args.as_slice() {
+                    [argument] => push_unary(
+                        &mut pending,
+                        block,
+                        Operation::RealToIntegerTruncated,
+                        argument,
+                        Mode::Real,
+                    ),
+                    _ => values.push(lowerer.unknown(32)),
+                }
+            }
+            Expression::SystemFunction(function) if function.name == "$clog2" && !real => {
+                match function.args.as_slice() {
+                    [argument] if !shapes.get(argument).real => push_unary(
+                        &mut pending,
+                        block,
+                        Operation::Clog2,
+                        argument,
+                        Mode::Bits(Context::SELF_DETERMINED),
+                    ),
+                    _ => {
+                        lowerer.error("`$clog2` takes one integral argument", function.span);
+                        values.push(lowerer.unknown(32));
+                    }
+                }
+            }
+            Expression::SystemFunction(function)
+                if real
+                    && super::super::digital_value::DigitalMathFunction::from_name(
+                        &function.name,
+                    )
+                    .is_some() =>
+            {
+                let math =
+                    super::super::digital_value::DigitalMathFunction::from_name(&function.name)
+                        .expect("matched math function");
+                if function.args.len() != math.arity() {
+                    lowerer.error(
+                        format!("`{}` takes {} argument(s)", function.name, math.arity()),
+                        function.span,
+                    );
+                    values.push(lowerer.real_constant(0.0));
+                } else {
+                    pending.push(Work::Apply(block, Operation::Math(math)));
+                    for argument in function.args.iter().rev() {
+                        pending.push(Work::Expression(block, argument, Mode::Real));
+                    }
+                }
+            }
+            Expression::SystemFunction(function)
+                if super::super::digital::DigitalSystemCallKind::from_name(&function.name)
+                    .is_some_and(|kind| kind.is_function()) =>
+            {
+                values.push(lowerer.system_function_value(block, function));
+            }
             Expression::Unary(value) => {
                 if value.op == UnaryOp::ToInteger {
                     lowerer.invariant(
@@ -1269,6 +1407,47 @@ fn apply(
         Operation::RealToBits => (
             bits(REAL_BIT_PATTERN_WIDTH),
             CfgValueKind::DigitalRealToBits { input: right },
+        ),
+        Operation::Math(math) => {
+            let args = if math.arity() == 2 {
+                let left = values.pop().expect("left math argument");
+                vec![left, right]
+            } else {
+                vec![right]
+            };
+            (
+                CfgValueType::Real,
+                CfgValueKind::DigitalPure {
+                    function: super::super::digital_value::DigitalPureFunction::Math(math),
+                    args,
+                },
+            )
+        }
+        Operation::RealToIntegerTruncated => {
+            let truncated = lowerer.builder.push(
+                block,
+                CfgValueType::Real,
+                CfgValueKind::DigitalPure {
+                    function: super::super::digital_value::DigitalPureFunction::Math(
+                        super::super::digital_value::DigitalMathFunction::Truncate,
+                    ),
+                    args: vec![right],
+                },
+            );
+            (
+                bits(32),
+                CfgValueKind::DigitalRealToInteger {
+                    input: truncated,
+                    width: 32,
+                },
+            )
+        }
+        Operation::Clog2 => (
+            bits(32),
+            CfgValueKind::DigitalPure {
+                function: super::super::digital_value::DigitalPureFunction::Clog2,
+                args: vec![right],
+            },
         ),
     };
     lowerer.builder.push(block, ty, kind)

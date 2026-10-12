@@ -891,9 +891,11 @@ impl<'a> Lexer<'a> {
     }
 
     fn scan_system_identifier(&mut self, start: usize) -> Result<Token, LexerError> {
-        // Already consumed '$'
+        // Already consumed '$'. IEEE 1364-2005 section 3.9 (A.9.3): later
+        // characters may include `$`, which `$test$plusargs` and
+        // `$value$plusargs` need.
         while let Some(ch) = self.peek_char() {
-            if ch.is_ascii_alphanumeric() || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' {
                 self.advance();
             } else {
                 break;

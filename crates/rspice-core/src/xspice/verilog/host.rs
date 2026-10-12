@@ -1267,6 +1267,11 @@ impl DigitalHost {
                 self.slots[index].status = ProcessStatus::Finished;
                 Ok(())
             }
+            // A system task ended the thread (IEEE 1364-2005 section 17.4).
+            DigitalProcessOutcome::Halted(_) => {
+                self.slots[index].status = ProcessStatus::Finished;
+                Ok(())
+            }
             DigitalProcessOutcome::Suspended(suspension) => {
                 let (wait, resume) = suspension.into_parts();
                 self.slots[index].resume = Some(resume);

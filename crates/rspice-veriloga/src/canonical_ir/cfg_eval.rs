@@ -1483,7 +1483,11 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalSelect { .. }
             | CfgValueKind::DigitalBlockingWrite { .. }
             | CfgValueKind::DigitalNonblockingWrite { .. }
-            | CfgValueKind::DigitalDriverWrite { .. } => {
+            | CfgValueKind::DigitalDriverWrite { .. }
+            | CfgValueKind::DigitalSystemTask { .. }
+            | CfgValueKind::DigitalSystemFunction { .. }
+            | CfgValueKind::DigitalCallOutput { .. }
+            | CfgValueKind::DigitalPure { .. } => {
                 return Err(CfgEvalError::DigitalConstructInAnalogEvaluation {
                     what: "a four-state or integer value",
                 });

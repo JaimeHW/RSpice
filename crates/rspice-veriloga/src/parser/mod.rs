@@ -146,6 +146,11 @@ impl<'a> Parser<'a> {
                 items.push(Item::Nature(self.parse_nature()?));
             } else if self.check(TokenKind::Eof) {
                 break;
+            } else if attributes.is_empty() && self.check(TokenKind::Semicolon) {
+                // IEEE 1800-2017's empty description item: a stray `;`, most
+                // often written as `endmodule;`. Both reference simulators
+                // accept it in a `.v` source, and it declares nothing.
+                self.advance();
             } else if Self::is_digital_construct_keyword(self.current().kind) {
                 // `connectmodule`, `primitive`, `always`, ... at file scope.
                 return Err(self.unsupported_ams_construct());

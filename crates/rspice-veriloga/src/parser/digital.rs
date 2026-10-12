@@ -17,6 +17,14 @@ use crate::lexer::TokenKind;
 use crate::source::Span;
 use smol_str::SmolStr;
 
+/// The operator an IEEE 1800-2017 section 11.4.1 compound assignment applies.
+/// `>>>` is a [`DigitalExpr`] rather than a [`BinaryOp`], so it has its own arm.
+#[derive(Debug, Clone, Copy)]
+enum CompoundOperator {
+    Binary(BinaryOp),
+    ArithmeticShiftRight,
+}
+
 /// The gate primitives of IEEE 1364-2005 section 7.2 this compiler accepts.
 ///
 /// The eight combinational ones. The tristate family (`bufif0`, `notif1`, ...),
@@ -662,13 +670,194 @@ impl Parser<'_> {
             TokenKind::SystemIdentifier if self.is_root_reference() => {
                 self.parse_digital_assignment()
             }
+            TokenKind::SystemIdentifier => self.parse_system_task_enable(),
             TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::LBrace => {
                 self.parse_digital_assignment()
             }
-            // Every procedural statement outside this wave's scope — system
-            // tasks, `fork`/`join`, `wait`, `disable`, `force`, `assign` as a
+            // IEEE 1800-2017 section 11.4.2's prefix `++i;` / `--i;`, which
+            // both reference simulators accept in a `.v` source.
+            TokenKind::Plus | TokenKind::Minus if self.step_operator_follows() => {
+                let assign = self.parse_prefix_step()?;
+                self.expect(TokenKind::Semicolon)?;
+                Ok(DigitalStatement::BlockingAssign(assign))
+            }
+            // Every procedural statement outside this wave's scope —
+            // `fork`/`join`, `wait`, `disable`, `force`, `assign` as a
             // procedural statement — stops here on its own keyword.
             _ => Err(self.unsupported_digital_statement()),
+        }
+    }
+
+    /// `$name [ ( [arg] {, [arg]} ) ] ;` — a system task enable (IEEE
+    /// 1364-2005 section 10.2.2 / 17).
+    ///
+    /// Every name is accepted here; which ones exist, and with what
+    /// arguments, is the analyzer's question, so an unknown task is refused
+    /// with its name rather than as a token mismatch.
+    fn parse_system_task_enable(&mut self) -> Result<DigitalStatement, ParseError> {
+        let start = self.current_span();
+        let name: SmolStr = self.current().text.clone().unwrap_or_default().into();
+        self.advance();
+        let args = if self.check(TokenKind::LParen) {
+            self.parse_arg_list()?
+        } else {
+            Vec::new()
+        };
+        self.expect(TokenKind::Semicolon)?;
+        Ok(DigitalStatement::SystemTask(SystemFunction {
+            name,
+            args,
+            span: start.extend(self.previous_span()),
+        }))
+    }
+
+    /// Whether the cursor and the next token spell `++` or `--` with nothing
+    /// between them. The lexer has no increment token — `a++b` is `a + +b` in
+    /// a Verilog-A expression — so the pair is recognized here, only where a
+    /// statement can begin or end with one.
+    fn step_operator_follows(&self) -> bool {
+        let current = self.current();
+        let Some(next) = self.tokens.get(self.pos + 1) else {
+            return false;
+        };
+        matches!(current.kind, TokenKind::Plus | TokenKind::Minus)
+            && next.kind == current.kind
+            && current.span.end == next.span.start
+    }
+
+    /// The operator of an IEEE 1800-2017 section 11.4.1 compound assignment
+    /// whose operator token is under the cursor, when the `=` that completes
+    /// it follows immediately.
+    fn compound_assignment_operator(&self) -> Option<CompoundOperator> {
+        let current = self.current();
+        let next = self.tokens.get(self.pos + 1)?;
+        if next.kind != TokenKind::Assign_ || current.span.end != next.span.start {
+            return None;
+        }
+        Some(CompoundOperator::Binary(match current.kind {
+            TokenKind::Plus => BinaryOp::Add,
+            TokenKind::Minus => BinaryOp::Sub,
+            TokenKind::Star => BinaryOp::Mul,
+            TokenKind::Slash => BinaryOp::Div,
+            TokenKind::Percent => BinaryOp::Mod,
+            TokenKind::BitAnd => BinaryOp::BitAnd,
+            TokenKind::BitOr => BinaryOp::BitOr,
+            TokenKind::BitXor => BinaryOp::BitXor,
+            // `<<<=` lexes as the same token as `<<=`, and section 11.4.1
+            // makes them the same operation.
+            TokenKind::Shl => BinaryOp::Shl,
+            TokenKind::Shr => BinaryOp::Shr,
+            TokenKind::ArithShr => return Some(CompoundOperator::ArithmeticShiftRight),
+            _ => return None,
+        }))
+    }
+
+    /// `++lvalue` / `--lvalue`, as the blocking assignment it abbreviates.
+    fn parse_prefix_step(&mut self) -> Result<DigitalAssign, ParseError> {
+        let start = self.current_span();
+        let op = if self.check(TokenKind::Plus) {
+            BinaryOp::Add
+        } else {
+            BinaryOp::Sub
+        };
+        self.advance();
+        self.advance();
+        let target = self.parse_digital_lvalue()?;
+        Ok(Self::stepped_assignment(
+            target,
+            op,
+            start.extend(self.previous_span()),
+        ))
+    }
+
+    /// `lvalue = lvalue op 1`, the meaning IEEE 1800-2017 section 11.4.2 gives
+    /// an increment or decrement used as a statement.
+    fn stepped_assignment(target: DigitalLValue, op: BinaryOp, span: Span) -> DigitalAssign {
+        let one = Expression::Number(NumberLit {
+            value: 1.0,
+            raw: "1".into(),
+            span,
+        });
+        Self::compound_assignment(target, CompoundOperator::Binary(op), one, span)
+    }
+
+    /// `lvalue op= value` as `lvalue = lvalue op (value)` (IEEE 1800-2017
+    /// section 11.4.1). The target's index expressions are read twice; the
+    /// digital subset has no side-effecting expression an index could hold
+    /// except a system function, which section 11.4.1 leaves undefined too.
+    fn compound_assignment(
+        target: DigitalLValue,
+        op: CompoundOperator,
+        value: Expression,
+        span: Span,
+    ) -> DigitalAssign {
+        let read = Box::new(Self::lvalue_as_expression(&target));
+        let value = Box::new(value);
+        DigitalAssign {
+            target,
+            timing: None,
+            value: match op {
+                CompoundOperator::Binary(op) => Expression::Binary(BinaryExpr {
+                    op,
+                    left: read,
+                    right: value,
+                    span,
+                }),
+                CompoundOperator::ArithmeticShiftRight => {
+                    Expression::Digital(DigitalExpr::ArithmeticShiftRight(ArithmeticShiftExpr {
+                        left: read,
+                        right: value,
+                        span,
+                    }))
+                }
+            },
+            span,
+        }
+    }
+
+    /// The expression that reads exactly what an assignment target writes.
+    fn lvalue_as_expression(target: &DigitalLValue) -> Expression {
+        match target {
+            DigitalLValue::Identifier { name, span } => Expression::Identifier(Identifier {
+                name: name.clone(),
+                span: *span,
+            }),
+            DigitalLValue::BitSelect { name, index, span } => {
+                Expression::ArrayAccess(ArrayAccessExpr {
+                    normalized: false,
+                    packed: None,
+                    discrete_validity: None,
+                    array: name.clone(),
+                    index: index.clone(),
+                    span: *span,
+                })
+            }
+            DigitalLValue::PartSelect {
+                name,
+                msb,
+                lsb,
+                span,
+            } => Expression::Digital(DigitalExpr::PartSelect(PartSelectExpr {
+                name: name.clone(),
+                msb: msb.clone(),
+                lsb: lsb.clone(),
+                span: *span,
+            })),
+            DigitalLValue::ArraySelect(select) => {
+                Expression::Digital(DigitalExpr::ArraySelect(select.clone()))
+            }
+            DigitalLValue::Concat { elements, span } => {
+                Expression::ArrayLiteral(ArrayLiteralExpr {
+                    elements: elements
+                        .iter()
+                        .map(|element| {
+                            ArrayLiteralElement::Value(Self::lvalue_as_expression(element))
+                        })
+                        .collect(),
+                    assignment_pattern: false,
+                    span: *span,
+                })
+            }
         }
     }
 
@@ -999,10 +1188,15 @@ impl Parser<'_> {
     // Assignments
     // ------------------------------------------------------------------
 
-    /// `lvalue = expr;` or `lvalue <= expr;`
+    /// `lvalue = expr;` or `lvalue <= expr;`, and the IEEE 1800-2017 section
+    /// 11.4 statement forms `lvalue op= expr;`, `lvalue++;` and `lvalue--;`.
     fn parse_digital_assignment(&mut self) -> Result<DigitalStatement, ParseError> {
         let assignment_start = self.current_span();
         let target = self.parse_digital_lvalue()?;
+        if let Some(assign) = self.parse_assignment_operator_tail(&target, assignment_start)? {
+            self.expect(TokenKind::Semicolon)?;
+            return Ok(DigitalStatement::BlockingAssign(assign));
+        }
         let nonblocking = if self.match_token(TokenKind::Le) {
             true
         } else {
@@ -1033,11 +1227,70 @@ impl Parser<'_> {
         })
     }
 
+    /// After an assignment target: a compound operator (`op=`) with its
+    /// right-hand side, or a postfix `++`/`--`, as the blocking assignment it
+    /// abbreviates. `None` leaves the cursor on a plain `=` or `<=`.
+    ///
+    /// A compound assignment takes no intra-assignment timing control (IEEE
+    /// 1800-2017 section 11.4.1 has no such form), so one is a syntax error
+    /// here rather than a delay silently attached to a read-modify-write.
+    fn parse_assignment_operator_tail(
+        &mut self,
+        target: &DigitalLValue,
+        start: Span,
+    ) -> Result<Option<DigitalAssign>, ParseError> {
+        if self.step_operator_follows() {
+            let op = if self.check(TokenKind::Plus) {
+                BinaryOp::Add
+            } else {
+                BinaryOp::Sub
+            };
+            self.advance();
+            self.advance();
+            return Ok(Some(Self::stepped_assignment(
+                target.clone(),
+                op,
+                start.extend(self.previous_span()),
+            )));
+        }
+        let Some(op) = self.compound_assignment_operator() else {
+            return Ok(None);
+        };
+        self.advance();
+        self.advance();
+        if self.check(TokenKind::Hash) || self.check(TokenKind::At) {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "compound assignment".to_string(),
+                    found: "an intra-assignment timing control; IEEE 1800-2017 section 11.4.1 \
+                            gives `op=` no timing form, so write `x = #d x op y;`"
+                        .to_string(),
+                },
+                self.current_span(),
+            ));
+        }
+        let value = self.parse_expression()?;
+        Ok(Some(Self::compound_assignment(
+            target.clone(),
+            op,
+            value,
+            start.extend(self.previous_span()),
+        )))
+    }
+
     /// The `lvalue = expr` form used by a `for` header, which carries no
-    /// terminating semicolon and no timing control.
+    /// terminating semicolon and no timing control. The IEEE 1800-2017
+    /// section 11.4 forms `i++`, `++i`, `i--`, `--i` and `i op= e` are
+    /// accepted too, as both reference simulators do in a `.v` source.
     fn parse_digital_assignment_expression(&mut self) -> Result<DigitalAssign, ParseError> {
         let start = self.current_span();
+        if self.step_operator_follows() {
+            return self.parse_prefix_step();
+        }
         let target = self.parse_digital_lvalue()?;
+        if let Some(assign) = self.parse_assignment_operator_tail(&target, start)? {
+            return Ok(assign);
+        }
         self.expect(TokenKind::Assign_)?;
         let value = self.parse_expression()?;
         Ok(DigitalAssign {

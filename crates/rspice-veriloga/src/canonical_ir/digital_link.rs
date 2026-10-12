@@ -7,6 +7,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use smol_str::SmolStr;
+
 use super::digital::*;
 use super::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
 use super::{
@@ -112,6 +114,26 @@ struct Layout<'a> {
     first_signal: usize,
     port_names: BTreeMap<&'a str, (usize, DigitalLinkDirection)>,
     map: DigitalLinkedInstance,
+    /// Where this instance's system call sites, scopes and observers start in
+    /// the linked plan's tables.
+    tables: TableOffsets,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TableOffsets {
+    sites: u32,
+    scopes: u32,
+    observers: u32,
+}
+
+/// An instance scope's path with its root renamed to the instance: each
+/// linked instance is a root of the design, named by its instance path (design
+/// P2 section 4.9).
+fn instance_scope_path(instance: &str, path: &str) -> SmolStr {
+    match path.split_once('.') {
+        Some((_, rest)) => format!("{instance}.{rest}").into(),
+        None => instance.into(),
+    }
 }
 
 /// Link independently elaborated plans without recompiling source or executing
@@ -132,6 +154,7 @@ pub fn link_digital_plans(
     let mut slots = Vec::new();
     let mut layouts = Vec::new();
     let mut source_count = 0usize;
+    let mut tables = TableOffsets::default();
     let mut plan = CanonicalDigitalPlan {
         timing: instances[0].plan.timing,
         ..Default::default()
@@ -183,6 +206,7 @@ pub fn link_digital_plans(
             .chain(instance.plan.bit_aliases.iter().map(|item| item.span))
             .chain(instance.plan.real_aliases.iter().map(|item| item.span))
             .chain(instance.plan.analog_probes.iter().map(|item| item.span))
+            .chain(instance.plan.system_calls.iter().map(|item| item.span))
         {
             files.insert(span.source_file_id);
         }
@@ -223,7 +247,21 @@ pub fn link_digital_plans(
                 )));
             }
         }
+        let instance_tables = tables;
+        tables.sites = tables
+            .sites
+            .checked_add(index(instance.plan.system_calls.len(), "system call")?)
+            .ok_or_else(|| error("linked system call count exceeds u32"))?;
+        tables.scopes = tables
+            .scopes
+            .checked_add(index(instance.plan.scopes.len(), "scope")?)
+            .ok_or_else(|| error("linked scope count exceeds u32"))?;
+        tables.observers = tables
+            .observers
+            .checked_add(index(instance.plan.observers.len(), "observer")?)
+            .ok_or_else(|| error("linked observer count exceeds u32"))?;
         layouts.push(Layout {
+            tables: instance_tables,
             instance,
             first_signal,
             port_names,
@@ -464,9 +502,72 @@ pub fn link_digital_plans(
                 if offset & 1023 == 0 {
                     check_cancel(control)?;
                 }
-                relocate_value(&mut value.kind, source, &layout.map, &drivers)?;
+                relocate_value(
+                    &mut value.kind,
+                    source,
+                    &layout.map,
+                    &drivers,
+                    layout.tables,
+                )?;
             }
             plan.processes.push(process);
+        }
+        // Scopes, call sites and observers keep their order, shifted to where
+        // this instance's tables start; every identity they hold moves with
+        // the table it names.
+        for scope in &source.scopes {
+            let mut scope = scope.clone();
+            scope.id = DigitalScopeId(scope.id.0 + layout.tables.scopes);
+            scope.parent = scope
+                .parent
+                .map(|parent| DigitalScopeId(parent.0 + layout.tables.scopes));
+            scope.path = instance_scope_path(layout.instance.name, &scope.path);
+            plan.scopes.push(scope);
+        }
+        for site in &source.system_calls {
+            let mut site = site.clone();
+            site.id = DigitalSystemCallId(site.id.0 + layout.tables.sites);
+            site.scope = DigitalScopeId(site.scope.0 + layout.tables.scopes);
+            site.observer = site.observer.map(|index| index + layout.tables.observers);
+            relocate_span(&mut site.span, &layout.map);
+            for argument in &mut site.arguments {
+                match argument {
+                    DigitalSystemArgument::Array { array, .. } => {
+                        relocate_array(array, &layout.map)?;
+                    }
+                    DigitalSystemArgument::Scope(scope) => {
+                        *scope = DigitalScopeId(scope.0 + layout.tables.scopes);
+                    }
+                    DigitalSystemArgument::Signal(signal) => {
+                        *signal = layout.map.signals[usize::from(*signal)];
+                    }
+                    DigitalSystemArgument::Empty
+                    | DigitalSystemArgument::String(_)
+                    | DigitalSystemArgument::Value { .. }
+                    | DigitalSystemArgument::Output { .. } => {}
+                }
+            }
+            plan.system_calls.push(site);
+        }
+        for observer in &source.observers {
+            let mut observer = observer.clone();
+            observer.site = DigitalSystemCallId(observer.site.0 + layout.tables.sites);
+            observer.process = layout.map.processes[usize::from(observer.process)];
+            for value in &mut observer.function.values {
+                relocate_value(
+                    &mut value.kind,
+                    source,
+                    &layout.map,
+                    &drivers,
+                    layout.tables,
+                )?;
+            }
+            for signal in &mut observer.dependencies {
+                *signal = layout.map.signals[usize::from(*signal)];
+            }
+            observer.dependencies.sort_unstable();
+            observer.dependencies.dedup();
+            plan.observers.push(observer);
         }
         layout.map.drivers = drivers;
     }
@@ -600,13 +701,19 @@ fn relocate_value(
     source: &CanonicalDigitalPlan,
     map: &DigitalLinkedInstance,
     drivers: &BTreeMap<DigitalDriverId, DigitalDriverId>,
+    tables: TableOffsets,
 ) -> LinkResult<()> {
     match kind {
         CfgValueKind::DigitalExpression { function, .. } => {
             for value in &mut function.values {
-                relocate_value(&mut value.kind, source, map, drivers)?;
+                relocate_value(&mut value.kind, source, map, drivers, tables)?;
             }
         }
+        CfgValueKind::DigitalSystemTask { site, .. }
+        | CfgValueKind::DigitalSystemFunction { site, .. } => {
+            *site = DigitalSystemCallId(site.0 + tables.sites);
+        }
+        CfgValueKind::DigitalCallOutput { .. } | CfgValueKind::DigitalPure { .. } => {}
         CfgValueKind::DigitalArrayRead { array, .. }
         | CfgValueKind::DigitalArrayBlockingWrite { array, .. } => {
             // Declaration relocation already checked member contiguity once.

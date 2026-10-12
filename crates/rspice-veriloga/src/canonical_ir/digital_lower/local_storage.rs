@@ -224,7 +224,20 @@ impl ProcessLowerer<'_> {
             DigitalStatement::Forever(statement) => {
                 self.storage_dependencies(&statement.body, required)
             }
-            DigitalStatement::Null(_) => {}
+            // A `$strobe`/`$monitor` reads its arguments in the monitor region,
+            // outside any activation of this process, so every local it names
+            // must live in signal storage (design P2 section 5.2).
+            DigitalStatement::SystemTask(task)
+                if crate::canonical_ir::digital::DigitalSystemCallKind::from_name(&task.name)
+                    .is_some_and(|kind| kind.is_observer()) =>
+            {
+                let mut names = BTreeSet::new();
+                for argument in &task.args {
+                    collect_expression_reads(argument, &mut names);
+                }
+                self.mark_names(&names, required);
+            }
+            DigitalStatement::SystemTask(_) | DigitalStatement::Null(_) => {}
         }
     }
 
@@ -289,6 +302,11 @@ impl ProcessLowerer<'_> {
                     self.event_expression_reads(&delay.value, &mut names);
                 }
                 children.extend(timing.statement.as_deref());
+            }
+            DigitalStatement::SystemTask(task) => {
+                for argument in &task.args {
+                    self.event_expression_reads(argument, &mut names);
+                }
             }
             DigitalStatement::Null(_) => {}
             DigitalStatement::Block(_) => unreachable!("block handled above"),

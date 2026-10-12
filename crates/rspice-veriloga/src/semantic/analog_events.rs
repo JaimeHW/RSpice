@@ -616,7 +616,7 @@ impl Lower {
             DigitalStatement::While(statement) => self.statement(&mut statement.body, locals)?,
             DigitalStatement::Repeat(statement) => self.statement(&mut statement.body, locals)?,
             DigitalStatement::Forever(statement) => self.statement(&mut statement.body, locals)?,
-            DigitalStatement::Null(_) => {}
+            DigitalStatement::SystemTask(_) | DigitalStatement::Null(_) => {}
         }
         Ok(())
     }

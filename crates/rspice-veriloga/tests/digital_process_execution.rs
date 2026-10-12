@@ -13,13 +13,14 @@
 
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalProcessKind,
-    DigitalSchedulingRegion, DigitalSensitivityOrigin,
+    DigitalSchedulingRegion, DigitalSensitivityOrigin, DigitalSystemCall, DigitalSystemCallId,
+    DigitalValueClass,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
     DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment, DigitalEvalError,
-    DigitalProcessOutcome, DigitalRealDrive, DigitalResumeState, DigitalScalar, DigitalSuspension,
-    DigitalUpdate, DigitalWaitRequest, any_term_is_satisfied, apply_deferred, classify_edge,
-    resume, start,
+    DigitalFunctionOutcome, DigitalProcessOutcome, DigitalRealDrive, DigitalResumeState,
+    DigitalScalar, DigitalSuspension, DigitalTaskControl, DigitalTaskOutcome, DigitalUpdate,
+    DigitalWaitRequest, any_term_is_satisfied, apply_deferred, classify_edge, resume, start,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
@@ -583,6 +584,11 @@ struct Store {
     /// passing against a fabricated zero — the same discipline the real store
     /// applies.
     analog: Vec<Option<f64>>,
+    /// The plan's system-call sites, so the store can answer a call the way
+    /// its kind says: halt on `$finish`, one output per declared output.
+    sites: Vec<DigitalSystemCall>,
+    /// Every system call the interpreter made, with its evaluated operands.
+    calls: Vec<(DigitalSystemCallId, Vec<DigitalScalar>)>,
 }
 
 #[test]
@@ -675,6 +681,52 @@ impl DigitalEnvironment for Store {
     fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
         self.analog.get(usize::from(probe)).copied().flatten()
     }
+
+    /// Records the call; halts where the kind halts; answers output `n` with
+    /// the 32-bit value `100 + n`.
+    fn system_task(
+        &mut self,
+        site: DigitalSystemCallId,
+        args: &[DigitalScalar],
+    ) -> Result<DigitalTaskOutcome, DigitalEvalError> {
+        self.calls.push((site, args.to_vec()));
+        let call = &self.sites[site.index()];
+        Ok(DigitalTaskOutcome {
+            control: if call.kind.halts() {
+                DigitalTaskControl::Halt
+            } else {
+                DigitalTaskControl::Continue
+            },
+            outputs: scripted_outputs(call),
+        })
+    }
+
+    /// Records the call and answers 42 (or 0.5 for a real result).
+    fn system_function(
+        &mut self,
+        site: DigitalSystemCallId,
+        args: &[DigitalScalar],
+    ) -> Result<DigitalFunctionOutcome, DigitalEvalError> {
+        self.calls.push((site, args.to_vec()));
+        let call = &self.sites[site.index()];
+        let value = match call.result {
+            Some(DigitalValueClass::FourState { width, .. }) => {
+                DigitalScalar::FourState(FourStateValue::from_u64(width, 42))
+            }
+            Some(DigitalValueClass::Real) => DigitalScalar::Real(0.5),
+            None => panic!("a function site declares its result"),
+        };
+        Ok(DigitalFunctionOutcome {
+            value,
+            outputs: scripted_outputs(call),
+        })
+    }
+}
+
+fn scripted_outputs(call: &DigitalSystemCall) -> Vec<DigitalScalar> {
+    (0..call.outputs)
+        .map(|index| DigitalScalar::FourState(FourStateValue::from_u64(32, 100 + u64::from(index))))
+        .collect()
 }
 
 struct Harness {
@@ -719,6 +771,7 @@ impl Harness {
         // an absence of drivers.
         let reals = vec![0.0; plan.signals.len()];
         let analog = vec![None; plan.analog_probes.len()];
+        let sites = plan.system_calls.clone();
         Self {
             plan,
             store: Store {
@@ -729,6 +782,8 @@ impl Harness {
                 driven: BTreeMap::new(),
                 driven_reals: BTreeMap::new(),
                 analog,
+                sites,
+                calls: Vec::new(),
             },
         }
     }
@@ -903,7 +958,9 @@ fn expect_finished(outcome: DigitalProcessOutcome) {
 fn expect_suspended(outcome: DigitalProcessOutcome) -> DigitalSuspension {
     match outcome {
         DigitalProcessOutcome::Suspended(suspension) => suspension,
-        DigitalProcessOutcome::Finished => panic!("expected the process to suspend"),
+        DigitalProcessOutcome::Finished | DigitalProcessOutcome::Halted(_) => {
+            panic!("expected the process to suspend")
+        }
     }
 }
 
@@ -4040,6 +4097,8 @@ fn bitstoreal_refuses_an_unknown_bit() {
         driven: BTreeMap::new(),
         driven_reals: BTreeMap::new(),
         analog: vec![None; plan.analog_probes.len()],
+        sites: plan.system_calls.clone(),
+        calls: Vec::new(),
     };
     let clk = plan
         .signals
@@ -4127,7 +4186,7 @@ impl Design {
     fn record(&mut self, index: usize, outcome: DigitalProcessOutcome) {
         self.waits[index] = match outcome {
             DigitalProcessOutcome::Suspended(suspension) => Some(suspension.into_parts()),
-            DigitalProcessOutcome::Finished => None,
+            DigitalProcessOutcome::Finished | DigitalProcessOutcome::Halted(_) => None,
         };
     }
 
@@ -8680,4 +8739,274 @@ fn multidimensional_arrays_diagnose_rank_shape_and_storage_errors() {
         );
         assert!(!error.contains("Internal error"), "{error}");
     }
+}
+
+// ===========================================================================
+// System tasks, system functions and the IEEE 1800 statement forms
+// (design P2 sections 1.2, 1.3 and 2)
+// ===========================================================================
+
+fn four_state(scalar: &DigitalScalar) -> String {
+    match scalar {
+        DigitalScalar::FourState(value) => value.spelling(),
+        other => panic!("expected a four-state operand, got {other:?}"),
+    }
+}
+
+/// The host receives a task's operands evaluated where the enable stands,
+/// each self-determined (IEEE 1364-2005 section 17.1.1.1), in argument order.
+#[test]
+fn a_display_hands_the_host_its_operands_evaluated_in_place() {
+    let mut harness = Harness::new(
+        "    reg [3:0] q;\n\
+         \x20   initial begin q = 4'b10x1; $display(\"%b %d\", q, q + 1); q = 0; end",
+    );
+    expect_finished(harness.run());
+    let [(site, args)] = harness.store.calls.as_slice() else {
+        panic!("expected one call, got {:?}", harness.store.calls);
+    };
+    assert_eq!(site.index(), 0);
+    assert_eq!(four_state(&args[0]), "10x1");
+    assert_eq!(four_state(&args[1]), "x".repeat(32));
+    assert_eq!(harness.get("q"), "0000");
+}
+
+/// IEEE 1364-2005 section 17.4.2: `$finish` ends the thread where it stands;
+/// the statements after it never run.
+#[test]
+fn a_halting_task_ends_the_thread_where_it_stands() {
+    let mut harness = Harness::new(
+        "    reg q;\n\
+         \x20   initial begin q = 0; $finish(2); q = 1; end",
+    );
+    let outcome = harness.run();
+    let DigitalProcessOutcome::Halted(site) = outcome else {
+        panic!("expected a halt, got {outcome:?}");
+    };
+    assert_eq!(site, harness.plan.system_calls[0].id);
+    assert_eq!(harness.get("q"), "0");
+}
+
+/// IEEE 1364-2005 section 17.9.1: `$random(seed)` reads the seed and writes
+/// the next one back, and the function value lands in the target.
+#[test]
+fn the_random_seed_is_read_and_written_back_through_the_call() {
+    let mut harness = Harness::new(
+        "    integer seed, r;\n\
+         \x20   initial begin seed = 5; r = $random(seed); end",
+    );
+    expect_finished(harness.run());
+    let [(_, args)] = harness.store.calls.as_slice() else {
+        panic!("expected one call");
+    };
+    assert_eq!(four_state(&args[0]), format!("{:032b}", 5));
+    assert_eq!(harness.get("seed"), format!("{:032b}", 100));
+    assert_eq!(harness.get("r"), format!("{:032b}", 42));
+}
+
+/// The pure functions compute in the interpreter; the host never sees them.
+#[test]
+fn pure_system_functions_compute_without_the_host() {
+    let mut harness = Harness::rnm(
+        "module pure;\n\
+         \x20 reg [7:0] q; reg [3:0] n; integer c, z, x, t, s; real r, h;\n\
+         \x20 initial begin\n\
+         \x20   q = 8'd17; n = 4'b1111; c = $clog2(q); z = $clog2(0); x = $clog2(8'bx);\n\
+         \x20   t = $rtoi(-2.7); s = $signed(n); r = $sqrt(16.0) + $itor(c); h = $pow(2.0, 10);\n\
+         \x20 end\n\
+         endmodule",
+    );
+    expect_finished(harness.run());
+    assert!(harness.store.calls.is_empty());
+    assert_eq!(harness.get("c"), format!("{:032b}", 5));
+    assert_eq!(harness.get("z"), "0".repeat(32));
+    assert_eq!(harness.get("x"), "x".repeat(32));
+    assert_eq!(harness.get("t"), format!("{:032b}", -2i32));
+    assert_eq!(
+        harness.get("s"),
+        "1".repeat(32),
+        "a signed operand extends its sign"
+    );
+    assert_eq!(harness.get_real("r"), 9.0);
+    assert_eq!(harness.get_real("h"), 1024.0);
+}
+
+/// IEEE 1800-2017 sections 11.4.1-2: each compound or step form executes as
+/// the blocking assignment it abbreviates, including as a `for` step.
+#[test]
+fn compound_and_step_assignments_execute_as_their_expansion() {
+    let mut harness = Harness::rnm(
+        "module steps;\n\
+         \x20 reg [7:0] q; reg signed [7:0] s; integer i;\n\
+         \x20 initial begin\n\
+         \x20   q = 8'd3; q += 5; q <<= 2; q -= 1; q ^= 8'h0f; q[7:4] |= 4'h5;\n\
+         \x20   s = -8; s >>>= 1;\n\
+         \x20   i = 0; i++; ++i; i--;\n\
+         \x20   for (i = 0; i < 4; i++) q = q + 1;\n\
+         \x20 end\n\
+         endmodule",
+    );
+    expect_finished(harness.run());
+    // 3 + 5 = 8, << 2 = 32, - 1 = 31, ^ 0x0f = 0x10, | 0x50 = 0x50, + 4 = 0x54.
+    assert_eq!(harness.get("q"), format!("{:08b}", 0x54));
+    assert_eq!(harness.get("s"), format!("{:08b}", -4i8));
+    assert_eq!(harness.get("i"), format!("{:032b}", 4));
+}
+
+/// Corpus design C3's `delay.v` (`tests/mixed-corpus/c03-dcosim/net`): a
+/// five-stage Johnson counter written with `<<=` and closed with
+/// `endmodule;`. Each `#1` step shifts the inverted MSB in.
+#[test]
+fn corpus_c3_delay_counts_through_its_johnson_sequence() {
+    let mut harness = Harness::rnm(
+        "`timescale 1us/100ns\n\
+         module delay(out);\n\
+         \x20  output reg [4:0] out;\n\
+         \x20  reg t;\n\
+         \x20  initial out = 0;\n\
+         \x20  always begin\n\
+         \x20     #1;\n\
+         \x20     t = out[4];\n\
+         \x20     out <<= 1;\n\
+         \x20     out[0] = ~t;\n\
+         \x20  end\n\
+         endmodule; // delay\n",
+    );
+    expect_finished(harness.start(0));
+    let mut suspension = expect_suspended(harness.start(1));
+    let mut sequence = Vec::new();
+    for _ in 0..10 {
+        suspension = expect_suspended(harness.resume(1, suspension.resume_state()));
+        sequence.push(harness.get("out"));
+    }
+    assert_eq!(
+        sequence,
+        [
+            "00001", "00011", "00111", "01111", "11111", "11110", "11100", "11000", "10000",
+            "00000"
+        ]
+    );
+}
+
+/// Corpus design C3's `pwm.v`: `++` statements, `$sin` and `$rtoi`. After the
+/// first full cycle the width is `$rtoi(1000 * (1 + sin(2 pi / 1000)) / 2)`,
+/// which is 503.
+#[test]
+fn corpus_c3_pwm_computes_its_next_width_from_the_sine() {
+    let mut harness = Harness::rnm(
+        "`timescale 1us/100ns\n\
+         `define M_TWO_PI 6.28318530717958647652\n\
+         module pwm(out);\n\
+         \x20  output reg out;\n\
+         \x20  parameter  Cycles = 1000, Samples = 1000;\n\
+         \x20  integer    i, j, width;\n\
+         \x20  real       sine;\n\
+         \x20  initial begin i = 0; j = 0; width = Cycles / 2; out = 0; end\n\
+         \x20  always begin\n\
+         \x20     #1;\n\
+         \x20     ++i;\n\
+         \x20     if (i == width) out = 0;\n\
+         \x20     if (i == Cycles) begin\n\
+         \x20        i = 0;\n\
+         \x20        ++j;\n\
+         \x20        if (j == Samples) j = 0;\n\
+         \x20        sine = $sin(j * `M_TWO_PI / Samples);\n\
+         \x20        width = $rtoi(Samples * (1.0 + sine) / 2.0);\n\
+         \x20        out = (width == 0) ? 0 : 1;\n\
+         \x20     end\n\
+         \x20  end\n\
+         endmodule // pwm\n",
+    );
+    expect_finished(harness.start(0));
+    let mut suspension = expect_suspended(harness.start(1));
+    for _ in 0..1000 {
+        suspension = expect_suspended(harness.resume(1, suspension.resume_state()));
+    }
+    assert_eq!(harness.get("width"), format!("{:032b}", 503));
+    assert_eq!(harness.get("j"), format!("{:032b}", 1));
+    assert_eq!(harness.get("i"), "0".repeat(32));
+    assert_eq!(harness.get("out"), "1");
+    for _ in 0..503 {
+        suspension = expect_suspended(harness.resume(1, suspension.resume_state()));
+    }
+    assert_eq!(harness.get("out"), "0", "the pulse ends at the new width");
+}
+
+/// IEEE 1364-2005 section 17.1.3: the process registers a `$monitor`; its
+/// observer evaluates the operands, on demand, against the current values.
+#[test]
+fn a_monitor_observer_evaluates_its_operands_on_demand() {
+    use rspice_veriloga::canonical_ir::digital_eval::{DigitalEvalScratch, run_observer};
+    let mut harness = Harness::new(
+        "    reg a; reg [1:0] b;\n\
+         \x20   initial $monitor(\"%b %d\", a, b + 1);",
+    );
+    expect_finished(harness.run());
+    assert_eq!(harness.store.calls.len(), 1);
+    assert!(
+        harness.store.calls[0].1.is_empty(),
+        "registration carries no operands"
+    );
+    harness.set("a", "1");
+    harness.set("b", "01");
+    let mut scratch = DigitalEvalScratch::new();
+    run_observer(&harness.plan, 0, &mut harness.store, &mut scratch).expect("the observer runs");
+    let (site, args) = &harness.store.calls[1];
+    assert_eq!(*site, harness.plan.system_calls[0].id);
+    assert_eq!(four_state(&args[0]), "1");
+    assert_eq!(four_state(&args[1]), format!("{:032b}", 2));
+}
+
+/// Linking relocates the site table, the scopes and the observers of every
+/// instance, and an instance's scope root takes the instance's name, which is
+/// what `%m` prints for it.
+#[test]
+fn linking_relocates_sites_scopes_and_observers_per_instance() {
+    use rspice_veriloga::canonical_ir::digital_link::{DigitalLinkInstance, link_digital_plans};
+    let base = Harness::from_source(
+        "module watch; reg q; initial begin : blk $display(\"%m\"); $monitor(q); end endmodule",
+    );
+    let linked = link_digital_plans(
+        &[
+            DigitalLinkInstance {
+                name: "xb",
+                plan: &base.plan,
+                ports: &[],
+            },
+            DigitalLinkInstance {
+                name: "xa",
+                plan: &base.plan,
+                ports: &[],
+            },
+        ],
+        &[],
+        &rspice_veriloga::NoPipelineControl,
+    )
+    .unwrap();
+    let plan = &linked.plan;
+    plan.validate().expect("the linked plan validates");
+    let paths: Vec<&str> = plan
+        .scopes
+        .iter()
+        .map(|scope| scope.path.as_str())
+        .collect();
+    assert_eq!(paths, ["xa", "xa.blk", "xb", "xb.blk"]);
+    assert_eq!(plan.scopes[3].parent, Some(plan.scopes[2].id));
+    for (index, call) in plan.system_calls.iter().enumerate() {
+        assert_eq!(call.id.index(), index);
+    }
+    let scopes: Vec<_> = plan
+        .system_calls
+        .iter()
+        .map(|call| call.scope.index())
+        .collect();
+    assert_eq!(scopes, [1, 1, 3, 3]);
+    assert_eq!(plan.observers.len(), 2);
+    for (observer, instance) in plan.observers.iter().zip(&linked.instances) {
+        assert!(plan.system_calls[observer.site.index()].observer.is_some());
+        assert!(instance.processes.contains(&observer.process));
+        assert_eq!(observer.dependencies.len(), 1);
+        assert!(instance.signals.contains(&observer.dependencies[0]));
+    }
+    assert_ne!(plan.observers[0].site, plan.observers[1].site);
 }

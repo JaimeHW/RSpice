@@ -562,6 +562,7 @@ fn every_wave_one_behavioral_statement_parses() {
             DigitalStatement::NonblockingAssign(_) => "<=",
             DigitalStatement::Timing(_) => "timing",
             DigitalStatement::Block(_) => "block",
+            DigitalStatement::SystemTask(_) => "task",
         })
         .collect();
     assert_eq!(
@@ -657,7 +658,6 @@ fn out_of_scope_procedural_statements_are_refused_by_name() {
         ("force", "force q = 1'b1;"),
         ("release", "release q;"),
         ("deassign", "deassign q;"),
-        ("$display", "$display(\"q\");"),
     ] {
         let message = parse_error(&digital_module(&format!(
             "    wire clk;\n\
@@ -2944,4 +2944,179 @@ fn inline_discrete_disciplines_and_port_prefixes_retain_the_declared_domain() {
         "{definition} module top; wreal sense value; logic value; endmodule"
     ));
     assert!(error.contains("Incompatible disciplines"), "{error}");
+}
+
+// ===========================================================================
+// System tasks and the IEEE 1800 statement forms (design P2 sections 1.2, 1.3)
+// ===========================================================================
+
+/// The statements of one `initial` block, parsed.
+fn initial_statements(section: &str) -> Vec<DigitalStatement> {
+    let file = parse(&digital_module(&format!(
+        "    reg [7:0] q; integer i;\n    initial begin {section} end"
+    )));
+    let module = parsed_module(&file);
+    let DigitalStatement::Block(block) = &module.digital_processes[0].body else {
+        panic!("expected a block body");
+    };
+    block.statements.clone()
+}
+
+/// IEEE 1364-2005 section 17: a system task enable is a statement, with or
+/// without arguments, and an empty argument is kept in its position.
+#[test]
+fn system_task_enables_parse_with_their_arguments() {
+    let statements =
+        initial_statements("$display(\"q=%d\", q,, 3); $finish; $finish(2); $monitoron;");
+    let tasks: Vec<(&str, usize)> = statements
+        .iter()
+        .map(|statement| match statement {
+            DigitalStatement::SystemTask(task) => (task.name.as_str(), task.args.len()),
+            other => panic!("expected a system task, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        tasks,
+        [
+            ("$display", 4),
+            ("$finish", 0),
+            ("$finish", 1),
+            ("$monitoron", 0)
+        ]
+    );
+    let DigitalStatement::SystemTask(display) = &statements[0] else {
+        unreachable!()
+    };
+    assert!(matches!(display.args[0], Expression::StringLit(_)));
+    assert!(matches!(display.args[2], Expression::NullArgument(_)));
+}
+
+/// IEEE 1800-2017 section 11.4.1-2's statement forms, which both reference
+/// simulators accept in a `.v` source (design P2 G2): each is the blocking
+/// assignment it abbreviates.
+#[test]
+fn compound_and_step_assignments_desugar_to_blocking_assignments() {
+    let statements =
+        initial_statements("q <<= 1; q += 2; q >>>= 1; ++i; i++; --i; i--; q[3:0] |= 4'h5;");
+    let forms: Vec<String> = statements
+        .iter()
+        .map(|statement| {
+            let DigitalStatement::BlockingAssign(assign) = statement else {
+                panic!("expected a blocking assignment, got {statement:?}");
+            };
+            assert!(assign.timing.is_none());
+            match &assign.value {
+                Expression::Binary(binary) => format!("{:?}", binary.op),
+                Expression::Digital(DigitalExpr::ArithmeticShiftRight(_)) => ">>>".into(),
+                other => panic!("unexpected right-hand side {other:?}"),
+            }
+        })
+        .collect();
+    assert_eq!(
+        forms,
+        ["Shl", "Add", ">>>", "Add", "Add", "Sub", "Sub", "BitOr"]
+    );
+    // The target is read back as the left operand.
+    let DigitalStatement::BlockingAssign(assign) = &statements[0] else {
+        unreachable!()
+    };
+    let Expression::Binary(binary) = &assign.value else {
+        unreachable!()
+    };
+    assert!(matches!(&*binary.left, Expression::Identifier(identifier) if identifier.name == "q"));
+}
+
+#[test]
+fn a_for_header_accepts_the_step_forms() {
+    for header in [
+        "i = 0; i < 4; i++",
+        "i = 0; i < 4; ++i",
+        "i = 0; i < 4; i += 1",
+    ] {
+        let statements = initial_statements(&format!("for ({header}) q = q + 1;"));
+        let DigitalStatement::For(statement) = &statements[0] else {
+            panic!("expected a for loop for `{header}`");
+        };
+        assert!(
+            matches!(statement.update.value, Expression::Binary(_)),
+            "{header}"
+        );
+    }
+}
+
+/// A compound assignment has no intra-assignment timing form, and two
+/// separated tokens are not an operator.
+#[test]
+fn malformed_compound_assignments_are_refused() {
+    let message = parse_error(&digital_module("    reg q;\n    initial q += #1 2;"));
+    assert!(
+        message.contains("intra-assignment timing control"),
+        "{message}"
+    );
+    let message = parse_error(&digital_module("    reg q;\n    initial q + = 2;"));
+    assert!(!message.is_empty());
+}
+
+/// A stray `;` after `endmodule` is IEEE 1800's empty description item, which
+/// both reference simulators accept (C3 `delay.v`).
+#[test]
+fn a_semicolon_after_endmodule_is_an_empty_item() {
+    let file =
+        parse("module m; reg q; initial q = 0; endmodule; // delay\nmodule n; endmodule;;\n");
+    assert_eq!(file.items.len(), 2);
+}
+
+/// Design P2 section 1.5: a name outside IEEE 1364-2005 section 17 and the
+/// named 1800 extensions is refused by name, and a task and a function cannot
+/// stand in for each other.
+#[test]
+fn system_calls_outside_the_subset_are_refused_by_name() {
+    for (call, expected) in [
+        ("$foo(q);", "`$foo` is not a system task or function"),
+        ("$countdrivers(q);", "annex C informative task"),
+        (
+            "$sdf_annotate(\"x.sdf\");",
+            "`$sdf_annotate` is not supported yet: SDF back-annotation",
+        ),
+        ("q = $display;", "is a system task and returns no value"),
+        ("$clog2(q);", "is a system function and returns a value"),
+        (
+            "q = $dist_uniform(i, 1);",
+            "takes 3 argument(s), and was given 2",
+        ),
+        ("$finish(1, 2);", "takes 0 to 1 argument(s)"),
+        ("q = $random(i + 1);", "must name a variable"),
+    ] {
+        let message = analyze_error(&digital_module(&format!(
+            "    reg [7:0] q; integer i;\n    initial begin {call} end"
+        )));
+        assert!(message.contains(expected), "`{call}`: {message}");
+    }
+}
+
+/// Every design P2 section 1.3 kind is accepted by the front end, including
+/// the file and waveform tasks whose host behaviour lane L5 adds.
+#[test]
+fn every_registered_system_call_is_accepted() {
+    analyze(&digital_module(
+        "    reg [7:0] q, mem [0:3]; integer i, fd; real r;\n\
+         \x20   initial begin\n\
+         \x20     $display(q); $write(q); $displayb(q); $writeh(q); $strobe(q); $monitoro(q);\n\
+         \x20     $monitoron; $monitoroff; $timeformat(-9, 2, \" ns\", 10); $printtimescale;\n\
+         \x20     $info(\"i\"); $warning(\"w\"); $error(\"e\"); $stop; $finish(0);\n\
+         \x20     i = $random; i = $random(i); i = $dist_uniform(i, 0, 9); i = $dist_normal(i, 0, 1);\n\
+         \x20     i = $dist_exponential(i, 3); i = $dist_poisson(i, 3); i = $dist_chi_square(i, 3);\n\
+         \x20     i = $dist_t(i, 3); i = $dist_erlang(i, 2, 3); i = $urandom; i = $urandom_range(4, 1);\n\
+         \x20     i = $test$plusargs(\"V\"); i = $value$plusargs(\"N=%d\", q);\n\
+         \x20     fd = $fopen(\"f.txt\", \"w\"); $fdisplay(fd, q); $fwrite(fd, q); $fstrobe(fd, q);\n\
+         \x20     $fmonitor(fd, q); $fflush(fd); i = $fgetc(fd); i = $ungetc(i, fd); i = $fgets(q, fd);\n\
+         \x20     i = $fscanf(fd, \"%d\", q); i = $sscanf(q, \"%d\", i); i = $fread(mem, fd);\n\
+         \x20     i = $ftell(fd); i = $fseek(fd, 0, 0); i = $rewind(fd); i = $feof(fd); i = $ferror(fd, q);\n\
+         \x20     $fclose(fd); $sformat(q, \"%d\", i); $swrite(q, i); $readmemh(\"m.hex\", mem);\n\
+         \x20     $readmemb(\"m.bin\", mem, 0, 3); $dumpfile(\"d.vcd\"); $dumpvars(0, q); $dumpon;\n\
+         \x20     $dumpoff; $dumpall; $dumplimit(100); $dumpflush; $fatal(1, \"f\");\n\
+         \x20     r = $sin(r) + $ln(2.0) + $pow(r, 2.0) + $atan2(r, 1.0) + $hypot(r, r) + $itor(i);\n\
+         \x20     i = $rtoi(r) + $clog2(q) + $signed(q) + $unsigned(i);\n\
+         \x20   end",
+    ));
 }

@@ -52,6 +52,18 @@ impl PreparedSourceMap {
         }
     }
 
+    /// The original document and line an offset in the expanded text came
+    /// from. A macro-expanded line reports the line of the invocation.
+    pub(crate) fn locate(&self, offset: usize) -> Option<(&Path, usize)> {
+        let index = self
+            .segments
+            .partition_point(|segment| segment.expanded.start <= offset)
+            .checked_sub(1)?;
+        let segment = &self.segments[index];
+        (segment.expanded.contains(&offset) || segment.expanded.end == offset)
+            .then(|| (self.paths[segment.path].as_path(), segment.line))
+    }
+
     pub(crate) fn warnings(
         &self,
         source: &str,

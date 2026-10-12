@@ -1105,6 +1105,11 @@ impl Unroller<'_> {
                     self.substitute_statement(inner);
                 }
             }
+            DigitalStatement::SystemTask(task) => {
+                for argument in &mut task.args {
+                    self.substitute(argument);
+                }
+            }
         }
     }
 

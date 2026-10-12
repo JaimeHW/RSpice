@@ -2475,7 +2475,11 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalSelect { .. }
             | CfgValueKind::DigitalBlockingWrite { .. }
             | CfgValueKind::DigitalNonblockingWrite { .. }
-            | CfgValueKind::DigitalDriverWrite { .. } => {
+            | CfgValueKind::DigitalDriverWrite { .. }
+            | CfgValueKind::DigitalSystemTask { .. }
+            | CfgValueKind::DigitalSystemFunction { .. }
+            | CfgValueKind::DigitalCallOutput { .. }
+            | CfgValueKind::DigitalPure { .. } => {
                 return Err(EmitError::DigitalValueInAnalogEmitter(value));
             }
         })

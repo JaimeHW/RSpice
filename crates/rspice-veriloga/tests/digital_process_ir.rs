@@ -2234,3 +2234,233 @@ fn realtobits_is_sixty_four_bits_and_bitstoreal_takes_sixty_four() {
         "the operand is the sixty-four-bit pattern the format names"
     );
 }
+
+// ===========================================================================
+// System tasks and functions (design P2 sections 1.3 and 2)
+// ===========================================================================
+
+use rspice_veriloga::canonical_ir::digital::{
+    DigitalRadix, DigitalScopeKind, DigitalSystemArgument, DigitalSystemCallKind,
+    DigitalSystemLane, DigitalValueClass,
+};
+use rspice_veriloga::canonical_ir::digital_value::DigitalPureFunction;
+
+/// The `(site, operand count)` of every system task node in a function.
+fn task_nodes(
+    function: &rspice_veriloga::canonical_ir::CfgFunction,
+) -> Vec<(
+    rspice_veriloga::canonical_ir::digital::DigitalSystemCallId,
+    usize,
+)> {
+    function
+        .values
+        .iter()
+        .filter_map(|value| match &value.kind {
+            CfgValueKind::DigitalSystemTask { site, args } => Some((*site, args.len())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every enable is one row of the plan's site table, numbered in source
+/// order, in the module scope `%m` names, with a `$finish` level folded to a
+/// constant rather than kept as an operand.
+#[test]
+fn system_task_enables_become_numbered_sites_in_the_module_scope() {
+    let plan = plan(
+        "    reg [3:0] q;\n\
+         \x20   initial begin $displayb(\"q=\", q); $finish(2); end\n\
+         \x20   always @(q) $writeh(q);",
+    );
+    let kinds: Vec<_> = plan.system_calls.iter().map(|call| call.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            DigitalSystemCallKind::Display(DigitalRadix::Binary),
+            DigitalSystemCallKind::Finish,
+            DigitalSystemCallKind::Write(DigitalRadix::Hex),
+        ]
+    );
+    for (index, call) in plan.system_calls.iter().enumerate() {
+        assert_eq!(call.id.index(), index);
+        assert_eq!(call.scope, plan.scopes[0].id);
+    }
+    assert_eq!(plan.system_calls[0].level, None);
+    assert_eq!(plan.system_calls[1].level, Some(2));
+    assert!(plan.system_calls[1].arguments.is_empty());
+    assert_eq!(
+        plan.system_calls[0].arguments,
+        [
+            DigitalSystemArgument::String("q=".into()),
+            DigitalSystemArgument::Value {
+                operand: 0,
+                class: DigitalValueClass::FourState {
+                    width: 4,
+                    signed: false
+                },
+            },
+        ]
+    );
+    assert_eq!(plan.scopes.len(), 1);
+    assert_eq!(plan.scopes[0].path, "dut");
+    assert_eq!(plan.scopes[0].kind, DigitalScopeKind::Module);
+    assert_eq!(plan.scopes[0].parent, None);
+    let ids: Vec<_> = plan.system_calls.iter().map(|call| call.id).collect();
+    assert_eq!(
+        task_nodes(&plan.processes[0].function),
+        [(ids[0], 1), (ids[1], 0)]
+    );
+    assert_eq!(task_nodes(&plan.processes[1].function), [(ids[2], 1)]);
+    plan.validate().expect("the site table validates");
+}
+
+/// IEEE 1364-2005 section 17.1.1: `%m` names the hierarchical scope, and a
+/// named block is one.
+#[test]
+fn a_named_block_opens_a_scope_under_its_module() {
+    let plan = plan(
+        "    initial begin : outer\n\
+         \x20     begin : inner $display(\"%m\"); end\n\
+         \x20     $display(\"%m\");\n\
+         \x20   end",
+    );
+    let paths: Vec<&str> = plan
+        .scopes
+        .iter()
+        .map(|scope| scope.path.as_str())
+        .collect();
+    assert_eq!(paths, ["dut", "dut.outer", "dut.outer.inner"]);
+    assert_eq!(plan.scopes[1].kind, DigitalScopeKind::Block);
+    assert_eq!(plan.scopes[1].parent, Some(plan.scopes[0].id));
+    assert_eq!(plan.scopes[2].parent, Some(plan.scopes[1].id));
+    let scopes: Vec<_> = plan.system_calls.iter().map(|call| call.scope).collect();
+    assert_eq!(scopes, [plan.scopes[2].id, plan.scopes[1].id]);
+}
+
+/// Design P2 section 2.3: `$monitor` registers once, and its operands are
+/// re-evaluated by a separate pure function on every change of a signal it
+/// reads, so the process carries no operands and the observer carries all.
+#[test]
+fn a_monitor_lowers_its_operands_into_an_observer_function() {
+    let plan = plan(
+        "    reg a; reg [1:0] b;\n\
+         \x20   initial $monitor(\"%b %b\", a, b + 1);",
+    );
+    assert_eq!(plan.observers.len(), 1);
+    let call = &plan.system_calls[0];
+    let observer = &plan.observers[0];
+    assert_eq!(
+        call.kind,
+        DigitalSystemCallKind::Monitor(DigitalRadix::Decimal)
+    );
+    assert_eq!(call.observer, Some(0));
+    assert_eq!(observer.site, call.id);
+    assert_eq!(observer.process, plan.processes[0].id);
+    let mut expected = vec![signal_named(&plan, "a"), signal_named(&plan, "b")];
+    expected.sort();
+    assert_eq!(observer.dependencies, expected);
+    assert_eq!(task_nodes(&plan.processes[0].function), [(call.id, 0)]);
+    assert_eq!(task_nodes(&observer.function), [(call.id, 2)]);
+    plan.validate().expect("the observer validates");
+}
+
+/// An argument the call writes (`$random(seed)`, `$value$plusargs`) is read
+/// as an operand and written back from the call's output, through an ordinary
+/// variable write.
+#[test]
+fn an_output_argument_is_written_back_from_the_call() {
+    let process = only_process(
+        "    integer seed, r;\n\
+         \x20   initial r = $random(seed);",
+    );
+    let kinds = kinds(&process);
+    let call = kinds
+        .iter()
+        .position(|kind| matches!(kind, CfgValueKind::DigitalSystemFunction { args, .. } if args.len() == 1))
+        .expect("the call reads the seed");
+    assert!(
+        kinds.iter().any(|kind| matches!(
+            kind,
+            CfgValueKind::DigitalCallOutput { call: output, index: 0 }
+                if usize::from(*output) == call
+        )),
+        "the seed is written back from output 0"
+    );
+}
+
+/// Pure functions are value nodes, not sites: they have no host behaviour to
+/// journal and no position in the effect order.
+#[test]
+fn pure_system_functions_are_value_nodes_rather_than_sites() {
+    let plan = plan(
+        "    reg [7:0] q; integer i; real r;\n\
+         \x20   initial begin i = $clog2(q) + $signed(q); r = $sqrt(2.0) + $itor(i); i = $rtoi(r); end",
+    );
+    assert!(plan.system_calls.is_empty());
+    let kinds = kinds(&plan.processes[0]);
+    assert!(kinds.iter().any(|kind| matches!(
+        kind,
+        CfgValueKind::DigitalPure {
+            function: DigitalPureFunction::Clog2,
+            ..
+        }
+    )));
+    assert!(kinds.iter().any(|kind| matches!(
+        kind,
+        CfgValueKind::DigitalPure {
+            function: DigitalPureFunction::Math(_),
+            ..
+        }
+    )));
+}
+
+/// Design P2 section 1.3: every kind registers at L1, including the file and
+/// waveform tasks whose host behaviour is lane L5's, so a design that uses one
+/// compiles and is refused at run time by name rather than at compile time.
+#[test]
+fn file_tasks_register_as_lane_l5_sites() {
+    let plan = plan(
+        "    integer fd; reg [7:0] mem [0:3];\n\
+         \x20   initial begin fd = $fopen(\"a.txt\"); $readmemh(\"m.hex\", mem); $dumpvars(0, dut); end",
+    );
+    let lanes: Vec<_> = plan
+        .system_calls
+        .iter()
+        .map(|call| (call.kind, call.kind.lane()))
+        .collect();
+    assert_eq!(
+        lanes,
+        [
+            (DigitalSystemCallKind::Fopen, DigitalSystemLane::Files),
+            (DigitalSystemCallKind::Readmemh, DigitalSystemLane::Files),
+            (DigitalSystemCallKind::Dumpvars, DigitalSystemLane::Files),
+        ]
+    );
+    assert!(matches!(
+        plan.system_calls[1].arguments[1],
+        DigitalSystemArgument::Array { .. }
+    ));
+    assert_eq!(
+        plan.system_calls[2].arguments[1],
+        DigitalSystemArgument::Scope(plan.scopes[0].id)
+    );
+}
+
+/// `%l` and the diagnostic origin need a line: compiling a source records the
+/// one-based line of every site.
+#[test]
+fn every_site_records_its_source_line() {
+    let plan = plan(
+        "    initial begin\n\
+         \x20     $display(\"one\");\n\
+         \x20     $warning(\"two\");\n\
+         \x20   end",
+    );
+    let lines: Vec<u32> = plan
+        .system_calls
+        .iter()
+        .map(|call| call.origin.as_ref().expect("located").line)
+        .collect();
+    // The module header and three declarations precede the section.
+    assert_eq!(lines, [6, 7]);
+}

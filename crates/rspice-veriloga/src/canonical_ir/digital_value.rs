@@ -1432,9 +1432,174 @@ pub fn real_compare(op: RealCompareOp, left: f64, right: f64) -> FourStateValue 
     })
 }
 
+// ============================================================================
+// Pure system functions
+// ============================================================================
+
+/// A pure system function, evaluated the same way in a process and in a
+/// constant expression (design P2 section 5.1). The impure ones — `$random`,
+/// `$test$plusargs`, file I/O — are host calls instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalPureFunction {
+    /// A real-valued function of IEEE 1364-2005 section 17.11.2.
+    Math(DigitalMathFunction),
+    /// `$clog2`, section 17.11.1.
+    Clog2,
+}
+
+/// The real math functions of IEEE 1364-2005 section 17.11.2, plus the
+/// truncation `$rtoi` performs (section 17.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalMathFunction {
+    Ln,
+    Log10,
+    Exp,
+    Sqrt,
+    Floor,
+    Ceil,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
+    /// Toward zero: `$rtoi`'s conversion before it takes the integer.
+    Truncate,
+    Pow,
+    Atan2,
+    Hypot,
+}
+
+impl DigitalMathFunction {
+    /// The function a `$name` spells.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "$ln" => Self::Ln,
+            "$log10" => Self::Log10,
+            "$exp" => Self::Exp,
+            "$sqrt" => Self::Sqrt,
+            "$floor" => Self::Floor,
+            "$ceil" => Self::Ceil,
+            "$sin" => Self::Sin,
+            "$cos" => Self::Cos,
+            "$tan" => Self::Tan,
+            "$asin" => Self::Asin,
+            "$acos" => Self::Acos,
+            "$atan" => Self::Atan,
+            "$sinh" => Self::Sinh,
+            "$cosh" => Self::Cosh,
+            "$tanh" => Self::Tanh,
+            "$asinh" => Self::Asinh,
+            "$acosh" => Self::Acosh,
+            "$atanh" => Self::Atanh,
+            "$pow" => Self::Pow,
+            "$atan2" => Self::Atan2,
+            "$hypot" => Self::Hypot,
+            _ => return None,
+        })
+    }
+
+    pub const fn arity(self) -> usize {
+        match self {
+            Self::Pow | Self::Atan2 | Self::Hypot => 2,
+            _ => 1,
+        }
+    }
+
+    /// Apply to IEEE 754 doubles, with the C library's answers outside each
+    /// function's domain (a NaN or an infinity, never a refusal), as section
+    /// 17.11.2 specifies by naming the C functions.
+    pub fn apply(self, arguments: &[f64]) -> f64 {
+        let x = arguments.first().copied().unwrap_or(f64::NAN);
+        let y = arguments.get(1).copied().unwrap_or(f64::NAN);
+        match self {
+            Self::Ln => x.ln(),
+            Self::Log10 => x.log10(),
+            Self::Exp => x.exp(),
+            Self::Sqrt => x.sqrt(),
+            Self::Floor => x.floor(),
+            Self::Ceil => x.ceil(),
+            Self::Sin => x.sin(),
+            Self::Cos => x.cos(),
+            Self::Tan => x.tan(),
+            Self::Asin => x.asin(),
+            Self::Acos => x.acos(),
+            Self::Atan => x.atan(),
+            Self::Sinh => x.sinh(),
+            Self::Cosh => x.cosh(),
+            Self::Tanh => x.tanh(),
+            Self::Asinh => x.asinh(),
+            Self::Acosh => x.acosh(),
+            Self::Atanh => x.atanh(),
+            Self::Truncate => x.trunc(),
+            Self::Pow => x.powf(y),
+            Self::Atan2 => x.atan2(y),
+            Self::Hypot => x.hypot(y),
+        }
+    }
+}
+
+/// `$clog2(n)` (IEEE 1364-2005 section 17.11.1): the ceiling of the base-two
+/// logarithm of `n` read as unsigned, and 0 for 0. The result is a 32-bit
+/// integer; an argument with an `x` or `z` bit has no logarithm and gives `x`.
+pub fn clog2(value: &FourStateValue) -> FourStateValue {
+    if value.has_unknown() {
+        return FourStateValue::splat(32, FourStateBit::Unknown);
+    }
+    // The highest set bit, and whether any lower bit is set: ceil(log2 n) is
+    // the highest bit's position, plus one unless n is a power of two.
+    let mut highest = None;
+    let mut lower = false;
+    for index in (0..value.width()).rev() {
+        if value.bit(index) == FourStateBit::One {
+            if highest.is_none() {
+                highest = Some(index);
+            } else {
+                lower = true;
+                break;
+            }
+        }
+    }
+    let result = match highest {
+        None | Some(0) => 0,
+        Some(position) => position + u32::from(lower),
+    };
+    FourStateValue::from_u64(32, u64::from(result))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clog2_is_the_ceiling_logarithm_and_zero_for_zero_and_one() {
+        let cases = [
+            (0u64, 0u64),
+            (1, 0),
+            (2, 1),
+            (3, 2),
+            (4, 2),
+            (5, 3),
+            (17, 5),
+            (1 << 40, 40),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(
+                clog2(&FourStateValue::from_u64(64, input)).to_u64(),
+                Some(expected),
+                "$clog2({input})"
+            );
+        }
+        let mut unknown = FourStateValue::from_u64(8, 4);
+        unknown.set_bit(7, FourStateBit::HighImpedance);
+        assert_eq!(clog2(&unknown).spelling(), "x".repeat(32));
+    }
 
     fn parse(spelling: &str) -> FourStateValue {
         let bits: Vec<FourStateBit> = spelling

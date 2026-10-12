@@ -93,8 +93,10 @@ mod constants;
 mod expressions;
 mod local_arrays;
 mod local_storage;
+mod system_calls;
 pub(crate) use connection_shapes::ConnectionShapes;
 use constants::ResolvedConstants;
+use system_calls::{CallTables, PlanCalls, ScopeFrame};
 
 use super::cfg::{CfgTerminator, CfgValueKind, CfgValueType, CfgVariable, DigitalWait, SsaBuilder};
 use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
@@ -275,7 +277,7 @@ impl DigitalLoweringDiagnostic {
 /// diagnostics, and the compiler's own path ([`lower_module`]) keeps it so the
 /// author's constructs and the compiler's invariants are rendered apart.
 pub fn lower(digital: &AnalyzedDigital) -> Result<CanonicalDigitalPlan, Vec<IrDiagnostic>> {
-    lower_with_analog_variables(digital, &HashMap::new()).map_err(|diagnostics| {
+    lower_with_analog_variables(digital, &HashMap::new(), "top").map_err(|diagnostics| {
         diagnostics
             .into_iter()
             .map(|entry| entry.diagnostic)
@@ -315,7 +317,7 @@ impl AnalogVariable {
 pub(crate) fn lower_module(
     module: &crate::semantic::AnalyzedModule,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
-    lower_with_analog_variables(&module.digital, &analog_variables(module))
+    lower_with_analog_variables(&module.digital, &analog_variables(module), &module.name)
 }
 
 fn analog_variables(module: &crate::semantic::AnalyzedModule) -> HashMap<SmolStr, AnalogVariable> {
@@ -414,6 +416,7 @@ fn bind_variable_events(
 fn lower_with_analog_variables(
     digital: &AnalyzedDigital,
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
+    root_name: &str,
 ) -> Result<CanonicalDigitalPlan, Vec<DigitalLoweringDiagnostic>> {
     if digital.is_empty() {
         return Ok(CanonicalDigitalPlan::default());
@@ -649,6 +652,22 @@ fn lower_with_analog_variables(
     // probe keeps its id across a recompilation for the reason a driver keeps
     // its index.
     let mut probes = Vec::new();
+    // The scopes `%m` names: the root module, then each instance frame in the
+    // elaboration's depth-first order, so a parent always precedes its child.
+    let mut calls = PlanCalls::default();
+    let root_scope =
+        calls.add_module_scope(None, root_name.into(), root_name.into(), digital.time_scale);
+    let frame_scope_frames: Vec<ScopeFrame> = digital
+        .instances
+        .iter()
+        .map(|instance| {
+            let path: SmolStr = format!("{root_name}.{}", instance.path).into();
+            let parent = path
+                .rsplit_once('.')
+                .and_then(|(parent, _)| calls.module_scopes.get(parent).copied());
+            calls.add_module_scope(parent, path, instance.module.clone(), instance.time_scale)
+        })
+        .collect();
     for process in &digital.processes {
         match lower_process(
             process,
@@ -662,6 +681,8 @@ fn lower_with_analog_variables(
             analog_variables,
             &mut probes,
             digital.time_scale,
+            &mut calls,
+            &root_scope,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -685,11 +706,12 @@ fn lower_with_analog_variables(
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
-    for ((instance, scope), constants) in digital
+    for (((instance, scope), constants), frame_scope) in digital
         .instances
         .iter()
         .zip(&frame_scopes)
         .zip(&instance_constants)
+        .zip(&frame_scope_frames)
     {
         let frame_array_names: HashSet<_> = instance
             .signals
@@ -725,6 +747,8 @@ fn lower_with_analog_variables(
                 &frame_variables,
                 &mut probes,
                 instance.time_scale,
+                &mut calls,
+                frame_scope,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -977,6 +1001,9 @@ fn lower_with_analog_variables(
         drivers,
         analog_probes: probes,
         absdelta,
+        scopes: calls.scopes,
+        system_calls: calls.sites,
+        observers: calls.observers,
     }
     .seal()
     // Structural validation of the plan this pass just built, reached only
@@ -1078,6 +1105,7 @@ fn lower_continuous_assign(
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
         local_arrays: Vec::new(),
@@ -1362,8 +1390,11 @@ fn lower_process(
     analog_variables: &HashMap<SmolStr, AnalogVariable>,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
+    calls: &mut PlanCalls,
+    scope: &ScopeFrame,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
+        calls: calls.tables_for(Some(scope)),
         analog_local_inputs: process.analog_local_inputs.clone(),
         process: None,
         local_arrays: Vec::new(),
@@ -1440,6 +1471,7 @@ fn lower_process(
     }
 
     local_arrays.extend(lowerer.local_arrays);
+    calls.absorb(lowerer.calls);
     let function = lowerer.builder.finish(entry).map_err(|error| {
         vec![DigitalLoweringDiagnostic::invariant(
             format!("lowering process {id} produced an invalid graph: {error}"),
@@ -1670,6 +1702,9 @@ impl ProcessBuilder {
 }
 
 struct ProcessLowerer<'a> {
+    /// System call sites, observers and named-block scopes this lowering
+    /// produces, and the scope it is in.
+    calls: CallTables,
     analog_local_inputs: HashMap<Span, SmolStr>,
     process: Option<DigitalProcessId>,
     local_arrays: Vec<super::digital::DigitalArray>,
@@ -2080,6 +2115,7 @@ impl ProcessLowerer<'_> {
             }
             DigitalStatement::BlockingAssign(_)
             | DigitalStatement::NonblockingAssign(_)
+            | DigitalStatement::SystemTask(_)
             | DigitalStatement::Null(_) => {}
         }
     }
@@ -2224,13 +2260,21 @@ impl ProcessLowerer<'_> {
                     return block;
                 };
                 self.scopes.push(scope);
+                let named = inner
+                    .name
+                    .as_ref()
+                    .is_some_and(|name| self.enter_named_scope(name));
                 let mut current = block;
                 for statement in &inner.statements {
                     current = self.statement(current, statement);
                 }
+                if named {
+                    self.leave_named_scope();
+                }
                 self.scopes.pop();
                 current
             }
+            DigitalStatement::SystemTask(task) => self.system_task_statement(block, task),
             DigitalStatement::BlockingAssign(assign) => self.assign(block, assign, false),
             DigitalStatement::NonblockingAssign(assign) => self.assign(block, assign, true),
             DigitalStatement::Conditional(conditional) => {

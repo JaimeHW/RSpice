@@ -1280,6 +1280,33 @@ pub enum CfgValueKind {
         target: DigitalWriteTarget,
         value: ValueId,
     },
+    /// A system task enable (IEEE 1364-2005 section 17), ordered like a write
+    /// and typed [`CfgValueType::Effect`]. `args` are the site's evaluated
+    /// operands in [`DigitalSystemArgument::Value`] order; the site table in
+    /// the plan holds the literal, empty and output arguments around them.
+    ///
+    /// [`DigitalSystemArgument::Value`]: super::digital::DigitalSystemArgument::Value
+    DigitalSystemTask {
+        site: super::digital::DigitalSystemCallId,
+        args: Vec<ValueId>,
+    },
+    /// A system function call, typed by the function's result.
+    DigitalSystemFunction {
+        site: super::digital::DigitalSystemCallId,
+        args: Vec<ValueId>,
+    },
+    /// Output `index` of the system call `call`, which defines it. It is read
+    /// in the call's own block, after the call and before any suspension.
+    DigitalCallOutput {
+        call: ValueId,
+        index: u32,
+    },
+    /// A pure system function of its operands (`$clog2`, `$sin`, ...),
+    /// evaluated alike at run time and in a constant expression.
+    DigitalPure {
+        function: digital_value::DigitalPureFunction,
+        args: Vec<ValueId>,
+    },
     /// Ordered analog system-task invocation. It has no numerical result and
     /// is never a common subexpression, derivative, or reusable cached value.
     AnalogTask(crate::analog_tasks::AnalogTaskCall<ValueId, super::SourceSpanRef>),
@@ -1414,7 +1441,11 @@ impl CfgValueKind {
             | Self::DigitalSelect { .. }
             | Self::DigitalBlockingWrite { .. }
             | Self::DigitalNonblockingWrite { .. }
-            | Self::DigitalDriverWrite { .. } => true,
+            | Self::DigitalDriverWrite { .. }
+            | Self::DigitalSystemTask { .. }
+            | Self::DigitalSystemFunction { .. }
+            | Self::DigitalCallOutput { .. }
+            | Self::DigitalPure { .. } => true,
         }
     }
 
@@ -1764,6 +1795,10 @@ impl CfgValueKind {
             Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
                 vec![*value]
             }
+            Self::DigitalSystemTask { args, .. }
+            | Self::DigitalSystemFunction { args, .. }
+            | Self::DigitalPure { args, .. } => args.clone(),
+            Self::DigitalCallOutput { call, .. } => vec![*call],
 
             _ => Vec::new(),
         }
@@ -2152,6 +2187,14 @@ impl CfgValueKind {
             Self::DigitalBlockingWrite { value, .. } | Self::DigitalDriverWrite { value, .. } => {
                 *value = map(*value)
             }
+            Self::DigitalSystemTask { args, .. }
+            | Self::DigitalSystemFunction { args, .. }
+            | Self::DigitalPure { args, .. } => {
+                for value in args {
+                    *value = map(*value);
+                }
+            }
+            Self::DigitalCallOutput { call, .. } => *call = map(*call),
 
             _ => {}
         }

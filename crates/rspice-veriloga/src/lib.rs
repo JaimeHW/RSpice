@@ -981,6 +981,7 @@ impl VerilogACompiler {
             &analyzed,
             &executable,
             measurements,
+            None,
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir)?;
@@ -1336,9 +1337,11 @@ impl VerilogACompiler {
             analyzed,
             &module,
             measurements,
+            None,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_canonical_ir_artifact_from_module(
         &self,
         source_package: &str,
@@ -1346,6 +1349,7 @@ impl VerilogACompiler {
         analyzed: &semantic::AnalyzedFile,
         module: &semantic::AnalyzedModule,
         measurements: &mut metrics::MetricsRecorder,
+        source_map: Option<&prepared_diagnostics::PreparedSourceMap>,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
         // Processes now have a canonical form, so this level no longer refuses
         // them: it lowers them, and the refusal moves outward to the backends
@@ -1356,6 +1360,32 @@ impl VerilogACompiler {
         // prevent.
         let digital = canonical_ir::digital_lower::lower_module(module)
             .map_err(Self::digital_lowering_error)?;
+        // A system call reports the file and line it was written on. The
+        // prepared source map knows the original document behind each
+        // expanded line; without one, the line is the preprocessed text's.
+        let digital = digital
+            .locate_system_calls(|span| {
+                // Only the compiled document's own text is indexed here; a
+                // span in a connection library has no line in it.
+                if span.source_file_id != 0 {
+                    return None;
+                }
+                let offset = span.start;
+                if let Some(map) = source_map {
+                    return map.locate(offset as usize).map(|(path, line)| {
+                        canonical_ir::digital::DigitalSourceLine {
+                            file: path.display().to_string().into(),
+                            line: line as u32,
+                        }
+                    });
+                }
+                let prefix = source.get(..offset as usize)?;
+                Some(canonical_ir::digital::DigitalSourceLine {
+                    file: source_package.into(),
+                    line: prefix.bytes().filter(|byte| *byte == b'\n').count() as u32 + 1,
+                })
+            })
+            .map_err(Self::canonical_ir_error)?;
         let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         measurements.checkpoint(PipelinePhase::HirLowering)?;
@@ -2142,6 +2172,7 @@ impl VerilogACompiler {
             &analyzed,
             &executable,
             &mut measurements,
+            Some(&prepared.source_map),
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir)?;

@@ -1982,6 +1982,9 @@ impl SemanticAnalyzer {
                     self.check_digital_statement(inner, signals, index);
                 }
             }
+            DigitalStatement::SystemTask(task) => {
+                self.check_system_call(task, true, signals, index);
+            }
             DigitalStatement::Null(_) => {}
         }
     }
@@ -2854,17 +2857,164 @@ impl SemanticAnalyzer {
                             function.span,
                         );
                     }
-                } else {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(format!(
-                            "system function `{}` inside a discrete-domain expression is not \
-                             supported yet",
-                            function.name
-                        )),
-                        function.span,
-                    );
+                    for argument in &function.args {
+                        self.check_digital_expression(argument, signals, index);
+                    }
+                    return;
                 }
-                for argument in &function.args {
+                self.check_system_call(function, false, signals, index);
+            }
+        }
+    }
+
+    /// Check a system task enable (`task`) or a system function call in an
+    /// expression against design P2 section 1.3's subset.
+    ///
+    /// The pure functions (`$signed`, `$unsigned`, `$rtoi`, `$itor`,
+    /// `$clog2` and the section 17.11.2 math) are operators; the rest are host
+    /// calls registered in [`crate::canonical_ir::digital::DigitalSystemCallKind`].
+    /// A name outside both is refused by name: user system tasks would need
+    /// VPI/PLI, which RSpice does not load (plan D-G).
+    fn check_system_call(
+        &mut self,
+        call: &SystemFunction,
+        task: bool,
+        signals: &[AnalyzedDigitalSignal],
+        index: &HashMap<SmolStr, usize>,
+    ) {
+        use crate::canonical_ir::digital::{DigitalArgumentUse, DigitalSystemCallKind};
+        let name = call.name.as_str();
+        let pure_arity = match name {
+            "$signed" | "$unsigned" | "$rtoi" | "$itor" | "$clog2" => Some(1),
+            _ => crate::canonical_ir::digital_value::DigitalMathFunction::from_name(name)
+                .map(|function| function.arity()),
+        };
+        if let Some(arity) = pure_arity {
+            if task {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "`{name}` is a system function and returns a value; IEEE 1364-2005 \
+                         section 17 does not let it be enabled as a task"
+                    )),
+                    call.span,
+                );
+            } else if call.args.len() != arity {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "`{name}` takes {arity} argument(s), and was given {}",
+                        call.args.len()
+                    )),
+                    call.span,
+                );
+            }
+            for argument in &call.args {
+                self.check_digital_expression(argument, signals, index);
+            }
+            return;
+        }
+        let Some(kind) = DigitalSystemCallKind::from_name(name) else {
+            let detail = if name == "$sdf_annotate" {
+                // SDF back-annotation arrives with plan P6.5.
+                "`$sdf_annotate` is not supported yet: SDF back-annotation of `specify` \
+                 timing is not implemented"
+                    .to_string()
+            } else if matches!(
+                name,
+                "$countdrivers"
+                    | "$getpattern"
+                    | "$save"
+                    | "$restart"
+                    | "$incsave"
+                    | "$scope"
+                    | "$showscopes"
+                    | "$showvars"
+                    | "$list"
+                    | "$key"
+                    | "$nokey"
+                    | "$log"
+                    | "$nolog"
+                    | "$reset"
+                    | "$reset_count"
+                    | "$reset_value"
+                    | "$input"
+            ) {
+                format!(
+                    "`{name}` is an IEEE 1364-2005 annex C informative task, which RSpice does \
+                     not implement (RSpice checkpoints replace `$save`/`$restart`)"
+                )
+            } else if name.starts_with("$q_")
+                || name.starts_with("$async$")
+                || name.starts_with("$sync$")
+            {
+                format!(
+                    "`{name}` is a stochastic-queue or PLA task (IEEE 1364-2005 sections 17.5 \
+                     and 17.6), which RSpice does not implement"
+                )
+            } else {
+                format!(
+                    "`{name}` is not a system task or function of the supported Verilog subset \
+                     (IEEE 1364-2005 section 17); a user-defined system task needs VPI/PLI, \
+                     which RSpice does not load"
+                )
+            };
+            self.record_error_at(SemanticErrorKind::UnsupportedFeature(detail), call.span);
+            for argument in &call.args {
+                self.check_digital_expression(argument, signals, index);
+            }
+            return;
+        };
+        if !task && !kind.is_function() {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{name}` is a system task and returns no value; enable it as a statement"
+                )),
+                call.span,
+            );
+        }
+        let (minimum, maximum) = kind.arity();
+        let count = call.args.len();
+        if count < minimum || maximum.is_some_and(|maximum| count > maximum) {
+            let expected = match maximum {
+                Some(maximum) if maximum == minimum => format!("{minimum}"),
+                Some(maximum) => format!("{minimum} to {maximum}"),
+                None => format!("at least {minimum}"),
+            };
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "`{name}` takes {expected} argument(s), and was given {count}"
+                )),
+                call.span,
+            );
+        }
+        for (position, argument) in call.args.iter().enumerate() {
+            match kind.argument_use(position) {
+                DigitalArgumentUse::Input => {
+                    self.check_digital_expression(argument, signals, index)
+                }
+                DigitalArgumentUse::Reference => match argument {
+                    Expression::Identifier(_) | Expression::NullArgument(_) => {}
+                    other => self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "argument {} of `{name}` names a module instance, block or signal, \
+                             not an expression",
+                            position + 1
+                        )),
+                        other.span(),
+                    ),
+                },
+                DigitalArgumentUse::Output
+                | DigitalArgumentUse::InOut
+                | DigitalArgumentUse::ArrayOutput => {
+                    if super::digital_walk::system_call_output_name(argument).is_none() {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "argument {} of `{name}` is written by the call, so it must name \
+                                 a variable",
+                                position + 1
+                            )),
+                            argument.span(),
+                        );
+                    }
                     self.check_digital_expression(argument, signals, index);
                 }
             }

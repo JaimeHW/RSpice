@@ -14,6 +14,10 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 159 gives the digital plan a system-call site table, `%m` scopes
+/// and observer functions, four process value kinds (system task, system
+/// function, call output, pure function), and relocates sites and renames
+/// scope roots on link; plan content identities change for every digital plan.
 /// Version 158 retains formal ports, typed port directions, and parameter units,
 /// descriptions and dependent-bound text for the runtime ABI.
 /// Version 157 enforces array replacement on externally specialized root sizes.
@@ -147,7 +151,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 158;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 159;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {
