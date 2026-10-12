@@ -150,6 +150,11 @@ path = "tests/gf180mcu_devices.rs"
 required-features = ["circuit-suites"]
 
 [[test]]
+name = "mixed_corpus"
+path = "tests/mixed_corpus.rs"
+required-features = ["mixed-corpus"]
+
+[[test]]
 name = "ngspice_regression"
 path = "tests/ngspice_regression.rs"
 required-features = ["circuit-suites"]
@@ -203,6 +208,12 @@ name = "rspice-ngspice-oracle-capture"
 path = "src/bin/ngspice_oracle_capture.rs"
 test = false
 required-features = ["circuit-suites"]
+
+[[bin]]
+name = "rspice-mixed-corpus"
+path = "src/bin/mixed_corpus.rs"
+test = false
+required-features = ["mixed-corpus"]
 
 [[bin]]
 name = "rspice-xyce-case-runner"
