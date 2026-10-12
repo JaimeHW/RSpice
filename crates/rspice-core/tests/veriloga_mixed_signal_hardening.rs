@@ -3934,66 +3934,87 @@ fn a_coupled_code_model_ring_inside_the_floor_is_bounded_as_the_code_model_it_is
     );
 }
 
-/// Assert that every ring publication after the enable sits on the floor grid
-/// the landing contract places it on, and that the run reached `tstop`.
+/// Assert that the trace records the ring's own schedule, that the analog
+/// points it was delivered at stand on the floor grid, and that the run
+/// reached `tstop`.
 ///
+/// Two clocks, one claim each. The code model keeps its own times and its own
+/// ordering, and a waveform records an event at the instant it happened
+/// (a4108d405), so after the enable the trace holds every publication of the
+/// gate at `armed + k * delay`, alternating, with none missing. The analog
+/// side owes that schedule a timepoint at or after each event, and
 /// `landed_veriloga_event_time` lands a run of sub-floor activations on
-/// `origin + k * hard_min` — the enable is the origin — so the ring's exact
-/// picosecond schedule is observable only as those points. That is the whole
-/// claim: the code model keeps its own times and its own ordering, and the
-/// analog side owes it a timepoint at or after each, which is the one it
-/// lands.
-fn assert_ring_lands_on_the_floor_grid(result: &TransientResult, tstop: f64, publications: usize) {
+/// `origin + k * hard_min` with the enable as the origin, so every accepted
+/// point after the enable is on that grid.
+fn assert_ring_schedule_and_landing(
+    result: &TransientResult,
+    tstop: f64,
+    delay: f64,
+    publications: usize,
+) {
     let last = result.time.last().copied().unwrap_or(0.0);
     assert!(
         last >= tstop - RING_SOLVER_FLOOR,
         "the run must reach tstop {tstop:e}s, it stopped at {last:e}s"
     );
-    let ring: Vec<f64> = digital_points(result, "rb")
+    let ring: Vec<(f64, String)> = digital_points(result, "rb")
         .into_iter()
-        .map(|(time, _)| time)
-        .filter(|time| *time > RING_ARMED_AT)
+        .filter(|(time, _)| *time > RING_ARMED_AT)
         .collect();
+    println!("{} ring publications after the enable", ring.len());
     assert!(
         ring.len() >= publications,
-        "the ring must publish at {publications} of the landed points between the enable and \
-         {tstop:e}s, saw {ring:?}"
+        "the ring must publish {publications} times between the enable and {tstop:e}s, \
+         saw {ring:?}"
     );
-    for time in &ring {
+    for (index, (time, state)) in ring.iter().enumerate() {
+        let expected = RING_ARMED_AT + (index + 1) as f64 * delay;
+        assert!(
+            (time - expected).abs() <= RING_SOLVER_FLOOR * 1.0e-6,
+            "ring publication {index} is recorded at {time:e}s, not at the gate's own instant \
+             {expected:e}s: {ring:?}"
+        );
+        let toggled = if index % 2 == 0 { "One" } else { "Zero" };
+        assert_eq!(
+            state, toggled,
+            "ring publication {index} must invert the one before it: {ring:?}"
+        );
+    }
+    let landed: Vec<f64> = result
+        .time
+        .iter()
+        .copied()
+        .filter(|time| *time > RING_ARMED_AT)
+        .collect();
+    for time in &landed {
         let steps = ((time - RING_ARMED_AT) / RING_SOLVER_FLOOR).round();
         assert!(
-            steps >= 1.0,
-            "no publication may be recorded inside the first landed step — the picosecond the \
-             gate asked for is not an analog instant: {ring:?}"
-        );
-        assert!(
-            (time - (RING_ARMED_AT + steps * RING_SOLVER_FLOOR)).abs()
-                <= RING_SOLVER_FLOOR * 1.0e-6,
-            "ring publication at {time:e}s is not on the floor grid the landing contract \
-             places it on ({RING_ARMED_AT:e}s + k x {RING_SOLVER_FLOOR:e}s): {ring:?}"
+            steps >= 1.0
+                && (time - (RING_ARMED_AT + steps * RING_SOLVER_FLOOR)).abs()
+                    <= RING_SOLVER_FLOOR * 1.0e-6,
+            "accepted point {time:e}s is not on the floor grid the landing contract places the \
+             schedule on ({RING_ARMED_AT:e}s + k x {RING_SOLVER_FLOOR:e}s): {landed:?}"
         );
     }
 }
 
 /// **Property 5, case f.** The events of a schedule inside the floor are
-/// delivered, at the timepoints the landing contract coalesces them onto, and
-/// the run finishes.
+/// delivered at the timepoints the landing contract coalesces them onto,
+/// recorded at their own instants, and the run finishes.
 ///
 /// The same ring as case e over an interval a floor march crosses, so the
 /// delivery is readable from the trace instead of inferred from a count, and
 /// nothing else drives `rb`: every value in it is one the code model published
 /// inside a wave the stepper opened.
 ///
-/// Which is also why the count of publications is one rather than five. Ten
-/// picosecond activations fall inside each ten-picosecond step, and coalescing
-/// is what the landing contract does with them: they are drained in queue
-/// order at the one analog timepoint, the gate re-evaluates after each, and
-/// what the accepted point commits is the net value of the whole window. An
-/// even number of inversions later that value is the one already standing, so
-/// the trace — a change list — holds the first publication and nothing after
-/// it. The observable claim is the one asserted: the run reaches `tstop`, and
-/// every value it does record sits on the floor grid rather than at a
-/// picosecond instant the solver never visited.
+/// Ten picosecond activations fall inside each ten-picosecond step, and
+/// coalescing is what the landing contract does with them on the analog side:
+/// they are drained in queue order at the one analog timepoint and the gate
+/// re-evaluates after each, so the accepted grid is the floor grid — the same
+/// fourteen points the ten-picosecond cadence of case g accepts. The digital
+/// side keeps every one of them: each publication is recorded at the
+/// picosecond it happened at, not at the analog point that delivered it, so
+/// the trace holds the full one-picosecond oscillation.
 #[test]
 fn a_coupled_code_model_schedule_inside_the_floor_is_delivered_at_the_landed_points() {
     const TSTOP: f64 = 1.05e-9;
@@ -4003,7 +4024,7 @@ fn a_coupled_code_model_schedule_inside_the_floor_is_delivered_at_the_landed_poi
     let deck = code_model_ring_deck(&enable, "1p", TSTOP, MAX_STEP);
     let result = run(&deck, TSTOP, MAX_STEP);
     pin_fixture("hardening_ring_1p", &result);
-    assert_ring_lands_on_the_floor_grid(&result, TSTOP, 1);
+    assert_ring_schedule_and_landing(&result, TSTOP, 1.0e-12, 49);
 }
 
 /// **Property 5, case g.** A cadence exactly at the solver's minimum step runs
@@ -4035,7 +4056,7 @@ fn a_coupled_code_model_cadence_exactly_at_the_solver_floor_runs() {
     let deck = code_model_ring_deck(&enable, "10p", TSTOP, MAX_STEP);
     let result = run(&deck, TSTOP, MAX_STEP);
     pin_fixture("hardening_ring_10p", &result);
-    assert_ring_lands_on_the_floor_grid(&result, TSTOP, 5);
+    assert_ring_schedule_and_landing(&result, TSTOP, 1.0e-11, 5);
 }
 
 //=============================================================================
