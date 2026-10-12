@@ -1354,20 +1354,27 @@ impl Engine {
         })
     }
 
+    /// Whether the transient Newton solves for corrections against directly
+    /// assembled physical currents. Promoted BJTs always do. A centered
+    /// linear capacitor does too, except beside B3SOI: the direct form is
+    /// accepted on an absolute KCL residual, and the B3SOI DD/FD/PD stamps
+    /// settle at about 1e-9 A on their own rows, so such decks keep the
+    /// affine form and its row-relative residual test.
     pub(super) fn requires_transient_correction_form(
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
         Self::requires_vbic_correction_form(circuit)
-            || circuit
-                .capacitors
-                .stamps
-                .iter()
-                .enumerate()
-                .any(|(index, stamp)| {
-                    circuit.capacitors.ic_branch_indices[index].is_none()
-                        && circuit.capacitors.value_expression(index).is_none()
-                        && stamp.pp.row != stamp.nn.row
-                })
+            || (!circuit.has_b3soi_devices()
+                && circuit
+                    .capacitors
+                    .stamps
+                    .iter()
+                    .enumerate()
+                    .any(|(index, stamp)| {
+                        circuit.capacitors.ic_branch_indices[index].is_none()
+                            && circuit.capacitors.value_expression(index).is_none()
+                            && stamp.pp.row != stamp.nn.row
+                    }))
     }
 
     /// Test the nonlinear residual with the active transient solver's native
