@@ -95,6 +95,7 @@ impl Engine {
                 final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
+                state_capture: None,
             },
         )?;
         let trace = trace.into_inner();

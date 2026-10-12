@@ -747,6 +747,10 @@ use state::{
     AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
 };
 mod state_advanced_mos;
+// Small-signal analysis at a transient state is the production caller; until
+// it lands the entry point is reached only by its own tests.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(in crate::engine) mod state_capture;
 mod state_commit;
 mod state_recovery;
 mod state_transmission_lines;
@@ -1019,6 +1023,9 @@ struct TransientResumePlan<'a> {
     final_checkpoint_retention: FinalCheckpointRetention,
     scheduled_checkpoint_times: &'a [Value],
     checkpoint_observer: Option<&'a TransientCheckpointObserver<'a>>,
+    /// Accepted states to capture live: each requested time is a hard
+    /// breakpoint, and the run stops once the last one is captured.
+    state_capture: Option<&'a state_capture::TransientStateCapture<'a>>,
 }
 
 /// Circuit construction and resume validation finish before the integration
@@ -3180,6 +3187,7 @@ impl Engine {
                     final_checkpoint_retention: FinalCheckpointRetention::Retained,
                     scheduled_checkpoint_times: &[],
                     checkpoint_observer: None,
+                    state_capture: None,
                 },
             )
             .and_then(Self::require_retained_final_checkpoint)
@@ -3269,6 +3277,7 @@ impl Engine {
                     final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                     scheduled_checkpoint_times: checkpoint_times,
                     checkpoint_observer: None,
+                    state_capture: None,
                 },
             )
             .map(|(result, _, checkpoints)| (result, checkpoints))
@@ -3405,6 +3414,7 @@ impl Engine {
                     final_checkpoint_retention: FinalCheckpointRetention::Retained,
                     scheduled_checkpoint_times: &[],
                     checkpoint_observer: None,
+                    state_capture: None,
                 },
             )
             .and_then(Self::require_retained_final_checkpoint)
@@ -3552,6 +3562,7 @@ impl Engine {
                 final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                 scheduled_checkpoint_times: &[],
                 checkpoint_observer: None,
+                state_capture: None,
             },
         )
         .map(|(result, _, _)| result)
@@ -4170,6 +4181,7 @@ impl Engine {
             final_checkpoint_retention,
             scheduled_checkpoint_times,
             checkpoint_observer,
+            state_capture,
         } = plan;
         let mut scheduled_checkpoints = Vec::with_capacity(if checkpoint_observer.is_some() {
             0
@@ -4851,6 +4863,13 @@ impl Engine {
             tstop,
             self.config.resource_limits.max_analysis_points,
         )?;
+        // A captured state is an accepted point at exactly the requested
+        // time, so every requested time is a solver stop.
+        if let Some(capture) = state_capture {
+            for &time in capture.times() {
+                Self::add_breakpoint_if_in_range(&mut breakpoints, time, tstop);
+            }
+        }
         Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
         let mut pending_dynamic_tline_breakpoints = resume
             .map(|checkpoint| checkpoint.pending_tline_arrivals().to_vec())
@@ -6806,6 +6825,14 @@ impl Engine {
         // ceiling are numerical work, not retained results. Termination is
         // governed by the per-point retry/minimum-step/livelock policies,
         // cooperative abort, and the explicit analysis/result resource limits.
+        //
+        // The starting point is accepted state too, so a capture requested at
+        // the run's first time is taken here.
+        if let Some(capture) = state_capture
+            && capture.offer(t, &circuit, &solution)?
+        {
+            tstop = t;
+        }
         while t < tstop {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
@@ -10792,6 +10819,11 @@ impl Engine {
                         retained_result_values,
                         abort,
                     )?;
+                    if let Some(capture) = state_capture
+                        && capture.offer(t, &circuit, &solution)?
+                    {
+                        tstop = t;
+                    }
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -11380,6 +11412,11 @@ impl Engine {
                 retained_result_values,
                 abort,
             )?;
+            if let Some(capture) = state_capture
+                && capture.offer(t, &circuit, &solution)?
+            {
+                tstop = t;
+            }
             if first_accepted_transient_step {
                 let span_ceiling = xyce_breakpoint_span_ceiling.ceiling();
                 let accepted_max_step = self

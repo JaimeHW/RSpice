@@ -168,6 +168,7 @@ impl Engine {
                     final_checkpoint_retention: FinalCheckpointRetention::Discarded,
                     scheduled_checkpoint_times: stream.times,
                     checkpoint_observer: Some(&observe),
+                    state_capture: None,
                 },
             )
             .map(|(result, _, _)| result)
