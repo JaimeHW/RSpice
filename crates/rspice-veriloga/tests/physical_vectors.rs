@@ -820,8 +820,7 @@ connectrules selected; connect sample split; endconnectrules
     let mismatched = source.replace("W(2+5*COUNT)", "W(3+5*COUNT)");
     let error = compiler
         .compile_runtime(&mismatched, Some("top"))
-        .err()
-        .expect("mismatched mixed width")
+        .expect_err("mismatched mixed width")
         .to_string();
     assert!(
         error.contains("requires 13 lanes") && error.contains("supplies 12"),
@@ -2501,8 +2500,7 @@ fn foreign_explicit_branches_reject_missing_or_incompatible_targets() {
         );
         let error = VerilogACompiler::default()
             .compile_runtime(&source, Some("top"))
-            .err()
-            .expect("invalid target must fail")
+            .expect_err("invalid target must fail")
             .to_string();
         assert!(error.contains(diagnostic), "{usage}: {error}");
     }
@@ -2599,8 +2597,7 @@ fn foreign_upward_resolution_rejects_shadowed_paths_wrong_roots_and_cycles() {
     ] {
         let error = compiler()
             .compile_runtime(source, Some("top"))
-            .err()
-            .expect("invalid selected hierarchy")
+            .expect_err("invalid selected hierarchy")
             .to_string();
         assert!(
             error.contains(diagnostic),
@@ -2801,8 +2798,7 @@ connectrules selected; connect drive #(.N(2),.GAIN(3)); endconnectrules
         .unwrap();
     let error = invalid
         .compile_runtime_with_connections("top", &configuration, &NoPipelineControl)
-        .err()
-        .expect("missing insertion ancestor must be diagnosed")
+        .expect_err("missing insertion ancestor must be diagnosed")
         .to_string();
     assert!(
         error.contains("group") && error.contains("scope"),

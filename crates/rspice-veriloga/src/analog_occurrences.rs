@@ -21,6 +21,13 @@ impl AnalogOccurrenceSource {
         })
     }
 
+    // Decoded only by the native ABI and the wasm32 runtime; a host
+    // `wasm-jit` build emits the operands but never reads them back.
+    #[cfg(any(
+        feature = "native",
+        all(feature = "wasm-jit", target_arch = "wasm32"),
+        test
+    ))]
     pub(crate) fn from_operands(group: f64, member: f64) -> Result<Option<Self>, VmError> {
         if !group.is_finite()
             || group.fract() != 0.0
