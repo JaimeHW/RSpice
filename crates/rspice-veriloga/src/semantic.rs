@@ -1547,6 +1547,7 @@ impl SemanticAnalyzer {
             Vec::new()
         };
         let mut local_arrays = Vec::new();
+        let mut refused_parameter_array = false;
         for (local, parameter_index) in declarations {
             if local {
                 let mut localparam = module.localparams[parameter_index].clone();
@@ -1639,6 +1640,7 @@ impl SemanticAnalyzer {
                 materialized_array_default = materialized_array_default
                     .map(|expression| self.normalize_integer_expression(&expression))
                     .transpose()?;
+                let errors_before = self.errors.len();
                 self.validate_parameter_array_declaration(
                     param,
                     materialized_array_default.as_ref(),
@@ -1646,7 +1648,9 @@ impl SemanticAnalyzer {
                     &module.parameters,
                     &parameter_indices,
                 );
-                if param.param_type == ParamType::Integer {
+                if self.errors.len() > errors_before {
+                    refused_parameter_array = true;
+                } else if param.param_type == ParamType::Integer {
                     materialized_array_default = materialized_array_default
                         .map(|expression| self.coerce_integer_parameter_array_default(expression))
                         .transpose()?;
@@ -1955,6 +1959,18 @@ impl SemanticAnalyzer {
                 alias: decl.alias.clone(),
                 target,
             });
+        }
+
+        // A parameter array the declaration validator refused has no storage
+        // to build, and nothing after this point can analyze a use of one.
+        // Report what the validator found rather than whichever generic
+        // storage or initializer error its malformed shape would raise next.
+        if refused_parameter_array && !self.errors.is_empty() {
+            let errors = std::mem::take(&mut self.errors)
+                .into_iter()
+                .map(CompileError::Semantic)
+                .collect();
+            return Err(CompileError::multiple(errors));
         }
 
         // Parameter arrays share checked numeric storage with variables, but
