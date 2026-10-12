@@ -600,6 +600,69 @@ fn the_installed_shot_noise_amplitude_follows_the_operating_point() {
     );
 }
 
+/// A switch injects the Johnson noise of its present conductance, `4kT·G`
+/// (ngspice `sw/swnoise.c`), and the accepted-step refresh moves it with the
+/// switch: the same train is installed at the OFF resistance and re-derived
+/// at the ON one once the control crosses the threshold.
+#[test]
+fn a_switch_injects_the_thermal_noise_of_its_present_conductance() {
+    const FMAX: Value = 1.0e9;
+    const RON: Value = 10.0;
+    const ROFF: Value = 1.0e6;
+    let nt = 1.0 / (2.0 * FMAX);
+    let tstop = 1024.0 * nt;
+    let config = TransientNoiseConfig {
+        fmax: FMAX,
+        fmin: None,
+        seed: Some(11),
+        scale: 1.0,
+    };
+    let deck = format!(
+        "switch thermal noise follows its state\n\
+         V1 in 0 1\n\
+         R1 in out 1k\n\
+         S1 out 0 c 0 SW1\n\
+         VC c 0 0\n\
+         .MODEL SW1 SW VT=1 VH=0.2 RON={RON} ROFF={ROFF}\n\
+         .END\n"
+    );
+    let flat_amplitude = |resistance: Value| (4.0 * boltzmann() * T / resistance * FMAX).sqrt();
+
+    let (mut circuit, mut runtime, solution) = installed(&deck, config, tstop);
+    let position = runtime
+        .entries
+        .iter()
+        .position(|entry| entry.identity.device.eq_ignore_ascii_case("S1"))
+        .expect("the switch exports a thermal-noise mechanism");
+    assert_eq!(runtime.entries[position].law, AmplitudeLaw::Flat);
+    against_oracle(
+        "installed OFF switch amplitude against sqrt(4kT/ROFF*fmax)",
+        circuit
+            .transient_device_noise()
+            .expect("installed")
+            .amplitude(position),
+        flat_amplitude(ROFF),
+        1.0e-9,
+    );
+
+    let control = circuit.get_node_by_name("c").expect("the control node");
+    let mut moved = solution.clone();
+    moved[control - 1] = 2.0;
+    circuit.update_nonlinear(&moved);
+    runtime
+        .refresh(&mut circuit, &moved, nt, &NoAbort)
+        .expect("the refresh re-derives the switch's density");
+    against_oracle(
+        "refreshed ON switch amplitude against sqrt(4kT/RON*fmax)",
+        circuit
+            .transient_device_noise()
+            .expect("installed")
+            .amplitude(position),
+        flat_amplitude(RON),
+        1.0e-9,
+    );
+}
+
 /// Spectre practice, observed through a run: the injected density follows the
 /// instantaneous bias, not the operating point the run started from.
 ///

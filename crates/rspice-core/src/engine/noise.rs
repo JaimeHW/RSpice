@@ -1866,6 +1866,79 @@ impl Engine {
         Ok(sources)
     }
 
+    /// The thermal noise of every switch's present conductance: `4kT·G`
+    /// across its terminals at the circuit temperature, for voltage-,
+    /// current- and expression-controlled switches alike.
+    ///
+    /// ngspice evaluates exactly this source for its `S` and `W` devices
+    /// (`src/spicelib/devices/sw/swnoise.c` and `csw/cswnoise.c`:
+    /// `NevalSrc(THERMNOISE, pos, neg, on ? onConduct : offConduct)`). `G` is
+    /// the conductance the small-signal network stamps at the same bias, so
+    /// the source and the admittance it drives are one resistor. ngspice's own
+    /// small-signal state differs here: its AC and noise loads take the switch
+    /// state from `CKTstate1`, which a DC operating point never writes
+    /// (`swload.c` under `MODEINITSMSIG`), so after `.op` it evaluates every
+    /// switch at its OFF conductance, in `.AC` as in `.NOISE`. The noise
+    /// follows the operating point RSpice's own AC stamp uses. Xyce gives its
+    /// switch no noise source (`N_DEV_SW.C` has no `getNumNoiseSources`); a
+    /// resistance with no Johnson noise is not physical, so the source is
+    /// collected in every dialect, as the native MOS6 flicker law is.
+    fn switch_thermal_noise_sources(
+        circuit: &CircuitData,
+        solution: &[Value],
+    ) -> Result<Vec<NoiseSource>, SimulationError> {
+        let mut sources = Vec::with_capacity(
+            circuit.vswitches.len() + circuit.iswitches.len() + circuit.generic_switches.len(),
+        );
+        let switches = circuit
+            .vswitches
+            .iter()
+            .map(|switch| {
+                (
+                    &switch.name,
+                    switch.node_pos,
+                    switch.node_neg,
+                    switch.small_signal_conductance(solution),
+                )
+            })
+            .chain(circuit.iswitches.iter().map(|switch| {
+                (
+                    &switch.name,
+                    switch.node_pos,
+                    switch.node_neg,
+                    switch.small_signal_conductance(solution),
+                )
+            }))
+            .chain(circuit.generic_switches.iter().map(|switch| {
+                (
+                    &switch.name,
+                    switch.node_pos,
+                    switch.node_neg,
+                    switch.conductance(),
+                )
+            }));
+        for (name, node_pos, node_neg, conductance) in switches {
+            if !conductance.is_finite() || conductance <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "switch '{name}' reports an invalid noise conductance {conductance:e} S"
+                )));
+            }
+            let resistance = Self::noise_resistance_from_conductance(name, conductance)?
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Noise source '{name}' unexpectedly has zero conductance"
+                    ))
+                })?;
+            sources.push(NoiseSource::thermal(
+                name.clone(),
+                node_pos,
+                node_neg,
+                resistance,
+            ));
+        }
+        Ok(sources)
+    }
+
     /// The terminal pair one element of a code model's analog output drives.
     fn xspice_output_element_nodes(
         instance: &crate::xspice::XspiceInstance,
@@ -2625,6 +2698,8 @@ impl Engine {
                 }
             }
         }
+
+        noise_sources.extend(Self::switch_thermal_noise_sources(circuit, dc_solution)?);
 
         // Diode shot noise (2qI) and KF flicker, both across the junction
         // (the builder externalizes RS onto an internal anode node, so

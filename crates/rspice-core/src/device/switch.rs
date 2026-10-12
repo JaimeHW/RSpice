@@ -565,6 +565,21 @@ impl VoltageSwitch {
         self.current_resistance
     }
 
+    /// The main-branch conductance the small-signal stamp uses at
+    /// `solution`: the switch's present conductance, and so the resistor
+    /// whose Johnson noise `.NOISE` and transient noise inject.
+    pub(crate) fn small_signal_conductance(&self, solution: &[Value]) -> Value {
+        let voltage = |node: NodeId| {
+            if node == 0 {
+                0.0
+            } else {
+                solution.get(node - 1).copied().unwrap_or(Value::NAN)
+            }
+        };
+        self.control_sensitivity(voltage(self.ctrl_pos) - voltage(self.ctrl_neg))
+            .0
+    }
+
     /// Whether every scalar needed by the ordinary and exact-HB memoryless
     /// laws has a physical, directly representable value.
     ///
@@ -1113,6 +1128,17 @@ impl CurrentSwitch {
     /// Get current resistance
     pub fn resistance(&self) -> Value {
         self.current_resistance
+    }
+
+    /// The main-branch conductance the small-signal stamp uses at
+    /// `solution`: the switch's present conductance, and so the resistor
+    /// whose Johnson noise `.NOISE` and transient noise inject.
+    pub(crate) fn small_signal_conductance(&self, solution: &[Value]) -> Value {
+        let ictrl = match self.ctrl_branch {
+            Some(branch) if branch > 0 && branch <= solution.len() => solution[branch - 1],
+            _ => 0.0,
+        };
+        self.control_sensitivity(ictrl).0
     }
 
     /// Commit hysteresis-side state after an accepted transient timestep.
