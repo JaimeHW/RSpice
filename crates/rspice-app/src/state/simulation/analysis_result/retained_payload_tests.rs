@@ -297,15 +297,23 @@ fn retained_waveforms_require_exact_finite_aligned_unique_evidence() {
             .contains("coordinates")
     );
 
-    let non_finite = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
-        WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, f64::NAN], "#00aaff"),
-    ]);
-    assert!(
-        non_finite
-            .validate_retained_evidence()
-            .expect_err("non-finite retained samples must fail closed")
-            .contains("non-finite")
-    );
+    // A NaN value is an unavailable sample, which only an imported result may
+    // carry; an infinite value is never valid.
+    for (value, reason) in [
+        (f64::NAN, "unavailable sample"),
+        (f64::INFINITY, "non-finite"),
+    ] {
+        let non_finite =
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                WaveformData::new("V(out)", vec![0.0, 1.0], vec![0.25, value], "#00aaff"),
+            ]);
+        assert!(
+            non_finite
+                .validate_retained_evidence()
+                .expect_err("non-finite native retained samples must fail closed")
+                .contains(reason)
+        );
+    }
 
     let duplicated = AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
         WaveformData::new("V(out)", vec![0.0], vec![0.25], "#00aaff"),
