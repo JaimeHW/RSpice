@@ -538,11 +538,14 @@ impl Engine {
                     circuit.state_dimension()
                 );
             }
+            // Delayed corners re-sample the travelling-wave coordinates, so
+            // the coarse Jacobian need not describe this shooting basis.
             let fine = self.pss_solve_grid(
                 circuit,
                 matrix,
                 config,
                 ShootingState::new(initial, coarse.state.period),
+                None,
                 abort,
             )?;
             *iterations += fine.iterations;

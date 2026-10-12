@@ -119,8 +119,10 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 6.055_454_452_393_343e-6;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-// Diode junction limiters start every period from the solved orbit bias.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 106;
+// Each chord step with another mesh's Jacobian must cut the residual tenfold.
+const PSS_CHORD_CONTRACTION: Value = 0.1;
+// Refined meshes take chord steps with the coarser mesh's Jacobian.
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 107;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -2384,9 +2386,13 @@ impl Engine {
             &mut matrix,
             &config,
             ShootingState::new(current_state, detected_period),
+            None,
             abort,
         )?;
         let mut iteration = coarse.iterations;
+        // The last Jacobian differentiated on a mesh that chord steps have
+        // since carried to finer meshes without differentiating them.
+        let mut chord_jacobian: Option<Vec<Vec<Value>>> = None;
         loop {
             coarse = self.pss_resolve_delay_corners(
                 &mut circuit,
@@ -2415,11 +2421,11 @@ impl Engine {
                 indices
             });
             circuit.integration_steps = finer_steps;
-            let fine_initial_state = if circuit
+            let resamples_delay_basis = circuit
                 .tlines
                 .iter()
-                .any(|line| !line.is_memoryless_two_port())
-            {
+                .any(|line| !line.is_memoryless_two_port());
+            let fine_initial_state = if resamples_delay_basis {
                 self.pss_set_reactive_state(&mut circuit, &coarse.state.x0)?;
                 circuit.delay_basis = circuit
                     .delay_basis
@@ -2447,6 +2453,10 @@ impl Engine {
                     &mut matrix,
                     &config,
                     ShootingState::new(fine_initial_state, coarse.state.period),
+                    // A refined delay basis re-samples the wave coordinates.
+                    (!resamples_delay_basis)
+                        .then(|| coarse.jacobian.as_deref().or(chord_jacobian.as_deref()))
+                        .flatten(),
                     abort,
                 )
                 .map_err(|error| match error {
@@ -2466,6 +2476,10 @@ impl Engine {
                     &mut matrix,
                     &config,
                     ShootingState::new(fine.state.x0.clone(), fine.state.period),
+                    fine.jacobian
+                        .as_deref()
+                        .or(coarse.jacobian.as_deref())
+                        .or(chord_jacobian.as_deref()),
                     abort,
                 );
                 circuit.probe_precision_floor = false;
@@ -2505,7 +2519,12 @@ impl Engine {
                 circuit.delay_basis = coarse_delay_basis;
                 break;
             }
-            coarse = fine;
+            let previous = std::mem::replace(&mut coarse, fine);
+            if coarse.jacobian.is_some() {
+                chord_jacobian = None;
+            } else if previous.jacobian.is_some() {
+                chord_jacobian = previous.jacobian;
+            }
         }
         let PssGridSolution {
             state: mut shooting_state,
@@ -2619,12 +2638,23 @@ impl Engine {
 
     /// Solve one deterministic mesh. Grid refinement happens only between
     /// complete solves; every Jacobian/monodromy perturbation replays this mesh.
+    ///
+    /// A driven solve may start from the Jacobian of another mesh of the same
+    /// shooting basis, such as the coarser grid whose orbit seeds this one.
+    /// The two period maps differ only by their discretization, so chord
+    /// steps with that Jacobian close the orbit at one traversal each, where
+    /// a fresh central-difference Jacobian costs two traversals per state.
+    /// A chord step is repeated only while each one cuts the residual by
+    /// `PSS_CHORD_CONTRACTION`; otherwise the solve differentiates its own
+    /// mesh. Convergence is certified on this mesh's traversal either way,
+    /// and the returned Jacobian is only ever one differentiated on it.
     fn pss_solve_grid(
         &self,
         circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         config: &PssConfig,
         mut shooting_state: ShootingState,
+        chord: Option<&[Vec<Value>]>,
         abort: &dyn AbortSignal,
     ) -> Result<PssGridSolution, SimulationError> {
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
@@ -2638,6 +2668,10 @@ impl Engine {
         // preconditioner even after a matrix-free step makes it too stale for
         // Floquet reporting.
         let mut preconditioner_jacobian: Option<Vec<Vec<Value>>> = None;
+        let mut chord = chord.filter(|jacobian| {
+            !config.is_autonomous() && jacobian.len() == shooting_state.dimension()
+        });
+        let mut chord_residual: Option<Value> = None;
 
         loop {
             if abort.is_aborted() {
@@ -2688,6 +2722,27 @@ impl Engine {
             // A nonconverged orbit is not retained while sensitivity workers
             // integrate their state-only perturbations.
             drop(waveform);
+
+            if let Some(jacobian) = chord {
+                let residual = shooting_state.residual_norm();
+                if chord_residual
+                    .is_none_or(|previous| residual <= PSS_CHORD_CONTRACTION * previous)
+                {
+                    let delta = self.pss_solve_with_integral_constants(
+                        circuit,
+                        &shooting_state,
+                        jacobian,
+                        &shooting_state.residual,
+                        config,
+                        abort,
+                    )?;
+                    shooting_state.update_x0(&delta, solver.damping);
+                    chord_residual = Some(residual);
+                    iteration += 1;
+                    continue;
+                }
+                chord = None;
+            }
 
             // Compute Newton step using a finite-difference Jacobian whose
             // columns integrate perturbed periods in parallel on per-worker
