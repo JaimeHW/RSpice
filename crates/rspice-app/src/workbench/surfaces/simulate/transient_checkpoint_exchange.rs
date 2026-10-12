@@ -1,6 +1,8 @@
 //! Exchange accepted transient images without converting packed bytes to text.
+use super::page_kit::{Tone, note_line, rule_row};
 use crate::io::file_exchange::{self, FileKind};
 use crate::product::{ContentDigest, ProjectId};
+use crate::ui::widgets::Button;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_results::transient_checkpoint::TransientCheckpointEvidence;
 
@@ -186,15 +188,30 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
     };
     let mut open = inspection.owner == Owner::of(&app.state);
     if open {
-        egui::Window::new("Transient checkpoint").id(inspection_id()).open(&mut open)
-            .default_width(520.0).show(ctx, |ui| {
-                ui.label(&inspection.label);
-                ui.label(format!("Accepted time: {:.17e} s", inspection.checkpoint.accepted_time()));
-                ui.label(format!("Retained bytes: {}", inspection.checkpoint.bytes().len()));
-                ui.label(format!("Content identity: {}", inspection.checkpoint.digest()));
-                ui.label("Resume continues from this accepted state. Results begin no earlier than this time; the analysis Start time still applies. Earlier waveform samples remain in the original run. Set the stop time later than the checkpoint and keep compatible circuit and solver settings.");
-                if ui.button("Export checkpoint…").clicked() {
-                    export(ctx, &mut app.state, &inspection.checkpoint);
+        egui::Window::new("Transient checkpoint")
+            .id(inspection_id())
+            .open(&mut open)
+            .default_width(520.0)
+            .show(ctx, |ui| {
+                let checkpoint = &inspection.checkpoint;
+                rule_row(ui, "Checkpoint", &inspection.label);
+                rule_row(
+                    ui,
+                    "Accepted time",
+                    &format!("{:.17e} s", checkpoint.accepted_time()),
+                );
+                rule_row(ui, "Retained bytes", &checkpoint.bytes().len().to_string());
+                rule_row(ui, "Content identity", &checkpoint.digest().to_string());
+                note_line(
+                    ui,
+                    "Resume continues from this accepted state. Results begin no earlier than \
+                     this time; the analysis Start time still applies. Earlier waveform samples \
+                     remain in the original run. Set the stop time later than the checkpoint and \
+                     keep compatible circuit and solver settings.",
+                    Tone::Dim,
+                );
+                if Button::new("Export checkpoint…").show(ui).clicked() {
+                    export(ctx, &mut app.state, checkpoint);
                 }
             });
     }

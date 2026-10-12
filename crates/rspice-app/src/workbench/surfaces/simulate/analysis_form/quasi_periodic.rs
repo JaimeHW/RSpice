@@ -11,8 +11,8 @@ use crate::simulation::plan::{
 };
 
 use super::{
-    QuantityPresentationPolicy, UiNumberLocale, choice_row, clear_pending_cell,
-    frequency_sweep_fields, full_width_field, input_row, input_row_enabled, switch_row,
+    QuantityPresentationPolicy, UiNumberLocale, action_line, choice_row, clear_pending_cell,
+    frequency_sweep_fields, full_width_field, input_row, input_row_enabled, sub_header, switch_row,
 };
 
 /// Render the QPSS fields.

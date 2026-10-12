@@ -1,9 +1,11 @@
 //! Portable trial journals and a small, cached inspection view.
 use rspice_formats::monte_carlo_checkpoint as checkpoint_file;
 
+use super::page_kit::{Tone, note_line, rule_row};
 use crate::io::file_exchange::{self, FileKind};
 use crate::product::ProjectId;
 use crate::state::MonteCarloCheckpointEvidence;
+use crate::ui::widgets::Button;
 use crate::workbench::{AppState, RSpiceApp};
 
 pub(super) enum Action {
@@ -208,26 +210,61 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
     };
     let mut open = inspection.owner == Owner::of(&app.state);
     if open {
-        egui::Window::new("Monte Carlo checkpoint").id(inspection_id()).open(&mut open).default_width(520.0).show(ctx, |ui| {
-            ui.label(&inspection.label);
-            let summary = &inspection.summary;
-            egui::Grid::new("checkpoint-summary").show(ui, |ui| {
+        egui::Window::new("Monte Carlo checkpoint")
+            .id(inspection_id())
+            .open(&mut open)
+            .default_width(520.0)
+            .show(ctx, |ui| {
+                let summary = &inspection.summary;
+                rule_row(ui, "Checkpoint", &inspection.label);
                 for (label, value) in [
-                    ("Committed trials", inspection.checkpoint.completed_trials().to_string()),
+                    (
+                        "Committed trials",
+                        inspection.checkpoint.completed_trials().to_string(),
+                    ),
                     ("Trials with values", summary.successful_trials.to_string()),
                     ("Failed trials", summary.failed_trials.to_string()),
-                    ("Trials missing measurement goals", summary.failed_measurement_trials.to_string()),
-                    ("Retained bytes", inspection.checkpoint.bytes().len().to_string()),
+                    (
+                        "Trials missing measurement goals",
+                        summary.failed_measurement_trials.to_string(),
+                    ),
+                    (
+                        "Retained bytes",
+                        inspection.checkpoint.bytes().len().to_string(),
+                    ),
                     ("Trial indices (from 0)", summary.ranges.join(", ")),
                     ("Measurements", summary.measurement_count.to_string()),
-                ] { ui.label(label); ui.label(value); ui.end_row(); }
+                ] {
+                    rule_row(ui, label, &value);
+                }
+                if summary.additional_ranges > 0 {
+                    note_line(
+                        ui,
+                        &format!(
+                            "{} more trial ranges are retained in the file.",
+                            summary.additional_ranges
+                        ),
+                        Tone::Dim,
+                    );
+                }
+                note_line(ui, &summary.measurements.join("; "), Tone::Dim);
+                if summary.measurement_count > summary.measurements.len() {
+                    note_line(
+                        ui,
+                        "Additional measurements are retained in the file.",
+                        Tone::Dim,
+                    );
+                }
+                note_line(
+                    ui,
+                    "Failed trials are retained too. Resuming reuses their recorded outcome; \
+                     change the trial range or run fresh to evaluate new trials.",
+                    Tone::Dim,
+                );
+                if Button::new("Export checkpoint…").show(ui).clicked() {
+                    begin_export(ctx, &mut app.state, &inspection.checkpoint);
+                }
             });
-            if summary.additional_ranges > 0 { ui.label(format!("{} more trial ranges are retained in the file.", summary.additional_ranges)); }
-            ui.label(summary.measurements.join("; "));
-            if summary.measurement_count > summary.measurements.len() { ui.label("Additional measurements are retained in the file."); }
-            ui.label("Failed trials are retained too. Resuming reuses their recorded outcome; change the trial range or run fresh to evaluate new trials.");
-            if ui.button("Export checkpoint…").clicked() { begin_export(ctx, &mut app.state, &inspection.checkpoint); }
-        });
     }
     if !open {
         ctx.data_mut(|data| data.remove::<Inspection>(inspection_id()));

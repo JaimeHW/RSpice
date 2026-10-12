@@ -50,7 +50,7 @@ pub(super) fn fields(
         ui.push_id(("qpnoise-output", index), |ui| {
             clear_pending_cell(ui);
             ui.separator();
-            ui.label(format!("Output {}", index + 2));
+            sub_header(ui, &format!("Output {}", index + 2));
             observation_fields(
                 ui,
                 &mut output.current,
@@ -59,8 +59,7 @@ pub(super) fn fields(
                 &mut output.branch,
                 &mut output.lattice,
             );
-            clear_pending_cell(ui);
-            if ui.small_button("Remove output").clicked() {
+            if action_line(ui, "Remove output") {
                 remove = Some(index);
             }
         });
@@ -68,8 +67,7 @@ pub(super) fn fields(
     if let Some(index) = remove {
         s.additional_outputs.remove(index);
     }
-    clear_pending_cell(ui);
-    if ui.button("Add noise output").clicked() {
+    if action_line(ui, "+ Add noise output") {
         s.additional_outputs.push(QpnoiseOutputDraft {
             lattice: s.output_lattice.clone(),
             ..Default::default()
