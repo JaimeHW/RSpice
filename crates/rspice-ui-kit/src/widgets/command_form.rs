@@ -15,7 +15,9 @@
 //! - The status slot is allocated whether or not it says anything, so the
 //!   footer does not move under the pointer as a draft becomes valid. A form
 //!   whose status is settled when it opens says so, and reserves only what
-//!   its status says.
+//!   its status says. A form whose refusals are each about one field states
+//!   them in that field's line instead, which is always there, and so needs
+//!   no reserved status at all.
 //! - Every control is named to AccessKit by the label its row states. The
 //!   labels here are painted, not laid out as widgets, so nothing else would
 //!   name them.
@@ -51,6 +53,17 @@ const STACKED_LABEL_GAP: f32 = 4.0;
 /// field give the value they show. A read-only value starts there too, so
 /// every value in a form starts at one x.
 const VALUE_INSET: f32 = 8.0;
+
+/// What the one-line slot under a field says. See [`FormRows::field_line`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldLine<'a> {
+    /// Nothing yet. The slot keeps its height and stays blank.
+    Blank,
+    /// What the field's value declares, set as a derived line.
+    Derived(&'a str),
+    /// Why the field's value is refused, in the error colour.
+    Error(&'a str),
+}
 
 /// The rows of one command form, laid out on a fixed label column.
 ///
@@ -251,6 +264,60 @@ impl<'u> FormRows<'u> {
             galley,
             t.color.text_faint,
         );
+    }
+
+    /// The one-line slot under the field `field` names: blank, what the
+    /// field's value declares, or why it is refused, in the error colour.
+    ///
+    /// The slot is present whatever it says, so nothing below it moves while
+    /// the field is typed in, and a refusal stands under the field it is about
+    /// instead of in the form's status line, which is left for a failure that
+    /// belongs to no field. A line too long for the control column is
+    /// shortened from the middle, with the whole of it on hover. A refusal
+    /// also marks the field invalid and becomes its description, so a screen
+    /// reader that never leaves the field still hears it.
+    pub fn field_line(&mut self, field: Option<Id>, line: FieldLine<'_>) {
+        let t = Tokens::get(self.ui.ctx());
+        let indent = self.control_indent();
+        self.ui.add_space(DERIVED_GAP);
+        let full_width = self.ui.available_width();
+        let width = (full_width - indent).max(1.0);
+        let (rect, response) = self
+            .ui
+            .allocate_exact_size(vec2(full_width, DERIVED_LINE_H), egui::Sense::hover());
+        let (text, font, color) = match line {
+            FieldLine::Blank => return,
+            FieldLine::Derived(text) => (
+                text,
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+            ),
+            FieldLine::Error(text) => {
+                mark_invalid(self.ui.ctx(), field, text);
+                (
+                    text,
+                    theme::sans(tokens::FS_0, FontWeight::Regular),
+                    t.color.err,
+                )
+            }
+        };
+        let shown = middle_elided(self.ui, text, &font, color, width);
+        let elided = shown != text;
+        self.ui.painter().text(
+            egui::pos2(rect.left() + indent, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            shown,
+            font,
+            color,
+        );
+        let value = text.to_owned();
+        self.ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(egui::accesskit::Role::Label);
+            node.set_value(value.clone());
+        });
+        if elided {
+            response.on_hover_text(text);
+        }
     }
 }
 
@@ -704,6 +771,61 @@ mod tests {
             height(true, Ok(Some("One line."))),
             reserved - STATUS_LINE_H
         ));
+    }
+
+    /// A field's line is one line whatever it says, so a field that becomes
+    /// invalid, or valid again, moves nothing below it; and a form whose
+    /// refusals stand under their fields reserves no status band.
+    #[test]
+    fn a_field_line_holds_its_height_whether_blank_derived_or_refused() {
+        let screen = egui::vec2(1024.0, 640.0);
+        let render = |line: FieldLine<'_>| {
+            painted_runs(screen, Mode::Dark, 3, |ctx| {
+                let mut name = String::from("ota");
+                let _ = CommandForm::new("Field lines", "Create")
+                    .status_fixed_at_open()
+                    .show(ctx, |rows| {
+                        let id = Id::new("command-form.field-line.name");
+                        rows.text("Name", id, &mut name, "");
+                        rows.field_line(Some(id), line);
+                        Some(id)
+                    });
+            })
+        };
+        let blank = render(FieldLine::Blank);
+        let derived = render(FieldLine::Derived("module ota"));
+        let refused = render(FieldLine::Error(
+            "a refusal far longer than the control column can hold on one line of it, which is shortened from the middle",
+        ));
+        for painted in [&derived, &refused] {
+            assert_eq!(painted.surface.height(), blank.surface.height());
+            assert_eq!(
+                painted.rect_of("Create").map(|rect| rect.top()),
+                blank.rect_of("Create").map(|rect| rect.top()),
+            );
+        }
+        assert!(
+            refused
+                .rect_of("a refusal far longer than the control column can hold on one line of it, which is shortened from the middle")
+                .is_none(),
+            "a refusal too long for the column is elided, not wrapped"
+        );
+        let unreserved = painted_runs(screen, Mode::Dark, 3, |ctx| {
+            let mut name = String::from("ota");
+            let _ = CommandForm::new("Field lines", "Create")
+                .status_fixed_at_open()
+                .show(ctx, |rows| {
+                    let id = Id::new("command-form.field-line.name");
+                    rows.text("Name", id, &mut name, "");
+                    Some(id)
+                });
+        });
+        assert!(
+            (blank.surface.height() - unreserved.surface.height() - DERIVED_GAP - DERIVED_LINE_H)
+                .abs()
+                < 0.5,
+            "the slot costs one line and its gap, and no status band"
+        );
     }
 
     /// The card is 420 pt wide wherever it fits, and is inset rather than
