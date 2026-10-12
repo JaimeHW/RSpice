@@ -416,7 +416,7 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
         Ok(sealed) => sealed,
         Err(error) => return result.failed(*error),
     };
-    let tasks = match headless_tasks(&cards) {
+    let tasks = match headless_tasks(&circuit, origin, &cards) {
         Ok(tasks) => tasks,
         Err(error) => return result.failed(*error),
     };
@@ -498,8 +498,31 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
 }
 
 /// Lower the deck's cards into the explicit task graph a study would carry.
-fn headless_tasks(cards: &[String]) -> Result<Vec<HeadlessTaskRequest>, CaseError> {
-    let deck = format!("* cards\n{}\n.end\n", cards.join("\n"));
+///
+/// The cards are lowered against the whole sealed circuit, includes expanded,
+/// as the application's manual-deck preparation lowers its expanded source: a
+/// driven `.PSS` takes its tone list from the circuit's time-varying sources,
+/// so a card read without its circuit binds none.
+fn headless_tasks(
+    circuit: &str,
+    origin: &Path,
+    cards: &[String],
+) -> Result<Vec<HeadlessTaskRequest>, CaseError> {
+    let directory = origin.parent().unwrap_or(Path::new("."));
+    let expanded = rspice_core::netlist::IncludeProcessor::new(directory)
+        .expand_content(circuit, origin)
+        .map_err(|error| ErrorRecord {
+            category: "parse".into(),
+            stage: Some("preparation".into()),
+            detail: error.to_string(),
+            display: error.to_string(),
+            ..Default::default()
+        })?;
+    let body: Vec<&str> = expanded
+        .lines()
+        .filter(|line| !line.trim().eq_ignore_ascii_case(".end"))
+        .collect();
+    let deck = format!("{}\n{}\n.end\n", body.join("\n"), cards.join("\n"));
     let queue =
         rspice_simulation::manual_deck::build_manual_deck_queue(27.0, &deck).map_err(|errors| {
             ErrorRecord {
