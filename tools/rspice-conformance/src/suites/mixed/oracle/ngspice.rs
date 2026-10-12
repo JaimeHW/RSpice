@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{MAX_TRANSIENT_ROWS, OracleAbsent, Producer, Table, column_name, decimate};
+use super::{OracleAbsent, Producer, Table, column_name};
 use crate::suites::ngspice::reference::live::{RawReferencePlot, parse_ngspice_raw_plots};
 
 pub const DEFAULT_EXE: &str =
@@ -295,10 +295,9 @@ pub(crate) fn sections(
             sections.insert("dc".into(), real_table("sweep", plot, true)?);
         }
         "tran" | "trnoise" => {
+            // Full resolution; the capture decimates (oracle::decimate_keeping).
             let plot = plot(&|name| name.contains("transient"))?;
-            let mut table = real_table("time", plot, true)?;
-            decimate(&mut table, MAX_TRANSIENT_ROWS);
-            sections.insert("tran".into(), table);
+            sections.insert("tran".into(), real_table("time", plot, true)?);
         }
         "ac" => {
             let plot = plot(&|name| name.contains("ac analysis"))?;

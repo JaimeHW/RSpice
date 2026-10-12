@@ -13,14 +13,16 @@
 //! | `ref/<v>.<a>.O4.out` | `oracle/<v>.<a>.xyce.cir` |
 //! | `ref/<v>.<a>.O5-O1.out` | `oracle/<v>.<a>.o5.ngspice.cir` |
 //! | `ref/<v>.<a>.O5-O4.out` | `oracle/<v>.<a>.o5.xyce.cir` |
-//! | `ref/<v>.<a>.O2.out` | `oracle/<v>.o2/deck.cir` (+ `build.txt`) |
+//! | `ref/<v>.<a>.O2.out` | `oracle/<v>.<a>.o2/deck.cir`, else `oracle/<v>.o2/deck.cir` (each + `build.txt`) |
 //!
 //! Event traces sit beside the table as `ref/<v>.<a>.<oracle>.events.tsv`.
 //!
 //! A table's transient grid is the oracle's own and is decimated to at most
 //! [`MAX_TRANSIENT_ROWS`] rows by uniform index (first and last kept): only
-//! measures are compared, never samples, and a measure that needs finer
-//! resolution than that states it in its tolerance.
+//! measures are compared, never samples. A deck whose measures need the
+//! oracle's own resolution somewhere (a switching waveform's per-period
+//! means) names those spans with `* rspice-full-rows: <t0> <t1> ...`, and
+//! every row inside them is kept ([`decimate_keeping`]).
 
 pub mod cosim;
 pub mod icarus;
@@ -160,13 +162,62 @@ pub struct Reference {
 
 /// Decimate a transient table to at most `max` rows by uniform index.
 pub fn decimate(table: &mut Table, max: usize) {
+    decimate_keeping(table, max, &[]);
+}
+
+/// The time spans an oracle deck asks to keep at full resolution, from its
+/// `* rspice-full-rows: <t0> <t1> [<t0> <t1> ...]` directive (seconds).
+pub fn full_row_spans(deck_source: &str) -> Result<Vec<(f64, f64)>, String> {
+    let Some(text) = ngspice::directive(deck_source, "rspice-full-rows") else {
+        return Ok(Vec::new());
+    };
+    let values = text
+        .split_whitespace()
+        .map(|word| {
+            word.parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| format!("rspice-full-rows: {word} is not a time"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if values.is_empty() || values.len() % 2 != 0 {
+        return Err("rspice-full-rows takes start/stop pairs".into());
+    }
+    let spans: Vec<(f64, f64)> = values.chunks(2).map(|pair| (pair[0], pair[1])).collect();
+    if spans.iter().any(|(start, stop)| stop <= start) {
+        return Err("rspice-full-rows: every span must end after it starts".into());
+    }
+    Ok(spans)
+}
+
+/// Decimate a transient table to at most `max` rows outside `spans`, keeping
+/// every row inside a span and the row on each side of it (so a measure
+/// interpolating at a span's ends reads the oracle's own samples). The rows
+/// outside are taken by uniform index, first and last kept; with no spans
+/// this is [`decimate`]. A switching waveform compared over a window (C6's
+/// one-period means against O2) needs its corners, which uniform decimation
+/// of a long run drops.
+pub fn decimate_keeping(table: &mut Table, max: usize, spans: &[(f64, f64)]) {
     let length = table.axis.len();
-    if length <= max || max < 2 {
+    let mut kept = vec![false; length];
+    for (start, stop) in spans {
+        let first = table.axis.partition_point(|time| time < start);
+        let last = table.axis.partition_point(|time| time <= stop);
+        for flag in &mut kept[first.saturating_sub(1)..(last + 1).min(length)] {
+            *flag = true;
+        }
+    }
+    let others: Vec<usize> = (0..length).filter(|index| !kept[*index]).collect();
+    let budget = max.saturating_sub(length - others.len()).max(2);
+    if others.len() <= budget || max < 2 {
         return;
     }
-    let indices: Vec<usize> = (0..max)
-        .map(|k| ((k as f64) * ((length - 1) as f64) / ((max - 1) as f64)).round() as usize)
-        .collect();
+    for k in 0..budget {
+        let position =
+            ((k as f64) * ((others.len() - 1) as f64) / ((budget - 1) as f64)).round() as usize;
+        kept[others[position]] = true;
+    }
+    let indices: Vec<usize> = (0..length).filter(|index| kept[*index]).collect();
     let pick = |series: &Vec<f64>| {
         indices
             .iter()
@@ -583,6 +634,50 @@ mod tests {
         assert_eq!(table.axis[0], 0.0);
         assert_eq!(table.axis[10], 100.0);
         assert_eq!(table.real["v(a)"][5], 50.0);
+    }
+
+    #[test]
+    fn decimation_keeps_named_spans_whole() {
+        let table = || {
+            let mut table = Table {
+                axis_name: "time".into(),
+                axis: (0..1001).map(f64::from).collect(),
+                ..Default::default()
+            };
+            table
+                .real
+                .insert("v(a)".into(), (0..1001).map(f64::from).collect());
+            table
+        };
+        // No spans: the uniform-index decimation, unchanged.
+        let mut plain = table();
+        let mut uniform = table();
+        decimate(&mut plain, 101);
+        decimate_keeping(&mut uniform, 101, &[]);
+        assert_eq!(plain, uniform);
+        assert_eq!(plain.axis[1], 10.0);
+        // A span keeps every row in it plus one on each side; the rest share
+        // what is left of the budget, ends kept.
+        let mut kept = table();
+        decimate_keeping(&mut kept, 101, &[(400.5, 430.0)]);
+        for time in 400..=431 {
+            assert!(kept.axis.contains(&f64::from(time)), "{time}");
+        }
+        assert!(
+            kept.axis.len() <= 101 && kept.axis.len() > 90,
+            "{}",
+            kept.axis.len()
+        );
+        assert_eq!((kept.axis[0], *kept.axis.last().unwrap()), (0.0, 1000.0));
+        assert!(kept.axis.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(kept.real["v(a)"], kept.axis);
+        assert_eq!(
+            full_row_spans("t\n* rspice-full-rows: 4e-4 5.62e-4 6.2e-4 6.22e-4\n.end\n"),
+            Ok(vec![(4e-4, 5.62e-4), (6.2e-4, 6.22e-4)])
+        );
+        assert_eq!(full_row_spans("t\n.end\n"), Ok(Vec::new()));
+        assert!(full_row_spans("t\n* rspice-full-rows: 1 2 3\n").is_err());
+        assert!(full_row_spans("t\n* rspice-full-rows: 2 1\n").is_err());
     }
 
     #[test]

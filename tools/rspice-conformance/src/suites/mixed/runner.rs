@@ -1182,6 +1182,17 @@ fn capture_one(
         }
         other => return Err(format!("oracle {other} is not captured")),
     };
+    // A transient table is kept to MAX_TRANSIENT_ROWS by uniform index,
+    // except the spans the deck asks to keep whole (`* rspice-full-rows:`).
+    let spans = oracle::full_row_spans(
+        &fs::read_to_string(&deck).map_err(|error| format!("{}: {error}", deck.display()))?,
+    )?;
+    let mut sections = sections;
+    for table in sections.values_mut() {
+        if table.axis_name == "time" {
+            oracle::decimate_keeping(table, oracle::MAX_TRANSIENT_ROWS, &spans);
+        }
+    }
     let mut header = vec![
         format!(
             "{}: {version}",

@@ -6,8 +6,9 @@
 * switch controls through a dac_bridge 0/vcc (X at vcc/2), 1 ps edges, behind
 * 20 ohm, as the built-in D/A converters do. d_cosim's output delay is its
 * 1 ps minimum. TMAX 10 ns keeps the quantized code current at the sample.
-* The capture keeps at most 20 001 rows of this run (uniform by index), which
-* drops switching corners, so only window means of v(vout) are compared.
+* The capture keeps every row of the load-step envelope's one-period windows
+* (the switching corners their means need) and at most 20 001 elsewhere.
+* rspice-full-rows: 5e-4 5.02e-4 5.1e-4 5.12e-4 5.3e-4 5.32e-4 5.6e-4 5.62e-4 6.2e-4 6.22e-4
 .param lv=22u cv=4.7u
 .include ../../net/stage.cir
 

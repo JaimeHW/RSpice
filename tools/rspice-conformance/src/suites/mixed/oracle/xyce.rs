@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{MAX_TRANSIENT_ROWS, OracleAbsent, Table, column_name, decimate};
+use super::{OracleAbsent, Table, column_name};
 
 pub const DEFAULT_EXE: &str = "C:/Users/James/Desktop/XyceNF-7.10.0/bin/Xyce.exe";
 
@@ -174,7 +174,9 @@ pub fn sections(kind: &str, prn: &str, deck: &str) -> Result<BTreeMap<String, Ta
         if kind == "ac"
             && let Some(signal) = complex_pair(&name, header.get(index + 1))
         {
-            let im = columns.get(index + 1).ok_or("real column without its imaginary")?;
+            let im = columns
+                .get(index + 1)
+                .ok_or("real column without its imaginary")?;
             table.complex.insert(
                 signal,
                 columns[index]
@@ -210,9 +212,8 @@ pub fn sections(kind: &str, prn: &str, deck: &str) -> Result<BTreeMap<String, Ta
         table.real.insert(key, series);
         index += 1;
     }
-    if kind == "tran" || kind == "trnoise" {
-        decimate(&mut table, MAX_TRANSIENT_ROWS);
-    }
+    // A transient table stays at full resolution here; the capture decimates
+    // it (oracle::decimate_keeping).
     let mut sections = BTreeMap::new();
     sections.insert(label.to_owned(), table);
     Ok(sections)
@@ -230,7 +231,8 @@ fn complex_pair(name: &str, next: Option<&String>) -> Option<String> {
             .and_then(|rest| rest.strip_suffix(')'))
             .map(str::to_owned)
     };
-    for (real, imaginary, quantity) in [("re(", "im(", ""), ("vr(", "vi(", "v"), ("ir(", "ii(", "i")]
+    for (real, imaginary, quantity) in
+        [("re(", "im(", ""), ("vr(", "vi(", "v"), ("ir(", "ii(", "i")]
     {
         if let (Some(a), Some(b)) = (inner(name, real), inner(&next, imaginary))
             && a == b
@@ -300,7 +302,10 @@ mod tests {
         let table = &sections("ac", ac, "").unwrap()["ac"];
         assert_eq!(table.complex["v(vout)"], vec![[0.5, -0.25]]);
         assert_eq!(table.complex["i(vin)"], vec![[1e-3, 2e-3]]);
-        assert!(table.real.is_empty() && table.complex.len() == 2, "{table:?}");
+        assert!(
+            table.real.is_empty() && table.complex.len() == 2,
+            "{table:?}"
+        );
     }
 
     #[test]
