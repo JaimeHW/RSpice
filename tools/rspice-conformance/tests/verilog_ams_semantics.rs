@@ -662,13 +662,7 @@ fn connect_module_signatures_still_match_the_shipped_library() {
 /// moves, or the citation is a comment.
 #[test]
 fn discipline_resolution_is_covered_where_this_suite_says_it_is() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("the conformance crate sits under tools/")
-        .join("rspice-veriloga")
-        .join("src")
-        .join("connect")
-        .join("tests.rs");
+    let path = ams::workspace_root().join("crates/rspice-veriloga/src/connect/tests.rs");
     let source = std::fs::read_to_string(&path).unwrap_or_else(|error| {
         panic!(
             "the discipline-resolution suite this one defers to is missing from {}: {error}",
