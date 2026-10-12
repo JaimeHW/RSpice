@@ -1,0 +1,10 @@
+* C2 charge-pump PLL, variant xs, ac: O1 (ngspice-46) oracle deck
+.include ../net/pll-xs.cir
+.include ../net/vco_sub_new.cir
+.include ../net/f-p-det-d-sub.cir
+.include ../net/loop-filter-2.cir
+.include ../net/pll-models.cir
+.param r1v=300 c1v=10n
+.ac dec 3 1k 10meg
+.save v(cont)
+.end

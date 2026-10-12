@@ -1,0 +1,23 @@
+// C2 mx: Verilog-A VCO replicating the ngspice d_osc of net/vco_sub_new.cir:
+// the same control-to-frequency points (linear between them, extrapolated past
+// the ends by the end segments), duty 0.5, init_phase 180 degrees, 100 ps edges.
+`include "disciplines.vams"
+module vco_pwl(cont, out);
+  input cont; output out; electrical cont, out;
+  real v, f, ph;
+  analog begin
+    v = V(cont);
+    if (v < 1.0)
+      f = 879.0820e6 + (v - 0.5) * (747.2197e6 - 879.0820e6) / 0.5;
+    else if (v < 1.5)
+      f = 747.2197e6 + (v - 1.0) * (579.9500e6 - 747.2197e6) / 0.5;
+    else if (v < 2.0)
+      f = 579.9500e6 + (v - 1.5) * (377.2727e6 - 579.9500e6) / 0.5;
+    else
+      f = 377.2727e6 + (v - 2.0) * (161.1650e6 - 377.2727e6) / 0.5;
+    ph = idtmod(f, 0.5, 1.0);
+    @(cross(ph - 0.5, 0));
+    V(out) <+ transition(ph >= 0.5 ? 1.0 : 0.0, 0, 100p, 100p);
+    $bound_step(0.05 / f);
+  end
+endmodule

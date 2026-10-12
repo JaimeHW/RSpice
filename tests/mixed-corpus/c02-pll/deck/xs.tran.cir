@@ -1,0 +1,9 @@
+* C2 charge-pump PLL, variant xs, tran
+.include ../net/pll-xs.cir
+.include ../net/vco_sub_new.cir
+.include ../net/f-p-det-d-sub.cir
+.include ../net/loop-filter-2.cir
+.include ../net/pll-models.cir
+.param r1v=300 c1v=10n
+.tran 0.1n 25u uic
+.end

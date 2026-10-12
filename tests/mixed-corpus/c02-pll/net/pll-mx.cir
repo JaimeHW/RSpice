@@ -1,0 +1,37 @@
+* C2 mx: the ngspice PLL with a Verilog-A VCO (net/vco_pwl.va), an XSPICE
+* divide-by-2 and a Verilog divide-by-20 + PFD (net/div20_pfd.v) sharing the
+* event nets d_div2 and d_ref, and the transistor pump/filter loopf_mx driven
+* through built-in D/A converters at vcc. RSpice-authored from the ngspice-46
+* PLL example; the decks name the two HDL sources.
+* output frequency 400 MHz, locked to a 10 MHz reference
+
+.param vcc=3.3
+.param fref=10e6
+
+vref ref 0 dc 0 pulse(0 'vcc' 10n 1n 1n  '1/fref/2' '1/fref')
+abridgeref [ref] [d_ref] adc_ref
+.model adc_ref adc_bridge(in_low = 0.5 in_high = 0.5)
+
+* vco: analog control cont, analog square wave vco_out
+xvco cont vco_out vco_pwl
+abridgevco [vco_out] [d_vco] adc_ref
+
+* XSPICE divide-by-2 into the shared event net d_div2
+adiv2 d_vco d_div2 div2
+.model div2 d_fdiv(div_factor = 2 high_cycles = 1
++ i_count = 0 rise_delay = 1e-10
++ fall_delay = 1e-10)
+
+* Verilog divide-by-20 and phase-frequency detector
+xpfd d_div2 d_ref up_n dn d_divout div20_pfd
+
+* charge pump and third-order loop filter
+xlf up_n dn cont loopf_mx
+* unit AC current drawn from the pump node, inert in tran
+iinj xlf.dra 0 dc 0 ac 1
+
+* d to a for plotting (keeps d_divout an XSPICE event net)
+abridge-w1 [d_divout d_ref] [s1 s2] dac1
+.model dac1 dac_bridge(out_low = 0 out_high = 1 out_undef = 0.5
++ input_load = 5.0e-12 t_rise = 1e-10
++ t_fall = 1e-10)

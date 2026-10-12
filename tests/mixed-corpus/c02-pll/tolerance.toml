@@ -1,0 +1,213 @@
+schema = "rspice-mixed-tolerance/1"
+# div20_pfd.v: `timescale 1ps/1ps; XSPICE delays are 100 ps.
+time_precision = 1e-12
+
+[[q]]
+id = "vlock"
+analysis = "tran"
+variants = ["xs", "mx"]
+kind = "mean"
+signal = "v(cont)"
+window = [2.0e-5, 2.5e-5]
+oracle = "O6"
+expect = "c02::vlock"
+abs = 0.015
+why = "C3/R3 ripple averaged; d_osc PWL exact"
+
+[[q]]
+id = "vlock"
+analysis = "tran"
+variants = ["xs", "mx"]
+kind = "mean"
+signal = "v(cont)"
+window = [2.0e-5, 2.5e-5]
+oracle = "O1"
+ref = "ref/xs.tran.O1.out"
+abs = 0.010
+why = "the same locked loop in both simulators"
+
+[[q]]
+id = "vlock"
+analysis = "tran"
+variants = ["mx"]
+kind = "mean"
+signal = "v(cont)"
+window = [2.0e-5, 2.5e-5]
+oracle = "O2"
+ref = "ref/mx.tran.O2.out"
+abs = 0.010
+why = "the same locked loop in both simulators"
+
+[[q]]
+id = "fdiv"
+analysis = "tran"
+variants = ["xs", "mx"]
+kind = "period"
+nets = ["d_divout"]
+window = [2.0e-5, 2.5e-5]
+oracle = "O6"
+expect = "c02::fdiv"
+abs = 5e-11
+why = "locked; ≤ 1 VCO period / 50 cycles"
+
+[[q]]
+id = "tlock"
+analysis = "tran"
+variants = ["xs"]
+kind = "settle"
+signal = "v(cont)"
+target = 1.94394
+band = 0.030
+window = [0.0, 2.5e-5]
+oracle = "O1"
+ref = "ref/xs.tran.O1.out"
+rel = 0.10
+why = "same loop; acquisition time to ±30 mV"
+
+[[q]]
+id = "tlock"
+analysis = "tran"
+variants = ["mx"]
+kind = "settle"
+signal = "v(cont)"
+target = 1.94394
+band = 0.030
+window = [0.0, 2.5e-5]
+oracle = "O1"
+ref = "ref/xs.tran.O1.out"
+rel = 0.15
+why = "mx PFD reset 100 ps and A/D threshold 1.65 V vs 0.5 V"
+
+[[q]]
+id = "tlock"
+analysis = "tran"
+variants = ["mx"]
+kind = "settle"
+signal = "v(cont)"
+target = 1.94394
+band = 0.030
+window = [0.0, 2.5e-5]
+oracle = "O2"
+ref = "ref/mx.tran.O2.out"
+rel = 0.05
+why = "the same mx loop with the Verilog in Icarus"
+
+[[q]]
+id = "vlock"
+analysis = "mc-tran"
+variants = ["xs", "mx"]
+kind = "per_trial"
+of = { kind = "mean", signal = "v(cont)", window = [2.0e-5, 2.5e-5] }
+trials = 8
+oracle = "O6"
+expect = "c02::vlock"
+abs = 0.015
+why = "lock voltage is set by the VCO table and divisor, not by R1/C1"
+
+[[q]]
+id = "fdiv"
+analysis = "mc-tran"
+variants = ["xs", "mx"]
+kind = "per_trial"
+of = { kind = "period", nets = ["d_divout"], window = [2.0e-5, 2.5e-5] }
+trials = 8
+oracle = "O6"
+expect = "c02::fdiv"
+abs = 5e-11
+why = "every trial locks to the reference period"
+
+[[q]]
+id = "ntrial"
+analysis = "mc-tran"
+variants = ["xs", "mx"]
+kind = "stat"
+stat = "std"
+over = "trials"
+of = { kind = "settle", signal = "v(cont)", target = 1.94394, band = 0.030, window = [0.0, 2.5e-5] }
+trials = 8
+interval = [1e-15, 1e3]
+oracle = "O6"
+why = "8 trials ran and the R1/C1 draws moved the acquisition time (P0.6b in a real design)"
+
+[[q]]
+id = "zlf"
+analysis = "ac"
+variants = ["mx"]
+kind = "ac"
+signal = "v(cont)"
+points = [1e3, 1e4, 1e5, 1e6, 1e7]
+oracle = "O6"
+expect = "c02::zlf"
+abs_db = 0.05
+abs_deg = 0.5
+why = "MOS off-state Cdb ~40 fF ⇒ ≤ 0.1% at 10 MHz"
+
+[[q]]
+id = "zlf"
+analysis = "ac"
+variants = ["xs"]
+kind = "ac"
+signal = "v(cont)"
+points = [1e3, 1e4, 1e5, 1e6, 1e7]
+oracle = "O1"
+ref = "ref/xs.ac.O1.out"
+abs_db = 0.01
+abs_deg = 0.1
+why = "the same network with the same BSIM3 switches"
+
+[[q]]
+id = "zlf"
+analysis = "ac"
+variants = ["mx"]
+kind = "ac"
+signal = "v(cont)"
+points = [1e3, 1e4, 1e5, 1e6, 1e7]
+oracle = "O5"
+abs_db = 1e-4
+abs_deg = 1e-3
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["xs"]
+kind = "op"
+signals = ["v(xlf.u1n)", "v(xlf.d1)", "v(cont)"]
+oracle = "O1"
+ref = "ref/xs.op.O1.out"
+abs = 1e-3
+why = "BSIM3 3.3.0 in both"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["mx"]
+kind = "op"
+signals = ["v(up_n)", "v(dn)", "v(cont)"]
+oracle = "O5"
+abs = 1e-5
+rel = 1e-5
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["mx"]
+kind = "op"
+signals = ["v(up_n)", "v(dn)"]
+oracle = "O5-O1"
+ref = "ref/mx.op.O5-O1.out"
+abs = 1e-3
+why = "cont floats on MOS leakage when both switches are off; it is not a model-agreement quantity"
+
+[[q]]
+id = "vlock"
+analysis = "pss"
+variants = ["xs", "mx"]
+kind = "mean"
+signal = "v(cont)"
+window = [0.0, 1.0e-7]
+oracle = "O6"
+expect = "c02::vlock"
+abs = 0.015
+why = "vlock as the DC harmonic of the periodic steady state (executed at the P7 exit)"

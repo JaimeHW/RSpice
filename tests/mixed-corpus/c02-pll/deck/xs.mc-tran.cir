@@ -1,0 +1,10 @@
+* C2 charge-pump PLL, variant xs, mc-tran
+.include ../net/pll-xs.cir
+.include ../net/vco_sub_new.cir
+.include ../net/f-p-det-d-sub.cir
+.include ../net/loop-filter-2.cir
+.include ../net/pll-models.cir
+.param r1v={agauss(300,15,1)} c1v={agauss(10n,0.5n,1)}
+.mc 8 seed 11
+.tran 0.1n 25u uic
+.end

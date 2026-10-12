@@ -1,0 +1,15 @@
+* C2 mx held-digital O5 circuit (corpus O5 rules): the PFD's D-A state
+* (up_n = 1, dn = 0) held at vcc / 0 V behind the built-in converters' 20 ohm;
+* the VCO, the A/D converters and the XSPICE and Verilog digital are removed
+* (none loads cont). The decks' analysis cards are appended by the runner.
+.include ../net/loopf_mx.cir
+.include ../net/pll-models.cir
+.param vcc=3.3
+.param r1v=300 c1v=10n
+vupn upn_h 0 3.3
+rupn upn_h up_n 20
+vdn dn_h 0 0
+rdn dn_h dn 20
+xlf up_n dn cont loopf_mx
+iinj xlf.dra 0 dc 0 ac 1
+.end

@@ -1,0 +1,9 @@
+* C2 charge-pump PLL, variant mx, ac
+.hdl "../net/vco_pwl.va"
+.hdl "../net/div20_pfd.v"
+.include ../net/pll-mx.cir
+.include ../net/loopf_mx.cir
+.include ../net/pll-models.cir
+.param r1v=300 c1v=10n
+.ac dec 3 1k 10meg
+.end

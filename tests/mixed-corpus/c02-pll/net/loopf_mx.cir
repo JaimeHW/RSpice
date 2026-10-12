@@ -1,0 +1,27 @@
+* C2 mx: loopf (net/loop-filter-2.cir) without its internal dac_bridge.
+* RSpice-authored from loop-filter-2.cir: the pump switches' gates u1n/d1 are
+* ports, driven by the Verilog PFD through built-in D/A converters (vcc).
+* in: u1n d1 analog gate drives; out: vout, vco control voltage
+
+.subckt loopf_mx u1n d1 vout
+
+.param initcond=2.5
+
+vdd dd 0 dc 'vcc'
+vss ss 0 dc 0
+
+* transistors as switches
+mnd  dra d1  ss  ss  n1  w=12u  l=0.35u  AS=24p AD=24p PS=28u PD=28u
+mpd  dra u1n  dd  dd  p1  w=24u l=0.35u  AS=48p AD=48p PS=52u PD=52u
+
+*** passive filter elements ***
+*third order filter
+.ic v(vout)='initcond' v(c1)='initcond' v(dra)='initcond' v(int1)='initcond' v(u1n)='vcc' v(d1)=0
+R1 dra int1 {r1v}
+R2 int1 c1 200
+C1 c1 0 {c1v}
+C2 int1 0 5n
+R3 int1 vout 50
+C3 vout 0 0.5n
+
+.ends loopf_mx

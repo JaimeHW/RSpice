@@ -1,0 +1,30 @@
+* C2 charge-pump PLL, variant mx, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* ngspice's d_osc for the VCO, XSPICE divide-by-2, d_cosim(div20_pfd.v), and
+* dac_bridge 0/vcc + 20 ohm into loopf_mx (the built-in converters' levels).
+.include ../../net/vco_sub_new.cir
+.include ../../net/loopf_mx.cir
+.include ../../net/pll-models.cir
+.param vcc=3.3
+.param fref=10e6
+.param r1v=300 c1v=10n
+vdd dd 0 dc 'vcc'
+vref ref 0 dc 0 pulse(0 'vcc' 10n 1n 1n  '1/fref/2' '1/fref')
+abridgeref [ref] [d_ref] adc_ref
+.model adc_ref adc_bridge(in_low = 0.5 in_high = 0.5)
+xvco buf d_vco cont dd d_osc_vco
+adiv2 d_vco d_div2 div2
+.model div2 d_fdiv(div_factor = 2 high_cycles = 1
++ i_count = 0 rise_delay = 1e-10
++ fall_delay = 1e-10)
+apfd [d_div2 d_ref] [d_upn d_dn d_divout] pfd
+.model pfd d_cosim simulation="ivlng" sim_args=["div20_pfd"]
+abridgegate [d_upn d_dn] [upn_h dn_h] dac_gate
+.model dac_gate dac_bridge(out_low = 0 out_high = 'vcc' out_undef = 'vcc/2'
++ input_load = 5.0e-12 t_rise = 1e-10 t_fall = 1e-10)
+rupn upn_h up_n 20
+rdn dn_h dn 20
+xlf up_n dn cont loopf_mx
+iinj xlf.dra 0 dc 0 ac 1
+.tran 0.1n 25u uic
+.save v(cont)
+.end

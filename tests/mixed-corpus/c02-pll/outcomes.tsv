@@ -1,0 +1,23 @@
+# variant	analysis	route	outcome	detail
+xs	tran	interp	fail	convergence: convergence: Convergence failed after 10 iterations: Newton-Raphson iteration limit exceeded
+xs	tran	native	fail	convergence: convergence: Convergence failed after 10 iterations: Newton-Raphson iteration limit exceeded
+mx	tran	interp	fail	convergence: convergence: Convergence failed after 9 iterations: Newton-Raphson iteration limit exceeded
+mx	tran	native	fail	convergence: convergence: Convergence failed after 9 iterations: Newton-Raphson iteration limit exceeded
+xs	op	interp	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+xs	op	native	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+mx	op	interp	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+mx	op	native	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+xs	ac	interp	fail	solver: solver: Solver error: Matrix is singular or near-singular
+xs	ac	native	fail	solver: solver: Solver error: Matrix is singular or near-singular
+mx	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xpfd form=prose; token-form=prose; analysis-form=prose
+mx	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xpfd form=prose; token-form=prose; analysis-form=prose
+xs	mc-tran	interp	fail	convergence: ConvergenceError: Convergence failed after 10 iterations
+xs	mc-tran	native	fail	convergence: ConvergenceError: Convergence failed after 10 iterations
+mx	mc-tran	interp	fail	convergence: ConvergenceError: Convergence failed after 9 iterations
+mx	mc-tran	native	fail	convergence: ConvergenceError: Convergence failed after 9 iterations
+xs	pss	interp	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
+xs	pss	native	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
+mx	pss	interp	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
+mx	pss	native	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
+mx	pnoise	interp	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode
+mx	pnoise	native	fail	parse: parse: Netlist parse error: .PSS at line 2: missing required field oscnode

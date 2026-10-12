@@ -1,0 +1,15 @@
+* C2 charge-pump PLL, variant mx, op: O5-O1 (ngspice-46) held-digital oracle deck
+* The O5 circuit of oracle/mx.o5.cir: up_n held at vcc and dn at 0 V behind 20 ohm.
+.include ../net/loopf_mx.cir
+.include ../net/pll-models.cir
+.param vcc=3.3
+.param r1v=300 c1v=10n
+vupn upn_h 0 3.3
+rupn upn_h up_n 20
+vdn dn_h 0 0
+rdn dn_h dn 20
+xlf up_n dn cont loopf_mx
+iinj xlf.dra 0 dc 0 ac 1
+.op
+.save v(up_n) v(dn) v(cont)
+.end
