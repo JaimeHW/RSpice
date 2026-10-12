@@ -44,7 +44,7 @@ pub(super) fn fields(
         ui,
         "Measurement",
         &mut setup.objective_measurement,
-        "gain, scalar:V(out), or last:signal",
+        "measure or selector",
         configured && !weighted,
     );
     if configured {
