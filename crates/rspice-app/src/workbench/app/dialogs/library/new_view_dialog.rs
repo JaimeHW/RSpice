@@ -8,6 +8,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, chip, input_row, kv_row};
 use crate::workbench::AppState;
+use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, store_generated_symbol};
 
 /// Cell-view kinds backed by a complete, editable production surface.
 ///
@@ -574,14 +575,6 @@ impl RSpiceApp {
     }
 }
 
-/// The one symbol view a cell's schematic keeps generated.
-///
-/// Every reader of the `generated` marker — the schematic-to-symbol
-/// synchronization and the library catalog merge alike — resolves the view
-/// under this exact name, so a symbol view created under any other name is
-/// the author's from the first frame.
-const GENERATED_SYMBOL_VIEW: &str = "symbol";
-
 /// A symbol view seeded from a cell's interface `ports`.
 ///
 /// [`GENERATED_SYMBOL_VIEW`] additionally carries the `generated` marker, so
@@ -592,21 +585,12 @@ pub(super) fn seeded_symbol_view(
     ports: &[crate::state::PortSpec],
 ) -> Result<crate::state::View, String> {
     let mut view = crate::state::View::new(view_name, crate::state::ViewType::Symbol);
-    crate::state::SymbolDocument::generated_from_ports(ports)
-        .store_in_view(&mut view)
-        .map_err(|error| format!("The generated symbol could not be encoded: {error}"))?;
-    if view_name == GENERATED_SYMBOL_VIEW {
-        view.metadata
-            .insert("generated".to_owned(), "ports".to_owned());
-        view.metadata.insert(
-            "ports".to_owned(),
-            ports
-                .iter()
-                .map(|port| format!("{}:{}", port.name, port.direction.keyword()))
-                .collect::<Vec<_>>()
-                .join(" "),
-        );
-    }
+    let stored = if view_name == GENERATED_SYMBOL_VIEW {
+        store_generated_symbol(&mut view, ports, |_| None)
+    } else {
+        crate::state::SymbolDocument::generated_from_ports(ports).store_in_view(&mut view)
+    };
+    stored.map_err(|error| format!("The generated symbol could not be encoded: {error}"))?;
     Ok(view)
 }
 

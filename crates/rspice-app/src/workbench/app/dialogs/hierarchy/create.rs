@@ -13,7 +13,7 @@ use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     Cell, CellViewRef, HierarchyExtractionPlan, HierarchyExtractionTerminal,
     HierarchyNetConnectivity, NetLabel, PortDirection, PortDiscipline, PortSpec,
-    SheetMoveConnectivityPlan, SymbolDocument, View, ViewType, hierarchy_terminal_direction,
+    SheetMoveConnectivityPlan, View, ViewType, hierarchy_terminal_direction,
     hierarchy_terminal_discipline,
 };
 use crate::ui::theme::{self, FontWeight};
@@ -665,21 +665,12 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let mut schematic_view = View::new("schematic", ViewType::Schematic);
     schematic_view.modified = true;
     target_cell.add_view(schematic_view);
-    let mut symbol_view = View::new("symbol", ViewType::Symbol);
-    SymbolDocument::generated_from_ports(&ports)
-        .store_in_view(&mut symbol_view)
-        .map_err(|error| format!("Generated symbol could not be encoded: {error}"))?;
-    symbol_view
-        .metadata
-        .insert("generated".to_owned(), "ports".to_owned());
-    symbol_view.metadata.insert(
-        "ports".to_owned(),
-        ports
-            .iter()
-            .map(|port| format!("{}:{}", port.name, port.direction.keyword()))
-            .collect::<Vec<_>>()
-            .join(" "),
+    let mut symbol_view = View::new(
+        rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW,
+        ViewType::Symbol,
     );
+    rspice_design::symbol::generated::store_generated_symbol(&mut symbol_view, &ports, |_| None)
+        .map_err(|error| format!("Generated symbol could not be encoded: {error}"))?;
     symbol_view.modified = true;
     target_cell.add_view(symbol_view);
 
@@ -961,7 +952,7 @@ mod tests {
     use super::*;
     use crate::state::{
         ComponentType, Point, SavedOutput, SavedOutputCompatibility, SavedOutputKind,
-        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming,
+        SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SymbolDocument,
     };
 
     #[test]

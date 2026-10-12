@@ -10,13 +10,15 @@ mod symbol_document;
 use crate::diagnostics::{ConsoleMessage, LogAnchor, LogSeverity};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
-    CellViewRef, ComponentType, OpenCellView, Point, PortDirection, PortSpec, SchematicState,
-    SymbolDocument, View, ViewType,
+    CellViewRef, ComponentType, OpenCellView, Point, SchematicState, SymbolDocument, View, ViewType,
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_design::drc::DrcSeverity;
+use rspice_design::symbol::generated::{
+    GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
+};
 use std::collections::BTreeMap;
 
 pub(super) const MAX_FINDING_ROWS: usize = 50;
@@ -672,82 +674,71 @@ impl AppState {
     /// Keep the active cell's generated "symbol" view in step with its
     /// schematic interface — created when ports exist, refreshed when they
     /// change, removed when the last port goes. A hand-authored symbol
-    /// view (no `generated` marker) is never touched: the user owns it.
+    /// view (no `generated` marker) is never touched: the user owns it, and
+    /// neither is anything in a read-only library.
     fn sync_generated_symbol_view(&mut self) {
-        const GENERATED_KEY: &str = "generated";
-        const PORTS_KEY: &str = "ports";
-
         let reference = self.workspace.content.active_view.clone();
         if !reference.view.eq_ignore_ascii_case("schematic") {
             return;
         }
-        let mut symbol_error = None;
-        let ports = self.schematic.interface_ports();
-        let existing_symbol = self
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view("symbol"))
-            .cloned();
-        if self
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .is_none()
-        {
+        let Some(library) = self.library_manager.get_library(&reference.library) else {
+            return;
+        };
+        let Some(cell) = library.get_cell(&reference.cell) else {
+            return;
+        };
+        if library.read_only {
             return;
         }
+        let existing_symbol = cell.get_view(GENERATED_SYMBOL_VIEW).cloned();
+        let ports = self.schematic.interface_ports();
 
         if ports.is_empty() {
-            if !existing_symbol
-                .as_ref()
-                .is_some_and(|view| view.metadata.contains_key(GENERATED_KEY))
-            {
+            if !existing_symbol.as_ref().is_some_and(is_generated_symbol) {
                 return;
             }
             if let Some(mut library) = self.library_manager.edit_library(&reference.library) {
-                library.remove_view(&reference.cell, "symbol");
+                library.remove_view(&reference.cell, GENERATED_SYMBOL_VIEW);
             }
             return;
         }
 
-        let encoded: String = ports
-            .iter()
-            .map(|port| format!("{}:{}", port.name, port.direction.keyword()))
-            .collect::<Vec<_>>()
-            .join(" ");
-        match existing_symbol {
-            Some(mut view) if view.metadata.contains_key(GENERATED_KEY) => {
+        let symbol_error = match existing_symbol {
+            Some(mut view) if is_generated_symbol(&view) => {
                 let before = view.metadata.clone();
-                view.metadata.insert(PORTS_KEY.to_owned(), encoded);
-                if let Err(error) =
-                    SymbolDocument::generated_from_ports(&ports).store_in_view(&mut view)
-                {
-                    symbol_error =
-                        Some(format!("Generated symbol could not be refreshed: {error}"));
-                } else if view.metadata != before
-                    && let Some(mut library) = self.library_manager.edit_library(&reference.library)
-                {
-                    library.replace_view_metadata(&reference.cell, "symbol", view.metadata);
+                match store_generated_symbol(&mut view, &ports, |_| None) {
+                    Err(error) => Some(format!("Generated symbol could not be refreshed: {error}")),
+                    Ok(()) => {
+                        if view.metadata != before
+                            && let Some(mut library) =
+                                self.library_manager.edit_library(&reference.library)
+                        {
+                            library.replace_view_metadata(
+                                &reference.cell,
+                                GENERATED_SYMBOL_VIEW,
+                                view.metadata,
+                            );
+                        }
+                        None
+                    }
                 }
             }
-            Some(_) => {} // hand-authored symbol: leave it alone
+            Some(_) => None, // hand-authored symbol: leave it alone
             None => {
-                let mut view = View::new("symbol", ViewType::Symbol);
-                view.metadata
-                    .insert(GENERATED_KEY.to_owned(), "ports".to_owned());
-                view.metadata.insert(PORTS_KEY.to_owned(), encoded);
-                if let Err(error) =
-                    SymbolDocument::generated_from_ports(&ports).store_in_view(&mut view)
-                {
-                    symbol_error = Some(format!("Generated symbol could not be created: {error}"));
-                } else if let Some(mut library) =
-                    self.library_manager.edit_library(&reference.library)
-                {
-                    library.add_view(&reference.cell, view);
+                let mut view = View::new(GENERATED_SYMBOL_VIEW, ViewType::Symbol);
+                match store_generated_symbol(&mut view, &ports, |_| None) {
+                    Err(error) => Some(format!("Generated symbol could not be created: {error}")),
+                    Ok(()) => {
+                        if let Some(mut library) =
+                            self.library_manager.edit_library(&reference.library)
+                        {
+                            library.add_view(&reference.cell, view);
+                        }
+                        None
+                    }
                 }
             }
-        }
+        };
         if let Some(error) = symbol_error {
             self.push_user_message(ConsoleMessage::warning(error));
         }
@@ -2241,23 +2232,6 @@ fn require_no_owned_sources(state: &AppState, library: &str) -> Result<(), Strin
         ));
     }
     Ok(())
-}
-
-pub(super) fn parse_encoded_ports(encoded: &str) -> Vec<PortSpec> {
-    encoded
-        .split_whitespace()
-        .filter_map(|entry| {
-            let (name, direction) = entry.split_once(':')?;
-            let name = name.trim();
-            if name.is_empty() {
-                return None;
-            }
-            Some(PortSpec {
-                name: name.to_owned(),
-                direction: PortDirection::parse(direction),
-            })
-        })
-        .collect()
 }
 
 #[cfg(test)]

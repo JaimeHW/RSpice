@@ -25,11 +25,13 @@ use rspice_design::symbol::publication::{
     EncodedSymbolEditorBundle, SymbolSaveCheck, check_symbol_pins, symbol_save_checks,
 };
 
+use rspice_design::library::metadata::{metadata_ports, module_interface_view};
 use rspice_design::symbol::edit::{
     symbol_metadata_snapshot_from_view, symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
+use rspice_design::symbol::generated::{GENERATED_PORTS_KEY, decode_ports};
 
-use super::{MAX_FINDING_ROWS, log_severity_from_drc, parse_encoded_ports};
+use super::{MAX_FINDING_ROWS, log_severity_from_drc};
 
 impl AppState {
     pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
@@ -127,12 +129,21 @@ impl AppState {
             }
         }
 
-        self.library_manager
+        let cell = self
+            .library_manager
             .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .and_then(|view| view.metadata.get("ports"))
-            .map(|encoded| parse_encoded_ports(encoded))
+            .and_then(|library| library.get_cell(&reference.cell));
+        // With no schematic, the module's last clean compile is the contract.
+        if let Some(ports) = cell
+            .and_then(module_interface_view)
+            .and_then(|view| metadata_ports(&view.metadata))
+            .filter(|ports| !ports.is_empty())
+        {
+            return ports;
+        }
+        cell.and_then(|cell| cell.get_view(&reference.view))
+            .and_then(|view| view.metadata.get(GENERATED_PORTS_KEY))
+            .map(|encoded| decode_ports(encoded))
             .unwrap_or_default()
     }
 
