@@ -607,9 +607,12 @@ fn gates() -> Vec<Gate> {
         engine.run_pss_with_abort(&netlist, PssConfig::new(1.0e6), abort)
     });
     // The forced-solution path added a cancellation check before every
-    // Newton solve. Call-site attribution accounts for 4,088 of this fixture's
-    // 16,420 polls at that entry; they are cancellation work, not extra Newton
-    // iterations. Independent-state stabilization saves another 291 steps.
+    // Newton solve. Call-site attribution accounted for 4,088 of this
+    // fixture's then 16,420 polls at that entry; they are cancellation work,
+    // not extra Newton iterations. Independent-state stabilization saves
+    // another 291 steps. A chord step with the coarse grid's Jacobian closes
+    // the doubled grid without its two central-difference traversals, which
+    // brought the count to 11,488.
     gates.push(Gate {
         metric: "pss.abort_polls",
         unit: "polls",

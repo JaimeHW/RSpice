@@ -1631,7 +1631,7 @@
       "note": "abort polls for PSS, including cancellation before every Newton solve and a solved doubled grid for waveform accuracy qualification",
       "tolerance": 0.15,
       "unit": "polls",
-      "value": 16420.0
+      "value": 11488.0
     },
     {
       "metric": "pss.shooting_iterations",
