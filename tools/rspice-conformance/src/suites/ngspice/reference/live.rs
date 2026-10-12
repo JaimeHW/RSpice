@@ -837,6 +837,17 @@ fn parse_raw_header(content: &[u8], pos: &mut usize) -> Result<RawHeader, String
             break false;
         }
 
+        // A variable row (`<index> <name> <type>`) before the key test: a
+        // device-parameter vector such as `.sens`'s `v(mp:eot)` has a colon in
+        // its name and must not be read as a `key: value` header line.
+        if in_variables {
+            let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+            if parts.len() >= 3 && parts[0].parse::<usize>().is_ok() {
+                variables.push(parts[1].to_string());
+                continue;
+            }
+        }
+
         if let Some((key, value)) = trimmed.split_once(':') {
             let key = key.trim().to_ascii_lowercase();
             let value = value.trim();
@@ -861,13 +872,6 @@ fn parse_raw_header(content: &[u8], pos: &mut usize) -> Result<RawHeader, String
                 _ => {}
             }
             continue;
-        }
-
-        if in_variables && !trimmed.is_empty() {
-            let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-            if parts.len() >= 3 && parts[0].parse::<usize>().is_ok() {
-                variables.push(parts[1].to_string());
-            }
         }
     };
 
@@ -1269,6 +1273,17 @@ fn conventional_windows_path(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variable_names_containing_a_colon_are_variables_not_header_keys() {
+        let raw = "Title: sens\nDate: today\nPlotname: Sensitivity Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\tv(mp:eot)\tvoltage\n\t1\tv(rtop)\tvoltage\nValues:\n 0\t1.5\n\t-2.5e-6\n";
+        let plots = parse_ngspice_raw_plots(raw.as_bytes()).expect("parses");
+        assert_eq!(
+            plots[0].variables,
+            vec!["v(mp:eot)".to_string(), "v(rtop)".to_string()]
+        );
+        assert_eq!(plots[0].data[1][0].re, -2.5e-6);
+    }
 
     #[cfg(windows)]
     #[test]
