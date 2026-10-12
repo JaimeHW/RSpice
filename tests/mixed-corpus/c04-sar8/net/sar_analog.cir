@@ -1,0 +1,79 @@
+* C4 SAR ADC analog half (RSpice-authored; corpus design C4): supplies, the
+* binary-weighted capacitor DAC and its switches, the Verilog-A comparator
+* (net/cmp_va.va), and a code probe. The SAR's outputs samp, b7..b0 and eoc
+* arrive on analog nodes (built-in D/A at vcc = 1.8 V in the RSpice decks); the
+* switch controls are B-sources over those levels. Capacitor values come from
+* net/caps_nominal.cir or net/caps_mc.cir; the input from net/vin_*.cir.
+*
+* Sampling (samp = 1): the top plate is grounded and every bottom plate sits
+* on vin. Conversion (samp = 0): the top plate floats and bottom plate k sits
+* on vref for b_k = 1 and on 0 otherwise, so
+*   v(top) = -vin + sum_k b_k C_k vref / Ctot,   Ctot = 256 Cu,
+* and the comparator's out is high (keep the trial bit) exactly when v(top) < 0.
+vdd vdd 0 1.8
+vref vref 0 1.0
+vcref cref 0 dc 0 ac 1
+xcmp top cref cmp vdd 0 cmp_va
+* capacitor DAC
+ctop7 top bt7 {c7v}
+ctop6 top bt6 {c6v}
+ctop5 top bt5 {c5v}
+ctop4 top bt4 {c4v}
+ctop3 top bt3 {c3v}
+ctop2 top bt2 {c2v}
+ctop1 top bt1 {c1v}
+ctop0 top bt0 {c0v}
+ctopd top btd {cdv}
+* top-plate switch on samp itself, so it opens before any bottom plate moves
+stop top 0 samp 0 swh
+* the bottom-plate switches see samp through a 1 ns RC
+rsd samp samp_d 1k
+csd samp_d 0 1p
+sv7 bt7 vin samp_d 0 swh
+sr7 bt7 vref cr7 0 swh
+sg7 bt7 0 cg7 0 swh
+bcr7 cr7 0 v = v(b7)*(1.8-v(samp_d))/1.8
+bcg7 cg7 0 v = (1.8-v(b7))*(1.8-v(samp_d))/1.8
+sv6 bt6 vin samp_d 0 swh
+sr6 bt6 vref cr6 0 swh
+sg6 bt6 0 cg6 0 swh
+bcr6 cr6 0 v = v(b6)*(1.8-v(samp_d))/1.8
+bcg6 cg6 0 v = (1.8-v(b6))*(1.8-v(samp_d))/1.8
+sv5 bt5 vin samp_d 0 swh
+sr5 bt5 vref cr5 0 swh
+sg5 bt5 0 cg5 0 swh
+bcr5 cr5 0 v = v(b5)*(1.8-v(samp_d))/1.8
+bcg5 cg5 0 v = (1.8-v(b5))*(1.8-v(samp_d))/1.8
+sv4 bt4 vin samp_d 0 swh
+sr4 bt4 vref cr4 0 swh
+sg4 bt4 0 cg4 0 swh
+bcr4 cr4 0 v = v(b4)*(1.8-v(samp_d))/1.8
+bcg4 cg4 0 v = (1.8-v(b4))*(1.8-v(samp_d))/1.8
+sv3 bt3 vin samp_d 0 swh
+sr3 bt3 vref cr3 0 swh
+sg3 bt3 0 cg3 0 swh
+bcr3 cr3 0 v = v(b3)*(1.8-v(samp_d))/1.8
+bcg3 cg3 0 v = (1.8-v(b3))*(1.8-v(samp_d))/1.8
+sv2 bt2 vin samp_d 0 swh
+sr2 bt2 vref cr2 0 swh
+sg2 bt2 0 cg2 0 swh
+bcr2 cr2 0 v = v(b2)*(1.8-v(samp_d))/1.8
+bcg2 cg2 0 v = (1.8-v(b2))*(1.8-v(samp_d))/1.8
+sv1 bt1 vin samp_d 0 swh
+sr1 bt1 vref cr1 0 swh
+sg1 bt1 0 cg1 0 swh
+bcr1 cr1 0 v = v(b1)*(1.8-v(samp_d))/1.8
+bcg1 cg1 0 v = (1.8-v(b1))*(1.8-v(samp_d))/1.8
+sv0 bt0 vin samp_d 0 swh
+sr0 bt0 vref cr0 0 swh
+sg0 bt0 0 cg0 0 swh
+bcr0 cr0 0 v = v(b0)*(1.8-v(samp_d))/1.8
+bcg0 cg0 0 v = (1.8-v(b0))*(1.8-v(samp_d))/1.8
+svd btd vin samp_d 0 swh
+sgd btd 0 cgd 0 swh
+bcgd cgd 0 v = 1.8-v(samp_d)
+.model swh sw vt=0.9 vh=0.05 ron=50 roff=1e12
+* code probe: the bits read at half the 1.8 V rail, as a number
+bcode code 0 v = (v(b7)>0.9 ? 128 : 0) + (v(b6)>0.9 ? 64 : 0) + (v(b5)>0.9 ? 32 : 0)
++ + (v(b4)>0.9 ? 16 : 0) + (v(b3)>0.9 ? 8 : 0) + (v(b2)>0.9 ? 4 : 0)
++ + (v(b1)>0.9 ? 2 : 0) + (v(b0)>0.9 ? 1 : 0)

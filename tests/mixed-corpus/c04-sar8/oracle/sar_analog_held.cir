@@ -1,0 +1,53 @@
+* C4 analog half at the held D-A state, for the ngspice O5-O1 decks
+* (RSpice-authored; corpus design C4). net/sar_analog.cir with every switch
+* replaced by the resistor its held control selects (samp = 1, bits 0): the
+* top-plate switch and the bottom plates' vin switches on (ron = 50 ohm), the
+* vref and ground switches off (roff = 1e12 ohm); their B-source controls and
+* the code probe have nothing left to drive and are dropped.
+* Why: ngspice-46 stamps every voltage-controlled switch in its off state in
+* .ac and .noise (a switch that is on at the operating point reads as roff;
+* checked on a one-switch circuit), so the switched netlist is not a valid
+* small-signal oracle there. A held switch is a linear resistor with the
+* resistor's thermal noise (ngspice's swnoise.c), which is what this file states.
+vdd vdd 0 1.8
+vref vref 0 1.0
+vcref cref 0 dc 0 ac 1
+xcmp top cref cmp vdd 0 cmp_va
+ctop7 top bt7 {c7v}
+ctop6 top bt6 {c6v}
+ctop5 top bt5 {c5v}
+ctop4 top bt4 {c4v}
+ctop3 top bt3 {c3v}
+ctop2 top bt2 {c2v}
+ctop1 top bt1 {c1v}
+ctop0 top bt0 {c0v}
+ctopd top btd {cdv}
+rstop top 0 50
+rsd samp samp_d 1k
+csd samp_d 0 1p
+rsv7 bt7 vin 50
+rsr7 bt7 vref 1e12
+rsg7 bt7 0 1e12
+rsv6 bt6 vin 50
+rsr6 bt6 vref 1e12
+rsg6 bt6 0 1e12
+rsv5 bt5 vin 50
+rsr5 bt5 vref 1e12
+rsg5 bt5 0 1e12
+rsv4 bt4 vin 50
+rsr4 bt4 vref 1e12
+rsg4 bt4 0 1e12
+rsv3 bt3 vin 50
+rsr3 bt3 vref 1e12
+rsg3 bt3 0 1e12
+rsv2 bt2 vin 50
+rsr2 bt2 vref 1e12
+rsg2 bt2 0 1e12
+rsv1 bt1 vin 50
+rsr1 bt1 vref 1e12
+rsg1 bt1 0 1e12
+rsv0 bt0 vin 50
+rsr0 bt0 vref 1e12
+rsg0 bt0 0 1e12
+rsvd btd vin 50
+rsgd btd 0 1e12

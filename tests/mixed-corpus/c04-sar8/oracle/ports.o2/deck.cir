@@ -1,0 +1,32 @@
+* C4 8-bit SAR ADC, variant ports, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* The register net/sar8.v in Icarus through d_cosim, over the same analog half
+* with the comparator's SPICE twin. adc_bridge at 0.9 V (vcc/2) into the
+* register and dac_bridge 0/1.8 V + 20 ohm out of it stand for the RSpice
+* decks' built-in converters.
+.include ../cmp_twin.cir
+.include ../../net/caps_nominal.cir
+.include ../../net/sar_analog.cir
+.include ../../net/vin_codes.cir
+vclk clk 0 pulse(0 1.8 0 1n 1n 49n 100n)
+vstart start 0 pulse(1.8 0 50n 1n 1n 898n 1u)
+abin [clk start cmp] [d_clk d_start d_cmp] adc_half
+.model adc_half adc_bridge(in_low = 0.9 in_high = 0.9)
+asar [d_clk d_start d_cmp] [d_samp d_eoc d_b7 d_b6 d_b5 d_b4 d_b3 d_b2 d_b1 d_b0] sar8
+.model sar8 d_cosim simulation="ivlng" sim_args=["sar8"]
+aout [d_samp d_eoc d_b7 d_b6 d_b5 d_b4 d_b3 d_b2 d_b1 d_b0]
++ [samp_h eoc_h b7_h b6_h b5_h b4_h b3_h b2_h b1_h b0_h] dac_rail
+.model dac_rail dac_bridge(out_low = 0 out_high = 1.8 out_undef = 0.9
++ input_load = 5.0e-12 t_rise = 1e-11 t_fall = 1e-11)
+rsamp samp_h samp 20
+reoc eoc_h eoc 20
+rb7 b7_h b7 20
+rb6 b6_h b6 20
+rb5 b5_h b5 20
+rb4 b4_h b4 20
+rb3 b3_h b3 20
+rb2 b2_h b2 20
+rb1 b1_h b1 20
+rb0 b0_h b0 20
+.tran 1n 32u
+.save v(code)
+.end

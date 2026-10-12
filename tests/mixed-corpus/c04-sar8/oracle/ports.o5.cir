@@ -1,0 +1,30 @@
+* C4 ports held-digital O5 circuit (corpus O5 rules): the register's D-A state
+* (samp = 1, eoc = 0, b7..b0 = 0) held at 1.8 V / 0 V behind the built-in
+* converters' 20 ohm; the register, its A/D inputs (clk, start, cmp) and their
+* sources are removed. The comparator stays the Verilog-A module. The runner
+* appends the deck's analysis card.
+.hdl "../net/cmp_va.va"
+.include ../net/caps_nominal.cir
+.include ../net/sar_analog.cir
+.include ../net/vin_codes.cir
+vsamp samp_h 0 1.8
+rsamp samp_h samp 20
+veoc eoc_h 0 0
+reoc eoc_h eoc 20
+vb7 b7_h 0 0
+rb7 b7_h b7 20
+vb6 b6_h 0 0
+rb6 b6_h b6 20
+vb5 b5_h 0 0
+rb5 b5_h b5 20
+vb4 b4_h 0 0
+rb4 b4_h b4 20
+vb3 b3_h 0 0
+rb3 b3_h b3 20
+vb2 b2_h 0 0
+rb2 b2_h b2 20
+vb1 b1_h 0 0
+rb1 b1_h b1 20
+vb0 b0_h 0 0
+rb0 b0_h b0 20
+.end

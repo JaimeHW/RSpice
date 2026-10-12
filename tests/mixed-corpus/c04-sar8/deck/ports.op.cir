@@ -1,0 +1,10 @@
+* C4 8-bit SAR ADC, variant ports, op
+.hdl "../net/sar8.v"
+.hdl "../net/cmp_va.va"
+.include ../net/caps_nominal.cir
+.include ../net/sar_analog.cir
+.include ../net/vin_codes.cir
+.include ../net/sar_ports.cir
+.param vcc=1.8
+.op
+.end

@@ -1,0 +1,30 @@
+* C4 8-bit SAR ADC, variant ports, op: O5-O1 (ngspice-46) held-digital oracle deck
+* The O5 circuit of oracle/ports.o5.cir with the comparator's SPICE twin and
+* each switch as the resistor its held control selects (sar_analog_held.cir).
+.include cmp_twin.cir
+.include ../net/caps_nominal.cir
+.include sar_analog_held.cir
+.include ../net/vin_codes.cir
+vsamp samp_h 0 1.8
+rsamp samp_h samp 20
+veoc eoc_h 0 0
+reoc eoc_h eoc 20
+vb7 b7_h 0 0
+rb7 b7_h b7 20
+vb6 b6_h 0 0
+rb6 b6_h b6 20
+vb5 b5_h 0 0
+rb5 b5_h b5 20
+vb4 b4_h 0 0
+rb4 b4_h b4 20
+vb3 b3_h 0 0
+rb3 b3_h b3 20
+vb2 b2_h 0 0
+rb2 b2_h b2 20
+vb1 b1_h 0 0
+rb1 b1_h b1 20
+vb0 b0_h 0 0
+rb0 b0_h b0 20
+.op
+.save v(top) v(xcmp.o1) v(cmp) v(bt7) v(samp)
+.end

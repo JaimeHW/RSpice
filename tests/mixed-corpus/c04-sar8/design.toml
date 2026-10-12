@@ -1,0 +1,57 @@
+schema = "rspice-mixed-design/1"
+id = "C4"
+title = "8-bit SAR ADC"
+exit_phases = ["P1", "P2"]
+dialect = "best-available"
+features = []
+
+# full: a Verilog testbench (clock, start, $display per conversion, $finish)
+# and the SAR register in one source file (net/sar8_full.v).
+[[variant]]
+name = "full"
+families = ["spice", "va-runtime", "vams-digital"]
+today = "parse:P2.3"
+
+# ports: the SAR register alone, clocked and started by SPICE sources.
+[[variant]]
+name = "ports"
+families = ["spice", "va-runtime", "vams-digital"]
+today = "runs"
+
+# Budgets are about five times the slower route's measured case time (at
+# least 30 s), so a hang surfaces quickly.
+[[analysis]]
+id = "tran"
+variants = ["full", "ports"]
+oracles = ["O6", "O2", "O5"]
+timeout_s = 520
+phase = "P2"
+
+# The coupled t = 0 fixed point (D-A): the sampling state.
+[[analysis]]
+id = "op"
+variants = ["full", "ports"]
+oracles = ["O6", "O2", "O5", "O5-O1"]
+timeout_s = 30
+phase = "P1"
+
+[[analysis]]
+id = "ac"
+variants = ["full", "ports"]
+oracles = ["O6", "O2", "O5", "O5-O1"]
+timeout_s = 30
+phase = "P1"
+
+[[analysis]]
+id = "noise"
+variants = ["full", "ports"]
+oracles = ["O6", "O2", "O5", "O5-O1"]
+timeout_s = 30
+phase = "P1"
+
+[[analysis]]
+id = "mc-tran"
+variants = ["full", "ports"]
+oracles = ["O6", "O2", "O5"]
+timeout_s = 310
+phase = "P1"

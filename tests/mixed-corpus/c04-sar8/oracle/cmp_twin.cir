@@ -1,0 +1,10 @@
+* C4 comparator, SPICE twin of net/cmp_va.va (RSpice-authored; corpus design C4,
+* O5-O1 and O2): the same transconductor, output conductance (noisy
+* resistor), capacitance and tanh limiter. The subcircuit takes the module's
+* name, so net/sar_analog.cir's instance line serves both.
+.subckt cmp_va inp inn out vdd gnd
+g1 gnd o1 inn inp 1m
+r1 o1 gnd 100k
+c1 o1 gnd 50f
+b1 out gnd v = v(vdd,gnd)*0.5*(1+tanh(50*v(o1,gnd)))
+.ends

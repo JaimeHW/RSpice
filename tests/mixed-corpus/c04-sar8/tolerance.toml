@@ -1,0 +1,163 @@
+schema = "rspice-mixed-tolerance/1"
+# sar8.v and sar8_full.v: `timescale 1ns/1ps.
+time_precision = 1e-12
+
+# ---- tran: a staircase of 32 mid-code inputs -> codes ----------------------
+
+[[q]]
+id = "codes"
+analysis = "tran"
+variants = ["full", "ports"]
+kind = "codes"
+nets = ["xsar.b7__event_0", "xsar.b6__event_0", "xsar.b5__event_0", "xsar.b4__event_0", "xsar.b3__event_0", "xsar.b2__event_0", "xsar.b1__event_0", "xsar.b0__event_0"]
+strobe = "xsar.eoc__event_0"
+window = [0.0, 3.2e-5]
+oracle = "O6"
+expect = "c04::codes"
+why = "the register's own bits at each eoc rise; every input is mid-code, half an LSB (1.95 mV) from both decision levels: v(xcmp.o1) = 0.195 V, tanh(9.8), so every decision is unambiguous"
+
+[[q]]
+id = "code"
+analysis = "tran"
+variants = ["full", "ports"]
+kind = "held_at"
+signal = "v(code)"
+times = { start = 9.7e-7, step = 1e-6, count = 32 }
+oracle = "O6"
+expect = "c04::codes"
+abs = 0.01
+why = "the code probe (a B-source over the converted bit levels) 70 ns after eoc, while the bits hold; integer arithmetic, exact"
+
+[[q]]
+id = "code"
+analysis = "tran"
+variants = ["full", "ports"]
+kind = "held_at"
+signal = "v(code)"
+times = { start = 9.7e-7, step = 1e-6, count = 32 }
+oracle = "O2"
+ref = "ref/ports.tran.O2.out"
+abs = 0.01
+why = "the same register in Icarus (d_cosim) over the SPICE twin of the comparator: the digital sequence must match exactly"
+
+# ---- op: the D-A state (sampling) -------------------------------------------
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["full", "ports"]
+kind = "op"
+signals = ["v(top)", "v(xcmp.o1)", "v(cmp)", "v(bt7)", "v(samp)"]
+oracle = "O5"
+abs = 1e-5
+rel = 1e-5
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["full", "ports"]
+kind = "op"
+signals = ["v(top)", "v(xcmp.o1)", "v(cmp)", "v(bt7)", "v(samp)"]
+oracle = "O5-O1"
+ref = "ref/ports.op.O5-O1.out"
+abs = 1e-6
+rel = 1e-6
+why = "a linear network and one tanh: the comparator's SPICE twin is exact"
+
+# ---- ac: the comparator with the code held (samp = 1, bits 0) --------------
+
+[[q]]
+id = "acc"
+analysis = "ac"
+variants = ["full", "ports"]
+kind = "ac"
+signal = "v(xcmp.o1)"
+points = [1e3, 1e4, 1e5, 1e6, 1e7, 1e8]
+oracle = "O6"
+expect = "c04::acc"
+abs_db = 0.02
+abs_deg = 0.2
+why = "H = gm ro/(1 + jf/31.83 MHz) from cref; the top plate draws nothing from the comparator, and its own RC pole (622 MHz) is not on this path"
+
+[[q]]
+id = "acc"
+analysis = "ac"
+variants = ["full", "ports"]
+kind = "ac"
+signal = "v(xcmp.o1)"
+points = [1e3, 1e4, 1e5, 1e6, 1e7, 1e8]
+oracle = "O5"
+abs_db = 1e-4
+abs_deg = 1e-3
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "acc"
+analysis = "ac"
+variants = ["full", "ports"]
+kind = "ac"
+signal = "v(xcmp.o1)"
+points = [1e3, 1e4, 1e5, 1e6, 1e7, 1e8]
+oracle = "O5-O1"
+ref = "ref/ports.ac.O5-O1.out"
+abs_db = 0.01
+abs_deg = 0.1
+why = "the comparator's SPICE twin (G, R, C, B) is the same linear network"
+
+# ---- noise -------------------------------------------------------------------
+
+[[q]]
+id = "nz"
+analysis = "noise"
+variants = ["full", "ports"]
+kind = "noise"
+points = [1e3, 1e5, 1e7]
+oracle = "O6"
+expect = "c04::nz"
+rel = 0.02
+why = "4kT (ro + (gm ro)^2 Ron_top)/(1 + (f/31.83 MHz)^2) = 9.944e-15 V^2/Hz at low f; the top switch's thermal noise included; the bottom switches' share (via the DAC capacitors) is below 1e-4"
+
+[[q]]
+id = "nz"
+analysis = "noise"
+variants = ["full", "ports"]
+kind = "noise"
+points = [1e3, 1e5, 1e7]
+oracle = "O5"
+rel = 1e-4
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "nz"
+analysis = "noise"
+variants = ["full", "ports"]
+kind = "noise"
+points = [1e3, 1e5, 1e7]
+oracle = "O5-O1"
+ref = "ref/ports.noise.O5-O1.out"
+rel = 0.01
+why = "ro and the switches' thermal noise in both simulators"
+
+# ---- mc-tran: DNL at the major carry ----------------------------------------
+# Two ramps of 8 inputs at 1/16 LSB straddle the 126->127 transition T127
+# (127 - 1/4 .. 127 + 3/16 LSB) and the 127->128 transition T128 (128 - 1/4 ..
+# 128 + 3/16 LSB). The ramps read code 127 on n_A = #{v >= T127} and
+# n_B = #{w < T128} inputs, so delta = (T128 - T127)/LSB - 1 = (n_A + n_B)/16
+# - 1/2. is127 is 1 V while eoc is high (100 ns per conversion) on a conversion
+# that gave code 127: its mean over the 16 conversions (16 us) is
+# (n_A + n_B)/160, so delta = 10 * mean - 1/2 and the statistic is the std of
+# 10 * mean.
+
+[[q]]
+id = "dnl"
+analysis = "mc-tran"
+variants = ["full", "ports"]
+kind = "stat"
+stat = "std"
+over = "trials"
+of = { kind = "mean", signal = "v(is127)", window = [5.0e-7, 1.65e-5], scale = 10.0 }
+trials = 10
+interval = [0.036, 0.136]
+oracle = "O6"
+why = "sigma(delta) = sqrt(255) * 0.005 = 0.0798 LSB (C7 against C6..C0, 0.5 % per unit), with the 1/16 LSB resolution of both transitions in quadrature 0.0838; chi^2 99 %, 9 df: [0.0368, 0.1357]"

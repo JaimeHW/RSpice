@@ -1,0 +1,3 @@
+* C4 capacitor DAC values, nominal (RSpice-authored; corpus design C4):
+* Cu = 20 fF, C_k = 2^k Cu, dummy Cu, Ctot = 256 Cu = 5.12 pF.
+.param c7v=2.56p c6v=1.28p c5v=640f c4v=320f c3v=160f c2v=80f c1v=40f c0v=20f cdv=20f

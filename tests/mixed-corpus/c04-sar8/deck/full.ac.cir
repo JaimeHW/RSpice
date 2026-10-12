@@ -1,0 +1,11 @@
+* C4 8-bit SAR ADC, variant full, ac (comparator, code held at the D-A state)
+.hdl "../net/sar8_full.v" module=tb_sar
+.hdl "../net/sar8_full.v" module=sar8
+.hdl "../net/cmp_va.va"
+.include ../net/caps_nominal.cir
+.include ../net/sar_analog.cir
+.include ../net/vin_codes.cir
+.include ../net/sar_full.cir
+.param vcc=1.8 nconv=32
+.ac dec 10 1k 100meg
+.end

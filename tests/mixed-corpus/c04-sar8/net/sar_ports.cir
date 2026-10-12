@@ -1,0 +1,8 @@
+* C4 variant ports (RSpice-authored; corpus design C4): the SAR register
+* (net/sar8.v) clocked and started by SPICE sources. clk is 10 MHz and rises
+* through the 0.9 V A/D threshold at 0.5 ns + k 100 ns; start is high around
+* the first clock of every microsecond, so conversion k runs from k us + 0.5 ns
+* and raises eoc at k us + 900.5 ns.
+vclk clk 0 pulse(0 1.8 0 1n 1n 49n 100n)
+vstart start 0 pulse(1.8 0 50n 1n 1n 898n 1u)
+xsar clk start cmp samp eoc b7 b6 b5 b4 b3 b2 b1 b0 sar8

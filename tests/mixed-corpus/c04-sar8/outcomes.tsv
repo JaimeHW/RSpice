@@ -1,0 +1,21 @@
+# variant	analysis	route	outcome	detail
+full	tran	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	tran	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+ports	tran	interp	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.000000e0, e=0.000000e0)
+ports	tran	native	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.000000e0, e=0.000000e0)
+full	op	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	op	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+ports	op	interp	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
+ports	op	native	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
+full	ac	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	ac	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+ports	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
+ports	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
+full	noise	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+full	noise	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
+ports	noise	interp	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
+ports	noise	native	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
+full	mc-tran	interp	refused	compile_refusal; label="net/sar8_full.v:17"; instance=net/sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v:17
+full	mc-tran	native	refused	compile_refusal; label="net/sar8_full.v:17"; instance=net/sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v:17
+ports	mc-tran	interp	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]
+ports	mc-tran	native	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]

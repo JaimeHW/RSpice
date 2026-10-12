@@ -1,0 +1,19 @@
+// C4 comparator (RSpice-authored; corpus design C4): an analog-only
+// Verilog-A transconductor. The internal node o1 carries
+// gm*ro*(V(inn) - V(inp)) behind a pole at 1/(2*pi*ro*co) = 31.83 MHz, with
+// the thermal noise of ro; out is a tanh limiter between gnd and vdd, so out
+// is high exactly when V(inp) < V(inn).
+`include "disciplines.vams"
+`include "constants.vams"
+module cmp_va(inp, inn, out, vdd, gnd);
+  inout inp, inn, out, vdd, gnd;
+  electrical inp, inn, out, vdd, gnd, o1;
+  parameter real gm = 1m;
+  parameter real ro = 100k;
+  parameter real co = 50f;
+  analog begin
+    I(o1, gnd) <+ -gm * V(inn, inp) + V(o1, gnd) / ro + ddt(co * V(o1, gnd))
+                  + white_noise(4.0 * `P_K * $temperature / ro, "ro");
+    V(out, gnd) <+ V(vdd, gnd) * 0.5 * (1.0 + tanh(50.0 * V(o1, gnd)));
+  end
+endmodule
