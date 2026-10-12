@@ -330,7 +330,7 @@ fn landed_veriloga_event_time(
         )));
     }
     if target - accepted_time >= hard_min_dt {
-        return Ok(target);
+        return Ok(coalesced_with_horizon(target, stop_time, hard_min_dt));
     }
     let resumed = floor_grid
         .march
@@ -368,9 +368,7 @@ fn landed_veriloga_event_time(
         };
         (accepted_time, 1.0, landed)
     });
-    if landed < stop_time && stop_time - landed < hard_min_dt {
-        landed = stop_time;
-    }
+    landed = coalesced_with_horizon(landed, stop_time, hard_min_dt);
     floor_grid.march = Some(FloorMarch {
         origin,
         hard_min_dt,
@@ -379,6 +377,25 @@ fn landed_veriloga_event_time(
         landed,
     });
     Ok(landed)
+}
+
+/// A landing less than one floor before the horizon lands on it.
+///
+/// Whatever produced the landing — an event clock far enough ahead to take as
+/// is, or a floor-grid point — the sliver it would leave before `stop_time` is
+/// an interval the solver cannot take. The common case is not a near miss but
+/// one instant computed twice: `.tran 1n 100n` parses its stop time as
+/// `100 * 1e-9`, one ulp above the double nearest 100 ns, while a 10 ns
+/// `always` clock's tenth tick converts to that nearest double. Landing the
+/// event on the horizon keeps the analog point at or after the event, which is
+/// all the schedule is owed, and makes the horizon the event's point: the tick
+/// is processed there and the run ends there.
+fn coalesced_with_horizon(landed: Value, stop_time: Value, hard_min_dt: Value) -> Value {
+    if landed < stop_time && stop_time - landed < hard_min_dt {
+        stop_time
+    } else {
+        landed
+    }
 }
 
 /// How many consecutive accepted points may advance by no more than the
@@ -12953,6 +12970,25 @@ mod tests {
             .expect("a femtosecond follow-up lands"),
             horizon,
             "a landing half a floor short of the horizon is the horizon"
+        );
+
+        // So is an event far enough ahead to take as is: `.tran 1n 100n`
+        // parses its stop time one ulp above the double a 10 ns clock's tenth
+        // tick converts to, and the sliver between them is no interval at all.
+        let stop: Value = 100.0 * 1.0e-9;
+        let tick: Value = 1.0e-7;
+        assert_eq!(stop, tick.next_up());
+        assert_eq!(
+            landed_veriloga_event_time(&mut FloorLandingGrid::default(), tick, 9.0e-8, 1e-20, stop)
+                .expect("the stop-time tick lands"),
+            stop,
+            "an event one ulp short of the horizon is the horizon"
+        );
+        assert_eq!(
+            landed_veriloga_event_time(&mut FloorLandingGrid::default(), tick, 9.0e-8, 1e-20, 2e-7)
+                .expect("an interior tick lands"),
+            tick,
+            "an event clear of the horizon keeps its own exact time"
         );
 
         let error = landed_veriloga_event_time(grid, 1.25, 1.0, Value::NAN, NO_HORIZON)
