@@ -693,6 +693,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
         .collect::<Vec<_>>();
     let transient = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -1510,6 +1511,7 @@ fn a_transient_result_without_an_events_field_still_decodes() {
 fn event_histories_survive_the_worker_edge_in_both_directions() {
     let source = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::new(),
         measurements: Vec::new(),
@@ -1696,6 +1698,7 @@ fn worker_result_payload_estimate_counts_high_volume_arrays() {
 fn worker_response_rejects_payloads_that_exceed_transport_limit() {
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -1725,6 +1728,7 @@ fn worker_response_rejects_payloads_that_exceed_transport_limit() {
 fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::from([(
             "V(out)".to_string(),

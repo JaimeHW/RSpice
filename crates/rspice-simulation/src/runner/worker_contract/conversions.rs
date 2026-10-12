@@ -1184,6 +1184,7 @@ pub(super) fn simulation_result_from_worker_pss(
         periodic_state: Some(std::sync::Arc::new(operating_point)),
         convergence: Default::default(),
         events: TransientEventHistory::default(),
+        hdl_output: Vec::new(),
     }
 }
 

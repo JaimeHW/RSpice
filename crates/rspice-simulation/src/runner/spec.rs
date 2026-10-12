@@ -563,6 +563,7 @@ mod tests {
         .expect("the PSS producer converges through the resolved service path");
         let result = SimulationResult::Transient {
             spectra: Vec::new(),
+            hdl_output: Vec::new(),
             time: produced.time,
             waveforms: HashMap::new(),
             measurements: Vec::new(),

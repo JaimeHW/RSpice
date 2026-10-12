@@ -1446,6 +1446,9 @@ impl TryFrom<SimulationResult> for WorkerSimulationResult {
                 convergence,
                 events,
                 spectra,
+                // The worker forwards HDL output on its own cadence (design
+                // P2 section 4.3, P4.7), not inside the result transport.
+                hdl_output: _,
             } => match periodic_state {
                 Some(operating_point) => {
                     if convergence.is_some() {
@@ -1848,6 +1851,7 @@ impl From<WorkerSimulationResult> for SimulationResult {
                 convergence: convergence.map(std::sync::Arc::new),
                 events: events.into(),
                 spectra: worker_recorded_fft::recorded_spectra(spectra),
+                hdl_output: Vec::new(),
             },
             WorkerSimulationResult::Fft {
                 spectrum,

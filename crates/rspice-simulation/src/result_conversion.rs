@@ -234,6 +234,9 @@ impl<Clock: Fn() -> f64> ResultConversion<Clock> {
                 // by the FFT task that bound this transient's trajectory. The
                 // transient's own retained result and digest are unchanged.
                 spectra: _,
+                // The HDL transcript is the run's console, not part of the
+                // retained result document or its digest.
+                hdl_output: _,
             } => {
                 let result = AnalysisResult::new(1, analysis_type, label.to_string(), (self.now)())
                     .with_waveforms(self.build_time_waveforms_owned(time, waveforms))
@@ -923,6 +926,7 @@ mod convergence_conversion_tests {
             ));
             let result = crate::results::SimulationResult::Transient {
                 spectra: Vec::new(),
+                hdl_output: Vec::new(),
                 time: time.clone(),
                 waveforms: HashMap::from([(
                     "V(out)".to_owned(),
@@ -1039,6 +1043,7 @@ mod waveform_unit_conversion_tests {
     fn a_waveform_retains_the_unit_its_producer_measured_it_in() {
         let sim_result = crate::results::SimulationResult::Transient {
             spectra: Vec::new(),
+            hdl_output: Vec::new(),
             time: vec![0.0, 1.0],
             waveforms: HashMap::from([
                 (
@@ -1163,6 +1168,7 @@ mod waveform_unit_conversion_tests {
         let result = super::convert(
             crate::results::SimulationResult::Transient {
                 spectra: Vec::new(),
+                hdl_output: Vec::new(),
                 time: vec![0.0, 1.0],
                 waveforms: HashMap::from([("V(env)".to_owned(), waveform)]),
                 measurements: Vec::new(),

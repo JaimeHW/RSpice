@@ -754,6 +754,7 @@ fn project_pss_data(
         // The periodic solver reports a converged steady state, not the
         // event schedule that reached it.
         events: Default::default(),
+        hdl_output: Vec::new(),
     })
 }
 
@@ -1054,6 +1055,8 @@ fn run_envelope(
         periodic_state: None,
         convergence: data.convergence,
         events: Default::default(),
+        // The service transient does not collect HDL output.
+        hdl_output: Vec::new(),
     })
 }
 

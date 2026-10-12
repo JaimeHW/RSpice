@@ -157,6 +157,7 @@ fn transient_convergence_survives_worker_round_trip() {
     let expected = convergence.clone();
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -224,6 +225,7 @@ fn worker_result_round_trip() {
 
     let transient = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: vec![0.0, 1e-9],
         waveforms: HashMap::from([(
             "V(out)".to_string(),
@@ -691,6 +693,7 @@ fn convergence_source_evidence_survives_derived_worker_transports() {
     for result in [
         SimulationResult::Transient {
             spectra: Vec::new(),
+            hdl_output: Vec::new(),
             time: vec![0.6, 1.0],
             waveforms: HashMap::new(),
             measurements: Vec::new(),
@@ -745,6 +748,7 @@ fn convergence_worker_transport_rejects_inline_and_malformed_quality_buffers() {
     .unwrap();
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: vec![0.0, 1.0],
         waveforms: HashMap::new(),
         measurements: Vec::new(),
@@ -908,6 +912,7 @@ fn a_recorded_fft_spectrum_survives_the_worker_boundary_bit_for_bit() {
         convergence: None,
         events: Default::default(),
         spectra: vec![std::sync::Arc::clone(&recorded)],
+        hdl_output: Vec::new(),
     };
     let SimulationResult::Transient {
         spectra: restored, ..
@@ -1144,6 +1149,7 @@ fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
         let expected_waveforms = waveforms.clone();
         let display = SimulationResult::Transient {
             spectra: Vec::new(),
+            hdl_output: Vec::new(),
             time,
             waveforms,
             measurements: Vec::new(),

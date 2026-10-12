@@ -98,6 +98,13 @@ pub enum SimulationResult {
         /// Empty for a transient that carried no card, which is every transient
         /// with no bound FFT analysis.
         spectra: Vec<std::sync::Arc<RecordedFftSpectrum>>,
+        /// What the deck's HDL designs printed as this solve accepted its
+        /// points (design P2 section 4.3): `$display` and its kin, severity
+        /// reports and finish notices, in emission order. Bounded at 64 MiB of
+        /// text; an overflow ends in one explicit truncation record. Empty for
+        /// a transient with no HDL design, and for one this runner did not
+        /// solve itself (a PSS rebuild, a worker transport).
+        hdl_output: Vec<rspice_core::config::HdlOutputRecord>,
     },
 
     /// AC analysis results

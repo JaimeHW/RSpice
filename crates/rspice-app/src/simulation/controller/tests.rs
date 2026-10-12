@@ -957,6 +957,7 @@ fn completed_transient_result_reuses_owned_waveform_buffers_in_run_history() {
         &export_io,
         Ok(crate::simulation::SimulationResult::Transient {
             spectra: Vec::new(),
+            hdl_output: Vec::new(),
             time,
             waveforms,
             measurements: Vec::new(),

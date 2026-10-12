@@ -16,6 +16,7 @@ fn transient() -> SimulationResult {
     let time = vec![0.0, 0.5, 1.0];
     SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([
             (
@@ -185,6 +186,7 @@ fn periodic_result() -> SimulationResult {
             .unwrap();
     SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),
@@ -235,6 +237,7 @@ fn authenticated_periodic_result() -> SimulationResult {
         .collect();
     SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: result.time.clone(),
         waveforms,
         measurements: Vec::new(),
@@ -855,6 +858,7 @@ fn large_artifact_transfer_uses_constant_size_metadata_and_exact_buffers() {
         .collect::<Vec<_>>();
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
+        hdl_output: Vec::new(),
         time: time.clone(),
         waveforms: HashMap::from([(
             "V(out)".to_owned(),

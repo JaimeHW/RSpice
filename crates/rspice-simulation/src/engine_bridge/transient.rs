@@ -80,6 +80,19 @@ impl EngineBridge {
         let prepared_netlist = netlist_for_transient_config(netlist, config, abort)?;
         let netlist = prepared_netlist.as_ref();
         let engine = self.engine_for_netlist(netlist);
+        // Collect what the deck's HDL designs print for the result, on an
+        // engine that shares this one's metrics and diagnostics.
+        let hdl_output = std::sync::Arc::new(HdlOutputCapture {
+            forward: engine.config().hdl.output.clone(),
+            ..HdlOutputCapture::default()
+        });
+        let engine = {
+            let mut capturing = engine.config().clone();
+            capturing.hdl.output = Some(hdl_output.clone());
+            engine
+                .try_resolved_with_config(capturing)
+                .map_err(|error| self.translate_error(error.into()))?
+        };
         let tran_result = if let Some(execution) = checkpoint {
             use rspice_core::engine::{
                 TransientCheckpointEncoding, TransientCheckpointStart, TransientCheckpointStream,
@@ -151,10 +164,13 @@ impl EngineBridge {
         let mut converted =
             convert_transient_result(netlist, tran_result, config.start_time, abort)?;
         if let SimulationResult::Transient {
-            convergence: slot, ..
+            convergence: slot,
+            hdl_output: records,
+            ..
         } = &mut converted
         {
             *slot = Some(std::sync::Arc::new(convergence));
+            *records = hdl_output.collector.take();
         }
         Ok(converted)
     }
@@ -375,11 +391,29 @@ fn convert_transient_result(
         waveforms,
         measurements,
         periodic_state: None,
-        // The engine is not in scope here; `run_transient` fills this in.
+        // The engine is not in scope here; `run_transient` fills these in.
         convergence: Default::default(),
         events,
         spectra,
+        hdl_output: Vec::new(),
     })
+}
+
+/// The run's HDL output (design P2 section 4.3): kept, bounded, for the
+/// result, and still handed to whatever sink the caller installed.
+#[derive(Debug, Default)]
+struct HdlOutputCapture {
+    collector: rspice_core::config::HdlOutputCollector,
+    forward: Option<std::sync::Arc<dyn rspice_core::config::HdlOutputSink>>,
+}
+
+impl rspice_core::config::HdlOutputSink for HdlOutputCapture {
+    fn emit(&self, record: &rspice_core::config::HdlOutputRecord) {
+        self.collector.emit(record);
+        if let Some(forward) = &self.forward {
+            forward.emit(record);
+        }
+    }
 }
 
 fn validate_transient_result_shape(
@@ -912,6 +946,70 @@ mod tests {
 
     fn parse_netlist(source: &str) -> rspice_core::Netlist {
         rspice_core::Netlist::parse(source).expect("test netlist parses")
+    }
+
+    /// Design P2 section 4.3: a headless transient carries what the deck's
+    /// HDL design printed, in emission order, and still hands every record
+    /// to the sink the caller installed.
+    #[test]
+    fn a_transient_result_carries_its_hdl_output() {
+        use rspice_core::config::{HdlOutputCollector, HdlStream};
+        let directory = std::env::temp_dir().join(format!(
+            "rspice_simulation_hdl_output_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).expect("create the model directory");
+        let model = directory.join("ticker.va");
+        std::fs::write(
+            &model,
+            "`timescale 1ns/1ns\n\
+             module ticker(p, n);\n\
+             \x20 inout p, n;\n\
+             \x20 electrical p, n;\n\
+             \x20 reg clk;\n\
+             \x20 integer count;\n\
+             \x20 initial begin clk = 0; count = 0; end\n\
+             \x20 always #5 clk = ~clk;\n\
+             \x20 always @(posedge clk) begin count = count + 1; $display(\"edge %0d\", count); end\n\
+             \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+             endmodule\n",
+        )
+        .expect("write the model");
+        let netlist = parse_netlist(&format!(
+            "* headless hdl output\nV1 a 0 1\nR1 a p 1k\nx1 p 0 ticker\n.va \"{}\" ticker\n.end\n",
+            model.display().to_string().replace('\\', "/")
+        ));
+        let installed = std::sync::Arc::new(HdlOutputCollector::new());
+        let mut config = rspice_core::SimulationConfig::default();
+        config.hdl.output = Some(installed.clone());
+        let result = EngineBridge::try_with_config(config)
+            .expect("a valid configuration")
+            .run_transient(
+                &netlist,
+                &TransientAnalysisConfig {
+                    stop_time: 32e-9,
+                    step_time: 1e-9,
+                    ..TransientAnalysisConfig::default()
+                },
+                &rspice_core::NoAbort,
+            )
+            .expect("the transient runs");
+        let _ = std::fs::remove_dir_all(&directory);
+        let SimulationResult::Transient { hdl_output, .. } = result else {
+            panic!("a transient result");
+        };
+        // `clk` rises at 5, 15 and 25 ns.
+        let printed: Vec<&str> = hdl_output
+            .iter()
+            .filter(|record| record.stream == HdlStream::Stdout)
+            .map(|record| record.text.as_str())
+            .collect();
+        assert_eq!(printed, ["edge 1\n", "edge 2\n", "edge 3\n"]);
+        assert_eq!(
+            installed.take(),
+            hdl_output,
+            "the installed sink saw the same"
+        );
     }
 
     #[test]
