@@ -3866,10 +3866,13 @@ impl Engine {
             // A projected descriptor is still a timepoint candidate. Apply
             // Xyce's configured update status after a Newton solve rather
             // than bypassing it through the exact-descriptor shortcut.
+            //
+            // The device test is not applied here: it compares a device's
+            // current with the prediction of its previous Newton
+            // linearization, and an exact projection has none at this
+            // timepoint, only the last accepted point's. The physical residual
+            // below is the certificate for a projected candidate.
             if update_weights.is_none()
-                && (!enforce_device_convergence
-                    || !circuit.has_nonlinear_devices()
-                    || circuit.nonlinear_converged(self.device_convergence_criteria()))
                 && self.pss_check_physical_candidate(
                     circuit,
                     matrix,
