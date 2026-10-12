@@ -1682,6 +1682,44 @@ mod tests {
         assert!(!verilog_a_bundle(&app).contains_file(&duplicate));
     }
 
+    /// New source in a cell view's bundle refuses a path that differs from a
+    /// file it holds only by Unicode case, the root's included, and leaves the
+    /// bundle as it was.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn new_source_in_a_cell_bundle_rejects_unicode_case_alias_paths() {
+        let mut app = veriloga_view_app();
+        let root = verilog_a_bundle(&app).root().logical_path().to_owned();
+        let create = |app: &mut RSpiceApp, path: &str| {
+            open_source_file_dialog(
+                app,
+                ProjectSourceLanguage::VerilogA,
+                CodeSourceFileAction::New,
+                &root,
+                &root,
+            )
+            .unwrap();
+            app.state
+                .ui
+                .code_workspace
+                .source_file_dialog
+                .as_mut()
+                .unwrap()
+                .proposed_path = path.to_owned();
+            let result = commit_source_file_dialog(app);
+            app.state.ui.code_workspace.source_file_dialog = None;
+            result
+        };
+        create(&mut app, "Models/étage.va").expect("a new path is created");
+        let before = verilog_a_bundle(&app).clone();
+
+        for alias in ["MODELS/ÉTAGE.VA", "models/Étage.va", "GAIN.VA"] {
+            let error = create(&mut app, alias).expect_err(alias);
+            assert!(error.contains("case-insensitively"), "{alias}: {error}");
+            assert_eq!(verilog_a_bundle(&app), &before, "{alias} changed nothing");
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_file_commit_rejects_a_stale_bundle_transaction() {

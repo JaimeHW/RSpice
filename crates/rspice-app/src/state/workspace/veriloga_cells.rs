@@ -207,6 +207,10 @@ fn is_retired_demo(bundle: &ProjectSourceBundle) -> bool {
 /// interface; otherwise the module goes to the first free `<module>_va`,
 /// `<module>_va2`, and so on. `reserved` holds names an enclosing transaction
 /// has already claimed.
+///
+/// Names are compared by the canonical cell-view identity New Cell and the
+/// source registry use, so a module never lands in a cell that differs from
+/// one already there only by Unicode case or composition.
 pub(crate) fn veriloga_cell_for_module(
     libraries: &LibraryManager,
     interface_of: &dyn Fn(&Cell, &CellViewRef) -> Vec<String>,
@@ -214,29 +218,24 @@ pub(crate) fn veriloga_cell_for_module(
     module: &DeclaredModule,
     reserved: &[String],
 ) -> (CellViewRef, bool) {
+    let same = |left: &str, right: &str| {
+        crate::state::canonical_cell_view_owner_key("", left, "")
+            == crate::state::canonical_cell_view_owner_key("", right, "")
+    };
     let existing = |name: &str| {
-        libraries.get_library(library).and_then(|library| {
-            library
-                .cells
-                .values()
-                .find(|cell| cell.name.eq_ignore_ascii_case(name))
-        })
+        libraries
+            .get_library(library)
+            .and_then(|library| library.cells.values().find(|cell| same(&cell.name, name)))
     };
-    let claimed = |name: &str| {
-        existing(name).is_some()
-            || reserved
-                .iter()
-                .any(|taken| taken.eq_ignore_ascii_case(name))
-    };
+    let claimed =
+        |name: &str| existing(name).is_some() || reserved.iter().any(|taken| same(taken, name));
     let base = cell_name_for_module(&module.name);
     if let Some(cell) = existing(&base)
-        && !reserved
-            .iter()
-            .any(|taken| taken.eq_ignore_ascii_case(&base))
+        && !reserved.iter().any(|taken| same(taken, &base))
         && !cell
             .views
             .values()
-            .any(|view| view.name.eq_ignore_ascii_case(VERILOGA_VIEW))
+            .any(|view| same(&view.name, VERILOGA_VIEW))
     {
         let reference = CellViewRef::new(library, &cell.name, VERILOGA_VIEW);
         if same_terminal_contract(&interface_of(cell, &reference), &module.ports) {
