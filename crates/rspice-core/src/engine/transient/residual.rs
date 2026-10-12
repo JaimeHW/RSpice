@@ -2043,15 +2043,16 @@ impl Engine {
             .capacitors
             .stamp_transient_norton_companions(matrix, rhs, dt, &companion_coeff);
         if ctx.baseline_diag_gmin == 0.0 && extra_diag_gmin == 0.0 {
-            if let Some(correction) = correction_rhs
-                && circuit.xspice_event_node_matrix_rows().next().is_some()
-            {
-                let deficient = matrix.deficient_rows();
-                Self::visit_unconstrained_xspice_event_rows(circuit, &deficient, |row| {
-                    if rhs.get(row).is_some_and(|value| *value == 0.0) {
-                        correction[row] = -solution[row];
-                    }
-                });
+            if let Some(correction) = correction_rhs {
+                Self::visit_unconstrained_xspice_event_rows(
+                    circuit,
+                    |row| matrix.row_is_deficient(row),
+                    |row| {
+                        if rhs.get(row).is_some_and(|value| *value == 0.0) {
+                            correction[row] = -solution[row];
+                        }
+                    },
+                );
             }
             Self::pin_unconstrained_xspice_event_rows(circuit, matrix, rhs);
         }

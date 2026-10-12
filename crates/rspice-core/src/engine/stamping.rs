@@ -110,35 +110,40 @@ impl Engine {
     /// transient and small-signal assembly of the same circuit agree on which
     /// placeholder rows exist.
     ///
-    /// `deficient_rows` is the assembled matrix's own emptiness report, so a
-    /// row an analog device did stamp is never a candidate.
+    /// `is_deficient` is the assembled matrix's own emptiness report for one
+    /// row, so a row an analog device did stamp is never a candidate. It is
+    /// asked of each event row just before that row is visited.
     pub(in crate::engine) fn visit_unconstrained_xspice_event_rows(
         circuit: &CircuitData,
-        deficient_rows: &[usize],
+        is_deficient: impl Fn(usize) -> bool,
         mut pin: impl FnMut(usize),
     ) {
         for row in circuit.xspice_event_node_matrix_rows() {
-            let deficient = deficient_rows.binary_search(&row).is_ok();
-            // The result namespace drops the voltage of every net
-            // `event_only_net_kind` claims, on the grounds that its row is one
-            // of these placeholders. If such a row carried an analog stamp
-            // after all, the two would disagree: an author would lose `V()` of
-            // a net the solver really does solve. The `.OPTIONS RSHUNT` shunt
-            // is the one stamp that reaches every row by construction and is
-            // not a claim about this net, so it is excluded rather than
-            // reported.
-            debug_assert!(
-                deficient
-                    || circuit.global_shunt_conductance != 0.0
-                    || circuit.event_only_net_kind(row + 1).is_none(),
-                "row {row} belongs to a net classified event-only but carries an analog \
-                 stamp; the pinned placeholder rows and the published analog namespace \
-                 have drifted apart"
-            );
+            let deficient = is_deficient(row);
+            Self::debug_assert_event_row_unstamped(circuit, row, deficient);
             if deficient {
                 pin(row);
             }
         }
+    }
+
+    /// The result namespace drops the voltage of every net
+    /// `event_only_net_kind` claims, on the grounds that its row is one of
+    /// these placeholders. If such a row carried an analog stamp after all,
+    /// the two would disagree: an author would lose `V()` of a net the solver
+    /// really does solve. The `.OPTIONS RSHUNT` shunt is the one stamp that
+    /// reaches every row by construction and is not a claim about this net,
+    /// so it is excluded rather than reported.
+    #[inline]
+    fn debug_assert_event_row_unstamped(circuit: &CircuitData, row: usize, deficient: bool) {
+        debug_assert!(
+            deficient
+                || circuit.global_shunt_conductance != 0.0
+                || circuit.event_only_net_kind(row + 1).is_none(),
+            "row {row} belongs to a net classified event-only but carries an analog \
+             stamp; the pinned placeholder rows and the published analog namespace \
+             have drifted apart"
+        );
     }
 
     /// Pin only numerically empty event rows that carry no analog RHS.
@@ -148,21 +153,24 @@ impl Engine {
     /// otherwise empty MNA placeholder row. Pinning that placeholder to zero
     /// restores matrix rank without adding conductance to any physical row or
     /// hiding an analog source connected to an event net.
+    ///
+    /// Each event row's emptiness is read from that row alone, just before it
+    /// is pinned. Pinning writes only its own diagonal, so every row reads as
+    /// a sweep of the whole matrix taken before the first pin would, without
+    /// paying for that sweep at every assembly.
     pub(in crate::engine) fn pin_unconstrained_xspice_event_rows(
         circuit: &CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
     ) {
-        if circuit.xspice_event_node_matrix_rows().next().is_none() {
-            return;
-        }
-        let deficient_rows = matrix.deficient_rows();
-        Self::visit_unconstrained_xspice_event_rows(circuit, &deficient_rows, |row| {
-            if rhs.get(row).is_some_and(|value| *value == 0.0) {
+        for row in circuit.xspice_event_node_matrix_rows() {
+            let deficient = matrix.row_is_deficient(row);
+            Self::debug_assert_event_row_unstamped(circuit, row, deficient);
+            if deficient && rhs.get(row).is_some_and(|value| *value == 0.0) {
                 matrix.add(row, row, 1.0);
                 rhs[row] = 0.0;
             }
-        });
+        }
     }
 
     /// The small-signal twin of [`Engine::pin_unconstrained_xspice_event_rows`].
@@ -185,9 +193,13 @@ impl Engine {
             return;
         }
         let deficient_rows = matrix.deficient_rows();
-        Self::visit_unconstrained_xspice_event_rows(circuit, &deficient_rows, |row| {
-            matrix.add_real(row, row, 1.0);
-        });
+        Self::visit_unconstrained_xspice_event_rows(
+            circuit,
+            |row| deficient_rows.binary_search(&row).is_ok(),
+            |row| {
+                matrix.add_real(row, row, 1.0);
+            },
+        );
     }
 
     /// Conductance of the `.OPTIONS RSHUNT` node-to-ground shunt, or zero when

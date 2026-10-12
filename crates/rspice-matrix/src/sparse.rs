@@ -1721,6 +1721,22 @@ impl StaticMatrix {
             .collect()
     }
 
+    /// Whether `row` is one [`Self::deficient_rows`] would list, read from
+    /// that row's own entries rather than from a sweep of the whole matrix.
+    ///
+    /// The test is the same one: no entry has a magnitude above zero, so a
+    /// NaN entry, like an absent or a signed-zero one, leaves the row empty.
+    /// A row outside the matrix is not deficient.
+    pub fn row_is_deficient(&self, row: usize) -> bool {
+        let layout = &self.residual_layout;
+        if row >= self.nrows || row + 1 >= layout.row_ptr.len() {
+            return false;
+        }
+        !layout.csc_idx[layout.row_ptr[row]..layout.row_ptr[row + 1]]
+            .iter()
+            .any(|&index| self.values[index].abs() > 0.0)
+    }
+
     /// Determine whether the principal submatrix selected by `indices` is
     /// singular under this matrix's solver policy.
     ///
@@ -7256,6 +7272,44 @@ mod tests {
         let matrix = StaticMatrix::from_triplets(2, 2, &[(0, 1, 2.0)]).unwrap();
 
         assert_eq!(matrix.deficient_rows(), [1]);
+    }
+
+    #[test]
+    fn row_deficiency_reads_each_row_as_the_whole_matrix_sweep_does() {
+        // Rows 0..4 hold a live entry, a stored zero, a signed zero, a NaN and
+        // nothing at all; only the first is constrained.
+        let mut matrix = StaticMatrix::from_triplets(
+            5,
+            5,
+            &[
+                (0, 3, 2.0),
+                (1, 1, 1.0),
+                (2, 0, 1.0),
+                (3, 4, 1.0),
+                (0, 0, 1.0),
+            ],
+        )
+        .unwrap();
+        let positions: Vec<(usize, usize)> = [(1, 1), (2, 0), (3, 4)]
+            .into_iter()
+            .map(|(row, col)| (row, matrix.get_index(row, col).unwrap().offset()))
+            .collect();
+        for (row, index) in positions {
+            matrix.values_mut()[index] = match row {
+                1 => 0.0,
+                2 => -0.0,
+                _ => Value::NAN,
+            };
+        }
+        let swept = matrix.deficient_rows();
+        assert_eq!(swept, [1, 2, 3, 4]);
+        for row in 0..7 {
+            assert_eq!(
+                matrix.row_is_deficient(row),
+                swept.contains(&row),
+                "row {row}"
+            );
+        }
     }
 
     #[test]
