@@ -551,8 +551,16 @@ impl CliError {
                         details.missing_dependency = Some(error.canonical_dependency_name.clone());
                         details.reason = Some(error.reason.as_str());
                     }
+                    // The refusal names the instance and the kind of analysis
+                    // it declined as typed fields; the card's own label, when
+                    // the CLI ran one, stays the analysis it reports.
                     rspice_core::SimulationError::UnsupportedCapability(refusal) => {
                         details.capability = Some(refusal.capability);
+                        details.instance_name = refusal.instance.clone();
+                        if details.analysis.is_none() {
+                            details.analysis =
+                                refusal.analysis_kind.map(|kind| kind.tag().to_string());
+                        }
                     }
                     // A Verilog-A or mixed binding refusal. The category and
                     // the exit status already follow the kind, because the

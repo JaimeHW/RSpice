@@ -170,6 +170,38 @@ fn output_failures_round_trip_through_worker_contract() {
     }
 }
 
+#[test]
+fn a_capability_refusal_stays_typed_through_the_worker_contract() {
+    let refusal = rspice_core::UnsupportedCapabilityError::new(
+        "analysis.discrete_state",
+        "mixed Verilog-AMS host 'x1' cannot take part in PSS analysis",
+    )
+    .for_analysis_kind(rspice_core::identity::AnalysisKind::Pss)
+    .for_instance("x1")
+    .for_module("clock_divider");
+    let message = refusal.to_string();
+    let expected = SimulationError::from(rspice_core::SimulationError::UnsupportedCapability(
+        Box::new(refusal),
+    ));
+    assert_eq!(
+        expected,
+        SimulationError::UnsupportedCapability {
+            capability: "analysis.discrete_state".to_string(),
+            analysis_kind: Some("pss".to_string()),
+            instance: Some("x1".to_string()),
+            module: Some("clock_divider".to_string()),
+            message: message.clone(),
+        }
+    );
+    assert_eq!(expected.to_string(), message);
+
+    let worker = WorkerSimulationError::from(expected.clone());
+    let encoded = serde_json::to_string(&worker).expect("worker error serializes");
+    let decoded: WorkerSimulationError =
+        serde_json::from_str(&encoded).expect("worker error deserializes");
+    assert_eq!(SimulationError::from(decoded), expected);
+}
+
 pub(super) fn retained_pss_operating_point() -> rspice_core::engine::PssOperatingPoint {
     let config = rspice_core::analysis::PssConfig::new(1.0)
         .with_harmonics(4)

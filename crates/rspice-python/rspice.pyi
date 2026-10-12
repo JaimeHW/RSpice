@@ -239,9 +239,13 @@ class SimulationError(RSpiceError):
 
     `analysis_id` and `coordinate_id` are the stable identities of the
     failing analysis card (``"ac-002"``) and run coordinate, present when the
-    failure belongs to one. `line` and `path` locate the offending construct
+    failure belongs to one. `analysis_kind` is the kind of analysis it
+    belongs to (``"pss"``), present also when a capability refusal knows the
+    kind but not the card. `line` and `path` locate the offending construct
     in the deck. `capability` is the dotted token of a refused capability
-    boundary, set only when `category` is ``"capability"``.
+    boundary, set only when `category` is ``"capability"``; a refusal then
+    names the instance it declined in `instance_name` and that instance's
+    module in `missing_dependency`.
     """
 
     kind: str
@@ -249,6 +253,7 @@ class SimulationError(RSpiceError):
     category: str
     retryable: bool
     analysis_id: str | None
+    analysis_kind: str | None
     coordinate_id: str | None
     line: int | None
     path: str | None

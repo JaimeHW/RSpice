@@ -54,6 +54,26 @@ pub enum SimulationError {
         message: String,
     },
 
+    /// A well-formed deck this build deliberately declines to run.
+    ///
+    /// The typed form of the engine's capability refusal: `capability` is the
+    /// stable token automation branches on, `analysis_kind` the analysis tag
+    /// (`"ac"`, `"pss"`) that declined, and `instance` and `module` the deck
+    /// instance and master it declined for, so the workbench can mark the
+    /// symbol and name the analysis without reading the sentence.
+    UnsupportedCapability {
+        /// Stable dotted token from `rspice_core::UnsupportedCapabilityError`.
+        capability: String,
+        /// Tag of the analysis kind that refused, when the engine knew it.
+        analysis_kind: Option<String>,
+        /// Deck name of the refused instance, when one instance owns it.
+        instance: Option<String>,
+        /// The module or model the refused instance is built from.
+        module: Option<String>,
+        /// The engine's full sentence, which is what a person reads.
+        message: String,
+    },
+
     /// Solver error
     SolverError(String),
 
@@ -134,6 +154,9 @@ impl std::fmt::Display for SimulationError {
             // span, the instance and the master, so re-labelling it here would
             // only push that identification further from the reader.
             SimulationError::Elaboration { message, .. } => write!(f, "{message}"),
+            // The core text, verbatim: it already carries the token, the
+            // analysis and the instance.
+            SimulationError::UnsupportedCapability { message, .. } => write!(f, "{message}"),
             SimulationError::SolverError(msg) => write!(f, "Solver error: {}", msg),
             SimulationError::RequestedSignalUnavailable {
                 signal,
@@ -341,11 +364,28 @@ impl From<rspice_core::SimulationError> for SimulationError {
             // treats it exactly as it treats a user cancellation until it
             // grows a distinct presentation for it.
             rspice_core::SimulationError::TimeLimitExceeded => SimulationError::Aborted,
+            rspice_core::SimulationError::UnsupportedCapability(refusal) => {
+                let message = refusal.to_string();
+                let refusal = *refusal;
+                // The descriptor's rule: the card's kind when the refusal
+                // names a card, else the kind the refusal site recorded.
+                let analysis_kind = refusal
+                    .analysis
+                    .map(|analysis| analysis.kind())
+                    .or(refusal.analysis_kind)
+                    .map(|kind| kind.tag().to_owned());
+                SimulationError::UnsupportedCapability {
+                    capability: refusal.capability.to_owned(),
+                    analysis_kind,
+                    instance: refusal.instance,
+                    module: refusal.module,
+                    message,
+                }
+            }
             // Categories this bridge has no dedicated presentation for yet.
-            // They keep their full message, which already names the capability
-            // token, the coordinate, or the artifact that failed.
-            other @ (rspice_core::SimulationError::UnsupportedCapability(_)
-            | rspice_core::SimulationError::ParameterDomain(_)
+            // They keep their full message, which already names the
+            // coordinate or the artifact that failed.
+            other @ (rspice_core::SimulationError::ParameterDomain(_)
             | rspice_core::SimulationError::MaterializationMismatch(_)
             | rspice_core::SimulationError::PersistenceIncompatible(_)
             | rspice_core::SimulationError::OutputCommitFailed(_)) => {
@@ -404,6 +444,19 @@ impl From<SimulationError> for WorkerSimulationError {
                 module,
                 kind,
                 location,
+                message,
+            },
+            SimulationError::UnsupportedCapability {
+                capability,
+                analysis_kind,
+                instance,
+                module,
+                message,
+            } => Self::UnsupportedCapability {
+                capability,
+                analysis_kind,
+                instance,
+                module,
                 message,
             },
             SimulationError::SolverError(message) => Self::SolverError(message),
@@ -479,6 +532,19 @@ impl From<WorkerSimulationError> for SimulationError {
                 module,
                 kind,
                 location,
+                message,
+            },
+            WorkerSimulationError::UnsupportedCapability {
+                capability,
+                analysis_kind,
+                instance,
+                module,
+                message,
+            } => Self::UnsupportedCapability {
+                capability,
+                analysis_kind,
+                instance,
+                module,
                 message,
             },
             WorkerSimulationError::SolverError(message) => Self::SolverError(message),

@@ -25,6 +25,7 @@ pub(super) fn execution(error: SimulationError, task: &str, timeout: Option<f64>
             "cache_corrupt" | "internal" => ("circuit_error", Category::Simulation),
             _ => ("netlist_error", Category::Netlist),
         },
+        E::UnsupportedCapability { .. } => ("unsupported_capability", Category::Capability),
         E::SolverError(_) => ("solver_error", Category::Solver),
         E::RequestedSignalUnavailable { .. } => {
             ("requested_signal_unavailable", Category::SignalUnavailable)
@@ -93,6 +94,16 @@ pub(super) fn execution(error: SimulationError, task: &str, timeout: Option<f64>
             details.missing_dependency = Some(canonical_dependency_name.clone());
         }
         E::Elaboration { instance, .. } => details.instance_name = instance.clone(),
+        // The token stays in the message: this schema carries it as a
+        // static string, which a shared-runner refusal no longer is.
+        E::UnsupportedCapability {
+            analysis_kind,
+            instance,
+            ..
+        } => {
+            details.instance_name = instance.clone();
+            details.analysis = analysis_kind.clone();
+        }
         _ => {}
     }
     CliError::Reported {

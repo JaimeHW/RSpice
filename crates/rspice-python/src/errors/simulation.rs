@@ -15,6 +15,9 @@ struct SimulationErrorAttributes {
     retryable: bool,
     /// Stable identity of the failing analysis card, e.g. `"ac-002"`.
     analysis_id: Option<String>,
+    /// Kind of the failing analysis, e.g. `"pss"`, when the failure names
+    /// one: the card's kind, or the kind a capability refusal recorded.
+    analysis_kind: Option<&'static str>,
     /// Stable identity of the failing run coordinate.
     coordinate_id: Option<String>,
     /// Netlist line the offending construct was authored on.
@@ -77,6 +80,11 @@ fn simulation_error_attributes(
             error.module.clone(),
             Some(error.kind.as_str()),
         ),
+        // A capability refusal names the instance it declined and the module
+        // that instance is built from, as the binding refusal does.
+        rspice_core::engine::SimulationError::UnsupportedCapability(refusal) => {
+            (refusal.instance.clone(), None, refusal.module.clone(), None)
+        }
         _ => (None, None, None, None),
     };
     let capability = match error {
@@ -92,6 +100,7 @@ fn simulation_error_attributes(
         category: descriptor.category.as_str(),
         retryable: descriptor.retryable,
         analysis_id: descriptor.analysis.map(|id| id.tag()),
+        analysis_kind: descriptor.analysis_kind.map(|kind| kind.tag()),
         coordinate_id: descriptor.coordinate.map(|id| id.to_string()),
         line: location.map(|location| location.line),
         path: location.and_then(|location| location.path.as_deref().map(super::public_path_string)),
@@ -129,6 +138,7 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
         value.setattr("category", attributes.category)?;
         value.setattr("retryable", attributes.retryable)?;
         value.setattr("analysis_id", attributes.analysis_id)?;
+        value.setattr("analysis_kind", attributes.analysis_kind)?;
         value.setattr("coordinate_id", attributes.coordinate_id)?;
         value.setattr("line", attributes.line)?;
         value.setattr("path", attributes.path)?;
@@ -290,6 +300,7 @@ mod tests {
             .expect("SimulationError stub block exists");
         for field in [
             "analysis_id: str | None",
+            "analysis_kind: str | None",
             "coordinate_id: str | None",
             "line: int | None",
             "path: str | None",

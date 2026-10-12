@@ -25,6 +25,16 @@ pub enum WorkerSimulationError {
         location: Option<String>,
         message: String,
     },
+    /// A capability refusal, typed across the worker boundary for the same
+    /// reason as [`Self::Elaboration`]: the schematic on this side marks the
+    /// instance and names the analysis that declined.
+    UnsupportedCapability {
+        capability: String,
+        analysis_kind: Option<String>,
+        instance: Option<String>,
+        module: Option<String>,
+        message: String,
+    },
     SolverError(String),
     RequestedSignalUnavailable {
         signal: String,
