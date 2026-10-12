@@ -425,6 +425,20 @@ fn run_deck_a() -> TransientResult {
     result
 }
 
+/// Deck A's nets that carry logic and no voltage, sorted and upper-cased as
+/// the result names them.
+///
+/// `d_clk` and `d_inv` are the adc and inverter outputs (R2.15). The other two
+/// are the private event endpoints of `xmix`'s discrete ports: since 02921aeeb
+/// (`q`) and ec3d55ed7 (`clk`) the electrical side of each is a shared
+/// converter, and the module's event port is rebound to a node of its own that
+/// nothing analog touches.
+fn deck_a_digital_only_nets() -> Vec<String> {
+    ["D_CLK", "D_INV", "XMIX.CLK__EVENT_0", "XMIX.Q__EVENT_0"]
+        .map(String::from)
+        .to_vec()
+}
+
 #[test]
 fn deck_a_tri_family_transient_sequence_golden() {
     let result = run_deck_a();
@@ -718,7 +732,7 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
     let mut worst: Option<(String, f64, f64, f64)> = None;
     let mut exact = 0_usize;
     let mut compared = 0_usize;
-    let mut digital_only = 0_usize;
+    let mut digital_only = Vec::new();
     for (name, values) in transient.node_names.iter().zip(&transient.voltages) {
         let Some(index) = operating_point
             .node_names
@@ -736,7 +750,7 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
         // own row for such a net is the subject of
         // `deck_a_operating_point_leaves_out_the_nets_its_transient_empties`.
         let Some(&first) = values.first() else {
-            digital_only += 1;
+            digital_only.push(name.to_ascii_uppercase());
             continue;
         };
         let op = operating_point.node_voltages[index];
@@ -758,12 +772,16 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
     let (node, op, first, relative) = worst.expect("deck A has an analog node");
     println!(
         "TRIFAMILY deck_a_op_vs_first_point_worst_node={node} relative={relative:e} \
-         bit_exact={exact}/{compared} digital_only_skipped={digital_only}"
+         bit_exact={exact}/{compared} digital_only_skipped={}",
+        digital_only.len()
     );
+    digital_only.sort();
     assert_eq!(
-        digital_only, 2,
-        "deck A's digital-only nets are `d_clk` and `d_inv`; a different count means the \
-         skip above is covering something it was not written for"
+        digital_only,
+        deck_a_digital_only_nets(),
+        "deck A's digital-only nets are the adc and inverter outputs and the mixed module's \
+         two converter endpoints; a different set means the skip above is covering something \
+         it was not written for"
     );
     assert!(
         relative < 1.0e-10,
@@ -776,8 +794,10 @@ fn deck_a_operating_point_agrees_with_its_first_transient_point() {
 /// publishes none for.
 ///
 /// R2.15 took `d_clk` and `d_inv` out of the analog result namespace by
-/// emptying their columns: `TransientResult::voltages` is a column per node,
-/// so "no analog value" has a shape there. `SimulationResult::node_voltages`
+/// emptying their columns, and the mixed module's two converter endpoints
+/// joined them ([`deck_a_digital_only_nets`]): `TransientResult::voltages` is
+/// a column per node, so "no analog value" has a shape there.
+/// `SimulationResult::node_voltages`
 /// is a dense `Vec<Value>` indexed BY NODE ID — `populate_public_dc_solution`
 /// writes `node_voltages[node]`, and `monte_carlo.rs` and the parametric
 /// sweeps read it back the same way — so dropping a row would renumber every
@@ -797,7 +817,7 @@ fn deck_a_operating_point_leaves_out_the_nets_its_transient_empties() {
         .run_dc_op(&netlist)
         .expect("a deck with a mixed Verilog-AMS instance must have an operating point");
     let transient = run_deck_a();
-    let mut absent = 0;
+    let mut absent = Vec::new();
     for (name, values) in transient.node_names.iter().zip(&transient.voltages) {
         if !values.is_empty() {
             continue;
@@ -818,12 +838,15 @@ fn deck_a_operating_point_leaves_out_the_nets_its_transient_empties() {
             None,
             "and no accessor may answer with the placeholder row for {name}"
         );
-        absent += 1;
+        absent.push(name.to_ascii_uppercase());
     }
+    absent.sort();
     assert_eq!(
-        absent, 2,
-        "deck A's event-only nets are `d_clk` and `d_inv`; a different count means this \
-         case is no longer looking at what it was written for"
+        absent,
+        deck_a_digital_only_nets(),
+        "deck A's event-only nets are the adc and inverter outputs and the mixed module's \
+         two converter endpoints; a different set means this case is no longer looking at \
+         what it was written for"
     );
 }
 
