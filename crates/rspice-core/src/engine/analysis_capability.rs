@@ -276,7 +276,9 @@ pub enum CellSupport {
         condition: &'static str,
         evidence: &'static [&'static str],
     },
-    /// No instance of the family takes part.
+    /// No instance of the family takes part. `reason` is what a person reads;
+    /// `plan` is the roadmap item that closes the cell, internal metadata that
+    /// never reaches refusal text — the `token` is how a refusal is tracked.
     Refused {
         token: &'static str,
         reason: &'static str,
@@ -350,7 +352,8 @@ const fn renderable(evidence: &'static [&'static str]) -> CellSupport {
     CellSupport::Restricted {
         gate: InstanceGate::TransientNoiseRenderable,
         token: "analysis.tran.noise",
-        condition: "every noise mechanism the transient-noise render plan can render: white, flicker and tabulated sources; shaped Verilog-A processes until P1.5 (L1b)",
+        // Shaped Verilog-A processes arrive with P1.5 (L1b).
+        condition: "every noise mechanism the transient-noise render plan can render: white, flicker and tabulated sources (shaped Verilog-A noise processes are not rendered yet)",
         evidence,
     }
 }
@@ -693,10 +696,11 @@ impl Engine {
                         }
                     }
                 },
+                // The roadmap item stays out of the text: the token tracks it.
                 CellSupport::Refused {
                     token,
                     reason,
-                    plan,
+                    plan: _,
                 } => {
                     let Some((instance, module)) = first_instance(circuit, family) else {
                         continue;
@@ -708,8 +712,7 @@ impl Engine {
                     let mut refusal = UnsupportedCapabilityError::new(
                         token,
                         format!(
-                            "{} '{instance}'{module_text} cannot take part in {}: {reason} \
-                             (planned: {plan})",
+                            "{} '{instance}'{module_text} cannot take part in {}: {reason}",
                             family.label(),
                             analysis.label(),
                         ),
@@ -730,6 +733,22 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether text names a roadmap item (`P1.6`, `P7.2/P7.3`) or a lane
+    /// (`L2b`, `lane L5`), which user-facing text must never do.
+    fn names_a_plan_item(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        let item = bytes.windows(4).any(|window| {
+            window[0] == b'P'
+                && window[1].is_ascii_digit()
+                && window[2] == b'.'
+                && window[3].is_ascii_digit()
+        });
+        let lane = bytes.windows(3).any(|window| {
+            matches!(window[0], b'(' | b' ') && window[1] == b'L' && window[2].is_ascii_digit()
+        });
+        item || lane || text.contains("planned")
+    }
 
     #[test]
     fn every_cell_is_decided_and_refusals_name_a_plan() {
@@ -753,6 +772,10 @@ mod tests {
                     assert!(token.starts_with("analysis."), "{family:?} × {analysis:?}");
                     assert!(!condition.is_empty(), "{family:?} × {analysis:?}");
                     assert!(!evidence.is_empty(), "{family:?} × {analysis:?}");
+                    assert!(
+                        !names_a_plan_item(condition),
+                        "{family:?} × {analysis:?}: a person reads the condition: {condition}"
+                    );
                 }
                 CellSupport::Refused {
                     token,
@@ -761,6 +784,10 @@ mod tests {
                 } => {
                     assert!(token.starts_with("analysis."), "{family:?} × {analysis:?}");
                     assert!(!reason.is_empty() && !plan.is_empty());
+                    assert!(
+                        !names_a_plan_item(reason),
+                        "{family:?} × {analysis:?}: a person reads the reason: {reason}"
+                    );
                 }
             }
         }

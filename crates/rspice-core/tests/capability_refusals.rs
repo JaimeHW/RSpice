@@ -463,6 +463,19 @@ mod mixed_signal_discrete_state {
             lowered.contains(&label.to_ascii_lowercase()) && lowered.contains("'x1'"),
             "the prose names the analysis and the instance: {error}"
         );
+        // The token tracks which roadmap item closes the cell; the prose a
+        // person reads names no plan item or lane.
+        let text = error.to_string();
+        let names_a_plan_item = text.as_bytes().windows(4).any(|window| {
+            window[0] == b'P'
+                && window[1].is_ascii_digit()
+                && window[2] == b'.'
+                && window[3].is_ascii_digit()
+        });
+        assert!(
+            !names_a_plan_item && !lowered.contains("planned"),
+            "no plan identifier reaches the refusal text: {error}"
+        );
     }
 
     #[test]
