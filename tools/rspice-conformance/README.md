@@ -30,6 +30,7 @@ harness consumes the hand-written Verilog-A suite.
 | `suites::veriloga` | RSpice's own captured stamps plus a finite-difference oracle sharing no code with the chain rule under test | snapshot plus independent mathematics |
 | `suites::verilog` | Icarus Verilog and Verilator, run live | two independent implementations diffed against each other *before* RSpice is involved |
 | `suites::execution` | checked-in ngspice captures where available; explicit execution contracts otherwise | numerical comparison of declared outputs, or completion/refusal coverage |
+| `suites::mixed` | per design: checked-in ngspice, Xyce and ngspice+`d_cosim`+Icarus references, RSpice on the held-digital (O5) deck, analytic expectations, live Icarus replay | measures against tolerances fixed in advance; every design × variant × analysis × route cell classified pass/refused/fail/wrong/unverified and held by `outcomes.tsv` |
 
 The Verilog-A suite uses snapshots and an independent oracle rather than
 external conformance because the thing under test is a code generator, and
@@ -99,7 +100,7 @@ BSIM4 4.6.1 for this deck's 4.5.0, so it is not this case's numerical oracle.
 
 Deck corpora are vendored at the workspace root, not inside this crate:
 `tests/ngspice/`, `tests/xyce/`, `tests/gf180mcu/`, `tests/iscas85/`,
-`tests/paranoia/`, and `tests/verilog/`. They are shared data with their own
+`tests/paranoia/`, `tests/verilog/`, and `tests/mixed-corpus/`. They are shared data with their own
 licensing and provenance, and they outlive any one runner. Each carries an
 `RSPICE-VENDORING.md` recording what was trimmed and why. `tests/paranoia/`'s
 in particular records third-party proprietary device models that upstream
@@ -122,10 +123,14 @@ crash.
 | `rspice-xyce-case-runner` | Per-deck child process for the Xyce suite |
 | `rspice-xspice-ifspec-audit` | Diff RSpice's XSPICE code-model metadata against `ifspec.ifs` in an ngspice source checkout, optionally running its example decks against a real ngspice binary |
 | `rspice-veriloga-golden` | Golden capture, replay, and derivative audit for generated models |
+| `rspice-mixed-corpus` | The mixed-signal corpus: `run` (classify and ratchet `outcomes.tsv`, `--record` to rewrite), `case` (the per-cell child, through `rspice-simulation`'s headless execution), `capture` (oracle references), `probe a\|b\|c` |
 
 ## Features
 
-`default = ["circuit-suites", "verilog-digital"]`. Verilog-A tooling depends on
+`default = ["circuit-suites", "verilog-digital", "mixed-corpus"]`. `mixed-corpus`
+adds `rspice-simulation`, whose headless preparation and runner execute the
+corpus cases as the application does; `veriloga-native` builds the corpus's
+native (JIT) route. Verilog-A tooling depends on
 this crate with `default-features = false` so it can reuse the generated-model
 oracle and benchmark harness without compiling the ngspice/Xyce runners or their
 corpora.
@@ -148,6 +153,8 @@ must never have, so CI asserts the forwarding is complete.
 cargo test -p rspice-conformance --release
 cargo test -p rspice-conformance --release --test ngspice_regression
 cargo test -p rspice-conformance --no-default-features --features veriloga-builtins-models --test veriloga_golden
+cargo run --release -p rspice-conformance --bin rspice-mixed-corpus -- run --design C5
+cargo run --release -p rspice-conformance --features veriloga-native --bin rspice-mixed-corpus -- run --record
 ```
 
 Release is not optional advice: these suites run thousands of decks, and the

@@ -57,6 +57,20 @@ oracle is a program rather than a file:
   executes digital Verilog yet, so the RSpice arm of the comparison is present
   and refuses by name until W2.3 lands.
 
+**The mixed-signal reference corpus** combines all three ideas:
+
+- `mixed-corpus/` — the twelve designs of `MIXED_SIMULATION_PLAN.md` §7 (SPICE,
+  XSPICE and Verilog-AMS together) plus the P0.6 probes. Each design carries
+  its decks, oracle decks, checked-in ngspice/Xyce/co-simulation references,
+  a `tolerance.toml` fixed before the first comparison, and `outcomes.tsv`:
+  the recorded pass/refused/fail/wrong/unverified outcome of every design ×
+  variant × analysis × route cell. Analytic expectations live in
+  `tools/rspice-conformance/src/suites/mixed/analytic/`. Run by
+  `tools/rspice-conformance/tests/mixed_corpus.rs` (nightly, once per route);
+  the integrity checks run with the crate's unit tests. Derived from the
+  ngspice examples (Modified BSD, `LICENSE-ngspice`) and RSpice-authored;
+  `RSPICE-VENDORING.md` records every edit.
+
 Do not mix validation manifests, generated outputs, or harness sidecars between
 corpora. Add a corpus-specific README or vendoring note when importing another
 upstream suite, and record excluded material there — `paranoia/` in particular
