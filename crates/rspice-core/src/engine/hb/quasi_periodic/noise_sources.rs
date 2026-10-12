@@ -113,7 +113,10 @@ impl Engine {
         let producer = state::Producer::capture(netlist, &engine.config, point.config())?;
         let grid = engine.validate_qpss_operating_point_with_abort(netlist, point, abort)?;
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "QPNOISE")?;
+        Self::ensure_analysis_capability(
+            &circuit,
+            crate::engine::CapabilityAnalysis::QuasiPeriodic,
+        )?;
         let mut solver = engine.qpss_circuit_solver(&circuit, &grid, true)?;
         let sources = engine.prepare_quasi_periodic_noise_sources(
             &circuit,

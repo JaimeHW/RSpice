@@ -44,6 +44,11 @@
 
 mod ac;
 mod analog_tasks;
+mod analysis_capability;
+pub use analysis_capability::{
+    CapabilityAnalysis, CapabilityFamily, CellSupport, InstanceGate, capability_cell,
+    capability_matrix,
+};
 mod builder;
 pub use builder::{
     ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinInspection,
@@ -96,6 +101,7 @@ pub use pstb::PeriodicStabilityResult;
 mod progress;
 mod sensitivity;
 pub use sensitivity::SensitivityCardResult;
+mod small_signal_bias;
 mod sp;
 pub use sp::SParameterRun;
 mod source_values;

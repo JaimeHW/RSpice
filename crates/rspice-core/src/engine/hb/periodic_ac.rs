@@ -127,22 +127,13 @@ impl Engine {
 
         let built = self.build_circuit_with_rf_ports(netlist, &[], abort)?;
         let (circuit, rf_ports) = (built.circuit, built.rf_ports);
-        // Every periodic small-signal analysis prepared here refuses a mixed
-        // Verilog-AMS module for the same reason AC, noise, PSS and HB do: the
-        // module's discrete half is executed by a transient event interleave,
-        // which has no periodic steady state to linearize around. The refusal
-        // has to happen here rather than in each caller, because this is the
-        // only place the circuit exists before the periodic operating point is
-        // either projected from a retained carrier or solved outright — and
-        // without it the harmonic system is assembled with the host's
+        // Every periodic small-signal analysis prepared here asks the capability
+        // gate here rather than in each caller, because this is the only place
+        // the circuit exists before the periodic operating point is either
+        // projected from a retained carrier or solved outright — and without
+        // it the harmonic system would be assembled with a mixed host's
         // equations simply absent, which answers rather than refuses.
-        Self::ensure_no_mixed_signal_analysis(
-            &circuit,
-            match &output {
-                PeriodicAcOutput::NodeSpectra => "PAC analysis",
-                PeriodicAcOutput::PortScattering => "PSP analysis",
-            },
-        )?;
+        Self::ensure_analysis_capability(&circuit, crate::engine::CapabilityAnalysis::Pac)?;
         let hb_config = match &operating_point {
             Some(PacOperatingPoint::HarmonicBalance(_)) => hb_config,
             point => self.hb_config_for_dependent_sources(

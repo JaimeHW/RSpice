@@ -218,7 +218,7 @@ impl Engine {
         let mut limits = engine.config.resource_limits;
         let grid = Arc::new(config.build_grid(&limits, abort)?);
         let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "spectral Envelope")?;
+        Self::ensure_analysis_capability(&circuit, crate::engine::CapabilityAnalysis::Envelope)?;
         circuit.set_independent_source_context(
             crate::circuit::SourceTimeBasis {
                 tstep: config.source_time_step,

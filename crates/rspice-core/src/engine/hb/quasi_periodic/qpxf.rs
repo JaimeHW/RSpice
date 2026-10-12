@@ -74,7 +74,10 @@ impl Engine {
             ));
         }
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "QPXF")?;
+        Self::ensure_analysis_capability(
+            &circuit,
+            crate::engine::CapabilityAnalysis::QuasiPeriodic,
+        )?;
         let mut solver = engine.qpss_circuit_solver(&circuit, &grid, true)?;
         let mut observation =
             vec![vec![Complex64::ZERO; grid.len()]; point.complete_spectra().len()];

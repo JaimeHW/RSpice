@@ -4800,6 +4800,10 @@ impl Engine {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
         });
+        Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Tran)?;
+        if netlist.options.transient_noise.is_some() {
+            Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::TranNoise)?;
+        }
         // Transient device noise is installed after the run's initial
         // operating point, so that point is the deterministic one and every
         // injected density is evaluated from a converged bias.

@@ -364,10 +364,10 @@ const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body whose only dy
      frequency fits a capacitance instead of reporting the device's response";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
-const MIXED_SIGNAL_INTERLEAVE: &str = "a mixed Verilog-AMS module's discrete half is executed by a transient event \
-     interleave, which has no periodic steady-state, small-signal or \
-     continuation form; `.tran` runs a mixed module and `.op` solves one at the state its \
-     initial blocks left, but an analysis around a settled discrete state is not available yet";
+const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \
+     discrete half runs as a transient event interleave, and its event queue, process \
+     resumptions and drivers are not part of a period map; small-signal analyses linearize \
+     it around its held equilibrium instead";
 
 /// The declaration table.
 ///
@@ -702,8 +702,9 @@ pub(crate) const fn periodic_capability_descriptor(
         // the transient event interleave. There is no periodic steady state to
         // linearize around, no charge state to export as a finite descriptor,
         // and no period map that carries an event queue and every process's
-        // resumption point. The analyses refuse it by name before they reach
-        // this table (`Engine::ensure_no_mixed_signal_analysis`); the family is
+        // resumption point. The periodic analyses refuse it by name before
+        // they reach this table (the analysis capability matrix's
+        // `analysis.mixed_signal.discrete_state` cells, P7); the family is
         // declared here so that the table stays exhaustive over what
         // `CircuitData` can hold, and so a route that ever reaches a gap query
         // without passing that guard fails closed instead of omitting the host.
@@ -1905,7 +1906,7 @@ mod tests {
                 );
             };
             assert!(
-                missing.contains("around a settled discrete state is not available yet"),
+                missing.contains("periodic steady state with running discrete state (P7)"),
                 "{capability:?} must name the capability a mixed module is still missing: \
                  {missing}"
             );

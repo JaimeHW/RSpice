@@ -505,7 +505,7 @@ impl Engine {
                 self.config.spice_dialect,
                 self.config.resource_limits,
             );
-            Self::ensure_no_mixed_signal_analysis(&circuit, "PSS noise analysis")?;
+            Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Pnoise)?;
             Self::ensure_pss_noise_delay_supported(&circuit)?;
             let matrix = self.build_matrix(&circuit)?;
             circuit.link_indices(&matrix);

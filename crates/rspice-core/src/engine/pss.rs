@@ -2237,7 +2237,7 @@ impl Engine {
             self.config.resource_limits,
         );
         Self::freeze_pss_independent_sources(&mut circuit, frozen_sources)?;
-        Self::ensure_no_mixed_signal_analysis(&circuit, "PSS analysis")?;
+        Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Pss)?;
         Self::ensure_supported_xyce_memristor_small_signal(&circuit, "PSS")?;
         Self::ensure_pss_state_supported(&circuit)?;
         let mut matrix = self.build_matrix(&circuit)?;

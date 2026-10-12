@@ -173,7 +173,10 @@ impl Engine {
         if let Some(seed) = dc_seed {
             seed.validate_for_circuit(&circuit)?;
         }
-        Self::ensure_no_mixed_signal_analysis(&circuit, "quasiperiodic steady-state analysis")?;
+        Self::ensure_analysis_capability(
+            &circuit,
+            crate::engine::CapabilityAnalysis::QuasiPeriodic,
+        )?;
         let required_unknowns = circuit
             .num_nodes()
             .saturating_add(circuit.num_branches())

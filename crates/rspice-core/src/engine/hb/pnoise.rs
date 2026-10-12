@@ -712,7 +712,7 @@ impl Engine {
         // refusal is the same one AC, noise, PSS and HB give, placed at the
         // first point the circuit exists. See `prepare_periodic_ac` for why
         // the omission this replaces was silent.
-        Self::ensure_no_mixed_signal_analysis(&circuit, "pnoise analysis")?;
+        Self::ensure_analysis_capability(&circuit, crate::engine::CapabilityAnalysis::Pnoise)?;
         validate_resistor_noise_metadata(&circuit)?;
         let hb_config = match &operating_point {
             Some(PnoiseOperatingPoint::HarmonicBalance(_)) => hb_config,

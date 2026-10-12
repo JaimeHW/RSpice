@@ -171,6 +171,80 @@ fn periodic_declarations_and_restrictions_match_requirements() {
     );
 }
 
+/// The family × analysis capability matrix, as the support tables are
+/// generated from it. Refresh with RSPICE_UPDATE_CORE_REQUIREMENTS=1.
+#[test]
+fn analysis_capability_matrix_matches_requirements() {
+    use super::analysis_capability::{CellSupport, capability_matrix};
+    let rows = capability_matrix()
+        .map(|(family, analysis, cell)| {
+            let (gate, token, condition, plan, evidence) = match cell {
+                CellSupport::Supported { evidence } => (None, None, None, None, evidence),
+                CellSupport::Restricted {
+                    gate,
+                    token,
+                    condition,
+                    evidence,
+                } => (
+                    Some(gate.tag()),
+                    Some(token),
+                    Some(condition),
+                    None,
+                    evidence,
+                ),
+                CellSupport::Refused {
+                    token,
+                    reason,
+                    plan,
+                } => (None, Some(token), Some(reason), Some(plan), &[][..]),
+            };
+            json!([
+                family.tag(),
+                analysis.tag(),
+                cell.status(),
+                gate,
+                token,
+                condition,
+                plan,
+                evidence
+            ])
+        })
+        .collect::<Vec<_>>();
+    let actual = json!({
+        "schema": "rspice-core-analysis-capability",
+        "version": 1,
+        "evidence": "Dispatch declarations of the family x analysis matrix. Each supported or restricted cell cites the tests that demonstrate it.",
+        "columns": ["family", "analysis", "support", "gate", "token", "condition_or_reason", "plan", "evidence"],
+        "rows": rows
+    });
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/testdata/qualification/core-analysis-capability-v1.json");
+    if std::env::var_os("RSPICE_UPDATE_CORE_REQUIREMENTS").as_deref()
+        == Some(std::ffi::OsStr::new("1"))
+    {
+        let mut rendered = serde_json::to_string_pretty(&json!({
+            "schema": actual["schema"], "version": actual["version"],
+            "evidence": actual["evidence"], "columns": actual["columns"]
+        }))
+        .unwrap();
+        rendered.truncate(rendered.len() - 2);
+        rendered.push_str(",\n  \"rows\": [\n");
+        let rows = actual["rows"].as_array().unwrap();
+        for (index, row) in rows.iter().enumerate() {
+            rendered.push_str("    ");
+            rendered.push_str(&serde_json::to_string(row).unwrap());
+            rendered.push_str(if index + 1 == rows.len() { "\n" } else { ",\n" });
+        }
+        rendered.push_str("  ]\n}\n");
+        std::fs::write(&path, rendered).unwrap();
+    }
+    let expected: Json = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(
+        actual, expected,
+        "review every capability cell change and its evidence before updating the snapshot"
+    );
+}
+
 #[test]
 fn analysis_inventory_parses_and_matches_control_execution() {
     use super::control::ControlCircuit;

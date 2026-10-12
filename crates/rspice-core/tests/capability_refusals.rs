@@ -388,21 +388,15 @@ mod veriloga_pole_zero {
     }
 }
 
-/// The analyses a mixed Verilog-AMS deck is still refused by, after `.op`
-/// stopped being one of them.
+/// The analyses a mixed Verilog-AMS deck takes part in around its held
+/// equilibrium, and the ones that still refuse it by name.
 ///
-/// D3 opened exactly one door: `.op` solves a mixed deck with its discrete
-/// half at the state its initial blocks left, and nothing advances. Every
-/// analysis here asks a different question — what the circuit does around a
-/// discrete state that has *settled*, which is a state no run has produced
-/// yet — and each must still refuse rather than assemble a system with the
-/// module's continuous half silently absent from it.
-///
-/// Named as a table of routes rather than one test per route, because the
-/// claim is about the set: the refusal comes from one producer
-/// (`CircuitData::ensure_no_mixed_signal_hosts`) and every entry point that
-/// reaches it must carry the same token and say the same thing about what is
-/// missing.
+/// The operating point is committed as the held equilibrium (P1 design S1),
+/// so every small-signal analysis and a DC sweep run on a mixed deck. A
+/// periodic analysis asks for a steady state with a *running* discrete half,
+/// which has no formulation yet (P7), and pole-zero waits for the descriptor
+/// wiring (P1.6); both refuse through the capability matrix with a typed
+/// token, analysis kind, instance and module.
 #[cfg(feature = "veriloga")]
 mod mixed_signal_discrete_state {
     use super::{Engine, SimulationError, capability_token, node, parse};
@@ -422,119 +416,461 @@ mod mixed_signal_discrete_state {
          \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
          endmodule\n";
 
-    fn write_model() -> PathBuf {
+    /// One file per test: the tests run in parallel and each removes its own.
+    fn write_model(test: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
-        path.push(format!("rspice_mixed_capability_{}.va", std::process::id()));
+        path.push(format!(
+            "rspice_mixed_capability_{test}_{}.va",
+            std::process::id()
+        ));
         let mut file = std::fs::File::create(&path).expect("create model file");
         file.write_all(CLOCK_DIVIDER.as_bytes())
             .expect("write model");
         path
     }
 
-    #[test]
-    fn every_analysis_around_a_settled_discrete_state_is_refused_by_name() {
-        let model = write_model();
-        let deck = format!(
-            "* a mixed module asked about a discrete state no run has settled\n\
-             v1 in 0 dc 1 ac 1\n\
+    fn clock_divider_deck(model: &std::path::Path) -> String {
+        format!(
+            "* a mixed module around its held equilibrium\n\
+             v1 in 0 dc 1 ac 1 sin(1 0.1 1meg)\n\
              r1 in p 1k\n\
              x1 p 0 qdiv clock_divider\n\
              rq qdiv 0 10k\n\
              .va \"{}\" clock_divider\n\
              .end\n",
             model.display().to_string().replace('\\', "/"),
+        )
+    }
+
+    /// The structured identity every matrix refusal carries.
+    fn assert_refusal(
+        error: &SimulationError,
+        token: &str,
+        kind: rspice_core::identity::AnalysisKind,
+        label: &str,
+    ) {
+        assert_eq!(capability_token(error), token, "{error}");
+        let SimulationError::UnsupportedCapability(refusal) = error else {
+            unreachable!("capability_token checked the variant");
+        };
+        assert_eq!(refusal.analysis_kind, Some(kind), "{error}");
+        assert_eq!(refusal.instance.as_deref(), Some("x1"), "{error}");
+        assert_eq!(refusal.module.as_deref(), Some("clock_divider"), "{error}");
+        assert_eq!(error.descriptor().analysis_kind, Some(kind));
+        assert_eq!(error.instance_name(), Some("x1"));
+        let lowered = error.to_string().to_ascii_lowercase();
+        assert!(
+            lowered.contains(&label.to_ascii_lowercase()) && lowered.contains("'x1'"),
+            "the prose names the analysis and the instance: {error}"
         );
-        let netlist = parse(&deck);
+    }
+
+    #[test]
+    fn every_analysis_around_the_held_state_runs_on_a_mixed_deck() {
+        let model = write_model("held");
+        let netlist = parse(&clock_divider_deck(&model));
         let probe = node(&netlist, "p");
-        let input = node(&netlist, "in");
         let engine = Engine::default();
 
-        // Route, the name its refusal must carry, and the outcome it produced.
-        let routes: [(&str, &str, Result<String, SimulationError>); 6] = [
-            (
-                ".dc",
-                "dc sweep",
-                engine
-                    .run_dc_sweep(&netlist, "v1", 0.0, 1.0, 0.5)
-                    .map(|points| format!("{} sweep points", points.len())),
-            ),
-            (
-                ".ac",
-                "ac analysis",
-                engine
-                    .run_ac(&netlist, &[1.0e3])
-                    .map(|points| format!("{} frequencies", points.len())),
-            ),
-            (
-                ".noise",
-                "noise analysis",
-                engine
-                    .run_noise(&netlist, probe, &[1.0e3], 300.15)
-                    .map(|points| format!("{} noise points", points.len())),
-            ),
-            (
-                ".pz",
-                "pole-zero analysis",
-                engine
-                    .run_pz(&netlist, input, probe)
-                    .map(|result| format!("{:?}", result.poles)),
-            ),
-            (
-                ".sens",
-                "sensitivity analysis",
-                engine
-                    .run_sensitivity_linearized(&netlist, probe, None)
-                    .map(|result| format!("{result:?}")),
-            ),
-            (
-                ".tf",
-                "ac analysis",
-                engine
-                    .run_transfer_function(&netlist, "p", None, false, "v1")
-                    .map(|result| format!("{result:?}")),
-            ),
-        ];
-
-        for (route, analysis, outcome) in routes {
-            let error = match outcome {
-                Ok(answer) => panic!(
-                    "{route} must refuse a mixed module rather than answer without its \
-                     continuous half; it answered with {answer}"
-                ),
-                Err(error) => error,
-            };
-            assert_eq!(
-                capability_token(&error),
-                "analysis.mixed_signal.discrete_state",
-                "{route} must refuse through the one mixed-signal producer: {error}"
-            );
-            let lowered = error.to_string().to_ascii_lowercase();
-            for expected in [
-                analysis,
-                "x1",
-                "around a settled discrete state is not available yet",
-            ] {
-                assert!(
-                    lowered.contains(expected),
-                    "the {route} refusal must contain {expected:?}: {error}"
-                );
-            }
-        }
-
-        // The door D3 opened, in the same deck, so the refusals above are a
-        // statement about these analyses and not about the deck.
-        let operating_point = engine
-            .run_dc_op(&netlist)
-            .expect("`.op` solves a mixed deck at its initial discrete state");
+        let sweep = engine
+            .run_dc_sweep(&netlist, "v1", 0.0, 1.0, 0.5)
+            .expect(".dc sweeps a mixed deck, carrying its held state");
+        assert_eq!(sweep.len(), 3);
+        let ac = engine
+            .run_ac(&netlist, &[1.0e3])
+            .expect(".ac linearizes the held equilibrium");
+        // The module's continuous half is a 1k conductance on p: the divider
+        // with r1 halves the drive, which is the module taking part.
+        let p = ac[0]
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("p"))
+            .expect("p is published");
         assert!(
-            operating_point
-                .node_names
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case("p")),
-            "the operating point must carry the deck's analog nodes: {:?}",
-            operating_point.node_names
+            (ac[0].voltages[p].re - 0.5).abs() < 1.0e-9,
+            "{:?}",
+            ac[0].voltages[p]
+        );
+        engine
+            .run_noise(&netlist, probe, &[1.0e3], 300.15)
+            .expect(".noise runs on the held equilibrium");
+        engine
+            .run_sensitivity_linearized(&netlist, probe, None)
+            .expect(".sens runs on the held equilibrium");
+        engine
+            .run_transfer_function(&netlist, "p", None, false, "v1")
+            .expect(".tf runs on the held equilibrium");
+        engine
+            .run_dc_op(&netlist)
+            .expect("`.op` solves a mixed deck at its coupled time-zero fixed point");
+
+        let _ = std::fs::remove_file(model);
+    }
+
+    /// A periodic analysis asks for a steady state with the discrete half
+    /// running, which the matrix refuses (P7), and pole-zero waits for the
+    /// descriptor wiring (P1.6). Both name the analysis kind, the instance
+    /// and its module as typed fields, not only in prose.
+    #[test]
+    fn a_periodic_analysis_refuses_a_running_discrete_state_by_name() {
+        use rspice_core::identity::AnalysisKind;
+        let model = write_model("periodic");
+        let netlist = parse(&clock_divider_deck(&model));
+        let engine = Engine::default();
+
+        let pss = engine
+            .run_pss(
+                &netlist,
+                rspice_core::analysis::PssConfig::new(1.0e6).with_harmonics(2),
+            )
+            .expect_err("a mixed deck has no periodic steady state yet");
+        assert_refusal(
+            &pss,
+            "analysis.mixed_signal.discrete_state",
+            AnalysisKind::Pss,
+            "PSS analysis",
+        );
+
+        let hb = engine
+            .run_hb(&netlist, super::HbConfig::new(1.0e6).with_harmonics(2))
+            .expect_err("a mixed deck has no harmonic-balance formulation yet");
+        assert_refusal(
+            &hb,
+            "analysis.mixed_signal.discrete_state",
+            AnalysisKind::HarmonicBalance,
+            "harmonic-balance analysis",
+        );
+
+        let pz = engine
+            .run_pz(&netlist, node(&netlist, "in"), node(&netlist, "p"))
+            .expect_err("pole-zero of a held mixed module lands with the descriptor wiring");
+        assert_refusal(
+            &pz,
+            "analysis.mixed_signal.discrete_state",
+            AnalysisKind::PoleZero,
+            "pole-zero analysis",
         );
 
         let _ = std::fs::remove_file(model);
+    }
+}
+
+/// F4: a refusal raised while the shared AC bias is prepared names the
+/// caller's analysis, not "AC analysis" — the transfer function here.
+#[test]
+fn a_transfer_function_refusal_names_the_transfer_function() {
+    let netlist = parse(
+        "tf over a coupled line\n\
+         V1 in 0 DC 1 AC 1\n\
+         R1 in a 50\n\
+         P1 a b 0 c d 0 cpl_model\n\
+         .model cpl_model CPL\n+ R = 0.1 0 0.1\n+ L = 1e-6 0 1e-6\n+ G = 0 0 0\n\
+         + C = 1e-10 0 1e-10\n+ length = 0.1\n\
+         R2 c 0 50\n\
+         R3 b 0 50\n\
+         R4 d 0 50\n\
+         .end\n",
+    );
+    let error = Engine::default()
+        .run_transfer_function(&netlist, "c", None, false, "V1")
+        .expect_err("a coupled line has no small-signal load");
+    assert_eq!(
+        capability_token(&error),
+        "analysis.ac.device.coupled_transmission_line"
+    );
+    assert_eq!(
+        error.descriptor().analysis_kind,
+        Some(rspice_core::identity::AnalysisKind::TransferFunction)
+    );
+    assert!(
+        error.to_string().contains("transfer function"),
+        "the refusal names the transfer function: {error}"
+    );
+}
+
+/// Every supported cell of the capability matrix, run on a fixture of its
+/// family: the evidence the matrix cites for "supported", in one place.
+///
+/// Each fixture is one shared analog harness — an inverting amplifier with a
+/// loop probe, an S-parameter port and a swept load — plus the family's
+/// instance. For every analysis the matrix marks supported, or restricted by
+/// a gate the fixture passes, the analysis must run; for every refused cell
+/// whose analysis the fixture can ask for, it must refuse with the cell's
+/// token.
+#[cfg(feature = "veriloga")]
+mod capability_matrix_cells {
+    use super::{Engine, SimulationError, capability_token, node, parse};
+    use rspice_core::analysis::{FourierAnalysis, FourierConfig, PssConfig, StbConfig};
+    use rspice_core::engine::{
+        CapabilityAnalysis, CapabilityFamily, CellSupport, InstanceGate, capability_cell,
+    };
+    use rspice_core::netlist::AnalysisCommand;
+    use rspice_core::{Netlist, NoAbort};
+
+    struct SourceFile(std::path::PathBuf);
+
+    impl SourceFile {
+        fn new(name: &str, source: &str) -> Self {
+            // The name is the whole file name, in a directory of this
+            // process's own: an unselected `.hdl` source declares its module
+            // by its file stem.
+            let directory = std::env::temp_dir()
+                .join(format!("rspice_capability_fixture_{}", std::process::id()));
+            std::fs::create_dir_all(&directory).expect("create fixture directory");
+            let path = directory.join(name);
+            std::fs::write(&path, source).expect("write fixture source");
+            Self(path)
+        }
+
+        fn path(&self) -> String {
+            self.0.display().to_string().replace('\\', "/")
+        }
+    }
+
+    impl Drop for SourceFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    const HARNESS: &str = "vin in 0 dc 0.5 sin(0.5 0.1 1meg) ac 1 distof1 0.01\n\
+         r1 in sum 1k\n\
+         rf sum fb 1k\n\
+         vprobe out fb 0\n\
+         eamp out 0 0 sum 100\n\
+         rl out 0 {rlv}\n\
+         .param rlv=1k\n\
+         rs1 out p2 100\n\
+         rs2 p2 0 100\n\
+         .sp lin 1 1k 1k port1=(p2)\n\
+         .fft v(out) np=16\n";
+
+    const NOISY_LOAD: &str = "`include \"disciplines.vams\"\n\
+         module noisy_load(p, n);\n\
+           inout p, n; electrical p, n;\n\
+           analog I(p, n) <+ V(p, n) / 5k + ddt(10p * V(p, n)) + white_noise(1.0e-22, \"load\");\n\
+         endmodule\n";
+
+    const TRIM: &str = "`timescale 1ns/1ps\n\
+         module trim_reg(csn, tr1, tr0);\n\
+           input csn;\n\
+           output tr1, tr0;\n\
+           reg tr1, tr0;\n\
+           initial begin tr1 = 1'b1; tr0 = 1'b0; end\n\
+           always @(negedge csn) tr0 = 1'b1;\n\
+         endmodule\n";
+
+    /// The family's instance, attached to the harness, and the files it reads.
+    fn fixture(family: CapabilityFamily) -> Option<(String, Vec<SourceFile>)> {
+        Some(match family {
+            CapabilityFamily::SpiceNative => (
+                "d1 out dn dmod\nrdn dn 0 10k\nc1 out 0 1n\n.model dmod d is=1e-14\n".into(),
+                Vec::new(),
+            ),
+            CapabilityFamily::XspiceAnalog => (
+                "again out xo gainblk\n.model gainblk gain (gain=0.5)\nrxo xo 0 1k\n".into(),
+                Vec::new(),
+            ),
+            CapabilityFamily::XspiceEvent => (
+                "aadc [in] [od] adcm\n.model adcm adc_bridge (in_low=0.25 in_high=0.25)\n\
+                 ainv od odn invm\n.model invm d_inverter\n\
+                 adac [odn] [xq] dacm\n.model dacm dac_bridge (out_low=0 out_high=1)\n\
+                 rxq xq sum 100k\n"
+                    .into(),
+                Vec::new(),
+            ),
+            CapabilityFamily::VerilogARuntime => {
+                let load = SourceFile::new("noisy_load.va", NOISY_LOAD);
+                (
+                    format!("xva out 0 noisy_load\n.va \"{}\" noisy_load\n", load.path()),
+                    vec![load],
+                )
+            }
+            CapabilityFamily::VerilogAGenerated => {
+                if !cfg!(feature = "veriloga-model-diode-cmc") {
+                    return None;
+                }
+                ("xd2 out dg diode_cmc\nrdg dg 0 1k\n".into(), Vec::new())
+            }
+            CapabilityFamily::VerilogAmsMixed => {
+                let trim = SourceFile::new("trim_reg.v", TRIM);
+                (
+                    format!(
+                        ".param vcc=1.8\nvcsn csn 0 1.8\nxtrim csn tr1 tr0 trim_reg\n\
+                         rt1 tr1 sum 100k\nrt0 tr0 sum 200k\n.hdl \"{}\"\n",
+                        trim.path()
+                    ),
+                    vec![trim],
+                )
+            }
+            CapabilityFamily::RealNumber => (
+                "aobs out rv obs\n.model obs v_to_real (gain=1)\n\
+                 arv rv xr drv\n.model drv real_to_v\nrxr xr 0 1k\n"
+                    .into(),
+                Vec::new(),
+            ),
+        })
+    }
+
+    fn deck(family: CapabilityFamily, extra: &str, cards: &str) -> Netlist {
+        parse(&format!(
+            "* {} fixture\n{HARNESS}{extra}{cards}.end\n",
+            family.tag()
+        ))
+    }
+
+    /// Run one analysis on the fixture; `None` when the fixture cannot ask
+    /// for it (a periodic analysis with no runner here).
+    fn run(
+        family: CapabilityFamily,
+        extra: &str,
+        analysis: CapabilityAnalysis,
+    ) -> Option<Result<(), SimulationError>> {
+        let engine = Engine::default();
+        let netlist = deck(family, extra, "");
+        let out = || node(&netlist, "out");
+        let ok = |result: Result<(), SimulationError>| Some(result);
+        match analysis {
+            CapabilityAnalysis::Op => ok(engine.run_dc_op(&netlist).map(drop)),
+            CapabilityAnalysis::Dc => ok(engine
+                .run_dc_sweep(&netlist, "vin", 0.4, 0.6, 0.1)
+                .map(drop)),
+            CapabilityAnalysis::Ac => ok(engine.run_ac(&netlist, &[1.0e3, 1.0e6]).map(drop)),
+            CapabilityAnalysis::Noise => ok(engine
+                .run_noise(&netlist, out(), &[1.0e3], 300.15)
+                .map(drop)),
+            CapabilityAnalysis::Tf => ok(engine
+                .run_transfer_function(&netlist, "out", None, false, "vin")
+                .map(drop)),
+            CapabilityAnalysis::Sp => {
+                let card = netlist
+                    .analyses
+                    .iter()
+                    .find(|command| matches!(command, AnalysisCommand::Sp { .. }))
+                    .cloned()
+                    .expect("the harness carries a .sp card");
+                ok(engine
+                    .run_sp_with_abort(&netlist, &card, &NoAbort)
+                    .map(drop))
+            }
+            CapabilityAnalysis::Stb => ok(engine
+                .run_stb(
+                    &netlist,
+                    StbConfig::new()
+                        .with_sweep(1.0e3, 1.0e6, 4)
+                        .with_probe("vprobe"),
+                )
+                .map(drop)),
+            CapabilityAnalysis::Pz => {
+                // A current into the summing node: `in` is an ideal source.
+                ok(engine
+                    .run_pz(&netlist, node(&netlist, "sum"), out())
+                    .map(drop))
+            }
+            CapabilityAnalysis::Sens => ok(engine
+                .run_sensitivity_linearized(&netlist, out(), None)
+                .map(drop)),
+            CapabilityAnalysis::Disto => {
+                ok(engine.run_distortion(&netlist, &[1.0e3], None).map(drop))
+            }
+            CapabilityAnalysis::Tran => ok(engine.run_tran(&netlist, 2.0e-6, 2.0e-8).map(drop)),
+            CapabilityAnalysis::TranNoise => {
+                let noisy = deck(family, extra, ".tran 20n 2u noisefmax=100meg noiseseed=3\n");
+                ok(engine.run_tran(&noisy, 2.0e-6, 2.0e-8).map(drop))
+            }
+            // Nine harmonics of 1 MHz need samples at least every 13.9 ns.
+            CapabilityAnalysis::Fourier => {
+                ok(engine.run_tran(&netlist, 4.0e-6, 5.0e-9).and_then(|tran| {
+                    let out = tran
+                        .node_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case("out"))
+                        .expect("out is retained");
+                    FourierAnalysis::new(FourierConfig::new(1.0e6))
+                        .analyze(&tran.time, &tran.voltages[out])
+                        .map(drop)
+                        .map_err(|error| SimulationError::Circuit(error.to_string()))
+                }))
+            }
+            CapabilityAnalysis::Fft => {
+                ok(engine.run_tran(&netlist, 2.0e-6, 2.0e-8).and_then(|tran| {
+                    engine
+                        .evaluate_transient_fft_results(&netlist, &tran, &NoAbort)
+                        .map(drop)
+                }))
+            }
+            CapabilityAnalysis::Sweep => {
+                ok(engine.run_step(&netlist, "rlv", &[900.0, 1100.0]).map(drop))
+            }
+            CapabilityAnalysis::Pss => Some(
+                engine
+                    .run_pss(&netlist, PssConfig::new(1.0e6).with_harmonics(2))
+                    .map(drop),
+            ),
+            CapabilityAnalysis::Hb => Some(
+                engine
+                    .run_hb(&netlist, super::HbConfig::new(1.0e6).with_harmonics(2))
+                    .map(drop),
+            ),
+            CapabilityAnalysis::Pac
+            | CapabilityAnalysis::Pnoise
+            | CapabilityAnalysis::Pxf
+            | CapabilityAnalysis::Pstb
+            | CapabilityAnalysis::Envelope
+            | CapabilityAnalysis::QuasiPeriodic => None,
+        }
+    }
+
+    #[test]
+    fn every_supported_cell_runs_on_its_family_fixture() {
+        let mut failures = Vec::new();
+        for family in CapabilityFamily::ALL {
+            let Some((extra, _files)) = fixture(family) else {
+                continue;
+            };
+            for analysis in CapabilityAnalysis::ALL {
+                let cell = capability_cell(family, analysis);
+                let Some(outcome) = run(family, &extra, analysis) else {
+                    continue;
+                };
+                match (cell, outcome) {
+                    (CellSupport::Supported { .. }, Err(error)) => failures.push(format!(
+                        "{} × {} is supported but refused: {error}",
+                        family.tag(),
+                        analysis.tag()
+                    )),
+                    (
+                        CellSupport::Restricted {
+                            gate:
+                                InstanceGate::NativeDeviceChecks
+                                | InstanceGate::TransientNoiseRenderable,
+                            ..
+                        },
+                        Err(error),
+                    ) => failures.push(format!(
+                        "{} × {} restricts to devices the fixture holds, but refused: {error}",
+                        family.tag(),
+                        analysis.tag()
+                    )),
+                    (CellSupport::Refused { token, .. }, outcome) => match outcome {
+                        Err(error)
+                            if matches!(error, SimulationError::UnsupportedCapability(_))
+                                && capability_token(&error) == token => {}
+                        Err(error) => failures.push(format!(
+                            "{} × {} must refuse with {token}, got {error}",
+                            family.tag(),
+                            analysis.tag()
+                        )),
+                        Ok(()) => failures.push(format!(
+                            "{} × {} is refused but ran",
+                            family.tag(),
+                            analysis.tag()
+                        )),
+                    },
+                    _ => {}
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 }
