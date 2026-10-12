@@ -354,7 +354,7 @@ fn seal_hdl(
             .compile_virtual_runtime(&bundle, &module, limits)
             .map_err(|error| compile_refusal(&module, &path, error.to_string()))?;
         let alias = directive.alias.clone().unwrap_or_else(|| module.clone());
-        let source_key = format!("__rspice_project__/mixed-corpus/{design_slug}/{file_name}");
+        let source_key = sealed_source_key(design_slug, &module, &file_name);
         let digest = rspice_app_types::product::ContentDigest::from_bytes(
             <sha2::Sha256 as sha2::Digest>::digest(source.as_bytes()).into(),
         );
@@ -370,6 +370,17 @@ fn seal_hdl(
     }
     let set = PreparedVerilogARuntimeSet::try_new(runtimes).map_err(harness_error)?;
     Ok((lines.join("\n") + "\n", set))
+}
+
+/// The virtual key a sealed runtime is installed under. The engine keys an
+/// HDL source by its file *and* the module selected from it
+/// (`VerilogASourceKey { source_path, selected_module }`), and the
+/// application's project keys carry the selected module too, so one file
+/// named by two directives (`module=tb_sar`, `module=sar8`) is two runtimes
+/// with two keys; keyed by the file alone the second would collide with the
+/// first.
+pub fn sealed_source_key(design_slug: &str, module: &str, file_name: &str) -> String {
+    format!("__rspice_project__/mixed-corpus/{design_slug}/{module}/{file_name}")
 }
 
 fn compile_refusal(module: &str, path: &Path, message: String) -> ErrorRecord {
@@ -1411,6 +1422,38 @@ mod tests {
         assert_eq!(directives[0].alias, None);
         assert_eq!(directives[1].alias.as_deref(), Some("xalias"));
         assert_eq!(directives[1].module.as_deref(), Some("Top"));
+    }
+
+    #[test]
+    fn one_file_named_by_two_directives_seals_two_runtimes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("pair.v"),
+            "module tb(c);\n  output c;\n  reg c;\n  initial c = 1'b0;\nendmodule\n\
+             module dut(c, q);\n  input c;\n  output q;\n  reg q;\n  initial q = 1'b0;\n  always @(posedge c) q <= ~q;\nendmodule\n",
+        )
+        .unwrap();
+        let circuit =
+            "t\n.hdl \"pair.v\" module=tb\n.hdl \"pair.v\" module=dut\nxtb c tb\nxdut c q dut\n.end\n";
+        let (rewritten, runtimes) =
+            seal_hdl(circuit, &dir.path().join("deck.cir"), "cxx").expect("two runtimes seal");
+        let keys: Vec<&str> = runtimes
+            .device_runtimes()
+            .map(|runtime| runtime.source_key())
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "__rspice_project__/mixed-corpus/cxx/dut/pair.v",
+                "__rspice_project__/mixed-corpus/cxx/tb/pair.v"
+            ]
+        );
+        assert!(
+            rewritten.contains(".veriloga \"__rspice_project__/mixed-corpus/cxx/tb/pair.v\" tb\n")
+                && rewritten
+                    .contains(".veriloga \"__rspice_project__/mixed-corpus/cxx/dut/pair.v\" dut\n"),
+            "{rewritten}"
+        );
     }
 
     #[test]
