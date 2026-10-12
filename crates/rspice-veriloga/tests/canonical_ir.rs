@@ -250,11 +250,17 @@ endmodule
         .default_expr
         .as_ref()
         .expect("exact large default expression");
+    // 70bb34d6b evaluates a closed default in its declared type, so a `real`
+    // parameter's based-integer default enters HIR as the real it converts
+    // to, no longer under its source spelling. What has to survive is the
+    // exact value: 2^53 bit for bit, spelled so that it reparses to itself.
     assert!(matches!(
         &artifact.hir.expressions[usize::from(default_expression.id)].kind,
         HirExprKind::Number { value, raw }
-            if *value == 9_007_199_254_740_992.0
-                && raw.as_str() == "54'h20_0000_0000_0000"
+            if value.to_bits() == 9_007_199_254_740_992.0_f64.to_bits()
+                && raw
+                    .parse::<f64>()
+                    .is_ok_and(|parsed| parsed.to_bits() == value.to_bits())
     ));
 }
 
