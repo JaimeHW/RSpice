@@ -874,8 +874,9 @@ impl CircuitData {
         report
     }
 
-    /// Report the authored MOSFET and JFET leads from the solved series resistors when
-    /// present. The public cache-only report remains usable without a solution.
+    /// Report the authored JFET leads from the solved series resistors when
+    /// present, and the four MOSFET leads from one device evaluation at the
+    /// solution. The public cache-only report remains usable without a solution.
     pub(crate) fn device_op_report_for_solution(
         &self,
         solution: &[Value],
@@ -898,6 +899,13 @@ impl CircuitData {
             return Err("accepted MOSFET displacement current count mismatch".to_string());
         }
         // Classic MOS devices are the leading entries in the canonical report.
+        // All four leads come from one evaluation of the device at `solution`
+        // under its current junction GMIN, so they satisfy KCL exactly at every
+        // reported point. A builder-externalized RD/RS carries the same current
+        // as the internal pin it feeds wherever the solution satisfies that
+        // device law; where it does not — a transient continued from a
+        // periodic orbit solved without the conditioning GMIN — reading
+        // ID/IS off the resistor and IG/IB off the device would mix two laws.
         for (index, (mosfet, entry)) in self
             .mosfets
             .devices
@@ -917,26 +925,6 @@ impl CircuitData {
                     *value = currents[index];
                 }
             }
-        }
-        for &(device, pin, resistor) in &self.mosfets.series_leads {
-            let stamp = &self.resistors.stamps[resistor];
-            let voltage = |node: NodeId| {
-                if node == 0 {
-                    Ok(0.0)
-                } else {
-                    solution.get(node - 1).copied().ok_or_else(|| {
-                        format!(
-                            "MOSFET '{}' lead node {node} is outside solution length {}",
-                            self.mosfets.devices[device].name,
-                            solution.len()
-                        )
-                    })
-                }
-            };
-            let current = self.resistors.conductances[resistor]
-                * (voltage(stamp.pp.row)? - voltage(stamp.nn.row)?);
-            // ID/IG/IS/IB lead the canonical classic-MOS parameter list.
-            report.entries[device].params[pin].1 = current;
         }
         Ok(())
     }

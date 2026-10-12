@@ -7699,11 +7699,6 @@ impl Engine {
                             drain_r,
                         );
                         mosfet.node_drain = dint;
-                        circuit.mosfets.series_leads.push((
-                            circuit.mosfets.len(),
-                            0,
-                            circuit.resistors.len() - 1,
-                        ));
                         if let Some(temp_k) = mosfet.noise_absolute_temperature {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if mosfet.noise_temperature_offset != 0.0 {
@@ -7724,11 +7719,6 @@ impl Engine {
                             source_r,
                         );
                         mosfet.node_source = sint;
-                        circuit.mosfets.series_leads.push((
-                            circuit.mosfets.len(),
-                            2,
-                            circuit.resistors.len() - 1,
-                        ));
                         if let Some(temp_k) = mosfet.noise_absolute_temperature {
                             circuit.set_last_resistor_absolute_noise_temperature(temp_k);
                         } else if mosfet.noise_temperature_offset != 0.0 {
