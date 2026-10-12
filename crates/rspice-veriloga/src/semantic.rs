@@ -1959,7 +1959,7 @@ impl SemanticAnalyzer {
 
         // Parameter arrays share checked numeric storage with variables, but
         // retain parameter symbols so source code can never write their cells.
-        let mut parameter_arrays = Self::parameter_array_items(&analyzed);
+        let mut parameter_arrays = Self::parameter_array_items(&analyzed, module);
         parameter_arrays.extend(local_arrays);
         for (item, var_type) in &parameter_arrays {
             if let Some(layout) =

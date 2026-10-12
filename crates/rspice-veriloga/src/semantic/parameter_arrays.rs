@@ -74,24 +74,27 @@ impl SemanticAnalyzer {
         ))
     }
 
-    pub(super) fn parameter_array_items(module: &AnalyzedModule) -> Vec<(VariableItem, VarType)> {
+    pub(super) fn parameter_array_items(
+        module: &AnalyzedModule,
+        source: &Module,
+    ) -> Vec<(VariableItem, VarType)> {
         module
             .parameters
             .iter()
-            .filter(|parameter| !parameter.dimensions.is_empty())
-            .map(|parameter| {
+            .zip(&source.parameters)
+            .filter(|(parameter, _)| !parameter.dimensions.is_empty())
+            .map(|(parameter, declared)| {
                 (
                     VariableItem {
                         name: parameter.name.clone(),
-                        dimensions: parameter
-                            .dimensions
-                            .iter()
-                            .map(|dimension| ArrayDimension {
-                                start: dimension.left.clone(),
-                                end: dimension.right.clone(),
-                                span: dimension.span,
-                            })
-                            .collect(),
+                        // Storage is sized from the bounds as declared, the way
+                        // a variable array's is. The analyzed bounds carry an
+                        // earlier localparam already normalized for analog
+                        // evaluation (`count` becomes `IntAdd(base, 1)`), which
+                        // the elaboration evaluator that sizes storage and
+                        // protects its parameter dependencies cannot read; it
+                        // resolves the localparam name itself.
+                        dimensions: declared.dimensions.clone(),
                         init: parameter.default_expr.clone(),
                         span: parameter.dimensions[0].span,
                     },
