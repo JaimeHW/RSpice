@@ -1729,13 +1729,17 @@ fn unlanded_tasks_and_options_are_refused_as_not_supported_yet() {
         )],
         &HdlTestbenchOptions::default(),
     )
-    .expect_err("file I/O is not supported yet")
-    .to_string();
+    .expect_err("file I/O is not supported yet");
+    let DigitalRunError::Unsupported(refusal) = &error else {
+        panic!("expected a typed capability refusal, got {error:?}");
+    };
+    assert_eq!(refusal.capability, "hdl.system_task.file_io");
+    let text = error.to_string();
     assert!(
-        error.contains("HDL file and waveform I/O (`$fopen`) is not supported yet"),
-        "{error}"
+        text.contains("HDL file and waveform I/O (`$fopen`) is not supported yet"),
+        "{text}"
     );
-    assert!(!error.contains("lane"), "{error}");
+    assert!(!text.contains("lane"), "{text}");
     let error = run_digital_testbench(
         &[(
             "f.v".into(),
@@ -1746,11 +1750,15 @@ fn unlanded_tasks_and_options_are_refused_as_not_supported_yet() {
             ..HdlTestbenchOptions::default()
         },
     )
-    .expect_err("delay selection is not supported yet")
-    .to_string();
+    .expect_err("delay selection is not supported yet");
+    let DigitalRunError::Unsupported(refusal) = &error else {
+        panic!("expected a typed capability refusal, got {error:?}");
+    };
+    assert_eq!(refusal.capability, "hdl.option.delay_select");
+    let text = error.to_string();
     assert!(
-        error.contains("min:typ:max delay selection is not supported yet"),
-        "{error}"
+        text.contains("min:typ:max delay selection is not supported yet"),
+        "{text}"
     );
-    assert!(!error.contains("lane"), "{error}");
+    assert!(!text.contains("lane"), "{text}");
 }

@@ -111,6 +111,31 @@ fn execution_and_argument_boundaries_publish_structured_categories() {
     );
 }
 
+/// An HDL option whose behaviour has not landed is a typed capability refusal
+/// in the browser too, with its token as a field and text that names the
+/// feature rather than a plan lane.
+#[test]
+fn an_unsupported_hdl_option_is_a_typed_capability_refusal() {
+    let error = run_ac_document_detailed(
+        "unlanded hdl option\nV1 1 0 1 AC 1\nR1 1 0 1k\n.options hdl_libmap=\"lib.map\"\n.END\n",
+        &[1_000.0],
+    )
+    .expect_err("an unlanded HDL option must be refused");
+    assert_eq!(error.code, "unsupported_capability", "{error:?}");
+    assert_eq!(error.category, "capability");
+    assert_eq!(error.capability.as_deref(), Some("hdl.option.libmap"));
+    assert!(
+        error
+            .message
+            .contains("`.options hdl_libmap` is not supported yet"),
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains("lane"), "{}", error.message);
+    let serialized = serde_json::to_value(&error).expect("the refusal serializes");
+    assert_eq!(serialized["capability"], "hdl.option.libmap");
+}
+
 #[test]
 fn resource_failures_serialize_stable_machine_readable_details() {
     let mut options = WasmExecutionOptions::default();

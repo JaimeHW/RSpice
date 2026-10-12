@@ -134,8 +134,9 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
             &rspice_core::SimulationConfigOverrides::default(),
         );
         let coordinate_engine = Engine::try_new(coordinate_config).map_err(|error| {
+            // `from` keeps a refused setting a typed capability refusal.
             Box::new(WasmError::from_simulation_error(
-                rspice_core::engine::SimulationError::Configuration(error),
+                rspice_core::engine::SimulationError::from(error),
             ))
         })?;
         let result_coordinate = ResultCoordinate::from_run_coordinate(&coordinate);

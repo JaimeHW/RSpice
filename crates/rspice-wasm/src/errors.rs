@@ -81,6 +81,10 @@ pub struct WasmError {
     pub missing_dependency: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
+    /// The dotted token of a capability refusal (`hdl.option.libmap`,
+    /// `analysis.hb.device`), which automation branches on.
+    #[serde(default)]
+    pub capability: Option<String>,
     pub unresolved_output_symbols: Vec<WasmUnresolvedOutputSymbol>,
 }
 
@@ -130,6 +134,7 @@ pub(crate) struct JsWasmErrorDetails<'a> {
     identifier_name: Option<&'a str>,
     missing_dependency: Option<&'a str>,
     reason: Option<&'a str>,
+    capability: Option<&'a str>,
     unresolved_output_symbols: Vec<JsUnresolvedOutputSymbol<'a>>,
 }
 
@@ -178,6 +183,7 @@ impl WasmError {
             identifier_name: None,
             missing_dependency: None,
             reason: None,
+            capability: None,
             unresolved_output_symbols: Vec::new(),
         }
     }
@@ -243,6 +249,10 @@ impl WasmError {
             structured.missing_dependency = Some(error.canonical_dependency_name.clone());
             structured.reason = Some(error.reason.as_str().to_string());
         }
+        if let rspice_core::engine::SimulationError::UnsupportedCapability(refusal) = &error {
+            structured.capability = Some(refusal.capability.to_string());
+            structured.instance_name.clone_from(&refusal.instance);
+        }
         structured
     }
 
@@ -299,6 +309,7 @@ impl WasmError {
                     identifier_name: None,
                     missing_dependency: None,
                     reason: None,
+                    capability: None,
                     unresolved_output_symbols,
                 }
             }
@@ -382,6 +393,7 @@ impl WasmError {
                 identifier_name: None,
                 missing_dependency: None,
                 reason: None,
+                capability: None,
                 unresolved_output_symbols: Vec::new(),
             },
             rspice_core::netlist::ParseError::UnresolvedSubcircuitParameter(error) => {
@@ -518,6 +530,7 @@ pub(crate) fn wasm_error_to_js(error: WasmError) -> JsValue {
         identifier_name: error.identifier_name.as_deref(),
         missing_dependency: error.missing_dependency.as_deref(),
         reason: error.reason.as_deref(),
+        capability: error.capability.as_deref(),
         unresolved_output_symbols: error
             .unresolved_output_symbols
             .iter()

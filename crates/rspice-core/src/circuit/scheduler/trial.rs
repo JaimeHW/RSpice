@@ -71,6 +71,11 @@ pub(in crate::circuit) fn mixed_error(instance: &str, error: MixedSignalError) -
     match error {
         MixedSignalError::Aborted => SimulationError::Aborted,
         MixedSignalError::ResourceLimit(error) => error.into(),
+        // A system call this build does not support yet stays a typed
+        // capability refusal, placed on the instance.
+        MixedSignalError::Digital(crate::xspice::verilog::DigitalRunError::Unsupported(
+            refusal,
+        )) => SimulationError::UnsupportedCapability(Box::new((*refusal).for_instance(instance))),
         MixedSignalError::AnalogNonFinite { .. } => SimulationError::from(
             crate::device::StampError::nonfinite_trial(instance, message),
         ),

@@ -466,6 +466,11 @@ pub(super) fn shared_error(
     match error {
         crate::xspice::verilog::MixedSignalError::Aborted => crate::SimulationError::Aborted,
         crate::xspice::verilog::MixedSignalError::ResourceLimit(error) => error.into(),
+        // A system call this build does not support yet stays a typed
+        // capability refusal.
+        crate::xspice::verilog::MixedSignalError::Digital(
+            crate::xspice::verilog::DigitalRunError::Unsupported(refusal),
+        ) => crate::SimulationError::UnsupportedCapability(refusal),
         error => {
             crate::SimulationError::Circuit(format!("mixed circuit digital execution: {error}"))
         }

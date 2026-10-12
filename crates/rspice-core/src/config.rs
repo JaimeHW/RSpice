@@ -129,16 +129,14 @@ pub enum SimulationConfigError {
         /// Preceding time value.
         previous: Value,
     },
-    /// An HDL run option whose behaviour a later P2 lane implements was given
-    /// a value other than its default. The text names the feature, never
-    /// the lane.
-    #[error("{option} is not supported yet: {reason}")]
-    HdlOptionNotAvailable {
-        /// The option, as the command line and `.options` spell it.
-        option: &'static str,
-        /// What is not implemented.
-        reason: &'static str,
-    },
+    /// A well-formed setting this build deliberately refuses: an HDL run
+    /// option whose behaviour a later P2 lane implements, set away from its
+    /// default. Converting into [`crate::SimulationError`] yields
+    /// [`crate::SimulationError::UnsupportedCapability`], so the refusal stays
+    /// typed rather than reading as an invalid configuration. The token names
+    /// the option; the text names the feature, never the lane.
+    #[error("{0}")]
+    UnsupportedCapability(Box<crate::UnsupportedCapabilityError>),
 }
 
 // ============================================================================
@@ -386,46 +384,65 @@ impl Default for HdlRunConfig {
 
 impl HdlRunConfig {
     /// Refuse an option set away from its default before the behaviour it
-    /// selects exists (design P2 section 7, L1 row).
+    /// selects exists (design P2 section 7, L1 row), as a typed capability
+    /// refusal whose token names the option.
     pub fn validate(&self) -> Result<(), SimulationConfigError> {
-        // The run directory and unrestricted I/O are P2 lane L5's; delay
-        // selection, path delays and timing checks L6's; library maps L8's.
-        let unavailable =
-            |option, reason| Err(SimulationConfigError::HdlOptionNotAvailable { option, reason });
-        if self.run_directory.is_some() {
-            return unavailable(
+        match self.unlanded_option() {
+            Some(refusal) => Err(SimulationConfigError::UnsupportedCapability(Box::new(
+                refusal,
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// The refusal for the first option set away from its default whose
+    /// behaviour has not landed. The run directory and unrestricted I/O are
+    /// P2 lane L5's; delay selection, path delays and timing checks L6's;
+    /// library maps L8's. The token says which; the text names the feature.
+    pub fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
+        let (capability, option, reason) = if self.run_directory.is_some() {
+            (
+                "hdl.option.rundir",
                 "the HDL run directory (`--hdl-run-dir`, `.options hdl_rundir`)",
                 "HDL file I/O is not implemented",
-            );
-        }
-        if self.unrestricted_io {
-            return unavailable("`--hdl-unrestricted-io`", "HDL file I/O is not implemented");
-        }
-        if self.delay_select != HdlDelaySelect::Typ {
-            return unavailable(
+            )
+        } else if self.unrestricted_io {
+            (
+                "hdl.option.unrestricted_io",
+                "`--hdl-unrestricted-io`",
+                "HDL file I/O is not implemented",
+            )
+        } else if self.delay_select != HdlDelaySelect::Typ {
+            (
+                "hdl.option.delay_select",
                 "min:typ:max delay selection (`--hdl-delay-select`, `.options hdl_delay_select`)",
                 "every HDL delay uses its typical value",
-            );
-        }
-        if !self.path_delays {
-            return unavailable(
+            )
+        } else if !self.path_delays {
+            (
+                "hdl.option.path_delays",
                 "`.options hdl_path_delays=0`",
                 "`specify` path delays are not implemented",
-            );
-        }
-        if !self.timing_checks {
-            return unavailable(
+            )
+        } else if !self.timing_checks {
+            (
+                "hdl.option.timing_checks",
                 "`.options hdl_timing_checks=0`",
                 "`specify` timing checks are not implemented",
-            );
-        }
-        if self.library_map.is_some() {
-            return unavailable(
+            )
+        } else if self.library_map.is_some() {
+            (
+                "hdl.option.libmap",
                 "`.options hdl_libmap`",
                 "Verilog configurations and library maps are not implemented",
-            );
-        }
-        Ok(())
+            )
+        } else {
+            return None;
+        };
+        Some(crate::UnsupportedCapabilityError::new(
+            capability,
+            format!("{option} is not supported yet: {reason}"),
+        ))
     }
 }
 
@@ -1451,12 +1468,13 @@ mod timeint_config_tests {
         HdlRunConfig::default()
             .validate()
             .expect("the defaults are valid");
-        for (config, feature) in [
+        for (config, token, feature) in [
             (
                 HdlRunConfig {
                     run_directory: Some("out".into()),
                     ..HdlRunConfig::default()
                 },
+                "hdl.option.rundir",
                 "HDL file I/O is not implemented",
             ),
             (
@@ -1464,6 +1482,7 @@ mod timeint_config_tests {
                     unrestricted_io: true,
                     ..HdlRunConfig::default()
                 },
+                "hdl.option.unrestricted_io",
                 "HDL file I/O is not implemented",
             ),
             (
@@ -1471,6 +1490,7 @@ mod timeint_config_tests {
                     delay_select: HdlDelaySelect::Min,
                     ..HdlRunConfig::default()
                 },
+                "hdl.option.delay_select",
                 "min:typ:max delay selection",
             ),
             (
@@ -1478,6 +1498,7 @@ mod timeint_config_tests {
                     path_delays: false,
                     ..HdlRunConfig::default()
                 },
+                "hdl.option.path_delays",
                 "`specify` path delays are not implemented",
             ),
             (
@@ -1485,6 +1506,7 @@ mod timeint_config_tests {
                     timing_checks: false,
                     ..HdlRunConfig::default()
                 },
+                "hdl.option.timing_checks",
                 "`specify` timing checks are not implemented",
             ),
             (
@@ -1492,6 +1514,7 @@ mod timeint_config_tests {
                     library_map: Some("lib.map".into()),
                     ..HdlRunConfig::default()
                 },
+                "hdl.option.libmap",
                 "library maps are not implemented",
             ),
         ] {
@@ -1500,14 +1523,23 @@ mod timeint_config_tests {
                 ..SimulationConfig::default()
             }
             .validate()
-            .expect_err("an unlanded option is refused")
-            .to_string();
-            assert!(error.contains("is not supported yet"), "{error}");
-            assert!(error.contains(feature), "{error}");
+            .expect_err("an unlanded option is refused");
+            let SimulationConfigError::UnsupportedCapability(refusal) = &error else {
+                panic!("expected a typed capability refusal, got {error:?}");
+            };
+            assert_eq!(refusal.capability, token, "{error}");
+            let text = error.to_string();
+            assert!(text.contains("is not supported yet"), "{text}");
+            assert!(text.contains(feature), "{text}");
             assert!(
-                !error.contains("lane") && !error.contains("P2"),
-                "no plan identifier reaches the text: {error}"
+                !text.contains("lane") && !text.contains("P2"),
+                "no plan identifier reaches the text: {text}"
             );
+            // The engine's error keeps it typed.
+            assert!(matches!(
+                crate::SimulationError::from(error),
+                crate::SimulationError::UnsupportedCapability(_)
+            ));
         }
     }
 }

@@ -52,10 +52,7 @@ impl<'a> ServiceContext<'a> {
         let mut config = self.engine_config(netlist);
         config.tolerance = tolerance;
         rspice_core::engine::Engine::try_new_with_resolved_config(config).map_err(|error| {
-            super::ServiceRunError::from_core(
-                diagnostic,
-                rspice_core::SimulationError::Configuration(error),
-            )
+            super::ServiceRunError::from_core(diagnostic, rspice_core::SimulationError::from(error))
         })
     }
 }

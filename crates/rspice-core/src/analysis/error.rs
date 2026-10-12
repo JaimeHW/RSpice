@@ -976,8 +976,10 @@ pub enum SimulationError {
     /// `Engine::run_with_outcome` translates this into successful normal finish.
     #[error("{0}")]
     ModelFinished(Box<crate::ModelFinish>),
+    /// Never holds [`crate::config::SimulationConfigError::UnsupportedCapability`]:
+    /// the conversion moves that to [`Self::UnsupportedCapability`].
     #[error("Invalid simulation configuration: {0}")]
-    Configuration(#[from] crate::config::SimulationConfigError),
+    Configuration(#[source] crate::config::SimulationConfigError),
 
     #[error(transparent)]
     ResourceLimit(#[from] crate::resource::ResourceLimitError),
@@ -1116,6 +1118,19 @@ impl From<ResultSchemaMismatchError> for SimulationError {
 impl From<UnsupportedCapabilityError> for SimulationError {
     fn from(error: UnsupportedCapabilityError) -> Self {
         Self::UnsupportedCapability(Box::new(error))
+    }
+}
+
+/// A configuration the build deliberately refuses stays a typed capability
+/// refusal; every other configuration error is a configuration error.
+impl From<crate::config::SimulationConfigError> for SimulationError {
+    fn from(error: crate::config::SimulationConfigError) -> Self {
+        match error {
+            crate::config::SimulationConfigError::UnsupportedCapability(refusal) => {
+                Self::UnsupportedCapability(refusal)
+            }
+            other => Self::Configuration(other),
+        }
     }
 }
 

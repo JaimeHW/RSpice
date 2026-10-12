@@ -46,8 +46,9 @@ pub(crate) fn engine_with_resource_limits(
         ..SimulationConfig::default()
     };
     Engine::try_new(config).map_err(|error| {
+        // `from` keeps a refused setting a typed capability refusal.
         Box::new(WasmError::from_simulation_error(
-            rspice_core::engine::SimulationError::Configuration(error),
+            rspice_core::engine::SimulationError::from(error),
         ))
     })
 }

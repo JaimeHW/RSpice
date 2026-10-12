@@ -64,9 +64,8 @@ pub(super) fn run(
         let mut config = engine.config().clone();
         config.resource_limits.max_result_values =
             limits.max_result_values.saturating_sub(presentation_values);
-        let bounded = Engine::try_new(config).map_err(|error| {
-            simulation_error(rspice_core::SimulationError::Configuration(error))
-        })?;
+        let bounded = Engine::try_new(config)
+            .map_err(|error| simulation_error(rspice_core::SimulationError::from(error)))?;
         let previous = circuit.datasets().len();
         match circuit
             .execute(&bounded, &command, session.variables(), abort)
@@ -281,7 +280,7 @@ fn execution_error(error: ControlExecutionError, script: &ControlScriptSource) -
             source_error(WasmError::from_simulation_error(source), line, script)
         }
         ControlExecutionError::Configuration { line, source } => source_error(
-            WasmError::from_simulation_error(rspice_core::SimulationError::Configuration(source)),
+            WasmError::from_simulation_error(rspice_core::SimulationError::from(source)),
             line,
             script,
         ),

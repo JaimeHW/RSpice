@@ -325,33 +325,39 @@ fn hdl_text_moves_to_stderr_when_stdout_is_a_payload() {
 fn unsupported_hdl_options_are_refused_as_not_supported_yet() {
     let directory = common::test_dir("hdl_unlanded");
     hdl_console_deck(&directory, "");
-    let refused = |output: &std::process::Output, feature: &str| {
-        assert_eq!(output.status.code(), Some(78), "{output:?}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("is not supported yet"), "{stderr}");
-        assert!(stderr.contains(feature), "{stderr}");
-        assert!(!stderr.contains("lane"), "no plan identifier: {stderr}");
-    };
-    for (args, feature) in [
-        (
-            vec!["--hdl-delay-select", "max"],
-            "min:typ:max delay selection",
-        ),
-        (vec!["--hdl-run-dir", "."], "HDL file I/O is not implemented"),
-        (
-            vec!["--hdl-unrestricted-io"],
-            "HDL file I/O is not implemented",
-        ),
-    ] {
-        let mut command = vec!["--quiet", "run", "talker.cir"];
+    // A typed capability refusal: exit 69, its token in the JSON error, and
+    // text that says what is not supported, never a plan lane.
+    let refused = |args: &[&str], token: &str, feature: &str| {
+        let mut command = vec!["--quiet", "--error-format", "json", "run", "talker.cir"];
         command.extend(args);
-        refused(&rspice_in(&directory, &command), feature);
-    }
-    hdl_console_deck(&directory, ".options hdl_libmap=\"lib.map\"\n");
+        let output = rspice_in(&directory, &command);
+        assert_eq!(output.status.code(), Some(69), "{output:?}");
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr)
+            .unwrap_or_else(|error| panic!("a JSON error: {error}: {output:?}"));
+        assert_eq!(error["error"]["category"], "capability", "{error}");
+        assert_eq!(error["error"]["capability"], token, "{error}");
+        let message = error["error"]["message"].as_str().unwrap();
+        assert!(message.contains("is not supported yet"), "{message}");
+        assert!(message.contains(feature), "{message}");
+        assert!(!message.contains("lane"), "no plan identifier: {message}");
+    };
     refused(
-        &rspice_in(&directory, &["--quiet", "run", "talker.cir"]),
-        "library maps are not implemented",
+        &["--hdl-delay-select", "max"],
+        "hdl.option.delay_select",
+        "min:typ:max delay selection",
     );
+    refused(
+        &["--hdl-run-dir", "."],
+        "hdl.option.rundir",
+        "HDL file I/O is not implemented",
+    );
+    refused(
+        &["--hdl-unrestricted-io"],
+        "hdl.option.unrestricted_io",
+        "HDL file I/O is not implemented",
+    );
+    hdl_console_deck(&directory, ".options hdl_libmap=\"lib.map\"\n");
+    refused(&[], "hdl.option.libmap", "library maps are not implemented");
     let output = rspice_in(&directory, &["--quiet", "run", "talker.cir", "N=4"]);
     assert_eq!(output.status.code(), Some(2), "{output:?}");
 }

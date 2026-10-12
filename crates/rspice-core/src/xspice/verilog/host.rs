@@ -235,11 +235,37 @@ pub enum DigitalRunError {
         /// The module the stimulus asked for.
         requested: String,
     },
+    /// A well-formed request this build deliberately refuses, such as a
+    /// testbench option whose P2 lane has not landed. Typed, with a token.
+    Unsupported(Box<crate::UnsupportedCapabilityError>),
+}
+
+/// A process or observer evaluation failure, as the host reports it. A system
+/// call whose host behaviour has not landed (file and waveform I/O, P2 lane
+/// L5) is a typed capability refusal rather than a failure; its text names
+/// the feature, never the lane.
+fn evaluation_error(
+    plan: &CanonicalDigitalPlan,
+    process: String,
+    error: DigitalEvalError,
+) -> DigitalRunError {
+    if let DigitalEvalError::SystemCallUnavailable { site, detail } = &error
+        && plan.system_calls.get(site.index()).is_some_and(|call| {
+            call.kind.lane() == rspice_veriloga::canonical_ir::digital::DigitalSystemLane::Files
+        })
+    {
+        return DigitalRunError::Unsupported(Box::new(crate::UnsupportedCapabilityError::new(
+            "hdl.system_task.file_io",
+            detail.clone(),
+        )));
+    }
+    DigitalRunError::Evaluation { process, error }
 }
 
 impl fmt::Display for DigitalRunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Unsupported(refusal) => refusal.fmt(f),
             Self::ExternalExecution { detail } => {
                 write!(f, "shared digital execution failed: {detail}")
             }
@@ -1298,10 +1324,7 @@ impl DigitalHost {
                 &mut environment,
                 &mut self.scratch,
             )
-            .map_err(|error| DigitalRunError::Evaluation {
-                process: "the monitor region".into(),
-                error,
-            })?;
+            .map_err(|error| evaluation_error(&self.plan, "the monitor region".into(), error))?;
         }
         Ok(())
     }
@@ -1385,10 +1408,8 @@ impl DigitalHost {
                 DEFAULT_PROCESS_STEP_LIMIT,
             ),
         };
-        let outcome = outcome.map_err(|error| DigitalRunError::Evaluation {
-            process: self.describe(index),
-            error,
-        })?;
+        let outcome =
+            outcome.map_err(|error| evaluation_error(&self.plan, self.describe(index), error))?;
 
         self.store
             .current_sequence()

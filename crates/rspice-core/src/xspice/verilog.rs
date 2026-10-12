@@ -759,25 +759,32 @@ pub fn run_digital_testbench(
     options: &HdlTestbenchOptions,
 ) -> Result<HdlTestbenchReport, DigitalRunError> {
     // The run directory is P2 lane L5's; delay selection and `specify` L6's.
-    let unavailable = |option: &str, reason: &str| {
-        Err(DigitalRunError::Compile {
-            detail: format!("{option} is not supported yet: {reason}"),
-        })
+    // The token says which; the text names the feature.
+    let unavailable = |capability: &'static str, option: &str, reason: &str| {
+        Err(DigitalRunError::Unsupported(Box::new(
+            crate::UnsupportedCapabilityError::new(
+                capability,
+                format!("{option} is not supported yet: {reason}"),
+            ),
+        )))
     };
     if options.run_directory.is_some() {
         return unavailable(
+            "hdl.option.rundir",
             "a testbench run directory",
             "HDL file I/O is not implemented",
         );
     }
     if options.delay_select != crate::config::HdlDelaySelect::Typ {
         return unavailable(
+            "hdl.option.delay_select",
             "min:typ:max delay selection",
             "every HDL delay uses its typical value",
         );
     }
     if options.specify {
         return unavailable(
+            "hdl.option.specify",
             "`specify` timing",
             "`specify` path delays and timing checks are not implemented",
         );

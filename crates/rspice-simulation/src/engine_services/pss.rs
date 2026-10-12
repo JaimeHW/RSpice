@@ -220,7 +220,7 @@ pub(crate) fn run_pss_analysis_on_materialized_with_context(
     let engine = Engine::try_new_with_resolved_config(sim_config).map_err(|error| {
         ServiceRunError::from_core(
             "PSS resolved engine configuration is invalid",
-            rspice_core::SimulationError::Configuration(error),
+            rspice_core::SimulationError::from(error),
         )
     })?;
     // The closed periodic-source contract is a *driven* rule, and the draft
