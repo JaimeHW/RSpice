@@ -210,6 +210,15 @@ pub struct StateSpaceFilter {
     order: usize,
 }
 
+/// A borrowed view of a filter's state-space matrices:
+/// `dx/dt = A x + B u`, `y = C x + D u`.
+pub(crate) struct StateSpaceRealization<'a> {
+    pub(crate) a: &'a [Vec<f64>],
+    pub(crate) b: &'a [f64],
+    pub(crate) c: &'a [f64],
+    pub(crate) d: f64,
+}
+
 /// Accepted dynamic state for a compiled Laplace realization. The immutable
 /// realization matrices remain in the compiled device and are shape-checked
 /// before these values are injected.
@@ -726,6 +735,18 @@ impl StateSpaceFilter {
             &self.state_prev
         };
         checked_state_output(&self.c, state, self.d, input)
+    }
+
+    /// The realization `(A, B, C, D)` this filter integrates in transient,
+    /// for a caller that exports its states as descriptor columns.
+    pub(crate) fn realization(&self) -> Result<StateSpaceRealization<'_>, LaplaceError> {
+        self.validate_structure()?;
+        Ok(StateSpaceRealization {
+            a: &self.a,
+            b: &self.b,
+            c: &self.c,
+            d: self.d,
+        })
     }
 
     /// Differentiate only the direct input term of a static DAE observation.

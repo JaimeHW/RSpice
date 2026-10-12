@@ -47,6 +47,16 @@ pub enum VmError {
         lower: i64,
         upper: i64,
     },
+    /// A small-signal descriptor met an analog operator that has no finite
+    /// rational realization: `absdelay`, `zi_*` or `idtmod`. The payload is
+    /// the operator's name as
+    /// [`crate::device::VerilogADevice::small_signal_descriptor_blockers`]
+    /// lists it.
+    NonRationalOperator(&'static str),
+    /// Two evaluations of one small-signal descriptor coefficient disagreed,
+    /// or the linearization is not affine in `s`, so the module has no single
+    /// `G + sC` realization at this operating point.
+    InconsistentDescriptor(String),
 }
 
 impl VmError {
@@ -95,6 +105,13 @@ impl std::fmt::Display for VmError {
                 "Array index {} outside declared bounds [{}:{}]",
                 index, lower, upper
             ),
+            VmError::NonRationalOperator(name) => write!(
+                f,
+                "analog operator {name} has no finite rational small-signal realization"
+            ),
+            VmError::InconsistentDescriptor(msg) => {
+                write!(f, "inconsistent small-signal descriptor: {msg}")
+            }
         }
     }
 }

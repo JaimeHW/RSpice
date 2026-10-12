@@ -5,6 +5,7 @@
 //! parameter lookup, and mathematical operations.
 
 mod context;
+mod descriptor;
 mod error;
 mod executor;
 mod filters;
@@ -23,6 +24,13 @@ pub use context::{
 #[cfg(feature = "native")]
 pub(crate) use context::{
     LIMITER_HISTORY_UNINITIALIZED, LIMITER_HISTORY_VALID, pin_limiter_history,
+};
+pub(crate) use descriptor::{
+    ABSDELAY, Axis, Column, DescriptorBuild, IDTMOD, OutputTarget, ZI, shadow_columns,
+};
+pub use descriptor::{
+    DescriptorEntry, DescriptorIndex, DescriptorStateKind, NoiseProcessRealization,
+    SmallSignalDescriptor,
 };
 pub use error::VmError;
 pub use executor::Vm;

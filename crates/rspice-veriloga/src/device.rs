@@ -4890,18 +4890,20 @@ impl VerilogADevice {
         }
     }
 
-    /// The non-rational analog operators this instance's small-signal response
-    /// carries, named as they are spelled in a source file.
+    /// The analog operators other than `ddt` that give this instance's
+    /// small-signal response internal state, named as they are spelled in a
+    /// source file.
     ///
-    /// A caller that must export every dynamic state as an explicit finite
-    /// state in a rational `G + sC` descriptor — pole-zero extraction is the
-    /// one — cannot represent any of them. `absdelay` is a transport delay,
-    /// whose `exp(-s*td)` has no rational form at all; `laplace_*`, `zi_*`,
-    /// `idt` and `idtmod` each hold internal state that the runtime carries
-    /// privately and never exports as a descriptor column, so a linearization
-    /// sampled at one frequency is a two-point fit rather than the device's
-    /// response. `ddt` is deliberately absent: its charge derivative *is* the
-    /// descriptor's `C` contribution.
+    /// A pole-zero descriptor must export every such state as an explicit
+    /// finite state of a rational `G + sC` pencil.
+    /// [`Self::try_small_signal_descriptor`] does that for `laplace_*` and
+    /// `idt`; [`Self::small_signal_descriptor_blockers`] filters this list to
+    /// the three it cannot realize. `absdelay` is a transport delay, whose
+    /// `exp(-s*td)` has no rational form at all; `zi_*` is a sampled-data
+    /// filter, rational in `z = exp(s*T)` and not in `s`; `idtmod` wraps its
+    /// integral at a modulus the small-signal response cannot carry. `ddt` is
+    /// deliberately absent: its charge derivative *is* the descriptor's `C`
+    /// contribution.
     ///
     /// Read off the same bytecode state vocabulary as the charge-slot walk, so
     /// the answer is identical on the interpreter and on every JIT —
@@ -4918,23 +4920,55 @@ impl VerilogADevice {
             Operator::IdtMod,
         ];
 
-        let mut seen = [false; NON_RATIONAL.len()];
+        NON_RATIONAL
+            .into_iter()
+            .zip(self.analog_operators_present(NON_RATIONAL))
+            .filter(|(_, present)| *present)
+            .map(|(operator, _)| operator.name())
+            .collect()
+    }
+
+    /// The analog operators that keep this instance from an exact
+    /// small-signal descriptor: `"absdelay"`, `"zi_*"` and `"idtmod"`, each
+    /// listed, in that order, when the analog body uses it.
+    ///
+    /// [`Self::try_small_signal_descriptor`] refuses with
+    /// [`VmError::NonRationalOperator`] naming the first of them. Like
+    /// [`Self::non_rational_analog_operators`], the answer is structural and
+    /// identical on every route.
+    pub fn small_signal_descriptor_blockers(&self) -> Vec<&'static str> {
+        use crate::canonical_ir::state::CanonicalStateOperator as Operator;
+
+        const BLOCKERS: [(Operator, &str); 3] = [
+            (Operator::Absdelay, crate::vm::ABSDELAY),
+            (Operator::Zi, crate::vm::ZI),
+            (Operator::IdtMod, crate::vm::IDTMOD),
+        ];
+
+        BLOCKERS
+            .into_iter()
+            .zip(self.analog_operators_present(BLOCKERS.map(|(operator, _)| operator)))
+            .filter(|(_, present)| *present)
+            .map(|((_, name), _)| name)
+            .collect()
+    }
+
+    /// Which of `operators` the analog body's bytecode uses.
+    fn analog_operators_present<const N: usize>(
+        &self,
+        operators: [crate::canonical_ir::state::CanonicalStateOperator; N],
+    ) -> [bool; N] {
+        let mut seen = [false; N];
         Self::for_each_bytecode_program(&self.model, false, &mut |program| {
             for instruction in &program.instructions {
-                for (index, operator) in NON_RATIONAL.into_iter().enumerate() {
+                for (index, operator) in operators.into_iter().enumerate() {
                     if !seen[index] && operator.bytecode_slot(instruction).is_some() {
                         seen[index] = true;
                     }
                 }
             }
         });
-
-        NON_RATIONAL
-            .into_iter()
-            .zip(seen)
-            .filter(|(_, present)| *present)
-            .map(|(operator, _)| operator.name())
-            .collect()
+        seen
     }
 
     /// Apply a commit only after all runtime instances in the circuit have
@@ -6281,6 +6315,146 @@ impl VerilogADevice {
             matrix_add(row, col, real, imag);
         }
         Ok(())
+    }
+
+    /// The exact `G + sC` descriptor of this instance's small-signal response
+    /// at `circuit_voltages`, for pole-zero analysis.
+    ///
+    /// The operating point is established as for
+    /// [`Self::try_stamp_small_signal_complex`], and the same Jacobian
+    /// programs are replayed with the same multiplicity and signs. Each
+    /// `laplace_*` filter, each `idt` and each `ddt` of an input that already
+    /// carries `s` becomes explicit descriptor states instead of a transfer at
+    /// one frequency, so reducing the states out at `s = jω` reproduces the
+    /// complex stamp at every frequency. No transient history is advanced.
+    ///
+    /// Requires an AC or noise analysis type, as the complex stamp does.
+    /// Refuses with [`VmError::NonRationalOperator`] when
+    /// [`Self::small_signal_descriptor_blockers`] is non-empty, and with
+    /// [`VmError::InconsistentDescriptor`] when the linearization has no
+    /// single realization.
+    pub fn try_small_signal_descriptor(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<crate::vm::SmallSignalDescriptor, VmError> {
+        use crate::vm::{Axis, Column, DescriptorBuild, DescriptorIndex, OutputTarget};
+
+        if !matches!(self.context.analysis_type, 1 | 3) {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "a small-signal descriptor requires AC or noise analysis, got analysis type {}",
+                self.context.analysis_type
+            )));
+        }
+        if let Some(&blocker) = self.small_signal_descriptor_blockers().first() {
+            return Err(VmError::NonRationalOperator(blocker));
+        }
+
+        self.try_update_all_voltages(circuit_voltages)?;
+        // The same pre-pass image the complex stamp replays from.
+        let variable_seed = self.context.variables.clone();
+        self.try_evaluate_with_task_recording(
+            crate::vm::VerilogAEvaluationMode::SmallSignal,
+            false,
+        )?;
+
+        let replay_mask = self.small_signal_replay_variables();
+        let replay_mask = (!replay_mask.is_empty()).then_some(replay_mask);
+        let columns = crate::vm::shadow_columns(&self.model.variable_names, variable_seed.len());
+        let mut structural = Vec::with_capacity(self.model.branch_sources.len().saturating_mul(4));
+        Self::buffer_structural_branches(
+            &self.model,
+            &self.branch_active,
+            &self.node_mapping,
+            &self.internal_node_indices,
+            &self.branch_current_indices,
+            &mut structural,
+            self.context.multiplicity,
+        );
+
+        let mut ddt_cuts = std::collections::BTreeSet::new();
+        loop {
+            let mut build =
+                DescriptorBuild::new(&self.context, &variable_seed, columns.clone(), ddt_cuts)?;
+            build.replay(&self.model.assignment_steps, replay_mask)?;
+            for &(row, col, value) in &structural {
+                build.add_entry(
+                    DescriptorIndex::Circuit(row),
+                    DescriptorIndex::Circuit(col),
+                    value,
+                    0.0,
+                );
+            }
+            for (program_idx, program) in self.model.stamp_programs.iter().enumerate() {
+                if !self
+                    .program_active
+                    .get(program_idx)
+                    .copied()
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+                let scale = if program.branch_ordinal.is_none() {
+                    self.context.multiplicity
+                } else {
+                    1.0
+                };
+                for mapped_entry in &self.matrix_indices.jacobian[program_idx] {
+                    let model_entry = &program.jacobian_programs[mapped_entry.jacobian_idx];
+                    let axis = match model_entry.col_axis {
+                        crate::codegen::ColumnAxis::Node(node) => Axis::Node(node),
+                        crate::codegen::ColumnAxis::Branch(ordinal) => Axis::Branch(ordinal),
+                    };
+                    let value = build.evaluate(&model_entry.program, Column::Axis(axis))?;
+                    let (row_kind, row_index) = match model_entry.row {
+                        StampIndex::Terminal(index) => (0, index),
+                        StampIndex::Internal(index) => (1, index),
+                        StampIndex::Branch(index) => (2, index),
+                        StampIndex::Ground => (3, 0),
+                    };
+                    build.add_output(
+                        OutputTarget {
+                            key: (
+                                program_idx,
+                                row_kind,
+                                row_index,
+                                mapped_entry.sign.to_bits(),
+                            ),
+                            row: mapped_entry.row.map(DescriptorIndex::Circuit),
+                            scale: mapped_entry.sign * scale,
+                        },
+                        mapped_entry.col.map(DescriptorIndex::Circuit),
+                        value,
+                    )?;
+                }
+            }
+            match build.restart() {
+                Some(cuts) => ddt_cuts = cuts,
+                None => return build.finish(|axis| self.descriptor_axis_index(axis)),
+            }
+        }
+    }
+
+    /// The matrix column of a derivative axis, or `None` for ground and for
+    /// axes outside the circuit.
+    fn descriptor_axis_index(&self, axis: crate::vm::Axis) -> Option<crate::vm::DescriptorIndex> {
+        let index = match axis {
+            crate::vm::Axis::Node(node) if node == crate::expr_converter::GROUND_NODE => {
+                return None;
+            }
+            crate::vm::Axis::Node(node) if node < self.model.num_terminals => {
+                StampIndex::Terminal(node)
+            }
+            crate::vm::Axis::Node(node) => StampIndex::Internal(node - self.model.num_terminals),
+            crate::vm::Axis::Branch(ordinal) => StampIndex::Branch(ordinal),
+            crate::vm::Axis::Noise(_) => return None,
+        };
+        Self::index_to_node(
+            &index,
+            &self.node_mapping,
+            &self.internal_node_indices,
+            &self.branch_current_indices,
+        )
+        .map(crate::vm::DescriptorIndex::Circuit)
     }
 
     /// Update terminal voltages from circuit solution
