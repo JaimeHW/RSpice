@@ -545,7 +545,7 @@ impl Engine {
                 matrix,
                 config,
                 ShootingState::new(initial, coarse.state.period),
-                None,
+                Some(PssChord::FixedPoint),
                 abort,
             )?;
             *iterations += fine.iterations;

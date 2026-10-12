@@ -119,10 +119,11 @@ impl PssAcceptedStepHistory {
 const PSS_FD_STEP: Value = 6.055_454_452_393_343e-6;
 const PSS_KRYLOV_STATE_THRESHOLD: usize = 12;
 const PSS_KRYLOV_REL_TOL: Value = 1e-9;
-// Each chord step with another mesh's Jacobian must cut the residual tenfold.
+// Each chord step must cut the residual tenfold.
 const PSS_CHORD_CONTRACTION: Value = 0.1;
-// Refined meshes take chord steps with the coarser mesh's Jacobian.
-const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 107;
+// Affine period maps keep one Jacobian per mesh, and re-sampled delay bases
+// take fixed-point chord steps.
+const PSS_OPERATING_POINT_IDENTITY_VERSION: u32 = 108;
 
 fn pss_identity_field(hasher: &mut blake3::Hasher, name: &str, bytes: &[u8]) {
     hasher.update(&(name.len() as u64).to_le_bytes());
@@ -715,6 +716,18 @@ pub(in crate::engine) struct PssCompanionStep<'a> {
     pub t_next: Value,
     pub dt: Value,
     pub initialization: bool,
+}
+
+/// The Jacobian a chord step of a driven shooting solve uses.
+#[derive(Clone, Copy)]
+enum PssChord<'a> {
+    /// `M - I` differentiated on another mesh of the same shooting basis.
+    Mesh(&'a [Vec<Value>]),
+    /// The fixed-point step `x0 <- x(T)`, a chord with `M = 0`. A re-sampled
+    /// basis has no Jacobian yet; when its orbit's multipliers are small the
+    /// next traversal closes it, and the tenfold contraction test says when
+    /// they are not.
+    FixedPoint,
 }
 
 /// What one period traversal is asked to walk: how far, how large a step it
@@ -2454,9 +2467,15 @@ impl Engine {
                     &config,
                     ShootingState::new(fine_initial_state, coarse.state.period),
                     // A refined delay basis re-samples the wave coordinates.
-                    (!resamples_delay_basis)
-                        .then(|| coarse.jacobian.as_deref().or(chord_jacobian.as_deref()))
-                        .flatten(),
+                    if resamples_delay_basis {
+                        Some(PssChord::FixedPoint)
+                    } else {
+                        coarse
+                            .jacobian
+                            .as_deref()
+                            .or(chord_jacobian.as_deref())
+                            .map(PssChord::Mesh)
+                    },
                     abort,
                 )
                 .map_err(|error| match error {
@@ -2476,10 +2495,15 @@ impl Engine {
                     &mut matrix,
                     &config,
                     ShootingState::new(fine.state.x0.clone(), fine.state.period),
-                    fine.jacobian
-                        .as_deref()
-                        .or(coarse.jacobian.as_deref())
-                        .or(chord_jacobian.as_deref()),
+                    match fine.jacobian.as_deref() {
+                        Some(jacobian) => Some(PssChord::Mesh(jacobian)),
+                        None if resamples_delay_basis => Some(PssChord::FixedPoint),
+                        None => coarse
+                            .jacobian
+                            .as_deref()
+                            .or(chord_jacobian.as_deref())
+                            .map(PssChord::Mesh),
+                    },
                     abort,
                 );
                 circuit.probe_precision_floor = false;
@@ -2567,14 +2591,9 @@ impl Engine {
         // For a driven linear circuit the period map is affine in x0: its
         // Jacobian is independent of bias and already describes this orbit.
         self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
-        let linear_jacobian = (!config.is_autonomous()
-            && !circuit.has_nonlinear_devices()
-            && !circuit
-                .tlines
-                .iter()
-                .any(|line| line.has_state_dependent_lossless_interpolation()))
-        .then_some(preconditioner_jacobian)
-        .flatten();
+        let linear_jacobian = Self::pss_period_map_is_affine(&circuit, &config)
+            .then_some(preconditioner_jacobian)
+            .flatten();
         let monodromy = if let Some(mut jacobian) = linear_jacobian {
             for (index, row) in jacobian.iter_mut().enumerate() {
                 row[index] += 1.0;
@@ -2648,13 +2667,22 @@ impl Engine {
     /// `PSS_CHORD_CONTRACTION`; otherwise the solve differentiates its own
     /// mesh. Convergence is certified on this mesh's traversal either way,
     /// and the returned Jacobian is only ever one differentiated on it.
+    ///
+    /// A driven circuit without nonlinear devices or state-dependent line
+    /// interpolation has an affine period map, whose Jacobian on a mesh is a
+    /// constant up to the traversal's own tolerances. Such a solve
+    /// differentiates its mesh at most once and takes every later direct
+    /// Newton step with that Jacobian; a residual random walk at the shooting
+    /// tolerance then costs one traversal per step instead of a fresh
+    /// Jacobian. A reused Jacobian is returned only while the converged state
+    /// stays inside the difference stencil it was taken with.
     fn pss_solve_grid(
         &self,
         circuit: &mut PssCircuit,
         matrix: &mut StaticMatrix,
         config: &PssConfig,
         mut shooting_state: ShootingState,
-        chord: Option<&[Vec<Value>]>,
+        chord: Option<PssChord<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<PssGridSolution, SimulationError> {
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
@@ -2668,10 +2696,21 @@ impl Engine {
         // preconditioner even after a matrix-free step makes it too stale for
         // Floquet reporting.
         let mut preconditioner_jacobian: Option<Vec<Vec<Value>>> = None;
-        let mut chord = chord.filter(|jacobian| {
-            !config.is_autonomous() && jacobian.len() == shooting_state.dimension()
+        let mut chord = chord.filter(|chord| {
+            !config.is_autonomous()
+                && match chord {
+                    PssChord::Mesh(jacobian) => jacobian.len() == shooting_state.dimension(),
+                    PssChord::FixedPoint => true,
+                }
         });
         let mut chord_residual: Option<Value> = None;
+        let affine = Self::pss_period_map_is_affine(circuit, config);
+        // Set once a direct step reuses the mesh's Jacobian. That Jacobian
+        // then belongs to an earlier iterate, and is returned for Floquet
+        // reporting only when the converged state still lies inside the
+        // central-difference stencil it was differentiated with.
+        let mut reused_jacobian = false;
+        let mut jacobian_origin: Vec<Value> = Vec::new();
 
         loop {
             if abort.is_aborted() {
@@ -2705,11 +2744,19 @@ impl Engine {
 
             // Check convergence
             if solver.check_convergence(&shooting_state) {
+                let jacobian = preconditioner_jacobian.filter(|_| {
+                    !reused_jacobian
+                        || self.pss_state_within_jacobian_stencil(
+                            circuit,
+                            &jacobian_origin,
+                            &shooting_state.x0,
+                        )
+                });
                 return Ok(PssGridSolution {
                     state: shooting_state,
                     waveform,
                     iterations: iteration,
-                    jacobian: preconditioner_jacobian,
+                    jacobian,
                 });
             }
             if iteration >= config.max_iterations {
@@ -2723,19 +2770,22 @@ impl Engine {
             // integrate their state-only perturbations.
             drop(waveform);
 
-            if let Some(jacobian) = chord {
+            if let Some(step) = chord {
                 let residual = shooting_state.residual_norm();
                 if chord_residual
                     .is_none_or(|previous| residual <= PSS_CHORD_CONTRACTION * previous)
                 {
-                    let delta = self.pss_solve_with_integral_constants(
-                        circuit,
-                        &shooting_state,
-                        jacobian,
-                        &shooting_state.residual,
-                        config,
-                        abort,
-                    )?;
+                    let delta = match step {
+                        PssChord::Mesh(jacobian) => self.pss_solve_with_integral_constants(
+                            circuit,
+                            &shooting_state,
+                            jacobian,
+                            &shooting_state.residual,
+                            config,
+                            abort,
+                        )?,
+                        PssChord::FixedPoint => shooting_state.residual.clone(),
+                    };
                     shooting_state.update_x0(&delta, solver.damping);
                     chord_residual = Some(residual);
                     iteration += 1;
@@ -2817,6 +2867,16 @@ impl Engine {
                         log::debug!("PSS driven Newton-Krylov step accepted");
                     }
                     delta
+                } else if affine && let Some(jacobian) = preconditioner_jacobian.as_deref() {
+                    reused_jacobian = true;
+                    self.pss_solve_with_integral_constants(
+                        circuit,
+                        &shooting_state,
+                        jacobian,
+                        &shooting_state.residual,
+                        config,
+                        abort,
+                    )?
                 } else {
                     let (delta, jacobian) = self.pss_compute_newton_step(
                         circuit,
@@ -2829,6 +2889,8 @@ impl Engine {
                         abort,
                     )?;
                     preconditioner_jacobian = Some(jacobian);
+                    jacobian_origin.clone_from(&shooting_state.x0);
+                    reused_jacobian = false;
                     delta
                 };
                 shooting_state.update_x0(&delta, solver.damping);
@@ -2836,6 +2898,33 @@ impl Engine {
 
             iteration += 1;
         }
+    }
+
+    /// Whether a converged state lies inside the central-difference stencil
+    /// of a Jacobian differentiated at `origin`, so that the Jacobian is as
+    /// valid there as one differentiated afresh.
+    fn pss_state_within_jacobian_stencil(
+        &self,
+        circuit: &PssCircuit,
+        origin: &[Value],
+        state: &[Value],
+    ) -> bool {
+        origin.len() == state.len()
+            && origin
+                .iter()
+                .zip(state)
+                .enumerate()
+                .all(|(index, (&origin, &state))| {
+                    (state - origin).abs()
+                        <= PSS_FD_STEP
+                            * circuit.perturbation_scale(
+                                index,
+                                origin,
+                                self.current_abstol() / self.voltage_abstol(),
+                                self.config.convergence_config.charge_abstol
+                                    / self.voltage_abstol(),
+                            )
+                })
     }
 
     fn ensure_pss_refinement_capacity(
@@ -3423,6 +3512,17 @@ impl Engine {
         (0..n)
             .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
             .collect()
+    }
+
+    /// A driven circuit without nonlinear devices or state-dependent line
+    /// interpolation has an affine period map on a fixed mesh.
+    fn pss_period_map_is_affine(circuit: &PssCircuit, config: &PssConfig) -> bool {
+        !config.is_autonomous()
+            && !circuit.has_nonlinear_devices()
+            && !circuit
+                .tlines
+                .iter()
+                .any(|line| line.has_state_dependent_lossless_interpolation())
     }
 
     /// Matrix-free directional derivative of the fixed-grid shooting map.
