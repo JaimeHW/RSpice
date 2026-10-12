@@ -1,11 +1,23 @@
 //! Geometry and visual contracts for schematic context surfaces.
 use super::*;
 
-fn catalog(separators: usize) -> Vec<ContextEntry<()>> {
-    std::iter::repeat_n(ContextEntry::Command(()), 16)
+fn catalog(commands: usize, separators: usize) -> Vec<ContextEntry<()>> {
+    std::iter::repeat_n(ContextEntry::Command(()), commands)
         .chain(std::iter::repeat_n(ContextEntry::Separator, separators))
         .collect()
 }
+
+/// The menu each target gets, as rows and rules: the app's catalogs, pinned
+/// label for label in `rspice-app`'s `schematic/view/context_menu/tests.rs`.
+///
+/// An instance, a Verilog-A instance (whose Descend row reads "Open Verilog-A
+/// view") and a wire have sixteen rows under four rules; a placed source
+/// trades the three master rows for its stimulus group under a fifth; the
+/// empty canvas has one verb, "New Verilog-A device…", where the three
+/// master rows stand.
+const INSTANCE: (usize, usize) = (16, 4);
+const SOURCE: (usize, usize) = (16, 5);
+const CANVAS: (usize, usize) = (14, 4);
 
 #[test]
 fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes() {
@@ -100,36 +112,37 @@ fn an_open_popup_cannot_retarget_its_action_when_the_source_or_selection_changes
 
 #[test]
 fn surface_geometry_matches_desktop_and_touch_contracts() {
-    let entries = catalog(4);
+    let entries = catalog(INSTANCE.0, INSTANCE.1);
     let desktop =
         SurfaceGeometry::for_viewport(vec2(1440.0, 900.0), ContextInvocation::Pointer, &entries);
     assert_eq!(desktop.width, 286.0);
     assert_eq!(desktop.max_height, 528.0);
     assert_eq!(desktop.row_height, 27.0);
     assert_eq!(desktop.radius, 3);
-    // Sixteen rows and four separators on the mockup's 27 px row measure
-    // 517 px: 47 header + 432 rows + 36 separators + 2 border.
-    assert_eq!(desktop.outer_height(), 517.0);
-    // `outer_height` clamps to `max_height`, so measuring strictly under
-    // the ceiling is the same statement as "no row is below the fold".
-    // A future entry that would turn the menu into a scroller fails here
-    // rather than silently hiding the entries it pushed past the edge.
-    assert!(
-        desktop.outer_height() < desktop.max_height,
-        "the desktop context menu must fit without scrolling"
-    );
-    // The tallest menu there is: a placed source whose standing calls for
-    // three stimulus verbs, at sixteen rows and a fifth separator.
-    {
-        let source = SurfaceGeometry::for_viewport(
+    // Every target's menu, measured on the mockup's 27 px row: 47 header +
+    // rows + 9 px per separator + 2 border. `outer_height` clamps to
+    // `max_height`, so measuring strictly under the ceiling is the same
+    // statement as "no row is below the fold": a future entry that would turn
+    // a menu into a scroller fails here rather than silently hiding the
+    // entries it pushed past the edge.
+    for (target, (commands, separators), height) in [
+        // An instance, a Verilog-A instance or a wire: 432 rows + 36 rules.
+        ("instance", INSTANCE, 517.0),
+        // The tallest there is: a placed source whose standing calls for
+        // three stimulus verbs, at a fifth separator.
+        ("placed source", SOURCE, 526.0),
+        // The empty canvas: one verb where an instance has three.
+        ("canvas", CANVAS, 463.0),
+    ] {
+        let menu = SurfaceGeometry::for_viewport(
             vec2(1440.0, 900.0),
             ContextInvocation::Pointer,
-            &catalog(5),
+            &catalog(commands, separators),
         );
-        assert_eq!(source.outer_height(), 526.0);
+        assert_eq!(menu.outer_height(), height, "{target}");
         assert!(
-            source.outer_height() < source.max_height,
-            "a placed source's context menu must fit without scrolling"
+            menu.outer_height() < menu.max_height,
+            "the {target} context menu must fit without scrolling"
         );
     }
 
@@ -151,8 +164,11 @@ fn surface_geometry_matches_desktop_and_touch_contracts() {
 #[test]
 fn desktop_origin_and_keyboard_anchor_match_the_mockup_contract() {
     let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
-    let desktop =
-        SurfaceGeometry::for_viewport(screen.size(), ContextInvocation::Pointer, &catalog(4));
+    let desktop = SurfaceGeometry::for_viewport(
+        screen.size(),
+        ContextInvocation::Pointer,
+        &catalog(INSTANCE.0, INSTANCE.1),
+    );
 
     assert_eq!(
         clamp_desktop_surface_origin(screen, pos2(-20.0, -10.0), desktop),

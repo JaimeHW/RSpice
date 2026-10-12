@@ -18,7 +18,9 @@ use rspice_ui_kit::{
 const DESKTOP_WIDTH: f32 = 286.0;
 /// Tall enough for the tallest menu there is without a scroller: a placed
 /// source's, at sixteen rows and five separators — 526 px with the header and
-/// the border. Every other target's menu is one separator shorter.
+/// the border. An instance's or a wire's menu is one separator shorter, and
+/// the empty canvas's two rows shorter again, its one verb standing in the
+/// slot an instance's three master rows take.
 const DESKTOP_MAX_HEIGHT: f32 = 528.0;
 const DESKTOP_VIEWPORT_INSET: f32 = 6.0;
 /// The mockup's `.menu-item { min-height: 27px }`. The row was drawn three
@@ -60,6 +62,11 @@ pub enum ContextAction {
     Duplicate,
     Delete,
     DescendHierarchy,
+    /// A Verilog-A instance's master is a module, not a schematic, and has no
+    /// occurrences to descend into: this opens the cell view instead.
+    OpenVerilogAView,
+    /// The empty canvas's verb in the instance-master slot.
+    NewVerilogADevice,
     UpdateInstanceInterface,
     ReplaceInstance,
     CreateHierarchy,
@@ -84,6 +91,7 @@ pub enum ContextIcon {
     Code,
     Probe,
     Waveform,
+    VerilogA,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -659,6 +667,7 @@ impl ContextIcon {
             Self::Code => WorkbenchIcon::Code.paint(painter, rect, color),
             Self::Probe => WorkbenchIcon::Probe.paint(painter, rect, color),
             Self::Waveform => WorkbenchIcon::Simulate.paint(painter, rect, color),
+            Self::VerilogA => WorkbenchIcon::VerilogA.paint(painter, rect, color),
         }
     }
 }

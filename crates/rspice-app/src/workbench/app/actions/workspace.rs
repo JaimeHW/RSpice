@@ -2017,13 +2017,61 @@ impl AppState {
             .and_then(|component_id| self.hierarchy_master_for_component(component_id))
     }
 
+    /// The Verilog-A view one instance is bound to, whether or not that view
+    /// resolves to a module yet. This says what kind of master the instance
+    /// has; [`Self::veriloga_source_for_component`] says whether it can be
+    /// opened.
+    pub(crate) fn veriloga_master_of_component(&self, component_id: u64) -> Option<CellViewRef> {
+        let binding = self
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.id == component_id)
+            .filter(|component| component.kind == ComponentType::CellInstance)?
+            .library_cell
+            .as_ref()?;
+        let reference = CellViewRef::new(
+            binding.library.clone(),
+            binding.cell.clone(),
+            binding.view.clone(),
+        );
+        (self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+            .map(|view| view.view_type)
+            == Some(ViewType::VerilogA))
+        .then_some(reference)
+    }
+
+    /// The openable Verilog-A view of the one selected instance.
+    pub(crate) fn selected_veriloga_source(&self) -> Option<CellViewRef> {
+        self.schematic
+            .session
+            .editor
+            .selection
+            .single_component()
+            .and_then(|component_id| self.veriloga_source_for_component(component_id))
+    }
+
     pub(crate) fn hierarchical_edit_in_place_enabled(&self) -> bool {
         self.ui
             .preferences
             .toggle(crate::workbench::TogglePreference::HierarchicalEditInPlace)
     }
 
+    /// Open what the one selected instance is an instance of: descend into
+    /// its schematic master, or, for a Verilog-A instance, open its module's
+    /// cell view. A module has no occurrences below it, so that is not a
+    /// descent and records no occurrence step.
     pub(crate) fn open_selected_instance_master(&mut self) {
+        if let Some(component_id) = self.schematic.session.editor.selection.single_component()
+            && self.open_veriloga_source_for_component(component_id)
+        {
+            return;
+        }
         let Some((instance_name, reference)) = self.selected_hierarchy_master() else {
             self.push_user_message(ConsoleMessage::warning(
                 "Select one instance with a resolved schematic master first",

@@ -719,8 +719,16 @@ impl Command {
             Self::AscendHierarchy => {
                 active_schematic_editor(app) && state.workspace.content.hierarchy_stack.len() > 1
             }
-            Self::DescendHierarchy | Self::DescendHierarchyDirect => {
+            Self::DescendHierarchy => {
                 active_schematic_editor(app) && state.selected_hierarchy_master().is_some()
+            }
+            // The direct route opens what the instance is an instance of, as
+            // its context-menu row does: a Verilog-A instance's module opens
+            // as its cell view.
+            Self::DescendHierarchyDirect => {
+                active_schematic_editor(app)
+                    && (state.selected_hierarchy_master().is_some()
+                        || state.selected_veriloga_source().is_some())
             }
             Self::ShowInNetlist => {
                 active_schematic_editor(app) && state.selected_instance_netlist_block().is_none()

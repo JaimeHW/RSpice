@@ -16,8 +16,9 @@ use crate::workbench::state::Workspace;
 use crate::workbench::{
     ResultViewer,
     app::{
-        StimulusLinkMode, commit_readoption, open_replace_instance_dialog,
-        open_stimulus_definition, open_stimulus_link, replace_instance_available,
+        StimulusLinkMode, commit_readoption, new_veriloga_device_available,
+        open_new_veriloga_device_form, open_replace_instance_dialog, open_stimulus_definition,
+        open_stimulus_link, replace_instance_available,
     },
 };
 
@@ -113,11 +114,27 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         shortcut_command: Some(Command::Delete),
     }),
     ContextEntry::Separator,
+    // The instance-master slot: what the menu's subject has for a master.
+    // An instance descends into its schematic; a Verilog-A instance's master
+    // is a module, which opens as its cell view (the Descend shortcut does
+    // the same); the empty canvas has no master and offers a new one.
     ContextEntry::Command(ContextCommand {
         action: ContextAction::DescendHierarchy,
         icon: ContextIcon::Hierarchy,
         label: "Descend into selected instance",
         shortcut_command: Some(Command::DescendHierarchyDirect),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::OpenVerilogAView,
+        icon: ContextIcon::VerilogA,
+        label: "Open Verilog-A view",
+        shortcut_command: Some(Command::DescendHierarchyDirect),
+    }),
+    ContextEntry::Command(ContextCommand {
+        action: ContextAction::NewVerilogADevice,
+        icon: ContextIcon::VerilogA,
+        label: "New Verilog-A device…",
+        shortcut_command: Some(Command::NewVerilogADevice),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::UpdateInstanceInterface,
@@ -201,17 +218,58 @@ fn clicked_source(state: &AppState) -> Option<&crate::state::Component> {
         })
 }
 
-/// The entries the menu is made of, for what is selected.
+/// What one menu is about, which decides what fills its instance-master slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuSubject {
+    /// One placed independent source: the stimulus group, and no master rows.
+    Source,
+    /// An instance whose master is a Verilog-A view.
+    VerilogAInstance,
+    /// The canvas itself: no object was under the pointer.
+    Canvas,
+    /// Any other instance, or a wire.
+    Object,
+}
+
+fn menu_subject(state: &AppState, target: ContextTarget) -> MenuSubject {
+    if clicked_source(state).is_some() {
+        return MenuSubject::Source;
+    }
+    match target {
+        ContextTarget::Canvas => MenuSubject::Canvas,
+        ContextTarget::Component(id) if state.veriloga_master_of_component(id).is_some() => {
+            MenuSubject::VerilogAInstance
+        }
+        ContextTarget::Component(_) | ContextTarget::Wire(_) => MenuSubject::Object,
+    }
+}
+
+/// Whether the catalog's instance-master slot holds `action` for `subject`.
+fn master_slot_shows(action: ContextAction, subject: MenuSubject) -> bool {
+    match action {
+        ContextAction::DescendHierarchy => subject == MenuSubject::Object,
+        ContextAction::OpenVerilogAView => subject == MenuSubject::VerilogAInstance,
+        ContextAction::NewVerilogADevice => subject == MenuSubject::Canvas,
+        ContextAction::UpdateInstanceInterface | ContextAction::ReplaceInstance => {
+            matches!(subject, MenuSubject::Object | MenuSubject::VerilogAInstance)
+        }
+        _ => true,
+    }
+}
+
+/// The entries the menu is made of, for what it was opened on.
 ///
 /// The catalog is one list, and almost all of it is every target's: a verb that
 /// cannot be taken right now stays where it is, disabled, and says why. What is
-/// left out is a verb that could never apply to the *kind* of object selected.
-/// A placed source gets the stimulus-library group and loses the three rows
-/// that are about a cell instance's master, which is also what lets the group
-/// in without turning the menu into a scroller; everything else gets the
-/// catalog without that group. A rule with nothing left under it goes too.
-fn menu_entries(state: &AppState) -> Vec<ContextEntry> {
-    let source = clicked_source(state).is_some();
+/// left out is a verb that could never apply to the *kind* of object the menu
+/// is about. Only the instance-master slot varies. An instance offers its
+/// master's three rows; a Verilog-A instance's Descend row opens its module's
+/// view; the empty canvas, which has no master, offers a new Verilog-A device
+/// in their place. A placed source gets the stimulus-library group instead of
+/// the master rows, which is also what lets the group in without turning the
+/// menu into a scroller. A rule with nothing left under it goes too.
+fn menu_entries(state: &AppState, target: ContextTarget) -> Vec<ContextEntry> {
+    let subject = menu_subject(state, target);
     let mut entries: Vec<ContextEntry> = Vec::with_capacity(CONTEXT_ENTRIES.len());
     for entry in CONTEXT_ENTRIES {
         let shown = match entry {
@@ -221,15 +279,7 @@ fn menu_entries(state: &AppState) -> Vec<ContextEntry> {
             ContextEntry::Command(command) if stimulus::owns(command.action) => {
                 stimulus::shown(command.action, state)
             }
-            ContextEntry::Command(command) => {
-                !(source
-                    && matches!(
-                        command.action,
-                        ContextAction::DescendHierarchy
-                            | ContextAction::UpdateInstanceInterface
-                            | ContextAction::ReplaceInstance
-                    ))
-            }
+            ContextEntry::Command(command) => master_slot_shows(command.action, subject),
         };
         if shown {
             entries.push(*entry);
@@ -869,6 +919,14 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             state.selected_hierarchy_master().is_some(),
             "Select one instance with a resolved schematic master",
         ),
+        ContextAction::OpenVerilogAView => (
+            state.selected_veriloga_source().is_some(),
+            "Select one Verilog-A instance whose view owns its module's source",
+        ),
+        ContextAction::NewVerilogADevice => (
+            new_veriloga_device_available(state),
+            "Make a writable design library available",
+        ),
         ContextAction::UpdateInstanceInterface => (
             writable
                 && state.schematic.selected_instance_interface_is_stale(
@@ -966,7 +1024,12 @@ fn execute_context_action(
         ContextAction::Delete => {
             state.delete_schematic_selection();
         }
-        ContextAction::DescendHierarchy => state.open_selected_instance_master(),
+        ContextAction::DescendHierarchy | ContextAction::OpenVerilogAView => {
+            state.open_selected_instance_master();
+        }
+        ContextAction::NewVerilogADevice => {
+            open_new_veriloga_device_form(state);
+        }
         ContextAction::UpdateInstanceInterface => {
             let outcome = state.schematic.update_selected_instance_interface(
                 &state.library_manager,
@@ -1113,7 +1176,7 @@ fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
 
 fn context_menu_view(state: &AppState, ctx: &Context) -> Option<ContextMenuView> {
     let binding = context_menu_binding(state)?;
-    let entries = menu_entries(state)
+    let entries = menu_entries(state, binding.target)
         .into_iter()
         .map(|entry| match entry {
             ContextEntry::Separator => context_surface::ContextEntry::Separator,
@@ -1155,7 +1218,9 @@ fn apply_context_request(
     if context_menu_binding(state).as_ref() != Some(&request.binding)
         || state.application_modal_open()
         || !action_availability(request.action, state).0
-        || !menu_entries(state).iter().any(|entry| {
+        || !menu_entries(state, request.binding.target)
+            .iter()
+            .any(|entry| {
             matches!(entry, ContextEntry::Command(command) if command.action == request.action)
         })
     {

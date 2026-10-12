@@ -105,51 +105,266 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
     state
 }
 
-/// Every target but a placed source sees the mockup's catalog, rule for rule.
-#[test]
-fn command_catalog_matches_the_mockup_exactly() {
-    let entries = menu_entries(&AppState::default());
-    let labels: Vec<_> = entries
+/// One Verilog-A instance of `behavioral/gain/veriloga`, whose view owns its
+/// module's source, selected.
+fn state_with_selected_veriloga_instance() -> (AppState, u64, crate::state::CellViewRef) {
+    let mut state = AppState::default();
+    let (id, reference) = select_a_veriloga_instance(&mut state);
+    (state, id, reference)
+}
+
+/// Place one Verilog-A instance of `behavioral/gain/veriloga` on `state`'s
+/// otherwise empty schematic and select it.
+fn select_a_veriloga_instance(state: &mut AppState) -> (u64, crate::state::CellViewRef) {
+    use crate::state::{
+        Cell, CellViewRef, Library, PortDirection, PortSpec, ProjectSourceBundle,
+        ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
+    };
+
+    state.schematic.document_mut_for_test().components.clear();
+    let reference = CellViewRef::new("behavioral", "gain", "veriloga");
+    let mut view = View::new("veriloga", ViewType::VerilogA);
+    view.metadata
+        .insert("veriloga.module".to_owned(), "gain".to_owned());
+    view.metadata
+        .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
+    let mut cell = Cell::new("gain");
+    cell.add_view(view);
+    let mut library = Library::new("behavioral");
+    library.add_cell(cell);
+    state.library_manager.add_library(library);
+    state
+        .workspace
+        .content
+        .project_sources
+        .insert_bundle(
+            ProjectSourceBundle::try_new(
+                ProjectSourceOwner::cell_view(reference.clone()),
+                ProjectSourceLanguage::VerilogA,
+                "gain.va",
+                "module gain(p, n);\n  inout p, n;\n  electrical p, n;\nendmodule\n",
+                [],
+                [],
+            )
+            .expect("a cell-view bundle"),
+        )
+        .expect("one bundle per cell view");
+    let mut binding = LibraryCellInstance::new("behavioral", "gain", "veriloga");
+    binding.bind_interface(&[
+        PortSpec {
+            name: "p".to_owned(),
+            direction: PortDirection::InOut,
+        },
+        PortSpec {
+            name: "n".to_owned(),
+            direction: PortDirection::InOut,
+        },
+    ]);
+    let id = state
+        .schematic
+        .add_library_cell_component(Point::new(100, 0), binding);
+    state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(id);
+    (id, reference)
+}
+
+fn catalog_of(entries: &[ContextEntry]) -> Vec<(&'static str, Option<Command>)> {
+    entries
         .iter()
         .filter_map(|entry| match entry {
             ContextEntry::Command(command) => Some((command.label, command.shortcut_command)),
             ContextEntry::Separator => None,
         })
-        .collect();
-    assert_eq!(
-        labels,
-        vec![
-            ("Object properties…", Some(Command::ObjectProperties)),
-            ("Rotate 90°", Some(Command::RotateSelection)),
-            ("Mirror", Some(Command::MirrorSelectionHorizontal)),
-            ("Copy selection", Some(Command::Copy)),
-            ("Duplicate", Some(Command::Duplicate)),
-            ("Delete", Some(Command::Delete)),
-            (
-                "Descend into selected instance",
-                Some(Command::DescendHierarchyDirect),
-            ),
-            (
-                "Update instance interface",
-                Some(Command::UpdateInstanceInterface),
-            ),
-            ("Replace instance…", Some(Command::ReplaceInstance)),
-            (
-                "Create hierarchy from selection…",
-                Some(Command::CreateHierarchy),
-            ),
-            ("Create symbol from schematic ports…", None),
-            ("Page setup…", Some(Command::PageSetup)),
-            ("Fit schematic content", Some(Command::FitSchematicContent),),
-            ("Show in netlist", Some(Command::ShowInNetlist)),
-            ("Add voltage or current probe…", Some(Command::PlaceProbe)),
-            (
-                "Open operating point",
-                Some(Command::ResultViewer(ResultViewer::Op)),
-            ),
-        ]
+        .collect()
+}
+
+/// Each target's menu, row for row and rule for rule. Only the
+/// instance-master slot differs: an instance's three master rows, a Verilog-A
+/// instance's "Open Verilog-A view" in place of Descend, and the empty
+/// canvas's one verb, "New Verilog-A device…", in place of all three. The row
+/// and rule counts are the ones `rspice-schematic-editor`'s geometry test
+/// measures against the 528 px ceiling: 16 + 4 (517 px), 14 + 4 (463 px).
+#[test]
+fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
+    let head = [
+        ("Object properties…", Some(Command::ObjectProperties)),
+        ("Rotate 90°", Some(Command::RotateSelection)),
+        ("Mirror", Some(Command::MirrorSelectionHorizontal)),
+        ("Copy selection", Some(Command::Copy)),
+        ("Duplicate", Some(Command::Duplicate)),
+        ("Delete", Some(Command::Delete)),
+    ];
+    let tail = [
+        (
+            "Create hierarchy from selection…",
+            Some(Command::CreateHierarchy),
+        ),
+        ("Create symbol from schematic ports…", None),
+        ("Page setup…", Some(Command::PageSetup)),
+        ("Fit schematic content", Some(Command::FitSchematicContent)),
+        ("Show in netlist", Some(Command::ShowInNetlist)),
+        ("Add voltage or current probe…", Some(Command::PlaceProbe)),
+        (
+            "Open operating point",
+            Some(Command::ResultViewer(ResultViewer::Op)),
+        ),
+    ];
+    let menu = |slot: &[(&'static str, Option<Command>)]| {
+        head.iter()
+            .chain(slot)
+            .chain(tail.iter())
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    let master_rows = [
+        (
+            "Update instance interface",
+            Some(Command::UpdateInstanceInterface),
+        ),
+        ("Replace instance…", Some(Command::ReplaceInstance)),
+    ];
+    let descend = (
+        "Descend into selected instance",
+        Some(Command::DescendHierarchyDirect),
     );
-    assert_eq!(separators_in(&entries), 4);
+    let open_veriloga = ("Open Verilog-A view", Some(Command::DescendHierarchyDirect));
+
+    // The empty canvas.
+    let state = AppState::default();
+    let canvas = menu_entries(&state, ContextTarget::Canvas);
+    assert_eq!(
+        catalog_of(&canvas),
+        menu(&[("New Verilog-A device…", Some(Command::NewVerilogADevice))])
+    );
+    assert_eq!((catalog_of(&canvas).len(), separators_in(&canvas)), (14, 4));
+
+    // A schematic instance, and a wire: the master rows, Descend first.
+    let mut resistor = AppState::default();
+    resistor
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    let id = resistor
+        .schematic
+        .add_component(ComponentType::Resistor, Point::new(40, 0));
+    for target in [ContextTarget::Component(id), ContextTarget::Wire(17)] {
+        let entries = menu_entries(&resistor, target);
+        assert_eq!(
+            catalog_of(&entries),
+            menu(&[descend, master_rows[0], master_rows[1]]),
+            "{target:?}"
+        );
+        assert_eq!(
+            (catalog_of(&entries).len(), separators_in(&entries)),
+            (16, 4)
+        );
+    }
+
+    // A Verilog-A instance: its Descend row opens the module's view.
+    let (veriloga, id, _) = state_with_selected_veriloga_instance();
+    let entries = menu_entries(&veriloga, ContextTarget::Component(id));
+    assert_eq!(
+        catalog_of(&entries),
+        menu(&[open_veriloga, master_rows[0], master_rows[1]])
+    );
+    assert_eq!(
+        (catalog_of(&entries).len(), separators_in(&entries)),
+        (16, 4)
+    );
+}
+
+/// "Open Verilog-A view" opens the module's cell view as a Design tab: no
+/// descent, because a module has no occurrences below it.
+#[test]
+fn open_veriloga_view_opens_the_instances_module_in_design() {
+    let (mut state, _, reference) = state_with_selected_veriloga_instance();
+    assert!(action_availability(ContextAction::OpenVerilogAView, &state).0);
+    assert!(
+        !action_availability(ContextAction::DescendHierarchy, &state).0,
+        "a module is not a schematic master to descend into"
+    );
+
+    let symbol_context = schematic_symbol_context(&state);
+    execute_context_action(
+        ContextAction::OpenVerilogAView,
+        &mut state,
+        Point::origin(),
+        &symbol_context,
+    );
+
+    assert_eq!(state.workspace.content.active_view, reference);
+    assert_eq!(state.workbench.workspace, Workspace::Design);
+    let open = state
+        .workspace
+        .content
+        .open_views
+        .iter()
+        .find(|open| open.reference == reference)
+        .expect("the module's view is an open tab");
+    assert_eq!(
+        open.occurrence,
+        rspice_design::occurrence::DocumentOccurrence::rooted(reference.clone()),
+        "opening a module records no occurrence step"
+    );
+}
+
+/// The row names its shortcut, the Descend command, so the command must do
+/// what the row does on a Verilog-A instance: it was disabled there, because
+/// a module is not a schematic master.
+#[test]
+fn the_descend_shortcut_opens_a_veriloga_instances_view_as_its_row_does() {
+    let mut app = crate::workbench::RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    app.state.workbench.activate(Workspace::Design);
+    let (_, reference) = select_a_veriloga_instance(&mut app.state);
+    assert!(Command::DescendHierarchyDirect.is_enabled(&app));
+    assert!(
+        !Command::DescendHierarchy.is_enabled(&app),
+        "the descent dialog lists schematic masters only"
+    );
+
+    Command::DescendHierarchyDirect.execute(&mut app);
+
+    assert_eq!(app.state.workspace.content.active_view, reference);
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
+}
+
+/// New Verilog-A device… from the canvas opens the form, and is refused with
+/// a reason where no library could take the cell.
+#[test]
+fn new_veriloga_device_opens_the_form_from_the_canvas() {
+    let mut state = AppState::default();
+    assert!(action_availability(ContextAction::NewVerilogADevice, &state).0);
+    let symbol_context = schematic_symbol_context(&state);
+    execute_context_action(
+        ContextAction::NewVerilogADevice,
+        &mut state,
+        Point::origin(),
+        &symbol_context,
+    );
+    assert!(state.dialogs.new_veriloga_device.open);
+
+    let names = state
+        .library_manager
+        .libraries_sorted()
+        .iter()
+        .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
+    for name in names {
+        state
+            .library_manager
+            .get_library_mut(&name)
+            .expect("the library")
+            .read_only = true;
+    }
+    let (enabled, reason) = action_availability(ContextAction::NewVerilogADevice, &state);
+    assert!(!enabled);
+    assert!(reason.contains("writable"), "{reason}");
 }
 
 /// A placed source's menu states the stimulus-library verbs its standing calls
@@ -158,7 +373,7 @@ fn command_catalog_matches_the_mockup_exactly() {
 #[test]
 fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
     let group = |state: &AppState| -> Vec<&'static str> {
-        labels_of(&menu_entries(state))
+        labels_of(&menu_entries(state, ContextTarget::Component(7)))
             .into_iter()
             .filter(|label| label.contains("timulus") || label.contains("Re-adopt"))
             .collect()
@@ -192,10 +407,19 @@ fn a_placed_source_gets_the_stimulus_verbs_its_standing_calls_for() {
     );
 
     for state in [&local, &adopted, &behind] {
-        let entries = menu_entries(state);
+        // The source is the menu's subject whether it was right-clicked or
+        // is what the canvas menu acts on.
+        for target in [ContextTarget::Component(7), ContextTarget::Canvas] {
+            let entries = menu_entries(state, target);
+            assert!(labels_of(&entries).len() <= 16, "{target:?}");
+            assert_eq!(separators_in(&entries), 5, "{target:?}");
+        }
+        let entries = menu_entries(state, ContextTarget::Component(7));
         let labels = labels_of(&entries);
         for master_row in [
             "Descend into selected instance",
+            "Open Verilog-A view",
+            "New Verilog-A device…",
             "Update instance interface",
             "Replace instance…",
         ] {
@@ -976,5 +1200,78 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
             );
             assert!(!state.schematic.can_undo(), "{change}");
         }
+    }
+}
+
+/// Each target's menu as the popup draws it: the empty canvas, a schematic
+/// instance, and a Verilog-A instance.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_per_target_context_menus_for_review() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    let mut instance = AppState::default();
+    instance
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    let mut resistor = Component::new(41, ComponentType::Resistor, Point::new(40, 0));
+    resistor.name = "R1".to_owned();
+    resistor.value = "10k".to_owned();
+    instance
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(resistor);
+    instance
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(41);
+    let (veriloga, id, _) = state_with_selected_veriloga_instance();
+    for (name, mut state, target) in [
+        (
+            "context-menu-canvas",
+            AppState::default(),
+            ContextTarget::Canvas,
+        ),
+        (
+            "context-menu-instance",
+            instance,
+            ContextTarget::Component(41),
+        ),
+        (
+            "context-menu-veriloga-instance",
+            veriloga,
+            ContextTarget::Component(id),
+        ),
+    ] {
+        state.dialogs.interaction.context_target = Some((target, (0, 0)));
+        // The popup's own frame and 286 px width, at the desktop row height.
+        let size = vec2(300.0, 540.0);
+        let canvas = crate::ui::raster::render(size, |ui, _| {
+            let view = context_menu_view(&state, ui.ctx()).expect("a context target");
+            let t = crate::ui::tokens::Tokens::get(ui.ctx());
+            egui::Frame::new()
+                .fill(t.color.bg_elevated)
+                .stroke(egui::Stroke::new(1.0, t.color.border_strong))
+                .corner_radius(3)
+                .show(ui, |ui| {
+                    ui.set_width(284.0);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    let _ = context_surface::render_context_contents(ui, &view, 27.0, false);
+                });
+        });
+        let path = directory.join(format!("{name}.png"));
+        std::fs::write(&path, canvas.png(size.y as usize)).expect("write the render");
+        writeln!(report, "{}", path.display()).ok();
     }
 }

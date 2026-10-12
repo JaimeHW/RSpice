@@ -1106,9 +1106,8 @@ impl Command {
             {
                 "open a schematic or testbench"
             }
-            Self::DescendHierarchy | Self::DescendHierarchyDirect => {
-                "select one hierarchical instance"
-            }
+            Self::DescendHierarchy => "select one hierarchical instance",
+            Self::DescendHierarchyDirect => "select one hierarchical or Verilog-A instance",
             Self::ShowInNetlist if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
             }
