@@ -545,7 +545,10 @@ impl Command {
                     && !state.schematic_edit_read_only()
                     && state
                         .schematic
-                        .selected_instance_interface_is_stale(&state.workspace.content.schematic_buffers)
+                        .selected_instance_interface_is_stale(
+                            &state.library_manager,
+                            &state.workspace.content.schematic_buffers,
+                        )
             }
             Self::CreateHierarchy => {
                 active_schematic_editor(app)

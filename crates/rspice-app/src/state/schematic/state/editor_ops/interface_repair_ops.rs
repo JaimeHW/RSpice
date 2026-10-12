@@ -11,13 +11,16 @@
 //!
 //! Staleness is decided by the comparison netlist generation's typed defect
 //! uses, so a surface can never offer this repair for an instance the deck
-//! would still emit, or withhold it from one the deck refuses.
+//! would still emit, or withhold it from one the deck refuses. A Verilog-A
+//! master's interface is the one its view states, measured by the comparison
+//! its materialization refuses on.
 
 use super::super::super::{
     ComponentType, LibraryCellInstance, PortSpec, SchematicReplacementError,
 };
 use super::super::*;
-use crate::state::{LibraryManager, SymbolResolver};
+use crate::state::{LibraryManager, SymbolResolver, ViewType};
+use rspice_design::library::metadata::metadata_ports;
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_design::schematic::interface_repair::interface_is_stale;
 use std::collections::HashMap;
@@ -30,9 +33,12 @@ impl SchematicState {
     /// the deck's own refusal cannot disagree about which instances are stale.
     pub fn selected_instance_interface_is_stale<S: AsRef<SchematicDocument>>(
         &self,
+        libraries: &LibraryManager,
         masters: &HashMap<String, S>,
     ) -> bool {
-        let Some((component_id, master_ports)) = selected_master_interface(self, masters) else {
+        let Some((component_id, master_ports)) =
+            selected_master_interface(self, libraries, masters)
+        else {
             return false;
         };
         self.design
@@ -51,6 +57,7 @@ impl SchematicState {
     /// selection, so the two never answer the staleness question differently.
     pub fn stale_instance_interfaces<S: AsRef<SchematicDocument>>(
         &self,
+        libraries: &LibraryManager,
         masters: &HashMap<String, S>,
     ) -> Vec<String> {
         self.design
@@ -60,7 +67,7 @@ impl SchematicState {
             .filter(|component| component.kind == ComponentType::CellInstance)
             .filter(|component| {
                 component.library_cell.as_ref().is_some_and(|binding| {
-                    master_interface(binding, masters)
+                    master_interface(binding, libraries, masters)
                         .is_some_and(|ports| interface_is_stale(binding, &ports))
                 })
             })
@@ -77,7 +84,7 @@ impl SchematicState {
         if self.session.read_only {
             return Err(SchematicReplacementError::ReadOnly);
         }
-        let (component_id, master_ports) = selected_master_interface(self, masters)
+        let (component_id, master_ports) = selected_master_interface(self, libraries, masters)
             .ok_or(SchematicReplacementError::SelectExactlyOneInstance)?;
         let resolver = SymbolResolver::new(libraries, masters);
         let edit =
@@ -98,10 +105,12 @@ impl SchematicState {
 }
 
 /// The selected instance and the interface its master presents now, when the
-/// selection is exactly one cell instance bound to a project schematic. Any
-/// other selection has no master interface to be measured against.
+/// selection is exactly one cell instance bound to a project schematic or a
+/// Verilog-A view. Any other selection has no master interface to be
+/// measured against.
 fn selected_master_interface<S: AsRef<SchematicDocument>>(
     schematic: &SchematicState,
+    libraries: &LibraryManager,
     masters: &HashMap<String, S>,
 ) -> Option<(u64, Vec<PortSpec>)> {
     let component_id = schematic.session.editor.selection.single_component()?;
@@ -115,21 +124,32 @@ fn selected_master_interface<S: AsRef<SchematicDocument>>(
         return None;
     }
     let binding = component.library_cell.as_ref()?;
-    master_interface(binding, masters).map(|ports| (component_id, ports))
+    master_interface(binding, libraries, masters).map(|ports| (component_id, ports))
 }
 
-/// The interface the binding's master presents now, when the master is a
-/// project schematic that declares one. A binding with no such master has
-/// nothing to be measured against.
+/// The interface the binding's master presents now: a project schematic's
+/// ports, or the ports a Verilog-A view states — which its last clean compile
+/// wrote. A binding with neither has nothing to be measured against.
 fn master_interface<S: AsRef<SchematicDocument>>(
     binding: &LibraryCellInstance,
+    libraries: &LibraryManager,
     masters: &HashMap<String, S>,
 ) -> Option<Vec<PortSpec>> {
-    let master = masters.get(&format!(
+    let ports = match masters.get(&format!(
         "{}/{}/{}",
         binding.library, binding.cell, binding.view
-    ))?;
-    let ports = master.as_ref().interface_ports();
+    )) {
+        Some(master) => master.as_ref().interface_ports(),
+        None => {
+            let cell = libraries
+                .get_library(&binding.library)?
+                .get_cell(&binding.cell)?;
+            let view = cell
+                .get_view(&binding.view)
+                .filter(|view| view.view_type == ViewType::VerilogA)?;
+            metadata_ports(&view.metadata).or_else(|| metadata_ports(&cell.metadata))?
+        }
+    };
     (!ports.is_empty()).then_some(ports)
 }
 

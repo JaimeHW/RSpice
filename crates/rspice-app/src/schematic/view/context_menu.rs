@@ -872,6 +872,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ContextAction::UpdateInstanceInterface => (
             writable
                 && state.schematic.selected_instance_interface_is_stale(
+                    &state.library_manager,
                     &state.workspace.content.schematic_buffers,
                 ),
             "Select one instance whose master interface changed after it was placed",

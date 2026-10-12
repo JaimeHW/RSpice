@@ -149,7 +149,7 @@ fn a_renamed_master_port_is_repaired_in_one_undo_step() {
     assert!(
         fixture
             .top
-            .selected_instance_interface_is_stale(&fixture.masters)
+            .selected_instance_interface_is_stale(&fixture.libraries, &fixture.masters)
     );
     let summary = fixture
         .top
@@ -164,7 +164,7 @@ fn a_renamed_master_port_is_repaired_in_one_undo_step() {
     assert!(
         !fixture
             .top
-            .selected_instance_interface_is_stale(&fixture.masters)
+            .selected_instance_interface_is_stale(&fixture.libraries, &fixture.masters)
     );
     assert_eq!(
         fixture
@@ -227,7 +227,7 @@ fn an_instance_that_still_matches_its_master_is_offered_no_repair() {
     assert!(
         !fixture
             .top
-            .selected_instance_interface_is_stale(&fixture.masters)
+            .selected_instance_interface_is_stale(&fixture.libraries, &fixture.masters)
     );
     assert_eq!(
         fixture
@@ -235,4 +235,85 @@ fn an_instance_that_still_matches_its_master_is_offered_no_repair() {
             .update_selected_instance_interface(&fixture.libraries, &fixture.masters),
         Err(SchematicReplacementError::NoChanges)
     );
+}
+
+/// A Verilog-A master has no schematic; its interface is the one its view
+/// states. The repair used to know schematic masters only, so an instance
+/// placed before a module gained a port could never be brought up to date.
+#[test]
+fn an_instance_of_a_verilog_a_master_is_repaired_to_the_views_interface() {
+    let ports = |names: &[&str]| {
+        serde_json::to_string(
+            &names
+                .iter()
+                .map(|name| {
+                    serde_json::json!({
+                        "name": name,
+                        "direction": if *name == "OUT" { "out" } else { "in" },
+                        "discipline": "electrical",
+                        "domain": "continuous",
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .expect("the interface encodes")
+    };
+    let mut libraries = LibraryManager::new();
+    let mut library = Library::new("work");
+    let mut cell = Cell::new("vamp");
+    let mut view = View::new("veriloga", ViewType::VerilogA);
+    view.metadata
+        .insert("veriloga.ports".to_owned(), ports(&["IN", "OUT"]));
+    cell.add_view(view);
+    library.add_cell(cell);
+    libraries.add_library(library);
+    let mut binding = LibraryCellInstance::new("work", "vamp", "veriloga");
+    binding.bind_interface(
+        &rspice_design::library::metadata::metadata_ports(
+            &libraries
+                .get_library("work")
+                .unwrap()
+                .get_cell("vamp")
+                .unwrap()
+                .get_view("veriloga")
+                .unwrap()
+                .metadata,
+        )
+        .expect("the view states its ports"),
+    );
+    let mut top = SchematicState::default();
+    let id = top.add_library_cell_component(Point::new(200, 200), binding);
+    top.session.editor.selection.select_only_component(id);
+    top.recalculate_runtime_state();
+    top.clear_undo_history();
+    let masters = HashMap::<String, SchematicState>::new();
+    assert!(!top.selected_instance_interface_is_stale(&libraries, &masters));
+
+    // The module gains `EN`, and a clean compile writes it to the view.
+    libraries
+        .get_library_mut("work")
+        .and_then(|library| library.get_cell_mut("vamp"))
+        .and_then(|cell| cell.get_view_mut("veriloga"))
+        .expect("the view")
+        .metadata
+        .insert("veriloga.ports".to_owned(), ports(&["IN", "OUT", "EN"]));
+
+    assert!(top.selected_instance_interface_is_stale(&libraries, &masters));
+    assert_eq!(top.stale_instance_interfaces(&libraries, &masters).len(), 1);
+    top.update_selected_instance_interface(&libraries, &masters)
+        .expect("the repair applies");
+    let repaired = top.design.document().components[0]
+        .library_cell
+        .as_ref()
+        .expect("the instance stays bound");
+    assert_eq!(repaired.terminal_order, ["IN", "OUT", "EN"]);
+    assert_eq!(
+        repaired.terminal_dirs,
+        [
+            crate::state::PortDirection::In,
+            crate::state::PortDirection::Out,
+            crate::state::PortDirection::In,
+        ]
+    );
+    assert!(!top.selected_instance_interface_is_stale(&libraries, &masters));
 }

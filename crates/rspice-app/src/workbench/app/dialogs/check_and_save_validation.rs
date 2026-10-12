@@ -280,13 +280,16 @@ impl CheckAndSaveValidationReport {
         // The masters it is measured against are the projection's, so this can
         // never offer a repair for an instance the deck would still emit, or
         // withhold it from one the deck refuses.
-        let stale_interface_instances = execution_projection.as_ref().map_or_else(
-            |_| Vec::new(),
-            |projection| {
-                state
-                    .schematic
-                    .stale_instance_interfaces(projection.schematic_buffers())
-            },
+        //
+        // A Verilog-A master's interface is its view's, which the projection
+        // refuses to resolve while an instance disagrees with it, so those
+        // instances are found whether or not the projection resolved.
+        let no_masters = std::collections::HashMap::new();
+        let stale_interface_instances = state.schematic.stale_instance_interfaces(
+            &state.library_manager,
+            execution_projection
+                .as_ref()
+                .map_or(&no_masters, |projection| projection.schematic_buffers()),
         );
         for instance in &stale_interface_instances {
             insert_located_finding(
