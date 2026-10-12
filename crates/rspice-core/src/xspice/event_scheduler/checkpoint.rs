@@ -184,7 +184,7 @@ impl EventScheduler {
     #[cfg(feature = "veriloga")]
     pub(crate) fn checkpoint_template(&self) -> Self {
         let mut template = Self::new(self.limits);
-        for target in &self.queues.targets {
+        for target in self.queues.targets() {
             template.queues.intern(target.clone());
         }
         template
@@ -201,7 +201,7 @@ impl EventScheduler {
         if self.failed_slot || self.queues.sequence_exhausted || !self.queues.slot_is_empty() {
             return Err(error("cannot capture an interrupted or failed event slot"));
         }
-        check_budget(&self.queues.targets, self.pending(), budget)?;
+        check_budget(self.queues.targets(), self.pending(), budget)?;
         let mut events: Vec<_> = self
             .queues
             .future
@@ -224,7 +224,7 @@ impl EventScheduler {
             next_sequence: self.queues.next_sequence,
             delta_cycles: self.slot_delta_cycles,
             events_executed: self.slot_events_executed,
-            targets: self.queues.targets.clone(),
+            targets: self.queues.targets().to_vec(),
             activations: self.queues.activations.clone(),
             events,
         })
@@ -245,7 +245,7 @@ impl EventScheduler {
             return Err(error("execution limits differ from the receiving kernel"));
         }
         check_budget(&image.targets, image.events.len(), budget)?;
-        if !image.targets.starts_with(&self.queues.targets) {
+        if !image.targets.starts_with(self.queues.targets()) {
             return Err(error(
                 "interned target identities differ from the receiving kernel",
             ));

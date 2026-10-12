@@ -70,6 +70,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::mem;
+use std::sync::Arc;
 
 mod checkpoint;
 pub use checkpoint::{SchedulerCheckpoint, SchedulerCheckpointError, SchedulerCheckpointLimits};
@@ -770,6 +771,28 @@ impl PartialEq for Queued {
 
 impl Eq for Queued {}
 
+/// The drivers a kernel has named, in interning order, and the index back from
+/// a driver to its id.
+///
+/// Append-only: an id, once handed out, names the same driver for the life of
+/// the kernel and of every copy taken from it. That is what lets a copy share
+/// the table rather than duplicate it. A rollback image copies the kernel at
+/// every attempted timestep and every Newton probe that drains an event, and
+/// the table holds two `String`s per driver twice over -- on a gate-level
+/// design, thousands of allocations per copy for a table that stops growing
+/// once every driver has fired. A copy that interns a new driver copies the
+/// table then, through [`Arc::make_mut`], and the ids both copies agree on
+/// stay the same ids.
+#[derive(Debug, Clone, Default)]
+struct TargetTable {
+    /// Every driver ever scheduled, indexed by its [`TargetId`]. This is what
+    /// a `ScheduledEvent` and an oscillation report are rendered from.
+    targets: Vec<EventTarget>,
+    /// Interning index. A lookup only: never iterated, so no observable order
+    /// depends on it.
+    ids: HashMap<EventTarget, TargetId>,
+}
+
 #[derive(Debug, Clone, Default)]
 struct EventQueues {
     /// Events at ticks after the current one, as a min-heap on the total
@@ -818,12 +841,10 @@ struct EventQueues {
     /// Infallible legacy supersession reports allocation failure at the next
     /// execution boundary; it must never cancel an output it cannot replace.
     sequence_exhausted: bool,
-    /// Every driver ever scheduled, indexed by its [`TargetId`]. This is what
-    /// a `ScheduledEvent` and an oscillation report are rendered from.
-    targets: Vec<EventTarget>,
-    /// Interning index. A lookup only: never iterated, so no observable order
-    /// depends on it.
-    target_ids: HashMap<EventTarget, TargetId>,
+    /// Every driver ever scheduled and its interning index. Shared with every
+    /// copy of the kernel until one of them interns a new driver; see
+    /// [`TargetTable`].
+    interned: Arc<TargetTable>,
     /// Activation counts at the current tick, for the oscillation report,
     /// indexed by [`TargetId`].
     activations: Vec<u64>,
@@ -940,23 +961,29 @@ impl EventQueues {
     /// same driver repeatedly — every digital process does — interns once and
     /// then schedules by id.
     fn intern(&mut self, target: EventTarget) -> TargetId {
-        if let Some(id) = self.target_ids.get(&target) {
+        if let Some(id) = self.interned.ids.get(&target) {
             return *id;
         }
         let id = TargetId(
-            u32::try_from(self.targets.len())
+            u32::try_from(self.interned.targets.len())
                 .expect("an event kernel does not host 2^32 distinct drivers"),
         );
-        self.targets.push(target.clone());
+        let interned = Arc::make_mut(&mut self.interned);
+        interned.targets.push(target.clone());
+        interned.ids.insert(target, id);
         self.driver_events.push(Vec::new());
         self.activations.push(0);
-        self.target_ids.insert(target, id);
         id
     }
 
     /// The identity behind an id.
     fn target(&self, id: TargetId) -> &EventTarget {
-        &self.targets[id.index()]
+        &self.interned.targets[id.index()]
+    }
+
+    /// Every driver interned so far, in id order.
+    fn targets(&self) -> &[EventTarget] {
+        &self.interned.targets
     }
 
     /// Render one queued event as the public [`ScheduledEvent`] a caller's
