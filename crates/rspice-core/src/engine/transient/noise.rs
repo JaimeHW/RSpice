@@ -12,9 +12,9 @@
 //! Expansion (instead of a stateful runtime source) buys three properties
 //! for free: PWL evaluation and breakpoint scheduling already exist and are
 //! battle-tested; the sample train is born deterministic (seeded by the
-//! netlist's `.options seed` plus a stable per-source hash), so reruns are
-//! bit-identical; and every analysis that consumes the netlist sees one
-//! consistent waveform.
+//! run seed — `NOISESEED=`, else `.options seed` — plus a stable per-source
+//! hash), so reruns are bit-identical; and every analysis that consumes the
+//! netlist sees one consistent waveform.
 
 use crate::Value;
 use crate::abort_signal::AbortSignal;
@@ -70,6 +70,10 @@ pub(super) fn checked_noise_sample_count(
 
 /// Expand the elaborated sources in place, after instance parameters and
 /// canonical names are resolved. Each instance receives an independent stream.
+///
+/// `seed` is the run seed: the transient card's `NOISESEED=` when it names
+/// one, else `.OPTIONS SEED`. Device noise draws from the same run seed, so
+/// one deck has one seed however its noise is authored.
 pub(in crate::engine) fn expand_transient_noise(
     elements: &mut [Element],
     seed: Option<u64>,

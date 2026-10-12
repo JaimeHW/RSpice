@@ -5493,7 +5493,11 @@ impl Engine {
         if let Some(tstop) = transient_stop_time {
             super::transient::noise::expand_transient_noise(
                 &mut flat_elements,
-                netlist.options.seed,
+                netlist
+                    .options
+                    .transient_noise
+                    .and_then(|noise| noise.seed)
+                    .or(netlist.options.seed),
                 tstop,
                 abort,
             )?;
