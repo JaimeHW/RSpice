@@ -192,7 +192,9 @@ def test_two_tone_requires_distof2_and_positive_difference_frequencies(engine) -
         engine.run_distortion(
             rspice.Netlist.parse(HARMONIC_DIODE), [1e3], f2_over_f1=0.9
         )
-    with pytest.raises(rspice.SimulationError, match="greater than the fixed F2"):
+    with pytest.raises(
+        rspice.SimulationError, match="greater than the positive fixed F2"
+    ):
         engine.run_distortion(
             rspice.Netlist.parse(TWO_TONE_DIODE),
             [1e3, 500.0],
