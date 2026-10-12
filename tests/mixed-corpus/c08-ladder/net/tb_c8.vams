@@ -1,0 +1,31 @@
+// C8 testbench (RSpice-authored): one wreal stimulus for every rung.
+//   0 V, stepping to 0.6 V at 20 us;
+//   from 200 us, one period of a 2 kHz sine, 0.5 ± 0.3 V, updated every 1 us
+//   (a rotation recursion: sin/cos are not available in processes);
+//   0.5 V from 700 us.
+// Into the electrical rungs it passes through the built-in real-to-voltage
+// converter; the wreal rung reads it directly.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module tb_c8(stim);
+  output stim;
+  wreal stim;
+  real v, s, c, next;
+  integer n;
+  assign stim = v;
+  initial begin
+    v = 0.0;
+    s = 0.0;
+    c = 1.0;
+    #20000 v = 0.6;
+    #180000;
+    for (n = 0; n < 500; n = n + 1) begin
+      v = 0.5 + 0.3 * s;
+      next = s * 0.9999210442038161 + c * 0.012566039883352606;
+      c = c * 0.9999210442038161 - s * 0.012566039883352606;
+      s = next;
+      #1000;
+    end
+    v = 0.5;
+  end
+endmodule

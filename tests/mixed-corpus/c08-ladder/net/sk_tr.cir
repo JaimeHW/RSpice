@@ -1,0 +1,76 @@
+* C8 rung (a): the Sallen-Key low-pass and the 4-bit flash quantizer at
+* transistor level (RSpice-authored), on C5's BSIM4 benchmark cards.
+* Supplies +/-1.5 V; one 20 uA bias mirror. The filter is unity-gain:
+* R1 = R2 = 10k, C1 = 2.25079 nF (to the output), C2 = 1.12540 nF, around a
+* two-stage Miller op-amp (NMOS pair 8u/1u, PMOS mirror 4u/1u, tail 4u/1u at
+* 20 uA, PMOS second stage 20u/0.5u, 2 pF with a 2k zero resistor). The
+* quantizer is 15 five-transistor comparators against a 16 x 1k ladder from
+* 1 V (taps k/16 V) plus a balanced replica (cref) that gives the encoder the
+* comparators' output balance level.
+.include ../../c05-ldo-trim/net/models-bsim4.cir
+
+vdd vdd 0 1.5
+vss vss 0 -1.5
+ib vdd nb 20u
+mb nb nb vss vss NBSIM4 w=4u l=4u
+
+.subckt opamp2 inp inn out vdd vss nb
+mt tail nb vss vss NBSIM4 w=4u l=4u
+m1 d1 inn tail vss NBSIM4 w=2u l=1u
+m2 d2 inp tail vss NBSIM4 w=2u l=1u
+m3 d1 d1 vdd vdd PBSIM4 w=8u l=4u
+m4 d2 d1 vdd vdd PBSIM4 w=8u l=4u
+m6 out d2 vdd vdd PBSIM4 w=80u l=4u
+m7 out nb vss vss NBSIM4 w=20u l=4u
+rz d2 cz 5k
+cc cz out 2p
+.ends
+
+r1 fin n1 10k
+r2 n1 n2 10k
+c1 n1 out 2.25079n
+c2 n2 0 1.12540n
+xop n2 out out vdd vss nb opamp2
+
+* five-transistor comparator: out rises when pos > neg
+.subckt cmp5t pos neg out vdd vss nb
+mt tail nb vss vss NBSIM4 w=4u l=4u
+m1 d1 pos tail vss NBSIM4 w=4u l=1u
+m2 out neg tail vss NBSIM4 w=4u l=1u
+m3 d1 d1 vdd vdd PBSIM4 w=4u l=1u
+m4 out d1 vdd vdd PBSIM4 w=4u l=1u
+.ends
+
+vladder vr 0 1
+rl16 vr t15 1k
+rl15 t15 t14 1k
+rl14 t14 t13 1k
+rl13 t13 t12 1k
+rl12 t12 t11 1k
+rl11 t11 t10 1k
+rl10 t10 t9 1k
+rl9 t9 t8 1k
+rl8 t8 t7 1k
+rl7 t7 t6 1k
+rl6 t6 t5 1k
+rl5 t5 t4 1k
+rl4 t4 t3 1k
+rl3 t3 t2 1k
+rl2 t2 t1 1k
+rl1 t1 0 1k
+xc1 out t1 c1 vdd vss nb cmp5t
+xc2 out t2 c2 vdd vss nb cmp5t
+xc3 out t3 c3 vdd vss nb cmp5t
+xc4 out t4 c4 vdd vss nb cmp5t
+xc5 out t5 c5 vdd vss nb cmp5t
+xc6 out t6 c6 vdd vss nb cmp5t
+xc7 out t7 c7 vdd vss nb cmp5t
+xc8 out t8 c8 vdd vss nb cmp5t
+xc9 out t9 c9 vdd vss nb cmp5t
+xc10 out t10 c10 vdd vss nb cmp5t
+xc11 out t11 c11 vdd vss nb cmp5t
+xc12 out t12 c12 vdd vss nb cmp5t
+xc13 out t13 c13 vdd vss nb cmp5t
+xc14 out t14 c14 vdd vss nb cmp5t
+xc15 out t15 c15 vdd vss nb cmp5t
+xcr t8 t8 cref vdd vss nb cmp5t

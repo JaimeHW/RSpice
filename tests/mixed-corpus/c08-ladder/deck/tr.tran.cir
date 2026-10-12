@@ -1,0 +1,10 @@
+* C8 abstraction ladder, variant tr (transistor filter and flash quantizer), tran
+.hdl "../net/tb_c8.vams"
+.hdl "../net/therm2bin.vams"
+.include ../net/sk_tr.cir
+.param vcc=1.8
+xtb stim tb_c8
+vac stim fin dc 0 ac 1
+xenc c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 cref clk q3 q2 q1 q0 therm2bin
+.tran 0.2u 0.7m
+.end

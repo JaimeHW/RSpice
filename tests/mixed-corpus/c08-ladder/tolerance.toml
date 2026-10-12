@@ -1,0 +1,94 @@
+schema = "rspice-mixed-tolerance/1"
+# tb_c8.vams / quant4.vams / therm2bin.vams / biquad_wr.vams: `timescale 1ns/1ps.
+time_precision = 1e-12
+
+# --- step overshoot ----------------------------------------------------------
+# The quantity measures min(−v(out)), i.e. −peak.
+
+[[q]]
+id = "ovs"
+analysis = "tran"
+variants = ["va", "wr"]
+kind = "min"
+signal = "-v(out)"
+window = [2e-5, 1.5e-4]
+oracle = "O6"
+expect = "c08::ovs"
+abs = 2e-3
+why = "0.6·(1 + e^−π) = 0.62593 V at ζ = 0.7071 (the biquad's own largest sample for wr); bilinear warping and staircase input"
+
+[[q]]
+id = "ovs"
+analysis = "tran"
+variants = ["tr"]
+kind = "min"
+signal = "-v(out)"
+window = [2e-5, 1.5e-4]
+oracle = "O6"
+expect = "c08::ovs"
+abs = 6e-3
+why = "as va; the op-amp follower's finite gain and input gate leakage through R1 + R2"
+
+# --- codes -------------------------------------------------------------------
+
+[[q]]
+id = "codes"
+analysis = "tran"
+variants = ["tr", "va", "wr"]
+kind = "codes"
+nets = ["q3", "q2", "q1", "q0"]
+strobe = "clk"
+oracle = "O6"
+expect = "c08::codes"
+abs = 0.0
+why = "floor(16·v) of the rung's ideal output at the previous clock rise, exact; within 1/32 LSB of a threshold (1/8 LSB for the transistor rung) either neighbouring code"
+
+[[q]]
+id = "xab"
+analysis = "tran"
+variants = ["tr", "va", "wr"]
+kind = "codes"
+nets = ["q3", "q2", "q1", "q0"]
+strobe = "clk"
+oracle = "O7"
+why = "codes agree across the rungs: supporting evidence only (O7), evaluated structurally by the harness"
+
+# --- small-signal --------------------------------------------------------
+
+[[q]]
+id = "acH"
+analysis = "ac"
+variants = ["va"]
+kind = "ac"
+signal = "v(out)"
+points = [100.0, 1e3, 5e3, 1e4, 2e4, 1e5, 1e6]
+oracle = "O6"
+expect = "c08::ach"
+abs_db = 0.001
+abs_deg = 0.01
+why = "the Laplace operator is the transfer exactly"
+
+[[q]]
+id = "acH"
+analysis = "ac"
+variants = ["tr"]
+kind = "ac"
+signal = "v(out)"
+points = [100.0, 1e3, 5e3, 1e4, 2e4, 5e4]
+oracle = "O6"
+expect = "c08::ach"
+abs_db = 0.1
+abs_deg = 1.0
+why = "the op-amp follower's finite gain and bandwidth, to 50 kHz"
+
+[[q]]
+id = "acH"
+analysis = "ac"
+variants = ["tr", "va"]
+kind = "ac"
+signal = "v(out)"
+points = [100.0, 1e3, 5e3, 1e4, 2e4, 5e4]
+oracle = "O5"
+abs_db = 1e-4
+abs_deg = 1e-3
+why = "corpus O5 rule: the testbench held at its t = 0 output, the readers removed; same equations and solver"

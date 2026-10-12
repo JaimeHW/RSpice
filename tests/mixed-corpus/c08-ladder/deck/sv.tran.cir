@@ -1,0 +1,10 @@
+* C8 abstraction ladder, variant sv (SV-RNM nettype biquad, P5), tran
+.hdl "../net/tb_c8.vams"
+.hdl "../net/biquad_sv.sv"
+.hdl "../net/quant4.vams"
+.param vcc=1.8
+xtb stim tb_c8
+xbq stim out biquad_sv
+xq out clk q3 q2 q1 q0 quant4
+.tran 0.2u 0.7m
+.end

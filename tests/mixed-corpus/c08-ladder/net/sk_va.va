@@ -1,0 +1,12 @@
+// C8 rung (b): the Sallen-Key low-pass as a Verilog-A Laplace operator
+// (RSpice-authored): f0 = 10 kHz, Q = 1/sqrt(2), unity DC gain. The
+// denominator is spelled as literals, sqrt(2)/w0 and 1/w0^2 with
+// w0 = 2·pi·10 kHz: RSpice's code generator refuses laplace coefficients
+// that depend on parameters or variables.
+`include "disciplines.vams"
+module sk_va(in, out);
+  input in;
+  output out;
+  electrical in, out;
+  analog V(out) <+ laplace_nd(V(in), '{1.0}, '{1.0, 2.2507907903927653e-05, 2.5330295910584445e-10});
+endmodule

@@ -1,0 +1,31 @@
+// C8 rung (c): the Sallen-Key low-pass as a wreal biquad (RSpice-authored).
+// Bilinear transform (no prewarp) at 1 MHz of w0^2/(s^2 + (w0/Q)s + w0^2),
+// f0 = 10 kHz, Q = 1/sqrt(2); updated at 0.5 us + n·1 us, half a step off the
+// testbench's updates, so every read sees a settled input.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module biquad_wr(x, y);
+  input x;
+  wreal x;
+  output y;
+  wreal y;
+  real x1, x2, y0, y1, y2;
+  assign y = y0;
+  initial begin
+    x1 = 0.0;
+    x2 = 0.0;
+    y0 = 0.0;
+    y1 = 0.0;
+    y2 = 0.0;
+    #500;
+    forever begin
+      y0 = 0.0009440841143955489 * (x + 2.0 * x1 + x2)
+         + 1.9112262303409135 * y1 - 0.9150025667984957 * y2;
+      x2 = x1;
+      x1 = x;
+      y2 = y1;
+      y1 = y0;
+      #1000;
+    end
+  end
+endmodule

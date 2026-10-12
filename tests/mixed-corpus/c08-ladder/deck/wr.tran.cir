@@ -1,0 +1,13 @@
+* C8 abstraction ladder, variant wr (wreal biquad, Verilog-AMS quantizer), tran
+* The stimulus reaches the biquad as a real event net; the biquad's output
+* reaches the quantizer's electrical input through the real-to-voltage
+* converter on `out`.
+.hdl "../net/tb_c8.vams"
+.hdl "../net/biquad_wr.vams"
+.hdl "../net/quant4.vams"
+.param vcc=1.8
+xtb stim tb_c8
+xbq stim out biquad_wr
+xq out clk q3 q2 q1 q0 quant4
+.tran 0.2u 0.7m
+.end

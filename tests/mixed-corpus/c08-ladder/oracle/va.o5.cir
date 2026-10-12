@@ -1,0 +1,8 @@
+* C8 va held-digital O5 circuit (corpus O5 rules): the testbench's real-to-
+* voltage output held at its t = 0 value (0 V) as a source; the quantizer is
+* an A/D reader only and is removed. The runner appends the deck's card.
+.hdl "../net/sk_va.va"
+vstim stim 0 0
+vac stim fin dc 0 ac 1
+xflt fin out sk_va
+.end

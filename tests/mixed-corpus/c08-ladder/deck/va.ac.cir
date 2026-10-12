@@ -1,0 +1,11 @@
+* C8 abstraction ladder, variant va (Verilog-A filter, Verilog-AMS quantizer), ac
+.hdl "../net/tb_c8.vams"
+.hdl "../net/sk_va.va"
+.hdl "../net/quant4.vams"
+.param vcc=1.8
+xtb stim tb_c8
+vac stim fin dc 0 ac 1
+xflt fin out sk_va
+xq out clk q3 q2 q1 q0 quant4
+.ac dec 20 100 1meg
+.end

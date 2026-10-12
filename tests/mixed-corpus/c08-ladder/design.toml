@@ -1,0 +1,49 @@
+schema = "rspice-mixed-design/1"
+id = "C8"
+title = "Abstraction ladder"
+exit_phases = ["P3", "P5"]
+dialect = "best-available"
+features = []
+
+# (a) transistor op-amp Sallen-Key and flash quantizer (C5's BSIM4 cards).
+[[variant]]
+name = "tr"
+families = ["spice", "vams-digital", "vams-analog", "wreal"]
+today = "runs"
+
+# (b) Verilog-A Laplace filter, Verilog-AMS quantizer.
+[[variant]]
+name = "va"
+families = ["va-runtime", "vams-digital", "vams-analog", "wreal"]
+today = "runs"
+
+# (c) wreal biquad, Verilog-AMS quantizer.
+[[variant]]
+name = "wr"
+families = ["vams-digital", "vams-analog", "wreal"]
+today = "runs"
+
+# (d) SystemVerilog real-number-modelling nettype twin of (c) (P5).
+[[variant]]
+name = "sv"
+families = ["vams-digital", "vams-analog", "sv-rnm"]
+today = "parse:P5"
+
+# Budgets are about five times the slower route's measured case time (tran:
+# tr 30 s interp, 19 s native; ac 0.2 s and its O5 run 0.6 s, floored at
+# 10 s).
+[[analysis]]
+id = "tran"
+variants = ["tr", "va", "wr", "sv"]
+oracles = ["O6", "O7"]
+timeout_s = 150
+phase = "P3"
+
+# The testbench and quantizer are mixed hosts in the deck, so ac refuses
+# today; the held-digital O5 decks (testbench held at 0 V) run.
+[[analysis]]
+id = "ac"
+variants = ["tr", "va"]
+oracles = ["O6", "O7", "O5"]
+timeout_s = 10
+phase = "P1"

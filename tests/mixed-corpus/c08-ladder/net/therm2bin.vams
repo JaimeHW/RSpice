@@ -1,0 +1,40 @@
+// C8 rung (a) encoder (RSpice-authored): reads the 15 comparator outputs at
+// each rise of an internal 100 kHz clock (rises at 5 us + k·10 us), counts
+// those above the balanced replica's output (cref, the comparators' own
+// decision level), and registers the thermometer count on q3..q0.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module therm2bin(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15,
+                 cref, clk, q3, q2, q1, q0);
+  input c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, cref;
+  electrical c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, cref;
+  output clk, q3, q2, q1, q0;
+  reg clk, q3, q2, q1, q0;
+  real level;
+  integer code;
+  initial begin
+    clk = 1'b0;
+    {q3, q2, q1, q0} = 4'd0;
+  end
+  always #5000 clk = ~clk;
+  always @(posedge clk) begin
+    level = V(cref);
+    code = 0;
+    if (V(c1) > level) code = code + 1;
+    if (V(c2) > level) code = code + 1;
+    if (V(c3) > level) code = code + 1;
+    if (V(c4) > level) code = code + 1;
+    if (V(c5) > level) code = code + 1;
+    if (V(c6) > level) code = code + 1;
+    if (V(c7) > level) code = code + 1;
+    if (V(c8) > level) code = code + 1;
+    if (V(c9) > level) code = code + 1;
+    if (V(c10) > level) code = code + 1;
+    if (V(c11) > level) code = code + 1;
+    if (V(c12) > level) code = code + 1;
+    if (V(c13) > level) code = code + 1;
+    if (V(c14) > level) code = code + 1;
+    if (V(c15) > level) code = code + 1;
+    {q3, q2, q1, q0} = code;
+  end
+endmodule

@@ -1,0 +1,28 @@
+// C8 quantizer for the Verilog-A and wreal rungs (RSpice-authored): a 4-bit
+// code clamp(floor(16·V(in)), 0, 15) sampled at each rise of an internal
+// 100 kHz clock (rises at 5 us + k·10 us) and registered on q3..q0. The floor
+// is the count of thresholds k/16 at or below V(in) (no real-to-integer
+// system function in processes).
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module quant4(in, clk, q3, q2, q1, q0);
+  input in;
+  electrical in;
+  output clk, q3, q2, q1, q0;
+  reg clk, q3, q2, q1, q0;
+  real v;
+  integer k, code;
+  initial begin
+    clk = 1'b0;
+    {q3, q2, q1, q0} = 4'd0;
+  end
+  always #5000 clk = ~clk;
+  always @(posedge clk) begin
+    v = V(in);
+    code = 0;
+    for (k = 1; k < 16; k = k + 1)
+      if (v >= k / 16.0)
+        code = code + 1;
+    {q3, q2, q1, q0} = code;
+  end
+endmodule
