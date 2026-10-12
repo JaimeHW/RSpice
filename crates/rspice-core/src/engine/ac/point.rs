@@ -141,6 +141,15 @@ impl Engine {
         analysis: CapabilityAnalysis,
         abort: &dyn AbortSignal,
     ) -> Result<PreparedAc, SimulationError> {
+        // The excitation is read from the elaborated topology, before the
+        // bias is solved: an ideal-source loop has no unique AC branch
+        // current, and saying so names the source, where the singular DC
+        // solve it would otherwise reach first names none.
+        Self::ensure_analysis_capability(&circuit, analysis)?;
+        let excitation = match excitation {
+            Some(excitation) => excitation,
+            None => AcExcitation::new(&circuit)?,
+        };
         let SmallSignalBias {
             circuit,
             matrix,
@@ -153,10 +162,6 @@ impl Engine {
             BiasSource::OperatingPoint,
             abort,
         )?;
-        let excitation = match excitation {
-            Some(excitation) => excitation,
-            None => AcExcitation::new(&circuit)?,
-        };
 
         let size = circuit.matrix_size();
         let ac_solve_denominator_floor = if excitation.projection.is_empty() {
