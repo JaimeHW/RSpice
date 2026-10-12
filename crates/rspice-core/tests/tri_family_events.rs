@@ -51,10 +51,17 @@ const DECK_E_OUT_LATE: f64 = 1.888954;
 /// is the claim a tolerance cannot make and the one a determinism gate needs.
 /// Deck E is the only fixture in this file whose analog half is charged by a
 /// bare HDL event net, so its grid is the event schedule and the RC together.
+///
+/// Re-measured twice, at the same 267 points: 02921aeeb moved `qdiv`'s drive
+/// into an XSPICE converter, and faaf0e809 centred the capacitor current. All
+/// 20 `clk` and 11 `qdiv` transitions are bit-identical to the first
+/// measurement, and `out` against the analytic 1020-ohm x 10 pF response to
+/// those transitions errs exactly as before (worst 0.1335 V at the 5 ns edge,
+/// which is integrated over the step that ends on it, in both).
 const DECK_E_FINGERPRINT: Fingerprint = Fingerprint {
     points: 267,
-    grid_hash: 0x62ac_bec5_7815_00bc,
-    volt_hash: 0x7658_cfbc_6cd9_6685,
+    grid_hash: 0x75fe_71c0_c992_8614,
+    volt_hash: 0x6496_7a05_64be_417c,
 };
 
 /// First transition of the flop output in deck E3, and the delay every one of
