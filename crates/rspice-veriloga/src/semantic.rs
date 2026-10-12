@@ -4682,7 +4682,14 @@ impl SemanticAnalyzer {
             return None;
         };
         let symbol = self.symbols.lookup(identifier.name.as_str())?;
-        if !matches!(symbol.kind, SymbolKind::Node | SymbolKind::Port) {
+        // A discrete net or port that analog code reads is rebound as a
+        // `Variable` carrying the projected value (`bind_discrete_read_symbol`),
+        // and keeps its discipline. It is still the discrete signal, so an edge
+        // on it is still a digital edge. An ordinary variable has no discipline.
+        if !matches!(
+            symbol.kind,
+            SymbolKind::Node | SymbolKind::Port | SymbolKind::Variable
+        ) {
             return None;
         }
         let discipline = self
