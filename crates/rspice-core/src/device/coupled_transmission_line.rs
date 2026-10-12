@@ -535,7 +535,6 @@ impl CoupledTransmissionLine {
         candidate_time: Value,
         reltol: Value,
         voltage_abstol: Value,
-        _current_abstol: Value,
     ) -> Option<Value> {
         let native = self.native.as_ref()?;
         let branches = self.native_branch_matrix_indices()?;

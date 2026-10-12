@@ -9733,7 +9733,6 @@ impl Engine {
                         step_time,
                         transient_lte_reltol,
                         transient_lte_abstol,
-                        self.current_abstol(),
                     )
                 })
                 .reduce(Value::min);
