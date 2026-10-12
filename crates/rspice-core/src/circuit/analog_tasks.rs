@@ -105,6 +105,31 @@ impl CircuitData {
         Ok(None)
     }
 
+    /// Inspect a solved equilibrium candidate: every non-mixed model as
+    /// [`Self::first_nonmixed_candidate_analog_task`] does, then every mixed
+    /// module's analog half. At an equilibrium point the module's trial has
+    /// been settled and kept as the held equilibrium, so its analog half holds
+    /// the candidate of that kept settle rather than of a rolled-back probe.
+    pub(crate) fn first_equilibrium_candidate_analog_task(
+        &self,
+        kind: AnalogTaskKind,
+    ) -> Result<Option<AnalogTaskEvent<'_>>, String> {
+        if let Some(event) = self.first_nonmixed_candidate_analog_task(kind)? {
+            return Ok(Some(event));
+        }
+        #[cfg(feature = "veriloga")]
+        for host in &self.mixed_signal_hosts {
+            if let Some(event) = host
+                .analog_device()
+                .first_candidate_analog_task(kind)
+                .map_err(|error| error.to_string())?
+            {
+                return Ok(Some(event));
+            }
+        }
+        Ok(None)
+    }
+
     /// Validate all runtime and generated candidates before a control request
     /// replaces their equations with a final-step evaluation.
     pub(crate) fn validate_nonmixed_model_acceptance(&self) -> Result<(), String> {

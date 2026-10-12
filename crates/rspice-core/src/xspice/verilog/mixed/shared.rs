@@ -248,6 +248,24 @@ pub(crate) struct MixedDigitalCoordinator {
     publications: Vec<AdcPublication>,
 }
 
+/// The coordinator's half of a held-equilibrium image; see
+/// [`MixedDigitalCoordinator::equilibrium_image`].
+#[derive(Clone)]
+pub(crate) struct CoordinatorEquilibriumImage {
+    topology: [u8; 32],
+    digital: MixedCell<DigitalHost>,
+    observers: Vec<AbsDeltaState>,
+    probes: Vec<Option<f64>>,
+}
+
+impl fmt::Debug for CoordinatorEquilibriumImage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CoordinatorEquilibriumImage")
+            .field("observers", &self.observers.len())
+            .finish()
+    }
+}
+
 /// One enrolled instance's A/D bit, dated by the instant it crossed.
 #[derive(Clone, Copy)]
 struct AdcPublication {
@@ -1483,6 +1501,64 @@ impl MixedDigitalCoordinator {
             "a numerical probe cannot commit shared digital state"
         );
         self.accepted_time = Some(cursor.time);
+        self.accepted_observers = std::mem::take(&mut cursor.observers);
+        self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
+        self.trial_open = false;
+        cursor.rollback = None;
+    }
+
+    /// The held equilibrium this coordinator keeps, as an image a rebuilt
+    /// circuit of the same digital structure can adopt.
+    ///
+    /// In-memory and time-zero only: the store is shared copy-on-write rather
+    /// than serialized, because the image never leaves the analysis that
+    /// rebuilds the circuit, and it is captured between DC sweep points where
+    /// no trial is open and no time has been accepted.
+    pub(crate) fn equilibrium_image(&self) -> Result<CoordinatorEquilibriumImage, String> {
+        if !self.enabled || self.trial_open || self.accepted_time.is_some() {
+            return Err(
+                "the held equilibrium image requires a started, idle time-zero coordinator".into(),
+            );
+        }
+        Ok(CoordinatorEquilibriumImage {
+            topology: self.checkpoint_topology()?,
+            digital: self.digital.clone(),
+            observers: self.accepted_observers.clone(),
+            probes: self.accepted_observation_probes.clone(),
+        })
+    }
+
+    /// Adopt a held equilibrium captured on another elaboration of this
+    /// circuit, iff its digital structure is this one's. Returns `false`,
+    /// leaving this coordinator as it was, when the structures differ.
+    pub(crate) fn adopt_equilibrium_image(
+        &mut self,
+        image: &CoordinatorEquilibriumImage,
+    ) -> Result<bool, String> {
+        if !self.enabled || self.trial_open || self.accepted_time.is_some() {
+            return Err("a held equilibrium is adopted only by a started, idle coordinator".into());
+        }
+        if image.topology != self.checkpoint_topology()?
+            || image.observers.len() != self.accepted_observers.len()
+            || image.probes.len() != self.accepted_observation_probes.len()
+        {
+            return Ok(false);
+        }
+        self.digital = image.digital.clone();
+        self.accepted_observers.clone_from(&image.observers);
+        self.accepted_observation_probes.clone_from(&image.probes);
+        Ok(true)
+    }
+
+    /// Keep the time-zero store this cursor's trial settled as the held
+    /// equilibrium. The image it carries is dropped rather than applied, and
+    /// no time is accepted: the next trial at time zero opens on this store,
+    /// so it is the operating point again rather than a repeated timepoint.
+    pub(crate) fn commit_equilibrium(&mut self, mut cursor: SharedTrialCursor) {
+        assert!(
+            !cursor.probe,
+            "a numerical probe cannot commit shared digital state"
+        );
         self.accepted_observers = std::mem::take(&mut cursor.observers);
         self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
         self.trial_open = false;

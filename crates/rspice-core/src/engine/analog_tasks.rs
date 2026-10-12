@@ -250,14 +250,14 @@ impl Engine {
         Ok(control.is_finished())
     }
 
+    /// A `$finish` the bias candidate of an equilibrium point requested, from
+    /// any analog model including a mixed module's held analog half.
     pub(super) fn candidate_equilibrium_finish(
         circuit: &CircuitData,
         point: ModelFinishPoint,
     ) -> Result<Option<ModelFinish>, SimulationError> {
-        #[cfg(feature = "veriloga")]
-        circuit.ensure_no_mixed_signal_hosts("equilibrium task acceptance")?;
         circuit
-            .first_nonmixed_candidate_analog_task(AnalogTaskKind::Finish)
+            .first_equilibrium_candidate_analog_task(AnalogTaskKind::Finish)
             .map_err(SimulationError::Circuit)?
             .map(|event| {
                 circuit

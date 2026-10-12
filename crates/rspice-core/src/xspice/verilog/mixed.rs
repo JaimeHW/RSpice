@@ -144,7 +144,7 @@ mod standalone;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 use shared::MixedDigital;
 pub(crate) use shared::checkpoint as coordinator_checkpoint;
-pub(crate) use shared::{MixedDigitalCoordinator, SharedTrialCursor};
+pub(crate) use shared::{CoordinatorEquilibriumImage, MixedDigitalCoordinator, SharedTrialCursor};
 use standalone::StandaloneExecution;
 
 use std::fmt;
@@ -871,6 +871,31 @@ pub(crate) struct EventPort {
     /// Existing unidirectional trace/bus label, independent of the private
     /// converter endpoint. Qualified event traces remain available as well.
     trace_node: Option<usize>,
+}
+
+/// One instance's half of a held-equilibrium image; see
+/// [`MixedSignalHost::equilibrium_image`].
+#[derive(Clone, Debug)]
+pub(crate) struct HostEquilibriumImage {
+    instance: String,
+    topology: [u8; 32],
+    adc_voltages: Vec<f64>,
+    adc_decisions: Vec<Option<FourStateBit>>,
+    adc_transition_times: Vec<Option<f64>>,
+    probe_values: Vec<Option<f64>>,
+}
+
+/// One of a module's own A/D bridges, as a held-equilibrium threshold finding
+/// reads it.
+pub(crate) struct BoundaryThreshold<'a> {
+    /// The boundary net's spelling.
+    pub(crate) signal: &'a str,
+    pub(crate) positive: usize,
+    pub(crate) negative: usize,
+    pub(crate) low: f64,
+    pub(crate) high: f64,
+    /// Whether the bit the bridge publishes is X.
+    pub(crate) undefined: bool,
 }
 
 impl EventPort {
@@ -3892,6 +3917,198 @@ impl MixedSignalHost {
         self.scratch.trial = trial.vectors;
         // A new accepted point is a new interval: see [`CandidateLedger::clear`].
         self.scratch.ledger.clear();
+    }
+
+    /// Whether the open trial can be kept as the held equilibrium.
+    ///
+    /// Non-mutating, so a circuit can validate every instance before it
+    /// promotes any: the trial is a non-probe time-zero trial whose boundary
+    /// the last settle found quiet, with no interpolated event pending, and
+    /// the analog half's candidate passes its own advance validation.
+    pub(crate) fn validate_equilibrium(&self) -> Result<(), MixedSignalError> {
+        let trial = self
+            .trial
+            .as_ref()
+            .ok_or_else(|| MixedSignalError::TrialProtocol {
+                detail: "there is no active trial to keep as the held equilibrium".into(),
+            })?;
+        if trial.probe || trial.time_seconds != 0.0 || trial.timestep_seconds != 0.0 {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "only a committable time-zero trial can be kept as the held equilibrium"
+                    .into(),
+            });
+        }
+        if trial.observation_refinement.is_some() || !trial.bridges_quiet {
+            return Err(MixedSignalError::TrialProtocol {
+                detail: "the held equilibrium requires a settled, quiet boundary".into(),
+            });
+        }
+        self.analog.validate_advance_state().map_err(analog_error)
+    }
+
+    /// Keep the open trial as the held equilibrium. Called only after
+    /// [`Self::validate_equilibrium`] accepted it on every instance.
+    ///
+    /// What the settle produced is promoted and nothing else moves: the
+    /// discrete state is the settled one, the A/D decisions and probe samples
+    /// become the accepted bank, the discrete inputs keep the values the analog
+    /// half was evaluated with, and the analog half takes its validated
+    /// acceptance. No time is accepted — `started` stays false and the accepted
+    /// time stays zero — so the next trial at time zero is still the operating
+    /// point; it starts from this settled state, because the initial-state
+    /// image a time-zero trial would otherwise restart from is dropped.
+    pub(crate) fn apply_equilibrium(&mut self) {
+        let Some(mut trial) = self.trial.take() else {
+            return;
+        };
+        if let Some(standalone) = &mut self.standalone {
+            standalone.commit();
+        }
+        self.prepared_analog.invalidate();
+        self.analog.make_mut().apply_validated_advance_state();
+        self.state.initial_digital = None;
+        std::mem::swap(
+            &mut self.state.accepted_adc_transition_times,
+            &mut trial.vectors.transition_times,
+        );
+        std::mem::swap(
+            &mut self.state.accepted_adc_voltages,
+            &mut trial.vectors.sampled_adc_voltages,
+        );
+        std::mem::swap(
+            &mut self.state.accepted_adc_decisions,
+            &mut trial.vectors.adc_decisions,
+        );
+        std::mem::swap(
+            &mut self.state.accepted_probe_values,
+            &mut trial.vectors.probe_values,
+        );
+        self.scratch.trial = trial.vectors;
+        self.scratch.ledger.clear();
+    }
+
+    /// This instance's half of a held-equilibrium image: its boundary
+    /// structure and the accepted decision bank its time-zero settle kept.
+    /// The discrete state itself is the coordinator's; the analog half is
+    /// rebuilt with the circuit and is not part of the image.
+    pub(crate) fn equilibrium_image(&self) -> Result<HostEquilibriumImage, String> {
+        self.require_idle("capture a held equilibrium")
+            .map_err(|error| error.to_string())?;
+        if !self.digital_started || self.state.started {
+            return Err(format!(
+                "mixed Verilog-AMS instance '{}' holds no time-zero equilibrium",
+                self.instance
+            ));
+        }
+        Ok(HostEquilibriumImage {
+            instance: self.instance.clone(),
+            topology: self.participant_topology()?,
+            adc_voltages: self.state.accepted_adc_voltages.clone(),
+            adc_decisions: self.state.accepted_adc_decisions.clone(),
+            adc_transition_times: self.state.accepted_adc_transition_times.clone(),
+            probe_values: self.state.accepted_probe_values.clone(),
+        })
+    }
+
+    /// Adopt a held-equilibrium image captured on another elaboration of this
+    /// circuit, iff this instance's boundary structure is the image's.
+    /// Returns `false`, changing nothing, when it is not.
+    pub(crate) fn adopt_equilibrium_image(
+        &mut self,
+        image: &HostEquilibriumImage,
+    ) -> Result<bool, String> {
+        self.require_idle("adopt a held equilibrium")
+            .map_err(|error| error.to_string())?;
+        if image.instance != self.instance
+            || image.topology != self.participant_topology()?
+            || image.adc_decisions.len() != self.state.accepted_adc_decisions.len()
+            || image.probe_values.len() != self.state.accepted_probe_values.len()
+        {
+            return Ok(false);
+        }
+        self.prepared_analog.invalidate();
+        self.state.initial_digital = None;
+        self.state
+            .accepted_adc_voltages
+            .clone_from(&image.adc_voltages);
+        self.state
+            .accepted_adc_decisions
+            .clone_from(&image.adc_decisions);
+        self.state
+            .accepted_adc_transition_times
+            .clone_from(&image.adc_transition_times);
+        self.state
+            .accepted_probe_values
+            .clone_from(&image.probe_values);
+        self.scratch.ledger.clear();
+        Ok(true)
+    }
+
+    /// This module's own A/D bridges as a threshold finding reads them: the
+    /// sensed pair, both thresholds, and whether the bit they publish is X.
+    pub(crate) fn boundary_thresholds(&self) -> impl Iterator<Item = BoundaryThreshold<'_>> + '_ {
+        self.state
+            .bridges
+            .adc
+            .iter()
+            .filter(|bridge| !bridge.root_only)
+            .map(|bridge| BoundaryThreshold {
+                signal: &bridge.signal_name,
+                positive: bridge.positive,
+                negative: bridge.negative,
+                low: bridge.low,
+                high: bridge.high,
+                undefined: self
+                    .state
+                    .digital
+                    .read(bridge.driven_signal())
+                    .is_some_and(|value| value.bit(bridge.bit) == FourStateBit::Unknown),
+            })
+    }
+
+    /// Stamp the small-signal conductance of this module's own D/A bridges at
+    /// the held state (S3): a bridge driving 0, 1 or X is its level behind
+    /// `1 / R`, which linearizes to that conductance; one driving Z is open.
+    pub(crate) fn stamp_small_signal_bridges(&self, mut matrix_add: impl FnMut(usize, usize, f64)) {
+        for bridge in &self.state.bridges.dac {
+            let Some(value) = self.state.digital.read(bridge.signal) else {
+                continue;
+            };
+            if bridge.driven_level(value.bit(bridge.bit)).is_none() {
+                continue;
+            }
+            let conductance = 1.0 / bridge.resistance;
+            let positive = matrix_row(bridge.positive);
+            let negative = matrix_row(bridge.negative);
+            if let Some(row) = positive {
+                matrix_add(row, row, conductance);
+            }
+            if let Some(row) = negative {
+                matrix_add(row, row, conductance);
+            }
+            if let (Some(positive), Some(negative)) = (positive, negative) {
+                matrix_add(positive, negative, -conductance);
+                matrix_add(negative, positive, -conductance);
+            }
+        }
+    }
+
+    /// The thermal-noise conductances of this module's own D/A bridges at the
+    /// held state, as `(positive, negative, conductance)` (S11): every bridge
+    /// not driving Z is a physical driver behind its output resistance.
+    pub(crate) fn bridge_noise_conductances(&self) -> Vec<(usize, usize, f64)> {
+        self.state
+            .bridges
+            .dac
+            .iter()
+            .filter(|bridge| {
+                self.state
+                    .digital
+                    .read(bridge.signal)
+                    .is_some_and(|value| bridge.driven_level(value.bit(bridge.bit)).is_some())
+            })
+            .map(|bridge| (bridge.positive, bridge.negative, 1.0 / bridge.resistance))
+            .collect()
     }
 
     /// Put a trial back the way it found things, and take its vectors back.

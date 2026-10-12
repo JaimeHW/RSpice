@@ -55,6 +55,10 @@ mod magnetic;
 pub(crate) mod mixed_checkpoint;
 #[cfg(feature = "veriloga")]
 mod mixed_signal;
+#[cfg(feature = "veriloga")]
+pub(crate) use mixed_signal::ThresholdFinding;
+#[cfg(all(test, feature = "veriloga"))]
+pub(crate) use mixed_signal::ThresholdFindingKind;
 mod net_kind;
 mod scheduler;
 pub(crate) use scheduler::{Activation, ActivationLanes};

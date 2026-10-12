@@ -93,8 +93,8 @@ pub use host::DigitalRunError;
 pub(crate) use mixed::checkpoint as participant_checkpoint;
 pub(crate) use mixed::coordinator_checkpoint;
 pub(crate) use mixed::{
-    BoundaryBitSource, BoundaryBus, CandidateLedger, MixedDigitalCoordinator,
-    PreparedMixedAcceptance, SharedTrialCursor,
+    BoundaryBitSource, BoundaryBus, CandidateLedger, CoordinatorEquilibriumImage,
+    HostEquilibriumImage, MixedDigitalCoordinator, PreparedMixedAcceptance, SharedTrialCursor,
 };
 pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 

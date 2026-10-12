@@ -130,6 +130,18 @@ pub(in crate::circuit) enum TrialKind {
     /// wheel drained no further than the tick the operating point itself is on
     /// (tick 0), the instances' `initial` blocks executed and one settle.
     OperatingPoint,
+    /// The converged operating point, settled once more and *kept* as the held
+    /// equilibrium every small-signal analysis, and the next DC sweep point,
+    /// linearize or start from.
+    ///
+    /// Settled exactly as [`Self::OperatingPoint`] is, at tick 0 and with a
+    /// zero interval, but not speculative: the wheel's settled store, every
+    /// instance's settled view and A/D decisions, and the code models' settled
+    /// contexts survive the trial ([`Trial::commit_equilibrium`]). No
+    /// `AcceptedStep` effect runs and no time is accepted, so a later time-zero
+    /// trial is still a time-zero trial — it simply starts from the settled
+    /// state instead of from the initial blocks.
+    Equilibrium,
 }
 
 impl TrialKind {
@@ -155,15 +167,17 @@ impl TrialKind {
         !matches!(self, Self::Acceptance)
     }
 
-    /// Whether [`Trial::prepare`] may be asked for a reservation.
+    /// Whether the trial may ever keep what it settled: through
+    /// [`Trial::prepare`] for an acceptance, through
+    /// [`Trial::commit_equilibrium`] for the held equilibrium.
     const fn may_commit(self) -> bool {
-        matches!(self, Self::Acceptance)
+        matches!(self, Self::Acceptance | Self::Equilibrium)
     }
 
     /// What the code models are told the run is doing.
     const fn analysis(self) -> crate::xspice::AnalysisType {
         match self {
-            Self::OperatingPoint => crate::xspice::AnalysisType::DcOp,
+            Self::OperatingPoint | Self::Equilibrium => crate::xspice::AnalysisType::DcOp,
             _ => crate::xspice::AnalysisType::Transient,
         }
     }
@@ -183,6 +197,7 @@ impl TrialKind {
             Self::Inspection => "candidate inspection",
             Self::Acceptance => "acceptance",
             Self::OperatingPoint => "operating-point",
+            Self::Equilibrium => "equilibrium",
         }
     }
 }
@@ -637,7 +652,7 @@ impl Trial<'_> {
     /// reservation unwinds every instance it holds and the trial's own `Drop`
     /// then puts the wheel back.
     pub(in crate::circuit) fn prepare(&mut self) -> Result<Prepared<'_>, SimulationError> {
-        if !self.kind.may_commit() {
+        if self.kind != TrialKind::Acceptance {
             return Err(SimulationError::Circuit(format!(
                 "a {} trial cannot be prepared for acceptance; it exists so a candidate can be \
                  assembled or inspected at a timepoint the solver is not committing",
@@ -686,6 +701,40 @@ impl Trial<'_> {
                 Err(SimulationError::Circuit(format!("{error}; {restore}")))
             }
         }
+    }
+
+    /// Keep this settled time-zero trial as the held equilibrium.
+    ///
+    /// Validate every instance, then promote all of them: the instances keep
+    /// their settled views, A/D decisions and probe samples and their analog
+    /// halves take their validated acceptance; the wheel keeps its settled
+    /// store; the code models keep their settled contexts and event values,
+    /// and their resource journal is committed rather than rolled back. No
+    /// time is accepted anywhere, so the next trial at time zero is still the
+    /// operating point — it starts from this state instead of from the
+    /// `initial` blocks.
+    pub(in crate::circuit) fn commit_equilibrium(mut self) -> Result<(), SimulationError> {
+        if self.kind != TrialKind::Equilibrium {
+            return Err(SimulationError::Circuit(format!(
+                "a {} trial cannot be committed as the held equilibrium",
+                self.kind.describe()
+            )));
+        }
+        for host in self.hosts.iter() {
+            named(host, host.validate_equilibrium())?;
+        }
+        for host in self.hosts.iter_mut() {
+            host.apply_equilibrium();
+        }
+        self.hosts_active = false;
+        if let (Some(coordinator), Some(cursor)) = (self.coordinator.as_mut(), self.cursor.take()) {
+            coordinator.commit_equilibrium(cursor);
+        }
+        if let Some(snapshot) = self.xspice.take() {
+            snapshot.resources().commit();
+        }
+        self.circuit.scheduler.note_equilibrium_commit();
+        Ok(())
     }
 
     /// Reject every instance trial still open and hand the wheel's image back.

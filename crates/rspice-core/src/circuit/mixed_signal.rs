@@ -33,6 +33,122 @@ use crate::{SimulationError, Value};
 
 use crate::xspice::verilog::{BoundaryBitSource, BoundaryBus, MixedSignalHost};
 
+/// A converter input found at a decision boundary of a held equilibrium.
+///
+/// The held discrete state is frozen for every analysis that linearizes
+/// around it, so a decision that a perturbation the size of the solver's own
+/// error could have flipped is worth naming: the small-signal answer is the
+/// answer for *this* decision, and the other one was equally consistent.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ThresholdFinding {
+    /// The converter instance whose decision is in question.
+    pub(crate) converter: String,
+    /// The analog net its input senses.
+    pub(crate) net: String,
+    /// The mixed module port the decision feeds, as `instance.port`, when a
+    /// module reads it.
+    pub(crate) host_port: Option<String>,
+    pub(crate) kind: ThresholdFindingKind,
+    /// The input the converter decided on.
+    pub(crate) voltage: Value,
+}
+
+/// Which boundary a [`ThresholdFinding`] sits on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ThresholdFindingKind {
+    /// Within Newton's own tolerance of a switching threshold.
+    OnThreshold { threshold: Value },
+    /// Inside an unknown or hysteresis band with no earlier decision, so the
+    /// converter published X.
+    UndefinedBand { low: Value, high: Value },
+}
+
+impl std::fmt::Display for ThresholdFinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "converter '{}' input on net '{}'",
+            self.converter, self.net
+        )?;
+        if let Some(port) = &self.host_port {
+            write!(f, " (feeding '{port}')")?;
+        }
+        match self.kind {
+            ThresholdFindingKind::OnThreshold { threshold } => write!(
+                f,
+                " sits on its threshold {threshold:e} V at the held equilibrium \
+                 (v = {:e} V); the frozen decision is one of two consistent ones",
+                self.voltage
+            ),
+            ThresholdFindingKind::UndefinedBand { low, high } => write!(
+                f,
+                " lies inside its undefined band ({low:e} V, {high:e} V) with no earlier \
+                 decision (v = {:e} V); the held equilibrium carries X",
+                self.voltage
+            ),
+        }
+    }
+}
+
+/// The held equilibrium of one DC sweep point, carried into the circuit the
+/// next point rebuilds (design §4.3).
+///
+/// A sibling of the transient checkpoint's mixed image rather than one, for
+/// the reasons that image cannot serve: it never leaves the analysis, so it is
+/// shared copy-on-write instead of serialized; and it is a time-zero
+/// equilibrium no time was ever accepted at, where the transient image is an
+/// accepted timepoint. Only the discrete state travels — the wheel's store
+/// and each instance's accepted decision bank. Every analog half is rebuilt
+/// with the circuit at the new point's parameter values.
+#[derive(Clone, Debug)]
+pub(crate) struct MixedEquilibriumImage {
+    coordinator: crate::xspice::verilog::CoordinatorEquilibriumImage,
+    hosts: Vec<crate::xspice::verilog::HostEquilibriumImage>,
+}
+
+/// The potential of one circuit node in a solution, ground at zero.
+fn node_voltage(solution: &[Value], node: usize) -> Value {
+    if node == 0 {
+        0.0
+    } else {
+        solution.get(node - 1).copied().unwrap_or(0.0)
+    }
+}
+
+/// How a finding names the analog net one converter input element senses.
+fn analog_input_net(
+    connection: &crate::xspice::PortConnection,
+    element: usize,
+    node_name: &dyn Fn(usize) -> String,
+) -> String {
+    use crate::xspice::{AnalogInputConnection, PortConnection};
+    let pair = |pos: usize, neg: usize| {
+        if neg == 0 {
+            node_name(pos)
+        } else {
+            format!("{},{}", node_name(pos), node_name(neg))
+        }
+    };
+    match connection {
+        PortConnection::Analog(node) => node_name(*node),
+        PortConnection::Differential(pos, neg) => pair(*pos, *neg),
+        PortConnection::AnalogVector(nodes) => nodes
+            .get(element)
+            .map_or_else(|| format!("element {element}"), |node| node_name(*node)),
+        PortConnection::TypedAnalogVector(elements) => match elements.get(element) {
+            Some(AnalogInputConnection::Node(node)) => node_name(*node),
+            Some(
+                AnalogInputConnection::Differential(pos, neg)
+                | AnalogInputConnection::VoltageOutput { pos, neg }
+                | AnalogInputConnection::CurrentOutput { pos, neg }
+                | AnalogInputConnection::Hybrid { pos, neg, .. },
+            ) => pair(*pos, *neg),
+            _ => format!("element {element}"),
+        },
+        _ => format!("element {element}"),
+    }
+}
+
 impl CircuitData {
     /// Enrich a terminal solver failure without changing convergence recovery
     /// or accepting any speculative boundary state.
@@ -237,6 +353,14 @@ impl CircuitData {
     /// Begin digital execution only after the engine has delivered every
     /// model's analog initialization effects and ruled out a requested exit.
     pub(crate) fn start_mixed_digital_execution(&mut self) -> Result<(), SimulationError> {
+        if self.scheduler.has_equilibrium_commit() {
+            return Err(crate::ElaborationError::new(
+                crate::ElaborationErrorKind::Internal,
+                "digital execution cannot start on a circuit that already holds a committed \
+                 equilibrium; that circuit belongs to an operating point or a small-signal bias",
+            )
+            .into());
+        }
         self.finalize_mixed_digital(
             &std::collections::BTreeSet::new(),
             &rspice_veriloga::NoPipelineControl,
@@ -268,45 +392,6 @@ impl CircuitData {
         self.mixed_signal_hosts
             .iter()
             .flat_map(MixedSignalHost::boundary_buses)
-    }
-
-    /// Refuse an analysis this route does not implement.
-    ///
-    /// The mixed host executes a *transient* interleave: its digital half is a
-    /// time wheel and its bridges are sampled between accepted timepoints.
-    /// There is no small-signal linearization of a process, so an AC, noise,
-    /// or harmonic-balance assembly has nothing to ask it for — and assembling
-    /// one anyway would silently omit the module's continuous half too, which
-    /// is a plausible answer to a question the deck did not ask.
-    ///
-    /// # What is missing, and why `.op` is not an exemption
-    ///
-    /// What every caller here wants is narrower than "a mixed module", so the
-    /// refusal names it: each of them sweeps, linearizes or shoots around a
-    /// discrete state that has *settled*, and settling one is a capability this
-    /// build does not have. `.op` does not need it — it answers at the state a
-    /// module's initial blocks left, which exists before anything has settled
-    /// and before any time has passed — so `.op` does not call this at all.
-    /// That is why the answer is a capability refusal rather than a circuit
-    /// error: the deck is understood and the analysis is the gap.
-    pub(crate) fn ensure_no_mixed_signal_hosts(
-        &self,
-        analysis: &str,
-    ) -> Result<(), SimulationError> {
-        let Some(host) = self.mixed_signal_hosts.first() else {
-            return Ok(());
-        };
-        Err(SimulationError::unsupported_capability(
-            "analysis.mixed_signal.discrete_state",
-            format!(
-                "mixed Verilog-AMS instance '{}' cannot take part in {analysis}: the module's \
-                 discrete half is executed by a transient event interleave, which has no \
-                 small-signal or steady-state form. `.tran` runs a mixed module and `.op` \
-                 solves one at the state its initial blocks left; an analysis around a \
-                 settled discrete state is not available yet",
-                host.instance_name()
-            ),
-        ))
     }
 
     /// Stamp every mixed module for one Newton evaluation, committing nothing.
@@ -424,6 +509,273 @@ impl CircuitData {
                 xyce_one_step_order2: false,
             },
         )
+    }
+
+    /// Commit the converged operating point as the held equilibrium.
+    ///
+    /// The coupled time-zero fixed point the operating-point Newton solve
+    /// converged to is settled once more at `solution` and kept, rather than
+    /// rolled back the way every operating-point probe is: the wheel keeps its
+    /// settled store, every host its settled view, A/D decisions and probe
+    /// samples, every enrolled code model its settled context, and each
+    /// host's analog half takes its validated acceptance. Linearization reads
+    /// only this committed state, and a DC sweep's next point starts from it.
+    ///
+    /// A boundary that will not quiet is refused with the settle's own
+    /// oscillation error. A circuit with no mixed module has nothing to
+    /// commit: XSPICE code models already keep their operating-point state.
+    pub(crate) fn accept_mixed_equilibrium(
+        &mut self,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        if self.mixed_signal_hosts.is_empty() {
+            return Ok(());
+        }
+        let mut trial = self.open_trial(
+            Candidate {
+                time: 0.0,
+                dt: 0.0,
+                analysis_step: None,
+            },
+            TrialKind::Equilibrium,
+            XspiceCompanionPolicy {
+                coefficients: &crate::numerics::integration::CompanionCoefficients::backward_euler(
+                ),
+                xyce_one_step_order2: false,
+            },
+            None,
+        )?;
+        trial.settle(&crate::abort_signal::NoAbort, solution)?;
+        trial.evaluate(solution)?;
+        trial.commit_equilibrium()
+    }
+
+    /// The held equilibrium this circuit carries, when it carries one: a
+    /// circuit with mixed modules whose time-zero settle was committed.
+    pub(crate) fn mixed_equilibrium_image(&self) -> Result<Option<MixedEquilibriumImage>, String> {
+        let Some(coordinator) = &self.scheduler.mixed_digital_coordinator else {
+            return Ok(None);
+        };
+        if self.mixed_signal_hosts.is_empty() || !self.scheduler.has_equilibrium_commit() {
+            return Ok(None);
+        }
+        Ok(Some(MixedEquilibriumImage {
+            coordinator: coordinator.equilibrium_image()?,
+            hosts: self
+                .mixed_signal_hosts
+                .iter()
+                .map(MixedSignalHost::equilibrium_image)
+                .collect::<Result<_, _>>()?,
+        }))
+    }
+
+    /// Adopt the held equilibrium a previous DC sweep point's circuit kept,
+    /// after this circuit has started digital execution.
+    ///
+    /// Installed whole or not at all: iff the wheel's digital structure and
+    /// every instance's boundary structure are the image's. Returns the first
+    /// instance whose structure differs, with this circuit left at its fresh
+    /// initialization, so the caller can say which elaboration changed.
+    pub(crate) fn adopt_mixed_equilibrium_image(
+        &mut self,
+        image: &MixedEquilibriumImage,
+    ) -> Result<Option<String>, String> {
+        let first_host = || {
+            self.mixed_signal_hosts
+                .first()
+                .map_or_else(String::new, |host| host.instance_name().to_owned())
+        };
+        let Some(coordinator) = &self.scheduler.mixed_digital_coordinator else {
+            return Ok(Some(first_host()));
+        };
+        if self.mixed_signal_hosts.len() != image.hosts.len() {
+            return Ok(Some(first_host()));
+        }
+        // Validate every participant on copies before the first install.
+        let mut staged_coordinator = coordinator.clone();
+        if !staged_coordinator.adopt_equilibrium_image(&image.coordinator)? {
+            return Ok(Some(first_host()));
+        }
+        let mut staged_hosts = self.mixed_signal_hosts.clone();
+        for (host, host_image) in staged_hosts.iter_mut().zip(&image.hosts) {
+            if !host.adopt_equilibrium_image(host_image)? {
+                return Ok(Some(host.instance_name().to_owned()));
+            }
+        }
+        self.scheduler.mixed_digital_coordinator = Some(staged_coordinator);
+        self.mixed_signal_hosts = staged_hosts;
+        self.scheduler.ledgers.clear();
+        self.scheduler.note_equilibrium_commit();
+        Ok(None)
+    }
+
+    /// Discard the analog initialization calls a freshly built module queued
+    /// when a DC sweep continues on a rebuilt circuit: they were delivered at
+    /// the sweep's first point, and the continuation does not run them again.
+    pub(crate) fn discard_mixed_initial_analog_tasks(&mut self) -> Result<(), String> {
+        for host in &mut self.mixed_signal_hosts {
+            host.visit_accepted_analog_tasks(&mut |_| {})
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Converter inputs that sit at a decision boundary of the held
+    /// equilibrium at `solution` (S5(c)).
+    ///
+    /// Two findings are reported, each naming the converter, its input net and
+    /// the mixed module port it feeds:
+    ///
+    /// * an input within Newton's own "same value" tolerance of a threshold,
+    ///   `|v − θ| ≤ reltol·max(|v|, |θ|) + vntol`, where a perturbation the
+    ///   size of the solver's own error could have flipped the decision;
+    /// * an input inside an unknown or hysteresis band whose converter
+    ///   published X because no earlier decision exists.
+    ///
+    /// The code models are read through their committed input samples; a
+    /// module's own A/D bridges through `solution`.
+    pub(crate) fn mixed_threshold_findings(
+        &self,
+        solution: &[Value],
+        reltol: Value,
+        vntol: Value,
+    ) -> Vec<ThresholdFinding> {
+        let node_names = self.node_names_sorted();
+        let node_name = |node: usize| -> String {
+            if node == 0 {
+                "0".to_owned()
+            } else {
+                node_names
+                    .get(node - 1)
+                    .cloned()
+                    .unwrap_or_else(|| format!("node {node}"))
+            }
+        };
+        let on_threshold = |voltage: Value, threshold: Value| {
+            (voltage - threshold).abs() <= reltol * voltage.abs().max(threshold.abs()) + vntol
+        };
+        let mut findings = Vec::new();
+        for instance in &self.xspice_instances {
+            let Ok(thresholds) = instance.analog_input_thresholds() else {
+                continue;
+            };
+            for threshold in thresholds {
+                let Some(voltage) =
+                    instance.analog_threshold_sample(&threshold.port, threshold.element)
+                else {
+                    continue;
+                };
+                let net = instance
+                    .connection(&threshold.port)
+                    .map(|connection| analog_input_net(connection, threshold.element, &node_name))
+                    .unwrap_or_else(|| threshold.port.clone());
+                let output = self.converter_output_node(instance, threshold.element);
+                let host_port = output.and_then(|node| self.mixed_host_port_on(node));
+                let kind = if let Some(theta) = [threshold.low, threshold.high]
+                    .into_iter()
+                    .find(|theta| on_threshold(voltage, *theta))
+                {
+                    Some(ThresholdFindingKind::OnThreshold { threshold: theta })
+                } else if threshold.low < voltage
+                    && voltage < threshold.high
+                    && output.is_some_and(|node| {
+                        self.scheduler
+                            .xspice_event_values
+                            .digital_values
+                            .get(&node)
+                            .is_some_and(|value| {
+                                value.state == crate::xspice::DigitalState::Unknown
+                            })
+                    })
+                {
+                    Some(ThresholdFindingKind::UndefinedBand {
+                        low: threshold.low,
+                        high: threshold.high,
+                    })
+                } else {
+                    None
+                };
+                if let Some(kind) = kind {
+                    findings.push(ThresholdFinding {
+                        converter: instance.name.clone(),
+                        net,
+                        host_port,
+                        kind,
+                        voltage,
+                    });
+                }
+            }
+        }
+        for host in &self.mixed_signal_hosts {
+            for bridge in host.boundary_thresholds() {
+                let voltage = node_voltage(solution, bridge.positive)
+                    - node_voltage(solution, bridge.negative);
+                let kind = if let Some(theta) = [bridge.low, bridge.high]
+                    .into_iter()
+                    .find(|theta| on_threshold(voltage, *theta))
+                {
+                    Some(ThresholdFindingKind::OnThreshold { threshold: theta })
+                } else if bridge.low < voltage && voltage < bridge.high && bridge.undefined {
+                    Some(ThresholdFindingKind::UndefinedBand {
+                        low: bridge.low,
+                        high: bridge.high,
+                    })
+                } else {
+                    None
+                };
+                if let Some(kind) = kind {
+                    findings.push(ThresholdFinding {
+                        converter: host.instance_name().to_owned(),
+                        net: if bridge.negative == 0 {
+                            node_name(bridge.positive)
+                        } else {
+                            format!(
+                                "{},{}",
+                                node_name(bridge.positive),
+                                node_name(bridge.negative)
+                            )
+                        },
+                        host_port: Some(format!("{}.{}", host.instance_name(), bridge.signal)),
+                        kind,
+                        voltage,
+                    });
+                }
+            }
+        }
+        findings
+    }
+
+    /// The digital net a converter publishes the decision of one input
+    /// element on.
+    fn converter_output_node(
+        &self,
+        instance: &crate::xspice::XspiceInstance,
+        element: usize,
+    ) -> Option<usize> {
+        use crate::xspice::{PortConnection, PortDirection};
+        let index = instance
+            .ports()
+            .iter()
+            .position(|port| port.direction == PortDirection::Out)?;
+        match instance.connection_at(index)? {
+            PortConnection::Digital(node) | PortConnection::DigitalInverted(node) => {
+                (element == 0).then_some(*node)
+            }
+            PortConnection::DigitalVector(nodes) => nodes.get(element).copied(),
+            PortConnection::DigitalVectorMapped(nodes) => {
+                nodes.get(element).map(|connection| connection.node)
+            }
+            _ => None,
+        }
+    }
+
+    /// The mixed module port bound to one event net, as `instance.port`.
+    fn mixed_host_port_on(&self, node: usize) -> Option<String> {
+        self.mixed_signal_hosts.iter().find_map(|host| {
+            host.direct_event_ports()
+                .find(|(port, _)| port.node == node)
+                .map(|(_, name)| format!("{}.{name}", host.instance_name()))
+        })
     }
 
     /// Settle and validate every mixed host before native acceptance work.

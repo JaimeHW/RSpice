@@ -66,7 +66,9 @@ impl MixedDigitalCoordinator {
         Ok(MixedDigital::View(view))
     }
 
-    fn checkpoint_topology(&self) -> Result<[u8; 32], String> {
+    pub(in crate::xspice::verilog::mixed) fn checkpoint_topology(
+        &self,
+    ) -> Result<[u8; 32], String> {
         let maps: Vec<_> = self
             .maps
             .iter()

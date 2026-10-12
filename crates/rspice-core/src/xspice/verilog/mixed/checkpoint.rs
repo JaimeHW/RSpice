@@ -173,7 +173,9 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    fn participant_topology(&self) -> Result<[u8; 32], String> {
+    pub(in crate::xspice::verilog::mixed) fn participant_topology(
+        &self,
+    ) -> Result<[u8; 32], String> {
         let adc: Vec<_> = self
             .state
             .bridges

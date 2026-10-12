@@ -179,6 +179,14 @@ pub(crate) struct CircuitScheduler {
     /// during one it holds the place-holders the instances swapped out.
     #[cfg(feature = "veriloga")]
     pub(in crate::circuit) ledgers: Vec<crate::xspice::verilog::CandidateLedger>,
+    /// Whether a time-zero trial has been kept as the held equilibrium.
+    ///
+    /// Such a circuit belongs to an operating point, a DC sweep or a
+    /// small-signal bias, and never to a transient: its discrete half has
+    /// already run its `initial` blocks, so a transient started on it would
+    /// begin from a settled state rather than from time zero.
+    #[cfg(feature = "veriloga")]
+    equilibrium_committed: bool,
 }
 
 impl CircuitScheduler {
@@ -196,7 +204,28 @@ impl CircuitScheduler {
             analog_step_floor: 0.0,
             #[cfg(feature = "veriloga")]
             ledgers: Vec::new(),
+            #[cfg(feature = "veriloga")]
+            equilibrium_committed: false,
         }
+    }
+
+    /// Record that a held equilibrium was committed on this circuit.
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) fn note_equilibrium_commit(&mut self) {
+        self.equilibrium_committed = true;
+    }
+
+    /// Whether a held equilibrium was committed on this circuit.
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) fn has_equilibrium_commit(&self) -> bool {
+        self.equilibrium_committed
+    }
+
+    /// Forget a held equilibrium when a fresh analysis resets every
+    /// participant to its initial state.
+    #[cfg(feature = "veriloga")]
+    pub(in crate::circuit) fn clear_equilibrium_commit(&mut self) {
+        self.equilibrium_committed = false;
     }
 
     /// Whether a code model shares an event net with a mixed module.
