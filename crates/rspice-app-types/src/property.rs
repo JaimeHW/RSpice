@@ -165,6 +165,28 @@ pub struct PropertyDefinition {
     /// Maximum value for numeric properties
     pub max_value: Option<f64>,
 
+    /// Whether `min_value` itself is refused: the open end of `from (0:…`.
+    #[serde(default)]
+    pub min_exclusive: bool,
+
+    /// Whether `max_value` itself is refused: the open end of `from …:1)`.
+    #[serde(default)]
+    pub max_exclusive: bool,
+
+    /// Whether a number must be whole: a Verilog-A `integer` parameter.
+    #[serde(default)]
+    pub integer: bool,
+
+    /// Numbers refused although they lie inside the range: a Verilog-A
+    /// `exclude` clause.
+    #[serde(default)]
+    pub excluded_values: Vec<f64>,
+
+    /// What an empty field means when that is not a value the field could
+    /// hold, such as `computed` for a parameter its module derives from others.
+    #[serde(default)]
+    pub default_hint: Option<String>,
+
     /// Maximum Unicode scalar count for string or expression properties.
     pub max_length: Option<usize>,
 
@@ -207,6 +229,11 @@ impl Default for PropertyDefinition {
             unit: None,
             min_value: None,
             max_value: None,
+            min_exclusive: false,
+            max_exclusive: false,
+            integer: false,
+            excluded_values: Vec::new(),
+            default_hint: None,
             max_length: None,
             required: false,
             read_only: false,
@@ -266,6 +293,38 @@ impl PropertyDefinition {
     pub fn with_range(mut self, min: f64, max: f64) -> Self {
         self.min_value = Some(min);
         self.max_value = Some(max);
+        self
+    }
+
+    /// Set the lower bound, refusing the bound itself when `exclusive`.
+    pub fn with_min(mut self, min: f64, exclusive: bool) -> Self {
+        self.min_value = Some(min);
+        self.min_exclusive = exclusive;
+        self
+    }
+
+    /// Set the upper bound, refusing the bound itself when `exclusive`.
+    pub fn with_max(mut self, max: f64, exclusive: bool) -> Self {
+        self.max_value = Some(max);
+        self.max_exclusive = exclusive;
+        self
+    }
+
+    /// Accept whole numbers only.
+    pub fn integer(mut self) -> Self {
+        self.integer = true;
+        self
+    }
+
+    /// Refuse `value` although it lies inside the range.
+    pub fn excluding(mut self, value: f64) -> Self {
+        self.excluded_values.push(value);
+        self
+    }
+
+    /// Say what an empty field means when that is not a value.
+    pub fn with_default_hint(mut self, hint: impl Into<String>) -> Self {
+        self.default_hint = Some(hint.into());
         self
     }
 
@@ -353,22 +412,50 @@ impl PropertyDefinition {
 
         // Check numeric range
         if let PropertyValue::Number { value: v, .. } = value {
-            if let Some(min) = self.min_value
-                && *v < min
-            {
-                return Err(format!(
-                    "{} must be at least {}",
-                    self.display_name,
-                    format_engineering(min)
-                ));
+            if self.integer && v.fract() != 0.0 {
+                return Err(format!("{} must be a whole number", self.display_name));
             }
-            if let Some(max) = self.max_value
-                && *v > max
+            if let Some(min) = self.min_value {
+                if self.min_exclusive && *v <= min {
+                    return Err(format!(
+                        "{} must be greater than {}",
+                        self.display_name,
+                        self.format_bound(min)
+                    ));
+                }
+                if *v < min {
+                    return Err(format!(
+                        "{} must be at least {}",
+                        self.display_name,
+                        self.format_bound(min)
+                    ));
+                }
+            }
+            if let Some(max) = self.max_value {
+                if self.max_exclusive && *v >= max {
+                    return Err(format!(
+                        "{} must be less than {}",
+                        self.display_name,
+                        self.format_bound(max)
+                    ));
+                }
+                if *v > max {
+                    return Err(format!(
+                        "{} must be at most {}",
+                        self.display_name,
+                        self.format_bound(max)
+                    ));
+                }
+            }
+            if let Some(excluded) = self
+                .excluded_values
+                .iter()
+                .find(|excluded| **excluded == *v)
             {
                 return Err(format!(
-                    "{} must be at most {}",
+                    "{} cannot be {}: that value is excluded",
                     self.display_name,
-                    format_engineering(max)
+                    self.format_bound(*excluded)
                 ));
             }
         }
@@ -402,6 +489,17 @@ impl PropertyDefinition {
         }
 
         Ok(())
+    }
+
+    /// A bound or excluded value as a refusal states it: a whole-number
+    /// property's as the integer it is (`1000`, not `1k`), any other in
+    /// engineering notation.
+    fn format_bound(&self, value: f64) -> String {
+        if self.integer && value.fract() == 0.0 && value.abs() < 1e15 {
+            format!("{}", value as i64)
+        } else {
+            format_engineering(value)
+        }
     }
 }
 
@@ -551,5 +649,53 @@ mod tests {
                 Err("Value must be finite".to_owned())
             );
         }
+    }
+
+    /// A Verilog-A range is open or closed at each end, and may exclude
+    /// single values; a refusal names the bound or the value it refused.
+    #[test]
+    fn open_ends_whole_numbers_and_excluded_values_are_refused_by_name() {
+        let ratio = PropertyDefinition::new("ratio")
+            .with_min(0.0, true)
+            .with_max(1.0, false)
+            .excluding(0.5);
+        let check = |definition: &PropertyDefinition, value: f64| {
+            definition.validate(&PropertyValue::number(value))
+        };
+        assert_eq!(
+            check(&ratio, 0.0),
+            Err("ratio must be greater than 0".to_owned())
+        );
+        assert!(check(&ratio, 1e-12).is_ok());
+        assert!(check(&ratio, 1.0).is_ok(), "the closed end is accepted");
+        assert_eq!(
+            check(&ratio, 0.5),
+            Err("ratio cannot be 500m: that value is excluded".to_owned())
+        );
+
+        let below_one = PropertyDefinition::new("vt").with_max(1.0, true);
+        assert_eq!(
+            check(&below_one, 1.0),
+            Err("vt must be less than 1".to_owned())
+        );
+        assert!(check(&below_one, 0.999).is_ok());
+
+        let stages = PropertyDefinition::new("stages")
+            .integer()
+            .with_min(1.0, false)
+            .excluding(4.0);
+        assert_eq!(
+            check(&stages, 1.5),
+            Err("stages must be a whole number".to_owned())
+        );
+        assert_eq!(
+            check(&stages, 0.0),
+            Err("stages must be at least 1".to_owned())
+        );
+        assert_eq!(
+            check(&stages, 4.0),
+            Err("stages cannot be 4: that value is excluded".to_owned())
+        );
+        assert!(check(&stages, 3.0).is_ok());
     }
 }
