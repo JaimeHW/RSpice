@@ -197,7 +197,9 @@ impl XyceTestRunner {
                 "{BUG636_LABEL} produced the wrong typed failure: {error:?}"
             ));
         };
-        if line != 10 || message != BUG636_PARSE_MESSAGE {
+        if line != 10
+            || message != Self::located_analysis_card_message(deck_path, 10, BUG636_PARSE_MESSAGE)
+        {
             return Err(format!(
                 "{BUG636_LABEL} parse identity changed: line={line}, message={message:?}"
             ));

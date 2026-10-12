@@ -821,6 +821,39 @@ impl XyceTestRunner {
         }
     }
 
+    /// The exact diagnostic a file-backed parse reports for a root analysis
+    /// card. Since d9af822b8 a card that fails eagerly is retried after the
+    /// declarations complete, and the retry's error carries its authored
+    /// `path:line` origin.
+    pub(super) fn located_analysis_card_message(
+        deck_path: &Path,
+        line: usize,
+        message: &str,
+    ) -> String {
+        format!(
+            "{}: {message}",
+            rspice_core::netlist::NetlistSourceLocation::in_file(deck_path, line)
+        )
+    }
+
+    /// [`Self::require_exact_syntax_failure`] for a root analysis card: the
+    /// typed kind, the line, the message and its location must all match.
+    pub(super) fn require_exact_analysis_card_syntax_failure(
+        label: &str,
+        source: &str,
+        deck_path: &Path,
+        expected_line: usize,
+        expected_message: &str,
+    ) -> Result<(), String> {
+        Self::require_exact_syntax_failure(
+            label,
+            source,
+            deck_path,
+            expected_line,
+            &Self::located_analysis_card_message(deck_path, expected_line, expected_message),
+        )
+    }
+
     pub(super) fn require_missing_library_dependency_absent(
         label: &str,
         deck_path: &Path,

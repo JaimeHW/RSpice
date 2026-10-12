@@ -1327,7 +1327,7 @@ impl XyceTestRunner {
                 (8, ".print dc V(1)"),
             ],
         )?;
-        Self::require_exact_syntax_failure(
+        Self::require_exact_analysis_card_syntax_failure(
             "Message/Input DC_excessArgs",
             source,
             deck_path,
@@ -1388,7 +1388,7 @@ impl XyceTestRunner {
             ]
         };
         Self::require_expected_failure_source_lines(label, source, line_count, &expected_lines)?;
-        Self::require_exact_syntax_failure(
+        Self::require_exact_analysis_card_syntax_failure(
             label,
             source,
             deck_path,
@@ -2079,7 +2079,7 @@ impl XyceTestRunner {
                 (17, ".END"),
             ],
         )?;
-        Self::require_exact_syntax_failure(
+        Self::require_exact_analysis_card_syntax_failure(
             "BUG 204",
             source,
             deck_path,
@@ -2112,7 +2112,7 @@ impl XyceTestRunner {
                 (10, ".END"),
             ],
         )?;
-        Self::require_exact_syntax_failure(
+        Self::require_exact_analysis_card_syntax_failure(
             "BUG 281",
             source,
             deck_path,
