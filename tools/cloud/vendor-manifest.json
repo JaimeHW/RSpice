@@ -9,7 +9,7 @@
   ],
   "patch": {
     "path": "tools/cloud/vendor.patch",
-    "sha256": "b6f22905033faaf392f69d3c39412344c006db20982ad10abbfe307c2bb66130"
+    "sha256": "30acc3f6efbc0491bc623198cbf3cba72f85d0bf13ea4b4bc4ebb253bc9fafcf"
   },
   "upstream_files": {
     "crates/rspice-cloud-client/Cargo.toml": "c8810b17e6b6b73779466491f53e5fe70cc7fab11150b12aa0eb1dfdb14aac04",
@@ -68,7 +68,7 @@
     "crates/rspice-pack/src/zip.rs": "49da02edde051a12e15ed1e0228357fbaaa4d418eb8e36f93d7046d87f1f0318"
   },
   "files": {
-    "crates/rspice-cloud-client/Cargo.toml": "c8810b17e6b6b73779466491f53e5fe70cc7fab11150b12aa0eb1dfdb14aac04",
+    "crates/rspice-cloud-client/Cargo.toml": "fcb1288b6866b4aa7f74ed5b9498647abcca6736d786677b7932f52db65670c8",
     "crates/rspice-cloud-client/README.md": "7a877d7b66063e87e49f63220b14eb0af8d7ed211dc9ed50391ae095291a3198",
     "crates/rspice-cloud-client/src/artifacts.rs": "81644ddbed452cf2dfe7c992b7212a8557f5e1e777432969718e45a8c56e7f60",
     "crates/rspice-cloud-client/src/auth.rs": "3c62b57e9ce880f879655db7d30618a3348f7b7aca0e2109e47e16e38df128ee",

@@ -9,12 +9,16 @@ file hashes, applies `vendor.patch`, and records the resulting file hashes and p
 hash. `--check` verifies the materialized result. Re-sync after reviewing any
 patch change; do not update hashes to conceal unexplained drift.
 
-The downstream patch preserves two existing application changes:
+The downstream patch preserves three existing application changes:
 
 - Protocols 3 and 4 both use revision content digest 2. Protocol 4 changes the
   result document, not the request identity. The regression tests retain the
   acceptance of 3/4 and rejection of incompatible versions.
 - Locally authored crate READMEs describe application integration.
+- `rspice-cloud-client` enables reqwest's `stream` feature for native targets
+  only. The browser build streams through its own Fetch adapter and the
+  workspace `wasm-streams`; reqwest's feature there would link a second
+  `wasm-streams` with the same exported JavaScript symbols.
 
 These changes are not claimed to originate at the upstream commit. Patch
 application fails when upstream context changes, requiring a compatibility
