@@ -99,6 +99,34 @@ const SWEEP_SIZE: (f32, f32) = (1400.0, 2600.0);
 /// How many passes a surface is given to reach a fixed point.
 const SETTLE_PASSES: usize = 8;
 
+/// The stack a sweep renders the studio on.
+///
+/// One sweep pass is a whole studio frame — a route, its overlays and the
+/// workflow dialogs — and in a debug build that needs more than the 2 MiB
+/// libtest gives a test thread. It overflowed there, and the abort took every
+/// test still running in the crate's binary with it. Production never runs
+/// the studio on less than 8 MiB: that is the Linux and macOS main thread and
+/// the browser build's `-zstack-size`, and `build.rs` reserves 64 MiB for the
+/// Windows executable. So the sweep renders on that floor rather than on
+/// libtest's default.
+const STUDIO_STACK_BYTES: usize = 8 << 20;
+
+/// Run `body` on a thread with the studio's production stack floor.
+///
+/// Everything the body needs is built inside it — the fixture, the context and
+/// any scripted picker answer, whose queue is per thread — so nothing but the
+/// result crosses back.
+fn on_studio_stack<R: Send>(body: impl FnOnce() -> R + Send) -> R {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(STUDIO_STACK_BYTES)
+            .spawn_scoped(scope, body)
+            .expect("the sweep's render thread starts")
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
 /// Roles a reader acts on.
 const CONTROL_ROLES: [Role; 9] = [
     Role::Button,
@@ -420,38 +448,41 @@ struct SurfacePlan {
 /// still builds its own.
 fn studio_enumeration() -> &'static [SurfacePlan] {
     static ENUMERATION: std::sync::OnceLock<Vec<SurfacePlan>> = std::sync::OnceLock::new();
-    ENUMERATION.get_or_init(|| {
-        let mut seen: BTreeSet<u64> = BTreeSet::new();
-        let mut plan = Vec::new();
-        for index in 0..surface_count() {
-            let (surface, app) = sweep_surface(index);
-            let mut sweep = Sweep::open(app);
-            let (_, nodes) = sweep.settle(&surface);
-            let published = nodes
-                .iter()
-                .filter(|(_, node)| is_pressable(node))
-                .map(|(_, node)| {
-                    (
-                        describe(node),
-                        node.bounds().expect("a pressable node carries bounds"),
-                    )
-                })
-                .collect();
-            let targets = nodes
-                .iter()
-                .filter(|(_, node)| is_pressable(node))
-                .filter(|(id, _)| seen.insert(id.0))
-                .map(|(id, node)| (*id, announced(node)))
-                .collect();
-            plan.push(SurfacePlan {
-                index,
-                surface,
-                published,
-                targets,
-            });
-        }
-        plan
-    })
+    ENUMERATION.get_or_init(|| on_studio_stack(enumerate_studio))
+}
+
+/// The enumeration [`studio_enumeration`] caches, computed once.
+fn enumerate_studio() -> Vec<SurfacePlan> {
+    let mut seen: BTreeSet<u64> = BTreeSet::new();
+    let mut plan = Vec::new();
+    for index in 0..surface_count() {
+        let (surface, app) = sweep_surface(index);
+        let mut sweep = Sweep::open(app);
+        let (_, nodes) = sweep.settle(&surface);
+        let published = nodes
+            .iter()
+            .filter(|(_, node)| is_pressable(node))
+            .map(|(_, node)| {
+                (
+                    describe(node),
+                    node.bounds().expect("a pressable node carries bounds"),
+                )
+            })
+            .collect();
+        let targets = nodes
+            .iter()
+            .filter(|(_, node)| is_pressable(node))
+            .filter(|(id, _)| seen.insert(id.0))
+            .map(|(id, node)| (*id, announced(node)))
+            .collect();
+        plan.push(SurfacePlan {
+            index,
+            surface,
+            published,
+            targets,
+        });
+    }
+    plan
 }
 
 /// The name a node announces, which is what a reader reaches it by.
@@ -481,23 +512,23 @@ fn announced(node: &Node) -> String {
 /// contributed, and the Outputs registry's own actions are all disabled over
 /// an empty registry, so its enabled controls are the toolbar's.
 const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
-    ("Analyses/Transient", 47),
-    ("Analyses/Ac", 3),
-    ("Analyses/DcSweep", 7),
-    ("Analyses/Noise", 9),
-    ("Analyses/Stb", 3),
-    ("Analyses/Pss", 13),
+    ("Analyses/Transient", 49),
+    ("Analyses/Ac", 6),
+    ("Analyses/DcSweep", 13),
+    ("Analyses/Noise", 11),
+    ("Analyses/Stb", 8),
+    ("Analyses/Pss", 30),
     ("Analyses/Temperature", 7),
-    ("Analyses/Corner", 9),
+    ("Analyses/Corner", 21),
     ("Excitations", 2),
     ("Variables", 2),
     ("Outputs", 0),
     ("Specifications", 4),
     ("RunSet", 31),
     ("Models", 1),
-    ("Solver", 32),
+    ("Solver", 33),
     ("Save", 6),
-    ("analysis catalogue · Analyses", 33),
+    ("analysis catalogue · Analyses", 37),
     ("analysis catalogue · Excitations", 0),
     ("analysis catalogue · Variables", 0),
     ("analysis catalogue · Outputs", 0),
@@ -507,7 +538,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Solver", 0),
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
-    ("analysis options · Operating point", 11),
+    ("analysis options · Operating point", 18),
     ("plan manager", 12),
     ("rename analysis", 4),
     ("run points", 12),
@@ -550,7 +581,17 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// also makes DC the first publisher of two shared option widgets previously
 /// first seen under Temperature and Operating point. Their forms are unchanged;
 /// the reviewed enumeration grows by one distinct control overall (295).
-const PRESSED_FLOOR: usize = 295;
+///
+/// Then the sharing itself went: each analysis kind's form now draws under its
+/// own widget identity. Sharing by grid position had stopped meaning "the same
+/// control" — the transient form's checkpoint switch and the temperature form's
+/// Stop field were one node, and six of Temperature's seven controls went
+/// unpressed because an earlier form had published their identities under
+/// other names. Every form's controls are now its own: no surface's tally
+/// fell, Temperature is back to its seven, and the option fields each kind owns
+/// are pressed on that kind's form (354). The transient form's two new
+/// controls — checkpoint retention and import — are among them.
+const PRESSED_FLOOR: usize = 354;
 
 /// Controls that are wired to nothing.
 ///
@@ -599,11 +640,17 @@ const HELD_SELECTION_CEILING: usize = 4;
 /// reaches its handler; nothing this sweep can read records that it did.
 ///
 /// [`the_sweep_press_that_starts_a_picker_answers_without_a_dialog`] is the
-/// evidence behind that sentence: it names this exact control as the only one
-/// the sweep reaches that starts a picker, and shows that a scripted sheet does
-/// come back through it. Exact, like the others: if the harness ever grows a
-/// way to see this, the entry has to go.
-const PRESSES_THIS_HARNESS_CANNOT_SEE: &[&str] = &["Variables: Button \"Import…\""];
+/// evidence behind that sentence, and shows that a scripted sheet does come
+/// back through it. The transient form's checkpoint import is the same shape —
+/// a binary picker through the same seam — and its product, an imported
+/// checkpoint in the run's retained results, is outside what the sweep
+/// compares; [`the_transient_checkpoint_import_press_answers_without_a_dialog`]
+/// is its evidence. Exact, like the others: if the harness ever grows a way to
+/// see either, its entry has to go.
+const PRESSES_THIS_HARNESS_CANNOT_SEE: &[&str] = &[
+    "Analyses/Transient: Button \"Import transient checkpoint…\"",
+    "Variables: Button \"Import…\"",
+];
 
 /// How many sweep presses open a modal.
 const MODAL_OPENERS_FLOOR: usize = 7;
@@ -909,7 +956,7 @@ macro_rules! surface_press_cases {
         $(
             #[test]
             fn $case() {
-                press_every_control_on($index, $surface);
+                on_studio_stack(|| press_every_control_on($index, $surface));
             }
         )*
     };
@@ -1054,6 +1101,10 @@ fn every_swept_surface_has_a_case_that_presses_it() {
 /// is then cancelled, and the plan has to be exactly what it was.
 #[test]
 fn every_destructive_press_is_reviewed_or_receipted() {
+    on_studio_stack(press_every_destructive_control);
+}
+
+fn press_every_destructive_control() {
     let mut silent = Vec::new();
     let mut cost = Vec::new();
     let mut destructive = 0usize;
@@ -1104,13 +1155,14 @@ fn every_destructive_press_is_reviewed_or_receipted() {
     );
 }
 
-/// The one sweep press that starts a file picker answers inside the frame.
+/// The sweep press that starts the spec-sheet picker answers inside the frame.
 ///
-/// `page_variables.rs`'s "Import…" is the only control any surface this sweep
-/// opens reaches `rfd` from: every other picker in the studio is behind a route
-/// the sweep's fixtures do not stand on — the plan manager's package import and
+/// `page_variables.rs`'s "Import…" is one of the two controls any surface this
+/// sweep opens reaches `rfd` from; the transient form's checkpoint import,
+/// below, is the other. Every other picker in the studio is behind a route the
+/// sweep's fixtures do not stand on — the plan manager's package import and
 /// export are drawn only in its exchange mode, and its draft opens in Browse.
-/// That one control used to raise a real Open dialog on the developer's desktop
+/// This control used to raise a real Open dialog on the developer's desktop
 /// and hold the test thread until a person closed it, so an unattended sweep
 /// hung and an attended one recorded whichever file the person picked.
 ///
@@ -1122,6 +1174,11 @@ fn every_destructive_press_is_reviewed_or_receipted() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn the_sweep_press_that_starts_a_picker_answers_without_a_dialog() {
+    on_studio_stack(spec_sheet_import_answers_without_a_dialog);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spec_sheet_import_answers_without_a_dialog() {
     use crate::io::file_exchange::{
         ScriptedChoice, script_next_choice, scripted_choices_remaining, take_pickers_opened,
     };
@@ -1186,6 +1243,122 @@ fn the_sweep_press_that_starts_a_picker_answers_without_a_dialog() {
             Some(SimulationWorkflowDialog::DesignVariableImport(_))
         ),
         "the picked sheet did not open the guided import"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+/// The transient form's checkpoint import answers inside the frame too.
+///
+/// The second control the sweep reaches a picker from, since the transient form
+/// gained checkpoint capture and resume. Its whole product is a checkpoint in
+/// the run's retained results, which none of the four terms the sweep compares
+/// can see, so an unscripted press — a cancellation — reads as dead there and
+/// is listed in [`PRESSES_THIS_HARNESS_CANNOT_SEE`]. This is the evidence for
+/// that entry, checked the same two ways as the spec-sheet import: a scripted
+/// cancellation is consumed by the seam and imports nothing, and a scripted
+/// checkpoint file is imported.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_transient_checkpoint_import_press_answers_without_a_dialog() {
+    on_studio_stack(transient_checkpoint_import_answers_without_a_dialog);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn transient_checkpoint_import_answers_without_a_dialog() {
+    use crate::io::file_exchange::{
+        ScriptedChoice, script_next_choice, scripted_choices_remaining, take_pickers_opened,
+    };
+    use rspice_core::engine::{TransientCheckpointEncoding, TransientStartupMode};
+
+    const SURFACE: &str = "Analyses/Transient";
+    const IMPORT: &str = "Import transient checkpoint\u{2026}";
+    let index = (0..surface_count())
+        .find(|&index| sweep_surface(index).0 == SURFACE)
+        .expect("the sweep covers the transient form");
+    fn import_control(nodes: &[(NodeId, Node)]) -> NodeId {
+        nodes
+            .iter()
+            .find(|(_, node)| is_pressable(node) && announced(node) == IMPORT)
+            .map(|(id, _)| *id)
+            .expect("the transient form publishes the checkpoint import")
+    }
+    fn imported(sweep: &Sweep) -> usize {
+        sweep
+            .app
+            .state
+            .simulation
+            .retained
+            .imported_transient_checkpoints
+            .iter()
+            .count()
+    }
+
+    // A cancellation.
+    let (name, app) = sweep_surface(index);
+    let mut sweep = Sweep::open(app);
+    let (_, nodes) = sweep.settle(&name);
+    let import = import_control(&nodes);
+    take_pickers_opened();
+    script_next_choice(ScriptedChoice::Cancelled);
+    sweep.press(import);
+    assert_eq!(
+        take_pickers_opened(),
+        ["RSpice transient checkpoint"],
+        "the press did not reach the picker seam, so on a desktop build it reached a dialog"
+    );
+    assert_eq!(
+        scripted_choices_remaining(),
+        0,
+        "the picker took the answer"
+    );
+    assert_eq!(
+        imported(&sweep),
+        0,
+        "a cancelled pick imported a checkpoint"
+    );
+
+    // And a checkpoint file, on a fixture of its own.
+    let deck = rspice_core::Netlist::parse(
+        "Sweep checkpoint\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1p\n.tran 1n 20n\n.end\n",
+    )
+    .expect("the checkpoint deck parses");
+    let (_, images) = rspice_core::Engine::default()
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &deck,
+            20e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &[7e-9],
+        )
+        .expect("the checkpoint deck solves");
+    let bytes = images[0]
+        .checkpoint
+        .to_bytes(TransientCheckpointEncoding::Packed)
+        .expect("the checkpoint packs");
+    let directory = std::env::temp_dir().join(format!(
+        "rspice-press-sweep-checkpoint-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("the scratch directory is made");
+    let file = directory.join("accepted.rspice-tran");
+    std::fs::write(&file, bytes).expect("the scratch checkpoint is written");
+
+    let (name, app) = sweep_surface(index);
+    let mut sweep = Sweep::open(app);
+    let (_, nodes) = sweep.settle(&name);
+    let import = import_control(&nodes);
+    script_next_choice(ScriptedChoice::Chose(file));
+    sweep.press(import);
+    assert_eq!(
+        scripted_choices_remaining(),
+        0,
+        "the picker took the answer"
+    );
+    assert_eq!(
+        imported(&sweep),
+        1,
+        "the picked checkpoint was not imported"
     );
 
     std::fs::remove_dir_all(&directory).ok();
@@ -1326,6 +1499,10 @@ fn the_sweep_viewport_reaches_every_control() {
 /// own would show the two are distinguishable.
 #[test]
 fn the_handled_predicate_reports_a_press_that_moves_nothing() {
+    on_studio_stack(press_a_control_and_a_non_control);
+}
+
+fn press_a_control_and_a_non_control() {
     let (name, app) = sweep_surface(0);
     let mut sweep = Sweep::open(app);
     let (settled, nodes) = sweep.settle(&name);
