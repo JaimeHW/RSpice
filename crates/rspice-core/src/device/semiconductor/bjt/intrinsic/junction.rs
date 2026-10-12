@@ -207,11 +207,21 @@ impl Bjt {
     ) -> Value {
         let phi = potential.max(1e-12);
         let exponent = 1.0 - grading;
-        let one_minus = (1.0 - scaled_voltage / phi).max(1e-18);
-        if exponent.abs() < 1e-12 {
-            -phi * one_minus.ln()
+        // ln(1 - v/phi) without forming 1 - v/phi: near zero bias that
+        // difference rounds to the unit's ulp, which quantizes the charge at
+        // about phi * EPSILON * C whatever the bias, and a companion
+        // multiplies that quantum by 1/dt. The clamp keeps the 1e-18 floor
+        // on 1 - v/phi.
+        let ratio = -scaled_voltage / phi;
+        let log_one_minus = if 1.0 + ratio > 1e-18 {
+            ratio.ln_1p()
         } else {
-            phi * (1.0 - one_minus.powf(exponent)) / exponent
+            1e-18_f64.ln()
+        };
+        if exponent.abs() < 1e-12 {
+            -phi * log_one_minus
+        } else {
+            -phi * (exponent * log_one_minus).exp_m1() / exponent
         }
     }
 
