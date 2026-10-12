@@ -1,10 +1,10 @@
 //! The Verilog-A and Automation source navigators.
 //!
-//! Both pages show one file at a time out of a project-owned bundle, so the
-//! rail's first job is choosing which. Before this existed the selection had
-//! no UI writer at all: a bundle's build profile, run plan, environment lock,
-//! and permission manifest were authored by the workspace and then
-//! unreachable, because only the bundle root was ever opened.
+//! Both show one file at a time out of a project-owned bundle, so the rail's
+//! first job is choosing which. Before this existed the selection had no UI
+//! writer at all: a bundle's build profile, run plan, environment lock, and
+//! permission manifest were authored by the workspace and then unreachable,
+//! because only the bundle root was ever opened.
 //!
 //! Rows state the role the bundle records, never a guess from the filename.
 //! A starter name is not identity — `characterize.py` is the Python entry
@@ -12,12 +12,13 @@
 
 use super::*;
 
-use crate::state::{ProjectSourceLanguage, ProjectSourceRole};
+use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::documents::code_workspace::{
-    SourceOutlineRow, VerilogAFileSelection, document_outline,
+    self, CodeSourceFileAction, SourceOutlineRow, VerilogAFileSelection, document_outline,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
+/// The rail of a Verilog-A cell view's bundle, with its file operations.
 pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::VerilogA;
     let active = active_path(app, language);
@@ -27,6 +28,12 @@ pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     let (build, sources): (Vec<_>, Vec<_>) = files
         .into_iter()
         .partition(|row| row.role == Some(ProjectSourceRole::VerilogABuildProfile));
+    let actions = active_bundle(app, language).map(|bundle| FileActions {
+        bundle_id: bundle.id(),
+        root: bundle.root().logical_path().to_owned(),
+        writable: !app.state.active_view_read_only()
+            && code_workspace::source_file_mutation_block_reason(app, language).is_none(),
+    });
 
     show_rail(
         ui,
@@ -38,6 +45,7 @@ pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
         ],
         active,
         language,
+        actions,
     );
 }
 
@@ -52,7 +60,145 @@ pub(super) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
         &[(MessageId::CodeNavigatorWorkflowFiles, files)],
         active,
         language,
+        None,
     );
+}
+
+/// New, rename and delete for a bundle's files, offered by the rail that
+/// lists them.
+///
+/// Each opens the source lifecycle dialog at its review, the same transaction
+/// Manage Source Document offers: rewriting a bundle's file graph is reviewed
+/// and committed, never applied by a single click in a list. The controls are
+/// neutral; danger is the confirmation's to state.
+struct FileActions {
+    bundle_id: ProjectSourceId,
+    root: String,
+    writable: bool,
+}
+
+impl FileActions {
+    /// Why `action` cannot apply to `path`, when it cannot. The root is the
+    /// closure's entry and the service refuses to delete it, so the control
+    /// says so before the click rather than after it.
+    fn refusal(
+        &self,
+        action: CodeSourceFileAction,
+        path: &str,
+        messages: MessageCatalog,
+    ) -> Option<String> {
+        (action == CodeSourceFileAction::Delete
+            && crate::state::project_source_paths_equal(path, &self.root))
+        .then(|| messages.text(MessageId::CodeSourceRootDeleteBlocked))
+    }
+}
+
+const FILE_ACTIONS: [(MessageId, CodeSourceFileAction, WorkbenchIcon); 3] = [
+    (
+        MessageId::CodeSourceNewFile,
+        CodeSourceFileAction::New,
+        WorkbenchIcon::Add,
+    ),
+    (
+        MessageId::CodeSourceRename,
+        CodeSourceFileAction::Rename,
+        WorkbenchIcon::Text,
+    ),
+    (
+        MessageId::CodeSourceDelete,
+        CodeSourceFileAction::Delete,
+        WorkbenchIcon::Trash,
+    ),
+];
+
+/// The file operations as icons at the right of a section header that spans
+/// `header`, acting on the file in front of the reader.
+fn header_file_actions(
+    ui: &mut Ui,
+    header: egui::Rect,
+    actions: &FileActions,
+    active: &str,
+    messages: MessageCatalog,
+) -> Option<CodeSourceFileAction> {
+    let side = (header.height() - 4.0).max(1.0);
+    let mut strip = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(header.shrink2(Vec2::new(6.0, 0.0)))
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    strip.spacing_mut().item_spacing.x = 2.0;
+    let mut requested = None;
+    for (label, action, icon) in FILE_ACTIONS.into_iter().rev() {
+        let label = messages.text(label);
+        let refusal = actions.refusal(action, active, messages);
+        let response = strip
+            .add_enabled_ui(actions.writable && refusal.is_none(), |ui| {
+                crate::workbench::design_system::icon_button(
+                    ui,
+                    icon,
+                    &label,
+                    false,
+                    Vec2::splat(side),
+                )
+            })
+            .inner;
+        let response = match refusal {
+            Some(reason) => response.on_disabled_hover_text(reason),
+            None => response,
+        };
+        if response.clicked() {
+            requested = Some(action);
+        }
+    }
+    requested
+}
+
+/// Rename and delete for one row, from its context menu.
+fn row_file_actions(
+    response: &Response,
+    actions: &FileActions,
+    path: &str,
+    messages: MessageCatalog,
+) -> Option<CodeSourceFileAction> {
+    let mut requested = None;
+    let (popup, _) = row_context_menu(response);
+    popup.show(|ui| {
+        for (label, action, _) in FILE_ACTIONS.into_iter().skip(1) {
+            let refusal = actions.refusal(action, path, messages);
+            let item = ui.add_enabled(
+                actions.writable && refusal.is_none(),
+                egui::Button::new(messages.text(label)),
+            );
+            let item = match refusal {
+                Some(reason) => item.on_disabled_hover_text(reason),
+                None => item,
+            };
+            if item.clicked() {
+                requested = Some(action);
+                ui.close();
+            }
+        }
+    });
+    requested
+}
+
+/// Open the lifecycle dialog at `action`'s review for `path`.
+fn open_file_action(
+    app: &mut RSpiceApp,
+    language: ProjectSourceLanguage,
+    bundle_id: ProjectSourceId,
+    action: CodeSourceFileAction,
+    path: &str,
+) {
+    let opened = code_workspace::open_source_file_dialog_in_bundle(
+        app, language, bundle_id, action, path, path,
+    )
+    .and_then(|()| crate::workbench::app::open_source_document_dialog(&mut app.state));
+    if let Err(error) = opened {
+        app.state.ui.code_workspace.source_file_dialog = None;
+        app.state
+            .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+    }
 }
 
 /// One selectable file in a project-owned source bundle.
@@ -160,10 +306,12 @@ fn show_rail(
     sections: &[(MessageId, Vec<BundleRow>)],
     active: Option<String>,
     language: ProjectSourceLanguage,
+    actions: Option<FileActions>,
 ) {
     let messages = app.state.ui.messages();
     let mut selected = None;
     let mut requested_line = None;
+    let mut requested_action = None;
     let outline = match (
         active.as_deref(),
         crate::workbench::documents::code_workspace::active_source_bundle(
@@ -186,22 +334,51 @@ fn show_rail(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             let mut any_file = false;
-            for (title, rows) in sections {
+            for (index, (title, rows)) in sections.iter().enumerate() {
                 if rows.is_empty() {
                     continue;
                 }
                 any_file = true;
-                section_header(ui, &messages.text(*title), Some(&rows.len().to_string()));
+                // The file operations sit in the first section's header: the
+                // sources are what they create, rename and delete.
+                let header_actions = actions.as_ref().filter(|_| index == 0);
+                let top = ui.cursor().top();
+                section_header(
+                    ui,
+                    &messages.text(*title),
+                    header_actions
+                        .is_none()
+                        .then(|| rows.len().to_string())
+                        .as_deref(),
+                );
+                if let (Some(file_actions), Some(path)) = (header_actions, active.as_deref()) {
+                    let header = egui::Rect::from_x_y_ranges(
+                        ui.max_rect().x_range(),
+                        top..=ui.cursor().top(),
+                    );
+                    if let Some(action) =
+                        header_file_actions(ui, header, file_actions, path, messages)
+                    {
+                        requested_action = Some((action, path.to_owned()));
+                    }
+                }
                 for row in rows {
                     let is_active = active.as_deref() == Some(row.logical_path.as_str());
-                    if nav_row(
+                    let response = nav_row_response(
                         ui,
                         source_row_icon(row.role),
                         &row.label,
                         is_active,
                         Some(&messages.text(role_message(row.role))),
-                    ) {
+                    );
+                    if response.clicked() {
                         selected = Some(row.logical_path.clone());
+                    }
+                    if let Some(file_actions) = actions.as_ref()
+                        && let Some(action) =
+                            row_file_actions(&response, file_actions, &row.logical_path, messages)
+                    {
+                        requested_action = Some((action, row.logical_path.clone()));
                     }
                 }
             }
@@ -234,6 +411,9 @@ fn show_rail(
 
     if let Some(logical_path) = selected {
         select(app, language, &logical_path);
+    }
+    if let (Some((action, path)), Some(file_actions)) = (requested_action, actions.as_ref()) {
+        open_file_action(app, language, file_actions.bundle_id, action, &path);
     }
     if let Some(line) = requested_line
         && let Some(active) = active.as_deref()
