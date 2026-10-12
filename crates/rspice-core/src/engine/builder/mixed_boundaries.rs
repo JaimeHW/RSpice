@@ -38,6 +38,26 @@ pub(super) fn plan_conversions(
                 continue;
             }
             let node_label = xspice_auto_bridge_node_label(Some(&names), port.node);
+            // A converter's electrical side would land on a net that already
+            // carries XSPICE event values, which is two domains on one node
+            // with no contract between them. Refused by the instance and port
+            // that would have brought the second domain.
+            let net_kind = circuit.net_kinds.kind(port.node);
+            if port.node > 0 && net_kind.is_discrete() {
+                return Err(crate::ElaborationError::new(
+                    crate::ElaborationErrorKind::PortDiscipline,
+                    format!(
+                        "connects its discrete port '{signal}' to node '{node_label}', which \
+                         carries {} event-driven XSPICE values and continuous loading. This \
+                         connection requires an explicit shared conversion contract for \
+                         continuous loading or unlike event domains; direct shared resolution \
+                         currently requires a digital-only net",
+                        net_kind.description(),
+                    ),
+                )
+                .instance(host.instance_name())
+                .into());
+            }
             let kind = match (port.bit, port.direction) {
                 (Some(_), DigitalLinkDirection::Input) => XspiceAutoBridgeKind::Adc,
                 (Some(_), DigitalLinkDirection::Output) => XspiceAutoBridgeKind::Dac,
