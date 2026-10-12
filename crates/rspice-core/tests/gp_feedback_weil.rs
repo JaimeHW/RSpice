@@ -51,7 +51,7 @@ const CASES: [Case; 5] = [
 ];
 
 impl Case {
-    fn netlist(&self, polarity: f64) -> Netlist {
+    fn source(&self, polarity: f64) -> String {
         // The control block belongs to the reference simulator's capture;
         // these tests exercise the public core analysis and checkpoint APIs.
         let mut source = self.source.split(".control").next().unwrap().to_owned() + ".end\n";
@@ -61,7 +61,11 @@ impl Case {
                 .replace("VS supply 0 ", "VS supply 0 -")
                 .replace("DC 0.78 SIN(0.78 ", "DC -0.78 SIN(-0.78 -");
         }
-        Netlist::parse(&source).unwrap()
+        source
+    }
+
+    fn netlist(&self, polarity: f64) -> Netlist {
+        Netlist::parse(&self.source(polarity)).unwrap()
     }
 
     fn rows(&self) -> Vec<[f64; 6]> {
@@ -156,7 +160,13 @@ fn feedback_tracks_recorded_ngspice_without_clamping_a_transistor_terminal() {
 fn adaptive_feedback_checkpoints_preserve_the_accepted_trajectory() {
     for case in &CASES {
         for polarity in [1.0, -1.0] {
-            let netlist = case.netlist(polarity);
+            // Exact resume is independent of the accuracy target. The
+            // oracle's RELTOL=1e-8 would hold exact-delay phase history to
+            // 0.1-0.3 ps steps; RELTOL=1e-5 keeps that controller adaptive.
+            let source = case.source(polarity);
+            assert!(source.contains(" RELTOL=1e-8 "));
+            let netlist =
+                Netlist::parse(&source.replace(" RELTOL=1e-8 ", " RELTOL=1e-5 ")).unwrap();
             for model in [
                 GpTransientPhaseModel::NgspiceWeil,
                 GpTransientPhaseModel::ExactDelay,
