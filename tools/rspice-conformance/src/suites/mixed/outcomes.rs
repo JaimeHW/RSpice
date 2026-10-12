@@ -8,8 +8,16 @@
 //! ran from what it observed; the landing manager reviews that diff. The detail
 //! column is informational (it carries measured numbers that move in the last
 //! digit between machines) and is not compared.
+//!
+//! The interpreter and native routes are separate builds, so two runners may
+//! record one design at once. Each read-merge-write holds an exclusive lock on
+//! the table itself ([`record_locked`]); a ratchet read holds a shared one.
 
 use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions, TryLockError};
+use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 use super::{Outcome, Route};
 
@@ -177,6 +185,90 @@ pub fn record(recorded: &[Row], observed: &[Row], order: &[(String, String)]) ->
     rows
 }
 
+/// How long a recorder waits for another runner's read-merge-write, which
+/// takes milliseconds; past this the holder is hung, not slow.
+const LOCK_WAIT: Duration = Duration::from_secs(120);
+const LOCK_POLL: Duration = Duration::from_millis(20);
+
+/// Take the table's lock, retrying until [`LOCK_WAIT`].
+///
+/// The lock is the operating system's lock on the open file, not a marker
+/// file, so there is no stale lock to detect: the kernel releases it when the
+/// holding handle closes, and a killed runner's handles close with its
+/// process. A lock that is still held therefore has a live holder.
+fn acquire(file: &File, path: &Path, exclusive: bool) -> Result<(), String> {
+    let started = Instant::now();
+    loop {
+        let attempt = if exclusive {
+            file.try_lock()
+        } else {
+            file.try_lock_shared()
+        };
+        match attempt {
+            Ok(()) => return Ok(()),
+            Err(TryLockError::WouldBlock) if started.elapsed() < LOCK_WAIT => {
+                std::thread::sleep(LOCK_POLL);
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err(format!(
+                    "{}: another runner held the lock for {} s",
+                    path.display(),
+                    LOCK_WAIT.as_secs()
+                ));
+            }
+            Err(TryLockError::Error(error)) => {
+                return Err(format!("{}: lock: {error}", path.display()));
+            }
+        }
+    }
+}
+
+/// The recorded table, read under a shared lock so a concurrent recorder's
+/// rewrite is never seen half done. A missing table has no rows.
+pub fn read_locked(path: &Path) -> Result<Vec<Row>, String> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    acquire(&file, path, false)?;
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+    parse(&text)
+}
+
+/// [`record`] `observed` into the table at `path`: read, merge and rewrite
+/// under one exclusive lock, so a recorder of another route running at the
+/// same time can neither be overwritten nor overwrite this one.
+pub fn record_locked(
+    path: &Path,
+    observed: &[Row],
+    order: &[(String, String)],
+) -> Result<(), String> {
+    let error = |error: std::io::Error| format!("{}: {error}", path.display());
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(error)?;
+    acquire(&file, path, true)?;
+    let mut text = String::new();
+    file.read_to_string(&mut text).map_err(error)?;
+    let rendered = render(&record(&parse(&text)?, observed, order));
+    if rendered != text {
+        // Rewritten in place through the locked handle: replacing the file
+        // would leave a waiting recorder locking the old one.
+        file.seek(SeekFrom::Start(0)).map_err(error)?;
+        file.set_len(0).map_err(error)?;
+        file.write_all(rendered.as_bytes()).map_err(error)?;
+        file.flush().map_err(error)?;
+    }
+    Ok(())
+}
+
 /// The table must hold exactly the declared cells for every route it names.
 pub fn coverage(rows: &[Row], cells: &[(String, String)]) -> Vec<String> {
     let mut findings = Vec::new();
@@ -286,5 +378,113 @@ mod tests {
         ]
         .concat();
         assert!(!coverage(&extra, &cells).is_empty());
+    }
+
+    fn cells() -> Vec<(String, String)> {
+        vec![
+            ("vams".to_owned(), "ac".to_owned()),
+            ("vams".to_owned(), "tran".to_owned()),
+        ]
+    }
+
+    #[test]
+    fn concurrent_recorders_of_disjoint_routes_both_land() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("outcomes.tsv");
+        let cells = cells();
+        const ROUNDS: usize = 40;
+        std::thread::scope(|scope| {
+            for route in [Route::Interp, Route::Native] {
+                let (path, cells) = (&path, &cells);
+                scope.spawn(move || {
+                    for round in 0..ROUNDS {
+                        let outcome = if round % 2 == 0 {
+                            Outcome::Pass
+                        } else {
+                            Outcome::Refused
+                        };
+                        let observed = [row("ac", route, outcome), row("tran", route, outcome)];
+                        record_locked(path, &observed, cells).unwrap();
+                    }
+                });
+            }
+        });
+        let rows = read_locked(&path).unwrap();
+        assert!(coverage(&rows, &cells).is_empty(), "{rows:?}");
+        // Each route's last write survives the other route's later merges.
+        assert!(
+            rows.iter().all(|row| row.outcome == Outcome::Refused),
+            "{rows:?}"
+        );
+    }
+
+    const HOLD_ENV: &str = "RSPICE_OUTCOMES_LOCK_HOLD";
+    const HELD: &str = "rspice-outcomes-lock-held";
+
+    /// The child half of `a_killed_recorder_does_not_wedge_the_next_one`,
+    /// which re-runs this test binary on it; on its own it does nothing.
+    #[test]
+    fn hold_the_table_lock_until_killed() {
+        let Some(path) = std::env::var_os(HOLD_ENV) else {
+            return;
+        };
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        file.lock().unwrap();
+        println!("{HELD}");
+        std::io::stdout().flush().unwrap();
+        std::thread::sleep(Duration::from_secs(120));
+    }
+
+    #[test]
+    fn a_killed_recorder_does_not_wedge_the_next_one() {
+        use std::io::BufRead as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("outcomes.tsv");
+        std::fs::write(&path, render(&[row("ac", Route::Native, Outcome::Pass)])).unwrap();
+        let mut holder = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "suites::mixed::outcomes::tests::hold_the_table_lock_until_killed",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(HOLD_ENV, &path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        // libtest prints the test's name on the same line before its output.
+        let stdout = std::io::BufReader::new(holder.stdout.take().unwrap());
+        let held = stdout
+            .lines()
+            .any(|line| line.is_ok_and(|line| line.contains(HELD)));
+        if !held {
+            let _ = holder.kill();
+            panic!("the holder process never took the lock");
+        }
+        // A live holder blocks a reader.
+        let probe = File::open(&path).unwrap();
+        assert!(matches!(
+            probe.try_lock_shared(),
+            Err(TryLockError::WouldBlock)
+        ));
+        drop(probe);
+        holder.kill().unwrap();
+        holder.wait().unwrap();
+        // Its death released the lock: the next recorder proceeds at once.
+        let started = Instant::now();
+        record_locked(
+            &path,
+            &[row("ac", Route::Interp, Outcome::Refused)],
+            &cells(),
+        )
+        .unwrap();
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert_eq!(read_locked(&path).unwrap().len(), 2);
     }
 }

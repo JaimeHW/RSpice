@@ -219,24 +219,19 @@ impl Assembly {
 }
 
 /// Ratchet `cells` against the design's `outcomes.tsv`, or record them into
-/// it.
+/// it under the table's lock.
 fn finish(
     options: &RunOptions,
     design: &Design,
     cells: Vec<CellReport>,
 ) -> Result<DesignReport, String> {
     let path = design.dir.join("outcomes.tsv");
-    let recorded = match fs::read_to_string(&path) {
-        Ok(text) => outcomes::parse(&text)?,
-        Err(_) => Vec::new(),
-    };
     let observed: Vec<Row> = cells.iter().map(|cell| cell.row.clone()).collect();
     let drift = if options.record {
-        let merged = outcomes::record(&recorded, &observed, &design.cells());
-        fs::write(&path, outcomes::render(&merged)).map_err(|error| error.to_string())?;
+        outcomes::record_locked(&path, &observed, &design.cells())?;
         Vec::new()
     } else {
-        outcomes::ratchet(&recorded, &observed)
+        outcomes::ratchet(&outcomes::read_locked(&path)?, &observed)
     };
     Ok(DesignReport {
         design: design.id().to_owned(),
@@ -1144,16 +1139,17 @@ mod tests {
         for design in &designs {
             findings.extend(integrity(design));
             let path = design.dir.join("outcomes.tsv");
-            match fs::read_to_string(&path) {
-                Ok(text) => match outcomes::parse(&text) {
-                    Ok(rows) => findings.extend(
-                        outcomes::coverage(&rows, &design.cells())
-                            .into_iter()
-                            .map(|finding| format!("{}: {finding}", design.slug)),
-                    ),
-                    Err(error) => findings.push(format!("{}: {error}", design.slug)),
-                },
-                Err(_) => findings.push(format!("{}: outcomes.tsv is missing", design.slug)),
+            if !path.is_file() {
+                findings.push(format!("{}: outcomes.tsv is missing", design.slug));
+                continue;
+            }
+            match outcomes::read_locked(&path) {
+                Ok(rows) => findings.extend(
+                    outcomes::coverage(&rows, &design.cells())
+                        .into_iter()
+                        .map(|finding| format!("{}: {finding}", design.slug)),
+                ),
+                Err(error) => findings.push(format!("{}: {error}", design.slug)),
             }
         }
         assert!(
