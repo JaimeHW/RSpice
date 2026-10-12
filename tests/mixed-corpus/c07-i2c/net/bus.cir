@@ -1,0 +1,14 @@
+* C7 open-drain bus (RSpice-authored): SDA and SCL each pulled up by 2.2 k
+* to vdd and loaded by 200 pF. The Verilog modules reach the bus through the
+* built-in bidirectional converters at vcc (open-drain: a driven 0 sinks
+* through 20 ohm, z releases). The adc_bridge observes the bus at vcc/2 as
+* the event nets sda_d/scl_d the protocol quantities read; it does not load
+* the bus.
+.param vcc=3.3
+vdd vdd 0 3.3
+rpsda sda vdd 2.2k
+cbsda sda 0 200p
+rpscl scl vdd 2.2k
+cbscl scl 0 200p
+aobs [sda scl] [sda_d scl_d] adc_obs
+.model adc_obs adc_bridge(in_low = 1.65 in_high = 1.65)

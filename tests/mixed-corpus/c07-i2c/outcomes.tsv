@@ -1,0 +1,13 @@
+# variant	analysis	route	outcome	detail
+flat	tran	interp	wrong	tf30 (O6) [0] |a−e|=1.913e-8 allowed 5.000e-10 (a=2.502398e-5, e=2.500486e-5)
+flat	tran	native	wrong	tf30 (O6) [0] |a−e|=1.913e-8 allowed 5.000e-10 (a=2.502398e-5, e=2.500486e-5)
+tasks	tran	interp	refused	compile_refusal; label="net/i2c_ctrl_tasks.v"; instance=i2c_ctrl_tasks.v form=structured; token-form=structured; analysis-form=location; site=net/i2c_ctrl_tasks.v
+tasks	tran	native	refused	compile_refusal; label="net/i2c_ctrl_tasks.v"; instance=i2c_ctrl_tasks.v form=structured; token-form=structured; analysis-form=location; site=net/i2c_ctrl_tasks.v
+cont	tran	interp	wrong	vcont (O6) [0] |a−e|=1.246e0 allowed 5.000e-3 (a=2.903604e0, e=1.657466e0)
+cont	tran	native	wrong	vcont (O6) [0] |a−e|=1.246e0 allowed 5.000e-3 (a=2.903604e0, e=1.657466e0)
+flat	op	interp	pass	idle (O6) [0] |a−e|=7.260e-12 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+flat	op	native	pass	idle (O6) [0] |a−e|=7.260e-12 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+tasks	op	interp	refused	compile_refusal; label="net/i2c_ctrl_tasks.v"; instance=i2c_ctrl_tasks.v form=structured; token-form=structured; analysis-form=location; site=net/i2c_ctrl_tasks.v
+tasks	op	native	refused	compile_refusal; label="net/i2c_ctrl_tasks.v"; instance=i2c_ctrl_tasks.v form=structured; token-form=structured; analysis-form=location; site=net/i2c_ctrl_tasks.v
+cont	op	interp	pass	idle (O6) [0] |a−e|=7.260e-12 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+cont	op	native	pass	idle (O6) [0] |a−e|=7.260e-12 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)

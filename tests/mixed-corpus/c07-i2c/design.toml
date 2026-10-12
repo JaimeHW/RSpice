@@ -1,0 +1,41 @@
+schema = "rspice-mixed-design/1"
+id = "C7"
+title = "Open-drain bus"
+exit_phases = ["P3"]
+dialect = "best-available"
+features = []
+
+# The controller script without tasks: what the digital front end runs today.
+[[variant]]
+name = "flat"
+families = ["spice", "xspice", "vams-digital"]
+today = "runs"
+
+# The same script written with tasks (P2.2, lane L3).
+[[variant]]
+name = "tasks"
+families = ["spice", "xspice", "vams-digital"]
+today = "parse:P2.2"
+
+# Contention: i2c_dev51 drives SDA push-pull high while the controller holds
+# it low.
+[[variant]]
+name = "cont"
+families = ["spice", "xspice", "vams-digital"]
+today = "runs"
+
+# Budgets are about five times the slower route's measured case time (tran
+# 3.7 s; op 0.1 s, floored at 10 s).
+[[analysis]]
+id = "tran"
+variants = ["flat", "tasks", "cont"]
+oracles = ["O6", "O3"]
+timeout_s = 20
+phase = "P3"
+
+[[analysis]]
+id = "op"
+variants = ["flat", "tasks", "cont"]
+oracles = ["O6", "O3"]
+timeout_s = 10
+phase = "P3"

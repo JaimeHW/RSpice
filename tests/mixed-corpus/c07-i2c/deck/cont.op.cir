@@ -1,0 +1,9 @@
+* C7 open-drain bus, variant cont (contention), op
+.hdl "../net/i2c_ctrl.v"
+.hdl "../net/i2c_dev.v"
+.include ../net/bus.cir
+xctrl scl sda i2c_ctrl mode=1
+xdev2a scl sda i2c_dev addr=42
+xdev51 scl sda i2c_dev addr=81 contend=1
+.op
+.end

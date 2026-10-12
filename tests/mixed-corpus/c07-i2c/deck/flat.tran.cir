@@ -1,0 +1,11 @@
+* C7 open-drain bus, variant flat (task-free controller script), tran
+* The design's 400 us cannot hold the three transactions at 100 kHz (45 bit
+* periods = 450 us); the script ends at 525 us.
+.hdl "../net/i2c_ctrl.v"
+.hdl "../net/i2c_dev.v"
+.include ../net/bus.cir
+xctrl scl sda i2c_ctrl
+xdev2a scl sda i2c_dev addr=42
+xdev51 scl sda i2c_dev addr=81
+.tran 100n 540u
+.end

@@ -1,0 +1,123 @@
+schema = "rspice-mixed-tolerance/1"
+# i2c_ctrl.v / i2c_dev.v: `timescale 1ns/1ps.
+time_precision = 1e-12
+
+# --- protocol: SDA at every SCL rise (bus observers sda_d / scl_d) --------
+
+[[q]]
+id = "proto"
+analysis = "tran"
+variants = ["flat", "tasks"]
+kind = "codes"
+nets = ["sda_d"]
+strobe = "scl_d"
+oracle = "O6"
+expect = "c07::proto"
+abs = 0.0
+why = "the script's bits: 0x54 ACK 0xC5 ACK stop | 0x55 ACK 0xC5 NACK stop | 0x66 NACK stop; SDA changes only mid-SCL-low, so every sample is race-free"
+
+# The O3 twin of `proto` (Icarus on a tri1 bus, oracle/<variant>.o3/tb.v) is
+# not declared: the integrity check requires a captured `ref` for every
+# oracle other than O5/O6/O7, and no reference file can name O3 (a harness
+# gap, reported). When the check admits live O3, add:
+#   id = "proto", oracle = "O3", same measure, abs = 0.0,
+#   why = "the same modules on an Icarus tri1 bus: protocol bits at SCL rises match exactly"
+
+# --- analog timing of the first SCL release (20 us) and fall (25 us) ------
+# The controller held SCL at V_OL = 3.3·20/2220 before the release; Rp·Cbus =
+# 440 ns rising, (20 ∥ 2.2k)·200p = 3.964 ns falling.
+
+[[q]]
+id = "tr30"
+analysis = "tran"
+variants = ["flat", "tasks"]
+kind = "cross"
+signal = "v(scl)"
+level = 0.99
+edge = "rise"
+window = [1.99e-5, 2.1e-5]
+oracle = "O6"
+expect = "c07::tr30"
+abs = 3.06e-9
+why = "20 us + Rp·Cbus·ln((3.3 − V_OL)/(3.3 − 0.99)) = 20 us + 153.0 ns; 2% of the RC delay"
+
+[[q]]
+id = "tr70"
+analysis = "tran"
+variants = ["flat", "tasks"]
+kind = "cross"
+signal = "v(scl)"
+level = 2.31
+edge = "rise"
+window = [1.99e-5, 2.1e-5]
+oracle = "O6"
+expect = "c07::tr70"
+abs = 1.05e-8
+why = "20 us + Rp·Cbus·ln((3.3 − V_OL)/(3.3 − 2.31)) = 20 us + 525.8 ns (30→70% = 372.8 ns); 2% of the RC delay"
+
+[[q]]
+id = "tf70"
+analysis = "tran"
+variants = ["flat", "tasks"]
+kind = "cross"
+signal = "v(scl)"
+level = 2.31
+edge = "fall"
+window = [2.49e-5, 2.55e-5]
+oracle = "O6"
+expect = "c07::tf70"
+abs = 5e-10
+why = "25 us + τf·ln((3.3 − V_OL)/(2.31 − V_OL)), τf = (20 ∥ 2.2k)·200p"
+
+[[q]]
+id = "tf30"
+analysis = "tran"
+variants = ["flat", "tasks"]
+kind = "cross"
+signal = "v(scl)"
+level = 0.99
+edge = "fall"
+window = [2.49e-5, 2.55e-5]
+oracle = "O6"
+expect = "c07::tf30"
+abs = 5e-10
+why = "25 us + τf·ln((3.3 − V_OL)/(0.99 − V_OL)) (70→30% = 3.43 ns)"
+
+[[q]]
+id = "vol"
+analysis = "tran"
+variants = ["flat", "tasks"]
+kind = "held_at"
+signal = "v(sda)"
+at = [1.25e-5]
+oracle = "O6"
+expect = "c07::vol"
+abs = 1e-3
+why = "the START hold: only the controller sinks SDA, V_OL = 3.3·20/2220 = 29.7 mV"
+
+# --- contention ------------------------------------------------------------
+
+[[q]]
+id = "vcont"
+analysis = "tran"
+variants = ["cont"]
+kind = "mean"
+signal = "v(sda)"
+window = [3.02e-4, 3.08e-4]
+oracle = "O6"
+expect = "c07::vcont"
+abs = 5e-3
+why = "20 ohm to 3.3 V against 20 ohm to 0 with Rp: 3.3·(1/20 + 1/2200)/(2/20 + 1/2200) = 1.6575 V; digital readers at 1.65 V are at threshold and not compared"
+
+# --- idle operating point --------------------------------------------------
+
+[[q]]
+id = "idle"
+analysis = "op"
+variants = ["flat", "tasks", "cont"]
+kind = "op"
+signals = ["v(sda)", "v(scl)"]
+oracle = "O6"
+expect = "c07::idle"
+abs = 1e-3
+why = "every driver starts released (z): the pull-ups hold both lines at 3.3 V"
