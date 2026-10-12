@@ -55,6 +55,60 @@ impl<S: MatrixStamper> MatrixStamper for PeriodicJacobian<'_, S> {
     fn stamp_rhs(&mut self, _row: NodeId, _value: Value) {}
 }
 
+/// Stamps a promoted Gummel-Poon device whose collector, base or emitter
+/// share a node the way its branch form does
+/// ([`Bjt::project_legacy_tied_terminal_system`]): the shared node is the
+/// reference, and the device never adds to its row or column directly.
+/// Every other entry is stamped as it arrives, and the reference row and
+/// column are recovered from those entries: the device's electrical rows
+/// carry currents that sum to zero (KCL), and its currents depend on its
+/// electrical voltages only through their differences (shift invariance).
+///
+/// Adding the reference entries directly would sum a shorted junction's
+/// equal and opposite derivatives onto the one shared diagonal, where an
+/// IS = 1e20 junction's +/-4e21 S leaves nothing of the circuit's own
+/// conductance. The recovered entries carry only the device's unshorted
+/// branches, as the branch form's reduced system does.
+pub(crate) struct TiedTerminalProjection<'a, S: MatrixStamper> {
+    stamper: &'a mut S,
+    reference: NodeId,
+    /// Every electrical node of the device, its terminals and every internal
+    /// state but the thermal one: its KCL rows and the voltages its currents
+    /// are invariant to a common shift of. Thermal, excess-phase and
+    /// RBI-current unknowns are not among them.
+    electrical: [NodeId; EXTERNAL_DIM + INTERNAL_DIM - 1],
+}
+
+impl<S: MatrixStamper> MatrixStamper for TiedTerminalProjection<'_, S> {
+    fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+        if value == 0.0 || row == self.reference || col == self.reference {
+            return;
+        }
+        let kcl_row = self.electrical.contains(&row);
+        let voltage_col = self.electrical.contains(&col);
+        self.stamper.stamp(row, col, value);
+        if voltage_col {
+            self.stamper.stamp(row, self.reference, -value);
+        }
+        if kcl_row {
+            self.stamper.stamp(self.reference, col, -value);
+            if voltage_col {
+                self.stamper.stamp(self.reference, self.reference, value);
+            }
+        }
+    }
+
+    fn stamp_rhs(&mut self, row: NodeId, value: Value) {
+        if value == 0.0 || row == self.reference {
+            return;
+        }
+        self.stamper.stamp_rhs(row, value);
+        if self.electrical.contains(&row) {
+            self.stamper.stamp_rhs(self.reference, -value);
+        }
+    }
+}
+
 impl Bjt {
     pub(crate) fn uses_three_terminal_vbic(&self) -> bool {
         self.vbic_three_terminal
@@ -853,6 +907,16 @@ impl Bjt {
         }
     }
 
+    /// Whether any electrical internal state owns a node of its own rather
+    /// than collapsing onto a terminal.
+    pub(in crate::device::semiconductor::bjt) fn mna_has_private_internal_nodes(&self) -> bool {
+        [
+            IDX_VCX, IDX_VCI, IDX_VBX, IDX_VBI, IDX_VEI, IDX_VBP, IDX_VSI,
+        ]
+        .into_iter()
+        .any(|idx| self.mna_internal_row_active(idx))
+    }
+
     /// Residual-row orientation relative to the MNA "currents leaving the
     /// node" convention: the CX..SI residual rows are current-in minus
     /// current-out (flip), while the thermal and excess-phase rows already
@@ -1545,7 +1609,70 @@ impl Bjt {
         self.stamp_mna_at(stamper, Some(anchor), false);
     }
 
+    /// The node a promoted Gummel-Poon device's collector, base or emitter
+    /// share with another of them, when it is not ground. It is the
+    /// reference [`Self::project_legacy_tied_terminal_system`] reduces the
+    /// branch form onto; a ground reference needs no projection, because
+    /// ground's row and column are never stamped.
+    pub(crate) fn promoted_tied_terminal_reference(&self) -> Option<NodeId> {
+        if !self.mna_promoted || !self.uses_legacy_gummel_poon() {
+            return None;
+        }
+        let [collector, base, emitter, _] = self.external_terminal_nodes();
+        let reference = if collector == base || collector == emitter {
+            collector
+        } else if base == emitter {
+            base
+        } else {
+            return None;
+        };
+        (reference != 0).then_some(reference)
+    }
+
+    /// `stamper` seen through the tied-terminal projection onto `reference`.
+    pub(crate) fn tied_terminal_projection<'a, S: MatrixStamper>(
+        &self,
+        stamper: &'a mut S,
+        reference: NodeId,
+    ) -> TiedTerminalProjection<'a, S> {
+        TiedTerminalProjection {
+            stamper,
+            reference,
+            electrical: [
+                self.node_collector,
+                self.node_base,
+                self.node_emitter,
+                self.node_substrate,
+                self.node_cx,
+                self.node_ci,
+                self.node_bx,
+                self.node_bi,
+                self.node_ei,
+                self.node_bp,
+                self.node_si,
+            ],
+        }
+    }
+
     fn stamp_mna_at(
+        &self,
+        stamper: &mut impl MatrixStamper,
+        anchor: Option<&[Value]>,
+        exact: bool,
+    ) {
+        // Only Newton loads project: the periodic evaluator's exact F/Q
+        // samples go through their own adapter.
+        match self.promoted_tied_terminal_reference().filter(|_| !exact) {
+            Some(reference) => self.stamp_mna_unprojected(
+                &mut self.tied_terminal_projection(stamper, reference),
+                anchor,
+                exact,
+            ),
+            None => self.stamp_mna_unprojected(stamper, anchor, exact),
+        }
+    }
+
+    fn stamp_mna_unprojected(
         &self,
         stamper: &mut impl MatrixStamper,
         anchor: Option<&[Value]>,
@@ -1747,13 +1874,12 @@ impl Bjt {
                 .or_else(|| external.map(|index| external_nodes[index]))
                 .unwrap_or(0)
         };
+        // A ground row reaches the stamper too, which discards it; the
+        // tied-terminal projection needs every row to recover KCL.
         for (row, sign) in [
             (node(correction.pos_internal, correction.pos_external), 1.0),
             (node(correction.neg_internal, correction.neg_external), -1.0),
         ] {
-            if row == 0 {
-                continue;
-            }
             for (column, derivative) in correction.d_internal.iter().enumerate() {
                 if *derivative != 0.0 {
                     stamper.stamp(row, self.mna_internal_node(column), sign * derivative);
@@ -1850,10 +1976,9 @@ impl Bjt {
         let external_nodes = self.external_terminal_nodes();
         let source = branch.linearization_dot(internal, external) - branch.current;
 
+        // A ground row reaches the stamper too, which discards it; the
+        // tied-terminal projection needs every row to recover KCL.
         let stamp_side = |row_node: NodeId, sign: Value| {
-            if row_node == 0 {
-                return;
-            }
             for col in 0..BJT_INTERNAL_STATE_DIM {
                 if branch.d_internal[col] != 0.0 {
                     stamper.stamp(

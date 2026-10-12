@@ -872,8 +872,11 @@ impl Bjt {
 
         // Preserve the internal bias accuracy formerly supplied by the
         // private solve. Absolute current tolerances alone lose this accuracy
-        // for small AREA/M. Direct GP keeps the native dialect's stopping rule.
-        if self.mna_promoted() {
+        // for small AREA/M. Direct GP keeps the native dialect's stopping rule,
+        // and so does a promoted device whose internal states all collapse
+        // onto its terminals: it never had a private solve, and its junction
+        // voltages are terminal differences the global update test governs.
+        if self.mna_promoted() && self.mna_has_private_internal_nodes() {
             let tolerance = criteria.voltage_tolerance().min(1e-10);
             for (current, previous) in [
                 (self.vbe, self.vbe_prev),

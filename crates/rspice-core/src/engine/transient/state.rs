@@ -1324,18 +1324,64 @@ impl Engine {
                 )));
             }
             let [pos, neg] = charge.nodes;
-            stamper.stamp(pos, pos, conductance);
-            stamper.stamp(pos, neg, -conductance);
-            stamper.stamp(neg, neg, conductance);
-            stamper.stamp(neg, pos, -conductance);
-            stamper.stamp_rhs(pos, source);
-            stamper.stamp_rhs(neg, -source);
+            // A charge across one node carries no current into the circuit;
+            // stamping its four entries onto one cell would only round away
+            // whatever else that cell holds.
+            if pos != neg {
+                stamper.stamp(pos, pos, conductance);
+                stamper.stamp(pos, neg, -conductance);
+                stamper.stamp(neg, neg, conductance);
+                stamper.stamp(neg, pos, -conductance);
+                stamper.stamp_rhs(pos, source);
+                stamper.stamp_rhs(neg, -source);
+            }
         }
         Ok(())
     }
 
+    /// Stamp a promoted BJT's charge and phase companions, through the
+    /// tied-terminal projection its static load also uses when its
+    /// collector, base or emitter share a node.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn stamp_promoted_bjt_companions(
+        stamper: &mut impl crate::device::MatrixStamper,
+        bjt: &crate::device::Bjt,
+        idx: usize,
+        coeff: &CompanionCoefficients,
+        dt: Value,
+        history: &BjtTransientHistory,
+        phase_trial: Option<bjt::BjtPhaseTrial<'_>>,
+        xyce_one_step_order2: bool,
+        anchor: Option<&[Value]>,
+    ) -> Result<(), SimulationError> {
+        match bjt.promoted_tied_terminal_reference() {
+            Some(reference) => Self::stamp_promoted_bjt_companions_unprojected(
+                &mut bjt.tied_terminal_projection(stamper, reference),
+                bjt,
+                idx,
+                coeff,
+                dt,
+                history,
+                phase_trial,
+                xyce_one_step_order2,
+                anchor,
+            ),
+            None => Self::stamp_promoted_bjt_companions_unprojected(
+                stamper,
+                bjt,
+                idx,
+                coeff,
+                dt,
+                history,
+                phase_trial,
+                xyce_one_step_order2,
+                anchor,
+            ),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_promoted_bjt_companions_unprojected(
         stamper: &mut impl crate::device::MatrixStamper,
         bjt: &crate::device::Bjt,
         idx: usize,
@@ -1441,10 +1487,9 @@ impl Engine {
             source += ag0 * derivative * offset;
         }
 
+        // A ground row reaches the stamper too, which discards it; the
+        // tied-terminal projection needs every row to recover KCL.
         let mut stamp_row = |row: crate::NodeId, sign: Value| {
-            if row == 0 {
-                return;
-            }
             for col in 0..BJT_INTERNAL_STATE_DIM {
                 let g = ag0 * branch.d_internal[col];
                 if g != 0.0 {

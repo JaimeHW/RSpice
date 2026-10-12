@@ -6981,11 +6981,7 @@ impl Engine {
 
                     // Transient collapsed GP states alias existing terminals;
                     // direct charge currents need no extra matrix unknowns.
-                    // A device whose authored collector, base or emitter
-                    // coincide keeps its branch-form stamps: there a tied
-                    // incidence is dropped exactly, while the promoted
-                    // terminal rows sum its conductances onto one entry.
-                    if (transient_stop_time.is_some() && !bjt.has_coincident_cbe_terminals())
+                    if transient_stop_time.is_some()
                         || bjt.uses_vbic_dynamic_charges()
                         || bjt.has_intrinsic_state_unknowns()
                     {
