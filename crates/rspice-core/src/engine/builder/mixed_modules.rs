@@ -371,6 +371,24 @@ fn classify_boundary_ports(
                 ));
             }
         };
+        // IEEE 1364-2005 section 12.3.3's `inout_declaration` takes a net type
+        // and nothing else: a bidirectional port's value is resolved from every
+        // driver on it, and a variable holds one procedural value. Refused at
+        // the X-card that names the port, because the linker that would
+        // otherwise find it reports a whole-circuit failure with no instance.
+        if direction == BoundaryDirection::Bidirectional && signal.procedurally_assignable {
+            return Err(refuse(
+                &element.name,
+                subckt_name,
+                ElaborationErrorKind::PortDiscipline,
+                format!(
+                    "declares bidirectional port '{}' as a variable; an `inout` port must be a \
+                     net (`wire`, `tri` or `wreal`), because a bidirectional boundary is \
+                     resolved from every driver on it",
+                    port.name
+                ),
+            ));
+        }
         let bits = (if signal.kind.is_real() {
             Some(vec![0])
         } else {
@@ -396,6 +414,23 @@ fn classify_boundary_ports(
         for (offset, bit) in bits.iter().copied().enumerate() {
             let deck_index = first + offset;
             let node = terminal_nodes[deck_index];
+            // An input on ground reads the reference's 0 V through its
+            // converter, which is a tie-low. A port the module drives would put
+            // a converter's output on the node every voltage is measured from,
+            // where the reference absorbs it and no solution ever shows it.
+            if node == 0 && direction != BoundaryDirection::AnalogToDiscrete {
+                return Err(refuse(
+                    &element.name,
+                    subckt_name,
+                    ElaborationErrorKind::PortDiscipline,
+                    format!(
+                        "connects discrete port '{}', which the module drives, to ground; ground \
+                         is the voltage reference rather than a net, so nothing the port drives \
+                         onto it can be observed",
+                        port.name
+                    ),
+                ));
+            }
             layout.ports.push(BoundaryPort {
                 signal: port.name.to_string(),
                 bit,
