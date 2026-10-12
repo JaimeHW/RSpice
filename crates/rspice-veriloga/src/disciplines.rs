@@ -173,50 +173,80 @@ impl DisciplineDb {
         self.disciplines.get(name)
     }
 
-    /// Add standard electrical natures
+    /// Add the natures of the standard `disciplines.vams` (Verilog-AMS LRM
+    /// 2.4, Annex D), attribute for attribute. A source that includes the
+    /// header redeclares them, and a connection library compiled against it
+    /// is compared with them field by field, so a built-in that differs in
+    /// any attribute is a conflict the author never wrote.
     fn add_standard_natures(&mut self) {
-        // Electrical
-        let mut voltage = Nature::builtin("Voltage", "V", 1.0e-6, "V");
-        voltage.idt_nature = Some("Flux".to_string());
-        self.add_nature(voltage);
-        let mut current = Nature::builtin("Current", "A", 1.0e-12, "I");
-        current.idt_nature = Some("Charge".to_string());
-        self.add_nature(current);
-
-        // Charge/Flux (for capacitor/inductor modeling)
-        let mut charge = Nature::builtin("Charge", "coul", 1.0e-14, "Q");
-        charge.ddt_nature = Some("Current".to_string());
-        self.add_nature(charge);
-
-        let mut flux = Nature::builtin("Flux", "Wb", 1.0e-9, "Phi");
-        flux.ddt_nature = Some("Voltage".to_string());
-        self.add_nature(flux);
-
-        // Thermal
-        self.add_nature(Nature::builtin("Temperature", "K", 1.0e-4, "Temp"));
-        self.add_nature(Nature::builtin("Power", "W", 1.0e-9, "Pwr"));
-
-        // Mechanical - translational
-        self.add_nature(Nature::builtin("Position", "m", 1.0e-6, "Pos"));
-        self.add_nature(Nature::builtin("Velocity", "m/s", 1.0e-6, "Vel"));
-        self.add_nature(Nature::builtin("Force", "N", 1.0e-6, "F"));
-
-        // Mechanical - rotational
-        self.add_nature(Nature::builtin("Angle", "rad", 1.0e-6, "Theta"));
-        self.add_nature(Nature::builtin("AngularVelocity", "rad/s", 1.0e-6, "Omega"));
-        self.add_nature(Nature::builtin("Torque", "N*m", 1.0e-6, "Tau"));
-
-        // Magnetic
-        self.add_nature(Nature::builtin(
-            "Magneto_Motive_Force",
-            "A*turn",
-            1.0e-12,
-            "MMF",
-        ));
-
-        // Fluid
-        self.add_nature(Nature::builtin("Pressure", "Pa", 1.0e-3, "P"));
-        self.add_nature(Nature::builtin("VolumeFlowRate", "m^3/s", 1.0e-12, "Flow"));
+        // (name, units, access, abstol, idt_nature, ddt_nature)
+        type Row = (
+            &'static str,
+            &'static str,
+            &'static str,
+            f64,
+            Option<&'static str>,
+            Option<&'static str>,
+        );
+        const NATURES: [Row; 16] = [
+            ("Current", "A", "I", 1e-12, Some("Charge"), None),
+            ("Charge", "coul", "Q", 1e-14, None, Some("Current")),
+            ("Voltage", "V", "V", 1e-6, Some("Flux"), None),
+            ("Flux", "Wb", "Phi", 1e-9, None, Some("Voltage")),
+            ("Magneto_Motive_Force", "A*turn", "MMF", 1e-12, None, None),
+            ("Temperature", "K", "Temp", 1e-4, None, None),
+            ("Power", "W", "Pwr", 1e-9, None, None),
+            ("Position", "m", "Pos", 1e-6, None, Some("Velocity")),
+            (
+                "Velocity",
+                "m/s",
+                "Vel",
+                1e-6,
+                Some("Position"),
+                Some("Acceleration"),
+            ),
+            (
+                "Acceleration",
+                "m/s^2",
+                "Acc",
+                1e-6,
+                Some("Velocity"),
+                Some("Impulse"),
+            ),
+            ("Impulse", "m/s^3", "Imp", 1e-6, Some("Acceleration"), None),
+            ("Force", "N", "F", 1e-6, None, None),
+            (
+                "Angle",
+                "rads",
+                "Theta",
+                1e-6,
+                None,
+                Some("Angular_Velocity"),
+            ),
+            (
+                "Angular_Velocity",
+                "rads/s",
+                "Omega",
+                1e-6,
+                Some("Angle"),
+                Some("Angular_Acceleration"),
+            ),
+            (
+                "Angular_Acceleration",
+                "rads/s^2",
+                "Alpha",
+                1e-6,
+                Some("Angular_Velocity"),
+                None,
+            ),
+            ("Angular_Force", "N*m", "Tau", 1e-6, None, None),
+        ];
+        for (name, units, access, abstol, idt_nature, ddt_nature) in NATURES {
+            let mut nature = Nature::builtin(name, units, abstol, access);
+            nature.idt_nature = idt_nature.map(str::to_owned);
+            nature.ddt_nature = ddt_nature.map(str::to_owned);
+            self.add_nature(nature);
+        }
     }
 
     /// Add standard disciplines
@@ -268,13 +298,13 @@ impl DisciplineDb {
             "rotational",
             Domain::Continuous,
             Some("Angle"),
-            Some("Torque"),
+            Some("Angular_Force"),
         ));
         self.add_discipline(Discipline::builtin(
             "rotational_omega",
             Domain::Continuous,
-            Some("AngularVelocity"),
-            Some("Torque"),
+            Some("Angular_Velocity"),
+            Some("Angular_Force"),
         ));
 
         // Magnetic
@@ -378,6 +408,109 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Every nature and discipline a `disciplines.vams` text declares, as the
+    /// compiler registers them, keyed by name.
+    fn declared_by(header: &str) -> (Vec<(String, NatureRow)>, Vec<(String, DisciplineRow)>) {
+        use crate::ast::Item;
+        let source = crate::preprocessor::Preprocessor::new()
+            .preprocess_source(header)
+            .unwrap();
+        let tokens = crate::Lexer::new(&source, crate::source::SourceId::new(1))
+            .collect_tokens()
+            .unwrap();
+        let ast = crate::Parser::new(&tokens).parse().unwrap();
+        let (db, _) = crate::semantic::SemanticAnalyzer::new()
+            .connection_definitions(&ast)
+            .unwrap();
+        let mut natures = Vec::new();
+        let mut disciplines = Vec::new();
+        for item in &ast.items {
+            match item {
+                Item::Nature(nature) => {
+                    let name = nature.name.as_str();
+                    natures.push((name.to_owned(), nature_row(&db.natures[name])));
+                }
+                Item::Discipline(discipline) => {
+                    let name = discipline.name.as_str();
+                    disciplines.push((name.to_owned(), discipline_row(&db.disciplines[name])));
+                }
+                _ => {}
+            }
+        }
+        natures.sort();
+        disciplines.sort();
+        (natures, disciplines)
+    }
+
+    type NatureRow = (
+        Option<String>,
+        String,
+        u64,
+        String,
+        Option<String>,
+        Option<String>,
+    );
+    type DisciplineRow = (String, Option<String>, Option<String>);
+
+    fn nature_row(nature: &Nature) -> NatureRow {
+        (
+            nature.base.clone(),
+            nature.units.clone(),
+            nature.abstol.to_bits(),
+            nature.access.clone(),
+            nature.idt_nature.clone(),
+            nature.ddt_nature.clone(),
+        )
+    }
+
+    fn discipline_row(discipline: &Discipline) -> DisciplineRow {
+        (
+            format!("{:?}", discipline.domain),
+            discipline.potential.clone(),
+            discipline.flow.clone(),
+        )
+    }
+
+    /// A source that includes `disciplines.vams` redeclares every built-in, and
+    /// a connection library compiled against it is checked against the
+    /// device's natures field by field. So the built-ins are the standard
+    /// header, attribute for attribute and name for name, and so is the copy
+    /// the preprocessor falls back to when no header is on disk. The standard
+    /// is Accellera's header as the repository vendors it beside the models
+    /// that ship their own copy.
+    #[test]
+    fn built_ins_and_the_fallback_header_are_the_standard_header() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/veriloga/vbic_1.3/vacode/disciplines.vams");
+        let vendored = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let standard = declared_by(&vendored);
+        assert_eq!(standard.0.len(), 16, "the standard declares 16 natures");
+        assert_eq!(standard.1.len(), 11, "the standard declares 11 disciplines");
+
+        let built_in = DisciplineDb::with_standard();
+        let mut natures: Vec<_> = built_in
+            .natures
+            .iter()
+            .map(|(name, nature)| (name.clone(), nature_row(nature)))
+            .collect();
+        natures.sort();
+        let mut disciplines: Vec<_> = built_in
+            .disciplines
+            .iter()
+            .map(|(name, discipline)| (name.clone(), discipline_row(discipline)))
+            .collect();
+        disciplines.sort();
+        assert_eq!(natures, standard.0, "built-in natures");
+        assert_eq!(disciplines, standard.1, "built-in disciplines");
+
+        assert_eq!(
+            declared_by(crate::stdlib::DISCIPLINES_VAMS),
+            standard,
+            "the fallback header"
+        );
     }
 
     #[test]

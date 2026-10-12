@@ -16,6 +16,14 @@ pub const DISCIPLINES_VAMS: &str = r#"
 `else
 `define DISCIPLINES_VAMS 1
 
+discipline logic;
+  domain discrete;
+enddiscipline
+
+discipline ddiscrete;
+  domain discrete;
+enddiscipline
+
 nature Current;
   units      = "A";
   access     = I;
@@ -149,6 +157,7 @@ endnature
 nature Angular_Acceleration;
   units      = "rads/s^2";
   access     = Alpha;
+  idt_nature = Angular_Velocity;
   abstol     = 1e-6;
 endnature
 
