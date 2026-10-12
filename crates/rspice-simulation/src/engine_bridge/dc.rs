@@ -552,6 +552,10 @@ impl EngineBridge {
     }
 }
 
+/// The quantities a DC sweep publishes: every node voltage and branch current
+/// the sweep emits a trace for. A net only the event domain resolves has no
+/// voltage, so it is left out here exactly as the trace loops leave it out;
+/// declaring it would leave the basis one curve the result can never cover.
 fn retain_dc_quantity_basis(
     evidence: &mut DcSweepEvidence,
     result: &rspice_core::SimulationResult,
@@ -559,8 +563,10 @@ fn retain_dc_quantity_basis(
     let quantities = result
         .node_names
         .iter()
+        .enumerate()
         .skip(1)
-        .cloned()
+        .filter(|(index, _)| result.event_only_node_kind(*index).is_none())
+        .map(|(_, name)| name.clone())
         .map(DcSweepQuantity::NodeVoltage)
         .chain(
             result
@@ -881,6 +887,36 @@ mod operating_point_contract_tests {
             converted.mna_solution.len(),
             converted.mna_node_names.len() + converted.mna_branch_names.len(),
             "the MNA evidence stays aligned with its own names"
+        );
+    }
+
+    /// A DC sweep declares only the quantities it emits a curve for: a net
+    /// only the event domain resolves has neither, so a mixed deck's sweep
+    /// covers its own basis.
+    #[test]
+    fn the_dc_sweep_basis_leaves_out_an_event_only_net() {
+        let mut core = rspice_core::SimulationResult::new(2, 1);
+        core.node_names = vec!["0".to_owned(), "clk".to_owned(), "out".to_owned()];
+        core.branch_names = vec!["V1".to_owned()];
+        core.set_event_only_nodes(vec![
+            None,
+            Some(rspice_core::analysis::transient::EventOnlyNetKind::Digital),
+            None,
+        ]);
+        let mut evidence = DcSweepEvidence {
+            source: "V1".to_owned(),
+            direction: DcSweepDirection::Ascending,
+            quantities: Vec::new(),
+            family: DcSweepFamily::Single,
+            selection: rspice_results::dc_sweep::DcCurveSelection::All,
+        };
+        retain_dc_quantity_basis(&mut evidence, &core).expect("the basis is retained");
+        assert_eq!(
+            evidence.quantities,
+            [
+                DcSweepQuantity::NodeVoltage("out".to_owned()),
+                DcSweepQuantity::BranchCurrent("V1".to_owned()),
+            ]
         );
     }
 
