@@ -232,6 +232,9 @@ incremental = true
 #
 #   RUSTFLAGS="-C debuginfo=2 -C link-arg=/DEBUG:FULL -C llvm-args=-fast-isel=false" \
 #     cargo test -p <crate> --test <target> --no-run
+#
+# For a recorded Windows x64 diagnostic build, use
+# tools/diagnostics/build-windows.ps1 and the opt-in profile below.
 debug = 0
 
 # Every dependency is optimized in debug builds; the workspace's own crates are
@@ -303,3 +306,12 @@ incremental = true
 # discarded by `/DEBUG:NONE` at link time, and the test binaries are the
 # largest artifacts in the tree.
 debug = 0
+
+# Opt-in symbol-bearing builds. On Windows use the diagnostic build script:
+# the ordinary /DEBUG:NONE linker workaround must be overridden as well.
+# SelectionDAG remains required on Windows x64 for the callback regression.
+[profile.diagnostic]
+inherits = "dev"
+debug = 2
+incremental = false
+strip = "none"
