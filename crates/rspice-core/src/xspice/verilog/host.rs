@@ -71,18 +71,22 @@ use std::{
 };
 
 use rspice_veriloga::canonical_ir::VectorBounds;
+use rspice_veriloga::canonical_ir::digital::DigitalSystemCallId;
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityTerm,
     DigitalSignal,
 };
 use rspice_veriloga::canonical_ir::digital_eval::{
-    DEFAULT_PROCESS_STEP_LIMIT, DigitalDeferredUpdate, DigitalEvalError, DigitalEvalScratch,
-    DigitalProcessOutcome, DigitalResumeState, DigitalWaitRequest, any_real_term_is_satisfied,
-    any_term_is_satisfied, apply_deferred as apply_deferred_update, resume_in as resume_process,
-    start_in as start_process,
+    DEFAULT_PROCESS_STEP_LIMIT, DigitalDeferredUpdate, DigitalDrive, DigitalEnvironment,
+    DigitalEvalError, DigitalEvalScratch, DigitalFunctionOutcome, DigitalProcessOutcome,
+    DigitalRealDrive, DigitalResumeState, DigitalScalar, DigitalTaskOutcome, DigitalWaitRequest,
+    any_real_term_is_satisfied, any_term_is_satisfied, apply_deferred as apply_deferred_update,
+    resume_in as resume_process, run_observer, start_in as start_process,
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
-use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalSignalId};
+use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
+
+use super::effects::{CallOrigin, HdlEffects, HdlEffectsConfig, MonitorTask};
 
 use super::store::{
     DigitalSignalStore, EventCapture, ExternalBitDriverId, SignalTransition, StoreError,
@@ -504,6 +508,80 @@ pub(crate) struct DigitalHost {
     /// clears the value table at every entry, which is the execution
     /// contract's "a `Wait` resumes as a `Jump`".
     scratch: DigitalEvalScratch,
+    /// System-task output, randomness, the monitor region and the finish
+    /// request. Part of the host so a rejected trial's clone restore takes
+    /// all of it back with everything else (design P2 section 5.3).
+    effects: HdlEffects,
+    /// Start processes, and wake a change's waiters, in reverse declaration
+    /// order: the racy-test classifier's schedule (design P2 section 2.4).
+    reverse_active: bool,
+}
+
+/// The interpreter's view of a running host: the signal store, plus the
+/// effects a system call reaches. Every store method is the store's own.
+struct HostEnvironment<'a> {
+    store: &'a mut DigitalSignalStore,
+    effects: &'a mut HdlEffects,
+    plan: &'a CanonicalDigitalPlan,
+    origin: CallOrigin,
+}
+
+impl DigitalEnvironment for HostEnvironment<'_> {
+    fn read_clock(&self) -> Option<rspice_veriloga::canonical_ir::DigitalClock> {
+        self.store.read_clock()
+    }
+    fn read_signal(&self, signal: DigitalSignalId) -> Option<FourStateValue> {
+        self.store.read_signal(signal)
+    }
+    fn write_signal(&mut self, signal: DigitalSignalId, value: FourStateValue) {
+        self.store.write_signal(signal, value);
+    }
+    fn defer_update(&mut self, update: DigitalDeferredUpdate) {
+        self.store.defer_update(update);
+    }
+    fn write_real_signal(&mut self, signal: DigitalSignalId, value: f64) {
+        self.store.write_real_signal(signal, value);
+    }
+    fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
+        self.store.read_real_signal(signal)
+    }
+    fn read_analog_potential(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.store.read_analog_potential(probe)
+    }
+    fn read_analog_flow(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.store.read_analog_flow(probe)
+    }
+    fn read_analog_variable(&self, probe: DigitalAnalogProbeId) -> Option<f64> {
+        self.store.read_analog_variable(probe)
+    }
+    fn drive_real_signal(&mut self, drive: DigitalRealDrive) {
+        self.store.drive_real_signal(drive);
+    }
+    fn drive_signal(&mut self, drive: DigitalDrive) {
+        self.store.drive_signal(drive);
+    }
+    fn system_task(
+        &mut self,
+        site: DigitalSystemCallId,
+        args: &[DigitalScalar],
+    ) -> Result<DigitalTaskOutcome, DigitalEvalError> {
+        let clock = self.store.read_clock();
+        self.effects
+            .system_task(self.plan, site, args, clock, self.origin)
+    }
+    fn system_function(
+        &mut self,
+        site: DigitalSystemCallId,
+        args: &[DigitalScalar],
+    ) -> Result<DigitalFunctionOutcome, DigitalEvalError> {
+        let clock = self.store.read_clock();
+        let process: Option<DigitalProcessId> = match self.origin {
+            CallOrigin::Process(process) => Some(process),
+            CallOrigin::Observer => None,
+        };
+        self.effects
+            .system_function(self.plan, site, args, process, clock)
+    }
 }
 
 impl DigitalHost {
@@ -594,8 +672,49 @@ impl DigitalHost {
             fired: Vec::new(),
             drained: Vec::new(),
             scratch: DigitalEvalScratch::new(),
+            effects: HdlEffects::new(&plan),
+            reverse_active: false,
             plan,
         }
+    }
+
+    /// Select the reverse same-tick start order (design P2 section 2.4).
+    pub(crate) fn set_reverse_active(&mut self, reverse: bool) {
+        self.reverse_active = reverse;
+    }
+
+    /// Install the run's HDL options (plusargs, `hdlseed`) before the design
+    /// starts. A fresh copy of this host keeps them.
+    pub(crate) fn configure_effects(&mut self, config: HdlEffectsConfig) {
+        self.effects.configure(config);
+    }
+
+    /// Take the output records the design produced since the last release.
+    pub(crate) fn drain_hdl_output(&mut self) -> Vec<super::effects::HdlOutputRecord> {
+        self.effects.drain_journal()
+    }
+
+    pub(crate) fn has_hdl_output(&self) -> bool {
+        self.effects.has_journal()
+    }
+
+    /// The `$finish`, `$stop` or `$fatal` the design executed, if any.
+    pub(crate) fn hdl_finish(&self) -> Option<&super::effects::HdlFinishRequest> {
+        self.effects.finish()
+    }
+
+    /// Severity-task counts over the run.
+    pub(crate) fn hdl_severities(&self) -> super::effects::SeverityCounts {
+        self.effects.severities()
+    }
+
+    /// Whether time may advance past `tick`: not once the design has
+    /// finished at an earlier tick (IEEE 1364-2005 section 17.4.1). The tick
+    /// it finished at still completes every region.
+    fn finished_before(&self, tick: u64) -> bool {
+        self.effects
+            .finish()
+            .is_some_and(|finish| tick > finish.tick)
     }
 
     pub(crate) fn scheduler_limits(&self) -> SchedulerLimits {
@@ -650,6 +769,7 @@ impl DigitalHost {
             self.resolution,
             self.scheduler.limits(),
         );
+        fresh.effects = HdlEffects::with_config(&self.plan, Arc::clone(self.effects.config()));
         fresh.store.inherit_bit_connections(&self.store);
         fresh.store.inherit_analog_variable_inputs(&self.store);
         for (_, target) in fresh.store.external_sources() {
@@ -733,6 +853,7 @@ impl DigitalHost {
         self.scheduler
             .next_instant()
             .and_then(|at| at.floor_tick(self.resolution).ok())
+            .filter(|tick| !self.finished_before(*tick))
     }
 
     /// [`Self::next_tick`], with the process whose activation it is.
@@ -744,8 +865,12 @@ impl DigitalHost {
     /// that happens to sit at the same interned slot.
     pub(crate) fn next_tick_process(&self) -> Option<(u64, Option<usize>)> {
         let (at, target) = self.scheduler.next_instant_target()?;
+        let tick = at.floor_tick(self.resolution).ok()?;
+        if self.finished_before(tick) {
+            return None;
+        }
         Some((
-            at.floor_tick(self.resolution).ok()?,
+            tick,
             self.process_of_target.get(usize::from(target)).copied(),
         ))
     }
@@ -766,7 +891,12 @@ impl DigitalHost {
 
     pub(crate) fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
         self.elaboration_closed = true;
-        for index in 0..self.slots.len() {
+        let order: Vec<usize> = if self.reverse_active {
+            (0..self.slots.len()).rev().collect()
+        } else {
+            (0..self.slots.len()).collect()
+        };
+        for index in order {
             self.queue(index, 0)?;
         }
         Ok(())
@@ -964,6 +1094,11 @@ impl DigitalHost {
                 break;
             }
             let next = self.tick_of(next)?;
+            // A finished design does not advance (IEEE 1364-2005 section
+            // 17.4.1); its pending work stays queued and unreported.
+            if self.finished_before(next) {
+                break;
+            }
             self.settle_with(next, participant)?;
         }
         Ok(())
@@ -980,6 +1115,9 @@ impl DigitalHost {
         participant: &mut (impl DigitalActiveParticipant + ?Sized),
     ) -> Result<(), DigitalRunError> {
         self.elaboration_closed = true;
+        if self.finished_before(tick) {
+            return Ok(());
+        }
         // Taken out of `self` so that running a process — which needs the
         // whole host — cannot hold a borrow of the drain buffer, and put back
         // on the way out so the next tick reuses its capacity.
@@ -1100,6 +1238,14 @@ impl DigitalHost {
                 promoted = true;
             }
 
+            // IEEE 1364-2005 sections 17.1.2 and 17.1.3: `$strobe` and
+            // `$monitor` print here, after every other region of the step
+            // has drained. They only read, so nothing they do wakes anything.
+            if region == DigitalSchedulingRegion::Monitor && self.effects.monitor_region_pending() {
+                self.run_monitor_region()?;
+                promoted = true;
+            }
+
             // Applied in the order they were evaluated, which is what makes two
             // nonblocking writes to different bits of one signal in one slot
             // both survive: `apply_deferred` resolves the target now, against
@@ -1128,6 +1274,36 @@ impl DigitalHost {
             }
         }
         Ok(false)
+    }
+
+    /// Run the monitor region's queue in the order it was scheduled.
+    fn run_monitor_region(&mut self) -> Result<(), DigitalRunError> {
+        for task in self.effects.take_monitor_region() {
+            let observer = match task {
+                MonitorTask::Strobe(observer) => observer,
+                MonitorTask::Monitor => match self.effects.enabled_monitor() {
+                    Some(observer) => observer,
+                    None => continue,
+                },
+            };
+            let mut environment = HostEnvironment {
+                store: &mut self.store,
+                effects: &mut self.effects,
+                plan: &self.plan,
+                origin: CallOrigin::Observer,
+            };
+            run_observer(
+                &self.plan,
+                observer as usize,
+                &mut environment,
+                &mut self.scratch,
+            )
+            .map_err(|error| DigitalRunError::Evaluation {
+                process: "the monitor region".into(),
+                error,
+            })?;
+        }
+        Ok(())
     }
 
     pub(crate) fn configure_traces(
@@ -1186,19 +1362,25 @@ impl DigitalHost {
         // the previous suspension built, and handing it over is what lets the
         // same allocation carry the next suspension's arguments back out.
         let resume = self.slots[index].resume.take();
+        let mut environment = HostEnvironment {
+            store: &mut self.store,
+            effects: &mut self.effects,
+            plan: &self.plan,
+            origin: CallOrigin::Process(process.id),
+        };
         let outcome = match resume {
             Some(state) => resume_process(
                 &self.plan,
                 process,
                 state,
-                &mut self.store,
+                &mut environment,
                 &mut self.scratch,
                 DEFAULT_PROCESS_STEP_LIMIT,
             ),
             None => start_process(
                 &self.plan,
                 process,
-                &mut self.store,
+                &mut environment,
                 &mut self.scratch,
                 DEFAULT_PROCESS_STEP_LIMIT,
             ),
@@ -1267,7 +1449,9 @@ impl DigitalHost {
                 self.slots[index].status = ProcessStatus::Finished;
                 Ok(())
             }
-            // A system task ended the thread (IEEE 1364-2005 section 17.4).
+            // `$finish`, `$stop` or `$fatal` ended this thread where it stood
+            // (IEEE 1364-2005 section 17.4.1). The rest of the time step
+            // still runs; the host refuses to advance past it.
             DigitalProcessOutcome::Halted(_) => {
                 self.slots[index].status = ProcessStatus::Finished;
                 Ok(())
@@ -1374,6 +1558,23 @@ impl DigitalHost {
                 return Ok(());
             }
             for transition in drained.iter() {
+                // IEEE 1364-2005 section 17.1.3: a change of any of the active
+                // `$monitor`'s operands prints its arguments at the end of
+                // the step.
+                if let Some(observer) = self.effects.enabled_monitor()
+                    && self
+                        .plan
+                        .observers
+                        .get(observer as usize)
+                        .is_some_and(|observer| {
+                            observer
+                                .dependencies
+                                .binary_search(&transition.signal)
+                                .is_ok()
+                        })
+                {
+                    self.effects.monitor_operand_changed();
+                }
                 for token in &transition.expressions {
                     if let Some(update) = self.expression_updates.remove(token) {
                         self.store.release_expression_capture(*token, update);
@@ -1387,6 +1588,25 @@ impl DigitalHost {
                 }
                 self.dispatch_event_captures(transition);
                 let net = usize::from(transition.signal);
+                if self.reverse_active {
+                    // The racy-test classifier's schedule: the same waiters,
+                    // woken in the reverse order.
+                    let candidates: Vec<usize> = self.waiters[net].iter().rev().copied().collect();
+                    for index in candidates {
+                        if transition.sequence <= self.slots[index].wait_after_sequence
+                            || !self.waiters[net].contains(&index)
+                        {
+                            continue;
+                        }
+                        if self.wait_satisfied(index, transition)
+                            && self.slots[index].remaining_events.consume()
+                        {
+                            self.unsubscribe(index);
+                            self.queue_ready(index, tick)?;
+                        }
+                    }
+                    continue;
+                }
                 let mut position = 0usize;
                 while position < self.waiters[net].len() {
                     let index = self.waiters[net][position];
@@ -1420,6 +1640,20 @@ impl DigitalHost {
                     position += 1;
                 }
             }
+        }
+    }
+
+    /// Whether a change satisfies a waiting process's event control.
+    fn wait_satisfied(&self, index: usize, transition: &SignalTransition) -> bool {
+        match (&self.slots[index].status, &transition.values) {
+            (
+                ProcessStatus::AwaitingEvent(terms),
+                TransitionValues::FourState { previous, next },
+            ) => any_term_is_satisfied(terms, transition.signal, previous, next),
+            (ProcessStatus::AwaitingEvent(terms), TransitionValues::Real { previous, next }) => {
+                any_real_term_is_satisfied(terms, transition.signal, *previous, *next)
+            }
+            _ => false,
         }
     }
 

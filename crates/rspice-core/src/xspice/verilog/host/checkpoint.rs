@@ -27,6 +27,14 @@ impl Default for HostCheckpointLimits {
     }
 }
 
+/// The host image version this build writes (design P2 section 5.4).
+///
+/// Version 2 saves threads rather than process slots, and carries
+/// self-tagged sections later lanes fill without a further version step.
+/// Version 1 images upcast losslessly: one thread with one frame per process,
+/// and every section empty.
+const HOST_CHECKPOINT_VERSION: u32 = 2;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct HostCheckpoint {
@@ -35,11 +43,29 @@ pub(crate) struct HostCheckpoint {
     tick_seconds: u64,
     scheduler: SchedulerCheckpoint,
     store: StoreCheckpoint,
+    /// Version 1's per-process slots; empty in a version 2 image.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     slots: Vec<SlotImage>,
+    /// Version 2's threads, one per process until fork arrives.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    threads: Vec<ThreadImage>,
     delayed: Vec<(u64, Vec<DigitalDeferredCheckpoint>)>,
     events: Vec<EventImage>,
     expressions: Vec<(u64, DigitalDeferredCheckpoint)>,
+    /// Randomness, `$timeformat`, the active `$monitor`, severity counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    effects: Option<EffectsSection>,
 }
+
+/// The effects section, tagged with its own version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EffectsSection {
+    version: u32,
+    image: super::super::effects::checkpoint::EffectsImage,
+}
+
+const EFFECTS_SECTION_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +74,51 @@ struct SlotImage {
     resume: Option<DigitalResumeCheckpoint>,
     after: u64,
     remaining: DigitalEventCountCheckpoint,
+}
+
+/// One thread of execution: its process, the thread that forked it, its
+/// schedule status, and its frames, outermost first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ThreadImage {
+    process: u32,
+    parent: Option<u32>,
+    status: StatusImage,
+    frames: Vec<FrameImage>,
+    after: u64,
+    remaining: DigitalEventCountCheckpoint,
+}
+
+/// What a frame executes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum FrameRoutine {
+    Process(u32),
+}
+
+/// One activation record: the routine, where it resumes, and its frame
+/// slots (none for a process body).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameImage {
+    routine: FrameRoutine,
+    resume: Option<DigitalResumeCheckpoint>,
+}
+
+impl ThreadImage {
+    /// A version 1 slot as the single-frame thread it always was.
+    fn from_slot(process: usize, slot: SlotImage) -> Self {
+        Self {
+            process: process as u32,
+            parent: None,
+            status: slot.status,
+            frames: vec![FrameImage {
+                routine: FrameRoutine::Process(process as u32),
+                resume: slot.resume,
+            }],
+            after: slot.after,
+            remaining: slot.remaining,
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum StatusImage {
@@ -109,6 +180,12 @@ impl DigitalHost {
         if !self.elaboration_closed || self.checkpoint_failed {
             return Err("host must be initialized and successfully settled before capture".into());
         }
+        if self.effects.finish().is_some() {
+            return Err(
+                "a run the design ended with `$finish`, `$stop` or `$fatal` cannot be checkpointed"
+                    .into(),
+            );
+        }
         if !self.inactive.is_empty()
             || !self.analog_waiters.is_empty()
             || self.analog_ready.is_some()
@@ -147,34 +224,48 @@ impl DigitalHost {
         let reader =
             DigitalCheckpointReader::new(&self.plan, limits.digital).map_err(|e| e.to_string())?;
         self.validate_checkpoint_links(&scheduler, &reader)?;
-        let slots = self
+        let threads = self
             .slots
             .iter()
-            .map(|slot| SlotImage {
-                status: match &slot.status {
-                    ProcessStatus::Queued => StatusImage::Queued,
-                    ProcessStatus::AwaitingEvent(terms) => {
-                        StatusImage::Event(DigitalWaitCheckpoint::capture(
-                            &self.plan,
-                            &DigitalWaitRequest::Event(terms.clone()),
-                        ))
-                    }
-                    ProcessStatus::AwaitingExpression(token) => StatusImage::Expression(*token),
-                    ProcessStatus::Finished => StatusImage::Finished,
-                    _ => unreachable!("checked drained boundary"),
-                },
-                resume: slot.resume.as_ref().map(DigitalResumeCheckpoint::capture),
-                after: slot.wait_after_sequence,
-                remaining: DigitalEventCountCheckpoint::capture(&slot.remaining_events),
+            .enumerate()
+            .map(|(index, slot)| {
+                ThreadImage::from_slot(
+                    index,
+                    SlotImage {
+                        status: match &slot.status {
+                            ProcessStatus::Queued => StatusImage::Queued,
+                            ProcessStatus::AwaitingEvent(terms) => {
+                                StatusImage::Event(DigitalWaitCheckpoint::capture(
+                                    &self.plan,
+                                    &DigitalWaitRequest::Event(terms.clone()),
+                                ))
+                            }
+                            ProcessStatus::AwaitingExpression(token) => {
+                                StatusImage::Expression(*token)
+                            }
+                            ProcessStatus::Finished => StatusImage::Finished,
+                            _ => unreachable!("checked drained boundary"),
+                        },
+                        resume: slot.resume.as_ref().map(DigitalResumeCheckpoint::capture),
+                        after: slot.wait_after_sequence,
+                        remaining: DigitalEventCountCheckpoint::capture(&slot.remaining_events),
+                    },
+                )
             })
             .collect();
+        let effects = super::super::effects::checkpoint::EffectsImage::capture(&self.effects)?;
         Ok(HostCheckpoint {
-            version: 1,
+            version: HOST_CHECKPOINT_VERSION,
             plan: self.plan.content_identity,
             tick_seconds: self.resolution.seconds_per_tick().to_bits(),
             scheduler,
             store,
-            slots,
+            slots: Vec::new(),
+            threads,
+            effects: Some(EffectsSection {
+                version: EFFECTS_SECTION_VERSION,
+                image: effects,
+            }),
             delayed: self
                 .delayed_updates
                 .iter()
@@ -232,14 +323,36 @@ impl DigitalHost {
         image: &HostCheckpoint,
         limits: HostCheckpointLimits,
     ) -> Result<Self, String> {
-        if image.version != 1
+        if !(1..=HOST_CHECKPOINT_VERSION).contains(&image.version)
             || image.plan != self.plan.content_identity
             || image.tick_seconds != self.resolution.seconds_per_tick().to_bits()
         {
             return Err("host checkpoint schema, plan or timing differs".into());
         }
+        // A version 1 image is a version 2 image with one single-frame
+        // thread per process and no sections.
+        let threads: Vec<ThreadImage> = match image.version {
+            1 => {
+                if !image.threads.is_empty() || image.effects.is_some() {
+                    return Err("a version 1 host image carries version 2 fields".into());
+                }
+                image
+                    .slots
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(index, slot)| ThreadImage::from_slot(index, slot))
+                    .collect()
+            }
+            _ => {
+                if !image.slots.is_empty() {
+                    return Err("a version 2 host image carries version 1 slots".into());
+                }
+                image.threads.clone()
+            }
+        };
         check_size(
-            image.slots.len(),
+            threads.len(),
             image
                 .delayed
                 .iter()
@@ -247,8 +360,28 @@ impl DigitalHost {
                 .chain([image.events.len(), image.expressions.len()]),
             limits,
         )?;
-        if image.slots.len() != self.plan.processes.len() {
+        if threads.len() != self.plan.processes.len() {
             return Err("host process dimensions differ".into());
+        }
+        let mut slots = Vec::with_capacity(threads.len());
+        for (index, thread) in threads.into_iter().enumerate() {
+            // Until fork and tasks land, every thread is a process's root
+            // thread with exactly one frame, executing that process.
+            let [frame] = thread.frames.as_slice() else {
+                return Err("host thread does not have exactly one frame".into());
+            };
+            if thread.process as usize != index
+                || thread.parent.is_some()
+                || frame.routine != FrameRoutine::Process(index as u32)
+            {
+                return Err("host thread belongs to another process or routine".into());
+            }
+            slots.push(SlotImage {
+                status: thread.status,
+                resume: frame.resume.clone(),
+                after: thread.after,
+                remaining: thread.remaining,
+            });
         }
         let mut reader =
             DigitalCheckpointReader::new(&self.plan, limits.digital).map_err(|e| e.to_string())?;
@@ -271,7 +404,21 @@ impl DigitalHost {
             .map_err(|e| e.to_string())?;
         restored.store = self.store.restored_checkpoint(&image.store, &mut reader)?;
         restored.elaboration_closed = true;
-        for (index, image) in image.slots.iter().enumerate() {
+        if let Some(section) = &image.effects {
+            if section.version != EFFECTS_SECTION_VERSION {
+                return Err("host effects section version differs".into());
+            }
+            if section
+                .image
+                .monitor
+                .as_ref()
+                .is_some_and(|monitor| monitor.observer as usize >= self.plan.observers.len())
+            {
+                return Err("host effects name an undeclared `$monitor`".into());
+            }
+            restored.effects.restore_state(&section.image)?;
+        }
+        for (index, image) in slots.iter().enumerate() {
             let resume = image
                 .resume
                 .as_ref()
@@ -636,6 +783,61 @@ endmodule
         assert_eq!(image(&restored), image(&original));
     }
 
+    /// Design P2 section 5.4: a version 1 image (per-process slots, no
+    /// sections) restores as the version 2 image of the same state.
+    #[test]
+    fn a_version_one_host_image_upcasts_to_single_frame_threads() {
+        let original = prepared();
+        let saved = image(&original);
+        let mut value = serde_json::to_value(&saved).unwrap();
+        let threads = value["threads"].as_array().unwrap().clone();
+        let slots: Vec<Value> = threads
+            .iter()
+            .map(|thread| {
+                json!({
+                    "status": thread["status"],
+                    "resume": thread["frames"][0]["resume"],
+                    "after": thread["after"],
+                    "remaining": thread["remaining"],
+                })
+            })
+            .collect();
+        let object = value.as_object_mut().unwrap();
+        object.remove("threads");
+        object.remove("effects");
+        object.insert("slots".into(), Value::Array(slots));
+        object.insert("version".into(), json!(1));
+        let version_one: HostCheckpoint = serde_json::from_value(value).unwrap();
+        let mut restored = host(SOURCE);
+        restored
+            .restore_checkpoint(&version_one, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+    }
+
+    /// `$random`'s global seed and a process's `$urandom` stream are design
+    /// state: a resumed run continues them exactly.
+    #[test]
+    fn host_checkpoint_continues_random_streams() {
+        let source = "`timescale 1ns/1ns\nmodule rng; integer a, b; initial begin a = $random; b = $urandom; #5; a = $random; b = $urandom; end endmodule";
+        let mut original = host(source);
+        original.start().unwrap();
+        let saved = transport(&image(&original));
+        let mut restored = host(source);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        original.advance_to(5).unwrap();
+        restored.advance_to(5).unwrap();
+        for name in ["a", "b"] {
+            assert_eq!(
+                restored.read(signal(&restored, name)),
+                original.read(signal(&original, name)),
+                "{name}"
+            );
+        }
+    }
+
     #[test]
     fn host_checkpoint_preserves_an_analog_clock_with_an_undelivered_same_tick_timer() {
         let source = "`timescale 1ns/1ns\nmodule causal; reg a,q; real observed; initial begin a=0; q=0; #1; q=1; end always @(a) observed=$abstime; endmodule";
@@ -697,17 +899,32 @@ endmodule
         value["scheduler"]["events"].as_array_mut().unwrap().pop();
         bad.push(value);
         let mut value = base.clone();
-        value["slots"][queued]["status"] = json!("Finished");
+        value["threads"][queued]["status"] = json!("Finished");
         bad.push(value);
         let mut value = base.clone();
-        value["slots"][queued]["resume"] = Value::Null;
+        value["threads"][queued]["frames"][0]["resume"] = Value::Null;
         bad.push(value);
         let mut value = base.clone();
-        value["slots"][event]["status"]["Event"]["base"]["Event"][0]["signal"] =
+        value["threads"][event]["status"]["Event"]["base"]["Event"][0]["signal"] =
             json!(signal(&receiver, "data").index());
         bad.push(value);
         let mut value = base.clone();
-        value["slots"][queued]["status"] = value["slots"][expression]["status"].clone();
+        value["threads"][queued]["status"] = value["threads"][expression]["status"].clone();
+        bad.push(value);
+        // A thread of another process, a forked thread, and a second frame
+        // are all refused until fork and tasks exist.
+        let mut value = base.clone();
+        value["threads"][queued]["process"] = json!(event);
+        bad.push(value);
+        let mut value = base.clone();
+        value["threads"][queued]["parent"] = json!(0);
+        bad.push(value);
+        let mut value = base.clone();
+        let frame = value["threads"][queued]["frames"][0].clone();
+        value["threads"][queued]["frames"]
+            .as_array_mut()
+            .unwrap()
+            .push(frame);
         bad.push(value);
         let mut value = base.clone();
         value["store"]["expressions"].as_array_mut().unwrap().pop();
@@ -716,7 +933,7 @@ endmodule
         value["delayed"] = json!([]);
         bad.push(value);
         let mut value = base.clone();
-        value["slots"][event]["after"] = json!(u64::MAX);
+        value["threads"][event]["after"] = json!(u64::MAX);
         bad.push(value);
         let mut value = base.clone();
         value["tick_seconds"] = json!(0);

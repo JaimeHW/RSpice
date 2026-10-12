@@ -1434,3 +1434,323 @@ fn repeat_controls_count_each_transition_and_retain_all_expression_baselines() {
         );
     }
 }
+
+// ===========================================================================
+// Self-checking testbenches: system tasks end to end (design P2 section 2.3)
+//
+// Expected text is what Icarus Verilog 13.0 printed for the same source
+// (`iverilog -g2005`, `vvp -n`), less its own `$finish called at` line, which
+// RSpice reports as a finish record instead.
+// ===========================================================================
+
+use crate::config::{HdlSeverity, HdlStream};
+
+fn testbench(files: &[(&str, &str)], options: &HdlTestbenchOptions) -> HdlTestbenchReport {
+    let sources: Vec<_> = files
+        .iter()
+        .map(|(path, text)| (std::path::PathBuf::from(path), (*text).to_owned()))
+        .collect();
+    run_digital_testbench(&sources, options).expect("the testbench runs")
+}
+
+fn bench(source: &str, plusargs: &[&str]) -> HdlTestbenchReport {
+    testbench(
+        &[("tb.v", source)],
+        &HdlTestbenchOptions {
+            plusargs: plusargs
+                .iter()
+                .map(|argument| (*argument).to_owned())
+                .collect(),
+            ..HdlTestbenchOptions::default()
+        },
+    )
+}
+
+fn stdout(report: &HdlTestbenchReport) -> String {
+    report
+        .records
+        .iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| record.text.as_str())
+        .collect()
+}
+
+/// `$display`/`$write`/`$strobe`/`$monitor`, `%t` under the design precision
+/// and under `$timeformat`, `$random(seed)`, both plusarg functions and `%m`.
+#[test]
+fn a_testbench_prints_what_icarus_prints() {
+    let report = bench(
+        "`timescale 1ns/100ps\n\
+         module tb;\n\
+         \x20 reg [7:0] a;\n\
+         \x20 integer seed, r, n;\n\
+         \x20 initial begin\n\
+         \x20   a = 8'd5; seed = 7;\n\
+         \x20   $display(\"start a=%d %h %b %o\", a, a, a, a);\n\
+         \x20   $write(\"w%0d;\", a);\n\
+         \x20   $display;\n\
+         \x20   $strobe(\"strobe a=%0d at %t\", a, $time);\n\
+         \x20   a = 8'd6;\n\
+         \x20   #3 a = 8'd7;\n\
+         \x20   $monitor(\"mon a=%0d t=%0t\", a, $time);\n\
+         \x20   #2 a = 8'd8;\n\
+         \x20   #1 a = 8'd8;\n\
+         \x20   $timeformat(-9, 2, \" ns\", 10);\n\
+         \x20   #1 $display(\"tf %t|\", $realtime);\n\
+         \x20   r = $random(seed);\n\
+         \x20   $display(\"r=%0d seed=%0d\", r, seed);\n\
+         \x20   if ($test$plusargs(\"VERBOSE\")) $display(\"verbose\");\n\
+         \x20   if ($value$plusargs(\"N=%d\", n)) $display(\"n=%0d\", n);\n\
+         \x20   $display(\"%m %0s|%s|\", \"ab\", \"cd\");\n\
+         \x20   $finish(0);\n\
+         \x20 end\n\
+         endmodule\n",
+        &["+VERBOSE", "+N=42"],
+    );
+    assert_eq!(
+        stdout(&report),
+        "start a=  5 05 00000101 005\n\
+         w5;\n\
+         strobe a=6 at                    0\n\
+         mon a=7 t=30\n\
+         mon a=8 t=50\n\
+         tf    7.00 ns|\n\
+         r=-2146999808 seed=483484\n\
+         verbose\n\
+         n=42\n\
+         tb ab|cd|\n"
+    );
+    assert_eq!(report.end, HdlTestbenchEnd::Finished);
+    assert_eq!(report.finish_level, Some(0));
+    assert_eq!(report.end_tick, 70);
+    assert!((report.end_seconds - 7e-9).abs() < 1e-21);
+    let finish = report.records.last().expect("a finish record");
+    assert_eq!(
+        finish.stream,
+        HdlStream::Finish {
+            stop: false,
+            level: 0
+        }
+    );
+    assert_eq!(
+        (finish.origin.file.as_str(), finish.origin.line),
+        ("tb.v", 23)
+    );
+    assert_eq!(finish.origin.scope, "tb");
+}
+
+/// Without plusargs neither function matches, and `$value$plusargs` leaves
+/// its variable alone.
+#[test]
+fn unmatched_plusargs_leave_the_variable_unchanged() {
+    let report = bench(
+        "module tb; integer n; initial begin n = 9;\n\
+         if (!$value$plusargs(\"N=%d\", n)) $display(\"no N, n=%0d\", n);\n\
+         if (!$test$plusargs(\"V\")) $display(\"no V\"); end endmodule\n",
+        &[],
+    );
+    assert_eq!(stdout(&report), "no N, n=9\nno V\n");
+    assert_eq!(report.end, HdlTestbenchEnd::Quiescent);
+}
+
+/// IEEE 1364-2005 sections 17.1.1 and 17.9, against Icarus: field widths and
+/// flags, unknown digits, the empty argument, the distribution functions and
+/// the global `$random` stream; then the severity tasks.
+#[test]
+fn formats_distributions_and_severities_match_icarus() {
+    let report = bench(
+        "module sev;\n\
+         \x20 integer seed, i;\n\
+         \x20 initial begin\n\
+         \x20   seed = 1;\n\
+         \x20   $display(\"%0d %0d %0d\", $dist_uniform(seed, 0, 99), $dist_uniform(seed, 0, 99), seed);\n\
+         \x20   seed = 3;\n\
+         \x20   $display(\"%0d %0d\", $dist_normal(seed, 10, 4), $dist_poisson(seed, 5));\n\
+         \x20   i = $random;\n\
+         \x20   $display(\"%0d\", i);\n\
+         \x20   $display(\"[%5d] [%-5d] [%05d] [%h] [%0h] [%e] [%0.3f] [%g] [%c] [%s]\", -3, 7, 42, 12'habc, 12'habc, 1.5, 3.14159, 0.0001, 65, \"hi\");\n\
+         \x20   $display(\"[%t] [%0t] [%b] [%d] [%o]\", 1, 2, 4'bx01z, 8'bxxxxxxxx, 6'o7z);\n\
+         \x20   $display(1.5, , 3);\n\
+         \x20   $warning(\"careful %0d\", 1);\n\
+         \x20   $error(\"bad %0d\", 2);\n\
+         \x20   $fatal(0, \"boom\");\n\
+         \x20   $display(\"never\");\n\
+         \x20 end\n\
+         endmodule\n",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "0 11 475628535\n\
+         9 8\n\
+         303379748\n\
+         [   -3] [7    ] [00042] [abc] [abc] [1.500000e+00] [3.142] [0.0001] [A] [hi]\n\
+         [                   1] [2] [x01z] [  x] [7z]\n\
+         1.50000           3\n"
+    );
+    let diagnostics: Vec<_> = report
+        .records
+        .iter()
+        .filter_map(|record| match record.stream {
+            HdlStream::Diagnostic { severity } => {
+                Some((severity, record.text.as_str(), record.origin.line))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        diagnostics,
+        [
+            (HdlSeverity::Warning, "careful 1", 13),
+            (HdlSeverity::Error, "bad 2", 14),
+            (HdlSeverity::Fatal, "boom", 15),
+        ]
+    );
+    assert_eq!(report.end, HdlTestbenchEnd::Fatal);
+    assert_eq!(report.finish_level, Some(0));
+    assert_eq!((report.warnings, report.errors, report.fatals), (1, 1, 1));
+}
+
+/// Design P2 section 4.3: `$finish` ends the thread at once, the rest of its
+/// tick still runs — other same-tick processes, the nonblocking update it
+/// scheduled, the event that update wakes, and the strobe region — and no
+/// later tick runs. Icarus prints the same four lines.
+#[test]
+fn finish_completes_its_tick_and_runs_no_later_one() {
+    let report = bench(
+        "`timescale 1ns/1ns\n\
+         module fin;\n\
+         \x20 reg a;\n\
+         \x20 initial begin a = 0; #5 a <= 1; $display(\"finish at %0t\", $time); $finish(1); $display(\"never\"); end\n\
+         \x20 always @(posedge a) $display(\"posedge a at %0t\", $time);\n\
+         \x20 initial #5 $display(\"same tick\");\n\
+         \x20 initial #5 $strobe(\"strobe at %0t\", $time);\n\
+         \x20 initial #6 $display(\"next tick never\");\n\
+         endmodule\n",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "finish at 5\nsame tick\nposedge a at 5\nstrobe at 5\n"
+    );
+    assert_eq!(report.end, HdlTestbenchEnd::Finished);
+    assert_eq!(report.finish_level, Some(1));
+    assert_eq!(report.end_tick, 5);
+}
+
+/// `$stop` ends a batch run the way `$finish` does, and says it stopped.
+#[test]
+fn stop_ends_a_batch_run() {
+    let report = bench(
+        "module s; initial begin #2 $stop; $display(\"never\"); end endmodule\n",
+        &[],
+    );
+    assert_eq!(report.end, HdlTestbenchEnd::Stopped);
+    assert_eq!(report.finish_level, Some(1));
+    assert!(matches!(
+        report.records.last().map(|record| &record.stream),
+        Some(HdlStream::Finish {
+            stop: true,
+            level: 1
+        })
+    ));
+    assert_eq!(stdout(&report), "");
+}
+
+/// Design P2 section 2.3: every source is one compilation unit, every module
+/// nothing instantiates is a root, and the roots are linked into one design;
+/// `%m` of a root is its module name and each record keeps its own file line.
+#[test]
+fn every_uninstantiated_module_is_a_linked_root() {
+    let report = testbench(
+        &[
+            (
+                "zeta.v",
+                "`timescale 1ns/1ns\nmodule zeta;\n  initial #1 $display(\"%m z\");\nendmodule\n",
+            ),
+            (
+                "alpha.v",
+                "module alpha;\n  initial $display(\"%m a\");\n  initial #2 $finish;\nendmodule\n",
+            ),
+        ],
+        &HdlTestbenchOptions::default(),
+    );
+    assert_eq!(stdout(&report), "alpha a\nzeta z\n");
+    let origins: Vec<_> = report
+        .records
+        .iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| (record.origin.file.as_str(), record.origin.line))
+        .collect();
+    assert_eq!(origins, [("alpha.v", 2), ("zeta.v", 3)]);
+    assert_eq!(report.end, HdlTestbenchEnd::Finished);
+    assert_eq!(report.end_tick, 2, "the timescale carried into alpha.v");
+}
+
+/// Design P2 section 2.4: the reverse schedule starts same-tick activations
+/// in the reverse of source order, which is what exposes a racy test.
+#[test]
+fn the_reverse_schedule_reverses_same_tick_starts() {
+    let source = "module r; initial $display(\"one\"); initial $display(\"two\"); endmodule\n";
+    assert_eq!(stdout(&bench(source, &[])), "one\ntwo\n");
+    let reversed = testbench(
+        &[("r.v", source)],
+        &HdlTestbenchOptions {
+            schedule: HdlSchedule::ReverseActive,
+            ..HdlTestbenchOptions::default()
+        },
+    );
+    assert_eq!(stdout(&reversed), "two\none\n");
+}
+
+/// A free-running clock ends at the tick ceiling rather than running on.
+#[test]
+fn a_free_running_testbench_ends_at_the_tick_ceiling() {
+    let report = testbench(
+        &[("c.v", "module c; reg k = 0; always #1 k = ~k; endmodule\n")],
+        &HdlTestbenchOptions {
+            tick_ceiling: Some(10),
+            ..HdlTestbenchOptions::default()
+        },
+    );
+    assert_eq!(report.end, HdlTestbenchEnd::TickCeiling);
+    assert_eq!(report.end_tick, 10);
+}
+
+/// The file and waveform tasks compile and are refused at run time as not
+/// supported yet; so are the options whose behaviour has not landed. The text
+/// names the feature, never a plan lane.
+#[test]
+fn unlanded_tasks_and_options_are_refused_as_not_supported_yet() {
+    let error = run_digital_testbench(
+        &[(
+            "f.v".into(),
+            "module f; integer fd; initial fd = $fopen(\"x.txt\"); endmodule\n".into(),
+        )],
+        &HdlTestbenchOptions::default(),
+    )
+    .expect_err("file I/O is not supported yet")
+    .to_string();
+    assert!(
+        error.contains("HDL file and waveform I/O (`$fopen`) is not supported yet"),
+        "{error}"
+    );
+    assert!(!error.contains("lane"), "{error}");
+    let error = run_digital_testbench(
+        &[(
+            "f.v".into(),
+            "module f; initial $display; endmodule\n".into(),
+        )],
+        &HdlTestbenchOptions {
+            delay_select: crate::config::HdlDelaySelect::Max,
+            ..HdlTestbenchOptions::default()
+        },
+    )
+    .expect_err("delay selection is not supported yet")
+    .to_string();
+    assert!(
+        error.contains("min:typ:max delay selection is not supported yet"),
+        "{error}"
+    );
+    assert!(!error.contains("lane"), "{error}");
+}

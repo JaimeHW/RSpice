@@ -129,6 +129,304 @@ pub enum SimulationConfigError {
         /// Preceding time value.
         previous: Value,
     },
+    /// An HDL run option whose behaviour a later P2 lane implements was given
+    /// a value other than its default. The text names the feature, never
+    /// the lane.
+    #[error("{option} is not supported yet: {reason}")]
+    HdlOptionNotAvailable {
+        /// The option, as the command line and `.options` spell it.
+        option: &'static str,
+        /// What is not implemented.
+        reason: &'static str,
+    },
+}
+
+// ============================================================================
+// HDL runs (design P2 section 4.3)
+// ============================================================================
+
+/// The analysis point an HDL output record belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum HdlPoint {
+    Initialization,
+    OperatingPoint,
+    DcSweep { value: f64 },
+    Transient { time: f64 },
+}
+
+/// The severity of an IEEE 1800-2017 section 20.10 severity task
+/// (`$info`, `$warning`, `$error`, `$fatal`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub enum HdlSeverity {
+    Info,
+    Warning,
+    Error,
+    Fatal,
+}
+
+impl HdlSeverity {
+    /// The word a rendering leads with.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Info => "Info",
+            Self::Warning => "Warning",
+            Self::Error => "Error",
+            Self::Fatal => "Fatal",
+        }
+    }
+}
+
+/// Where an HDL output record goes.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum HdlStream {
+    /// `$display`, `$write`, `$strobe`, `$monitor` and their kin.
+    Stdout,
+    /// A file a design opened (`$fdisplay`); written at commit.
+    File { handle: u32, path: String },
+    /// A severity task's message.
+    Diagnostic { severity: HdlSeverity },
+    /// `$finish(level)` or `$stop(level)` ended the run here; the text is empty
+    /// and the origin names the call (IEEE 1364-2005 section 17.4).
+    Finish { stop: bool, level: u8 },
+}
+
+/// The call an HDL output record came from.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HdlOrigin {
+    /// The hierarchical scope `%m` prints.
+    pub scope: String,
+    /// The source file the call was written in; empty when unknown.
+    pub file: String,
+    /// Its line, one-based; zero when unknown.
+    pub line: u32,
+}
+
+/// One accepted unit of HDL output.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HdlOutputRecord {
+    pub point: HdlPoint,
+    /// The design tick the call ran at.
+    pub tick: u64,
+    /// That tick in seconds.
+    pub seconds: f64,
+    pub stream: HdlStream,
+    /// The formatted text, with the newline a `$display` appends.
+    pub text: String,
+    pub origin: HdlOrigin,
+}
+
+/// Receives HDL output as the run accepts it: a record produced by a trial
+/// the solver later rejects is never delivered.
+pub trait HdlOutputSink: Send + Sync + std::fmt::Debug {
+    fn emit(&self, record: &HdlOutputRecord);
+}
+
+/// A sink that keeps the records, for a headless caller that reads them after
+/// the run (design P2 section 4.3).
+///
+/// Bounded by text bytes. The record that would cross the bound is replaced
+/// by one explicit truncation warning, and everything after it is dropped, so
+/// an overflow is never silent and never unbounded.
+#[derive(Debug)]
+pub struct HdlOutputCollector {
+    limit: usize,
+    state: std::sync::Mutex<HdlCollectorState>,
+}
+
+#[derive(Debug, Default)]
+struct HdlCollectorState {
+    records: Vec<HdlOutputRecord>,
+    bytes: usize,
+    truncated: bool,
+}
+
+impl Default for HdlOutputCollector {
+    fn default() -> Self {
+        Self::bounded(Self::DEFAULT_MAX_BYTES)
+    }
+}
+
+impl HdlOutputCollector {
+    /// The default bound: 64 MiB of text.
+    pub const DEFAULT_MAX_BYTES: usize = 64 << 20;
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A collector that keeps at most `max_bytes` of record text.
+    pub fn bounded(max_bytes: usize) -> Self {
+        Self {
+            limit: max_bytes,
+            state: Default::default(),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, HdlCollectorState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Every record delivered so far, in delivery order.
+    pub fn records(&self) -> Vec<HdlOutputRecord> {
+        self.state().records.clone()
+    }
+
+    /// Take the records delivered so far. The byte bound covers the whole run.
+    pub fn take(&self) -> Vec<HdlOutputRecord> {
+        std::mem::take(&mut self.state().records)
+    }
+
+    /// Whether the bound dropped output.
+    pub fn truncated(&self) -> bool {
+        self.state().truncated
+    }
+}
+
+impl HdlOutputSink for HdlOutputCollector {
+    fn emit(&self, record: &HdlOutputRecord) {
+        let mut state = self.state();
+        if state.truncated {
+            return;
+        }
+        let bytes = state.bytes.saturating_add(record.text.len());
+        if bytes > self.limit {
+            state.truncated = true;
+            state.records.push(HdlOutputRecord {
+                stream: HdlStream::Diagnostic {
+                    severity: HdlSeverity::Warning,
+                },
+                text: format!(
+                    "HDL output exceeded its {} byte bound here; later output was dropped",
+                    self.limit
+                ),
+                ..record.clone()
+            });
+            return;
+        }
+        state.bytes = bytes;
+        state.records.push(record.clone());
+    }
+}
+
+/// Which value of a min:typ:max expression elaboration selects (IEEE
+/// 1364-2005 section 5.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum HdlDelaySelect {
+    Min,
+    #[default]
+    Typ,
+    Max,
+}
+
+impl HdlDelaySelect {
+    /// The spelling `.options hdl_delay_select` and `--hdl-delay-select` take.
+    pub fn parse(spelling: &str) -> Option<Self> {
+        Some(match spelling.to_ascii_lowercase().as_str() {
+            "min" => Self::Min,
+            "typ" => Self::Typ,
+            "max" => Self::Max,
+            _ => return None,
+        })
+    }
+}
+
+/// Everything about a run that the HDL half of a design reads.
+///
+/// Every P2 option is here from the start, so a later lane changes behaviour
+/// without changing configuration; an option whose behaviour has not arrived
+/// is refused by [`SimulationConfig::validate`] when it is set away from its
+/// default.
+#[derive(Debug, Clone)]
+pub struct HdlRunConfig {
+    /// Receives accepted output records. `None` discards them.
+    pub output: Option<std::sync::Arc<dyn HdlOutputSink>>,
+    /// `$test$plusargs`/`$value$plusargs` sources, first match wins: the
+    /// command line's `+name` tokens, then `.options hdl_plusargs`.
+    pub plusargs: Vec<String>,
+    /// `.options hdlseed`: the initial value of the design-global `$random`
+    /// seed, and the root of every process's `$urandom` stream.
+    pub seed: u32,
+    /// The directory a relative HDL file path resolves against by default:
+    /// the deck's own directory, supplied by the front end.
+    pub deck_directory: Option<std::path::PathBuf>,
+    /// `--hdl-run-dir` / `.options hdl_rundir`: an explicit run directory.
+    pub run_directory: Option<std::path::PathBuf>,
+    /// `--hdl-unrestricted-io`: let HDL writes leave the run directory.
+    pub unrestricted_io: bool,
+    /// `--hdl-delay-select` / `.options hdl_delay_select`.
+    pub delay_select: HdlDelaySelect,
+    /// `.options hdl_path_delays`: honour `specify` path delays.
+    pub path_delays: bool,
+    /// `.options hdl_timing_checks`: run `specify` timing checks.
+    pub timing_checks: bool,
+    /// `.options hdl_libmap`: a Verilog library map file.
+    pub library_map: Option<std::path::PathBuf>,
+}
+
+impl Default for HdlRunConfig {
+    fn default() -> Self {
+        Self {
+            output: None,
+            plusargs: Vec::new(),
+            seed: 0,
+            deck_directory: None,
+            run_directory: None,
+            unrestricted_io: false,
+            delay_select: HdlDelaySelect::Typ,
+            path_delays: true,
+            timing_checks: true,
+            library_map: None,
+        }
+    }
+}
+
+impl HdlRunConfig {
+    /// Refuse an option set away from its default before the behaviour it
+    /// selects exists (design P2 section 7, L1 row).
+    pub fn validate(&self) -> Result<(), SimulationConfigError> {
+        // The run directory and unrestricted I/O are P2 lane L5's; delay
+        // selection, path delays and timing checks L6's; library maps L8's.
+        let unavailable =
+            |option, reason| Err(SimulationConfigError::HdlOptionNotAvailable { option, reason });
+        if self.run_directory.is_some() {
+            return unavailable(
+                "the HDL run directory (`--hdl-run-dir`, `.options hdl_rundir`)",
+                "HDL file I/O is not implemented",
+            );
+        }
+        if self.unrestricted_io {
+            return unavailable("`--hdl-unrestricted-io`", "HDL file I/O is not implemented");
+        }
+        if self.delay_select != HdlDelaySelect::Typ {
+            return unavailable(
+                "min:typ:max delay selection (`--hdl-delay-select`, `.options hdl_delay_select`)",
+                "every HDL delay uses its typical value",
+            );
+        }
+        if !self.path_delays {
+            return unavailable(
+                "`.options hdl_path_delays=0`",
+                "`specify` path delays are not implemented",
+            );
+        }
+        if !self.timing_checks {
+            return unavailable(
+                "`.options hdl_timing_checks=0`",
+                "`specify` timing checks are not implemented",
+            );
+        }
+        if self.library_map.is_some() {
+            return unavailable(
+                "`.options hdl_libmap`",
+                "Verilog configurations and library maps are not implemented",
+            );
+        }
+        Ok(())
+    }
 }
 
 /// Dialect-specific expression-function semantics.
@@ -409,6 +707,8 @@ pub struct SimulationConfig {
     /// same length as the locked grid; callers that provide only a grid retain
     /// the normal timestamp-difference behavior.
     pub locked_time_step_sizes: Option<std::sync::Arc<Vec<Value>>>,
+    /// The HDL half's run options and output receiver (design P2 section 4.3).
+    pub hdl: HdlRunConfig,
 }
 
 impl SimulationConfig {
@@ -418,6 +718,7 @@ impl SimulationConfig {
     /// should call this directly or construct the engine with
     /// [`crate::Engine::try_new`] before starting simulation work.
     pub fn validate(&self) -> Result<(), SimulationConfigError> {
+        self.hdl.validate()?;
         validate_positive("tolerance", self.tolerance)?;
         validate_count("max_iterations", self.max_iterations)?;
         validate_count("transient_max_iterations", self.transient_max_iterations)?;
@@ -908,6 +1209,7 @@ impl Default for SimulationConfig {
             convergence_config: ConvergenceConfig::default(),
             locked_time_grid: None,
             locked_time_step_sizes: None,
+            hdl: HdlRunConfig::default(),
         }
     }
 }
@@ -1096,6 +1398,116 @@ mod timeint_config_tests {
             invalid
                 .validate()
                 .expect_err("invalid TIMEINT config must fail closed");
+        }
+    }
+
+    fn hdl_record(text: &str) -> HdlOutputRecord {
+        HdlOutputRecord {
+            point: HdlPoint::Transient { time: 1e-9 },
+            tick: 1,
+            seconds: 1e-9,
+            stream: HdlStream::Stdout,
+            text: text.into(),
+            origin: HdlOrigin {
+                scope: "tb".into(),
+                file: "tb.v".into(),
+                line: 3,
+            },
+        }
+    }
+
+    /// Design P2 section 4.3: headless output is bounded, and the overflow is
+    /// one explicit record rather than silence.
+    #[test]
+    fn the_hdl_collector_bounds_its_text_with_one_truncation_record() {
+        // The first two records are exactly nine bytes.
+        let collector = HdlOutputCollector::bounded(9);
+        for text in ["abcd\n", "efg\n", "hij\n", "klm\n"] {
+            collector.emit(&hdl_record(text));
+        }
+        let records = collector.take();
+        let texts: Vec<_> = records.iter().map(|record| record.text.as_str()).collect();
+        assert_eq!(texts[..2], ["abcd\n", "efg\n"]);
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[2].stream,
+            HdlStream::Diagnostic {
+                severity: HdlSeverity::Warning
+            }
+        );
+        assert!(records[2].text.contains("9 byte bound"));
+        assert!(collector.truncated());
+        assert_eq!(
+            HdlOutputCollector::new().limit,
+            HdlOutputCollector::DEFAULT_MAX_BYTES
+        );
+    }
+
+    /// Design P2 section 7, L1: every P2 run option exists now, and a value
+    /// other than the default is refused, saying plainly what is not
+    /// supported — never which plan lane brings it.
+    #[test]
+    fn unlanded_hdl_options_are_refused_as_not_supported_yet() {
+        HdlRunConfig::default()
+            .validate()
+            .expect("the defaults are valid");
+        for (config, feature) in [
+            (
+                HdlRunConfig {
+                    run_directory: Some("out".into()),
+                    ..HdlRunConfig::default()
+                },
+                "HDL file I/O is not implemented",
+            ),
+            (
+                HdlRunConfig {
+                    unrestricted_io: true,
+                    ..HdlRunConfig::default()
+                },
+                "HDL file I/O is not implemented",
+            ),
+            (
+                HdlRunConfig {
+                    delay_select: HdlDelaySelect::Min,
+                    ..HdlRunConfig::default()
+                },
+                "min:typ:max delay selection",
+            ),
+            (
+                HdlRunConfig {
+                    path_delays: false,
+                    ..HdlRunConfig::default()
+                },
+                "`specify` path delays are not implemented",
+            ),
+            (
+                HdlRunConfig {
+                    timing_checks: false,
+                    ..HdlRunConfig::default()
+                },
+                "`specify` timing checks are not implemented",
+            ),
+            (
+                HdlRunConfig {
+                    library_map: Some("lib.map".into()),
+                    ..HdlRunConfig::default()
+                },
+                "library maps are not implemented",
+            ),
+        ] {
+            let error = SimulationConfig {
+                hdl: config,
+                ..SimulationConfig::default()
+            }
+            .validate()
+            .expect_err("an unlanded option is refused")
+            .to_string();
+            assert!(error.contains("is not supported yet"), "{error}");
+            assert!(error.contains(feature), "{error}");
+            assert!(
+                !error.contains("lane") && !error.contains("P2"),
+                "no plan identifier reaches the text: {error}"
+            );
         }
     }
 }

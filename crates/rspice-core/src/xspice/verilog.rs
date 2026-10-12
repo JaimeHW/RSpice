@@ -69,6 +69,7 @@
 //!
 //! [`DigitalHost::advance_to`]: host::DigitalHost::advance_to
 
+pub(crate) mod effects;
 pub(crate) mod host;
 #[cfg(test)]
 mod linked_tests;
@@ -659,6 +660,262 @@ fn invert(bit: FourStateBit) -> FourStateBit {
         FourStateBit::One => FourStateBit::Zero,
         other => other,
     }
+}
+
+/// Which order same-tick activations start in (design P2 section 2.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HdlSchedule {
+    /// Source order: processes start, and a change wakes its waiters, in
+    /// declaration order. What every run uses.
+    #[default]
+    Source,
+    /// The reverse of source order, for the racy-test classifier only: a test
+    /// whose outcome differs under it depends on an order IEEE 1364-2005
+    /// section 11.4.2 leaves open.
+    ReverseActive,
+}
+
+/// How a self-checking testbench run is configured (design P2 section 2.3).
+#[derive(Debug, Clone, Default)]
+pub struct HdlTestbenchOptions {
+    /// Where relative HDL file paths resolve (HDL file I/O, P2 lane L5).
+    pub run_directory: Option<std::path::PathBuf>,
+    /// `$test$plusargs`/`$value$plusargs` sources, first match wins.
+    pub plusargs: Vec<String>,
+    /// `hdlseed`.
+    pub seed: u32,
+    /// min:typ:max selection (P2 lane L6).
+    pub delay_select: crate::config::HdlDelaySelect,
+    /// Honour `specify` blocks (P2 lane L6).
+    pub specify: bool,
+    /// `` `include `` search directories.
+    pub include_dirs: Vec<std::path::PathBuf>,
+    pub schedule: HdlSchedule,
+    /// The run ends at the first tick past this one. `None` is the exact tick
+    /// range's limit.
+    pub tick_ceiling: Option<u64>,
+}
+
+/// How a testbench run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HdlTestbenchEnd {
+    /// `$finish` (IEEE 1364-2005 section 17.4.1).
+    Finished,
+    /// `$stop`.
+    Stopped,
+    /// `$fatal`.
+    Fatal,
+    /// No event was left to run.
+    Quiescent,
+    /// The next event lay past the tick ceiling.
+    TickCeiling,
+}
+
+/// What a testbench run produced.
+#[derive(Debug, Clone)]
+pub struct HdlTestbenchReport {
+    /// Every output record, in emission order.
+    pub records: Vec<crate::config::HdlOutputRecord>,
+    pub end: HdlTestbenchEnd,
+    /// The level of the `$finish`, `$stop` or `$fatal` that ended the run.
+    pub finish_level: Option<u8>,
+    /// The tick the run ended at, and that tick in seconds.
+    pub end_tick: u64,
+    pub end_seconds: f64,
+    /// Severity-task counts.
+    pub warnings: u32,
+    pub errors: u32,
+    pub fatals: u32,
+}
+
+/// The modules a source declares, in order.
+fn declared_modules(source: &str) -> Result<Vec<String>, DigitalRunError> {
+    use rspice_veriloga::lexer::{Lexer, TokenKind};
+    let mut sources = rspice_veriloga::SourceMap::new();
+    let id = sources.add_source("unit", source);
+    let tokens =
+        Lexer::new(source, id)
+            .collect_tokens()
+            .map_err(|error| DigitalRunError::Compile {
+                detail: error.to_string(),
+            })?;
+    Ok(tokens
+        .windows(2)
+        .filter(|pair| matches!(pair[0].kind, TokenKind::Module | TokenKind::Macromodule))
+        .filter_map(|pair| pair[1].text.clone())
+        .collect())
+}
+
+/// Run a self-checking HDL testbench to its end (design P2 section 2.3).
+///
+/// Every source is one compilation unit, read in order, so macros and
+/// `timescale` carry from one file into the next (IEEE 1364-2005 sections
+/// 19.3 and 19.8). Every module no other module instantiates is a root, and
+/// the roots are linked into one design and run on the same host, effects and
+/// interpreter the mixed coordinator drives — only the coupled trial is
+/// absent — until `$finish`, `$stop`, event exhaustion, or the tick ceiling.
+pub fn run_digital_testbench(
+    sources: &[(std::path::PathBuf, String)],
+    options: &HdlTestbenchOptions,
+) -> Result<HdlTestbenchReport, DigitalRunError> {
+    // The run directory is P2 lane L5's; delay selection and `specify` L6's.
+    let unavailable = |option: &str, reason: &str| {
+        Err(DigitalRunError::Compile {
+            detail: format!("{option} is not supported yet: {reason}"),
+        })
+    };
+    if options.run_directory.is_some() {
+        return unavailable(
+            "a testbench run directory",
+            "HDL file I/O is not implemented",
+        );
+    }
+    if options.delay_select != crate::config::HdlDelaySelect::Typ {
+        return unavailable(
+            "min:typ:max delay selection",
+            "every HDL delay uses its typical value",
+        );
+    }
+    if options.specify {
+        return unavailable(
+            "`specify` timing",
+            "`specify` path delays and timing checks are not implemented",
+        );
+    }
+    let mut unit = String::new();
+    // Each file starts on its own line; a file's own line numbers are
+    // recovered from where it starts in the unit.
+    let mut starts = Vec::with_capacity(sources.len());
+    for (path, text) in sources {
+        starts.push((unit.lines().count() as u32, path.display().to_string()));
+        unit.push_str(text);
+        if !text.ends_with('\n') {
+            unit.push('\n');
+        }
+    }
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        include_paths: options.include_dirs.clone(),
+        ..CompilerOptions::default()
+    });
+    let mut plans = Vec::new();
+    for module in declared_modules(&unit)? {
+        let artifact = compiler
+            .compile_canonical_ir_module(&unit, Some(&module))
+            .map_err(|error| DigitalRunError::Compile {
+                detail: error.to_string(),
+            })?;
+        if !artifact.mir.equations.is_empty() || !artifact.digital.absdelta.is_empty() {
+            return Err(DigitalRunError::MixedSignalModule {
+                module,
+                equations: artifact.mir.equations.len(),
+            });
+        }
+        plans.push((module, artifact.digital));
+    }
+    // A module some other module instantiates is not a root.
+    let instantiated: std::collections::BTreeSet<String> = plans
+        .iter()
+        .flat_map(|(_, plan)| plan.scopes.iter().skip(1))
+        .filter(|scope| {
+            scope.kind == rspice_veriloga::canonical_ir::digital::DigitalScopeKind::Module
+        })
+        .map(|scope| scope.module.to_string())
+        .collect();
+    let roots: Vec<_> = plans
+        .into_iter()
+        .filter(|(module, plan)| !instantiated.contains(module) && plan.has_executable_content())
+        .collect();
+    if roots.is_empty() {
+        return Err(DigitalRunError::NoDigitalContent {
+            module: sources
+                .first()
+                .map(|(path, _)| path.display().to_string())
+                .unwrap_or_default(),
+        });
+    }
+    let plan = if roots.len() == 1 {
+        roots.into_iter().next().expect("one root").1
+    } else {
+        use rspice_veriloga::canonical_ir::digital_link::{
+            DigitalLinkInstance, link_digital_plans,
+        };
+        let instances: Vec<_> = roots
+            .iter()
+            .map(|(module, plan)| DigitalLinkInstance {
+                name: module,
+                plan,
+                ports: &[],
+            })
+            .collect();
+        link_digital_plans(&instances, &[], &rspice_veriloga::NoPipelineControl)
+            .map_err(|diagnostics| DigitalRunError::Compile {
+                detail: diagnostics
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            })?
+            .plan
+    };
+    let resolution = TimeResolution::new(plan.timing.precision_exponent)?;
+    let mut host = DigitalHost::from_plan(Arc::new(plan), resolution, SchedulerLimits::default());
+    host.configure_effects(effects::HdlEffectsConfig {
+        plusargs: options.plusargs.clone(),
+        seed: options.seed,
+    });
+    host.set_reverse_active(options.schedule == HdlSchedule::ReverseActive);
+    host.start()?;
+    let ceiling = options
+        .tick_ceiling
+        .unwrap_or(TimeResolution::MAX_EXACT_TICKS);
+    let mut end_tick = 0;
+    let mut end = HdlTestbenchEnd::Quiescent;
+    while host.hdl_finish().is_none() {
+        let Some(next) = host.next_tick() else {
+            break;
+        };
+        if next > ceiling {
+            end = HdlTestbenchEnd::TickCeiling;
+            break;
+        }
+        host.advance_to(next)?;
+        end_tick = next;
+    }
+    let finish = host.hdl_finish().cloned();
+    if let Some(finish) = &finish {
+        end_tick = finish.tick;
+        end = match finish.kind {
+            effects::HdlFinishKind::Finish => HdlTestbenchEnd::Finished,
+            effects::HdlFinishKind::Stop => HdlTestbenchEnd::Stopped,
+            effects::HdlFinishKind::Fatal => HdlTestbenchEnd::Fatal,
+        };
+    }
+    let end_seconds = resolution.ticks_to_seconds(end_tick)?;
+    let mut records = host.drain_hdl_output();
+    for record in &mut records {
+        record.point = crate::config::HdlPoint::Transient {
+            time: record.seconds,
+        };
+        // The unit's lines back to each file's own.
+        if record.origin.line > 0 && record.origin.file == "<input>" {
+            let line = record.origin.line - 1;
+            if let Some((start, file)) = starts.iter().rev().find(|(start, _)| *start <= line) {
+                record.origin.file = file.clone();
+                record.origin.line = line - start + 1;
+            }
+        }
+    }
+    let severities = host.hdl_severities();
+    Ok(HdlTestbenchReport {
+        records,
+        end,
+        finish_level: finish.map(|finish| finish.level),
+        end_tick,
+        end_seconds,
+        warnings: severities.warnings,
+        errors: severities.errors,
+        fatals: severities.fatals,
+    })
 }
 
 /// Read a `%b`-style four-state spelling, most significant bit first.
