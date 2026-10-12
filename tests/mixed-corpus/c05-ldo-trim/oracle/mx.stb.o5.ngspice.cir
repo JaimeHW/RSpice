@@ -16,8 +16,14 @@ vtr0 tr0_h 0 0
 rtr0 tr0_h tr0 20
 * Tian current injection into the driving side of the break (dc 0: inert at the operating point)
 iprobe 0 og dc 0 ac 0
+* The PSRR stimulus (vin ... ac 1 in net/ldo.cir) is zeroed first: left on, it
+* drives the loop in both injections and the formula returns -1.99 (6 dB at
+* -180 degrees) instead of the loop gain. With it off the double injection
+* gives 42.6 (32.6 dB) at 10 Hz, as the broken loop does at DC (og2 driven
+* +-5 mV about its operating point moves og by -44.1 times as much).
 * rspice-control-begin
 * pre_osdi {ngspice_lib}/juncap200.osdi
+* alter vin acmag=0
 * alter vprobe acmag=1
 * alter iprobe acmag=0
 * ac dec 10 10 100meg

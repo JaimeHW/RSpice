@@ -158,7 +158,11 @@ cards, Berkeley; not extracted from a real technology).
 
 Edits: the two cards are concatenated and both `VERSION`s set to 4.8.2.
 `oracle/models-bsim4.xyce.inc` is the same file with `LEVEL = 54` (Xyce's
-BSIM4; 4.8.2 is Xyce's highest version), and `oracle/ldo_body.xyce.inc` is
+BSIM4) and both `VERSION`s set to 4.7: Xyce 7.10's 4.8.2 path evaluates the
+cards' `MTRLMOD = 1` differently from ngspice-46 (about 44 % more drain
+current), while its 4.7 path reproduces ngspice's currents to 0.1 %, and
+ngspice's are the same for every version from 4.6.1 to 4.8.2 (the header of
+that file has the measurements). `oracle/ldo_body.xyce.inc` is
 `net/ldo_body.inc` with the switch model in Xyce's `VSWITCH` form (Xyce has no
 hysteretic `SW` model). Those two copies must follow their originals.
 

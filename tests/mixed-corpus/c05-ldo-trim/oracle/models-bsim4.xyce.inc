@@ -1,5 +1,12 @@
 * Xyce copy of net/models-bsim4.cir: LEVEL 14 (ngspice's BSIM4) becomes 54
-* (Xyce's); VERSION 4.8.2 is Xyce's highest supported BSIM4 version.
+* (Xyce's), and VERSION 4.8.2 becomes 4.7. Xyce 7.10's 4.8.2 code path
+* evaluates these cards' MTRLMOD = 1 differently from ngspice-46 (and from
+* Xyce's own 4.6.1 and 4.7): a PBSIM4 w=10u l=0.2u m=60 at Vsg = 0.6 V,
+* Vsd = 0.65 V conducts 16.81 mA against ngspice's 11.66 mA, an NBSIM4
+* 8u/1u at Vgs = 0.6 V, Vds = 1 V 139.4 uA against 96.2 uA. With MTRLMOD = 0
+* the two agree to six digits; ngspice gives the same currents for every
+* VERSION from 4.6.1 to 4.8.2; Xyce at 4.7 gives 11.67 mA and 96.27 uA.
+* So 4.7 is the version at which Xyce evaluates the same device.
         ******** BSIM4.6.1 Model Card for NMOS ********
 
 ** The BSIM4 model card below was not extracted/obtained from/based on
@@ -16,7 +23,7 @@
 
 .MODEL  NBSIM4  NMOS  LEVEL = 54
 
-+VERSION = 4.8.2      BINUNIT = 1            PARAMCHK= 0            MOBMOD  = 0
++VERSION = 4.7        BINUNIT = 1            PARAMCHK= 0            MOBMOD  = 0
 +CAPMOD  = 1            IGCMOD  = 1            IGBMOD  = 1            GEOMOD  = 1
 +DIOMOD  = 1            RDSMOD  = 0            RBODYMOD= 0            RGATEMOD= 1
 +PERMOD  = 1            ACNQSMOD= 0            TRNQSMOD= 0            TEMPMOD = 0
@@ -128,7 +135,7 @@
 
 .MODEL  PBSIM4  PMOS  LEVEL = 54
 
-+VERSION = 4.8.2        BINUNIT = 1            PARAMCHK= 0            MOBMOD  = 0
++VERSION = 4.7          BINUNIT = 1            PARAMCHK= 0            MOBMOD  = 0
 +CAPMOD  = 2            IGCMOD  = 1            IGBMOD  = 1            GEOMOD  = 1
 +DIOMOD  = 1            RDSMOD  = 0            RBODYMOD= 0            RGATEMOD= 1
 +PERMOD  = 1            ACNQSMOD= 0            TRNQSMOD= 0            TEMPMOD = 0
