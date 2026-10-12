@@ -5,8 +5,8 @@
 //! surfaces.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
+use rspice_design::hierarchy::source_view_source;
 use rspice_design::library::metadata::{CellParameter, cell_parameter_contract, metadata_ports};
 
 use super::{LibraryManager, ViewType};
@@ -72,18 +72,27 @@ pub fn library_cell_placement_candidates(
                         }
                     }
                     ViewType::VerilogA | ViewType::Spice => {
-                        let source = view
-                            .file_path
-                            .clone()
-                            .or_else(|| metadata_path(&view.metadata))
-                            .or_else(|| metadata_path(&cell.metadata));
+                        // The netlister's own rule: a Verilog-A view runs the
+                        // project bundle it owns, any other source view the
+                        // file it names. A shelf that judged a Verilog-A view
+                        // by a file path offered views no deck could bind and
+                        // refused every one the project owns.
+                        let source = source_view_source(
+                            library,
+                            cell,
+                            view,
+                            workspace.content.project.id(),
+                            &workspace.content.project_sources,
+                            libraries.catalog(),
+                        )
+                        .map(|source| source.path);
                         let ports = metadata_ports(&view.metadata)
                             .or_else(|| metadata_ports(&cell.metadata))
                             .unwrap_or_default();
                         if !ports.is_empty() {
                             binding.bind_interface(&ports);
                         }
-                        binding.source_path = source;
+                        binding.source_path = source.as_ref().ok().cloned();
                         binding.module_name = view
                             .metadata
                             .get("veriloga.module")
@@ -114,7 +123,7 @@ pub fn library_cell_placement_candidates(
                             .map(validate_library_netlist_template)
                             .transpose()
                             .err();
-                        let ready = binding.source_path.is_some()
+                        let ready = source.is_ok()
                             && !binding.terminal_order.is_empty()
                             && template_error.is_none();
                         (
@@ -124,7 +133,8 @@ pub fn library_cell_placement_candidates(
                                     format!("invalid model-bound netlist template: {error}")
                                 }
                                 None if ready => String::new(),
-                                None => "missing source or ports".to_owned(),
+                                None if source.is_err() => "missing source".to_owned(),
+                                None => "no ports".to_owned(),
                             },
                         )
                     }
@@ -182,18 +192,13 @@ const fn view_preference(view_type: ViewType) -> u8 {
     }
 }
 
-fn metadata_path(metadata: &HashMap<String, String>) -> Option<PathBuf> {
-    metadata
-        .get("netlist.source_path")
-        .or_else(|| metadata.get("veriloga.source_path"))
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Cell, Library, View};
+    use crate::state::{
+        Cell, Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, View,
+    };
+    use std::path::PathBuf;
 
     #[test]
     fn a_schematic_cell_publishes_its_declared_parameters_onto_every_placement() {
@@ -252,35 +257,125 @@ mod tests {
         assert!(candidate.binding.parameter_order.is_empty());
     }
 
-    #[test]
-    fn catalog_enumerates_every_ready_implementation_view_deterministically() {
-        let mut fast =
-            View::new("fast", ViewType::Spice).with_path(PathBuf::from("models/fast.sp"));
-        fast.metadata
-            .insert("netlist.ports".to_owned(), "in,out".to_owned());
-        let mut accurate = View::new("accurate", ViewType::VerilogA)
-            .with_path(PathBuf::from("models/accurate.va"));
-        accurate
-            .metadata
-            .insert("veriloga.ports".to_owned(), "in,out".to_owned());
+    /// `analog/amp` with a `veriloga` view stating `ports` and naming module
+    /// `amp`, whose project bundle `workspace` owns.
+    fn project_veriloga_cell(workspace: &mut ProjectWorkspace, ports: &str) -> LibraryManager {
+        let mut view = View::new("veriloga", ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), "amp".to_owned());
+        view.metadata
+            .insert("veriloga.ports".to_owned(), ports.to_owned());
         let mut cell = Cell::new("amp");
-        cell.add_view(fast);
-        cell.add_view(accurate);
+        cell.add_view(view);
         let mut library = Library::new("analog");
         library.add_cell(cell);
         let mut libraries = LibraryManager::new();
         libraries.add_library(library);
+        workspace
+            .content
+            .project_sources
+            .insert_bundle(
+                ProjectSourceBundle::try_new(
+                    ProjectSourceOwner::cell_view(CellViewRef::new("analog", "amp", "veriloga")),
+                    ProjectSourceLanguage::VerilogA,
+                    "amp.va",
+                    "module amp(inp, out);\n  input inp;\n  output out;\n  electrical inp, out;\nendmodule\n",
+                    [],
+                    [],
+                )
+                .expect("a cell-view bundle"),
+            )
+            .expect("one bundle per cell view");
+        libraries
+    }
 
-        let candidates =
-            library_cell_placement_candidates(&libraries, &ProjectWorkspace::default());
+    #[test]
+    fn catalog_enumerates_every_ready_implementation_view_deterministically() {
+        let mut workspace = ProjectWorkspace::default();
+        let mut libraries = project_veriloga_cell(&mut workspace, r#"["in","out"]"#);
+        let mut fast =
+            View::new("fast", ViewType::Spice).with_path(PathBuf::from("models/fast.sp"));
+        fast.metadata
+            .insert("netlist.ports".to_owned(), "in,out".to_owned());
+        libraries
+            .get_library_mut("analog")
+            .and_then(|library| library.get_cell_mut("amp"))
+            .expect("the cell")
+            .add_view(fast);
+
+        let candidates = library_cell_placement_candidates(&libraries, &workspace);
         assert_eq!(
             candidates
                 .iter()
                 .map(|candidate| candidate.view.as_str())
                 .collect::<Vec<_>>(),
-            ["accurate", "fast"]
+            ["veriloga", "fast"]
         );
         assert!(candidates.iter().all(|candidate| candidate.ready));
+    }
+
+    /// A Verilog-A cell the project owns has no file path: its source is the
+    /// bundle its view owns, which is what the netlister binds. The shelf used
+    /// to ask for a path and called every such cell "missing source or ports".
+    #[test]
+    fn a_project_owned_veriloga_cell_with_ports_is_ready_to_place() {
+        let mut workspace = ProjectWorkspace::default();
+        let libraries = project_veriloga_cell(
+            &mut workspace,
+            r#"[{"name":"inp","direction":"in","discipline":"electrical","domain":"continuous"},{"name":"out","direction":"out","discipline":"electrical","domain":"continuous"}]"#,
+        );
+
+        let candidate = library_cell_placement_candidates(&libraries, &workspace)
+            .pop()
+            .expect("the Verilog-A candidate");
+
+        assert!(candidate.ready, "{}", candidate.unavailable_reason);
+        assert_eq!(candidate.binding.terminal_order, ["inp", "out"]);
+        assert!(
+            candidate
+                .binding
+                .source_path
+                .as_deref()
+                .and_then(std::path::Path::to_str)
+                .is_some_and(|key| key.starts_with("__rspice_project__/")),
+            "{:?}",
+            candidate.binding.source_path
+        );
+        assert_eq!(candidate.binding.module_name.as_deref(), Some("amp"));
+    }
+
+    /// The same rule refuses what the netlister would: a Verilog-A view that
+    /// names a file but owns no bundle has nothing a deck can bind, and one
+    /// whose module has no ports has nothing to connect.
+    #[test]
+    fn a_veriloga_view_without_a_bundle_or_ports_is_not_ready() {
+        let mut workspace = ProjectWorkspace::default();
+        let libraries = project_veriloga_cell(&mut workspace, "[]");
+        let portless = library_cell_placement_candidates(&libraries, &workspace)
+            .pop()
+            .expect("the Verilog-A candidate");
+        assert!(!portless.ready);
+        assert_eq!(portless.unavailable_reason, "no ports");
+
+        let mut file_only =
+            View::new("veriloga", ViewType::VerilogA).with_path(PathBuf::from("models/amp.va"));
+        file_only
+            .metadata
+            .insert("veriloga.module".to_owned(), "amp".to_owned());
+        file_only
+            .metadata
+            .insert("veriloga.ports".to_owned(), "in,out".to_owned());
+        let mut cell = Cell::new("amp");
+        cell.add_view(file_only);
+        let mut library = Library::new("analog");
+        library.add_cell(cell);
+        let mut libraries = LibraryManager::new();
+        libraries.add_library(library);
+        let unbound = library_cell_placement_candidates(&libraries, &ProjectWorkspace::default())
+            .pop()
+            .expect("the Verilog-A candidate");
+        assert!(!unbound.ready);
+        assert_eq!(unbound.unavailable_reason, "missing source");
     }
 
     #[test]
