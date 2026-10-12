@@ -253,6 +253,8 @@ fn run_rspice(case: &Case) -> Result<RunOutcome, RunError> {
         }
         text.push('\n');
     }
+    text.push_str(testbench::TRACE_END);
+    text.push('\n');
     let trace = parse_trace(&text).map_err(|error| RunError::Trace {
         engine: VerilogEngine::Rspice,
         error,
@@ -294,16 +296,19 @@ fn run_icarus(
     let runtime = program(tools, "runtime", VerilogEngine::Icarus)?;
     let object = dir.join("design.vvp");
 
-    // `-g2012` because the corpus uses constructs (notably `always @(*)`) that
-    // predate SystemVerilog but postdate the 1995 default Icarus still applies.
+    // `-g2005`: the corpus is IEEE 1364-2005 Verilog. Compiled as SystemVerilog
+    // (`-g2012`) its identifiers collide with SystemVerilog keywords
+    // (`lvalue_forms` has a port named `tagged`). The bench comes first so its
+    // `` `timescale `` governs the cases, which declare none; compiled after
+    // them it would leave their delays in Icarus's default one-second unit.
     let compile_args = vec![
-        "-g2012".to_string(),
+        "-g2005".to_string(),
         "-o".to_string(),
         path_arg(&object),
         "-s".to_string(),
         testbench::TOP_MODULE.to_string(),
-        path_arg(&case.source),
         path_arg(&dir.join(testbench::FILE_NAME)),
+        path_arg(&case.source),
     ];
     let compiled = run_process(&compiler.program, &compile_args, Some(dir), timeout_ms)
         .map_err(|err| compile_error(VerilogEngine::Icarus, &compiler.program, &err))?;
@@ -348,18 +353,25 @@ fn run_verilator(
     // lint opinions -- width inference, unoptimisable flattening -- from
     // failing a build whose semantics are the thing under test; they go to
     // stderr, which never reaches the trace.
+    // As for Icarus: the corpus is 1364-2005 and its cases declare no
+    // timescale, so the language and the cases' time unit (the bench's) are
+    // stated rather than left to Verilator's SystemVerilog and 1 ps defaults.
     let compile_args = vec![
         "--binary".to_string(),
         "--timing".to_string(),
         "-Wno-fatal".to_string(),
+        "--default-language".to_string(),
+        "1364-2005".to_string(),
+        "--timescale".to_string(),
+        "1ns/1ns".to_string(),
         "--Mdir".to_string(),
         path_arg(dir),
         "--top-module".to_string(),
         testbench::TOP_MODULE.to_string(),
         "-o".to_string(),
         executable_name.to_string(),
-        path_arg(&case.source),
         path_arg(&dir.join(testbench::FILE_NAME)),
+        path_arg(&case.source),
     ];
     let compiled = run_process(&compiler.program, &compile_args, Some(dir), timeout_ms)
         .map_err(|err| compile_error(VerilogEngine::Verilator, &compiler.program, &err))?;
@@ -383,8 +395,15 @@ fn run_verilator(
             ),
         });
     }
-    let simulated = run_process(&path_arg(&executable), &[], Some(dir), timeout_ms)
-        .map_err(|err| simulate_error(VerilogEngine::Verilator, executable_name, &err))?;
+    // `+verilator+quiet` drops the run summary; the `Verilog $finish` line it
+    // still prints lands after the bench's end marker.
+    let simulated = run_process(
+        &path_arg(&executable),
+        &["+verilator+quiet".to_string()],
+        Some(dir),
+        timeout_ms,
+    )
+    .map_err(|err| simulate_error(VerilogEngine::Verilator, executable_name, &err))?;
     if !simulated.success {
         return Err(RunError::Simulate {
             engine: VerilogEngine::Verilator,

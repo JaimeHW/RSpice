@@ -94,6 +94,12 @@ const REQUIRED_CASES: [(&str, &str); 16] = [
 /// it would drop out of the oracle-versus-oracle check without saying so.
 const FOUR_STATE_CASES: [&str; 3] = ["xz_propagation", "bus_forms", "edge_forms"];
 
+/// Two-state cases Verilator answers wrongly, each with the defect named in
+/// the manifest note and reproduced outside the harness. Held back from the
+/// oracle-versus-oracle check for the same reason as the four-state set: a
+/// known defect in one oracle is not a disagreement worth reporting.
+const VERILATOR_DEFECT_CASES: [&str; 1] = ["delay_forms"];
+
 fn corpus() -> Corpus {
     Corpus::load(&corpus_dir()).unwrap_or_else(|err| panic!("the Verilog corpus must load: {err}"))
 }
@@ -147,18 +153,20 @@ fn the_corpus_is_complete_and_self_consistent() {
             case.name
         );
         let four_state = FOUR_STATE_CASES.contains(&case.name.as_str());
+        let verilator_defect = VERILATOR_DEFECT_CASES.contains(&case.name.as_str());
         assert_eq!(
             case.admits(VerilogEngine::Verilator),
-            !four_state,
+            !(four_state || verilator_defect),
             "case '{}': Verilator is a two-state simulator, so it may arbitrate \
-             exactly the cases whose answers never contain x or z",
+             exactly the cases whose answers never contain x or z, less the \
+             named Verilator defects",
             case.name
         );
     }
 
     // And the oracle-vs-oracle check must have something left to compare, or
     // it degenerates into one simulator talking to itself.
-    let both = corpus.cases.len() - FOUR_STATE_CASES.len();
+    let both = corpus.cases.len() - FOUR_STATE_CASES.len() - VERILATOR_DEFECT_CASES.len();
     assert!(
         both >= 8,
         "only {both} case(s) can be cross-checked between two oracles"
@@ -218,8 +226,13 @@ fn every_case_generates_a_well_formed_testbench() {
             case.name
         );
         assert!(
-            bench.contains("$finish;"),
+            bench.contains("$finish(0);"),
             "case '{}': the run would never terminate",
+            case.name
+        );
+        assert!(
+            bench.contains(testbench::TRACE_END),
+            "case '{}': no trace end marker",
             case.name
         );
 

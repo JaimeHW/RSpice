@@ -1,18 +1,22 @@
 //! Parsing and comparing the observation traces two simulators produce.
 //!
-//! The grammar is a header followed by one row per vector:
+//! The grammar is a header, one row per vector, and an end marker:
 //!
 //! ```text
 //! # RSPICE-VERILOG-TRACE 1
 //! @0 N22=1 N23=1
 //! @1 N22=1 N23=0
+//! # RSPICE-VERILOG-TRACE-END
 //! ```
 //!
-//! # Strict where it counts, tolerant only before the header
+//! # Strict where it counts, tolerant only outside the markers
 //!
-//! Anything a tool prints before the header is preamble and is kept for
-//! diagnostics but not compared: banners are not something two different
-//! simulators can be asked to agree on. After the header the parser is exact.
+//! Anything a tool prints before the header is preamble, and anything after
+//! the end marker is epilogue (Verilator's `Verilog $finish` line); both are
+//! kept for diagnostics but not compared: banners are not something two
+//! different simulators can be asked to agree on. A trace whose end marker
+//! never arrived is a run that stopped early and is an error. Between the
+//! markers the parser is exact.
 //! A non-empty line that is not a row is an error, not something to skip — the
 //! skipping version of this parser silently swallows a simulator's runtime
 //! warning about the very case under test, and a warning printed between two
@@ -26,7 +30,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use super::testbench::TRACE_HEADER;
+use super::testbench::{TRACE_END, TRACE_HEADER};
 
 /// One sampled observation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +60,8 @@ pub struct Trace {
     /// Whatever the tool printed before the header. Never compared; reported
     /// when something else fails, because it usually explains why.
     pub preamble: String,
+    /// Whatever the tool printed after the end marker. Never compared.
+    pub epilogue: String,
 }
 
 /// Why a trace could not be read.
@@ -81,6 +87,8 @@ pub enum TraceError {
     },
     /// A trace with no rows would compare equal to any other empty trace.
     Empty,
+    /// The end marker never appeared: the run stopped before the bench did.
+    MissingEnd { rows: usize },
 }
 
 impl fmt::Display for TraceError {
@@ -104,6 +112,10 @@ impl fmt::Display for TraceError {
                 found,
             } => write!(f, "line {line}: expected step {expected}, found {found}"),
             Self::Empty => write!(f, "the trace has a header but no rows"),
+            Self::MissingEnd { rows } => write!(
+                f,
+                "no '{TRACE_END}' line after {rows} rows; the run ended before the bench finished"
+            ),
         }
     }
 }
@@ -122,11 +134,16 @@ pub fn parse_trace(output: &str) -> Result<Trace, TraceError> {
 
     let preamble = lines[..header_index].join("\n");
     let mut rows = Vec::new();
+    let mut epilogue = None;
     for (offset, raw) in lines[header_index + 1..].iter().enumerate() {
         let number = header_index + offset + 2;
         let line = raw.trim();
         if line.is_empty() {
             continue;
+        }
+        if line == TRACE_END {
+            epilogue = Some(lines[number..].join("\n"));
+            break;
         }
         if !line.starts_with('@') {
             return Err(TraceError::UnexpectedLine {
@@ -183,7 +200,14 @@ pub fn parse_trace(output: &str) -> Result<Trace, TraceError> {
     if rows.is_empty() {
         return Err(TraceError::Empty);
     }
-    Ok(Trace { rows, preamble })
+    let Some(epilogue) = epilogue else {
+        return Err(TraceError::MissingEnd { rows: rows.len() });
+    };
+    Ok(Trace {
+        rows,
+        preamble,
+        epilogue,
+    })
 }
 
 /// One way in which two traces differ.
@@ -329,7 +353,30 @@ fn tail(value: &str) -> String {
 mod tests {
     use super::*;
 
-    const GOOD: &str = "# RSPICE-VERILOG-TRACE 1\n@0 y=1 w=1010\n@1 y=0 w=0101\n";
+    const GOOD: &str =
+        "# RSPICE-VERILOG-TRACE 1\n@0 y=1 w=1010\n@1 y=0 w=0101\n# RSPICE-VERILOG-TRACE-END\n";
+
+    /// A header, the given rows, and the end marker.
+    fn ended(rows: &str) -> String {
+        format!("{TRACE_HEADER}\n{rows}{TRACE_END}\n")
+    }
+
+    #[test]
+    fn the_tool_epilogue_after_the_end_marker_is_kept_but_not_compared() {
+        let output = format!("{GOOD}- rspice_verilog_tb.v:84: Verilog $finish\n");
+        let trace = parse_trace(&output).expect("parses");
+
+        assert_eq!(trace.rows.len(), 2);
+        assert!(trace.epilogue.contains("Verilog $finish"), "{trace:?}");
+        assert!(compare_traces(&trace, &parse_trace(GOOD).expect("parses")).is_empty());
+    }
+
+    #[test]
+    fn a_trace_that_stops_before_its_end_marker_is_rejected() {
+        let error = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=1\n").expect_err("no end marker");
+
+        assert_eq!(error, TraceError::MissingEnd { rows: 1 });
+    }
 
     #[test]
     fn a_well_formed_trace_parses_into_ordered_rows() {
@@ -357,9 +404,9 @@ mod tests {
 
     #[test]
     fn a_warning_printed_between_rows_is_an_error_rather_than_skipped() {
-        let output = "# RSPICE-VERILOG-TRACE 1\n@0 y=1\nWARNING: something\n@1 y=0\n";
+        let output = ended("@0 y=1\nWARNING: something\n@1 y=0\n");
 
-        let error = parse_trace(output).expect_err("mid-trace output must not be swallowed");
+        let error = parse_trace(&output).expect_err("mid-trace output must not be swallowed");
 
         assert!(
             matches!(&error, TraceError::UnexpectedLine { text, .. } if text.contains("WARNING")),
@@ -379,7 +426,7 @@ mod tests {
 
     #[test]
     fn out_of_order_steps_are_rejected() {
-        let error = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=1\n@2 y=0\n")
+        let error = parse_trace(&ended("@0 y=1\n@2 y=0\n"))
             .expect_err("step numbering is part of the contract");
 
         assert_eq!(
@@ -395,6 +442,7 @@ mod tests {
     #[test]
     fn a_header_without_rows_is_rejected_rather_than_agreeing_with_everything() {
         assert_eq!(parse_trace(TRACE_HEADER), Err(TraceError::Empty));
+        assert_eq!(parse_trace(&ended("")), Err(TraceError::Empty));
     }
 
     #[test]
@@ -431,20 +479,20 @@ mod tests {
 
     #[test]
     fn four_state_values_compare_as_themselves() {
-        let left = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=x\n").expect("parses");
-        let right = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=0\n").expect("parses");
+        let left = parse_trace(&ended("@0 y=x\n")).expect("parses");
+        let right = parse_trace(&ended("@0 y=0\n")).expect("parses");
 
         // The whole point of the four-state corpus entry: x is not 0.
         assert_eq!(compare_traces(&left, &right).len(), 1);
 
-        let same = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=x\n").expect("parses");
+        let same = parse_trace(&ended("@0 y=x\n")).expect("parses");
         assert!(compare_traces(&left, &same).is_empty());
     }
 
     #[test]
     fn a_truncated_run_is_reported_as_a_row_count_difference() {
         let left = parse_trace(GOOD).expect("parses");
-        let right = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=1 w=1010\n").expect("parses");
+        let right = parse_trace(&ended("@0 y=1 w=1010\n")).expect("parses");
 
         let divergences = compare_traces(&left, &right);
 
@@ -456,8 +504,8 @@ mod tests {
 
     #[test]
     fn differing_port_sets_are_reported_once_per_row_not_per_port() {
-        let left = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=1 w=1010\n").expect("parses");
-        let right = parse_trace("# RSPICE-VERILOG-TRACE 1\n@0 y=1\n").expect("parses");
+        let left = parse_trace(&ended("@0 y=1 w=1010\n")).expect("parses");
+        let right = parse_trace(&ended("@0 y=1\n")).expect("parses");
 
         let divergences = compare_traces(&left, &right);
 
@@ -470,14 +518,14 @@ mod tests {
 
     #[test]
     fn divergence_reporting_is_capped() {
-        let mut left_text = String::from("# RSPICE-VERILOG-TRACE 1\n");
-        let mut right_text = left_text.clone();
+        let mut left_text = String::new();
+        let mut right_text = String::new();
         for step in 0..50 {
             left_text.push_str(&format!("@{step} y=1\n"));
             right_text.push_str(&format!("@{step} y=0\n"));
         }
-        let left = parse_trace(&left_text).expect("parses");
-        let right = parse_trace(&right_text).expect("parses");
+        let left = parse_trace(&ended(&left_text)).expect("parses");
+        let right = parse_trace(&ended(&right_text)).expect("parses");
 
         let divergences = compare_traces(&left, &right);
 

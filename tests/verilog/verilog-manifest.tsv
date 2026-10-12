@@ -37,7 +37,7 @@ xz_propagation.v	iverilog	four-state rules; Verilator is two-state by design and
 # end implements and no case above reached.
 case_forms.v	iverilog,verilator	case, casez and casex on one selector, in an implicitly sensitive block
 loop_forms.v	iverilog,verilator	for, while and repeat, each computing one output of a clocked process
-delay_forms.v	iverilog,verilator	intra-assignment and statement delays against an undelayed assignment
+delay_forms.v	iverilog	intra-assignment and statement delays against an undelayed assignment; Verilator 5.048 is excluded because it applies `lagged <= #6 d;` at the edge when the assignment sits in an if/else branch beside an undelayed non-blocking assignment (reproduced outside the harness), where IEEE 1364-2005 section 9.2.2 delays the update and Icarus does
 lvalue_forms.v	iverilog,verilator	part-select, concatenation and bit-select targets, and a sized literal in a concatenation
 gate_forms.v	iverilog,verilator	unnamed, multi-instance, n-input and multi-output gate spellings
 bus_forms.v	iverilog	two continuous drivers on one net; Verilator cannot arbitrate a z

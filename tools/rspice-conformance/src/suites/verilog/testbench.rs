@@ -44,6 +44,15 @@ pub const FILE_NAME: &str = "rspice_verilog_tb.v";
 /// The first line of a trace, written by the generated bench.
 pub const TRACE_HEADER: &str = "# RSPICE-VERILOG-TRACE 1";
 
+/// The last line of a trace, written immediately before `$finish(0)`.
+///
+/// Simulators print their own end-of-run lines after the bench is done —
+/// Verilator always reports `- <file>:<line>: Verilog $finish`, even with
+/// `+verilator+quiet` — so the bench marks where its trace ends rather than
+/// the parser learning each tool's epilogue. A trace without the marker is a
+/// run that stopped early, which a bare end of output cannot distinguish.
+pub const TRACE_END: &str = "# RSPICE-VERILOG-TRACE-END";
+
 /// Render the testbench for one case.
 ///
 /// Deterministic: the same stimulus always yields byte-identical Verilog, so a
@@ -121,7 +130,10 @@ pub fn render(stimulus: &Stimulus, case_name: &str) -> String {
         let _ = writeln!(out, "    #{} rspice_sample;", stimulus.settle);
         let _ = writeln!(out, "    #{hold};");
     }
-    let _ = writeln!(out, "    $finish;");
+    let _ = writeln!(out, "    $write(\"{TRACE_END}\\n\");");
+    // `$finish(0)`: Icarus prints a "$finish called at" line for the default
+    // diagnostic level and nothing for level 0.
+    let _ = writeln!(out, "    $finish(0);");
     let _ = writeln!(out, "  end");
     let _ = writeln!(out, "endmodule");
     out
@@ -268,7 +280,9 @@ mod tests {
         // Without `$finish` the free-running clock in a clocked case would run
         // forever and the only thing stopping it would be the harness timeout,
         // which reports a hang rather than a result.
-        assert!(bench.contains("    $finish;"), "{bench}");
+        assert!(bench.contains("    $finish(0);"), "{bench}");
+        let end = bench.find(TRACE_END).expect("end marker is written");
+        assert!(end < bench.find("$finish(0)").expect("finish"), "{bench}");
         assert!(bench.trim_end().ends_with("endmodule"), "{bench}");
     }
 }

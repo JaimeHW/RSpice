@@ -137,9 +137,12 @@ impl VerilogEngine {
             Self::Verilator => {
                 "Debian/Ubuntu: `apt install verilator` (5.x required for `--binary`/`--timing`). \
                  macOS: `brew install verilator`. Windows has no first-class native build; use \
-                 WSL, MSYS2 (`pacman -S mingw-w64-x86_64-verilator`), or a container. Verilator \
-                 also needs a C++ toolchain and `make`, because it compiles the design to a \
-                 native executable."
+                 MSYS2 (`pacman -S mingw-w64-ucrt-x86_64-verilator`), WSL, or a container. On \
+                 MSYS2 point `RSPICE_VERILATOR_EXE` at `verilator_bin.exe` (the `verilator` \
+                 wrapper is a Perl script Windows cannot execute directly) and set \
+                 `VERILATOR_ROOT` to the installation's `share/verilator`. Verilator also needs \
+                 a C++ toolchain and `make`, because it compiles the design to a native \
+                 executable."
             }
             Self::Rspice => "RSpice does not execute digital Verilog yet.",
         }
