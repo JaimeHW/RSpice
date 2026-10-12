@@ -7,7 +7,9 @@
 use std::collections::HashMap;
 
 use rspice_design::hierarchy::source_view_source;
-use rspice_design::library::metadata::{CellParameter, cell_parameter_contract, metadata_ports};
+use rspice_design::library::metadata::{
+    CellParameter, cell_parameter_contract, instance_parameter_order, metadata_ports,
+};
 
 use super::{LibraryManager, ViewType};
 use crate::state::{
@@ -149,10 +151,15 @@ pub fn library_cell_placement_candidates(
                     ready = false;
                     unavailable_reason = format!("invalid typed parameter contract: {error}");
                 }
-                binding.parameter_order = parameters
-                    .iter()
-                    .map(|parameter| parameter.name.clone())
-                    .collect();
+                // A snapshot, read by the unconfigured path's placed-binding
+                // authority and by the inspector's rows for a master with no
+                // typed sheet; configuration materialization binds the
+                // master's current contract by this same rule at netlist time.
+                binding.parameter_order = instance_parameter_order(cell, view)
+                    .ok()
+                    .flatten()
+                    .filter(|_| parameter_contract_error.is_none())
+                    .unwrap_or_default();
                 candidates.push(LibraryCellPlacementCandidate {
                     library: library.name.clone(),
                     cell: cell.name.clone(),
