@@ -1562,6 +1562,7 @@ mod tests {
                 success: true,
                 error_message: None,
                 failure_attribution: None,
+                failure_capability: None,
                 provenance: None,
                 import_source: None,
             },

@@ -80,6 +80,10 @@ pub struct AnalysisResult<W = RetainedWaveform> {
     /// name any. `None` covers every successful run and every failure the
     /// engine could not attribute — a parse error names no conductor.
     pub failure_attribution: Option<ConvergenceAttribution>,
+    /// The capability token when the failure was a deliberate refusal
+    /// (`analysis.mixed_signal.discrete_state`). `None` for every success and
+    /// every failure that was not a refusal.
+    pub failure_capability: Option<String>,
     /// Quality of this result's transient source. Missing historical or
     /// imported evidence stays unknown; it is never inferred from smooth data.
     pub convergence: Option<std::sync::Arc<TransientConvergenceEvidence>>,
@@ -139,6 +143,7 @@ impl<W> AnalysisResult<W> {
             success,
             error_message,
             failure_attribution,
+            failure_capability,
             convergence,
             provenance,
             import_source,
@@ -162,6 +167,7 @@ impl<W> AnalysisResult<W> {
             success,
             error_message,
             failure_attribution,
+            failure_capability,
             convergence,
             provenance,
             import_source,
@@ -285,6 +291,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             success: true,
             error_message: None,
             failure_attribution: None,
+            failure_capability: None,
             convergence: None,
             provenance: None,
             import_source: None,
@@ -318,6 +325,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             success: false,
             error_message: Some(error.into()),
             failure_attribution: None,
+            failure_capability: None,
             convergence: None,
             provenance: None,
             import_source: None,

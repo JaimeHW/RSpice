@@ -1770,6 +1770,11 @@ pub struct ProjectAnalysisResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_attribution:
         Option<rspice_results::convergence_attribution::ConvergenceAttribution>,
+    /// The capability token of a refused analysis. Every schema written
+    /// before refusals were recorded omits it, which reads back as "not a
+    /// refusal" — the message still carries the token in brackets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_capability: Option<String>,
     /// Numerical quality introduced by result schema v21. Missing stays unknown.
     #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
     pub convergence:
@@ -2000,6 +2005,7 @@ impl ProjectAnalysisResult {
             success: self.success,
             error_message: self.error_message,
             failure_attribution: self.failure_attribution,
+            failure_capability: self.failure_capability,
             convergence: self.convergence.into_value().map(std::sync::Arc::new),
             provenance,
             import_source: self.import_source.into_value(),
@@ -2182,6 +2188,7 @@ impl ProjectAnalysisResult {
             success: analysis.success,
             error_message: analysis.error_message.clone(),
             failure_attribution: analysis.failure_attribution.clone(),
+            failure_capability: analysis.failure_capability.clone(),
             convergence: analysis
                 .convergence
                 .as_deref()

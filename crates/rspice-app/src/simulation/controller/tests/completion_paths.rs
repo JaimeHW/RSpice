@@ -1907,3 +1907,28 @@ fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
         "the aborted run was sealed at the generation the memos already describe"
     );
 }
+
+#[test]
+fn a_capability_refusal_names_the_analysis_the_instance_and_the_token() {
+    let refusal = rspice_core::UnsupportedCapabilityError::new(
+        "analysis.mixed_signal.discrete_state",
+        "running discrete state is not part of a period map",
+    )
+    .for_analysis_kind(rspice_core::identity::AnalysisKind::Pss)
+    .for_instance("x1")
+    .for_module("clock_divider");
+    let error = SimulationError::from(rspice_core::SimulationError::UnsupportedCapability(
+        Box::new(refusal),
+    ));
+    assert_eq!(
+        SimulationController::refusal_console_line("PSS", &error).as_deref(),
+        Some(
+            "Not supported in PSS: 'x1' \u{2014} running discrete state is not part of a \
+             period map [analysis.mixed_signal.discrete_state]"
+        )
+    );
+    assert_eq!(
+        SimulationController::refusal_console_line("PSS", &SimulationError::Aborted),
+        None
+    );
+}

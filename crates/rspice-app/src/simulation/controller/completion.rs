@@ -303,7 +303,6 @@ impl SimulationController {
             }
             Err(e) => {
                 let attribution = e.attribution().cloned();
-                Self::report_failed_analysis(state, &format!("Analysis failed: {e}"), &attribution);
 
                 // Mark run as partially failed and add failed analysis entry
                 let failed_label = self
@@ -320,6 +319,9 @@ impl SimulationController {
                             .map(|config| self.analysis_name(config).to_owned())
                     })
                     .unwrap_or_else(|| "Analysis".to_owned());
+                let console_line = Self::refusal_console_line(&failed_label, &e)
+                    .unwrap_or_else(|| format!("Analysis failed: {e}"));
+                Self::report_failed_analysis(state, &console_line, &attribution);
                 let failed_type = self
                     .current_spec
                     .as_ref()
@@ -339,6 +341,12 @@ impl SimulationController {
                         provenance,
                     );
                     analysis.failure_attribution = attribution;
+                    analysis.failure_capability = match &e {
+                        SimulationError::UnsupportedCapability { capability, .. } => {
+                            Some(capability.clone())
+                        }
+                        _ => None,
+                    };
                     self.materialize_current_saved_outputs(&mut analysis);
                     Some(analysis)
                 } else {
@@ -363,5 +371,32 @@ impl SimulationController {
                 }
             }
         }
+    }
+
+    /// The console line for a deliberate refusal: the analysis the author
+    /// ran, the instance it declined for, the reason, and the token —
+    /// `Not supported in <label>: '<instance>' — <reason> [token]`. `None`
+    /// for every failure that is not a refusal.
+    pub(super) fn refusal_console_line(label: &str, error: &SimulationError) -> Option<String> {
+        let SimulationError::UnsupportedCapability {
+            capability,
+            instance,
+            message,
+            ..
+        } = error
+        else {
+            return None;
+        };
+        // The core rendering is `unsupported capability [token] ...: reason`.
+        let reason = message
+            .split_once(&format!("[{capability}]"))
+            .and_then(|(_, rest)| rest.split_once(": "))
+            .map_or(message.as_str(), |(_, reason)| reason);
+        Some(match instance {
+            Some(instance) => {
+                format!("Not supported in {label}: '{instance}' \u{2014} {reason} [{capability}]")
+            }
+            None => format!("Not supported in {label}: {reason} [{capability}]"),
+        })
     }
 }
