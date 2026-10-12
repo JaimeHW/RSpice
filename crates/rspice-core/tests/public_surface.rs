@@ -82,8 +82,14 @@ use rspice_core::analysis::harmonic_balance::{
 //   rational transfer descriptors, and committed/other digital drivers.
 // - Core integration tests: scheduler checkpoints, pole-spectrum runners,
 //   mixed observer/bridge controls and small-signal descriptors.
-// The census is 5,655, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5655;
+// The census was 5,655, with no slack.
+// Four structured-refusal statements: the `for_analysis_kind`, `for_instance`
+// and `for_module` builders on `UnsupportedCapabilityError` and the
+// `SimulationError::instance_name` accessor, read by the CLI error payload
+// (`rspice-cli` cli/error.rs), the Python error attributes
+// (`rspice-python` errors/simulation.rs) and the typed simulation refusal
+// (`rspice-simulation` error.rs). The census is 5,659, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5659;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

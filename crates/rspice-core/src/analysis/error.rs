@@ -206,6 +206,11 @@ impl std::fmt::Display for SimulationErrorCategory {
 /// `None` when the failure happened outside any one analysis instance or
 /// sweep point. The source span is not here because it is not `Copy`; read it
 /// with [`SimulationError::source_location`].
+///
+/// `analysis_kind` is the kind of analysis the failure belongs to. It is the
+/// kind of `analysis` when the failure names a card, and otherwise the kind a
+/// capability refusal recorded: an engine refusal site knows which analysis
+/// it is running, not which card ordinal asked for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SimulationErrorDescriptor {
@@ -215,6 +220,7 @@ pub struct SimulationErrorDescriptor {
     pub iterations: Option<usize>,
     pub resource_limit: Option<ResourceLimitError>,
     pub analysis: Option<AnalysisInstanceId>,
+    pub analysis_kind: Option<AnalysisKind>,
     pub coordinate: Option<RunCoordinateId>,
 }
 
@@ -229,14 +235,27 @@ pub struct SimulationErrorDescriptor {
 /// boundary (`"analysis.hb.device"`, `"device.ltra.rg_finite_length"`). It is
 /// coarser than the message: several messages may share one token, and the
 /// token is what automation branches on.
+///
+/// `analysis_kind`, `instance` and `module` are what a refusal site knows
+/// that the token does not: which kind of analysis declined, and the deck
+/// instance and module it declined for. They are typed so a frontend can
+/// place the refusal on a schematic and in a run log without parsing the
+/// detail, which still names all three for a person reading it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsupportedCapabilityError {
     /// Stable dotted token naming the refused capability boundary.
     pub capability: &'static str,
     /// Analysis instance the refusal belongs to, when one is in scope.
     pub analysis: Option<AnalysisInstanceId>,
+    /// Kind of analysis that refused, when the site knows the kind but not
+    /// the authored card.
+    pub analysis_kind: Option<AnalysisKind>,
     /// Run coordinate the refusal belongs to, when one is in scope.
     pub coordinate: Option<RunCoordinateId>,
+    /// Deck instance name the refusal belongs to, as elaborated.
+    pub instance: Option<String>,
+    /// The module or model the refused instance is built from.
+    pub module: Option<String>,
     /// Human-facing explanation, naming the construct and the supported
     /// alternative where one exists.
     pub detail: String,
@@ -249,7 +268,10 @@ impl UnsupportedCapabilityError {
         Self {
             capability,
             analysis: None,
+            analysis_kind: None,
             coordinate: None,
+            instance: None,
+            module: None,
             detail: detail.into(),
             location: None,
         }
@@ -258,6 +280,27 @@ impl UnsupportedCapabilityError {
     #[must_use]
     pub fn with_analysis(mut self, analysis: AnalysisInstanceId) -> Self {
         self.analysis = Some(analysis);
+        self
+    }
+
+    /// Record the kind of analysis that refused.
+    #[must_use]
+    pub fn for_analysis_kind(mut self, kind: AnalysisKind) -> Self {
+        self.analysis_kind = Some(kind);
+        self
+    }
+
+    /// Record the deck instance the refusal belongs to.
+    #[must_use]
+    pub fn for_instance(mut self, instance: impl Into<String>) -> Self {
+        self.instance = Some(instance.into());
+        self
+    }
+
+    /// Record the module or model the refused instance is built from.
+    #[must_use]
+    pub fn for_module(mut self, module: impl Into<String>) -> Self {
+        self.module = Some(module.into());
         self
     }
 
@@ -282,9 +325,14 @@ impl std::fmt::Display for UnsupportedCapabilityError {
         write!(formatter, "unsupported capability [{}]", self.capability)?;
         if let Some(analysis) = self.analysis {
             write!(formatter, " in {analysis}")?;
+        } else if let Some(kind) = self.analysis_kind {
+            write!(formatter, " in {}", kind.tag())?;
         }
         if let Some(coordinate) = self.coordinate {
             write!(formatter, " at run {coordinate}")?;
+        }
+        if let Some(instance) = &self.instance {
+            write!(formatter, " for '{instance}'")?;
         }
         write!(formatter, ": {}", self.detail)
     }
@@ -1305,7 +1353,29 @@ impl SimulationError {
                 _ => None,
             },
             analysis: self.analysis_instance(),
+            analysis_kind: self
+                .analysis_instance()
+                .map(AnalysisInstanceId::kind)
+                .or(match self {
+                    Self::UnsupportedCapability(error) => error.analysis_kind,
+                    _ => None,
+                }),
             coordinate: self.run_coordinate(),
+        }
+    }
+
+    /// The deck instance this failure belongs to, when it names one.
+    ///
+    /// The instance is what places a failure on a schematic, and three
+    /// failure families know it: a Verilog-A or mixed elaboration refusal, a
+    /// behavioral source with an invalid reference, and a capability refusal
+    /// whose site recorded the instance it declined for.
+    pub fn instance_name(&self) -> Option<&str> {
+        match self {
+            Self::Elaboration(error) => error.instance.as_deref(),
+            Self::BehavioralReference(error) => Some(error.owner_name.as_str()),
+            Self::UnsupportedCapability(error) => error.instance.as_deref(),
+            _ => None,
         }
     }
 
@@ -1479,6 +1549,82 @@ mod tests {
                 .to_string()
                 .contains("unsupported capability [analysis.hb.device] in hb-002"),
             "message must carry the token and the analysis: {error}"
+        );
+    }
+
+    #[test]
+    fn capability_refusals_publish_their_analysis_kind_instance_and_module() {
+        let error = SimulationError::from(
+            UnsupportedCapabilityError::new(
+                "analysis.tran.noise.shaped_process",
+                "transient noise cannot render process 'b' of 'x1' (module 'shaped')",
+            )
+            .for_analysis_kind(AnalysisKind::Tran)
+            .for_instance("x1")
+            .for_module("shaped"),
+        );
+
+        let descriptor = error.descriptor();
+        assert_eq!(descriptor.code, SimulationErrorCode::UnsupportedCapability);
+        assert_eq!(descriptor.analysis, None);
+        assert_eq!(
+            descriptor.analysis_kind,
+            Some(AnalysisKind::Tran),
+            "a refusal without a card still reports the kind it recorded"
+        );
+        assert_eq!(error.instance_name(), Some("x1"));
+        let SimulationError::UnsupportedCapability(refusal) = &error else {
+            panic!("typed capability variant was lost");
+        };
+        assert_eq!(refusal.module.as_deref(), Some("shaped"));
+        assert_eq!(
+            error.to_string(),
+            "unsupported capability [analysis.tran.noise.shaped_process] in tran for 'x1': \
+             transient noise cannot render process 'b' of 'x1' (module 'shaped')"
+        );
+
+        // A card identity wins over a recorded kind, both in the descriptor
+        // and in the rendered message.
+        let carded = SimulationError::from(
+            UnsupportedCapabilityError::new("analysis.pss.device", "detail")
+                .with_analysis(AnalysisInstanceId::new(AnalysisKind::Pss, 0))
+                .for_analysis_kind(AnalysisKind::Tran),
+        );
+        assert_eq!(carded.descriptor().analysis_kind, Some(AnalysisKind::Pss));
+        assert_eq!(
+            carded.to_string(),
+            "unsupported capability [analysis.pss.device] in pss-001: detail"
+        );
+        assert_eq!(carded.instance_name(), None);
+    }
+
+    #[test]
+    fn instance_name_covers_every_family_that_knows_its_instance() {
+        let elaboration = SimulationError::from(
+            ElaborationError::new(ElaborationErrorKind::PortCount, "two nets for three ports")
+                .instance("X7")
+                .module("amp"),
+        );
+        assert_eq!(elaboration.instance_name(), Some("X7"));
+
+        let behavioral = SimulationError::BehavioralReference(Box::new(
+            crate::device::BehavioralReferenceError {
+                owner_name: "B1".to_string(),
+                canonical_owner_name: "b1".to_string(),
+                dependency_name: "nowhere".to_string(),
+                canonical_dependency_name: "nowhere".to_string(),
+                reason: crate::device::BehavioralReferenceReason::UnknownNode,
+            },
+        ));
+        assert_eq!(behavioral.instance_name(), Some("B1"));
+
+        assert_eq!(
+            SimulationError::unsupported_capability("analysis.hb.device", "detail").instance_name(),
+            None
+        );
+        assert_eq!(
+            SimulationError::Circuit("no instance".to_string()).instance_name(),
+            None
         );
     }
 
