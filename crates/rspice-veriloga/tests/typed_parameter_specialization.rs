@@ -1404,14 +1404,35 @@ endmodule
         );
     }
     wide.validate_integrity().unwrap();
-    for (source, expected) in [
-        (
+    // A child that holds both a parameter array and an overridden packed
+    // parameter used to be refused ("requires combined packed and array
+    // source specialization"). d54480ec2 removed that refusal and specializes
+    // the two together, so the override must reach the packed parameter's
+    // dependent default while the array keeps its declared cells.
+    let combined = compiler
+        .compile_runtime(
             r#"module leaf(p); inout p; electrical p;
  parameter real A[1:0]='{1,2}; parameter [7:0] P=1;
  parameter real LEVEL=P+0.0; analog I(p)<+LEVEL; endmodule
 module parent(p); inout p; electrical p; leaf #(.P(2)) child(p); endmodule"#,
-            "requires combined packed and array source specialization",
-        ),
+            Some("parent"),
+        )
+        .unwrap();
+    let level = combined
+        .model
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name.ends_with("_LEVEL"))
+        .expect("flattened LEVEL parameter");
+    assert_eq!(level.default, 2.0, "the packed override reaches LEVEL");
+    assert!(
+        combined
+            .model
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name.ends_with("_A") && parameter.is_array)
+    );
+    for (source, expected) in [
         (
             "module bad(q); parameter [1.5:0] P=0; output reg q=0; endmodule",
             "packed bounds require known integer",
