@@ -745,6 +745,30 @@ fn the_wasm_transport_test_speaks_the_current_worker_transport() {
     }
 }
 
+/// The Chromium checkpoint qualification is the other hand-built host; its
+/// execution policy is a JSON object that must decode as the shipping default.
+#[test]
+fn the_checkpoint_qualification_speaks_the_current_worker_transport() {
+    const QUALIFICATION: &str =
+        include_str!("../../../../../tools/ci/monte-carlo-checkpoint-qualification.mjs");
+    for declaration in [
+        format!("const REQUEST_PROTOCOL = {WORKER_REQUEST_TRANSPORT_PROTOCOL};"),
+        format!("const RESPONSE_PROTOCOL = {WORKER_RESPONSE_TRANSPORT_PROTOCOL};"),
+        "execution_limits: EXECUTION_LIMITS,".to_owned(),
+    ] {
+        assert!(QUALIFICATION.contains(&declaration), "{declaration}");
+    }
+    let limits = QUALIFICATION
+        .split_once("const EXECUTION_LIMITS = ")
+        .and_then(|(_, rest)| rest.split_once("};"))
+        .map(|(object, _)| format!("{object}}}"))
+        .expect("the qualification declares its execution policy as a JSON object");
+    assert_eq!(
+        serde_json::from_str::<rspice_core::ResourceLimits>(&limits).unwrap(),
+        rspice_core::ResourceLimits::default()
+    );
+}
+
 #[test]
 fn standalone_connection_worker_transport_retains_selected_physics() {
     let (sources, deck) = crate::veriloga::tests::standalone_connection_fixture();

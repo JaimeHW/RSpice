@@ -6,6 +6,21 @@ const workers = new Set();
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const json = value => JSON.stringify(value, (_, item) => typeof item === "bigint" ? item.toString() : item);
 const deck = "Browser checkpoint\n.param r=1k\nV1 in 0 1\nR1 in out {r}\nR2 out 0 1k\n.mc 6 uniform 0.2 seed 37\n.end\n";
+// The worker transport revisions and the shipping default execution resource
+// policy. rspice-simulation's worker-contract tests pin these to the Rust
+// contract (`worker_protocol.rs`, `ResourceLimits::default()`).
+const REQUEST_PROTOCOL = 45;
+const RESPONSE_PROTOCOL = 37;
+const EXECUTION_LIMITS = {
+  "max_netlist_bytes": 67108864, "max_netlist_lines": 2000000,
+  "max_expanded_source_bytes": 268435456, "max_dependency_source_bytes": 268435456,
+  "max_external_data_bytes": 268435456, "max_external_data_values": 25000000,
+  "max_shared_cache_bytes": 536870912, "max_include_depth": 64, "max_hierarchy_depth": 100,
+  "max_flattened_elements": 250000, "max_circuit_nodes": 250000, "max_matrix_unknowns": 250000,
+  "max_analysis_points": 2000000, "max_result_values": 25000000,
+  "max_transport_history_bytes": 268435456, "max_mixed_interval_events": 1000000,
+  "max_parallel_workers": 64, "max_batch_runs": 10000
+};
 
 async function openWorker() {
   const worker = new Worker(workerUrl, {type: "module"});
@@ -41,9 +56,10 @@ async function digest(bytes) {
 
 function request(id, bins, resume = null, source = deck) {
   return {
-    protocolVersion: 42,
+    protocolVersion: REQUEST_PROTOCOL,
     request: {
       request: {
+        execution_limits: EXECUTION_LIMITS,
         id, request: {Spec: {spec: {MonteCarlo: {variation_source: "parameter_tolerance", params: []}},
           options: {mc_histogram_bins: bins, mc_checkpoint: {publish_every: 1,
             trial_range: {start: 0, end: 6}, resume: resume ? {digest: resume.digest} : null}}}},
@@ -76,7 +92,7 @@ function run(worker, packet, stopAfterCheckpoint = false) {
             finish({terminated: true});
           }
         } else if (data.type === "result") {
-          assert(data.response.protocolVersion === 36, "Unexpected response protocol");
+          assert(data.response.protocolVersion === RESPONSE_PROTOCOL, "Unexpected response protocol");
           assert(Number(data.response.response.id) === id, "Nested response identity differs");
           finish({outcome: data.response.response.outcome});
         } else if (data.type === "error") {
