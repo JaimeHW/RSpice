@@ -144,9 +144,9 @@ def test_every_family_publishes_the_shared_document(results):
     for kind, result in results:
         document = result.document()
         assert document["schema"] == "rspice-analysis-result", kind
-        # Version 17 retains singular voltage observations. Every producer
+        # Version 18 adds explicit Monte Carlo output units. Every producer
         # uses the shared version so older readers reject new guarantees.
-        assert document["schemaVersion"] == 17, kind
+        assert document["schemaVersion"] == 18, kind
         assert document["resultKind"] == kind, kind
         assert document["analysis"]["tag"], kind
 
