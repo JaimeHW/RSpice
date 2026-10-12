@@ -29,6 +29,7 @@ use crate::project_technology::ProjectTechnologyInputs;
 use crate::project_veriloga::preparation::{
     prepared_configuration_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
     prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
+    rebind_project_veriloga_source_keys,
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_app_types::canonical::content_digest;
@@ -546,6 +547,11 @@ pub fn build_prepared_manual_deck<R, A>(
         expanded,
     )
     .map_err(|error| PreparationError::new(PreparationStage::SourceChecks, error))?;
+    let expanded = rebind_project_veriloga_source_keys(
+        inputs.technology.project.id(),
+        inputs.project_sources,
+        expanded,
+    );
     reject_unresolved_device_models(&expanded, has_project_technology)?;
     let project_model_sources =
         prepared_project_model_sources(inputs.technology.models, &expanded)?;

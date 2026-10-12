@@ -5,7 +5,7 @@ use crate::preparation::{PreparationError, PreparationStage};
 use crate::project_veriloga::receipt::ProjectCompileReceipt;
 use rspice_app_types::product::ProjectId;
 use rspice_design::project_sources::{
-    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry,
+    ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceRegistry,
 };
 use rspice_design::projection::ConfigurationExecutionProjection;
 use std::collections::HashMap;
@@ -106,16 +106,14 @@ pub fn prepared_configuration_veriloga_runtimes(
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
-fn prepared_project_veriloga_runtimes(
+/// The runtime of one project Verilog-A bundle a deck names, from the
+/// retained compile receipt when it is this bundle's current one, else rebuilt
+/// from the validated bytes.
+fn prepared_project_veriloga_runtime(
     project_id: ProjectId,
-    sources: &ProjectSourceRegistry,
+    bundle: &ProjectSourceBundle,
     retained: Option<&ProjectCompileReceipt>,
-) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(bundle) = sources.bundle_for_owner(&ProjectSourceOwner::code_workspace(
-        ProjectSourceLanguage::VerilogA,
-    )) else {
-        return Ok(Default::default());
-    };
+) -> Result<crate::veriloga::PreparedVerilogARuntime, PreparationError> {
     let document = bundle.root();
     if let Some(receipt) = retained
         && receipt.token().project_id == project_id
@@ -123,10 +121,8 @@ fn prepared_project_veriloga_runtimes(
         && receipt.token().revision == bundle.revision().get()
         && receipt.token().closure_digest == bundle.closure_digest()
     {
-        let runtime = receipt
+        return receipt
             .prepare_runtime(project_id, bundle)
-            .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        return crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error));
     }
     if !document.validation_is_current() {
@@ -156,10 +152,8 @@ fn prepared_project_veriloga_runtimes(
                     ),
                 )
             })?;
-    let runtime = receipt
+    receipt
         .prepare_runtime(project_id, bundle)
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-    crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime])
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
@@ -200,45 +194,79 @@ pub fn prepared_model_library_veriloga_runtimes(
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
+/// The project Verilog-A runtimes a deck's `.veriloga` directives name
+/// exactly, one per bundle, whichever cell view owns it.
 pub fn project_veriloga_runtimes_referenced_by(
     project_id: ProjectId,
     sources: &ProjectSourceRegistry,
     retained: Option<&ProjectCompileReceipt>,
     source: &str,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
-    let Some(bundle) = sources.bundle_for_owner(&ProjectSourceOwner::code_workspace(
-        ProjectSourceLanguage::VerilogA,
-    )) else {
-        return Ok(Default::default());
-    };
-    let key_prefix = format!(
-        "__rspice_project__/{}/{}/{}/",
-        project_id,
-        bundle.id(),
-        bundle.closure_digest()
-    );
-    let key_suffix = format!("/{}", bundle.root().logical_path());
-    let references_project_key = executable_logical_lines(source)
-        .iter()
-        .filter_map(|(_, line)| parse_veriloga_directive_identity(line))
-        .any(|(path, _)| path.starts_with(&key_prefix) && path.ends_with(&key_suffix));
-    if !references_project_key {
-        return Ok(Default::default());
-    }
-    let runtimes = prepared_project_veriloga_runtimes(project_id, sources, retained)?;
-    let exact_reference = runtimes.sources().any(|runtime| {
-        executable_logical_lines(source).iter().any(|(_, line)| {
+    let lines = executable_logical_lines(source);
+    let mut runtimes = Vec::new();
+    for bundle in sources
+        .iter_bundles()
+        .filter(|bundle| bundle.language() == ProjectSourceLanguage::VerilogA)
+    {
+        let key_prefix = format!(
+            "__rspice_project__/{}/{}/{}/",
+            project_id,
+            bundle.id(),
+            bundle.closure_digest()
+        );
+        let key_suffix = format!("/{}", bundle.root().logical_path());
+        let references_bundle = lines
+            .iter()
+            .filter_map(|(_, line)| parse_veriloga_directive_identity(line))
+            .any(|(path, _)| path.starts_with(&key_prefix) && path.ends_with(&key_suffix));
+        if !references_bundle {
+            continue;
+        }
+        let runtime = prepared_project_veriloga_runtime(project_id, bundle, retained)?;
+        let exact_reference = lines.iter().any(|(_, line)| {
             project_veriloga_directive_matches_exact_identity(
                 line,
                 runtime.source_key(),
                 runtime.netlist_alias(),
             )
-        })
-    });
-    if !exact_reference {
-        return Ok(Default::default());
+        });
+        if exact_reference {
+            runtimes.push(runtime);
+        }
     }
-    Ok(runtimes)
+    crate::veriloga::PreparedVerilogARuntimeSet::try_new(runtimes)
+        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
+}
+
+/// Rewrite each `.veriloga` key that names a project bundle's current bytes
+/// under an earlier identity to that bundle's current key.
+///
+/// A key frames the bundle's owner into its digest, so a deck written against
+/// the project-wide Verilog-A workspace names a key its source no longer
+/// carries once that source became a cell view's. The bytes are the same,
+/// which [`ProjectSourceRegistry::current_veriloga_source_key`] proves before
+/// anything is rewritten; a key naming bytes the bundle no longer holds is
+/// left exactly as written, to be refused as the stale reference it is.
+#[must_use]
+pub fn rebind_project_veriloga_source_keys(
+    project_id: ProjectId,
+    sources: &ProjectSourceRegistry,
+    source: String,
+) -> String {
+    source
+        .split_inclusive('\n')
+        .map(|line| {
+            let Some((key, _)) = parse_veriloga_directive_identity(line.trim()) else {
+                return std::borrow::Cow::Borrowed(line);
+            };
+            match sources.current_veriloga_source_key(project_id, key) {
+                Some(current) if current != key => {
+                    std::borrow::Cow::Owned(line.replacen(key, &current, 1))
+                }
+                _ => std::borrow::Cow::Borrowed(line),
+            }
+        })
+        .collect()
 }
 
 /// Parse the identity-bearing fields from the one project Verilog-A directive
