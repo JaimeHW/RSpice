@@ -153,13 +153,25 @@ pub fn materialize_authoritative_source_binding(
         [&view.metadata, &cell.metadata],
         &["reference.prefix", "reference_prefix"],
     );
-    materialized.parameter_order = metadata_terminal_names_for_keys(
-        [&view.metadata, &cell.metadata],
-        &["netlist.parameter_order"],
-    )
-    .unwrap_or_default();
+    materialized.declare_parameters(current_parameter_order(library, cell, view)?);
     materialized.bind_interface(&ports);
     Ok(materialized)
+}
+
+/// The allowlist an instance of `view` binds now, by the rule placement used:
+/// the master's current contract, never the copy the placement took, so a
+/// parameter its module gained after the instance was placed is accepted.
+fn current_parameter_order(
+    library: &Library,
+    cell: &Cell,
+    view: &View,
+) -> Result<Option<Vec<String>>, String> {
+    crate::library::metadata::instance_parameter_order(cell, view).map_err(|error| {
+        format!(
+            "{}/{}/{} has an invalid parameter contract: {error}",
+            library.name, cell.name, view.name
+        )
+    })
 }
 
 pub fn project_veriloga_binding_for_view(
@@ -265,25 +277,6 @@ pub fn metadata_value<const N: usize>(
         .map(|value| value.trim())
         .find(|value| !value.is_empty())
         .map(str::to_owned)
-}
-
-pub(super) fn metadata_terminal_names_for_keys<const N: usize>(
-    maps: [&HashMap<String, String>; N],
-    keys: &[&str],
-) -> Option<Vec<String>> {
-    let encoded = maps
-        .into_iter()
-        .find_map(|metadata| keys.iter().find_map(|key| metadata.get(*key)))?;
-    let values = serde_json::from_str::<Vec<String>>(encoded).unwrap_or_else(|_| {
-        encoded
-            .split([',', ' ', '\t', '\n'])
-            .filter_map(|value| {
-                let value = value.trim();
-                (!value.is_empty()).then(|| value.to_owned())
-            })
-            .collect()
-    });
-    (!values.is_empty()).then_some(values)
 }
 
 pub(super) fn metadata_source_path(metadata: &HashMap<String, String>) -> Option<&Path> {

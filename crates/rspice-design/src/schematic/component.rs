@@ -62,6 +62,12 @@ pub struct LibraryCellInstance {
     /// instances. Empty preserves legacy source-backed cell behavior.
     #[serde(default)]
     pub parameter_order: Vec<String>,
+    /// Whether `parameter_order` is a declared contract even when empty: a
+    /// compiled module that declares no parameter accepts none. Set where an
+    /// execution binding is materialized from its master's current contract;
+    /// never persisted, because a placement's copy of a contract goes stale.
+    #[serde(skip)]
+    parameters_declared: bool,
     /// Terminal order used for schematic connectivity and netlist emission.
     #[serde(default)]
     pub terminal_order: Vec<String>,
@@ -235,6 +241,7 @@ impl LibraryCellInstance {
             variant_model_section: None,
             reference_prefix: None,
             parameter_order: Vec::new(),
+            parameters_declared: false,
             terminal_order: Vec::new(),
             terminal_dirs: Vec::new(),
             interface_bound: false,
@@ -253,6 +260,20 @@ impl LibraryCellInstance {
 
     pub fn is_executable_builtin(&self) -> bool {
         self.is_builtin_xspice() || self.is_generated_veriloga()
+    }
+
+    /// Bind this instance to the parameters its master declares, in emission
+    /// order, or to none when the master states no contract and its instances'
+    /// parameters pass through unchecked.
+    pub fn declare_parameters(&mut self, order: Option<Vec<String>>) {
+        self.parameters_declared = order.is_some();
+        self.parameter_order = order.unwrap_or_default();
+    }
+
+    /// Whether an override `parameter_order` does not name is refused rather
+    /// than passed through.
+    pub fn parameters_declared(&self) -> bool {
+        self.parameters_declared || !self.parameter_order.is_empty()
     }
 
     /// Bind this instance to a cell interface: terminal order and
