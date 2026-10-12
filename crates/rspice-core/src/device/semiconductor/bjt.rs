@@ -2374,6 +2374,12 @@ impl Bjt {
         ]
     }
 
+    /// Whether two of the authored collector, base and emitter are one node.
+    pub(crate) fn has_coincident_cbe_terminals(&self) -> bool {
+        let [c, b, e, _] = self.external_terminal_nodes();
+        c == b || b == e || c == e
+    }
+
     #[inline]
     fn external_terminal_voltages(&self, voltages: &[Value]) -> [Value; EXTERNAL_DIM] {
         self.external_terminal_nodes()
