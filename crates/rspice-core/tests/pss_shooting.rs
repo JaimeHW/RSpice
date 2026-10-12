@@ -557,9 +557,23 @@ const VBIC_THREE_TERMINAL_REFERENCE: [f64; 17] = [
 ];
 
 fn vbic_periodic_electrical_oracle(level: u32, polarity: &str, sign: f64) -> Netlist {
+    vbic_periodic_electrical_oracle_with_tolerances(
+        level,
+        polarity,
+        sign,
+        "RELTOL=1e-6 VNTOL=1e-8 ABSTOL=1e-14",
+    )
+}
+
+fn vbic_periodic_electrical_oracle_with_tolerances(
+    level: u32,
+    polarity: &str,
+    sign: f64,
+    tolerances: &str,
+) -> Netlist {
     // Prescribe zero thermal rise for the electrical shooting oracle.
     let thermal_pin = if level == 12 { " 0" } else { "" };
-    Netlist::parse(&format!("VBIC PSS electrical oracle\nVcc supply 0 {}\nVb drive 0 SIN({} {} 1meg)\nRc supply c 1k\nRb drive b 100\nQ1 c b 0 0{thermal_pin} vm\n.model vm {polarity}(LEVEL={level} IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=0.8)\n.options RELTOL=1e-6 VNTOL=1e-8 ABSTOL=1e-14\n.temp 27\n.end\n", 2.0*sign, 0.65*sign, 0.02*sign)).unwrap()
+    Netlist::parse(&format!("VBIC PSS electrical oracle\nVcc supply 0 {}\nVb drive 0 SIN({} {} 1meg)\nRc supply c 1k\nRb drive b 100\nQ1 c b 0 0{thermal_pin} vm\n.model vm {polarity}(LEVEL={level} IS=1e-14 IBEI=1e-16 IBCI=1e-16 RCX=10 RCI=20 RBX=10 RBI=40 RE=1 RBP=10 RS=1 CJE=10p CJC=5p CJEP=3p CJCP=2p TF=10n TR=2n QCO=10f GAMM=1e-9 ISP=1e-16 WBE=0.8)\n.options {tolerances}\n.temp 27\n.end\n", 2.0*sign, 0.65*sign, 0.02*sign)).unwrap()
 }
 
 #[test]
@@ -571,7 +585,15 @@ fn nonlinear_vbic_charge_pss_matches_settled_reference_simulators() {
         (SpiceDialect::Xyce, 11, VBIC_THREE_TERMINAL_REFERENCE),
     ] {
         for (polarity, sign) in [("NPN", 1.0), ("PNP", -1.0)] {
-            let netlist = vbic_periodic_electrical_oracle(level, polarity, sign);
+            // The orbit must match the settled references within 0.2 mV.
+            // RELTOL=1e-4 already brings it within 2 uV on a 1,025-point
+            // mesh; RELTOL=1e-6 refined to 8,193 points for 0.5 uV.
+            let netlist = vbic_periodic_electrical_oracle_with_tolerances(
+                level,
+                polarity,
+                sign,
+                "RELTOL=1e-4 VNTOL=1e-7 ABSTOL=1e-13",
+            );
             let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
             let point = engine
                 .run_pss_operating_point_with_abort(
