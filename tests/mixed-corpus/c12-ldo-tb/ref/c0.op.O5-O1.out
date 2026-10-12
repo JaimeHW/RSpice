@@ -1,0 +1,8 @@
+# RSPICE-NGSPICE-ORACLE 2
+# ngspice: ngspice-46 : Circuit level simulation program
+# executable-sha256: 86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453
+# input-blake3: 5baa18772c628117ed871516f4b7cd5c5e48bec0385a2f8c9fe66721c41ad3d6
+# analysis: op
+Index op v(meas) v(vout)
+0 0 1.15116057274119 1.15116057274119
+# end-analysis

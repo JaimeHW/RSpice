@@ -1,0 +1,238 @@
+schema = "rspice-mixed-tolerance/1"
+# tb_ldo and spi_trim: `timescale 1ns/1ps.
+time_precision = 1e-12
+
+# ---- op: the D-A state (trim code 0) ---------------------------------------
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["full", "unrolled", "top"]
+kind = "op"
+signals = ["v(vout)"]
+oracle = "O5"
+abs = 1e-5
+rel = 1e-5
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["full", "unrolled", "top"]
+kind = "op"
+signals = ["v(vout)"]
+oracle = "O5-O1"
+ref = "ref/c0.op.O5-O1.out"
+abs = 1e-3
+rel = 1e-3
+why = "the same BSIM4 4.8.2 equations (C5's op row)"
+
+# ---- tran: the testbench's verdict and its sixteen readings -----------------
+
+[[q]]
+id = "ok"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "events"
+nets = { full = ["xtb.ok__event_0"], unrolled = ["xtb.ok__event_0"], top = ["xtop.ok__event_0"] }
+window = [0.0, 1.65e-3]
+oracle = "O6"
+expect = "c12::ok"
+edge_abs = 1e-9
+why = "the trim ladder is monotonic: vref (1 + 100k/(75k - k 1k)) steps by 9.0 to 13.7 mV, inside [5 mV, 20 mV], so ok goes 0 -> 1 once, at 1600 us; digital, exact"
+
+# vk.<k>: the testbench reads V(vout) 92.5 us after latching code k and holds
+# it on meas; each reading is compared with the operating point at code k
+# (oracle/c<k>.op.o5.ngspice.cir), the loop settled (C5: ~50 us after a latch).
+
+[[q]]
+id = "vk.0"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [9.9200e-05, 9.9800e-05]
+oracle = "O5-O1"
+ref = "ref/c0.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 0, 92.5 us after its latch, against the code-0 operating point"
+
+[[q]]
+id = "vk.1"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [1.9920e-04, 1.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c1.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 1, 92.5 us after its latch, against the code-1 operating point"
+
+[[q]]
+id = "vk.2"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [2.9920e-04, 2.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c2.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 2, 92.5 us after its latch, against the code-2 operating point"
+
+[[q]]
+id = "vk.3"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [3.9920e-04, 3.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c3.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 3, 92.5 us after its latch, against the code-3 operating point"
+
+[[q]]
+id = "vk.4"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [4.9920e-04, 4.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c4.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 4, 92.5 us after its latch, against the code-4 operating point"
+
+[[q]]
+id = "vk.5"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [5.9920e-04, 5.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c5.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 5, 92.5 us after its latch, against the code-5 operating point"
+
+[[q]]
+id = "vk.6"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [6.9920e-04, 6.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c6.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 6, 92.5 us after its latch, against the code-6 operating point"
+
+[[q]]
+id = "vk.7"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [7.9920e-04, 7.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c7.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 7, 92.5 us after its latch, against the code-7 operating point"
+
+[[q]]
+id = "vk.8"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [8.9920e-04, 8.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c8.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 8, 92.5 us after its latch, against the code-8 operating point"
+
+[[q]]
+id = "vk.9"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [9.9920e-04, 9.9980e-04]
+oracle = "O5-O1"
+ref = "ref/c9.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 9, 92.5 us after its latch, against the code-9 operating point"
+
+[[q]]
+id = "vk.10"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [1.0992e-03, 1.0998e-03]
+oracle = "O5-O1"
+ref = "ref/c10.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 10, 92.5 us after its latch, against the code-10 operating point"
+
+[[q]]
+id = "vk.11"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [1.1992e-03, 1.1998e-03]
+oracle = "O5-O1"
+ref = "ref/c11.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 11, 92.5 us after its latch, against the code-11 operating point"
+
+[[q]]
+id = "vk.12"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [1.2992e-03, 1.2998e-03]
+oracle = "O5-O1"
+ref = "ref/c12.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 12, 92.5 us after its latch, against the code-12 operating point"
+
+[[q]]
+id = "vk.13"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [1.3992e-03, 1.3998e-03]
+oracle = "O5-O1"
+ref = "ref/c13.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 13, 92.5 us after its latch, against the code-13 operating point"
+
+[[q]]
+id = "vk.14"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [1.4992e-03, 1.4998e-03]
+oracle = "O5-O1"
+ref = "ref/c14.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 14, 92.5 us after its latch, against the code-14 operating point"
+
+[[q]]
+id = "vk.15"
+analysis = "tran"
+variants = ["full", "unrolled", "top"]
+kind = "mean"
+signal = "v(meas)"
+window = [1.5992e-03, 1.5998e-03]
+oracle = "O5-O1"
+ref = "ref/c15.op.O5-O1.out"
+abs = 1e-3
+why = "the testbench's reading of code 15, 92.5 us after its latch, against the code-15 operating point"

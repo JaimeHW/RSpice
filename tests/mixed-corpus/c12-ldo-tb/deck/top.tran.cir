@@ -1,0 +1,11 @@
+* C12 Verilog-AMS testbench over the C5 LDO, variant top, tran
+* Verilog-AMS on top (net/top.vams) instantiates the SPICE subcircuit ldo, the
+* trim register and the testbench; the supply and load are SPICE at deck level.
+.include ../../c05-ldo-trim/net/models-bsim4.cir
+.include ../net/ldo_sub.cir
+.include ../net/supply_load.cir
+.hdl "../net/top.vams" module=top
+xtop vin vout ok meas top
+.param vcc=1.8
+.tran 0.5u 1.65m
+.end

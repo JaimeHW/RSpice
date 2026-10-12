@@ -1,0 +1,40 @@
+schema = "rspice-mixed-design/1"
+id = "C12"
+title = "Verilog-AMS testbench over the C5 LDO"
+exit_phases = ["P3", "P4"]
+dialect = "best-available"
+features = []
+
+# full: the testbench with a task, a loop, $display, $error and $finish.
+[[variant]]
+name = "full"
+families = ["spice", "vams-digital", "vams-analog", "wreal"]
+today = "parse:P2.3"
+
+# unrolled: the same sequence as straight-line code, no system tasks.
+[[variant]]
+name = "unrolled"
+families = ["spice", "vams-digital", "vams-analog", "wreal"]
+today = "runs"
+
+# top: Verilog-AMS on top, instantiating the SPICE subcircuit ldo.
+[[variant]]
+name = "top"
+families = ["spice", "vams-digital", "vams-analog", "wreal"]
+today = "refused:P3.6"
+
+# Budgets are about five times the slower route's measured case time (at
+# least 30 s), so a hang surfaces quickly.
+[[analysis]]
+id = "tran"
+variants = ["full", "unrolled", "top"]
+oracles = ["O5", "O6", "O5-O1"]
+timeout_s = 30
+phase = "P3"
+
+[[analysis]]
+id = "op"
+variants = ["full", "unrolled", "top"]
+oracles = ["O5", "O6", "O5-O1"]
+timeout_s = 30
+phase = "P3"

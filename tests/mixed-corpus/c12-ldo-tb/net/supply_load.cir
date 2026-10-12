@@ -1,0 +1,9 @@
+* C12 supply and load (RSpice-authored; corpus design C12): C5's supply and
+* static load (../../c05-ldo-trim/net/ldo.cir: vin 1.8 V with ac 1, rload 100 ohm,
+* cout 1 uF with 0.1 ohm ESR). C5's 10 mA load-step source is left out: its
+* 201..301 us pulse would fall inside the code-2 settle window, and C12 measures
+* each trim code settled at the static load.
+vin vin 0 1.8 ac 1
+rload vout 0 100
+cout vout co 1u
+resr co 0 0.1

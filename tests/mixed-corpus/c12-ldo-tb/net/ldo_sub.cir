@@ -1,0 +1,7 @@
+* C12 the C5 LDO as a SPICE subcircuit (RSpice-authored; corpus design C12):
+* reference, error amplifier, pass device and trimmed feedback ladder of
+* ../../c05-ldo-trim/net/ldo_body.inc (read, not copied). Models:
+* ../../c05-ldo-trim/net/models-bsim4.cir at top level.
+.subckt ldo vin vout tr3 tr2 tr1 tr0
+.include ../../c05-ldo-trim/net/ldo_body.inc
+.ends ldo

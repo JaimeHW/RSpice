@@ -1,0 +1,12 @@
+* C12 Verilog-AMS testbench over the C5 LDO, variant unrolled, op
+.include ../../c05-ldo-trim/net/models-bsim4.cir
+.include ../net/ldo_sub.cir
+.include ../net/supply_load.cir
+.hdl "../../c05-ldo-trim/net/spi_trim.v"
+.hdl "../net/tb_ldo_unrolled.vams"
+xldo vin vout tr3 tr2 tr1 tr0 ldo
+xtrim sclk sdi csn tr3 tr2 tr1 tr0 spi_trim
+xtb vout sclk sdi csn ok meas tb_ldo
+.param vcc=1.8
+.op
+.end

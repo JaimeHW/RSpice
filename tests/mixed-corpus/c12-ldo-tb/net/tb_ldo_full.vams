@@ -1,0 +1,47 @@
+// C12 testbench, variant full (RSpice-authored; corpus design C12): a task
+// shifts a code into spi_trim MSB first (sdi 0.5 us before each of four sclk
+// rises, 1.5 us apart) and latches it with csn; a loop loads codes 0..15 every
+// 100 us, reads V(vout) 92.5 us after each latch into vk[k] and onto meas
+// (wreal), reports each code with $display, flags a step vk[k] - vk[k-1]
+// outside [5 mV, 20 mV] with $error, raises ok at 1600 us if none was flagged,
+// and finishes.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module tb_ldo(vout, sclk, sdi, csn, ok, meas);
+  inout vout; electrical vout;
+  output sclk, sdi, csn, ok; reg sclk, sdi, csn, ok;
+  output meas; wreal meas;
+  real mv;
+  real vk [0:15];
+  integer k, i;
+  reg pass;
+  assign meas = mv;
+
+  task load(input [3:0] code);
+    begin
+      csn = 1'b0;
+      for (i = 3; i >= 0; i = i - 1) begin
+        #500 sdi = code[i];
+        #500 sclk = 1'b1;
+        #500 sclk = 1'b0;
+      end
+      #500 csn = 1'b1;
+    end
+  endtask
+
+  initial begin
+    sclk = 1'b0; sdi = 1'b0; csn = 1'b1; ok = 1'b0; pass = 1'b1; mv = 0.0;
+    for (k = 0; k < 16; k = k + 1) begin
+      load(k);
+      #92500 vk[k] = V(vout); mv = vk[k];
+      $display("code %0d: vout = %g V", k, vk[k]);
+      if (k > 0 && (vk[k] - vk[k-1] < 5e-3 || vk[k] - vk[k-1] > 20e-3)) begin
+        pass = 1'b0;
+        $error("code %0d: step %g V is outside [5 mV, 20 mV]", k, vk[k] - vk[k-1]);
+      end
+      #1000;
+    end
+    ok = pass;
+    $finish;
+  end
+endmodule

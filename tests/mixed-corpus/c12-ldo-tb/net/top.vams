@@ -1,0 +1,199 @@
+// C12 variant top (RSpice-authored; corpus design C12): Verilog-AMS on top.
+// top instantiates the SPICE subcircuit ldo (net/ldo_sub.cir), the trim
+// register and the unrolled testbench; the supply and load stay SPICE at the
+// deck level. Instantiating a SPICE subcircuit from Verilog is plan item
+// P3.6. spi_trim is ../../c05-ldo-trim/net/spi_trim.v verbatim and tb_ldo
+// is net/tb_ldo_unrolled.vams verbatim, in this one file because a design
+// split across HDL files is P2 lane L8.
+`include "disciplines.vams"
+`timescale 1ns/1ps
+module top(vin, vout, ok, meas);
+  inout vin, vout; electrical vin, vout;
+  output ok; output meas; wreal meas;
+  electrical tr3, tr2, tr1, tr0;
+  wire sclk, sdi, csn;
+  ldo xldo(vin, vout, tr3, tr2, tr1, tr0);
+  spi_trim xtrim(sclk, sdi, csn, tr3, tr2, tr1, tr0);
+  tb_ldo xtb(vout, sclk, sdi, csn, ok, meas);
+endmodule
+module spi_trim(sclk, sdi, csn, tr3, tr2, tr1, tr0);
+  input sclk, sdi, csn;
+  output tr3, tr2, tr1, tr0;
+  reg tr3, tr2, tr1, tr0;
+  reg [3:0] sh;
+  initial begin sh = 4'b0000; tr3 = 1'b0; tr2 = 1'b0; tr1 = 1'b0; tr0 = 1'b0; end
+  always @(posedge sclk) if (!csn) sh <= {sh[2:0], sdi};
+  always @(posedge csn) {tr3, tr2, tr1, tr0} <= sh;
+endmodule
+module tb_ldo(vout, sclk, sdi, csn, ok, meas);
+  inout vout; electrical vout;
+  output sclk, sdi, csn, ok; reg sclk, sdi, csn, ok;
+  output meas; wreal meas;
+  real mv;
+  real vk0, vk1, vk2, vk3, vk4, vk5, vk6, vk7, vk8, vk9, vk10, vk11, vk12, vk13, vk14, vk15;
+  reg pass;
+  assign meas = mv;
+  initial begin
+    sclk = 1'b0; sdi = 1'b0; csn = 1'b1; ok = 1'b0; pass = 1'b1; mv = 0.0;
+    // code 0: shift 0000 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk0 = V(vout); mv = vk0;
+    #1000;
+    // code 1: shift 0001 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk1 = V(vout); mv = vk1;
+    if (vk1 - vk0 < 5e-3 || vk1 - vk0 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 2: shift 0010 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk2 = V(vout); mv = vk2;
+    if (vk2 - vk1 < 5e-3 || vk2 - vk1 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 3: shift 0011 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk3 = V(vout); mv = vk3;
+    if (vk3 - vk2 < 5e-3 || vk3 - vk2 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 4: shift 0100 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk4 = V(vout); mv = vk4;
+    if (vk4 - vk3 < 5e-3 || vk4 - vk3 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 5: shift 0101 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk5 = V(vout); mv = vk5;
+    if (vk5 - vk4 < 5e-3 || vk5 - vk4 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 6: shift 0110 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk6 = V(vout); mv = vk6;
+    if (vk6 - vk5 < 5e-3 || vk6 - vk5 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 7: shift 0111 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk7 = V(vout); mv = vk7;
+    if (vk7 - vk6 < 5e-3 || vk7 - vk6 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 8: shift 1000 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk8 = V(vout); mv = vk8;
+    if (vk8 - vk7 < 5e-3 || vk8 - vk7 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 9: shift 1001 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk9 = V(vout); mv = vk9;
+    if (vk9 - vk8 < 5e-3 || vk9 - vk8 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 10: shift 1010 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk10 = V(vout); mv = vk10;
+    if (vk10 - vk9 < 5e-3 || vk10 - vk9 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 11: shift 1011 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk11 = V(vout); mv = vk11;
+    if (vk11 - vk10 < 5e-3 || vk11 - vk10 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 12: shift 1100 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk12 = V(vout); mv = vk12;
+    if (vk12 - vk11 < 5e-3 || vk12 - vk11 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 13: shift 1101 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk13 = V(vout); mv = vk13;
+    if (vk13 - vk12 < 5e-3 || vk13 - vk12 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 14: shift 1110 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b0; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk14 = V(vout); mv = vk14;
+    if (vk14 - vk13 < 5e-3 || vk14 - vk13 > 20e-3) pass = 1'b0;
+    #1000;
+    // code 15: shift 1111 in MSB first, latch, settle, measure
+    csn = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 sdi = 1'b1; #500 sclk = 1'b1; #500 sclk = 1'b0;
+    #500 csn = 1'b1;
+    #92500 vk15 = V(vout); mv = vk15;
+    if (vk15 - vk14 < 5e-3 || vk15 - vk14 > 20e-3) pass = 1'b0;
+    #1000;
+    ok = pass;
+  end
+endmodule

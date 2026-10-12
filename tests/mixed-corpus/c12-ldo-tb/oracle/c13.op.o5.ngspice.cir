@@ -1,0 +1,19 @@
+* C12 trim code 13 held, op: O5-O1 (ngspice-46) held-digital oracle deck
+* The O5 circuit (oracle/unrolled.o5.cir) with tr3..tr0 held at code 13 (1101)
+* behind 20 ohm; meas is a probe of v(vout), the value the testbench reads.
+.include ../../c05-ldo-trim/net/models-bsim4.cir
+.include ../net/ldo_sub.cir
+.include ../net/supply_load.cir
+xldo vin vout tr3 tr2 tr1 tr0 ldo
+vtr3 tr3_h 0 1.8
+rtr3 tr3_h tr3 20
+vtr2 tr2_h 0 1.8
+rtr2 tr2_h tr2 20
+vtr1 tr1_h 0 0
+rtr1 tr1_h tr1 20
+vtr0 tr0_h 0 1.8
+rtr0 tr0_h tr0 20
+emeas meas 0 vout 0 1
+.op
+.save v(vout) v(meas)
+.end
