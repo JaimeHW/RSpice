@@ -139,6 +139,54 @@ impl TableId {
     }
 }
 
+/// The operator of a [`Node::Unary`].
+///
+/// This is [`UnaryOp`] less `ArrayIndex`, the compiler-inserted conversion
+/// from an authored array coordinate to its offset. That variant carries an
+/// `i64` lower bound and a `u32` length, which makes [`UnaryOp`] itself 16
+/// bytes and a node holding it 24; it is [`Node::ArrayIndex`] instead, with
+/// its bounds in a side table.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum IrUnaryOp {
+    /// Compiler-inserted assignment conversion to integer.
+    ToInteger,
+    /// Compiler-inserted numeric assignment conversion to real.
+    ToReal,
+    /// `-`
+    Neg,
+    /// `+`
+    Pos,
+    /// `!`
+    Not,
+    /// `~`
+    BitNot,
+}
+
+impl IrUnaryOp {
+    /// The node operator for an AST operator, or `None` for `ArrayIndex`,
+    /// which is [`ExprArena::push_array_index`]'s to represent.
+    pub fn from_ast(op: UnaryOp) -> Option<Self> {
+        Some(match op {
+            UnaryOp::ArrayIndex { .. } => return None,
+            UnaryOp::ToInteger => Self::ToInteger,
+            UnaryOp::ToReal => Self::ToReal,
+            UnaryOp::Neg => Self::Neg,
+            UnaryOp::Pos => Self::Pos,
+            UnaryOp::Not => Self::Not,
+            UnaryOp::BitNot => Self::BitNot,
+        })
+    }
+}
+
+/// The declared bounds of one [`Node::ArrayIndex`] coordinate.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ArrayIndexBounds {
+    /// The axis's lower declared index.
+    pub lower: i64,
+    /// The number of elements on the axis.
+    pub len: u32,
+}
+
 /// The array read a [`Node::VarIndexed`] performs, less its index expression.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct IndexedRead {
@@ -208,7 +256,16 @@ pub enum Node {
     /// Binary operation.
     Binary(BinaryOp, NodeId, NodeId),
     /// Unary operation.
-    Unary(UnaryOp, NodeId),
+    Unary(IrUnaryOp, NodeId),
+    /// Checked conversion of an authored array coordinate to its zero-based
+    /// offset along one axis. The axis bounds are
+    /// `ExprArena::array_index(bounds)`.
+    ArrayIndex {
+        /// The authored coordinate.
+        operand: NodeId,
+        /// Index into the arena's array-index bounds table.
+        bounds: u32,
+    },
     /// Identity value with zero derivative, used for coefficients outside ddt
     /// while constructing the reactive linearization.
     FreezeDerivative(NodeId),
@@ -710,6 +767,8 @@ pub struct ExprArena {
     tables: Vec<(Vec<f64>, Vec<f64>)>,
     /// Array reads of [`Node::VarIndexed`].
     indexed: Vec<IndexedRead>,
+    /// Axis bounds of [`Node::ArrayIndex`].
+    array_indices: Vec<ArrayIndexBounds>,
     /// `(ic, offset)` of [`Node::IdtMod`].
     optional_pairs: Vec<(Option<NodeId>, Option<NodeId>)>,
     /// Axes of [`Node::Ddx`].
@@ -831,6 +890,21 @@ impl ExprArena {
     #[inline]
     pub fn indexed(&self, payload: u32) -> &IndexedRead {
         &self.indexed[payload as usize]
+    }
+
+    /// Append a checked coordinate-to-offset conversion of `operand` along an
+    /// axis with these bounds.
+    pub fn push_array_index(&mut self, operand: NodeId, lower: i64, len: u32) -> NodeId {
+        let bounds =
+            u32::try_from(self.array_indices.len()).expect("array-index count is below u32::MAX");
+        self.array_indices.push(ArrayIndexBounds { lower, len });
+        self.push(Node::ArrayIndex { operand, bounds })
+    }
+
+    /// The axis bounds `bounds` addresses.
+    #[inline]
+    pub fn array_index(&self, bounds: u32) -> ArrayIndexBounds {
+        self.array_indices[bounds as usize]
     }
 
     /// Append an optional child pair, returning its payload index.
@@ -967,7 +1041,7 @@ pub fn for_each_child<F: FnMut(NodeId)>(arena: &ExprArena, node: &Node, f: &mut 
             f(*left);
             f(*right);
         }
-        Node::Unary(_, inner) => f(*inner),
+        Node::Unary(_, inner) | Node::ArrayIndex { operand: inner, .. } => f(*inner),
         Node::Call { a, b, .. } => {
             optional(*a, f);
             optional(*b, f);
@@ -1331,6 +1405,13 @@ pub fn rebuild_children(
             }
             arena.push(Node::Unary(op, new_inner))
         }
+        Node::ArrayIndex { operand, bounds } => rebuild_unary(
+            arena,
+            id,
+            operand,
+            |operand| Node::ArrayIndex { operand, bounds },
+            descend,
+        ),
         Node::Call { func, argc, a, b } => {
             let new_a = rebuild_optional(arena, a, descend);
             let new_b = rebuild_optional(arena, b, descend);
@@ -1834,7 +1915,8 @@ mod tests {
         let one = m(arena);
         let two = m(arena);
         out.push(arena.push(Node::Binary(BinaryOp::Add, one, two)));
-        out.push(arena.push(Node::Unary(UnaryOp::Neg, one)));
+        out.push(arena.push(Node::Unary(IrUnaryOp::Neg, one)));
+        out.push(arena.push_array_index(one, -3, 4));
         out.push(arena.push(Node::Conditional(one, two, one)));
         out.push(arena.push(Node::Ddt(one)));
         out.push(arena.push(Node::FreezeDerivative(one)));

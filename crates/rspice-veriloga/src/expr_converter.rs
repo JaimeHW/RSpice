@@ -14,7 +14,7 @@ use crate::ast::{
 };
 use crate::branch_identity::BranchIdentity;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileResult};
-use crate::ir::arena::{ExprArena, Heavy, IndexedRead, Node, ZiPolynomial, pack_index};
+use crate::ir::arena::{ExprArena, Heavy, IndexedRead, IrUnaryOp, Node, ZiPolynomial, pack_index};
 use crate::ir::{BranchRef, DdxAxis, IrFunction, NodeId};
 use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
@@ -1140,7 +1140,16 @@ impl<'a> ExprConverter<'a> {
             let zero = arena.push(Node::Const(0.0));
             return Ok(arena.push(Node::Binary(BinaryOp::BitOr, operand, zero)));
         }
-        Ok(arena.push(Node::Unary(unary.op, operand)))
+        Ok(match unary.op {
+            crate::ast::UnaryOp::ArrayIndex { lower, len } => {
+                arena.push_array_index(operand, lower, len)
+            }
+            op => {
+                let op =
+                    IrUnaryOp::from_ast(op).expect("every other unary operator is a node operator");
+                arena.push(Node::Unary(op, operand))
+            }
+        })
     }
 
     /// Convert a conditional expression
@@ -2182,7 +2191,7 @@ impl<'a> ExprConverter<'a> {
                 if let Some((ordinal, reversed)) = self.ctx.branch_current_axis(name, pos, neg) {
                     let current = arena.push(Node::BranchCurrent(pack_index(ordinal)));
                     Ok(if reversed {
-                        arena.push(Node::Unary(crate::ast::UnaryOp::Neg, current))
+                        arena.push(Node::Unary(IrUnaryOp::Neg, current))
                     } else {
                         current
                     })

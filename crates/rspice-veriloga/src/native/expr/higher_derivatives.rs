@@ -6,8 +6,8 @@
 //! No executable bytecode contributes an equation or an algebraic operand.
 
 use super::*;
-use crate::ast::{BinaryOp, UnaryOp};
-use crate::ir::arena::{ExprArena, Heavy, NameId, Node, NodeId as AlgebraId, visit};
+use crate::ast::BinaryOp;
+use crate::ir::arena::{ExprArena, Heavy, IrUnaryOp, NameId, Node, NodeId as AlgebraId, visit};
 use crate::ir::autodiff::differentiate_with_variable_derivatives;
 use crate::ir::{AbsDelaySiteId, IrFunction};
 use std::collections::HashSet;
@@ -66,22 +66,18 @@ impl Algebra {
                 len,
             } => {
                 let inner = self.import(lowerer, *operand)?;
-                Node::Unary(
-                    UnaryOp::ArrayIndex {
-                        lower: *lower,
-                        len: *len,
-                    },
-                    inner,
-                )
+                let node = self.arena.push_array_index(inner, *lower, *len);
+                self.imported.insert(id, node);
+                return Ok(node);
             }
             HirExprKind::Unary { op, operand } => {
                 let inner = self.import(lowerer, *operand)?;
                 match op.as_str() {
-                    "Pos" => Node::Unary(UnaryOp::Pos, inner),
-                    "Neg" => Node::Unary(UnaryOp::Neg, inner),
-                    "Not" => Node::Unary(UnaryOp::Not, inner),
-                    "BitNot" => Node::Unary(UnaryOp::BitNot, inner),
-                    "ToInteger" => Node::Unary(UnaryOp::ToInteger, inner),
+                    "Pos" => Node::Unary(IrUnaryOp::Pos, inner),
+                    "Neg" => Node::Unary(IrUnaryOp::Neg, inner),
+                    "Not" => Node::Unary(IrUnaryOp::Not, inner),
+                    "BitNot" => Node::Unary(IrUnaryOp::BitNot, inner),
+                    "ToInteger" => Node::Unary(IrUnaryOp::ToInteger, inner),
                     FROZEN_DERIVATIVE_UNARY => Node::FreezeDerivative(inner),
                     _ => return Err(lowerer.unsupported(format!("unary operator {op}"))),
                 }
@@ -221,20 +217,22 @@ impl Algebra {
                 lowerer.lower_opaque_mixed_derivative(leaf.expression, &leaf.axes)
             }
             Node::FreezeDerivative(inner) => self.emit(lowerer, inner),
+            Node::ArrayIndex { operand, bounds } => {
+                self.emit(lowerer, operand)?;
+                let bounds = self.arena.array_index(bounds);
+                lowerer.append_unary(NativeOp::CheckedArrayIndex {
+                    lower: bounds.lower,
+                    len: bounds.len as usize,
+                })
+            }
             Node::Unary(op, inner) => {
                 self.emit(lowerer, inner)?;
                 match op {
-                    UnaryOp::ArrayIndex { lower, len } => {
-                        lowerer.append_unary(NativeOp::CheckedArrayIndex {
-                            lower,
-                            len: len as usize,
-                        })
-                    }
-                    UnaryOp::Pos | UnaryOp::ToReal => Ok(()),
-                    UnaryOp::Neg => lowerer.append_unary(NativeOp::Neg),
-                    UnaryOp::Not => lowerer.append_unary(NativeOp::Logical(LogicalOp::Not)),
-                    UnaryOp::ToInteger => lowerer.append_unary(NativeOp::IntegerCast),
-                    UnaryOp::BitNot => {
+                    IrUnaryOp::Pos | IrUnaryOp::ToReal => Ok(()),
+                    IrUnaryOp::Neg => lowerer.append_unary(NativeOp::Neg),
+                    IrUnaryOp::Not => lowerer.append_unary(NativeOp::Logical(LogicalOp::Not)),
+                    IrUnaryOp::ToInteger => lowerer.append_unary(NativeOp::IntegerCast),
+                    IrUnaryOp::BitNot => {
                         lowerer.push(NativeOp::Const(-1.0))?;
                         lowerer.append_integer_binary("BitXor")
                     }

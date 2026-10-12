@@ -6,11 +6,11 @@
 
 pub mod arena;
 
-use crate::ast::{BinaryOp, UnaryOp};
+use crate::ast::BinaryOp;
 use crate::branch_identity::BranchIdentity;
 use crate::error::CompileResult;
 pub use crate::ir::arena::NodeId;
-use crate::ir::arena::{ExprArena, Heavy, HeavyKind, IndexedRead, Node, unpack_index};
+use crate::ir::arena::{ExprArena, Heavy, HeavyKind, IndexedRead, IrUnaryOp, Node, unpack_index};
 use crate::semantic::AnalyzedModule;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -1209,7 +1209,7 @@ impl DeviceIR {
                     };
                     (
                         branch,
-                        exprs.push(Node::Unary(UnaryOp::Neg, expr)),
+                        exprs.push(Node::Unary(IrUnaryOp::Neg, expr)),
                         Some(ordinal),
                     )
                 }
@@ -1514,6 +1514,7 @@ impl DeviceIR {
                     contains_ddt(arena, left) || contains_ddt(arena, right)
                 }
                 Node::Unary(_, inner)
+                | Node::ArrayIndex { operand: inner, .. }
                 | Node::Limexp(inner)
                 | Node::IdtCompanion(inner)
                 | Node::LimiterPrevious(inner) => contains_ddt(arena, inner),
@@ -1627,7 +1628,7 @@ impl DeviceIR {
                 let right = arena.push(Node::FreezeDerivative(right));
                 Some(arena.push(Node::Binary(BinaryOp::Div, charge, right)))
             }
-            Node::Unary(op @ (UnaryOp::Neg | UnaryOp::Pos), inner) => {
+            Node::Unary(op @ (IrUnaryOp::Neg | IrUnaryOp::Pos), inner) => {
                 let charge = Self::extract_charge(arena, inner)?;
                 Some(arena.push(Node::Unary(op, charge)))
             }
@@ -1832,7 +1833,9 @@ impl DeviceIR {
                 arena.indexed(payload).len == 0 && recurse(index)
             }
             Node::Binary(_, left, right) => recurse(left) && recurse(right),
-            Node::Unary(_, operand) | Node::Limexp(operand) => recurse(operand),
+            Node::Unary(_, operand) | Node::ArrayIndex { operand, .. } | Node::Limexp(operand) => {
+                recurse(operand)
+            }
             Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
             Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
             Node::Conditional(condition, then_expr, else_expr) => {
@@ -1849,7 +1852,9 @@ impl DeviceIR {
         match *arena.node(expr) {
             Node::Const(_) | Node::Param(_) => true,
             Node::Binary(_, left, right) => recurse(left) && recurse(right),
-            Node::Unary(_, operand) | Node::Limexp(operand) => recurse(operand),
+            Node::Unary(_, operand) | Node::ArrayIndex { operand, .. } | Node::Limexp(operand) => {
+                recurse(operand)
+            }
             Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
             Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
             Node::Conditional(condition, then_expr, else_expr) => {
@@ -1899,7 +1904,9 @@ impl DeviceIR {
                         .all(|k| static_vars.contains(format!("{array}[{k}]").as_str()))
             }
             Node::Binary(_, left, right) => recurse(left) && recurse(right),
-            Node::Unary(_, operand) | Node::Limexp(operand) => recurse(operand),
+            Node::Unary(_, operand) | Node::ArrayIndex { operand, .. } | Node::Limexp(operand) => {
+                recurse(operand)
+            }
             Node::Call { a, b, .. } => a.is_none_or(&recurse) && b.is_none_or(&recurse),
             Node::CallSpilled { args, .. } => arena.call_args(args).iter().all(|arg| recurse(*arg)),
             Node::Conditional(condition, then_expr, else_expr) => {
@@ -2384,11 +2391,11 @@ pub mod autodiff {
                 | BinaryOp::Shl
                 | BinaryOp::Shr => 0,
             },
-            Node::Unary(UnaryOp::Neg | UnaryOp::Pos | UnaryOp::ToReal, inner) => recurse(inner),
-            Node::Unary(
-                UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger | UnaryOp::ArrayIndex { .. },
-                _,
-            ) => 0,
+            Node::Unary(IrUnaryOp::Neg | IrUnaryOp::Pos | IrUnaryOp::ToReal, inner) => {
+                recurse(inner)
+            }
+            Node::Unary(IrUnaryOp::Not | IrUnaryOp::BitNot | IrUnaryOp::ToInteger, _)
+            | Node::ArrayIndex { .. } => 0,
             Node::Limexp(inner) | Node::Ddt(inner) => recurse(inner),
             Node::Idt(inner, ic) => recurse(inner) | optional(ic),
             Node::IdtMod {
@@ -3288,10 +3295,10 @@ pub mod autodiff {
             Node::Unary(op, inner) => {
                 let inner = simplified_constant(arena, inner, constants);
                 match (op, inner) {
-                    (UnaryOp::Neg, SimplifiedConstant::Value(value)) => {
+                    (IrUnaryOp::Neg, SimplifiedConstant::Value(value)) => {
                         SimplifiedConstant::Value(-value)
                     }
-                    (UnaryOp::Pos, value) => value,
+                    (IrUnaryOp::Pos, value) => value,
                     _ => SimplifiedConstant::Other,
                 }
             }
@@ -3455,11 +3462,11 @@ pub mod autodiff {
                 | BinaryOp::Shl
                 | BinaryOp::Shr => {}
             },
-            Node::Unary(UnaryOp::Neg | UnaryOp::Pos | UnaryOp::ToReal, inner) => collect!(inner),
-            Node::Unary(
-                UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger | UnaryOp::ArrayIndex { .. },
-                _,
-            ) => {}
+            Node::Unary(IrUnaryOp::Neg | IrUnaryOp::Pos | IrUnaryOp::ToReal, inner) => {
+                collect!(inner)
+            }
+            Node::Unary(IrUnaryOp::Not | IrUnaryOp::BitNot | IrUnaryOp::ToInteger, _)
+            | Node::ArrayIndex { .. } => {}
             Node::Conditional(condition, then_expr, else_expr) => {
                 // The predicate selects a derivative branch but is not itself
                 // differentiated. Match `simplify`'s constant-branch fold.
@@ -4007,7 +4014,7 @@ pub mod autodiff {
                         &DerivativeWrt::Voltage(neg),
                         shadows,
                     );
-                    let negated = arena.push(Node::Unary(UnaryOp::Neg, derivative));
+                    let negated = arena.push(Node::Unary(IrUnaryOp::Neg, derivative));
                     simplify(arena, negated)
                 }
                 // ddx(f, V(a,b)): when f depends on the pair only
@@ -4046,7 +4053,7 @@ pub mod autodiff {
                         shadows,
                     );
                     if reversed {
-                        let negated = arena.push(Node::Unary(UnaryOp::Neg, derivative));
+                        let negated = arena.push(Node::Unary(IrUnaryOp::Neg, derivative));
                         simplify(arena, negated)
                     } else {
                         derivative
@@ -4549,7 +4556,7 @@ pub mod autodiff {
                     }
                     BinaryOp::Div => {
                         let quotient = binary!(BinaryOp::Div, left, right);
-                        let negative = arena.push(Node::Unary(UnaryOp::Neg, quotient));
+                        let negative = arena.push(Node::Unary(IrUnaryOp::Neg, quotient));
                         let one = constant!(1.0);
                         arena.push_call(IrFunction::SumProductsDiv, &[dl, one, negative, dr, right])
                     }
@@ -4633,18 +4640,20 @@ pub mod autodiff {
                 }
             }
 
-            Node::Unary(UnaryOp::Neg, inner) => {
+            Node::Unary(IrUnaryOp::Neg, inner) => {
                 let di = differentiate!(inner);
-                arena.push(Node::Unary(UnaryOp::Neg, di))
+                arena.push(Node::Unary(IrUnaryOp::Neg, di))
             }
             // Unary plus is the identity
-            Node::Unary(UnaryOp::Pos | UnaryOp::ToReal, inner) => differentiate!(inner),
+            Node::Unary(IrUnaryOp::Pos | IrUnaryOp::ToReal, inner) => differentiate!(inner),
             // Logical/bitwise negation is piecewise constant
-            Node::Unary(UnaryOp::ArrayIndex { .. }, _) => {
+            Node::ArrayIndex { .. } => {
                 let zero = constant!(0.0);
                 binary!(BinaryOp::CheckedValue, expr, zero)
             }
-            Node::Unary(UnaryOp::Not | UnaryOp::BitNot | UnaryOp::ToInteger, _) => constant!(0.0),
+            Node::Unary(IrUnaryOp::Not | IrUnaryOp::BitNot | IrUnaryOp::ToInteger, _) => {
+                constant!(0.0)
+            }
 
             // d(c ? a : b) = c ? da : db
             Node::Conditional(condition, then_expr, else_expr) => {
@@ -4690,7 +4699,7 @@ pub mod autodiff {
                     IrFunction::Sin => arena.push_call(IrFunction::Cos, &[inner]),
                     IrFunction::Cos => {
                         let sin = arena.push_call(IrFunction::Sin, &[inner]);
-                        arena.push(Node::Unary(UnaryOp::Neg, sin))
+                        arena.push(Node::Unary(IrUnaryOp::Neg, sin))
                     }
                     IrFunction::Tan => {
                         let one = constant!(1.0);
@@ -4725,7 +4734,7 @@ pub mod autodiff {
                         let complement = binary!(BinaryOp::Sub, outer_one, squared);
                         let root = arena.push_call(IrFunction::Sqrt, &[complement]);
                         let quotient = binary!(BinaryOp::Div, one, root);
-                        arena.push(Node::Unary(UnaryOp::Neg, quotient))
+                        arena.push(Node::Unary(IrUnaryOp::Neg, quotient))
                     }
                     IrFunction::Atan => {
                         let one = constant!(1.0);
@@ -4839,7 +4848,7 @@ pub mod autodiff {
                     let db = differentiate!(pair[1]);
                     derivatives.extend([da, pair[1], pair[0], db]);
                 }
-                let negative = arena.push(Node::Unary(UnaryOp::Neg, expr));
+                let negative = arena.push(Node::Unary(IrUnaryOp::Neg, expr));
                 let dd = differentiate!(divisor);
                 derivatives.extend([negative, dd, divisor]);
                 arena.push_call(IrFunction::SumProductsDiv, &derivatives)
@@ -5481,16 +5490,26 @@ pub mod autodiff {
             }
             Node::Unary(op, operand) => {
                 let simplified = simplify_from(arena, operand, primal_len);
-                if let (UnaryOp::Neg, Node::Const(value)) = (op, *arena.node(simplified)) {
+                if let (IrUnaryOp::Neg, Node::Const(value)) = (op, *arena.node(simplified)) {
                     return arena.push(Node::Const(-value));
                 }
-                if let UnaryOp::Pos = op {
+                if let IrUnaryOp::Pos = op {
                     return simplified;
                 }
                 if simplified == operand {
                     return expr;
                 }
                 arena.push(Node::Unary(op, simplified))
+            }
+            Node::ArrayIndex { operand, bounds } => {
+                let simplified = simplify_from(arena, operand, primal_len);
+                if simplified == operand {
+                    return expr;
+                }
+                arena.push(Node::ArrayIndex {
+                    operand: simplified,
+                    bounds,
+                })
             }
             Node::Conditional(condition, then_expr, else_expr) => {
                 let simplified_condition = simplify_from(arena, condition, primal_len);

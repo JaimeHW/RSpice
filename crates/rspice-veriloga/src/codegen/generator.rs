@@ -7,7 +7,9 @@
 //! differentiates — it schedules and serializes what exists.
 
 use super::*;
-use crate::ir::arena::{ExprArena, Heavy, Node, NodeId, ZiPolynomial, unpack_index};
+use crate::ir::arena::{
+    ArrayIndexBounds, ExprArena, Heavy, IrUnaryOp, Node, NodeId, ZiPolynomial, unpack_index,
+};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -1419,29 +1421,32 @@ impl CodeGenerator {
                         BinaryOp::BitXor => Instruction::BitXor,
                     });
                 }
-                Node::Unary(_, inner) if !children_emitted => {
+                Node::Unary(_, inner) | Node::ArrayIndex { operand: inner, .. }
+                    if !children_emitted =>
+                {
                     pending.push((id, true));
                     next = Some((inner, false));
                     continue;
                 }
+                Node::ArrayIndex { bounds, .. } => {
+                    let ArrayIndexBounds { lower, len } = arena.array_index(bounds);
+                    program
+                        .instructions
+                        .push(Instruction::ArrayIndex { lower, len });
+                }
                 Node::Unary(op, _) => {
                     match op {
-                        crate::ast::UnaryOp::ArrayIndex { lower, len } => {
-                            program
-                                .instructions
-                                .push(Instruction::ArrayIndex { lower, len });
-                        }
-                        crate::ast::UnaryOp::ToInteger => {
+                        IrUnaryOp::ToInteger => {
                             program.instructions.push(Instruction::PushConst(0.0));
                             program.instructions.push(Instruction::BitOr);
                         }
-                        crate::ast::UnaryOp::Neg => program.instructions.push(Instruction::Neg),
+                        IrUnaryOp::Neg => program.instructions.push(Instruction::Neg),
                         // Unary plus is the identity
-                        crate::ast::UnaryOp::Pos | crate::ast::UnaryOp::ToReal => {}
-                        crate::ast::UnaryOp::Not => program.instructions.push(Instruction::Not),
+                        IrUnaryOp::Pos | IrUnaryOp::ToReal => {}
+                        IrUnaryOp::Not => program.instructions.push(Instruction::Not),
                         // Bitwise complement is represented through the shared
                         // integer conversion and 32-bit XOR contract: ~x == x ^ -1.
-                        crate::ast::UnaryOp::BitNot => {
+                        IrUnaryOp::BitNot => {
                             program.instructions.push(Instruction::PushConst(-1.0));
                             program.instructions.push(Instruction::BitXor);
                         }
