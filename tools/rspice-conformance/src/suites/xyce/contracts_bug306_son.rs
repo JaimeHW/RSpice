@@ -888,7 +888,10 @@ impl XyceTestRunner {
             || nonempty_branches.iter().any(|values| {
                 values.len() != point_count || values.iter().any(|value| !value.is_finite())
             })
-            || result.device_op_traces.len() != 8
+            // The BJT operating report gained `temp` (d8d148918), `power`
+            // (310ed2d84) and the six intrinsic junction voltages
+            // (4685ce40a); lead-current output retains the whole report.
+            || result.device_op_traces.len() != 16
             || device_op_schema
                 != [
                     ("Q1", "ic"),
@@ -899,6 +902,14 @@ impl XyceTestRunner {
                     ("Q1", "vce"),
                     ("Q1", "beta"),
                     ("Q1", "gm"),
+                    ("Q1", "temp"),
+                    ("Q1", "power"),
+                    ("Q1", "vbe_intrinsic"),
+                    ("Q1", "vce_intrinsic"),
+                    ("Q1", "vbc_intrinsic"),
+                    ("Q1", "vcsub_intrinsic"),
+                    ("Q1", "vbsub_intrinsic"),
+                    ("Q1", "vesub_intrinsic"),
                 ]
             || result.device_op_traces.iter().any(|trace| {
                 trace.values.len() != point_count
