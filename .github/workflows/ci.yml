@@ -177,6 +177,7 @@ jobs:
           --test mixed_bit_aliases
           --test spectre_analog_statements
           --test transient_checkpoint
+          --test transient_noise_veriloga
           --test veriloga_ac
           --test veriloga_connect_source_closure
           --test veriloga_dc_lifecycle
@@ -279,7 +280,7 @@ jobs:
           cargo check --locked -p rspice-core --no-default-features --features veriloga-model-diode-cmc,veriloga-builtins-noise
           cargo check --locked -p rspice-core --features veriloga-builtins-base --all-targets
           cargo test --locked -p rspice-core --features veriloga-model-diode-cmc --test generated_veriloga_feature_shards
-          cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards
+          cargo test --locked -p rspice-core --features veriloga-model-diode-cmc,veriloga-builtins-noise --test generated_veriloga_feature_shards --test transient_noise_veriloga
           cargo check --locked -p rspice-core --features veriloga-model-hisimhv-va,veriloga-builtins-noise
       - name: Audit complete generated Verilog-A catalog
         run: cargo run --locked -p rspice-veriloga-catalog-dump -- --validate-only
@@ -352,6 +353,7 @@ jobs:
           --test mixed_bit_aliases
           --test spectre_analog_statements
           --test transient_checkpoint
+          --test transient_noise_veriloga
           --test veriloga_ac
           --test veriloga_connect_source_closure
           --test veriloga_dc_lifecycle
