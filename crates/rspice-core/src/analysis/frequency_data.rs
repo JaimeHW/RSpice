@@ -1,6 +1,6 @@
 //! Compact coordinates for table-driven frequency results.
-use crate::analysis::measure_signals::MeasureParameterSeries;
-use crate::analysis::{AcResult, NoiseResult};
+use super::measure_signals::MeasureParameterSeries;
+use super::{AcResult, NoiseResult};
 use crate::{ModelFinish, Value};
 
 /// Resolved meaning of a frequency-table column. Declared parameters take
@@ -24,8 +24,8 @@ pub enum FrequencyDataTarget {
 
 impl FrequencyDataTarget {
     /// Physical coordinate unit; ordinary parameter/device bindings state no unit.
-    pub fn unit(&self) -> crate::execution::SignalUnit {
-        use crate::execution::SignalUnit;
+    pub fn unit(&self) -> crate::signal_unit::SignalUnit {
+        use crate::signal_unit::SignalUnit;
         match self {
             Self::Frequency => SignalUnit::Hertz,
             Self::Parameter(name) if name == "TEMP" => SignalUnit::Custom("degC".into()),
@@ -59,7 +59,7 @@ pub struct FrequencyDataResult<T> {
 }
 
 impl<T> FrequencyDataResult<T> {
-    pub(super) fn value_count(&self, count: impl Fn(&T) -> usize) -> usize {
+    fn value_count(&self, count: impl Fn(&T) -> usize) -> usize {
         self.points.iter().fold(
             self.columns
                 .iter()

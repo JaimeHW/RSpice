@@ -1,6 +1,7 @@
 //! Caller-owned transient execution within the shared ordered control host.
 use super::*;
-use crate::execution::{AnalysisInstanceId, DeckPlan, DeckPlanError, PostProcessSource};
+use crate::execution::{DeckPlan, DeckPlanError, PostProcessSource};
+use crate::identity::AnalysisInstanceId;
 
 impl ControlCircuit {
     /// Execute one command with the engine's ordinary transient policy.

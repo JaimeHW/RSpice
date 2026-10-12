@@ -442,7 +442,7 @@ pub fn evaluate_ac_continuous_measurements_with_limits_and_abort(
 /// Evaluate AC table events with resolved row parameters and bounded storage.
 pub fn evaluate_ac_table_continuous_measurements_with_limits_and_abort(
     netlist: &Netlist,
-    table: &crate::engine::FrequencyDataResult<AcResult>,
+    table: &crate::analysis::frequency_data::FrequencyDataResult<AcResult>,
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {
@@ -531,7 +531,7 @@ pub fn evaluate_noise_continuous_measurements_with_limits_and_abort(
 /// Evaluate NOISE table events with resolved row parameters and bounded storage.
 pub fn evaluate_noise_table_continuous_measurements_with_limits_and_abort(
     netlist: &Netlist,
-    table: &crate::engine::FrequencyDataResult<crate::analysis::NoiseResult>,
+    table: &crate::analysis::frequency_data::FrequencyDataResult<crate::analysis::NoiseResult>,
     limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<ContinuousMeasureResult>, SimulationError> {

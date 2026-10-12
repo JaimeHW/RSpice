@@ -5539,7 +5539,7 @@ pub fn evaluate_noise_measurements_with_abort(
 /// Evaluate scalar NOISE table measurements with the resolved row parameters.
 pub fn evaluate_noise_table_measurements_with_abort(
     netlist: &Netlist,
-    table: &crate::engine::FrequencyDataResult<crate::analysis::NoiseResult>,
+    table: &super::frequency_data::FrequencyDataResult<crate::analysis::NoiseResult>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
     evaluate_noise_measurements_with_parameters(
@@ -6994,7 +6994,7 @@ pub fn evaluate_ac_measurements_with_abort(
 /// Evaluate scalar AC table measurements with the resolved row parameters.
 pub fn evaluate_ac_table_measurements_with_abort(
     netlist: &Netlist,
-    table: &crate::engine::FrequencyDataResult<AcResult>,
+    table: &super::frequency_data::FrequencyDataResult<AcResult>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
     evaluate_ac_measurements_with_parameters(netlist, &table.points, Some(&table.parameters), abort)

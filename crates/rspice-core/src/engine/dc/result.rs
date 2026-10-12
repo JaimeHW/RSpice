@@ -63,13 +63,13 @@ impl Engine {
         if let Some(outer) = outer {
             axes.push(DcSweepAxis {
                 name: outer.source.trim().to_ascii_lowercase(),
-                unit: crate::execution::sweep_axis_unit(&outer.source),
+                unit: crate::signal_unit::sweep_axis_unit(&outer.source),
                 values: bounded_dc_sweep_points(&engine, &outer.spec(), abort)?,
             });
         }
         axes.push(DcSweepAxis {
             name: source.trim().to_ascii_lowercase(),
-            unit: crate::execution::sweep_axis_unit(source),
+            unit: crate::signal_unit::sweep_axis_unit(source),
             values: bounded_dc_sweep_points(&engine, primary, abort)?,
         });
         let axis_values = axes

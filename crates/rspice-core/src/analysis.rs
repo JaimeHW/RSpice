@@ -30,6 +30,9 @@ pub mod distortion;
 pub mod error;
 pub mod floquet;
 pub mod fourier;
+// Frequency-table results are published from `engine`; measurements here
+// consume them, so the types live at this layer.
+pub(crate) mod frequency_data;
 pub mod frequency_grid;
 pub mod harmonic_balance;
 pub mod measure;

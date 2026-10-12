@@ -9,9 +9,10 @@ use crate::abort_signal::AbortSignal;
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{Netlist, Value};
 
-mod result;
 mod validation;
-pub use result::{FrequencyDataColumn, FrequencyDataResult, FrequencyDataTarget};
+pub use crate::analysis::frequency_data::{
+    FrequencyDataColumn, FrequencyDataResult, FrequencyDataTarget,
+};
 
 #[cfg(test)]
 mod tests;

@@ -34,12 +34,12 @@ pub mod result_document;
 mod schema;
 mod seed;
 mod sole_analysis;
-mod sweep_axis;
 mod topology;
 
 pub use crate::{
     analysis::transient::{TransientMaximumStepError, resolve_transient_maximum_step},
     identity::{AnalysisInstanceId, AnalysisKind, RunCoordinateId},
+    signal_unit::sweep_axis_unit,
 };
 pub use bounded_io::{BoundedAbortWriter, BoundedWriteFailure};
 pub use capability::{
@@ -88,6 +88,6 @@ pub use schema::{
     CoordinateSchema, SchemaUnion, SignalDescriptor, SignalKind, SignalOwner, SignalSchema,
     SignalSchemaError, SignalShape, SignalUnit, SignalValueType,
 };
+pub use seed::monte_carlo_seed_at_coordinate;
 pub use sole_analysis::{analysis_instance_identity, sole_analysis_identity};
 pub use topology::{TopologyComponent, TopologyFingerprint, TopologyFingerprintError};
-pub use {seed::monte_carlo_seed_at_coordinate, sweep_axis::sweep_axis_unit};
