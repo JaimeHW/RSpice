@@ -409,6 +409,10 @@ pub(crate) struct CandidateLedger {
     probes: usize,
     adc: Vec<BoundaryNetHistory>,
     dac: Vec<BoundaryNetHistory>,
+    /// Parallel to `MixedSignalHost::event_ports`. A port whose electrical
+    /// conversion is a shared converter is the module's side of that boundary,
+    /// so a loop closed through the converter is observed here.
+    ports: Vec<BoundaryNetHistory>,
 }
 
 impl CandidateLedger {
@@ -859,6 +863,17 @@ pub(crate) struct EventPort {
     /// Existing unidirectional trace/bus label, independent of the private
     /// converter endpoint. Qualified event traces remain available as well.
     trace_node: Option<usize>,
+}
+
+impl EventPort {
+    /// The bit and deck node of a port whose electrical side is a shared
+    /// converter: elaboration moved its event endpoint off the deck node it
+    /// was declared on. `None` for a real port, a bidirectional one, and a
+    /// pure event connection, none of which a converter stands between.
+    fn converted_bit(&self) -> Option<(u32, usize)> {
+        let node = self.trace_node.filter(|node| *node != self.node)?;
+        Some((self.bit?, node))
+    }
 }
 
 /// One vector boundary port, as a bus over the deck nodes its bits landed on.
@@ -3940,6 +3955,7 @@ impl MixedSignalHost {
         if history.probe_time != Some(time)
             || history.adc.len() != bridges.adc.len()
             || history.dac.len() != bridges.dac.len()
+            || history.ports.len() != self.event_ports.len()
         {
             history.probe_time = Some(time);
             history.probes = 0;
@@ -3949,8 +3965,12 @@ impl MixedSignalHost {
             history
                 .dac
                 .resize(bridges.dac.len(), BoundaryNetHistory::default());
+            history
+                .ports
+                .resize(self.event_ports.len(), BoundaryNetHistory::default());
             history.adc.fill(BoundaryNetHistory::default());
             history.dac.fill(BoundaryNetHistory::default());
+            history.ports.fill(BoundaryNetHistory::default());
         }
         let record = |signal, bit, entry: &mut BoundaryNetHistory| {
             let bit = self
@@ -3980,7 +4000,31 @@ impl MixedSignalHost {
         for (bridge, entry) in bridges.dac.iter().zip(&mut history.dac) {
             record(bridge.signal, bridge.bit, entry);
         }
+        for (port, entry) in self.event_ports.iter().zip(&mut history.ports) {
+            if let Some((bit, _)) = port.converted_bit() {
+                record(port.signal, bit, entry);
+            }
+        }
         history.probes = history.probes.saturating_add(1);
+    }
+
+    /// One converted port bit, spelled as [`boundary_net_name`] spells a
+    /// bridge's net, so a diagnostic names it the same way whichever side
+    /// stamps the electrical conversion.
+    fn event_port_net_name(&self, port: &EventPort, bit: u32) -> String {
+        let width = self
+            .state
+            .digital
+            .read(port.signal)
+            .map_or(0, FourStateValue::width);
+        let plan = self.state.digital.plan();
+        boundary_net_name(
+            plan.signal(port.signal)
+                .map_or("", |signal| signal.name.as_str()),
+            bit,
+            width,
+            self.state.digital.declared_range(port.signal),
+        )
     }
 
     /// Describe observed switching only after the caller has exhausted its
@@ -4002,32 +4046,20 @@ impl MixedSignalHost {
         }
         let mut nets = Vec::new();
         let mut elided = 0;
-        for (signal, node, read_by_module, entry) in self
-            .state
-            .bridges
-            .adc
-            .iter()
-            .zip(&history.adc)
-            .map(|(bridge, entry)| (&bridge.signal_name, bridge.positive, true, entry))
-            .chain(
-                self.state
-                    .bridges
-                    .dac
-                    .iter()
-                    .zip(&history.dac)
-                    .map(|(bridge, entry)| (&bridge.signal_name, bridge.positive, false, entry)),
-            )
-        {
+        // The participant is named only for a net that switched, so the
+        // spelling of one that did not is never built.
+        let mut note = |entry: &BoundaryNetHistory, net: &dyn Fn() -> (String, usize, bool)| {
             if entry.run < 3 {
-                continue;
+                return;
             }
             if nets.len() == 32 {
                 elided += 1;
-                continue;
+                return;
             }
+            let (signal, node, read_by_module) = net();
             nets.push(
                 BoundaryNetActivity {
-                    signal: signal.clone(),
+                    signal,
                     node,
                     read_by_module,
                     moves: entry.run,
@@ -4035,6 +4067,28 @@ impl MixedSignalHost {
                 }
                 .to_string(),
             );
+        };
+        for (bridge, entry) in self.state.bridges.adc.iter().zip(&history.adc) {
+            note(entry, &|| {
+                (bridge.signal_name.clone(), bridge.positive, true)
+            });
+        }
+        for (bridge, entry) in self.state.bridges.dac.iter().zip(&history.dac) {
+            note(entry, &|| {
+                (bridge.signal_name.clone(), bridge.positive, false)
+            });
+        }
+        for (port, entry) in self.event_ports.iter().zip(&history.ports) {
+            if let Some((bit, node)) = port.converted_bit() {
+                note(entry, &|| {
+                    (
+                        self.event_port_net_name(port, bit),
+                        node,
+                        port.direction
+                            == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input,
+                    )
+                });
+            }
         }
         if nets.is_empty() {
             return None;
