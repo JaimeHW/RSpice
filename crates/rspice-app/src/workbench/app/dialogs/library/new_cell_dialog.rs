@@ -495,7 +495,7 @@ mod tests {
         let veriloga = cell.get_view("veriloga").expect("the Verilog-A view");
         assert_eq!(
             veriloga.metadata.get("veriloga.module").map(String::as_str),
-            Some("rspice_comparator_va")
+            Some("comparator")
         );
         assert_eq!(
             veriloga.metadata.get("veriloga.ports").map(String::as_str),
@@ -513,10 +513,8 @@ mod tests {
                 .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
                     reference.clone()
                 ))
-                .is_some_and(|bundle| bundle
-                    .root()
-                    .content()
-                    .contains("module rspice_comparator_va;"))
+                .is_some_and(|bundle| bundle.root().logical_path() == "comparator.va"
+                    && bundle.root().content().contains("module comparator;"))
         );
         assert_eq!(app.state.workspace.content.active_view, reference);
         assert_eq!(

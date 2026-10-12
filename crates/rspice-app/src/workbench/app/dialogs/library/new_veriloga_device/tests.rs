@@ -157,14 +157,25 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
     let source = root_source(&app, &reference);
     assert!(
         source.contains(
-            "module rspice_opamp_va(inp, inn, out, vdd, vss);\n    input inp, inn;\n    output out;\n    inout vdd, vss;\n    electrical inp, inn, out, vdd, vss;\nendmodule\n"
+            "module opamp(inp, inn, out, vdd, vss);\n    input inp, inn;\n    output out;\n    inout vdd, vss;\n    electrical inp, inn, out, vdd, vss;\nendmodule\n"
         ),
         "{source}"
     );
+    let root = app
+        .state
+        .workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
+        .expect("the view owns its source")
+        .root()
+        .logical_path()
+        .to_owned();
+    assert_eq!(root, "opamp.va", "the root file is named after its module");
     let veriloga = view(&app, "opamp", "veriloga").expect("the veriloga view");
     assert_eq!(
         veriloga.metadata.get("veriloga.module").map(String::as_str),
-        Some("rspice_opamp_va")
+        Some("opamp")
     );
     let interface = decode_source_view_ports(
         veriloga
@@ -279,10 +290,7 @@ fn a_device_typed_without_ports_starts_a_module_that_declares_none() {
         .expect("the device is created");
 
     let source = root_source(&app, &reference);
-    assert!(
-        source.contains("module rspice_blank_va;\nendmodule\n"),
-        "{source}"
-    );
+    assert!(source.contains("module blank;\nendmodule\n"), "{source}");
     assert!(!source.contains("electrical"), "{source}");
     assert_eq!(
         view(&app, "blank", "veriloga")

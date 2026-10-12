@@ -754,19 +754,32 @@ fn validate_unique_ports(source: &str, ports: &[crate::state::PortSpec]) -> Resu
     Ok(())
 }
 
+/// The module a new Verilog-A view of `cell_name` starts out declaring: the
+/// cell's own name, as a Virtuoso `veriloga` view's module is named after its
+/// cell. A cell name no module can carry is made into one: each character an
+/// identifier cannot hold becomes `_`, a leading digit gains a `_` in front,
+/// and a Verilog-AMS keyword, by the frontend's own table, gains a `_` behind.
+///
+/// This names only what a starter declares. Once the source exists it is the
+/// authority, and a view keeps whatever module its source declares.
 pub(super) fn verilog_module_name(cell_name: &str) -> String {
-    let mut sanitized = String::with_capacity(cell_name.len().saturating_add(11));
-    for character in cell_name.chars() {
-        if character.is_ascii_alphanumeric() || character == '_' {
-            sanitized.push(character);
-        } else {
-            sanitized.push('_');
-        }
+    let mut name = cell_name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if name.is_empty() || name.starts_with(|character: char| character.is_ascii_digit()) {
+        name.insert(0, '_');
     }
-    if sanitized.is_empty() {
-        sanitized.push_str("model");
+    if rspice_veriloga::TokenKind::keyword(&name).is_some() {
+        name.push('_');
     }
-    format!("rspice_{sanitized}_va")
+    name
 }
 
 pub(super) fn is_verilog_identifier(value: &str) -> bool {
@@ -1302,11 +1315,12 @@ mod tests {
             .bundle_for_owner(&owner)
             .expect("created view owns a sealed source bundle");
         assert_eq!(bundle.language(), ProjectSourceLanguage::VerilogA);
+        assert_eq!(bundle.root().logical_path(), "precision_amp.va");
         assert!(
             bundle
                 .root()
                 .content()
-                .contains("module rspice_precision_amp_va(inp, inn, out, vss);")
+                .contains("module precision_amp(inp, inn, out, vss);")
         );
         assert!(bundle.root().content().contains("input inp, inn;"));
         assert!(bundle.root().content().contains("output out;"));
@@ -1320,7 +1334,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             view.metadata.get("veriloga.module").map(String::as_str),
-            Some("rspice_precision_amp_va")
+            Some("precision_amp")
         );
         assert_eq!(
             view.metadata.get("veriloga.ports").map(String::as_str),
@@ -1340,7 +1354,7 @@ mod tests {
         let selected =
             crate::workbench::documents::code_workspace::selected_veriloga_source(&app).unwrap();
         assert_eq!(selected.bundle().id(), bundle.id());
-        assert_eq!(selected.selected_module(), Some("rspice_precision_amp_va"));
+        assert_eq!(selected.selected_module(), Some("precision_amp"));
         assert!(selected.bundle().validation_is_current());
         assert!(app.state.ui.code_workspace.veriloga.receipt.is_some());
     }
@@ -1378,10 +1392,7 @@ mod tests {
             .root()
             .content()
             .to_owned();
-        assert!(
-            source.contains("module rspice_blank_va;\nendmodule"),
-            "{source}"
-        );
+        assert!(source.contains("module blank;\nendmodule"), "{source}");
         assert!(!source.contains("electrical"), "{source}");
         let view = app
             .state
@@ -1401,7 +1412,7 @@ mod tests {
     #[test]
     fn a_starter_declares_a_bus_port_under_its_base_name_with_its_range() {
         let source = starter_veriloga_source(
-            "rspice_dac_va",
+            "dac",
             &[
                 PortSpec {
                     name: "d[7:0]".to_owned(),
@@ -1419,7 +1430,7 @@ mod tests {
         );
         assert!(
             source.contains(
-                "module rspice_dac_va(d, clk, out);\n    input clk;\n    input [7:0] d;\n    output out;\n    electrical clk, out;\n    electrical [7:0] d;\nendmodule\n"
+                "module dac(d, clk, out);\n    input clk;\n    input [7:0] d;\n    output out;\n    electrical clk, out;\n    electrical [7:0] d;\nendmodule\n"
             ),
             "{source}"
         );
@@ -1430,6 +1441,29 @@ mod tests {
         assert_eq!(verilog_port_declaration("A<3:0>"), None);
         assert_eq!(verilog_port_declaration("d[3:3]"), None);
         assert_eq!(verilog_port_declaration("9d"), None);
+    }
+
+    /// A `veriloga` view's module is named after its cell, as in Virtuoso.
+    /// A cell name a module cannot carry is made into one, and nothing is
+    /// added to a name that already is one.
+    #[test]
+    fn a_new_module_is_named_after_its_cell() {
+        for (cell, module) in [
+            ("opamp_ideal", "opamp_ideal"),
+            ("Gain2", "Gain2"),
+            ("2stage", "_2stage"),
+            ("\u{c9}tage", "_tage"),
+            ("amp-v2", "amp_v2"),
+            // Verilog-AMS keywords, by the frontend's table: a module named
+            // `module` or `analog` would not parse.
+            ("module", "module_"),
+            ("analog", "analog_"),
+            ("wire", "wire_"),
+            // Keywords are case-sensitive, so this one is a name.
+            ("Module", "Module"),
+        ] {
+            assert_eq!(verilog_module_name(cell), module, "{cell}");
+        }
     }
 
     #[test]

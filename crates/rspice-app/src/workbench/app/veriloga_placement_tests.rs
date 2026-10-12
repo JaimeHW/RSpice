@@ -14,7 +14,7 @@ use crate::workbench::state::Workspace;
 const LIBRARY: &str = "behavioral";
 
 /// The module the reader writes: two ports, named the way the form named it.
-const TWO_PORTS: &str = "`include \"disciplines.vams\"\nmodule rspice_gain_va(inp, out);\n  input inp;\n  output out;\n  electrical inp, out;\n  analog V(out) <+ 2 * V(inp);\nendmodule\n";
+const TWO_PORTS: &str = "`include \"disciplines.vams\"\nmodule gain(inp, out);\n  input inp;\n  output out;\n  electrical inp, out;\n  analog V(out) <+ 2 * V(inp);\nendmodule\n";
 
 /// An open project with a writable library, New Verilog-A device… opened
 /// from a `bench` schematic that is not the design's top, and a device `gain`
