@@ -10363,10 +10363,17 @@ impl SemanticAnalyzer {
         // front: otherwise the backend's sorted lookup table would pick one
         // declaration nondeterministically. Aliases resolve to their exact,
         // case-sensitive Verilog-A target.
+        //
+        // A name spelled identically twice is a duplicate declaration, not a
+        // case collision. The symbol table reports that by name, so leave it
+        // to that diagnostic rather than end analysis here with a message
+        // claiming `res` conflicts "case-insensitively" with `res`.
         let mut param_given_indices: std::collections::HashMap<String, (usize, SmolStr)> =
             std::collections::HashMap::new();
+        let mut spellings = HashSet::new();
         for (index, parameter) in parameters.iter().enumerate() {
-            if !public_names.contains(&parameter.name) {
+            if !public_names.contains(&parameter.name) || !spellings.insert(parameter.name.as_str())
+            {
                 continue;
             }
             Self::insert_external_parameter_name(
@@ -10382,6 +10389,9 @@ impl SemanticAnalyzer {
             let Some(&target) = indices.get(&alias.target) else {
                 continue;
             };
+            if !spellings.insert(alias.alias.as_str()) {
+                continue;
+            }
             Self::insert_external_parameter_name(
                 &mut param_given_indices,
                 alias.alias.as_str(),
