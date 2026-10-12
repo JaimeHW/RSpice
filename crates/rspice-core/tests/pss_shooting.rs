@@ -1016,8 +1016,14 @@ fn check_bounded_compositions(cases: std::ops::RangeInclusive<usize>) {
         let netlist = Netlist::parse(&format!(
             "bounded tangent forcing\n.options reltol={reltol} vntol=1e-8\nB1 in 0 V={expression}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
         )).unwrap();
+        // One 64 MHz forcing cycle is the orbit. It holds both sign half-cycles
+        // of the reciprocal forcing and two tangent poles, which source
+        // resolution must find between the 32 initial grid clocks.
+        let config = PssConfig::new(64.0 * F0)
+            .with_points_per_period(32)
+            .with_tstab_periods(0);
         let analysis = Engine::default()
-            .run_pss_with_abort(&netlist, PssConfig::new(F0).with_tstab_periods(0), &NoAbort)
+            .run_pss_with_abort(&netlist, config, &NoAbort)
             .unwrap_or_else(|error| panic!("{expression}: {error}"));
         let result = &analysis.result;
         let output = result
@@ -1348,22 +1354,25 @@ fn check_nonlinear_time_features(kinds: std::ops::RangeInclusive<usize>) {
             "nonlinear periodic feature\nB1 in 0 V={expression}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
         ))
         .unwrap();
+        // One forcing cycle is the orbit. Its 32-point initial grid is still
+        // seven times coarser than the widest feature, so every feature lies
+        // between grid clocks and must be found by source resolution.
+        let config = PssConfig::new(1.0 / source_period)
+            .with_points_per_period(32)
+            .with_tstab_periods(0);
         let point = Engine::default()
-            .run_pss_operating_point_with_abort(
-                &netlist,
-                PssConfig::new(F0).with_tstab_periods(0),
-                &NoAbort,
-            )
+            .run_pss_operating_point_with_abort(&netlist, config.clone(), &NoAbort)
             .unwrap_or_else(|error| panic!("{expression}: {error}"));
         let result = &point.analysis().result;
         assert!(
-            result.time.len() <= if kind == 3 { 2_000_001 } else { 262_145 },
+            result.time.len() <= if kind == 3 { 31_251 } else { 4_097 },
             "{expression}: {}",
             result.time.len()
         );
         if kind == 0 {
+            // At most 27 clocks beyond the initial grid per forcing cycle.
             assert!(
-                result.time.len() < 2_048,
+                result.time.len() < 61,
                 "switching edges must resolve locally"
             );
         }
@@ -1396,10 +1405,10 @@ fn check_nonlinear_time_features(kinds: std::ops::RangeInclusive<usize>) {
         if kind == 0 {
             let engine = Engine::default();
             let (_, state) = engine
-                .run_pss_with_continuation_state(&netlist, PssConfig::new(F0).with_tstab_periods(0))
+                .run_pss_with_continuation_state(&netlist, config)
                 .unwrap();
             let (continued, _) = engine
-                .run_tran_from_pss_state(&netlist, &state, 1.0 / F0, 1.0 / (F0 * 256.0))
+                .run_tran_from_pss_state(&netlist, &state, source_period, source_period / 4.0)
                 .unwrap();
             let output = continued
                 .node_names
@@ -1576,26 +1585,30 @@ fn behavioral_polynomial_harmonics_drive_an_accurate_refined_rc_orbit() {
 #[test]
 fn pss_refines_source_clocks_beyond_the_requested_grid_nyquist_limit() {
     use rspice_core::engine::PssDcOperatingPointSeed;
+    // A 32-point request has its Nyquist limit at 16 cycles: each drive puts
+    // a tone at or beyond it, so every route must refine the requested grid.
     for source in [
-        "V1 in 0 SIN(0 1 128meg)",
-        "V1 in 0 SIN(0 1 256meg)",
-        "I1 0 in SIN(0 1m 128meg)",
-        "B1 in 0 V=sin(2*pi*256meg*time)",
-        "B1 0 in I=1m*cos(-2*pi*128meg*time+0.3)",
-        "B1 in 0 V=spice_sin(0,1,128meg)",
-        "V1 in 0 SFFM(0 1 256meg 0.3 1meg)",
-        "V1 in 0 SFFM(0 1 1meg 0.3 128meg)",
-        "V1 in 0 AM(0 1 1 64meg 64meg)",
-        "B1 in 0 V=spice_sffm(0,1,1meg,0.3,128meg)",
-        "B1 in 0 V=sin(2*pi*1meg*time+0.3*sin(2*pi*128meg*time))",
-        "V1 in 0 DC 0 AC 1 portnum=1 z0=50 pwr=0.001 freq=128meg",
+        "V1 in 0 SIN(0 1 16meg)",
+        "V1 in 0 SIN(0 1 32meg)",
+        "I1 0 in SIN(0 1m 16meg)",
+        "B1 in 0 V=sin(2*pi*32meg*time)",
+        "B1 0 in I=1m*cos(-2*pi*16meg*time+0.3)",
+        "B1 in 0 V=spice_sin(0,1,16meg)",
+        "V1 in 0 SFFM(0 1 32meg 0.3 1meg)",
+        "V1 in 0 SFFM(0 1 1meg 0.3 16meg)",
+        "V1 in 0 AM(0 1 1 8meg 8meg)",
+        "B1 in 0 V=spice_sffm(0,1,1meg,0.3,16meg)",
+        "B1 in 0 V=sin(2*pi*1meg*time+0.3*sin(2*pi*16meg*time))",
+        "V1 in 0 DC 0 AC 1 portnum=1 z0=50 pwr=0.001 freq=16meg",
     ] {
         let netlist = Netlist::parse(&format!(
             "aliased PSS forcing\n{source}\nR1 in out {R}\nR2 in 0 1meg\nC1 out 0 {C}\n.end\n"
         ))
         .unwrap();
         let engine = Engine::default();
-        let config = PssConfig::new(F0).with_tstab_periods(0);
+        let config = PssConfig::new(F0)
+            .with_points_per_period(32)
+            .with_tstab_periods(0);
         let circuit = engine.build_circuit(&netlist).unwrap();
         let seed = PssDcOperatingPointSeed::try_new(
             circuit.node_names_sorted(),
@@ -1614,7 +1627,7 @@ fn pss_refines_source_clocks_beyond_the_requested_grid_nyquist_limit() {
         let mut runs = vec![engine.run_pss_with_abort(&netlist, config.clone(), &NoAbort)];
         // Exercise every entry point on one drive; the remaining cases cover
         // distinct waveform evaluators without repeating the same solver work.
-        if source == "V1 in 0 SIN(0 1 128meg)" {
+        if source == "V1 in 0 SIN(0 1 16meg)" {
             runs.extend([
                 engine.run_pss(&netlist, config.clone()),
                 engine
@@ -1688,11 +1701,13 @@ fn resolved_high_harmonic_rc_orbits_converge_toward_the_analytic_waveform() {
             "resolved high harmonic\n{source}\nR1 in out {R}\nC1 out 0 {C}\n.end\n"
         ))
         .unwrap();
-        for points in [4096, 8192] {
+        // A 16 MHz orbit holds eight drive cycles; 256 and 512 requested
+        // points give the drive 32 and 64 clocks per cycle.
+        for points in [256, 512] {
             let point = Engine::default()
                 .run_pss_operating_point_with_abort(
                     &netlist,
-                    PssConfig::new(F0)
+                    PssConfig::new(16.0 * F0)
                         .with_tstab_periods(0)
                         .with_points_per_period(points),
                     &NoAbort,
