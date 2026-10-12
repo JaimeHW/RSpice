@@ -13,22 +13,33 @@
 //! binds its terminals in; [`compiled_interface`] checks that lane by lane
 //! rather than assuming it. A discrete vector is one pin under its bare name:
 //! its bits travel as one digital signal.
+//!
+//! The same write states the module's parameters as the view's
+//! `veriloga.parameter_contract`: types, defaults, ranges, units and
+//! descriptions, the one contract an instance's property sheet and the
+//! netlister's allowlist are both read from. A module refused for its ports
+//! writes neither, and a recompile that changes nothing writes nothing.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use rspice_design::library::metadata::{
-    PortDomain, SourceViewPort, VERILOGA_PORTS_KEY, decode_port_list, decode_source_view_ports,
-    encode_source_view_ports,
+    CellParameter, ParameterDeclaration, ParameterRange, ParameterScope, ParameterValueType,
+    PortDomain, RangeBound, RangeValue, SourceViewPort, VERILOGA_PARAMETER_CONTRACT_KEY,
+    VERILOGA_PORTS_KEY, decode_port_list, decode_source_view_ports, encode_source_view_ports,
+    encode_veriloga_parameter_contract, parameter_number_text,
 };
 use rspice_design::schematic::owned::Schematic;
 use rspice_design::symbol::generated::{
     GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
 use rspice_design_model::bus::{BusDeclaration, BusNotation};
-use rspice_veriloga::RuntimeAbiSummary;
 use rspice_veriloga::ast::PortDirection as ModulePortDirection;
+use rspice_veriloga::canonical_ir::CanonicalValueType;
 use rspice_veriloga::disciplines::Domain;
+use rspice_veriloga::{
+    RuntimeAbiParameterValue, RuntimeAbiRangeBound, RuntimeAbiRangeValue, RuntimeAbiSummary,
+};
 
 use crate::state::{
     CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceOwner,
@@ -214,6 +225,10 @@ pub(crate) fn apply_compiled_interface(
         Ok(ports) => ports,
         Err(reason) => return refused(reason),
     };
+    let contract = match encode_veriloga_parameter_contract(&compiled_parameters(abi)) {
+        Ok(contract) => contract,
+        Err(reason) => return refused(reason),
+    };
     let Some(library) = libraries.get_library(&reference.library) else {
         return refused(format!("library '{}' no longer exists", reference.library));
     };
@@ -229,14 +244,28 @@ pub(crate) fn apply_compiled_interface(
             .get(&CellViewRef::new(&reference.library, &reference.cell, SCHEMATIC_VIEW).key())
             .map(|schematic| schematic.document().interface_ports())
             .unwrap_or_default();
-        let outcome = if same_interface(&schematic, &module) {
-            VerilogAInterfaceOutcome::MatchesSchematic
-        } else {
-            VerilogAInterfaceOutcome::SchematicMismatch { schematic, module }
-        };
+        if !same_interface(&schematic, &module) {
+            return AppliedInterface {
+                outcome: VerilogAInterfaceOutcome::SchematicMismatch { schematic, module },
+                wrote: false,
+            };
+        }
+        // The schematic owns the ports; the module still owns its
+        // parameters, which an instance bound to this view takes.
+        let parameters = cell
+            .get_view(&reference.view)
+            .filter(|_| !library.read_only)
+            .and_then(|view| updated_view_metadata(view, None, &contract));
+        let wrote = parameters.is_some();
+        if let Some(metadata) = parameters
+            && let Some(mut edit) = libraries.edit_library(&reference.library)
+        {
+            edit.replace_view_metadata(&reference.cell, &reference.view, metadata);
+            edit.mark_view_modified(&reference.cell, &reference.view);
+        }
         return AppliedInterface {
-            outcome,
-            wrote: false,
+            outcome: VerilogAInterfaceOutcome::MatchesSchematic,
+            wrote,
         };
     }
     if library.read_only {
@@ -256,11 +285,7 @@ pub(crate) fn apply_compiled_interface(
         Ok(encoded) => encoded,
         Err(reason) => return refused(reason),
     };
-    let interface = (view.metadata.get(VERILOGA_PORTS_KEY) != Some(&encoded)).then(|| {
-        let mut metadata = view.metadata.clone();
-        metadata.insert(VERILOGA_PORTS_KEY.to_owned(), encoded);
-        metadata
-    });
+    let interface = updated_view_metadata(view, Some(encoded), &contract);
     let existing_symbol = cell.get_view(GENERATED_SYMBOL_VIEW);
     let symbol = match existing_symbol {
         // A hand-edited symbol is its author's; its drift is reported.
@@ -302,6 +327,71 @@ pub(crate) fn apply_compiled_interface(
         outcome: VerilogAInterfaceOutcome::Defined,
         wrote,
     }
+}
+
+/// `view`'s metadata with the compile's interface, when the module defines
+/// it, and its parameter contract; `None` when that is what it already says,
+/// so an unchanged recompile writes nothing and dirties nothing.
+fn updated_view_metadata(
+    view: &View,
+    ports: Option<String>,
+    contract: &str,
+) -> Option<HashMap<String, String>> {
+    let mut metadata = view.metadata.clone();
+    if let Some(ports) = ports {
+        metadata.insert(VERILOGA_PORTS_KEY.to_owned(), ports);
+    }
+    metadata.insert(
+        VERILOGA_PARAMETER_CONTRACT_KEY.to_owned(),
+        contract.to_owned(),
+    );
+    (metadata != view.metadata).then_some(metadata)
+}
+
+/// The parameters a compiled module declares, as its view's contract states
+/// them: every public parameter, whatever its scope, because an instance of
+/// a module takes all of them on its own line.
+pub(crate) fn compiled_parameters(abi: &RuntimeAbiSummary) -> Vec<CellParameter> {
+    let value = |value: &RuntimeAbiRangeValue| match value {
+        RuntimeAbiRangeValue::Constant(value) => RangeValue::Constant(*value),
+        RuntimeAbiRangeValue::Dependent(text) => RangeValue::Dependent(text.to_string()),
+    };
+    let bound = |bound: &RuntimeAbiRangeBound| match bound {
+        RuntimeAbiRangeBound::Unbounded => RangeBound::Unbounded,
+        RuntimeAbiRangeBound::Inclusive(bound) => RangeBound::Inclusive(value(bound)),
+        RuntimeAbiRangeBound::Exclusive(bound) => RangeBound::Exclusive(value(bound)),
+    };
+    abi.parameters
+        .iter()
+        .map(|parameter| CellParameter {
+            name: parameter.name.to_string(),
+            aliases: parameter.aliases.iter().map(ToString::to_string).collect(),
+            required: false,
+            default_value: parameter.default.as_ref().map(|default| match default {
+                RuntimeAbiParameterValue::Real(value) => parameter_number_text(*value),
+                RuntimeAbiParameterValue::Integer(value) => value.to_string(),
+                RuntimeAbiParameterValue::String(text) => text.to_string(),
+            }),
+            declaration: Some(ParameterDeclaration {
+                value_type: match parameter.value_type {
+                    CanonicalValueType::Integer => ParameterValueType::Integer,
+                    CanonicalValueType::String => ParameterValueType::String,
+                    _ => ParameterValueType::Real,
+                },
+                scope: match parameter.scope {
+                    rspice_veriloga::ParameterScope::Instance => ParameterScope::Instance,
+                    rspice_veriloga::ParameterScope::Model => ParameterScope::Model,
+                },
+                range: parameter.range.as_ref().map(|range| ParameterRange {
+                    lower: bound(&range.lower),
+                    upper: bound(&range.upper),
+                    exclude: range.exclude.iter().map(value).collect(),
+                }),
+                units: parameter.units.as_ref().map(ToString::to_string),
+                description: parameter.description.as_ref().map(ToString::to_string),
+            }),
+        })
+        .collect()
 }
 
 /// The interface a compile that was never published defines, made the
