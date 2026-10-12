@@ -2415,6 +2415,23 @@ impl CanonicalNoisePlan {
     }
 }
 
+/// One noise process a realization covers, selected as the per-frequency
+/// evaluation selects it.
+struct PlannedNoiseProcess {
+    process_id: usize,
+    injections: Vec<PlannedNoiseInjection>,
+}
+
+struct PlannedNoiseInjection {
+    /// The injection's index in its compiled source, or `None` for the
+    /// unit-gain injection of a pre-grouped artifact.
+    gain_program: Option<usize>,
+    /// Multiplicity scaling and RHS sign of the gain.
+    scale: f64,
+    node_pos: usize,
+    node_neg: usize,
+}
+
 #[derive(Debug, Clone)]
 struct EvaluatedCanonicalNoiseProcess {
     process_id: usize,
@@ -9486,6 +9503,346 @@ impl VerilogADevice {
             });
         }
         Ok(processes)
+    }
+
+    /// The shaping of each noise process at `circuit_voltages`, as a
+    /// descriptor driven by a unit noise input.
+    ///
+    /// The processes, and each one's injections, are the ones
+    /// [`Self::try_noise_processes_at_frequency`] reports at the same
+    /// voltages, in the same order, from the same operating point and
+    /// activation. Reducing a realization's states out at `s = jω` gives that
+    /// evaluation's injection gains at `ω/2π`, multiplicity and RHS sign
+    /// included. Gains shaped by `laplace_*`, `idt` or a nested `ddt` carry
+    /// those operators as states, and a state the unit input does not reach
+    /// is omitted; gains shaped by `absdelay`, `zi_*` or `idtmod` refuse with
+    /// [`VmError::NonRationalOperator`].
+    ///
+    /// Requires an AC or noise analysis type, as the per-frequency evaluation
+    /// does.
+    pub fn try_noise_process_realizations(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<Vec<crate::vm::NoiseProcessRealization>, VmError> {
+        use crate::vm::{Axis, Column, DescriptorBuild, DescriptorIndex, OutputTarget};
+
+        let (variable_seed, processes) = if self.canonical_noise_plan.is_required() {
+            self.grouped_noise_realization_plan(circuit_voltages)?
+        } else {
+            self.legacy_noise_realization_plan(circuit_voltages)?
+        };
+        let live = self.noise_gain_live_variables();
+        let columns = crate::vm::shadow_columns(&self.model.variable_names, variable_seed.len());
+        let mut realizations = Vec::with_capacity(processes.len());
+        for process in processes {
+            let input = Axis::Noise(process.process_id);
+            let source = &self.model.noise_sources[process.process_id];
+            let mut ddt_cuts = std::collections::BTreeSet::new();
+            let descriptor = loop {
+                let mut build =
+                    DescriptorBuild::new(&self.context, &variable_seed, columns.clone(), ddt_cuts)?;
+                build.replay(self.model.noise_assignment_replay(), Some(live))?;
+                for (position, injection) in process.injections.iter().enumerate() {
+                    let row = DescriptorIndex::Circuit(position);
+                    let Some(index) = injection.gain_program else {
+                        build.add_entry(row, DescriptorIndex::NoiseInput, injection.scale, 0.0);
+                        continue;
+                    };
+                    let value = build
+                        .evaluate(&source.injections[index].gain_program, Column::Axis(input))?;
+                    build.add_output(
+                        OutputTarget {
+                            key: (position, 0, 0, 0),
+                            row: Some(row),
+                            scale: injection.scale,
+                        },
+                        Some(DescriptorIndex::NoiseInput),
+                        value,
+                    )?;
+                }
+                match build.restart() {
+                    Some(cuts) => ddt_cuts = cuts,
+                    None => {
+                        break build.finish(|axis| {
+                            (axis == input).then_some(DescriptorIndex::NoiseInput)
+                        })?;
+                    }
+                }
+            };
+            realizations.push(crate::vm::NoiseProcessRealization {
+                process_id: process.process_id,
+                descriptor,
+                injections: process
+                    .injections
+                    .iter()
+                    .map(|injection| (injection.node_pos, injection.node_neg))
+                    .collect(),
+            });
+        }
+        Ok(realizations)
+    }
+
+    /// The circuit node of a noise endpoint, with 0 for ground, or `None`
+    /// outside the device mapping.
+    fn noise_endpoint_node(&self, index: &StampIndex) -> Option<usize> {
+        match index {
+            StampIndex::Terminal(terminal) => self.node_mapping.get(*terminal).copied(),
+            StampIndex::Internal(internal) => self.internal_node_indices.get(*internal).copied(),
+            StampIndex::Branch(branch) => self.branch_current_indices.get(*branch).copied(),
+            StampIndex::Ground => Some(0),
+        }
+    }
+
+    /// The endpoints of one injection: across its nodes, or at its branch row
+    /// for a potential contribution that does not scale as a current.
+    fn noise_injection_endpoints(
+        &self,
+        scales_as_current: bool,
+        branch_ordinal: Option<usize>,
+        pos: &StampIndex,
+        neg: &StampIndex,
+    ) -> (Option<usize>, Option<usize>) {
+        match (scales_as_current, branch_ordinal) {
+            (false, Some(ordinal)) => (self.branch_current_indices.get(ordinal).copied(), Some(0)),
+            _ => (self.noise_endpoint_node(pos), self.noise_endpoint_node(neg)),
+        }
+    }
+
+    /// The process and injection selection of the grouped path of
+    /// [`Self::try_noise_processes_at_frequency`], with its refusals, and the
+    /// variable image its gains replay from.
+    fn grouped_noise_realization_plan(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<(Vec<f64>, Vec<PlannedNoiseProcess>), VmError> {
+        self.prepare_canonical_noise_operating_point(circuit_voltages)?;
+        let multiplicity = Self::noise_multiplicity(self.context.multiplicity)?;
+        let plan = match &self.canonical_noise_plan {
+            CanonicalNoisePlan::Ready(plan) => plan,
+            CanonicalNoisePlan::Unavailable(error) => return Err((**error).clone()),
+            CanonicalNoisePlan::NotRequired => {
+                return Err(VmError::InvalidModel(
+                    "grouped-noise canonical runtime plan is missing".into(),
+                ));
+            }
+        };
+        let metadata = plan.evaluate(&self.context)?;
+        if metadata.len() != self.model.noise_sources.len() {
+            return Err(VmError::InvalidModel(
+                "grouped-noise canonical runtime result shape changed after construction".into(),
+            ));
+        }
+        let mut processes = Vec::with_capacity(metadata.len());
+        for (expected, metadata) in metadata.into_iter().enumerate() {
+            if metadata.process_id != expected {
+                return Err(VmError::InvalidModel(format!(
+                    "grouped-noise runtime process ID {} is not dense at {expected}",
+                    metadata.process_id
+                )));
+            }
+            let source = self.model.noise_sources.get(expected).ok_or_else(|| {
+                VmError::InvalidModel("grouped-noise source index is outside model table".into())
+            })?;
+            if !metadata.active || source.injections.is_empty() {
+                continue;
+            }
+            let mut injections = Vec::with_capacity(source.injections.len());
+            for (injection_index, injection) in source.injections.iter().enumerate() {
+                let active = self
+                    .program_active
+                    .get(injection.program_idx)
+                    .copied()
+                    .ok_or_else(|| {
+                        VmError::InvalidModel(format!(
+                            "noise process {expected} injection {injection_index} activation index {} is outside the model table",
+                            injection.program_idx
+                        ))
+                    })?;
+                if !active {
+                    continue;
+                }
+                let scales_as_current = Self::noise_scales_as_current(
+                    &self.model,
+                    injection.is_current,
+                    injection.branch_ordinal,
+                    injection.program_idx,
+                );
+                let scale = Self::noise_injection_scale(
+                    multiplicity,
+                    scales_as_current,
+                    injection.rhs_sign,
+                    expected,
+                )?;
+                let (Some(node_pos), Some(node_neg)) = self.noise_injection_endpoints(
+                    scales_as_current,
+                    injection.branch_ordinal,
+                    &injection.pos,
+                    &injection.neg,
+                ) else {
+                    return Err(VmError::InvalidModel(format!(
+                        "noise process {expected} injection {injection_index} endpoint is outside the device mapping"
+                    )));
+                };
+                injections.push(PlannedNoiseInjection {
+                    gain_program: Some(injection_index),
+                    scale,
+                    node_pos,
+                    node_neg,
+                });
+            }
+            if injections.is_empty() {
+                continue;
+            }
+            if Self::noise_power(metadata.psd, expected)? == 0.0 {
+                continue;
+            }
+            if let Some(exponent) = metadata.exponent {
+                Self::finite_result(exponent, format!("noise process {expected} exponent"))?;
+            }
+            processes.push(PlannedNoiseProcess {
+                process_id: expected,
+                injections,
+            });
+        }
+        Ok((self.context.variables.clone(), processes))
+    }
+
+    /// The process and injection selection of the pre-grouped path of
+    /// [`Self::try_noise_processes_at_frequency`], and the variable image its
+    /// gains replay from.
+    fn legacy_noise_realization_plan(
+        &mut self,
+        circuit_voltages: &[f64],
+    ) -> Result<(Vec<f64>, Vec<PlannedNoiseProcess>), VmError> {
+        self.try_update_all_voltages(circuit_voltages)?;
+        let variable_seed = self.context.variables.clone();
+        let scalar_sources = self.try_noise_sources(circuit_voltages)?;
+        let multiplicity = Self::noise_multiplicity(self.context.multiplicity)?;
+        let legacy_noise_artifact = self.model.noise_process_schema == 0;
+        let mut processes = Vec::with_capacity(scalar_sources.len());
+        for scalar in scalar_sources {
+            let Some(source) = self.model.noise_sources.get(scalar.process_id) else {
+                return Err(VmError::InvalidInstruction(
+                    "evaluated noise process has no compiled definition",
+                ));
+            };
+            if !legacy_noise_artifact && source.process_id != scalar.process_id {
+                return Err(VmError::InvalidModel(format!(
+                    "grouped-noise process table is not dense at index {}",
+                    scalar.process_id
+                )));
+            }
+            let source_scales_as_current = Self::noise_scales_as_current(
+                &self.model,
+                source.is_current,
+                source.branch_ordinal,
+                source.program_idx,
+            );
+            let legacy_scale = if source_scales_as_current {
+                multiplicity
+            } else {
+                multiplicity.recip()
+            };
+            Self::finite_result(
+                scalar.psd / legacy_scale,
+                format!("noise process {} raw power", source.process_id),
+            )?;
+            let mut injections = Vec::with_capacity(source.injections.len().max(1));
+            if source.injections.is_empty() {
+                // An artifact serialized before grouped injections carries one
+                // unit-gain injection in the legacy source fields.
+                let (node_pos, node_neg) = self.noise_injection_endpoints(
+                    source_scales_as_current,
+                    source.branch_ordinal,
+                    &source.pos,
+                    &source.neg,
+                );
+                injections.push(PlannedNoiseInjection {
+                    gain_program: None,
+                    scale: Self::noise_injection_scale(
+                        multiplicity,
+                        source_scales_as_current,
+                        1.0,
+                        source.process_id,
+                    )?,
+                    node_pos: node_pos.unwrap_or(0),
+                    node_neg: node_neg.unwrap_or(0),
+                });
+            }
+            for (injection_index, injection) in source.injections.iter().enumerate() {
+                if !self
+                    .program_active
+                    .get(injection.program_idx)
+                    .copied()
+                    .unwrap_or(true)
+                {
+                    continue;
+                }
+                let scales_as_current = Self::noise_scales_as_current(
+                    &self.model,
+                    injection.is_current,
+                    injection.branch_ordinal,
+                    injection.program_idx,
+                );
+                let (node_pos, node_neg) = self.noise_injection_endpoints(
+                    scales_as_current,
+                    injection.branch_ordinal,
+                    &injection.pos,
+                    &injection.neg,
+                );
+                injections.push(PlannedNoiseInjection {
+                    gain_program: Some(injection_index),
+                    scale: Self::noise_injection_scale(
+                        multiplicity,
+                        scales_as_current,
+                        injection.rhs_sign,
+                        source.process_id,
+                    )?,
+                    node_pos: node_pos.unwrap_or(0),
+                    node_neg: node_neg.unwrap_or(0),
+                });
+            }
+            if injections.is_empty() {
+                continue;
+            }
+            processes.push(PlannedNoiseProcess {
+                process_id: scalar.process_id,
+                injections,
+            });
+        }
+        Ok((variable_seed, processes))
+    }
+
+    fn noise_multiplicity(multiplicity: f64) -> Result<f64, VmError> {
+        if multiplicity.is_finite() && multiplicity > 0.0 {
+            Ok(multiplicity)
+        } else {
+            Err(VmError::InvalidRuntimeConfiguration(format!(
+                "noise multiplicity must be finite and positive, got {multiplicity}"
+            )))
+        }
+    }
+
+    /// The factor an injection's gain program is scaled by: the square root
+    /// of the multiplicity (its inverse for a potential contribution), with
+    /// the injection's RHS sign.
+    fn noise_injection_scale(
+        multiplicity: f64,
+        scales_as_current: bool,
+        rhs_sign: f64,
+        process_id: usize,
+    ) -> Result<f64, VmError> {
+        if !matches!(rhs_sign, -1.0 | 1.0) {
+            return Err(VmError::InvalidModel(format!(
+                "noise process {process_id} injection RHS sign must be +1 or -1, got {rhs_sign}"
+            )));
+        }
+        let gain_scale = if scales_as_current {
+            multiplicity.sqrt()
+        } else {
+            multiplicity.sqrt().recip()
+        };
+        Ok(gain_scale * rhs_sign)
     }
 
     /// Checked noise-source evaluation path for callers that can surface
