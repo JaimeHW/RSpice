@@ -1,0 +1,44 @@
+schema = "rspice-mixed-design/1"
+id = "C11"
+title = "Switched-capacitor filter with a Verilog non-overlapping clock"
+exit_phases = ["P7"]
+dialect = "best-available"
+features = []
+
+[[variant]]
+name = "mx"
+families = ["spice", "vams-digital"]
+today = "runs"
+
+# Budgets are about five times the slower route's measured case time (tran
+# 8.3 s interp, 9.7 s native). The periodic cells stop at preparation today
+# (0.1 s); their budget is a guess for the P7 runs.
+[[analysis]]
+id = "tran"
+variants = ["mx"]
+oracles = ["O6"]
+timeout_s = 50
+phase = "P0"
+
+# Periodic analyses with running digital come last (plan D-B); today each is
+# expected to refuse at its mixed-signal guard.
+[[analysis]]
+id = "pss"
+variants = ["mx"]
+oracles = ["O6"]
+timeout_s = 60
+phase = "P7"
+
+[[analysis]]
+id = "pac"
+variants = ["mx"]
+oracles = ["O6"]
+timeout_s = 60
+phase = "P7"
+
+[[analysis]]
+id = "pnoise"
+variants = ["mx"]
+oracles = ["O6"]
+timeout_s = 60
+phase = "P7"

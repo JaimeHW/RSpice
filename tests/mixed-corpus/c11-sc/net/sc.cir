@@ -1,0 +1,12 @@
+* C11 passive switched-capacitor low-pass (RSpice-authored): C1 samples the
+* input on ph1 and shares its charge with C2 on ph2, so the value held on
+* `out` after each ph2 is y[k] = 0.1 x[k] + 0.9 y[k-1]. The clock is the
+* Verilog nonov_clk; its outputs drive the switch controls through the
+* built-in D/A converters at vcc. The decks add the input source.
+.param vcc=1.8
+xclk ph1 ph2 nonov_clk
+s1 in a ph1 0 swc
+c1 a 0 1p
+s2 a out ph2 0 swc
+c2 out 0 9p
+.model swc sw vt=0.9 vh=0.1 ron=1k roff=1e12

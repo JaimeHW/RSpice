@@ -1,0 +1,9 @@
+* C11 switched-capacitor filter, variant mx, pnoise
+* Driven PSS as in deck/mx.pss.cir, then periodic noise at v(out) sampled at
+* the ph2 fall (980 ns of the 1 us period = 352.8 degrees).
+.hdl "../net/nonov_clk.v"
+.include ../net/sc.cir
+vin in 0 dc 0.5 ac 1
+.pss fund=1meg tstab=10u
+.pnoise dec 10 100 500k out=v(out) sampling=phase samplephase=352.8
+.end

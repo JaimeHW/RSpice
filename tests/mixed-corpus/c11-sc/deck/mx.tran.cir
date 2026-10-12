@@ -1,0 +1,11 @@
+* C11 switched-capacitor filter, variant mx, tran
+.hdl "../net/nonov_clk.v"
+.include ../net/sc.cir
+vin in 0 dc 0.5 sin(0.5 0.2 10k) ac 1
+* The design's `.tran 1n 1m` takes a million steps; 300 periods (three of
+* the input sine) carry the same checks. The step stays fine: C1 tracks the
+* input through Ron = 1k with a 1 ns time constant, and a step of h lags it
+* by about h/2 at the input's slope (measured: 2 ns under 30 uV, 10 ns
+* about 90 uV, against the 50 uV rec allowance).
+.tran 2n 0.3m
+.end

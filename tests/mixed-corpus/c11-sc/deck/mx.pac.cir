@@ -1,0 +1,9 @@
+* C11 switched-capacitor filter, variant mx, pac
+* Driven PSS as in deck/mx.pss.cir, then the periodic small-signal transfer
+* from vin's `ac 1` to v(out) over the design's 100 Hz .. 100 kHz.
+.hdl "../net/nonov_clk.v"
+.include ../net/sc.cir
+vin in 0 dc 0.5 ac 1
+.pss fund=1meg tstab=10u
+.pac dec 10 100 100k input=vin out=v(out)
+.end

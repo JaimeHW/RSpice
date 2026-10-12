@@ -1,0 +1,11 @@
+* C11 switched-capacitor filter, variant mx, pss
+* Driven PSS at the 1 MHz clock. The input is held at its 0.5 V mean (the
+* tran deck's 10 kHz sine is not periodic in one clock period); the periodic
+* small-signal and noise decks drive it with `ac 1`. The design's `.pss 1meg
+* 10u` is ngspice's oscillator form, which needs an oscillator node this
+* clocked circuit does not have.
+.hdl "../net/nonov_clk.v"
+.include ../net/sc.cir
+vin in 0 dc 0.5 ac 1
+.pss fund=1meg tstab=10u
+.end

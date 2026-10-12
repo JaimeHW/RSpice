@@ -1,0 +1,31 @@
+schema = "rspice-mixed-tolerance/1"
+# nonov_clk.v: `timescale 1ns/1ps.
+time_precision = 1e-12
+
+# The value C2 holds after each ph2 (read 10 ns after the ph2 fall, while both
+# switches are open), periods n = 1..298 (design: n ≥ 1).
+[[q]]
+id = "rec"
+analysis = "tran"
+variants = ["mx"]
+kind = "held_at"
+signal = "v(out)"
+times = { start = 1.99e-6, step = 1e-6, count = 298 }
+oracle = "O6"
+expect = "c11::rec"
+abs = 5e-5
+why = "y[k] = 0.1·x[k] + 0.9·y[k−1] from the 0.5 V operating point, x at the ph1 fall; Ron·C ≈ 1 ns ≪ the 460 ns phases, input tracking lag ≤ 13 uV"
+
+# P7: sideband 0 of the periodic small-signal transfer.
+[[q]]
+id = "pac"
+analysis = "pac"
+variants = ["mx"]
+kind = "ac"
+signal = "v(out)"
+points = [100.0, 1e3, 1e4, 1e5]
+oracle = "O6"
+expect = "c11::pac"
+abs_db = 0.05
+abs_deg = 0.5
+why = "0.1/(1 − 0.9·e^−jωT) · sinc(πfT) · e^−jω·0.54T: sampled at the ph1 fall (0.48 T), held from the ph2 rise (0.52 T) for one period"
