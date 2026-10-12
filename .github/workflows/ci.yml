@@ -173,6 +173,8 @@ jobs:
           --test capability_refusals
           --test connect_module_insertion
           --test mixed_bit_aliases
+          --test mixed_dc_sweep_state
+          --test mixed_small_signal_held
           --test sensitivity_source_waveforms
           --test spectre_analog_statements
           --test transient_checkpoint
@@ -351,6 +353,8 @@ jobs:
           --test capability_refusals
           --test connect_module_insertion
           --test mixed_bit_aliases
+          --test mixed_dc_sweep_state
+          --test mixed_small_signal_held
           --test sensitivity_source_waveforms
           --test spectre_analog_statements
           --test transient_checkpoint
