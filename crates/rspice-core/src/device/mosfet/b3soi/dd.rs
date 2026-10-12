@@ -65,6 +65,8 @@ pub(crate) struct B3SoiDdNodes {
     pub node_temp: NodeId,
 }
 
+#[cfg(test)]
+mod derivative_tests;
 pub mod eval;
 pub mod params;
 pub mod temp;
