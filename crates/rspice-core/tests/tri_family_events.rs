@@ -39,9 +39,9 @@ use rspice_core::{Engine, Netlist};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// `out` of deck E, four nanoseconds after the divider's first rise.
-const DECK_E_OUT_EARLY: f64 = 1.214404;
+const DECK_E_OUT_EARLY: f64 = 1.107262;
 /// `out` of deck E, eight nanoseconds after the divider's first rise.
-const DECK_E_OUT_LATE: f64 = 1.888954;
+const DECK_E_OUT_LATE: f64 = 1.859483;
 
 /// Deck E's accepted grid and analog solution, first measured 2026-09-13.
 ///
@@ -52,16 +52,24 @@ const DECK_E_OUT_LATE: f64 = 1.888954;
 /// Deck E is the only fixture in this file whose analog half is charged by a
 /// bare HDL event net, so its grid is the event schedule and the RC together.
 ///
-/// Re-measured twice, at the same 267 points: 02921aeeb moved `qdiv`'s drive
-/// into an XSPICE converter, and faaf0e809 centred the capacitor current. All
-/// 20 `clk` and 11 `qdiv` transitions are bit-identical to the first
-/// measurement, and `out` against the analytic 1020-ohm x 10 pF response to
-/// those transitions errs exactly as before (worst 0.1335 V at the 5 ns edge,
-/// which is integrated over the step that ends on it, in both).
+/// Re-measured twice at the same 267 points (02921aeeb moved `qdiv`'s drive
+/// into an XSPICE converter, faaf0e809 centred the capacitor current), with
+/// `out` against the analytic 1020-ohm x 10 pF response to its transitions
+/// erring exactly as before in both: worst 0.1335 V at the 5 ns edge, which
+/// was integrated over the step that ends on it.
+///
+/// Re-measured a third time for the left-limit D/A drive (P0.10 D9), which
+/// solves each edge's own point with the drive from before it and restarts
+/// the step leaving it: 267 -> 271 points, all 20 `clk` and 11 `qdiv`
+/// transitions bit-identical, and `out` worst 0.1335 -> 1.08e-3 V, mean
+/// 5.75e-2 -> 4.88e-4 V. The two sampled voltages beside this moved with it:
+/// they are read at the first accepted point at or after their instants, so
+/// what moved is the edge's head start rather than the sampling, and each is
+/// now within that 1.08e-3 V of the analytic response at its own point.
 const DECK_E_FINGERPRINT: Fingerprint = Fingerprint {
-    points: 267,
-    grid_hash: 0x75fe_71c0_c992_8614,
-    volt_hash: 0x6496_7a05_64be_417c,
+    points: 271,
+    grid_hash: 0x0298_ba21_539a_bfab,
+    volt_hash: 0xa9e7_9f15_0bd8_fec9,
 };
 
 /// First transition of the flop output in deck E3, and the delay every one of
