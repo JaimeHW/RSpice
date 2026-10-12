@@ -232,29 +232,15 @@ fn gp_exact_delay_solves_biased_charge_through_private_terminal_resistances() {
         for polarity in [1.0, -1.0] {
             for regime in REGIMES {
                 let coarse = run_private(regime, polarity, dialect, 4e-11);
-                let mut fine = run_private(regime, polarity, dialect, 4e-12);
-                // BestAvailable's adaptive controller already refines the 40 ps
-                // request to almost the 4 ps grid. Retain that run's accuracy
-                // gate, then require a genuinely finer grid for the same 0.7
-                // refinement gate. Other dialects retain their original pair.
-                if dialect == SpiceDialect::BestAvailable {
-                    for terminal in 0..3 {
-                        assert!(
-                            fine.current[terminal] < 1e-14 + 0.02 * fine.peak[terminal],
-                            "{fine:?}"
-                        );
-                        assert!(fine.voltage[terminal] < 2e-4, "{fine:?}");
-                    }
-                    eprintln!(
-                        "private nodes {}/{dialect:?}/{polarity}: intermediate={fine:?}",
-                        regime.name
-                    );
-                    fine = run_private(regime, polarity, dialect, 4e-13);
-                    assert!(
-                        fine.samples >= 2 * coarse.samples,
-                        "coarse={coarse:?}, fine={fine:?}"
-                    );
-                }
+                let fine = run_private(regime, polarity, dialect, 4e-12);
+                // The refinement gates below need a genuinely finer accepted
+                // grid. Every dialect's 40 ps run now keeps at most 281
+                // samples against about 1,350 at 4 ps, so the same pair
+                // qualifies BestAvailable as well.
+                assert!(
+                    fine.samples >= 2 * coarse.samples,
+                    "coarse={coarse:?}, fine={fine:?}"
+                );
                 eprintln!(
                     "private nodes {}/{dialect:?}/{polarity}: coarse={coarse:?}, fine={fine:?}",
                     regime.name
