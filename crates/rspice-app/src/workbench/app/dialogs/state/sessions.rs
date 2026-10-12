@@ -215,6 +215,8 @@ pub struct DialogState {
     pub new_view_error: Option<String>,
     /// Exact library catalog revision captured when New View opened.
     pub(crate) new_view_library_revision: u64,
+    /// New Verilog-A device: a cell whose module the reader writes next.
+    pub(crate) new_veriloga_device: NewVerilogADeviceFormState,
     /// Copy Cell dialog
     pub copy_cell_dialog: bool,
     /// Copy Cell source library
@@ -506,6 +508,7 @@ impl DialogState {
             || self.window_session.open
             || self.new_cell_dialog
             || self.new_view_dialog
+            || self.new_veriloga_device.open
             || self.copy_cell_dialog
             || self.rename_cell_dialog
             || self.rename_view_dialog

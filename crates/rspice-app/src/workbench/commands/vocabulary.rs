@@ -60,6 +60,11 @@ pub enum Command {
     CloseActiveDocument,
     CloseProject,
     NewCell,
+    /// A cell view of another kind beside the views the selected cell has.
+    NewView,
+    /// A cell whose Verilog-A module the reader writes next, with the symbol
+    /// its ports generate.
+    NewVerilogADevice,
     OpenDocument,
     OpenNetlist,
     ImportNetlist,
@@ -384,6 +389,8 @@ impl Command {
             Self::CloseActiveDocument => spec("close-document", "Close active document", "File"),
             Self::CloseProject => spec("close-project", "Close project…", "File"),
             Self::NewCell => spec("new-cell", "New cell…", "File"),
+            Self::NewView => spec("new-view", "New view…", "File"),
+            Self::NewVerilogADevice => spec("new-veriloga-device", "New Verilog-A device…", "File"),
             Self::OpenDocument => spec("open-schematic", "Open schematic…", "File"),
             Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
@@ -1112,6 +1119,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::CloseActiveDocument,
     Command::CloseProject,
     Command::NewCell,
+    Command::NewView,
+    Command::NewVerilogADevice,
     Command::OpenDocument,
     Command::OpenNetlist,
     Command::ImportNetlist,

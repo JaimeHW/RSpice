@@ -12,6 +12,7 @@ use crate::workbench::app::{RSpiceApp, VERILOGA_LIBRARY_NAME, save_global_verilo
 mod cell_ops_dialogs;
 mod library_ops_dialogs;
 mod new_cell_dialog;
+pub(in crate::workbench) mod new_veriloga_device;
 mod new_view_dialog;
 mod pending_deletions;
 mod rename_view_dialog;

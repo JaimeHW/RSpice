@@ -35,6 +35,27 @@ const fn is_creatable_view_type(view_type: crate::state::ViewType) -> bool {
 }
 
 impl AppState {
+    /// The cell New View adds a view to when it is invoked as a command: the
+    /// cell selected in the library, else the cell of the active document,
+    /// while its library can be written.
+    pub(crate) fn new_view_target(&self) -> Option<(String, String)> {
+        let selected = self
+            .library_manager
+            .selected_library
+            .as_deref()
+            .zip(self.library_manager.selected_cell.as_deref());
+        let active = &self.workspace.content.active_view;
+        selected
+            .into_iter()
+            .chain([(active.library.as_str(), active.cell.as_str())])
+            .find(|(library, cell)| {
+                self.library_manager
+                    .get_library(library)
+                    .is_some_and(|library| !library.read_only && library.get_cell(cell).is_some())
+            })
+            .map(|(library, cell)| (library.to_owned(), cell.to_owned()))
+    }
+
     /// Open New View against an exact, currently writable cell identity.
     ///
     /// The target is resolved before any dialog state changes. This keeps a

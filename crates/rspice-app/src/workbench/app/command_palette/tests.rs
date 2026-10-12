@@ -501,6 +501,71 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
     );
 }
 
+/// New view… was reachable only from the project library's row menu, and a
+/// Verilog-A device only by way of New Cell and New View. Both are palette
+/// rows now, enabled where their dialogs could create something, and each
+/// opens its dialog.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs() {
+    let mut app = test_app();
+    app.state.project_lifecycle.authority.open_session();
+    let mut library = crate::state::Library::new("behavioral");
+    let mut cell = crate::state::Cell::new("gain");
+    cell.add_view(crate::state::View::new(
+        "schematic",
+        crate::state::ViewType::Schematic,
+    ));
+    library.add_cell(cell);
+    app.state.library_manager.add_library(library);
+    app.state.library_manager.select_cell("behavioral", "gain");
+
+    for (query, command) in [
+        ("Verilog-A device", Command::NewVerilogADevice),
+        ("New view", Command::NewView),
+    ] {
+        let rows = app.palette_rows(
+            query,
+            PaletteScope::All,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        );
+        let row = rows
+            .into_iter()
+            .find(|row| row.entry.command() == Some(command))
+            .unwrap_or_else(|| panic!("{query:?} finds {command:?}"));
+        assert!(row.blocked.is_none(), "{command:?}: {:?}", row.blocked);
+        row.entry.execute(&mut app).expect("the command runs");
+    }
+
+    assert!(app.state.dialogs.new_veriloga_device.open);
+    assert!(app.state.dialogs.new_view_dialog);
+    assert_eq!(app.state.dialogs.new_view_library, "behavioral");
+    assert_eq!(app.state.dialogs.new_view_cell, "gain");
+
+    // With nothing it could write, neither is offered as runnable.
+    let mut read_only = test_app();
+    read_only.state.project_lifecycle.authority.open_session();
+    let names = read_only
+        .state
+        .library_manager
+        .libraries_sorted()
+        .iter()
+        .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
+    for name in names {
+        read_only
+            .state
+            .library_manager
+            .get_library_mut(&name)
+            .expect("the library")
+            .read_only = true;
+    }
+    for command in [Command::NewVerilogADevice, Command::NewView] {
+        assert!(!command.is_enabled(&read_only), "{command:?}");
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn loaded_model_records_are_searchable_and_select_the_catalog_record() {

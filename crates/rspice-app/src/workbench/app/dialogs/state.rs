@@ -722,6 +722,18 @@ impl DescendHierarchyDialogState {
     }
 }
 
+/// Draft for New Verilog-A device….
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NewVerilogADeviceFormState {
+    pub(crate) open: bool,
+    pub(crate) library: String,
+    pub(crate) name: String,
+    /// The ports the starter module declares, as typed: `inp:in d[7:0] vss`.
+    pub(crate) ports: String,
+    /// Why the last commit was refused. Any edit clears it.
+    pub(crate) error: Option<String>,
+}
+
 /// Draft for Create pins.
 ///
 /// The contract fields outlive a close, as they do in Virtuoso: a reader who

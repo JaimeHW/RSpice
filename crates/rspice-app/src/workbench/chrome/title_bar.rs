@@ -1259,7 +1259,10 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::OpenWorkspace(Workspace::Netlist) => WorkbenchIcon::Netlist,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
         Command::NewProject => WorkbenchIcon::File,
-        Command::NewCell | Command::CreateResultDocument => WorkbenchIcon::Add,
+        Command::NewCell
+        | Command::NewView
+        | Command::NewVerilogADevice
+        | Command::CreateResultDocument => WorkbenchIcon::Add,
         Command::OpenProject
         | Command::OpenDocument
         | Command::ImportResultDataset

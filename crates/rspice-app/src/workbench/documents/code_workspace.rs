@@ -80,8 +80,9 @@ pub(crate) use veriloga_inspector::{
 #[cfg(test)]
 pub(crate) use veriloga_interface::VerilogAInterfaceOutcome;
 pub(crate) use veriloga_interface::{
-    VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
-    interface_mismatch_detail, reconciled_symbol, refresh_symbol_standing, symbol_standing,
+    VerilogACellSymbol, VerilogAInterfaceFinding, apply_receipt_interface, interface_check_finding,
+    interface_finding, interface_mismatch_detail, reconciled_symbol, refresh_symbol_standing,
+    symbol_standing,
 };
 
 /// Who owns the source bundle a language's editor is showing.

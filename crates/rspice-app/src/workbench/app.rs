@@ -147,6 +147,9 @@ pub(crate) use dialogs::design_review_comments::{
     DesignReviewCommentsDialogState, open_design_review_comments,
 };
 
+pub(crate) use dialogs::library::new_veriloga_device::{
+    new_veriloga_device_available, open_new_veriloga_device_form,
+};
 pub(crate) use dialogs::placement::bus_tap::open_bus_tap;
 pub(crate) use dialogs::placement::pin_port::open_create_pins;
 pub(crate) use dialogs::project::new_project::open_new_project_dialog;
@@ -899,6 +902,7 @@ impl RSpiceApp {
         self.process_model_browser_dialog(ctx);
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
+        self.render_new_veriloga_device_form(ctx);
         self.render_veriloga_import_dialog(ctx);
         self.render_veriloga_replace_dialog(ctx);
         self.process_copy_cell_dialog(ctx);

@@ -304,6 +304,30 @@ pub(crate) fn apply_compiled_interface(
     }
 }
 
+/// The interface a compile that was never published defines, made the
+/// cell's by the rule a published compile follows, and carried on its
+/// receipt. A view created with a starter module is compiled before it
+/// exists anywhere a reader could compile it, and goes through here so its
+/// `veriloga.ports` and generated symbol are the ones its first published
+/// compile would write. Refused when the ports could not become the cell's.
+pub(crate) fn apply_receipt_interface(
+    libraries: &mut LibraryManager,
+    schematic_buffers: &HashMap<String, Schematic>,
+    reference: &CellViewRef,
+    receipt: VerilogACompileReceipt,
+) -> Result<VerilogACompileReceipt, String> {
+    let applied = apply_compiled_interface(
+        libraries,
+        schematic_buffers,
+        reference,
+        &receipt.compilation.report().abi,
+    );
+    if let VerilogAInterfaceOutcome::Refused(reason) = applied.outcome {
+        return Err(reason);
+    }
+    Ok(with_interface_outcome(receipt, reference, applied.outcome))
+}
+
 /// Whether a schematic's interface and a module's agree: the same names in
 /// the same order, each pointing the same way. A supply pin is an `inout`
 /// port, because a module has no other way to declare one.

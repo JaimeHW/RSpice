@@ -350,6 +350,9 @@ impl Command {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
             Self::CloseProject => state.project_lifecycle.is_open(),
+            // Each is enabled exactly where its dialog could create something.
+            Self::NewView => state.new_view_target().is_some(),
+            Self::NewVerilogADevice => crate::workbench::app::new_veriloga_device_available(state),
             Self::OpenNetlist => {
                 !state.simulation.execution.has_active_execution()
             }
@@ -1091,6 +1094,17 @@ impl Command {
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
             Self::CloseProject => file_action(app, FileMenuAction::CloseProject),
             Self::NewCell => open_new_cell_dialog(app),
+            Self::NewView => {
+                if let Some((library, cell)) = app.state.new_view_target()
+                    && let Err(error) = app.state.open_new_view_dialog(&library, &cell)
+                {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                }
+            }
+            Self::NewVerilogADevice => {
+                crate::workbench::app::open_new_veriloga_device_form(&mut app.state);
+            }
             Self::OpenDocument => file_action(app, FileMenuAction::Open),
             Self::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
             Self::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),

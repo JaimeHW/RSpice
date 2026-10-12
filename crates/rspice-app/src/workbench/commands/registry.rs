@@ -486,6 +486,8 @@ impl Command {
                 | Self::CloseAllDocuments
                 | Self::CloseProject
                 | Self::NewCell
+                | Self::NewView
+                | Self::NewVerilogADevice
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::ImportResultDataset
@@ -586,6 +588,8 @@ impl Command {
                 | Self::CloseAllDocuments
                 | Self::CloseProject
                 | Self::NewCell
+                | Self::NewView
+                | Self::NewVerilogADevice
                 | Self::OpenDocument
                 | Self::OpenNetlist
                 | Self::ImportNetlist
@@ -1135,6 +1139,8 @@ impl Command {
             Self::ImportNetlist if app.state.workbench.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }
+            Self::NewVerilogADevice => "no library can be written",
+            Self::NewView => "select a cell in a writable library",
             Self::StopSimulation
                 if app.state.simulation.execution.has_active_execution()
                     && !crate::simulation::execution::execution_target_supports_cancellation() =>
