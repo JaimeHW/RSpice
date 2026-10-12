@@ -1035,7 +1035,12 @@ fn dimensioned_localparam_fails_closed_instead_of_becoming_a_scalar() {
             "#,
     ));
     assert_eq!(module.arrays["taps"].len, 2);
-    assert!(!module.variables.iter().any(|variable| variable.name == "taps"));
+    assert!(
+        !module
+            .variables
+            .iter()
+            .any(|variable| variable.name == "taps")
+    );
 }
 
 #[test]
@@ -1412,7 +1417,12 @@ fn parameter_array_uses_do_not_acquire_scalar_semantics() {
         "parameter real taps[0:0] = '{1.0};\nanalog I(p, n) <+ taps[0] * V(p, n);",
     ));
     assert!(module.arrays.contains_key("taps"));
-    assert!(!module.variables.iter().any(|variable| variable.name == "taps"));
+    assert!(
+        !module
+            .variables
+            .iter()
+            .any(|variable| variable.name == "taps")
+    );
     assert!(matches!(
         &module.contributions[0].expression,
         Expression::Binary(binary)

@@ -1674,9 +1674,9 @@ endmodule
         .validate()
         .expect_err("an elaboration-bound artifact without its source is damaged");
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("require retained parameter source")),
+        diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("require retained parameter source")),
         "{diagnostics:?}"
     );
     let mut empty_device = make_device(&empty);
