@@ -58,6 +58,31 @@ const INERT_FIELDS: &[(AnalysisKind, &str, &str)] = &[
         "touchstone_version",
         "post-run export format, not an engine input",
     ),
+    // A temperature or corner study's base is bound through the frozen plan:
+    // `frozen_instance_projection` resolves the bound instance's kind and
+    // settings into the setup the study runs against, which this draft-only
+    // projection never builds. `pvt_selected_bases_persist_clone_and_freeze_
+    // exact_settings` drives each bound base through `build_queue_from_plan`.
+    (
+        AnalysisKind::Temperature,
+        "base_analysis",
+        "bound through the frozen plan's instance projection, not the draft",
+    ),
+    (
+        AnalysisKind::Corner,
+        "base_analysis",
+        "bound through the frozen plan's instance projection, not the draft",
+    ),
+    // A resume names retained checkpoints by digest. The queue resolves them
+    // against the run's retained or imported evidence when it prepares the
+    // task, so the draft's execution options carry no resume at all;
+    // `monte_carlo_checkpoint_controls_resolve_evidence_before_preparation`
+    // follows a selected digest into the prepared task's resume input.
+    (
+        AnalysisKind::MonteCarlo,
+        "checkpoint.resume",
+        "resolved against retained evidence when the task is queued",
+    ),
     // Six `Corner` entries stood here, every one of them a `run_set.*` path.
     // They are gone rather than re-justified: the Corner draft no longer holds
     // a run set, so those paths are not draft fields and this ratchet — which
@@ -133,6 +158,20 @@ const ENUM_CANDIDATES: &[&str] = &[
     "Nested",
     "Placed",
     "Entered",
+    // The `.FFT` window is a keyword string, and only the Gaussian and Kaiser
+    // windows read `ALFA=`.
+    "KAISER",
+    // The QPNOISE lattice and source selections and the QPXF source and
+    // sideband selections, each of which decides which list field is read.
+    "Range",
+    "MaxOrders",
+    "Explicit",
+    "Only",
+    "Except",
+    "Named",
+    // The QPNOISE and QPXF frequency axes, and the QPNOISE integration rule.
+    "offset",
+    "log_log",
 ];
 
 /// One valid element for a list-valued field that defaults to empty.
@@ -156,6 +195,53 @@ const ARRAY_SEEDS: &[(AnalysisKind, &str, &str)] = &[
     // node is not a legal entry — the added rows take the card's own accessor
     // grammar — so the seed carries the `V(...)` the form's hint states.
     (AnalysisKind::Fourier, "additional_outputs", r#""V(n_out)""#),
+    // A second QPNOISE output, spelled the way the output rows are.
+    (
+        AnalysisKind::Qpnoise,
+        "additional_outputs",
+        r#"{"current": false, "node": "n_out", "reference": "0", "branch": "", "lattice": "0,0"}"#,
+    ),
+    // One authored AC DATA parameter column, one value per default frequency.
+    (
+        AnalysisKind::AcData,
+        "parameter_columns",
+        r#"{"name": "RLOAD", "values": "1k 2k 3k 4k 5k"}"#,
+    ),
+    // One statistical variation of a design parameter and one correlation,
+    // in the Monte Carlo form's own row shapes, and one retained checkpoint to
+    // resume from.
+    (
+        AnalysisKind::MonteCarlo,
+        "variations",
+        r#"{"parameter": "p1", "scope": 0, "distribution": 0, "spread": "5", "percent": true}"#,
+    ),
+    (
+        AnalysisKind::MonteCarlo,
+        "correlations",
+        r#"{"scope": 0, "parameters": "p1, p2", "coefficient": "0.5"}"#,
+    ),
+    (
+        AnalysisKind::MonteCarlo,
+        "checkpoint.resume",
+        r#""abababababababababababababababababababababababababababababababab""#,
+    ),
+    // One weighted objective, one hard constraint and one variable domain,
+    // in the optimization form's row shapes.
+    (
+        AnalysisKind::Optimization,
+        "objective_terms",
+        r#"{"measurement": "gain", "goal": 0, "target": "0", "scale": "1", "weight": "1"}"#,
+    ),
+    (
+        AnalysisKind::Optimization,
+        "constraints",
+        r#"{"measurement": "gain", "lower": "1", "upper": "", "tolerance": "", "scale": ""}"#,
+    ),
+    (
+        AnalysisKind::Optimization,
+        "variable_domains",
+        r#"{"name": "x", "mode": 0, "step": "1", "values": ""}"#,
+    ),
     // The `Corner` composition seeds that stood here are gone with the run set
     // they addressed: a composition is declared on the plan, not on the draft
     // this ratchet perturbs.
@@ -170,7 +256,17 @@ const OBJECT_SEEDS: &[(AnalysisKind, &str, &str)] = &[
     // design that resolves to an empty roster where the unchosen default reads
     // the ad-hoc table, so the spec's port list moves.
     (AnalysisKind::SParameter, "port_source_idx", "0"),
+    // A study's base analysis, which a fresh study does not name. Any instance
+    // identity is a value the projection has to carry; whether the plan holds
+    // that instance is the frozen plan's question, not the draft's.
+    (AnalysisKind::MonteCarlo, "base_analysis", STUDY_BASE),
+    (AnalysisKind::Optimization, "base_analysis", STUDY_BASE),
+    (AnalysisKind::Temperature, "base_analysis", STUDY_BASE),
+    (AnalysisKind::Corner, "base_analysis", STUDY_BASE),
 ];
+
+/// The instance identity [`OBJECT_SEEDS`] names as a study's base analysis.
+const STUDY_BASE: &str = r#""6f2b1c34-0d5e-4a7b-9c18-3e4f5a6b7c8d""#;
 
 /// The engine-facing projection of one draft.
 ///
@@ -621,6 +717,59 @@ fn every_draft_field_moves_the_engine_facing_projection() {
                 }
                 bodies.push(configured);
             }
+        }
+        // Each of these fields is read only behind two choices made together,
+        // which the one-sibling search cannot open: an AC sensitivity's sweep
+        // points and spacing need the AC mode and a band stop; a multirate
+        // envelope's mixing order needs multirate integration and a second
+        // carrier; a delay-sampled PNOISE reference needs the delay mode and
+        // the reference node it is measured from; a Monte Carlo correlation
+        // needs the explicit statistical model and the two variations it
+        // correlates.
+        let conjunctions: Vec<(&str, Value)> = match kind {
+            AnalysisKind::Sensitivity => vec![
+                ("sens_type_idx", Value::from(1)),
+                ("ac_stop", Value::String("10k".into())),
+            ],
+            AnalysisKind::Envelope => vec![
+                ("multirate_enabled", Value::Bool(true)),
+                ("carrier_tones", Value::String("1M, 1.3M".into())),
+            ],
+            AnalysisKind::Pnoise => vec![
+                ("sampling.mode_idx", Value::from(3)),
+                ("sampling.reference_node", Value::String("n_ref".into())),
+            ],
+            AnalysisKind::MonteCarlo => vec![
+                ("variation_source_idx", Value::from(2)),
+                (
+                    "variations",
+                    serde_json::from_str(
+                        r#"[
+                            {"parameter": "p1", "scope": 0, "distribution": 0, "spread": "5", "percent": true},
+                            {"parameter": "p2", "scope": 0, "distribution": 0, "spread": "5", "percent": true}
+                        ]"#,
+                    )
+                    .expect("the Monte Carlo variation rows are JSON"),
+                ),
+            ],
+            _ => Vec::new(),
+        };
+        if !conjunctions.is_empty() {
+            bodies.push(
+                conjunctions
+                    .iter()
+                    .fold(body.clone(), |configured, (path, value)| {
+                        with_value_at(&configured, path, value.clone())
+                    }),
+            );
+        }
+        // A Monte Carlo or optimization study measures its base analysis, so
+        // its measurement, objective and constraint editors are read only once
+        // a base is named. The sibling search walks scalar and list siblings,
+        // not an absent identity, so the named base is a starting point here.
+        if matches!(kind, AnalysisKind::MonteCarlo | AnalysisKind::Optimization) {
+            let base = serde_json::from_str(STUDY_BASE).expect("the study base seed is JSON");
+            bodies.push(with_value_at(&body, "base_analysis", base));
         }
 
         let mut paths = Vec::new();
