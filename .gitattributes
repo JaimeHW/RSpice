@@ -29,6 +29,12 @@ tests/xyce/RSPICE-UPSTREAM-EXCLUSIONS.tsv text eol=lf
 # CI, and the two would disagree about bytes that are supposed to be identical.
 tests/verilog/** text eol=lf
 
+# The mixed-signal corpus's references are verified byte for byte against a
+# fresh capture (`rspice-mixed-corpus capture`), which renders LF, and its
+# decks are fed verbatim to ngspice, Xyce and Icarus. Pinned to LF for the same
+# reason as tests/verilog/.
+tests/mixed-corpus/** text eol=lf
+
 # Publication-contract golden fixtures are compared byte-for-byte against the
 # canonical serializer's LF output and include_str!'d into the test binary, so
 # CRLF materialization on Windows would fail the byte-exactness gate.

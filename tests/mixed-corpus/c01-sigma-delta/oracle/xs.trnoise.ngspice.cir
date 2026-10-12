@@ -1,0 +1,11 @@
+* C1 sigma-delta modulator, variant xs, trnoise: O1 (ngspice-46) oracle deck
+.include ../net/converter.cir
+.include ../net/count-latch-dac.cir
+.include ../net/mod1-ct.cir
+Xmod inp inm dclk dv dvb mod1
+vin inp inm dc 0 trnoise(0.1 0.2u 0 0)
+.tran 0.2u 5m
+.save v(adaclout) v(inp) v(inm)
+* rspice-stochastic: ngspice-46 fills TRNOISE's Wallace pool from a generator seeded with the process id (src/frontend/trannoise/wallace.c initw), so no seed option reproduces a capture
+
+.end

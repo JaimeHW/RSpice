@@ -1,0 +1,131 @@
+schema = "rspice-mixed-tolerance/1"
+# sdq.vams: `timescale 1ns/1ps; XSPICE delays are 1 ns.
+time_precision = 1e-12
+
+[[q]]
+id = "code"
+analysis = "tran"
+variants = ["xs", "vams"]
+kind = "held_at"
+signal = "v(adaclout)"
+times = { start = 1.5e-4, step = 1e-4, count = 19 }
+scale = 1024.0
+oracle = "O6"
+expect = "c01::code"
+abs = 3.0
+rel = 0.0
+why = "first-order ΣΔ: ones-count error ≤ ±1 per window → ±2 codes (code = 2·ones); +1 for window alignment"
+
+[[q]]
+id = "code"
+analysis = "tran"
+variants = ["xs", "vams"]
+kind = "held_at"
+signal = "v(adaclout)"
+times = { start = 1.5e-4, step = 1e-4, count = 19 }
+scale = 1024.0
+oracle = "O1"
+ref = "ref/xs.tran.O1.out"
+abs = 2.0
+rel = 0.0
+why = "one decision flip per window between simulators"
+
+[[q]]
+id = "code"
+analysis = "tran"
+variants = ["vams"]
+kind = "held_at"
+signal = "v(adaclout)"
+times = { start = 1.5e-4, step = 1e-4, count = 19 }
+scale = 1024.0
+oracle = "O2"
+ref = "ref/vams.tran.O2.out"
+abs = 2.0
+rel = 0.0
+why = "one decision flip per window between simulators"
+
+[[q]]
+id = "lattice"
+analysis = "tran"
+variants = ["xs", "vams"]
+kind = "events"
+nets = ["dv"]
+lattice = { t0 = 1.02e-7, period = 2e-7 }
+oracle = "O6"
+expect = "c01::lattice"
+edge_abs = 2.5e-9
+why = "clock ramp 2 ns + clk_delay 1 ns exact: dv moves only at 0.1 µs + 1 ns + 1 ns + k·200 ns"
+
+[[q]]
+id = "opdiff"
+analysis = "op"
+variants = ["xs", "vams"]
+kind = "op"
+signal = { xs = "v(xmod.outintp)-v(xmod.outintn)", vams = "v(outintp)-v(outintn)" }
+oracle = "O6"
+expect = "c01::opdiff"
+rel = 1e-4
+why = "Rshunt 100 MΩ vs 500 Ω loading ≤ 1e-5"
+
+[[q]]
+id = "opdiff"
+analysis = "op"
+variants = ["xs", "vams"]
+kind = "op"
+signal = { xs = "v(xmod.outintp)-v(xmod.outintn)", vams = "v(outintp)-v(outintn)" }
+oracle = "O1"
+ref = "ref/xs.op.O1.out"
+rel = 1e-6
+abs = 1e-6
+why = "linear circuit"
+
+[[q]]
+id = "acint"
+analysis = "ac"
+variants = ["xs", "vams"]
+kind = "ac"
+signal = { xs = "v(xmod.outintp)-v(xmod.outintn)", vams = "v(outintp)-v(outintn)" }
+points = [10.0, 100.0, 1e3, 1e4, 1e5, 1e6]
+oracle = "O6"
+expect = "c01::acint"
+abs_db = 0.01
+abs_deg = 0.1
+why = "Rshunt and input-load terms ≤ 1e-4"
+
+[[q]]
+id = "acint"
+analysis = "ac"
+variants = ["xs", "vams"]
+kind = "ac"
+signal = { xs = "v(xmod.outintp)-v(xmod.outintn)", vams = "v(outintp)-v(outintn)" }
+points = [10.0, 100.0, 1e3, 1e4, 1e5, 1e6]
+oracle = "O1"
+ref = "ref/xs.ac.O1.out"
+abs_db = 0.001
+abs_deg = 0.01
+why = "identical linear network"
+
+[[q]]
+id = "var"
+analysis = "trnoise"
+variants = ["xs", "vams"]
+kind = "stat"
+stat = "var"
+over = "samples"
+of = { kind = "held_at", signal = "v(adaclout)", times = { start = 1.5e-4, step = 1e-4, count = 49 }, scale = 1024.0 }
+interval = [0.72, 3.3]
+oracle = "O6"
+why = "250²·σ²·NT/Tw = 1.25 (+ ≤ 4/3 quantization); χ² 99%, 48 df"
+
+[[q]]
+id = "var"
+analysis = "trnoise"
+variants = ["xs", "vams"]
+kind = "stat"
+stat = "var"
+over = "samples"
+of = { kind = "held_at", signal = "v(adaclout)", times = { start = 1.5e-4, step = 1e-4, count = 49 }, scale = 1024.0 }
+ratio = [0.48, 2.08]
+oracle = "O1"
+ref = "ref/xs.trnoise.O1.out"
+why = "F-test 99%, (48, 48) df; independent RNG streams"

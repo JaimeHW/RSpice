@@ -1,0 +1,17 @@
+* C1 sigma-delta modulator, variant vams, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* xq split back into BComp + adc_bridge + d_cosim(sdq_dig.v) + dac_bridge (+/-1 V).
+.include ../../net/converter.cir
+.include ../../net/count-latch-dac.cir
+.include ../../net/mod1int.cir
+xint inp inm adffq adffqb outintp outintn mod1int
+BComp acompout 0 V = (V(outintp) - V(outintn)) >= 0 ? 1 : -1
+abridgec [acompout] [dcmp] adc_cmp
+.model adc_cmp adc_bridge(in_low = 0 in_high = 0)
+aq [dcmp dclk] [dv dvb] sdq
+.model sdq d_cosim simulation="ivlng" sim_args=["sdq_dig"]
+abridgef [dv dvb] [adffq adffqb] dac_pm1
+.model dac_pm1 dac_bridge(out_low = -1 out_high = 1 out_undef = 0 input_load = 5.0e-12)
+vin inp inm dc 0 sin(0 'inampl' 'infreq' 0 0)
+.tran 0.1u 2m
+.save v(adaclout)
+.end

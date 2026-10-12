@@ -1,0 +1,8 @@
+* C1 sigma-delta modulator, variant xs, ac
+.include ../net/converter.cir
+.include ../net/count-latch-dac.cir
+.include ../net/mod1-ct.cir
+Xmod inp inm dclk dv dvb mod1
+vin inp inm dc 0 ac 1
+.ac dec 10 1 10meg
+.end

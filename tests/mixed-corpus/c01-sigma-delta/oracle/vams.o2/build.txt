@@ -1,0 +1,1 @@
+iverilog -o sdq_dig sdq_dig.v

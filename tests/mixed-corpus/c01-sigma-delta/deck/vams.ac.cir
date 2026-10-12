@@ -1,0 +1,10 @@
+* C1 sigma-delta modulator, variant vams, ac
+.include ../net/converter.cir
+.include ../net/count-latch-dac.cir
+.include ../net/mod1int.cir
+.hdl "../net/sdq.vams"
+xint inp inm adffq adffqb outintp outintn mod1int
+xq outintp outintn dclk adffq adffqb dv dvb sdq
+vin inp inm dc 0 ac 1
+.ac dec 10 1 10meg
+.end

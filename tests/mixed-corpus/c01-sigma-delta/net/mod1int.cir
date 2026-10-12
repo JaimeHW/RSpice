@@ -1,0 +1,27 @@
+* C1 vams: the analog half of mod1 (net/mod1-ct.cir) as its own subcircuit.
+* RSpice-authored from mod1-ct.cir: the integrator, summer and gain block are
+* unchanged; the comparator, flip-flop and feedback DAC move to the top-level
+* Verilog-AMS instance xq (net/sdq.vams), which drives adffq/adffqb directly.
+
+.subckt mod1int ainp ainn adffq adffqb outintp outintn
+* integrator and summer
+Ri1 ainn inintn 500
+Rf1 adffq inintn 500
+Cint1 outintp inintn 1n
+.IC v(outintp) = 0 v(inintp) = 0
+*
+Rshunt1 outintp 0 100Meg
+Rshunt2 inintn 0 100Meg
+*
+Ri2 ainp inintp 500
+Rf2 adffqb inintp 500
+Cint2 outintn inintp 1n
+.IC v(outintn) = 0 v(inintn) = 0
+*
+Rshunt3 outintn 0 100Meg
+Rshunt4 inintp 0 100Meg
+*
+aint %vd(inintp inintn) %vd(outintp outintn) amp
+.model amp gain ( in_offset =0.0 gain =100000
++ out_offset = 0)
+.ends mod1int

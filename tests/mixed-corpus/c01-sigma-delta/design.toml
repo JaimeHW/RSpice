@@ -1,0 +1,46 @@
+schema = "rspice-mixed-design/1"
+id = "C1"
+title = "Sigma-delta modulator"
+exit_phases = ["P0", "P1"]
+# The headless path runs the product's default engine configuration; decks
+# state any options they need. The fallback entries use the same default.
+dialect = "best-available"
+features = []
+
+[[variant]]
+name = "xs"
+families = ["spice", "xspice"]
+today = "runs"
+
+[[variant]]
+name = "vams"
+families = ["spice", "xspice", "vams-digital", "vams-analog"]
+today = "runs"
+
+[[analysis]]
+id = "tran"
+variants = ["xs", "vams"]
+oracles = ["O1", "O2", "O6"]
+timeout_s = 900
+phase = "P0"
+
+[[analysis]]
+id = "op"
+variants = ["xs", "vams"]
+oracles = ["O1", "O2", "O6"]
+timeout_s = 300
+phase = "P1"
+
+[[analysis]]
+id = "ac"
+variants = ["xs", "vams"]
+oracles = ["O1", "O2", "O6"]
+timeout_s = 300
+phase = "P1"
+
+[[analysis]]
+id = "trnoise"
+variants = ["xs", "vams"]
+oracles = ["O1", "O2", "O6"]
+timeout_s = 1800
+phase = "P1"

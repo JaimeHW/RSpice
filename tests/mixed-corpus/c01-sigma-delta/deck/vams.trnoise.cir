@@ -1,0 +1,12 @@
+* C1 sigma-delta modulator, variant vams, trnoise
+.include ../net/converter.cir
+.include ../net/count-latch-dac.cir
+.include ../net/mod1int.cir
+.hdl "../net/sdq.vams"
+xint inp inm adffq adffqb outintp outintn mod1int
+xq outintp outintn dclk adffq adffqb dv dvb sdq
+vin inp inm dc 0 trnoise(0.1 0.2u 0 0)
+* upstream .control: save inp inm adaclout adaccout ; save memory space
+.save v(inp) v(inm) v(adaclout) v(adaccout)
+.tran 0.2u 5m
+.end

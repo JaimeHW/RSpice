@@ -1,0 +1,17 @@
+# variant	analysis	route	outcome	detail
+xs	tran	interp	fail	solver: solver: Solver error: transient engine returned duplicate waveform identities
+xs	tran	native	fail	solver: solver: Solver error: transient engine returned duplicate waveform identities
+vams	tran	interp	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=9.9999999999999986e-10s
+vams	tran	native	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=9.9999999999999986e-10s
+xs	op	interp	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+xs	op	native	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+vams	op	interp	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+vams	op	native	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
+xs	ac	interp	fail	solver: solver: Solver error: AC engine returned duplicate signal identities
+xs	ac	native	fail	solver: solver: Solver error: AC engine returned duplicate signal identities
+vams	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xq form=prose; token-form=prose; analysis-form=prose
+vams	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xq form=prose; token-form=prose; analysis-form=prose
+xs	trnoise	interp	fail	solver: solver: Solver error: transient engine returned duplicate waveform identities
+xs	trnoise	native	fail	solver: solver: Solver error: transient engine returned duplicate waveform identities
+vams	trnoise	interp	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=3.9999999999999994e-9s
+vams	trnoise	native	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=3.9999999999999994e-9s

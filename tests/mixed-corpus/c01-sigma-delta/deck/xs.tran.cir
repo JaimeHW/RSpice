@@ -1,0 +1,10 @@
+* C1 sigma-delta modulator, variant xs, tran
+.include ../net/converter.cir
+.include ../net/count-latch-dac.cir
+.include ../net/mod1-ct.cir
+Xmod inp inm dclk dv dvb mod1
+vin inp inm dc 0 sin(0 'inampl' 'infreq' 0 0)
+* upstream .control: save inp inm adaclout adaccout ; save memory space
+.save v(inp) v(inm) v(adaclout) v(adaccout)
+.tran 0.1u 2m
+.end
