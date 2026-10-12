@@ -223,3 +223,135 @@ fn comparison_conversion_and_compilation_propagate_broken_pipes() {
     std::fs::write(directory.join("model.va"), "module resistor(p,n); inout p,n; electrical p,n; parameter real r=1000; analog I(p,n) <+ V(p,n)/r; endmodule\n").unwrap();
     assert_io_error(&closed_stdout(&directory, &["compile-va", "model.va"]));
 }
+
+// ---------------------------------------------------------------------------
+// The HDL console (design P2 section 4.3)
+// ---------------------------------------------------------------------------
+
+/// A mixed deck whose HDL half prints, reads a plusarg, reports an error and
+/// finishes at level 1.
+fn hdl_console_deck(directory: &Path, options: &str) {
+    std::fs::write(
+        directory.join("talker.va"),
+        "`timescale 1ns/1ns\n\
+         module talker(p, n);\n\
+         \x20 inout p, n;\n\
+         \x20 electrical p, n;\n\
+         \x20 integer value;\n\
+         \x20 initial begin\n\
+         \x20   value = 0;\n\
+         \x20   #2 $display(\"checking\");\n\
+         \x20   if ($value$plusargs(\"N=%d\", value)) $display(\"n=%0d\", value);\n\
+         \x20   #3 $error(\"mismatch %0d\", 7);\n\
+         \x20   #1 $finish(1);\n\
+         \x20 end\n\
+         \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.join("talker.cir"),
+        format!(
+            "* HDL console\nx1 p 0 talker\nrp p 0 1k\n.va \"talker.va\" talker\n{options}.tran 1n 20n\n.end\n"
+        ),
+    )
+    .unwrap();
+}
+
+fn rspice_in(directory: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(args)
+        .current_dir(directory)
+        .env_remove("RSPICE_OUTPUT_FORMAT")
+        .output()
+        .unwrap()
+}
+
+/// Design text goes to stdout as it is released; the severity report and the
+/// level-1 finish notice go to stderr with their time, line and scope; the
+/// command-line plusarg reaches `$value$plusargs`; and a run that publishes
+/// a result also publishes the transcript beside it.
+#[test]
+fn hdl_text_reaches_stdout_and_reports_reach_stderr() {
+    let directory = common::test_dir("hdl_console");
+    hdl_console_deck(&directory, "");
+    let output = rspice_in(
+        &directory,
+        &["run", "talker.cir", "-f", "csv", "-o", "out.csv", "+N=5"],
+    );
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("checking\nn=5\n"), "{stdout}");
+    assert!(
+        stderr.contains("$error at 5 ns (") && stderr.contains("talker.va:10, x1): mismatch 7"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("finished by $finish at 6 ns ("), "{stderr}");
+    let transcript = std::fs::read_to_string(directory.join("out.hdl.log")).unwrap();
+    assert!(
+        transcript.starts_with("checking\nn=5\n$error at 5 ns"),
+        "{transcript}"
+    );
+}
+
+/// When stdout carries the JSON summary, design text moves to stderr, and the
+/// deck's plusargs come after the command line's.
+#[test]
+fn hdl_text_moves_to_stderr_when_stdout_is_a_payload() {
+    let directory = common::test_dir("hdl_payload");
+    hdl_console_deck(&directory, ".options hdl_plusargs='+N=9'\n");
+    let output = rspice_in(
+        &directory,
+        &["--quiet", "run", "talker.cir", "--summary", "-"],
+    );
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("stdout is the summary alone: {error}: {output:?}"));
+    assert_eq!(summary["passed"], false);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("checking\nn=9\n"), "{stderr}");
+    let output = rspice_in(&directory, &["--quiet", "run", "talker.cir", "+N=4"]);
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("n=4\n"),
+        "the command line precedes the deck: {output:?}"
+    );
+}
+
+/// HDL options whose behaviour has not landed are refused, saying plainly what
+/// is not supported, rather than accepted and ignored; a stray positional is
+/// not a plusarg.
+#[test]
+fn unsupported_hdl_options_are_refused_as_not_supported_yet() {
+    let directory = common::test_dir("hdl_unlanded");
+    hdl_console_deck(&directory, "");
+    let refused = |output: &std::process::Output, feature: &str| {
+        assert_eq!(output.status.code(), Some(78), "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("is not supported yet"), "{stderr}");
+        assert!(stderr.contains(feature), "{stderr}");
+        assert!(!stderr.contains("lane"), "no plan identifier: {stderr}");
+    };
+    for (args, feature) in [
+        (
+            vec!["--hdl-delay-select", "max"],
+            "min:typ:max delay selection",
+        ),
+        (vec!["--hdl-run-dir", "."], "HDL file I/O is not implemented"),
+        (
+            vec!["--hdl-unrestricted-io"],
+            "HDL file I/O is not implemented",
+        ),
+    ] {
+        let mut command = vec!["--quiet", "run", "talker.cir"];
+        command.extend(args);
+        refused(&rspice_in(&directory, &command), feature);
+    }
+    hdl_console_deck(&directory, ".options hdl_libmap=\"lib.map\"\n");
+    refused(
+        &rspice_in(&directory, &["--quiet", "run", "talker.cir"]),
+        "library maps are not implemented",
+    );
+    let output = rspice_in(&directory, &["--quiet", "run", "talker.cir", "N=4"]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+}

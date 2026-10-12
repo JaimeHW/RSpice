@@ -218,6 +218,13 @@ fn execute_with_destinations(
     // closes the completion latch, so a deadline that expires after the run
     // is already over cannot announce a cancellation that never happened.
     let _timeout = args.timeout.map(crate::abort::arm_timeout).transpose()?;
+    // HDL design text moves to stderr when stdout carries the JSON summary.
+    let hdl_console = crate::console::hdl_console();
+    hdl_console.set_stdout_is_payload(
+        args.summary
+            .as_deref()
+            .is_some_and(|path| path.as_os_str() == "-"),
+    );
 
     // A run that was killed (rather than cancelled) cannot clean up after
     // itself, so its staging files stay in the output directory. Reclaim the
@@ -398,9 +405,20 @@ fn execute_with_destinations(
         .filter(|meas| !meas.passed)
         .map(|meas| meas.name.as_str())
         .collect();
+    // An HDL `$error` or `$fatal` fails a self-checking testbench run.
+    let hdl_failures = hdl_console.failures();
     let passed = first_error.is_none()
         && abort_reason.is_none()
+        && hdl_failures == 0
         && (failed_measurements.is_empty() || args.allow_failed_meas);
+    // The designs' transcript is published beside the result.
+    if let (Some(output), Some(text)) = (
+        resolve_output_path(args.output.clone(), config)?,
+        hdl_console.transcript(),
+    ) {
+        let log = output.with_extension("hdl.log");
+        std::fs::write(&log, text).map_err(|error| CliError::output_error(&log, error))?;
+    }
 
     if let Some(ref summary_path) = args.summary {
         outputs.dedup();
@@ -443,6 +461,12 @@ fn execute_with_destinations(
 
     if let Some((message, details)) = first_error {
         return Err(CliError::reported(message, details));
+    }
+
+    if hdl_failures > 0 {
+        return Err(CliError::VerificationFailed {
+            message: format!("the HDL design reported {hdl_failures} $error/$fatal message(s)"),
+        });
     }
 
     // The simulation itself succeeded; failed .MEAS checks still fail the

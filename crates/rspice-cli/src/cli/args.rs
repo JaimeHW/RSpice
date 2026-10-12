@@ -645,6 +645,57 @@ pub struct RunArgs {
     /// Library file containing corner definitions
     #[arg(long, value_name = "FILE", requires = "corners")]
     pub corner_lib: Option<PathBuf>,
+
+    // =========================================================================
+    // HDL run options (Verilog designs in the deck)
+    // =========================================================================
+    /// Plusargs for `$test$plusargs` and `$value$plusargs`, after the netlist
+    /// (`rspice run tb.cir +VERBOSE +N=4`). They come before the deck's
+    /// `.options hdl_plusargs`, and the first match wins
+    #[arg(value_name = "+PLUSARG", value_parser = plusarg)]
+    pub plusargs: Vec<String>,
+
+    /// Directory that relative HDL file paths resolve against (default: the
+    /// deck's directory)
+    #[arg(long, value_name = "DIR")]
+    pub hdl_run_dir: Option<PathBuf>,
+
+    /// Let HDL file writes leave the run directory
+    #[arg(long)]
+    pub hdl_unrestricted_io: bool,
+
+    /// Which value of each min:typ:max HDL delay to use (default: typ)
+    #[arg(long, value_enum, value_name = "WHICH")]
+    pub hdl_delay_select: Option<HdlDelaySelectArg>,
+}
+
+/// `--hdl-delay-select`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum HdlDelaySelectArg {
+    Min,
+    Typ,
+    Max,
+}
+
+impl HdlDelaySelectArg {
+    pub fn core(self) -> rspice_core::config::HdlDelaySelect {
+        match self {
+            Self::Min => rspice_core::config::HdlDelaySelect::Min,
+            Self::Typ => rspice_core::config::HdlDelaySelect::Typ,
+            Self::Max => rspice_core::config::HdlDelaySelect::Max,
+        }
+    }
+}
+
+/// A positional token after the netlist must be a `+plusarg`.
+fn plusarg(token: &str) -> Result<String, String> {
+    if token.starts_with('+') && token.len() > 1 {
+        Ok(token.to_owned())
+    } else {
+        Err(format!(
+            "`{token}` is not a plusarg; arguments after the netlist must begin with `+`"
+        ))
+    }
 }
 
 /// Arguments for the `models` subcommand

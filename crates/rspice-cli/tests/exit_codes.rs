@@ -1678,6 +1678,56 @@ fn an_output_symbol_the_result_cannot_supply_exits_eighty_three() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A mixed deck whose HDL half ends with `report` (design P2 section 4.3).
+fn hdl_report_deck(dir: &std::path::Path, report: &str) -> std::path::PathBuf {
+    let model = dir.join("hdl_check.va");
+    std::fs::write(
+        &model,
+        format!(
+            "`timescale 1ns/1ns\n\
+             module hdl_check(p, n);\n\
+             \x20 inout p, n;\n\
+             \x20 electrical p, n;\n\
+             \x20 initial begin #2 $display(\"checking\"); #3 {report} end\n\
+             \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+             endmodule\n"
+        ),
+    )
+    .expect("write model");
+    let deck = dir.join("hdl_check.cir");
+    std::fs::write(
+        &deck,
+        format!(
+            "* HDL self-check\nx1 p 0 hdl_check\nrp p 0 1k\n.va \"{}\" hdl_check\n.tran 1n 20n\n.end\n",
+            model.display().to_string().replace('\\', "/")
+        ),
+    )
+    .expect("write deck");
+    deck
+}
+
+/// Design P2 section 4.3: a design's `$error` or `$fatal` fails the run the
+/// way a failed `.MEAS` does, while `$warning` and `$finish` do not.
+#[test]
+fn an_hdl_error_or_fatal_exits_three() {
+    for (tag, report, code) in [
+        ("hdl_error", "$error(\"mismatch %0d\", 7);", 3),
+        ("hdl_fatal", "$fatal(1, \"boom\");", 3),
+        ("hdl_warning", "$warning(\"careful\");", 0),
+        ("hdl_finish", "$finish(1);", 0),
+    ] {
+        let dir = test_dir(tag);
+        let deck = hdl_report_deck(&dir, report);
+        let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+        assert_eq!(
+            output.status.code(),
+            Some(code),
+            "{report}: stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 #[test]
 fn every_reachable_category_has_a_distinct_status_and_never_exits_one() {
     // A cross-check over the codes this suite proves reachable: they must all

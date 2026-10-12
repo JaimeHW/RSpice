@@ -533,7 +533,24 @@ pub(super) fn build_observed_engine(
 }
 
 fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {
-    let base = config.core_simulation_config();
+    let mut base = config.core_simulation_config();
+    // The CLI's HDL settings are the base layer the deck's `.options hdl_*`
+    // resolve over: CLI plusargs precede the deck's, and an explicit run
+    // directory or delay selection is not replaced by the deck's.
+    base.hdl = rspice_core::config::HdlRunConfig {
+        output: Some(crate::console::hdl_console()),
+        plusargs: args.plusargs.clone(),
+        deck_directory: (!crate::commands::is_stdin(&args.input))
+            .then(|| args.input.parent().map(std::path::Path::to_path_buf))
+            .flatten(),
+        run_directory: args.hdl_run_dir.clone(),
+        unrestricted_io: args.hdl_unrestricted_io,
+        delay_select: args
+            .hdl_delay_select
+            .map(crate::cli::HdlDelaySelectArg::core)
+            .unwrap_or_default(),
+        ..base.hdl
+    };
 
     // Configured presets belong to the base layer. Only an explicit CLI
     // selection may replace convergence controls authored in the deck.
