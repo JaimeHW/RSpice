@@ -2359,41 +2359,52 @@ fn analysis_form_body(
         .show(ui, |ui| {
             ui.set_width(content_width);
             ui.spacing_mut().item_spacing.y = 0.0;
-            analysis_form::form(
-                ui,
-                draft,
-                app.state.ui.preferences.quantity_presentation_policy(),
-                app.state.ui.number_locale,
-                envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
-                &placed_loop_probes,
-                &placed_rf_ports,
-                noise_domain
-                    .as_ref()
-                    .map(NoiseDomainCatalog::domain)
-                    .unwrap_or_default(),
-                tf_inference.as_ref().map(|catalog| &catalog.inference),
-                op_context,
-                &run_space,
-                &study_bases,
-                route,
-            );
-            // Under the analysis's own parameters, because that is what they
-            // are: a bound this analysis states, in the same grid and with the
-            // same label over the same well.
-            if let AnalysisDraft::MonteCarlo(setup) = draft {
-                *checkpoint_action =
-                    analysis_form::checkpoint_sources(ui, setup, &app.state.simulation, selected);
-            }
-            if let AnalysisDraft::Transient(setup) = draft {
-                *checkpoint_action = analysis_form::transient_checkpoint_sources(
+            // Each kind's form gets its own widget identities. A field's
+            // identity is otherwise where it sits in the grid, so the Nth
+            // control of one kind's form and the Nth of another's were one
+            // egui widget: they shared its retained state, and AccessKit
+            // published two different controls under one node.
+            ui.push_id(draft.kind(), |ui| {
+                analysis_form::form(
                     ui,
-                    setup,
-                    &app.state.simulation,
-                    selected,
-                )
-                .map(checkpoint_exchange::Action::Transient);
-            }
-            *option_edits = analysis_form::options::fields(ui, app, draft, selected);
+                    draft,
+                    app.state.ui.preferences.quantity_presentation_policy(),
+                    app.state.ui.number_locale,
+                    envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
+                    &placed_loop_probes,
+                    &placed_rf_ports,
+                    noise_domain
+                        .as_ref()
+                        .map(NoiseDomainCatalog::domain)
+                        .unwrap_or_default(),
+                    tf_inference.as_ref().map(|catalog| &catalog.inference),
+                    op_context,
+                    &run_space,
+                    &study_bases,
+                    route,
+                );
+                // Under the analysis's own parameters, because that is what
+                // they are: a bound this analysis states, in the same grid and
+                // with the same label over the same well.
+                if let AnalysisDraft::MonteCarlo(setup) = draft {
+                    *checkpoint_action = analysis_form::checkpoint_sources(
+                        ui,
+                        setup,
+                        &app.state.simulation,
+                        selected,
+                    );
+                }
+                if let AnalysisDraft::Transient(setup) = draft {
+                    *checkpoint_action = analysis_form::transient_checkpoint_sources(
+                        ui,
+                        setup,
+                        &app.state.simulation,
+                        selected,
+                    )
+                    .map(checkpoint_exchange::Action::Transient);
+                }
+                *option_edits = analysis_form::options::fields(ui, app, draft, selected);
+            });
         })
         .response
         .rect
