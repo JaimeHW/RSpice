@@ -182,9 +182,26 @@ pub(super) fn resolve_includes(
                 continue;
             }
             // A partial cache hit must not mix source snapshots. Compile all
-            // selected modules from this frozen preparation in the second pass.
+            // selected modules from this frozen preparation in the second pass,
+            // except a registered bytecode-only model: it has no canonical
+            // artifact to recompile or compare, and it is the registration's
+            // own authority for this path. It is kept only while every file it
+            // was registered against is the version this preparation read.
             for &index in &group {
-                models[index] = None;
+                if let Some(entry) = models[index]
+                    .as_ref()
+                    .filter(|entry| entry.canonical_ir.is_none())
+                {
+                    for dependency in &entry.dependencies {
+                        dependency_versions.record(
+                            path,
+                            &dependency.canonical_path,
+                            dependency.content_hash,
+                        )?;
+                    }
+                } else {
+                    models[index] = None;
+                }
             }
             Some(prepared)
         } else {
