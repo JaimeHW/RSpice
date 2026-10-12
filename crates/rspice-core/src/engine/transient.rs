@@ -4040,12 +4040,7 @@ impl Engine {
                 || plan.final_checkpoint_retention.is_retained()
                 || !plan.scheduled_checkpoint_times.is_empty())
         {
-            return Err(SimulationError::Circuit(
-                "a transient with NOISEFMAX= cannot be checkpointed or resumed: a checkpoint \
-                 does not carry the noise streams' position, so a resumed segment would replay \
-                 a different realization. Run the window as one transient."
-                    .to_string(),
-            ));
+            return Err(Self::transient_noise_checkpoint_refusal());
         }
         let trapezoidal_xmu = if self.config.spice_dialect == SpiceDialect::Xyce {
             0.5

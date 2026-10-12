@@ -86,7 +86,8 @@ use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::{NoiseSource, NoiseSourceIdentity, NoiseSourceType};
 use crate::circuit::device_noise::{InjectedNoiseSource, NoiseTrain, TransientDeviceNoise};
 use crate::config::SpiceDialect;
-use crate::engine::{Engine, SimulationError};
+use crate::engine::{Engine, SimulationError, UnsupportedCapabilityError};
+use crate::identity::AnalysisKind;
 use crate::netlist::TransientNoiseConfig;
 use crate::numerics::fnv1a;
 use crate::{CircuitData, Value};
@@ -407,6 +408,24 @@ fn stream_seed(
 }
 
 impl Engine {
+    /// The refusal a checkpointed or resumed transient-noise run receives.
+    ///
+    /// A checkpoint does not yet carry the noise streams' position, and the
+    /// default lowest flicker frequency is derived from the run's own stop
+    /// time, so a resumed segment would replay a different realization than
+    /// the one it continues. That is a capability this build does not have,
+    /// not a defect in the deck, so it reports as one.
+    pub(super) fn transient_noise_checkpoint_refusal() -> SimulationError {
+        UnsupportedCapabilityError::new(
+            "analysis.tran.checkpoint.transient_noise",
+            "a transient with NOISEFMAX= cannot be checkpointed or resumed: a checkpoint does \
+             not carry the noise streams' position, so a resumed segment would replay a \
+             different realization. Run the window as one transient.",
+        )
+        .for_analysis_kind(AnalysisKind::Tran)
+        .into()
+    }
+
     /// Build the injection plan for a transient-noise run and install it on
     /// the circuit.
     ///

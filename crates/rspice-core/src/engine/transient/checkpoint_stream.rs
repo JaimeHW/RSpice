@@ -47,9 +47,7 @@ impl Engine {
         if netlist.options.transient_noise.is_some()
             && (!matches!(start, TransientCheckpointStart::Fresh(_)) || !times.is_empty())
         {
-            return Err(SimulationError::Circuit(
-                "A transient with NOISEFMAX cannot be checkpointed or resumed: the noise stream state is not yet persisted".into(),
-            ));
+            return Err(Self::transient_noise_checkpoint_refusal());
         }
         let accepted_time = match start {
             TransientCheckpointStart::Fresh(_) => 0.0,
