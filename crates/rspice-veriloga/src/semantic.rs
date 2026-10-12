@@ -9345,43 +9345,30 @@ impl SemanticAnalyzer {
             .then(|| expression.clone())
         };
 
-        // Extract bounds from first range bound if present
-        if let Some(bound) = range.bounds.first() {
-            let min = bound.lower.as_ref().and_then(fold);
-            let max = bound.upper.as_ref().and_then(fold);
-            let min_parameter = bound
-                .lower
-                .as_ref()
-                .and_then(|expression| Self::direct_parameter_reference(expression, param_names));
-            let max_parameter = bound
-                .upper
-                .as_ref()
-                .and_then(|expression| Self::direct_parameter_reference(expression, param_names));
-            let min_expression = bound.lower.as_ref().and_then(computed);
-            let max_expression = bound.upper.as_ref().and_then(computed);
-            let exclude: Vec<f64> = range.exclude.iter().filter_map(fold).collect();
-            let exclude_parameters = range
+        // The interval comes from the first `from` clause. `exclude` needs no
+        // `from` (VAMS-2.4 3.4.2): without one both ends stay unbounded and
+        // the exclusions are still enforced.
+        let bound = range.bounds.first();
+        let lower = bound.and_then(|bound| bound.lower.as_ref());
+        let upper = bound.and_then(|bound| bound.upper.as_ref());
+        TypedParameterRange {
+            min: lower.and_then(fold),
+            max: upper.and_then(fold),
+            min_parameter: lower
+                .and_then(|expression| Self::direct_parameter_reference(expression, param_names)),
+            max_parameter: upper
+                .and_then(|expression| Self::direct_parameter_reference(expression, param_names)),
+            min_expression: lower.and_then(computed),
+            max_expression: upper.and_then(computed),
+            min_exclusive: bound.is_some_and(|bound| !bound.lower_inclusive),
+            max_exclusive: bound.is_some_and(|bound| !bound.upper_inclusive),
+            exclude: range.exclude.iter().filter_map(fold).collect(),
+            exclude_parameters: range
                 .exclude
                 .iter()
                 .filter_map(|expression| Self::direct_parameter_reference(expression, param_names))
-                .collect();
-            let exclude_expressions = range.exclude.iter().filter_map(computed).collect();
-
-            TypedParameterRange {
-                min,
-                max,
-                min_parameter,
-                max_parameter,
-                min_expression,
-                max_expression,
-                min_exclusive: !bound.lower_inclusive,
-                max_exclusive: !bound.upper_inclusive,
-                exclude,
-                exclude_parameters,
-                exclude_expressions,
-            }
-        } else {
-            TypedParameterRange::unrestricted()
+                .collect(),
+            exclude_expressions: range.exclude.iter().filter_map(computed).collect(),
         }
     }
 

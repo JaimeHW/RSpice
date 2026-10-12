@@ -1569,6 +1569,36 @@ endmodule
         );
     }
 
+    /// `exclude` without `from` is enforced, so the ABI reports it: both ends
+    /// unbounded, the exclusions listed.
+    #[test]
+    fn abi_reports_an_exclude_only_range_as_unbounded_with_its_exclusions() {
+        use RuntimeAbiRangeBound::Unbounded;
+        let report = crate::VerilogACompiler::default()
+            .compile_runtime(
+                r#"
+module exclude_only(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real forbidden = 2.0;
+  parameter real lp = 1.0e-8 exclude 0.0 exclude forbidden;
+  analog I(p, n) <+ lp * forbidden * V(p, n);
+endmodule
+"#,
+                Some("exclude_only"),
+            )
+            .expect("an exclude-only range compiles");
+        assert_eq!(
+            parameter(&report.abi, "lp").range,
+            range(
+                Unbounded,
+                Unbounded,
+                vec![constant(0.0), dependent("forbidden")]
+            )
+        );
+        assert_eq!(parameter(&report.abi, "forbidden").range, None);
+    }
+
     /// The bytecode generator cannot lower a string literal ("String literals
     /// in expressions"), and a string parameter's default is one, so a module
     /// that declares one never reaches a runtime report yet. The ABI is

@@ -3030,6 +3030,39 @@ assert_eq!(instance.params.values, before, "failed cross-scope validation must r
 }
 
 #[test]
+fn generated_exclude_without_from_refuses_the_excluded_value() {
+    let (state, stamp, noise) = generated_parts(
+        r#"
+module exclude_only(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real lp = 1.0e-8 exclude 0.0;
+    analog I(p, n) <+ lp * V(p, n);
+endmodule
+"#,
+        "exclude only parameter range",
+    );
+    assert!(
+        state.contains(".excluded_values(&[0.0])"),
+        "the descriptor must publish the exclusion"
+    );
+    let body = r#"
+use runtime::{GeneratedParameterAssignment as Assignment, GeneratedParameterOrigin as Origin};
+let mut instance = device::state::Instance::new(&[0, 1]);
+let before = instance.params.values;
+let error = instance.apply_parameters(&[Assignment::new("lp", 0.0, Origin::ModelCard)]).unwrap_err();
+assert!(error.contains("'lp' must not equal 0.0"), "{error}");
+assert_eq!(instance.params.values, before, "a refused exclusion must roll back atomically");
+for value in [-1.0e-300, 1.0e-300, -5.0, 1.0e6] {
+    instance.apply_parameters(&[Assignment::new("lp", value, Origin::ModelCard)]).unwrap();
+    assert_eq!(instance.params.values, [value]);
+}
+"#;
+    run_generated_main("exclude only parameter range", &state, &stamp, &noise, body)
+        .unwrap_or_else(|report| panic!("exclude-only range probe failed:\n{report}"));
+}
+
+#[test]
 fn zero_parameter_generated_state_defines_empty_scope_metadata() {
     let (state, stamp, noise) = generated_parts(
         r#"

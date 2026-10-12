@@ -194,6 +194,63 @@ fn checked_parameter_assignment_rejects_invalid_values_without_mutation() {
     assert_eq!(current.to_bits(), 4.0_f64.to_bits());
 }
 
+/// `exclude` without `from` (the CMC `MPRex` form): no interval, but the
+/// listed values are refused exactly as an exclusion inside a range is.
+fn exclude_only_model() -> DeviceFixture {
+    DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module exclude_only(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real forbidden = 2.0;
+    parameter real lp = 1.0e-8 exclude 0.0 exclude forbidden;
+    analog I(p, n) <+ lp * V(p, n);
+endmodule
+"#,
+    )
+}
+
+#[test]
+fn exclude_without_from_refuses_the_excluded_value_and_accepts_its_neighbours() {
+    let model = exclude_only_model();
+    let lp = &model.parameters[1];
+    assert_eq!((lp.min, lp.max), (None, None));
+    assert_eq!(lp.exclude, [0.0]);
+    assert_eq!(lp.exclude_parameters, [0]);
+
+    let mut device = model.device("EXCLUDE_ONLY", &[1, 0]);
+    assert!(matches!(
+        device.try_set_parameter("lp", 0.0),
+        Err(ParameterValueError::Excluded { .. })
+    ));
+    for value in [-1.0e-300, 1.0e-300, -5.0, 1.0e6] {
+        assert_eq!(device.try_set_parameter("lp", value), Ok(true), "{value}");
+    }
+
+    let builder = rspice_veriloga::device::DeviceBuilder::new(model.model.clone(), "EXCLUDED")
+        .nodes(&[1, 0])
+        .param("lp", 0.0);
+    #[cfg(feature = "native")]
+    let builder = builder.canonical_ir(model.canonical_ir.clone());
+    let error = builder
+        .try_build()
+        .expect_err("an instance setting the excluded value must not construct");
+    assert!(error.to_string().contains("explicitly excluded"), "{error}");
+
+    let mut referenced = model.device("EXCLUDE_ONLY_REFERENCE", &[1, 0]);
+    referenced
+        .try_set_parameter("lp", 3.0)
+        .expect("scalar assignment is valid");
+    referenced
+        .try_set_parameter("forbidden", 3.0)
+        .expect("scalar assignment is valid");
+    let error = referenced
+        .try_resolve_parameter_defaults()
+        .expect_err("a referenced exclusion must use its final instance value");
+    assert!(error.to_string().contains("explicitly excluded"), "{error}");
+}
+
 #[test]
 fn compiled_parameters_preserve_dependent_range_references() {
     let model = dependent_range_model();

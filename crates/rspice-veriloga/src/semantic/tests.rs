@@ -1083,6 +1083,26 @@ fn parameter_default_out_of_range_is_preserved_for_instance_validation() {
 }
 
 #[test]
+fn exclude_without_from_keeps_its_exclusions_on_an_unbounded_range() {
+    let m = analyze_one(&module_src(
+        r#"
+            parameter real forbidden = 2.0;
+            parameter real lp = 1.0e-8 exclude 0.0 exclude forbidden exclude 2 * forbidden;
+            analog I(p, n) <+ lp * V(p, n);
+            "#,
+    ));
+    let range = m.parameters[1].range.as_ref().expect("exclude-only range");
+    assert_eq!((range.min, range.max), (None, None));
+    assert_eq!((&range.min_parameter, &range.max_parameter), (&None, &None));
+    assert!(range.min_expression.is_none() && range.max_expression.is_none());
+    assert!(!range.min_exclusive && !range.max_exclusive);
+    assert_eq!(range.exclude, [0.0]);
+    assert_eq!(range.exclude_parameters, [SmolStr::from("forbidden")]);
+    assert_eq!(range.exclude_expressions.len(), 1);
+    assert!(range.contains(1.0e-8) && !range.contains(0.0));
+}
+
+#[test]
 fn parameter_default_composites_may_reference_only_earlier_parameters() {
     analyze(&module_src(
         r#"
