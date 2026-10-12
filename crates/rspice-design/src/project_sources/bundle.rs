@@ -526,9 +526,30 @@ impl ProjectSourceBundle {
     /// of insertion order.
     #[must_use]
     pub fn closure_digest(&self) -> ContentDigest {
+        self.closure_digest_as(&self.owner)
+    }
+
+    /// Whether `digest` names this bundle's current source graph: its own
+    /// closure digest, or the digest a retained revision recorded for exactly
+    /// the bytes, edges and roles the bundle holds now.
+    ///
+    /// A source moved to another owner keeps its graph and gains a new digest,
+    /// because the owner is framed into it. A reference written against the
+    /// earlier owner still names these exact bytes, which is what this proves:
+    /// the current graph, framed under the retained owner, reproduces the
+    /// retained digest.
+    pub(super) fn digest_names_current_graph(&self, digest: ContentDigest) -> bool {
+        digest == self.closure_digest()
+            || self.history.iter().any(|snapshot| {
+                snapshot.closure_digest == digest
+                    && self.closure_digest_as(&snapshot.owner) == digest
+            })
+    }
+
+    fn closure_digest_as(&self, owner: &ProjectSourceOwner) -> ContentDigest {
         let mut hasher = Sha256::new();
         hash_frame(&mut hasher, CLOSURE_DIGEST_DOMAIN);
-        match &self.owner {
+        match owner {
             ProjectSourceOwner::CodeWorkspace { language } => {
                 hash_frame(&mut hasher, b"code-workspace");
                 hash_frame(&mut hasher, language.stable_name().as_bytes());

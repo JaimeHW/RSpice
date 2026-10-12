@@ -919,3 +919,119 @@ fn veriloga_runtime_identities_separate_project_bundle_and_selected_module() {
         Err(ProjectSourceError::InvalidModuleName { .. })
     ));
 }
+
+/// The project-wide Verilog-A bundle a v1 registry carried, as the legacy
+/// singleton field it was persisted in.
+fn legacy_veriloga_registry() -> ProjectSourceRegistry {
+    let source = ProjectSourceDocument::try_new(
+        "sensor.va",
+        ProjectSourceLanguage::VerilogA,
+        "module sensor(p, n); inout p, n; electrical p, n; endmodule\n",
+    )
+    .unwrap();
+    serde_json::from_value(serde_json::json!({ "verilog_a": source, "automation": null })).unwrap()
+}
+
+/// A Code Workspace bundle given to a cell view is the same source: same
+/// identity, same bytes, same validation. Only the owner and the revision
+/// that records the move are new, and the move cannot happen twice.
+#[test]
+fn a_code_workspace_bundle_moves_to_a_cell_view_keeping_its_identity_and_validation() {
+    let mut registry = legacy_veriloga_registry();
+    let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+    let before = registry.bundle_for_owner(&owner).unwrap().id();
+    registry.mark_bundle_validated(before).unwrap();
+    let original = registry.get_bundle(before).unwrap().clone();
+    let reference = CellViewRef::new("work", "sensor", "veriloga");
+
+    let moved = registry
+        .move_code_workspace_bundle_to_cell_view(ProjectSourceLanguage::VerilogA, reference.clone())
+        .unwrap();
+
+    assert_eq!(moved, Some(before));
+    assert!(registry.bundle_for_owner(&owner).is_none());
+    let bundle = registry
+        .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
+        .unwrap();
+    assert_eq!(bundle.id(), before);
+    assert_eq!(bundle.root().content(), original.root().content());
+    assert!(bundle.revision() > original.revision());
+    assert_ne!(bundle.closure_digest(), original.closure_digest());
+    assert!(bundle.validation_is_current());
+    assert!(bundle.root().validation_is_current());
+    assert_eq!(
+        bundle
+            .revision_history()
+            .last()
+            .map(ProjectSourceRevisionSnapshot::closure_digest),
+        Some(original.closure_digest())
+    );
+    assert_eq!(
+        registry
+            .move_code_workspace_bundle_to_cell_view(ProjectSourceLanguage::VerilogA, reference)
+            .unwrap(),
+        None
+    );
+}
+
+/// A key written before the move still names the bundle and still names its
+/// bytes, so it reads back as the current key. Once the bytes change it names
+/// nothing current, though it still names whose source it was.
+#[test]
+fn a_key_written_before_a_move_reads_back_as_the_current_key_until_the_bytes_change() {
+    let project = ProjectId::new();
+    let mut registry = legacy_veriloga_registry();
+    let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+    let id = registry.bundle_for_owner(&owner).unwrap().id();
+    let legacy_key =
+        project_veriloga_bundle_source_key(project, registry.get_bundle(id).unwrap(), "sensor")
+            .unwrap();
+    assert_eq!(
+        registry.current_veriloga_source_key(project, &legacy_key),
+        Some(legacy_key.clone()),
+        "a current key is its own current key"
+    );
+
+    let reference = CellViewRef::new("work", "sensor", "veriloga");
+    registry
+        .move_code_workspace_bundle_to_cell_view(ProjectSourceLanguage::VerilogA, reference)
+        .unwrap();
+    let current_key =
+        project_veriloga_bundle_source_key(project, registry.get_bundle(id).unwrap(), "sensor")
+            .unwrap();
+    assert_ne!(legacy_key, current_key);
+    assert_eq!(
+        registry.current_veriloga_source_key(project, &legacy_key),
+        Some(current_key)
+    );
+    assert_eq!(
+        registry
+            .veriloga_bundle_for_source_key(project, &legacy_key)
+            .map(ProjectSourceBundle::id),
+        Some(id)
+    );
+    assert!(
+        registry
+            .current_veriloga_source_key(ProjectId::new(), &legacy_key)
+            .is_none(),
+        "a key is read only against the project it was written for"
+    );
+
+    registry
+        .replace_bundle_file_content(
+            id,
+            "sensor.va",
+            "module sensor(p, n); inout p, n; electrical p, n; real edited; endmodule\n".to_owned(),
+        )
+        .unwrap();
+    assert!(
+        registry
+            .current_veriloga_source_key(project, &legacy_key)
+            .is_none()
+    );
+    assert!(
+        registry
+            .veriloga_bundle_for_source_key(project, &legacy_key)
+            .is_some()
+    );
+}

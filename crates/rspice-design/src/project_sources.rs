@@ -1305,6 +1305,87 @@ impl ProjectSourceRegistry {
         Ok(changed)
     }
 
+    /// Give the Code Workspace bundle of `language` to the cell view
+    /// `reference`, returning its identity, or `None` when there is no such
+    /// bundle.
+    ///
+    /// The bundle keeps its identity, files, edges and roles; the move is a
+    /// revision like a rename, so the previous owner's graph stays retained
+    /// in the history. Unlike a rename it keeps its validation: the move
+    /// changes no byte, and the closure under its new owner is the closure
+    /// that was compiled.
+    pub fn move_code_workspace_bundle_to_cell_view(
+        &mut self,
+        language: ProjectSourceLanguage,
+        reference: CellViewRef,
+    ) -> Result<Option<ProjectSourceId>, ProjectSourceError> {
+        let owner = ProjectSourceOwner::code_workspace(language);
+        let Some(index) = self.bundles.iter().position(|bundle| bundle.owner == owner) else {
+            return Ok(None);
+        };
+        let mut candidate = self.clone();
+        let original = &self.bundles[index];
+        let bundle = &mut candidate.bundles[index];
+        bundle.record_revision_snapshot(original);
+        bundle.owner = ProjectSourceOwner::cell_view(reference);
+        bundle.advance_revision()?;
+        bundle.invalidate_validation();
+        if original.validation_is_current() {
+            bundle.mark_validated()?;
+        }
+        let id = bundle.id();
+        candidate.canonicalize();
+        candidate.validate()?;
+        *self = candidate;
+        Ok(Some(id))
+    }
+
+    /// The Verilog-A bundle a project source key was written for.
+    ///
+    /// The key is [`project_veriloga_bundle_source_key`]'s, read back. It names
+    /// its bundle whether or not the bytes have changed since, so this answers
+    /// whose source a deck refers to, not whether the reference is current.
+    #[must_use]
+    pub fn veriloga_bundle_for_source_key(
+        &self,
+        project_id: ProjectId,
+        key: &str,
+    ) -> Option<&ProjectSourceBundle> {
+        let parts = VerilogASourceKeyParts::parse(project_id, key)?;
+        self.get_bundle(parts.bundle_id).filter(|bundle| {
+            bundle.language == ProjectSourceLanguage::VerilogA
+                && bundle.root.logical_path() == parts.root
+        })
+    }
+
+    /// `key` against its bundle's current identity, when it names exactly the
+    /// bytes that bundle holds now: the key itself when it is current, or the
+    /// current key when it was written against a retained revision with the
+    /// same graph, such as one taken before the bundle changed owner. `None`
+    /// when the key names no bundle or bytes the bundle no longer holds.
+    #[must_use]
+    pub fn current_veriloga_source_key(&self, project_id: ProjectId, key: &str) -> Option<String> {
+        let parts = VerilogASourceKeyParts::parse(project_id, key)?;
+        let bundle = self.veriloga_bundle_for_source_key(project_id, key)?;
+        let current = bundle.closure_digest();
+        if parts.closure_digest == current.to_string() {
+            return Some(key.to_owned());
+        }
+        let retained = bundle
+            .history
+            .iter()
+            .map(|snapshot| snapshot.closure_digest)
+            .find(|digest| parts.closure_digest == digest.to_string())?;
+        bundle.digest_names_current_graph(retained).then(|| {
+            format!(
+                "{PROJECT_VERILOGA_KEY_ROOT}{project_id}/{}/{current}/{}/{}",
+                bundle.id(),
+                parts.module_digest,
+                parts.root
+            )
+        })
+    }
+
     /// Synchronize one cell-view-owned bundle from another registry without
     /// touching Code Workspace or sibling cell-view sources.
     pub fn synchronize_cell_view_bundle_from(
@@ -1591,12 +1672,40 @@ pub fn project_veriloga_bundle_source_key(
 ) -> Result<String, ProjectSourceError> {
     validate_veriloga_runtime_selection(bundle, module_name)?;
     Ok(format!(
-        "__rspice_project__/{project_id}/{}/{}/{}/{}",
+        "{PROJECT_VERILOGA_KEY_ROOT}{project_id}/{}/{}/{}/{}",
         bundle.id(),
         bundle.closure_digest(),
         selected_module_digest(module_name),
         bundle.root().logical_path()
     ))
+}
+
+const PROJECT_VERILOGA_KEY_ROOT: &str = "__rspice_project__/";
+
+/// A [`project_veriloga_bundle_source_key`] read back into its fields.
+struct VerilogASourceKeyParts<'a> {
+    bundle_id: ProjectSourceId,
+    closure_digest: &'a str,
+    module_digest: &'a str,
+    root: &'a str,
+}
+
+impl<'a> VerilogASourceKeyParts<'a> {
+    /// The fields of `key` when it is a key of `project_id`. The root is the
+    /// remainder, so a root with directories in it is read whole.
+    fn parse(project_id: ProjectId, key: &'a str) -> Option<Self> {
+        let mut fields = key.strip_prefix(PROJECT_VERILOGA_KEY_ROOT)?.splitn(5, '/');
+        if fields.next()? != project_id.to_string() {
+            return None;
+        }
+        let bundle_id = fields.next()?.parse().ok()?;
+        Some(Self {
+            bundle_id,
+            closure_digest: fields.next()?,
+            module_digest: fields.next()?,
+            root: fields.next().filter(|root| !root.is_empty())?,
+        })
+    }
 }
 
 /// Collision-resistant, portable SPICE identifier for one selected module in
