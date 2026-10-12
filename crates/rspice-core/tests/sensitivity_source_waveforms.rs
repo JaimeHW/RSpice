@@ -295,6 +295,67 @@ fn ldo_load_current_row_matches_ngspice() {
     assert_matches_ngspice(&sens(&ldo(C5_LOAD, COMPARED, HELD_TRIM)));
 }
 
+/// Design M1: every device-instance and model-parameter row of the
+/// unfiltered `.sens v(vout)` is an operating-point tangent, so none is
+/// refused, and each matches ngspice-46's re-solved operating points.
+///
+/// The reference is ngspice re-solved: `alter`/`altermod` the parameter by
+/// ±1e-3 of its value and difference two `op`s. ngspice's own `.sens` is not
+/// the reference for these rows: on this circuit it disagrees with its own
+/// re-solved operating points on 378 of 554 rows (`m1_w` is -637.6 V/m
+/// against a re-solved -21128.6 V/m), while RSpice's tangents agree with
+/// them to a median 4e-5 (worst 1e-2, the re-solve's own truncation) on the
+/// 84 rows the re-solve resolves cleanly.
+#[test]
+fn ldo_unfiltered_rows_are_operating_point_tangents() {
+    let result = sens(&ldo(C5_LOAD, ".sens v(vout)", HELD_TRIM));
+    assert!(
+        result.sensitivities.len() > 500,
+        "every BSIM4 model and instance row resolves: {} rows",
+        result.sensitivities.len()
+    );
+    assert_matches_ngspice(&result);
+    for (name, parameter, expected) in [
+        ("m1", "w", -2.1128569e4),
+        ("m1", "l", 1.3433635e5),
+        ("mp", "w", 2.0484692e3),
+        ("nbsim4", "a0", -4.5134057e-4),
+        ("nbsim4", "vth0", -2.9395412e-2),
+        ("pbsim4", "vth0", 1.7567007e-2),
+        ("pbsim4", "pclm", 9.2768694e-4),
+        ("rref", "r", -8.2186814e-9),
+    ] {
+        assert_relative(
+            row(&result, name, parameter).absolute,
+            expected,
+            1e-3,
+            &format!("{name}:{parameter}"),
+        );
+    }
+    // A1 = 0 is a kink of the model: a positive A1 leaves the residual bit
+    // for bit where it was and a negative one moves it. The row is the
+    // forward one, as SPICE's forward perturbation reports it, and named.
+    let one_sided = |name: &str| {
+        result
+            .one_sided
+            .iter()
+            .any(|row| row.eq_ignore_ascii_case(name))
+    };
+    assert!(one_sided("NBSIM4:A1"), "{:?}", result.one_sided);
+    assert_eq!(row(&result, "nbsim4", "a1").absolute, 0.0);
+    // VFB is smooth but strongly curved: its one-sided differences at the
+    // step differ by a fifth, and halve with the step.
+    for name in ["NBSIM4:VTH0", "NBSIM4:VFB"] {
+        assert!(!one_sided(name), "{name} is two-sided");
+    }
+    assert_relative(
+        row(&result, "nbsim4", "vfb").absolute,
+        2.6759911e-4,
+        2e-3,
+        "nbsim4:vfb",
+    );
+}
+
 /// The corpus deck itself: the trim register is a Verilog module whose
 /// outputs reach the ladder switches through built-in converters. Its
 /// initial block holds code 0, the operating point's discrete state, and the
@@ -312,4 +373,43 @@ fn ldo_rows_hold_the_trim_registers_discrete_state() {
          xtrim sclk sdi csn tr3 tr2 tr1 tr0 spi_trim\n",
     ));
     assert_matches_ngspice(&result);
+}
+
+/// O5 for the unfiltered study: the trim register's rows are its held twin's
+/// rows. Each residual tangent rebuilds the circuit, and the rebuilt host
+/// runs its initial blocks and settles at the converged solution, so it
+/// holds the same discrete state the operating point held.
+#[cfg(feature = "veriloga")]
+#[test]
+fn ldo_unfiltered_rows_hold_the_trim_registers_discrete_state() {
+    let held = sens(&ldo(C5_LOAD, ".sens v(vout)", HELD_TRIM));
+    let mixed = sens(&ldo(
+        C5_LOAD,
+        ".sens v(vout)",
+        ".hdl \"spi_trim.v\"\n.param vcc=1.8\n\
+         vcsn csn 0 pwl(0 1.8 400u 1.8 400.01u 0 405u 0 405.01u 1.8)\n\
+         vsdi sdi 0 pwl(0 0 400u 0 400.01u 1.8)\n\
+         vsclk sclk 0 pwl(0 0 401u 0 401.01u 1.8 401.5u 1.8 401.51u 0)\n\
+         xtrim sclk sdi csn tr3 tr2 tr1 tr0 spi_trim\n",
+    ));
+    let mut compared = 0;
+    for twin in &held.sensitivities {
+        let Some(row) = mixed
+            .sensitivities
+            .iter()
+            .find(|row| row.vector_name.eq_ignore_ascii_case(&twin.vector_name))
+        else {
+            continue;
+        };
+        compared += 1;
+        assert!(
+            (row.absolute - twin.absolute).abs() <= 1e-12 * twin.absolute.abs().max(1e-300),
+            "{}: {:e} held {:e}",
+            twin.vector_name,
+            row.absolute,
+            twin.absolute
+        );
+    }
+    assert!(compared > 500, "{compared} rows compared");
+    assert_eq!(mixed.one_sided, held.one_sided);
 }

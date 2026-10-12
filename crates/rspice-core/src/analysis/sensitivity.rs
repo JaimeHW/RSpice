@@ -460,6 +460,11 @@ pub struct SensitivityResult {
     pub output_value: Value,
     /// Sensitivities for each element
     pub sensitivities: Vec<Sensitivity>,
+    /// Vector names of the rows whose model is not differentiable at the
+    /// nominal parameter value. Each reports the forward (`+δ`) one-sided
+    /// derivative, as SPICE's forward perturbation does; every other row is
+    /// exact or two-sided.
+    pub one_sided: Vec<String>,
 }
 
 impl SensitivityResult {
@@ -477,6 +482,7 @@ impl SensitivityResult {
             output_unit,
             output_value,
             sensitivities: Vec::new(),
+            one_sided: Vec::new(),
         }
     }
 

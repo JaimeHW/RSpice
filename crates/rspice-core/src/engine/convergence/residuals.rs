@@ -672,6 +672,53 @@ impl Engine {
         tangents
     }
 
+    /// The operating-point equations' residual `b - J x` at `at`, assembled
+    /// as [`Self::dc_operating_point_tangents`] assembles `J`: the static
+    /// probe (no junction limiting, a mixed host's discrete state held), the
+    /// residual accumulated in double-double.
+    ///
+    /// Two circuits that differ only in one parameter value, assembled at the
+    /// same `at`, differ in this residual by that parameter's direct effect on
+    /// the equations and by nothing else: no Newton iteration is involved, so
+    /// the difference carries none of a re-solved operating point's
+    /// convergence error. The circuit's operating-point state is left as it
+    /// was.
+    pub(in crate::engine) fn dc_operating_point_residual(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        at: &[Value],
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        if at.len() != size || at.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::Circuit(format!(
+                "operating-point residual needs a finite point of the {size} unknown(s)"
+            )));
+        }
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let residual: Result<Vec<Value>, SimulationError> =
+            matrix.with_probe_values(|probe, rhs| {
+                self.stamp_dc_static_probe_system(circuit, probe, rhs, at)?;
+                // Correction coordinates already hold `b - J x` in the RHS.
+                if Self::requires_vbic_correction_form(circuit) {
+                    return Ok(rhs.to_vec());
+                }
+                let mut residual = Vec::with_capacity(size);
+                probe
+                    .correction_rhs_into(rhs, at, &mut residual)
+                    .map_err(SimulationError::Solver)?;
+                Ok(residual)
+            });
+        circuit.restore_nonlinear_state(snapshot);
+        let residual = residual?;
+        if residual.iter().any(|value| !value.is_finite()) {
+            return Err(SimulationError::Circuit(
+                "operating-point residual is not finite".to_owned(),
+            ));
+        }
+        Ok(residual)
+    }
+
     pub(in crate::engine::convergence) fn residual_probe_fixed_point_converged(
         &self,
         circuit: &CircuitData,

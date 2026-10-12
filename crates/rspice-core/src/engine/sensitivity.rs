@@ -212,6 +212,114 @@ struct AcSensitivityTarget {
     location: AcSensitivityLocation,
 }
 
+/// Relative agreement two one-sided residual derivatives of a row need for
+/// the row to be taken as differentiable at its nominal value without
+/// looking further. A smooth model's sides differ by the step times the
+/// curvature, `δ·|y''/y'|`: 1e-3 of the derivative per unit of the
+/// parameter's own curvature scale `|p·y''/y'|`. Sides further apart than
+/// this are a kink only if the gap does not halve with the step.
+const ONE_SIDED_AGREEMENT: Value = 0.1;
+
+/// The output change over one step, relative to the nominal output, below
+/// which one-sided responses are not resolvable. The residual is assembled
+/// from linearized stamps whose companion currents round at `ε·|g·x|`, and a
+/// high-gain loop carries that to the output at about 1e-10 of its value.
+const ONE_SIDED_RESOLUTION: Value = 1.0e-9;
+
+/// One side of a residual-tangent row at one step: `J(x*)^-1` times the
+/// residual difference over the step, not divided by it.
+type ResidualSide = Option<Vec<Value>>;
+
+/// One device or model DC row's operating-point tangents (design M1).
+///
+/// Each side is `J(x*)^-1 (r(p + δ) - r(p))` or `J(x*)^-1 (r(p) - r(p - δ))`,
+/// the residual `r = b - J x` assembled at the FIXED converged solution `x*`
+/// for the circuit rebuilt at each parameter value, at the step `δ` and at
+/// `δ/2`. `None` is a side whose circuit could not be built or assembled at
+/// `x*` (a parameter domain, or a value that changes the unknowns).
+struct ResidualTangent {
+    step: Value,
+    /// `[forward, backward]` at `δ`, then at `δ/2`.
+    sides: [[ResidualSide; 2]; 2],
+    /// The side's residual at `δ` equals the nominal residual bit for bit:
+    /// the model ignores the parameter on that side.
+    flat: [bool; 2],
+}
+
+impl ResidualTangent {
+    /// The row's derivative and whether it is one-sided, or `None` when
+    /// neither side resolved.
+    ///
+    /// Two sides that agree give the central difference, Richardson-
+    /// extrapolated from `δ` and `δ/2` so the truncation error is fourth
+    /// order. Sides that do not agree (one is flat and the other is not, or
+    /// they differ beyond [`ONE_SIDED_AGREEMENT`] and the resolution floor by
+    /// a gap that does not halve with the step) mark a model that is not
+    /// differentiable at the nominal value, and the
+    /// row is the forward side, as SPICE's forward perturbation reports it. A
+    /// row with one resolvable side is that side. A one-sided value is
+    /// extrapolated from both steps too, which leaves a second-order error.
+    fn derivative(
+        &self,
+        nominal: &SimulationResult,
+        output: &AcSensitivityOutput,
+        nominal_output: Value,
+    ) -> Result<Option<(Value, bool)>, SimulationError> {
+        let read = |side: &ResidualSide, step: Value| {
+            side.as_ref()
+                .map(|tangent| {
+                    Engine::dc_tangent_output_value(nominal, tangent, output)
+                        .map(|change| change / step)
+                })
+                .transpose()
+        };
+        let [[forward, backward], [forward_half, backward_half]] = &self.sides;
+        let (forward, backward) = (read(forward, self.step)?, read(backward, self.step)?);
+        let half = 0.5 * self.step;
+        let (forward_half, backward_half) = (read(forward_half, half)?, read(backward_half, half)?);
+        let one_sided = |coarse: Value, fine: Option<Value>| match fine {
+            Some(fine) => 2.0 * fine - coarse,
+            None => coarse,
+        };
+        Ok(match (forward, backward) {
+            (Some(forward), Some(backward)) => {
+                let floor = ONE_SIDED_RESOLUTION * (nominal_output.abs() + ONE_SIDED_RESOLUTION)
+                    / self.step;
+                // A smooth row's sides differ by the step times its curvature,
+                // which halves with the step; a kink's differ by the change of
+                // slope, which does not. A strongly curved smooth row (C5's
+                // NMOS `VFB`, whose sides differ by a fifth at `δ`) is told
+                // from a kink by the half step.
+                let gap = forward - backward;
+                let kink = self.flat[0] != self.flat[1]
+                    || (gap.abs()
+                        > ONE_SIDED_AGREEMENT * forward.abs().max(backward.abs()) + floor
+                        && match (forward_half, backward_half) {
+                            (Some(forward), Some(backward)) => {
+                                (forward - backward).abs() > 0.75 * gap.abs()
+                            }
+                            _ => true,
+                        });
+                Some(if kink {
+                    (one_sided(forward, forward_half), true)
+                } else {
+                    let coarse = 0.5 * (forward + backward);
+                    let central = match (forward_half, backward_half) {
+                        (Some(forward), Some(backward)) => {
+                            (4.0 * (0.5 * (forward + backward)) - coarse) / 3.0
+                        }
+                        _ => coarse,
+                    };
+                    (central, false)
+                })
+            }
+            (Some(forward), None) => Some((one_sided(forward, forward_half), true)),
+            (None, Some(backward)) => Some((one_sided(backward, backward_half), true)),
+            (None, None) => None,
+        })
+    }
+}
+
 impl Engine {
     pub(in crate::engine) fn collect_sensitivity_elements(
         circuit: &CircuitData,
@@ -324,13 +432,13 @@ impl Engine {
         let setup = progress.stage(0.0, 0.2);
         let abort: &dyn AbortSignal = &setup;
         let engine = self.resolved_for_netlist(netlist);
-        let mut circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        let circuit = engine.build_circuit_with_abort(netlist, abort)?;
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
             "Sensitivity",
             "linearized sensitivity reports native element/source derivatives and does not use ngspice MIF DEVsen* hooks",
         );
-        Self::ensure_no_mixed_signal_analysis(&circuit, "sensitivity analysis")?;
+        Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Sens)?;
         Self::validate_sensitivity_node("output", output_pos, circuit.num_nodes())?;
         if let Some(output_neg) = output_neg {
             Self::validate_sensitivity_node("reference", output_neg, circuit.num_nodes())?;
@@ -341,22 +449,19 @@ impl Engine {
         let bias = progress.stage(0.2, 0.6);
         let abort: &dyn AbortSignal = &bias;
 
-        let mut matrix = engine.build_matrix(&circuit)?;
-        circuit.link_indices(&matrix);
-
-        let dc_solution = engine.solve_dc_operating_point_with_abort(
+        // The adjoint form reads the Jacobian at the held equilibrium (S9).
+        let super::small_signal_bias::SmallSignalBias {
+            circuit,
+            matrix,
+            bias: dc_solution,
+        } = engine.prepare_small_signal_bias(
             netlist,
-            &mut circuit,
-            &mut matrix,
+            Some(circuit),
+            super::CapabilityAnalysis::Sens,
+            0,
+            super::small_signal_bias::BiasSource::OperatingPoint,
             abort,
         )?;
-        circuit.refresh_jiles_atherton_inductances(&dc_solution);
-        if circuit.has_nonlinear_devices() {
-            circuit.update_nonlinear(&dc_solution);
-        }
-        circuit
-            .prepare_behavioral_small_signal(&dc_solution)
-            .map_err(SimulationError::Circuit)?;
         progress.report(0.6)?;
         let derivatives = progress.stage(0.6, 0.95);
         let abort: &dyn AbortSignal = &derivatives;
@@ -422,6 +527,20 @@ impl Engine {
                 crate::solver::SolverError::SingularMatrix,
             ))?;
         progress.complete(result)
+    }
+
+    /// The capability gate for the perturbation (complete) forms, which solve
+    /// through the operating-point and AC entries and so would otherwise be
+    /// gated, if at all, under those analyses' names.
+    fn ensure_sensitivity_capability(
+        &self,
+        flat: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let circuit = self
+            .resolved_for_netlist(flat)
+            .build_circuit_with_abort(flat, abort)?;
+        Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Sens)
     }
 
     fn validate_sensitivity_node(
@@ -2883,6 +3002,158 @@ impl Engine {
         Ok(rows.into_iter().zip(tangents).collect())
     }
 
+    /// The perturbation of a residual-tangent row: a relative 1e-3 of the
+    /// nominal value, or SPICE's absolute 1e-6 for a zero nominal.
+    ///
+    /// SPICE's relative 1e-6 is too small for a residual difference: the
+    /// residual's companion currents round at `ε·|g·x|`, which on the C5 LDO
+    /// reaches the output as about 5e-12 V, and against a 1e-6 step that is a
+    /// percent of a BSIM4 model row (`A0`, `PCLM`). A central difference at
+    /// 1e-3 has a truncation error of 1e-6 times the parameter's curvature
+    /// scale and a thousandth of that noise.
+    fn residual_sensitivity_step(nominal: Value) -> Value {
+        if nominal == 0.0 {
+            return 1.0e-6;
+        }
+        Self::relative_sensitivity_step(nominal, 1.0e-6)
+    }
+
+    /// The operating-point residual at `solution` of `netlist` built and
+    /// prepared afresh, or `None` when the build is recoverably refused (a
+    /// parameter domain) or its unknowns are not the converged layout.
+    fn dc_rebuilt_residual(
+        engine: &Engine,
+        netlist: &Netlist,
+        layout: &(usize, Vec<String>, Vec<String>),
+        solution: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let Ok((mut circuit, mut matrix)) =
+            sensitivity_trial(engine.prepared_dc_probe_circuit(netlist, abort))?
+        else {
+            return Ok(None);
+        };
+        if circuit.matrix_size() != layout.0
+            || circuit.node_names_sorted() != layout.1
+            || circuit.branch_names_sorted() != layout.2
+        {
+            return Ok(None);
+        }
+        Ok(sensitivity_trial(engine.dc_operating_point_residual(
+            &mut circuit,
+            &mut matrix,
+            solution,
+        ))?
+        .ok())
+    }
+
+    /// Operating-point tangents for device-instance and model-parameter DC
+    /// rows, keyed by target row (design M1).
+    ///
+    /// A parameter that is not an independent source's excitation enters the
+    /// DC equations through device stamps, so its tangent is `J(x*)^-1 ∂r/∂p`
+    /// with `∂r/∂p` differenced from the residual `b - J x` assembled at the
+    /// FIXED converged solution for the circuit rebuilt at `p ± δ` and
+    /// `p ± δ/2`. Nothing is re-solved, so no row carries Newton convergence
+    /// error, and the solve is the converged Jacobian's, as for a source row.
+    /// Both sides are kept so [`ResidualTangent::derivative`] can tell a
+    /// smooth row from one the model makes one-sided, and both steps so it
+    /// can extrapolate the truncation error away. A rebuilt nominal circuit
+    /// whose unknowns differ from the converged ones yields no tangents, and
+    /// those rows keep the re-solved finite difference.
+    #[allow(clippy::too_many_arguments)]
+    fn dc_residual_tangents(
+        engine: &Engine,
+        flat: &Netlist,
+        circuit: &mut CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[Value],
+        rows: &[(usize, &AcSensitivityTarget)],
+        progress: &dyn Fn(usize) -> Result<(), SimulationError>,
+        abort: &dyn AbortSignal,
+    ) -> Result<HashMap<usize, ResidualTangent>, SimulationError> {
+        if rows.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let layout = (
+            circuit.matrix_size(),
+            circuit.node_names_sorted(),
+            circuit.branch_names_sorted(),
+        );
+        let Some(nominal) = Self::dc_rebuilt_residual(engine, flat, &layout, solution, abort)?
+        else {
+            return Ok(HashMap::new());
+        };
+        let mut pending = Vec::with_capacity(rows.len());
+        let mut directions = Vec::new();
+        for (count, &(row, target)) in rows.iter().enumerate() {
+            progress(count)?;
+            let step = Self::residual_sensitivity_step(target.nominal_value);
+            let side = |value: Value| -> Result<Option<Vec<Value>>, SimulationError> {
+                if !value.is_finite() {
+                    return Ok(None);
+                }
+                let mut perturbed = flat.clone();
+                if sensitivity_trial(Self::apply_ac_sensitivity_target(
+                    &mut perturbed,
+                    target,
+                    value,
+                ))?
+                .is_err()
+                {
+                    return Ok(None);
+                }
+                Self::dc_rebuilt_residual(engine, &perturbed, &layout, solution, abort)
+            };
+            let difference = |left: &[Value], right: &[Value]| {
+                left.iter()
+                    .zip(right)
+                    .map(|(left, right)| left - right)
+                    .collect::<Vec<_>>()
+            };
+            let mut flat = [false; 2];
+            let mut sides = [[None, None], [None, None]];
+            for (level, offset) in [step, 0.5 * step].into_iter().enumerate() {
+                let upper = side(target.nominal_value + offset)?;
+                let lower = side(target.nominal_value - offset)?;
+                if level == 0 {
+                    flat = [
+                        upper.as_deref() == Some(nominal.as_slice()),
+                        lower.as_deref() == Some(nominal.as_slice()),
+                    ];
+                }
+                for (slot, change) in sides[level].iter_mut().zip([
+                    upper.map(|upper| difference(&upper, &nominal)),
+                    lower.map(|lower| difference(&nominal, &lower)),
+                ]) {
+                    *slot = change.map(|change| {
+                        directions.push(change);
+                        directions.len() - 1
+                    });
+                }
+            }
+            pending.push((row, step, sides, flat));
+        }
+        let mut tangents = engine
+            .dc_operating_point_tangents(circuit, matrix, solution, &directions)?
+            .into_iter()
+            .map(Some)
+            .collect::<Vec<_>>();
+        let mut take = |index: Option<usize>| index.and_then(|index| tangents[index].take());
+        Ok(pending
+            .into_iter()
+            .map(
+                |(row, step, [[forward, backward], [forward_half, backward_half]], flat)| {
+                    let sides = [
+                        [take(forward), take(backward)],
+                        [take(forward_half), take(backward_half)],
+                    ];
+                    (row, ResidualTangent { step, sides, flat })
+                },
+            )
+            .collect())
+    }
+
     /// The output's derivative along an operating-point tangent, read through
     /// the nominal result's public layout (node voltages, then public branch
     /// currents, as `populate_public_dc_solution` publishes the solution).
@@ -2949,9 +3220,15 @@ impl Engine {
     /// Method: design parameters and eligible R/L/C value fields on a qualified
     /// linear deck use physical derivatives and a transpose solve; an
     /// independent source's DC value, for every waveform kind, is the exact
-    /// tangent of the nominal operating point; every other row is a
-    /// Richardson-extrapolated three-point stencil accepted only on 1e-4
-    /// relative agreement of four independent fits, else refused by name.
+    /// tangent of the nominal operating point; every device-instance and
+    /// model-parameter row is also a tangent of the nominal operating point,
+    /// its excitation a central difference of the residual at the fixed
+    /// converged solution, or the forward one-sided difference (named in
+    /// [`SensitivityResult::one_sided`] and one warning) where the model is
+    /// not differentiable at the nominal value. A row neither side of which
+    /// can be assembled at the converged solution is a Richardson-extrapolated
+    /// three-point stencil of re-solves accepted only on 1e-4 relative
+    /// agreement of four independent fits, else refused by name.
     pub fn run_sensitivity_dc_complete(
         &self,
         netlist: &Netlist,
@@ -2973,6 +3250,7 @@ impl Engine {
         let setup = progress.stage(0.0, 0.1);
         let abort: &dyn AbortSignal = &setup;
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
+        self.ensure_sensitivity_capability(&flat, abort)?;
         Self::validate_complete_dc_sensitivity_coverage(&flat)?;
         Self::validate_design_parameter_filters(&flat, filters, "DC")?;
         let candidates = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
@@ -3009,8 +3287,26 @@ impl Engine {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        // Every device-instance and model-parameter row is the same kind of
+        // tangent, its excitation differenced from the residual at the fixed
+        // converged solution (see `dc_residual_tangents`).
+        let residual_rows = targets
+            .iter()
+            .enumerate()
+            .filter(|(_, target)| {
+                !matches!(
+                    target.location,
+                    AcSensitivityLocation::SourceDc { .. }
+                        | AcSensitivityLocation::DesignParameter { .. }
+                )
+            })
+            .collect::<Vec<_>>();
         let mut source_tangents = HashMap::new();
-        let nominal_result = if source_rows.is_empty() {
+        let mut residual_tangents = HashMap::new();
+        let residual_progress = |count: usize| {
+            progress.report(0.2 + 0.4 * count as f64 / residual_rows.len().max(1) as f64)
+        };
+        let nominal_result = if source_rows.is_empty() && residual_rows.is_empty() {
             self.run_dc_op_with_abort(&flat, abort)?
         } else {
             self.run_dc_op_with_linearization_and_abort(
@@ -3018,6 +3314,16 @@ impl Engine {
                 &mut |engine, circuit, matrix, solution| {
                     source_tangents =
                         Self::dc_source_tangents(engine, circuit, matrix, solution, &source_rows)?;
+                    residual_tangents = Self::dc_residual_tangents(
+                        engine,
+                        &flat,
+                        circuit,
+                        matrix,
+                        solution,
+                        &residual_rows,
+                        &residual_progress,
+                        abort,
+                    )?;
                     Ok(())
                 },
                 abort,
@@ -3033,12 +3339,17 @@ impl Engine {
 
         let mut runs = 1;
         let count = targets.len();
+        let mut one_sided = Vec::new();
         for (index, target) in targets.into_iter().enumerate() {
-            let start = 0.2 + 0.75 * index as f64 / count as f64;
-            let end = 0.2 + 0.75 * (index + 1) as f64 / count as f64;
+            let start = 0.6 + 0.35 * index as f64 / count as f64;
+            let end = 0.6 + 0.35 * (index + 1) as f64 / count as f64;
             progress.report(start)?;
             let work = progress.stage(start, end);
             let abort: &dyn AbortSignal = &work;
+            let residual = match residual_tangents.get(&index) {
+                Some(tangent) => tangent.derivative(&nominal_result, &output, nominal_output)?,
+                None => None,
+            };
             let derivative =
                 if let AcSensitivityLocation::DesignParameter { name } = &target.location {
                     self.design_parameter_derivatives(
@@ -3059,7 +3370,16 @@ impl Engine {
                     self.linear_device_sensitivity(&flat, &output, &target, None, &mut runs, abort)?
                 {
                     derivative[0].re
+                } else if let Some((derivative, forward_only)) = residual {
+                    if forward_only {
+                        one_sided.push(target.vector_name.clone());
+                    }
+                    derivative
                 } else {
+                    // Neither side could be assembled at the converged
+                    // solution (both refused, or the parameter changes the
+                    // unknowns): the re-solved finite difference, which
+                    // refuses the row by name if it cannot resolve it.
                     let h = Self::complete_sensitivity_step(&target);
                     self.refine_sensitivity(
                         &target.vector_name,
@@ -3097,6 +3417,15 @@ impl Engine {
             ));
             progress.report(end)?;
         }
+        if !one_sided.is_empty() {
+            log::warn!(
+                "[sens.one_sided] {output_name}: {} row(s) not differentiable at their nominal \
+                 value report the forward one-sided derivative: {}",
+                one_sided.len(),
+                one_sided.join(", ")
+            );
+        }
+        result.one_sided = one_sided;
 
         progress.complete(result)
     }
@@ -3147,6 +3476,7 @@ impl Engine {
         }
         self.ensure_analysis_points(frequencies.len())?;
         let flat = self.flattened_sensitivity_netlist(netlist, abort)?;
+        self.ensure_sensitivity_capability(&flat, abort)?;
         Self::validate_design_parameter_filters(&flat, filters, "AC")?;
         let candidates = Self::collect_ac_sensitivity_targets(&flat, self.config.resource_limits)?
             .into_iter()
