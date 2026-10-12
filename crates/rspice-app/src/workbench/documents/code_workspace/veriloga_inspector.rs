@@ -14,13 +14,17 @@ use egui::{Align, Color32, Layout, Sense, Stroke, Ui, Vec2};
 use crate::product::ProjectId;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::Button;
 use crate::workbench::design_system::{
     StatusMark, WorkbenchIcon, code_inspector_property_list, code_inspector_section, property_row,
-    property_row_status, property_row_toned,
+    property_row_control_columns, property_row_height, property_row_status, property_row_toned,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
 use super::page::VerilogAWorkbenchState;
+use super::veriloga_interface::{
+    VerilogACellSymbol, VerilogAInterfaceOutcome, VerilogASymbolDrift,
+};
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource,
     TargetQualification, VerilogACompileReceipt,
@@ -86,6 +90,14 @@ pub(crate) fn veriloga_compile_status(
             messages.text(MessageId::VerilogAStatusModified),
             t.color.warn,
         ),
+        // The module compiled, but it is not the cell its schematic defines.
+        Some(VerilogACompileReceipt {
+            interface: Some(VerilogAInterfaceOutcome::SchematicMismatch { .. }),
+            ..
+        }) => (
+            messages.text(MessageId::VerilogAStatusPortsDiffer),
+            t.color.err,
+        ),
         Some(receipt) => {
             let summary = receipt.diagnostics.summary();
             match summary.total().saturating_sub(summary.errors) {
@@ -109,6 +121,13 @@ pub(crate) fn veriloga_compile_status(
     }
 }
 
+/// What the reader asked the inspector to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VerilogAInspectorAction {
+    /// Reconcile the cell's hand-edited symbol with the module's ports.
+    UpdateSymbol,
+}
+
 /// The inspector body: module identity, build targets, diagnostics, and the
 /// ABI contract the module exposes to a netlist.
 pub(crate) fn show_veriloga_inspector(
@@ -117,11 +136,11 @@ pub(crate) fn show_veriloga_inspector(
     project_id: ProjectId,
     selected: &SelectedVerilogASource,
     messages: MessageCatalog,
-) {
+) -> Option<VerilogAInspectorAction> {
     let t = Tokens::get(ui.ctx());
     ui.set_width(ui.available_width());
     let receipt = veriloga_receipt(state, project_id, selected);
-    module_section(ui, state, project_id, selected, receipt, messages, &t);
+    let action = module_section(ui, state, project_id, selected, receipt, messages, &t);
     build_targets_section(ui, receipt, messages, &t);
     // Diagnostics exist only for a source the compiler has read. With neither
     // a receipt nor a refusal for this exact revision, an empty list is not a
@@ -137,6 +156,7 @@ pub(crate) fn show_veriloga_inspector(
         &t,
     );
     abi_section(ui, receipt, messages);
+    action
 }
 
 fn module_section(
@@ -147,7 +167,8 @@ fn module_section(
     receipt: Option<&VerilogACompileReceipt>,
     messages: MessageCatalog,
     t: &Tokens,
-) {
+) -> Option<VerilogAInspectorAction> {
+    let mut action = None;
     // The module a compile actually elaborated outranks the one the bundle
     // asks for: with no explicit entry the compiler chooses, and the receipt
     // is the record of what it chose.
@@ -187,9 +208,116 @@ fn module_section(
                     &status,
                     tone,
                 );
+                if let crate::state::ProjectSourceOwner::CellView { reference } =
+                    selected.bundle().owner()
+                    && interface_rows(ui, state, receipt, reference, messages, t)
+                {
+                    action = Some(VerilogAInspectorAction::UpdateSymbol);
+                }
             });
         },
     );
+    action
+}
+
+/// Which view defines the cell's ports, and where its symbol stands against
+/// them. Returns whether Update symbol was pressed.
+fn interface_rows(
+    ui: &mut Ui,
+    state: &VerilogAWorkbenchState,
+    receipt: Option<&VerilogACompileReceipt>,
+    reference: &crate::state::CellViewRef,
+    messages: MessageCatalog,
+    t: &Tokens,
+) -> bool {
+    let symbol = messages.text(MessageId::VerilogASymbolRow);
+    match state.symbol_standing.of(reference) {
+        None => false,
+        Some(VerilogACellSymbol::SchematicDefined) => {
+            let differs = receipt.is_some_and(|receipt| {
+                matches!(
+                    receipt.interface,
+                    Some(VerilogAInterfaceOutcome::SchematicMismatch { .. })
+                )
+            });
+            let (value, tone) = if differs {
+                (MessageId::VerilogAPortsDifferFromSchematic, t.color.err)
+            } else {
+                (MessageId::VerilogAPortsFromSchematic, t.color.text)
+            };
+            property_row_toned(
+                ui,
+                &messages.text(MessageId::VerilogAPortsRow),
+                &messages.text(value),
+                tone,
+            );
+            false
+        }
+        Some(VerilogACellSymbol::None) => {
+            property_row(ui, &symbol, &messages.text(MessageId::VerilogASymbolNone));
+            false
+        }
+        Some(VerilogACellSymbol::Generated) => {
+            property_row(
+                ui,
+                &symbol,
+                &messages.text(MessageId::VerilogASymbolGenerated),
+            );
+            false
+        }
+        Some(VerilogACellSymbol::InStep) => {
+            property_row(ui, &symbol, &messages.text(MessageId::VerilogASymbolInStep));
+            false
+        }
+        Some(VerilogACellSymbol::Drifted(drift)) => {
+            property_row_toned(
+                ui,
+                &symbol,
+                &symbol_drift_text(drift, messages),
+                t.color.warn,
+            );
+            value_column_button(ui, &messages.text(MessageId::VerilogAUpdateSymbol))
+        }
+    }
+}
+
+/// "2 pins missing, 1 extra", and how many pins turned round when any did.
+pub(crate) fn symbol_drift_text(drift: &VerilogASymbolDrift, messages: MessageCatalog) -> String {
+    let count = |items: &[String]| items.len().to_string();
+    let missing = count(&drift.missing);
+    let mut text = messages.format(
+        if drift.missing.len() == 1 {
+            MessageId::VerilogASymbolPinMissing
+        } else {
+            MessageId::VerilogASymbolPinsMissing
+        },
+        &[("missing", &missing), ("extra", &count(&drift.extra))],
+    );
+    if !drift.turned.is_empty() {
+        text.push_str(&messages.format(
+            MessageId::VerilogASymbolPinsTurned,
+            &[("count", &count(&drift.turned))],
+        ));
+    }
+    text
+}
+
+/// A button in the value column, under the fact it acts on, so the action
+/// stays on the inspector's label/value grid.
+fn value_column_button(ui: &mut Ui, label: &str) -> bool {
+    let width = ui.available_width();
+    let (_, value_left) = property_row_control_columns(width);
+    let height = property_row_height(ui) + 6.0;
+    ui.allocate_ui_with_layout(
+        Vec2::new(width, height),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.set_min_size(Vec2::new(width, height));
+            ui.add_space(value_left);
+            Button::new(label).show(ui).clicked()
+        },
+    )
+    .inner
 }
 
 fn build_targets_section(

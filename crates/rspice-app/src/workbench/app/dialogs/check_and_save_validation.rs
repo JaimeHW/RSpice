@@ -313,6 +313,23 @@ impl CheckAndSaveValidationReport {
                     }),
             );
         }
+        // A cell's schematic defines its ports, and a module that compiled to
+        // different ones is refused by any run that binds it. Saving such a
+        // project is legitimate work in progress, so it advises.
+        if let Some((reference, message)) =
+            crate::workbench::documents::code_workspace::interface_check_finding(
+                &state.ui.code_workspace.veriloga,
+                &state.workspace.content.project_sources,
+            )
+        {
+            insert_finding(
+                &mut findings,
+                CheckAndSaveFindingLevel::Advisory,
+                "verilog-a interface",
+                &format!("{}:ports-differ-from-schematic", reference.key()),
+                message,
+            );
+        }
 
         match &execution_projection {
             Ok(projection) => {

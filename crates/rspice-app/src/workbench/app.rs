@@ -562,6 +562,14 @@ impl RSpiceApp {
         // to be on screen when the worker answers.
         crate::workbench::documents::code_workspace::poll_veriloga_compile(self);
         crate::workbench::documents::code_workspace::consume_veriloga_compile_request(self);
+        // Where the open module's symbol stands is measured here, once per
+        // library revision, so neither the editor nor the inspector parses it.
+        crate::workbench::documents::code_workspace::refresh_symbol_standing(
+            &mut self.state.ui.code_workspace.veriloga,
+            &self.state.library_manager,
+            &self.state.workspace.content.active_view,
+            self.state.workspace.content.active_view_type(),
+        );
         crate::workbench::documents::code_workspace::poll_automation_source_import(self);
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
         crate::workbench::documents::code_workspace::settle_pending_python_execute(self);
@@ -1457,6 +1465,9 @@ mod veriloga_design_tests;
 
 #[cfg(test)]
 mod veriloga_cell_source_tests;
+
+#[cfg(test)]
+mod veriloga_interface_tests;
 
 #[cfg(test)]
 mod tests {

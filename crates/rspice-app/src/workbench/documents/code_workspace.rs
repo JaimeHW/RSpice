@@ -14,6 +14,7 @@ mod source_files;
 mod source_search;
 mod veriloga;
 mod veriloga_inspector;
+mod veriloga_interface;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
 pub use super::{CodeSourceFileAction, CodeWorkspacePage};
@@ -73,7 +74,14 @@ pub(crate) use veriloga::{
 };
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
 pub(crate) use veriloga_inspector::{
-    show_veriloga_inspector, veriloga_compile_status, veriloga_diagnostics,
+    VerilogAInspectorAction, show_veriloga_inspector, symbol_drift_text, veriloga_compile_status,
+    veriloga_diagnostics, veriloga_receipt,
+};
+#[cfg(test)]
+pub(crate) use veriloga_interface::VerilogAInterfaceOutcome;
+pub(crate) use veriloga_interface::{
+    VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
+    interface_mismatch_detail, reconciled_symbol, refresh_symbol_standing, symbol_standing,
 };
 
 /// Who owns the source bundle a language's editor is showing.

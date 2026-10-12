@@ -8,10 +8,10 @@ use egui::Ui;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::documents::code_workspace;
+use crate::workbench::documents::code_workspace::{self, VerilogAInspectorAction};
 
-pub(super) fn show(ui: &mut Ui, app: &RSpiceApp) {
-    match code_workspace::selected_veriloga_source(app) {
+pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    let action = match code_workspace::selected_veriloga_source(app) {
         Ok(selected) => code_workspace::show_veriloga_inspector(
             ui,
             &app.state.ui.code_workspace.veriloga,
@@ -21,6 +21,12 @@ pub(super) fn show(ui: &mut Ui, app: &RSpiceApp) {
         ),
         // The editor states the same refusal in full; the inspector has no
         // module to describe and says why rather than drawing empty rows.
-        Err(error) => muted_inspector_copy(ui, &error),
+        Err(error) => {
+            muted_inspector_copy(ui, &error);
+            None
+        }
+    };
+    if let Some(VerilogAInspectorAction::UpdateSymbol) = action {
+        app.state.update_active_veriloga_symbol();
     }
 }

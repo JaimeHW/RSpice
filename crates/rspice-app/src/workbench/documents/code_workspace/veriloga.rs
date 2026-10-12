@@ -1087,6 +1087,33 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     {
                         app.state.workspace.content.project_sources_dirty = true;
                     }
+                    let receipt = match receipt_bundle.as_ref().map(ProjectSourceBundle::owner) {
+                        Some(ProjectSourceOwner::CellView { reference }) => {
+                            let applied = super::veriloga_interface::apply_compiled_interface(
+                                &mut app.state.library_manager,
+                                &app.state.workspace.content.schematic_buffers,
+                                reference,
+                                &report.abi,
+                            );
+                            if applied.wrote {
+                                app.state.workspace.content.project_metadata_dirty = true;
+                            }
+                            if let super::veriloga_interface::VerilogAInterfaceOutcome::Refused(
+                                reason,
+                            ) = &applied.outcome
+                            {
+                                app.state.push_user_message(ConsoleMessage::warning(format!(
+                                    "The module compiled, but its ports did not become the cell's interface: {reason}."
+                                )));
+                            }
+                            super::veriloga_interface::with_interface_outcome(
+                                receipt,
+                                reference,
+                                applied.outcome,
+                            )
+                        }
+                        _ => receipt,
+                    };
                     Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
                     app.state.ui.code_workspace.veriloga.last_failure_token = None;
                     app.state.ui.code_workspace.veriloga.receipt = Some(receipt);
@@ -1405,6 +1432,7 @@ fn receipt_projection(
         generated_rust: target_qualification(report.targets.get(RuntimeTarget::GeneratedRust)),
         diagnostics,
         compilation,
+        interface: None,
     })
 }
 

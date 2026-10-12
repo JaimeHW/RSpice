@@ -659,6 +659,7 @@ fn source_editor(
     {
         app.state.push_user_message(ConsoleMessage::warning(error));
     }
+    interface_strip(ui, &mut app.state, selected);
     let search_input =
         crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
             ui, editor_id,
@@ -786,6 +787,109 @@ fn source_editor(
             ui.ctx(),
             crate::workbench::documents::code_workspace::source_search_query_id(),
         );
+    }
+}
+
+/// The line under the toolbar that states a finding about the module's
+/// interface: its ports differ from the cell's schematic, they could not be
+/// written, or a hand-edited symbol has drifted from them, with Update symbol
+/// beside the drift. With nothing to say it takes no room at all.
+fn interface_strip(
+    ui: &mut Ui,
+    state: &mut crate::workbench::app_state::AppState,
+    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
+) {
+    use crate::workbench::documents::code_workspace::{
+        VerilogAInterfaceFinding, interface_finding, interface_mismatch_detail, symbol_drift_text,
+        veriloga_receipt,
+    };
+
+    let crate::state::ProjectSourceOwner::CellView { reference } = selected.bundle().owner() else {
+        return;
+    };
+    let t = Tokens::get(ui.ctx());
+    let messages = state.ui.messages();
+    let veriloga = &state.ui.code_workspace.veriloga;
+    let receipt = veriloga_receipt(veriloga, state.workspace.content.project.id(), selected);
+    let Some(finding) = interface_finding(veriloga, receipt, reference) else {
+        return;
+    };
+    let (text, tone, detail, offers_update) = match finding {
+        VerilogAInterfaceFinding::SchematicMismatch { schematic, module } => (
+            messages.text(MessageId::VerilogAInterfaceMismatchStrip),
+            t.color.err,
+            Some(interface_mismatch_detail(reference, schematic, module)),
+            false,
+        ),
+        VerilogAInterfaceFinding::Refused(reason) => (
+            messages.format(
+                MessageId::VerilogAInterfaceRefusedStrip,
+                &[("reason", reason)],
+            ),
+            t.color.warn,
+            None,
+            false,
+        ),
+        VerilogAInterfaceFinding::SymbolDrift(drift) => (
+            messages.format(
+                MessageId::VerilogASymbolStrip,
+                &[("drift", &symbol_drift_text(drift, messages))],
+            ),
+            t.color.warn,
+            None,
+            true,
+        ),
+    };
+    let (strip, response) = ui.allocate_exact_size(
+        Vec2::new(
+            ui.available_width(),
+            EDITOR_TOOLBAR_HEIGHT.max(t.metrics.ctl_h),
+        ),
+        Sense::hover(),
+    );
+    // The strip shares the toolbar's fill, so the rule above it is what keeps
+    // a finding from reading as a second row of tools.
+    ui.painter().rect_filled(strip, 0.0, t.color.bg_panel);
+    for y in [strip.top() + 0.5, strip.bottom()] {
+        ui.painter()
+            .hline(strip.x_range(), y, Stroke::new(1.0, t.color.border));
+    }
+    // The toolbar's left inset, and its status text's right edge.
+    let content = strip.shrink2(Vec2::new(8.0, 0.0));
+    let mut actions = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_max(
+                content.min,
+                egui::pos2(content.right() - EDITOR_SCROLLBAR_INSET, content.bottom()),
+            ))
+            .layout(Layout::right_to_left(Align::Center)),
+    );
+    let update = offers_update
+        && Button::new(&messages.text(MessageId::VerilogAUpdateSymbol))
+            .show(&mut actions)
+            .clicked();
+    let text_right = actions.min_rect().left().min(content.right()) - 8.0;
+    let icon = egui::Rect::from_center_size(
+        egui::pos2(content.left() + 7.0, content.center().y),
+        Vec2::splat(14.0),
+    );
+    crate::workbench::design_system::WorkbenchIcon::Warning.paint(ui.painter(), icon, tone);
+    let text_clip = egui::Rect::from_min_max(
+        egui::pos2(icon.right() + 7.0, strip.top()),
+        egui::pos2(text_right.max(icon.right() + 7.0), strip.bottom()),
+    );
+    ui.painter().with_clip_rect(text_clip).text(
+        egui::pos2(text_clip.left(), strip.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        tone,
+    );
+    if let Some(detail) = detail {
+        response.on_hover_text(detail);
+    }
+    if update {
+        state.update_active_veriloga_symbol();
     }
 }
 

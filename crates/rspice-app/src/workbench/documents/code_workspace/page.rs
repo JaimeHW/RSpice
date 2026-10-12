@@ -184,6 +184,9 @@ pub struct VerilogACompileReceipt {
     pub wasm_interpreter: TargetQualification,
     pub generated_rust: TargetQualification,
     pub diagnostics: Arc<super::CodeDiagnosticCollection>,
+    /// What this compile did to its cell's interface. `None` for a compile
+    /// that was not a cell view's published result.
+    pub interface: Option<super::veriloga_interface::VerilogAInterfaceOutcome>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -221,6 +224,8 @@ pub struct VerilogAWorkbenchState {
     pub receipt: Option<VerilogACompileReceipt>,
     pub last_failure: Arc<super::CodeDiagnosticCollection>,
     pub last_failure_token: Option<VerilogASourceOperationToken>,
+    /// Where the open view's cell symbol stands against its interface.
+    pub symbol_standing: super::veriloga_interface::VerilogASymbolStanding,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
