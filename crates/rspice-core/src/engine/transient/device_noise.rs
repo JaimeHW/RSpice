@@ -4,8 +4,9 @@
 //! `.TRAN … NOISEFMAX=f` runs an ordinary transient with one extra current
 //! between the terminals of every noise mechanism the device models export —
 //! the same mechanisms `.NOISE` sums, collected by the same code
-//! ([`Engine::try_collect_noise_sources`]), so nothing here invents a density.
-//! This is Spectre's `tran noisefmax=…`.
+//! ([`Engine::try_collect_noise_sources`] for native devices and
+//! [`processes::collect_noise_processes`] for Verilog-A), so nothing here
+//! invents a density. This is Spectre's `tran noisefmax=…`.
 //!
 //! # What is injected
 //!
@@ -21,6 +22,13 @@
 //! solution at every accepted step, which is what makes the injected noise
 //! track the instantaneous bias instead of the `t = 0` operating point.
 //!
+//! A Verilog-A noise function is one *process* (LRM 2.4 §4.6.4.6): one call
+//! of `white_noise`, `flicker_noise`, `noise_table` or `noise_table_log` in
+//! one instance. Its value may reach several circuit equations, so it is
+//! injected at each of them with that injection's own gain, all from one
+//! train: the contributions of one call are coherent, and two calls are
+//! independent even when they share a name.
+//!
 //! Two shapes of density cover every mechanism that can be rendered:
 //!
 //! * **Frequency-flat** — thermal (`4kT/R`), shot (`2qI`), an explicit
@@ -30,9 +38,9 @@
 //!   total mean square `S·fmax` exact.
 //!
 //! * **`A/f^ef`** — every flicker mechanism, including the BSIM3 and BSIM4
-//!   physical channel-flicker models, whose densities are also exactly
-//!   proportional to `f^-ef`. The unit process is the Kasdin
-//!   fractional-integration sequence already used by `TRNOISE`
+//!   physical channel-flicker models and Verilog-A `flicker_noise`, whose
+//!   densities are exactly proportional to `f^-ef`. The unit process is the
+//!   Kasdin fractional-integration sequence already used by `TRNOISE`
 //!   ([`super::noise::kasdin_one_over_f`], ngspice's `f_alpha` construction in
 //!   `src/frontend/trannoise/1-f-code.c:44-53`, whose `Q_d` is the standard
 //!   deviation of the white input), driven by white noise of variance
@@ -53,15 +61,25 @@
 //!   interpolates raw amplitudes — so there is no ngspice normalization to
 //!   agree with; only the generator is shared.
 //!
+//! A train is drawn once from the run seed and a key naming the mechanism,
+//! so its samples depend only on that key and the sample index. The spectral
+//! operand a train was drawn for — a flicker exponent — is frozen for the
+//! run, and a bias that moves it refuses the run by name rather than
+//! rendering a spectrum the model no longer states.
+//!
 //! # What is refused
 //!
-//! A mechanism whose density is neither flat nor a power law cannot be
-//! rendered from what the model states, and guessing the missing degree of
-//! freedom would be inventing physics. Those are refused by name rather than
-//! approximated:
+//! A mechanism whose density cannot be rendered from what the model states is
+//! refused by name rather than approximated, because guessing the missing
+//! degree of freedom would be inventing physics:
 //!
 //! * a tabulated density (Verilog-A `noise_table`), which is an arbitrary
 //!   spectrum;
+//! * a Verilog-A process whose injection gain depends on frequency — noise the
+//!   module shapes through `ddt`, `idt` or `laplace_*` — is refused as
+//!   `analysis.tran.noise.shaped_process`, and one from a module carrying
+//!   `absdelay`, `zi_*` or `idtmod`, which no finite-state realization
+//!   represents, as `analysis.tran.noise.non_rational_shaping`;
 //! * burst/popcorn noise, a Lorentzian plateau `P0` with corner `fb`: a
 //!   random-telegraph process reproduces it exactly, but `(P0, fb)` fixes only
 //!   two of its three parameters, and choosing the third is an assumption the
@@ -74,6 +92,8 @@
 //!
 //! A device with no noise model contributes nothing, silently, exactly as in
 //! `.NOISE`.
+
+pub(in crate::engine) mod processes;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -88,11 +108,16 @@ use crate::circuit::device_noise::{
     InjectedNoiseSource, NoiseInjection, NoiseTrain, TransientDeviceNoise,
 };
 use crate::config::SpiceDialect;
+use crate::engine::noise::CollectedNoiseSources;
 use crate::engine::{Engine, SimulationError, UnsupportedCapabilityError};
 use crate::identity::AnalysisKind;
 use crate::netlist::TransientNoiseConfig;
 use crate::numerics::fnv1a;
 use crate::{CircuitData, Value};
+use processes::{
+    CollectedNoiseProcess, NoiseProcessKey, NoiseProcessSpectrum, collect_noise_processes,
+    has_structural_noise_processes,
+};
 
 /// Total materialized samples one run may hold, across every source.
 ///
@@ -108,6 +133,23 @@ const MAX_TOTAL_MATERIALIZED_SAMPLES: usize = 1 << 24;
 /// power grows faster than any finite record can represent and the "lowest
 /// represented frequency" stops meaning anything.
 const MAX_FLICKER_EXPONENT: Value = 2.0;
+
+/// Charge `total` materialized samples against a run's remaining allowance.
+fn charge_materialized_budget(
+    budget: &mut usize,
+    total: usize,
+    describe: &str,
+) -> Result<(), SimulationError> {
+    if total > *budget {
+        return Err(SimulationError::Circuit(format!(
+            "transient noise materialized trains exceed the {MAX_TOTAL_MATERIALIZED_SAMPLES}-sample \
+             budget at source '{describe}'. Raise NOISEFMIN, lower NOISEFMAX, or shorten the \
+             transient."
+        )));
+    }
+    *budget -= total;
+    Ok(())
+}
 
 /// How one mechanism's amplitude is derived from its spectral density.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,25 +173,8 @@ fn rendering_law(source: &NoiseSource) -> Result<Option<AmplitudeLaw>, String> {
         }
         NoiseSourceType::Flicker
         | NoiseSourceType::Bsim3Flicker
-        | NoiseSourceType::Bsim4Flicker => {
-            let ef = source.ef;
-            if !ef.is_finite() || !(0.0..=MAX_FLICKER_EXPONENT).contains(&ef) {
-                return Err(format!(
-                    "transient noise cannot render '{named}' with a 1/f exponent of {ef}; the \
-                     fractional integrator represents 0 to {MAX_FLICKER_EXPONENT}"
-                ));
-            }
-            Ok(Some(if ef == 0.0 {
-                AmplitudeLaw::Flat
-            } else {
-                AmplitudeLaw::PowerLaw
-            }))
-        }
-        NoiseSourceType::Table => Err(format!(
-            "transient noise cannot render '{named}': a tabulated spectral density is neither \
-             frequency-flat nor a power law, and rendering it as either would report a spectrum \
-             the model does not state. Use .NOISE for this device."
-        )),
+        | NoiseSourceType::Bsim4Flicker => flicker_law(source.ef, &named).map(Some),
+        NoiseSourceType::Table => Err(tabulated_refusal(&named)),
         NoiseSourceType::Burst => Err(format!(
             "transient noise cannot render '{named}': its Lorentzian plateau and corner \
              frequency fix two of the three parameters of the random-telegraph process that \
@@ -160,7 +185,87 @@ fn rendering_law(source: &NoiseSource) -> Result<Option<AmplitudeLaw>, String> {
     }
 }
 
-/// What the accepted-step refresh needs to re-derive one injected amplitude.
+/// The law a `1/f^ef` density renders with, or why it cannot.
+fn flicker_law(ef: Value, named: &str) -> Result<AmplitudeLaw, String> {
+    if !ef.is_finite() || !(0.0..=MAX_FLICKER_EXPONENT).contains(&ef) {
+        return Err(format!(
+            "transient noise cannot render '{named}' with a 1/f exponent of {ef}; the \
+             fractional integrator represents 0 to {MAX_FLICKER_EXPONENT}"
+        ));
+    }
+    Ok(if ef == 0.0 {
+        AmplitudeLaw::Flat
+    } else {
+        AmplitudeLaw::PowerLaw
+    })
+}
+
+/// Why a tabulated density is not rendered.
+fn tabulated_refusal(named: &str) -> String {
+    format!(
+        "transient noise cannot render '{named}': a tabulated spectral density is neither \
+         frequency-flat nor a power law, and rendering it as either would report a spectrum \
+         the model does not state. Use .NOISE for this device."
+    )
+}
+
+/// The law one Verilog-A process renders with.
+fn process_law(process: &CollectedNoiseProcess) -> Result<AmplitudeLaw, SimulationError> {
+    match &process.spectrum {
+        NoiseProcessSpectrum::White => Ok(AmplitudeLaw::Flat),
+        NoiseProcessSpectrum::Flicker { exponent } => {
+            flicker_law(*exponent, &process.describe()).map_err(SimulationError::Circuit)
+        }
+        NoiseProcessSpectrum::Table { .. } => Err(SimulationError::Circuit(tabulated_refusal(
+            &process.describe(),
+        ))),
+    }
+}
+
+/// The spectral operands a train was drawn for.
+///
+/// A train is materialized once, so the exponent it realizes has to stay
+/// what it was for the whole run. A refresh that finds it moved refuses
+/// rather than injecting a spectrum the model no longer states.
+#[derive(Clone, Debug, PartialEq)]
+enum FrozenOperands {
+    /// Nothing about the shape can move: a flat density.
+    None,
+    /// A `1/f^ef` exponent, including `ef = 0`.
+    Exponent(Value),
+}
+
+impl FrozenOperands {
+    fn of_source(source: &NoiseSource) -> Self {
+        match source.noise_type {
+            NoiseSourceType::Flicker
+            | NoiseSourceType::Bsim3Flicker
+            | NoiseSourceType::Bsim4Flicker => Self::Exponent(source.ef),
+            _ => Self::None,
+        }
+    }
+
+    fn of_process(spectrum: &NoiseProcessSpectrum) -> Self {
+        match spectrum {
+            NoiseProcessSpectrum::Flicker { exponent } => Self::Exponent(*exponent),
+            NoiseProcessSpectrum::White | NoiseProcessSpectrum::Table { .. } => Self::None,
+        }
+    }
+
+    /// Whether `now` differs from the frozen operands by more than `reltol`.
+    fn moved(&self, now: &Self, reltol: Value) -> bool {
+        let apart = |before: Value, after: Value| {
+            (after - before).abs() > reltol * after.abs().max(before.abs())
+        };
+        match (self, now) {
+            (Self::None, Self::None) => false,
+            (Self::Exponent(before), Self::Exponent(after)) => apart(*before, *after),
+            _ => true,
+        }
+    }
+}
+
+/// What the accepted-step refresh needs to re-derive one native amplitude.
 struct AmplitudeEntry {
     identity: NoiseSourceIdentity,
     noise_type: NoiseSourceType,
@@ -170,6 +275,7 @@ struct AmplitudeEntry {
     /// Absolute temperature the model reports for this mechanism, when it
     /// reports one; otherwise the analysis temperature is used.
     absolute_temperature: Option<Value>,
+    frozen: FrozenOperands,
 }
 
 impl AmplitudeEntry {
@@ -186,16 +292,128 @@ impl AmplitudeEntry {
     }
 }
 
+/// What the accepted-step refresh needs to re-derive one Verilog-A process.
+struct ProcessEntry {
+    key: NoiseProcessKey,
+    mechanism: String,
+    law: AmplitudeLaw,
+    frozen: FrozenOperands,
+    /// The injection endpoints whose gains were proven frequency-flat.
+    classified: Vec<(usize, usize)>,
+    /// Where the process's injected source sits in the installed plan.
+    slot: usize,
+}
+
+impl ProcessEntry {
+    /// Whether this evaluation is the structure classification proved flat.
+    fn covers(&self, process: &CollectedNoiseProcess) -> bool {
+        process.injections.len() == self.classified.len()
+            && process.injections.iter().zip(&self.classified).all(
+                |(injection, &(node_pos, node_neg))| {
+                    injection.node_pos == node_pos
+                        && injection.node_neg == node_neg
+                        && injection.gain.im == 0.0
+                },
+            )
+    }
+}
+
+/// The sample grid and band one transient-noise run renders on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::engine) struct NoiseGrid {
+    /// Highest represented frequency, `NOISEFMAX`.
+    pub(in crate::engine) fmax: Value,
+    /// Lowest represented frequency: `NOISEFMIN`, else `1/tstop`.
+    pub(in crate::engine) fmin: Value,
+    /// Sample interval, `1/(2·fmax)`.
+    pub(in crate::engine) nt: Value,
+    /// Held samples covering the run.
+    pub(in crate::engine) sample_count: usize,
+}
+
+impl NoiseGrid {
+    /// Resolve a transient card's noise request against its stop time.
+    pub(in crate::engine) fn resolve(
+        config: &TransientNoiseConfig,
+        tstop: Value,
+    ) -> Result<Self, SimulationError> {
+        config.validate().map_err(SimulationError::Circuit)?;
+        if !(tstop.is_finite() && tstop > 0.0) {
+            return Err(SimulationError::Circuit(format!(
+                "transient noise requires a finite positive stop time, found {tstop}"
+            )));
+        }
+        let nt = 1.0 / (2.0 * config.fmax);
+        if !(nt.is_finite() && nt > 0.0) {
+            return Err(SimulationError::Circuit(format!(
+                "NOISEFMAX={} does not give a representable sample interval",
+                config.fmax
+            )));
+        }
+        let sample_count = checked_noise_sample_count(
+            "transient noise",
+            "the .TRAN card",
+            tstop / nt,
+            1,
+            "tstop·2·NOISEFMAX",
+            "Lower NOISEFMAX or shorten the transient.",
+        )
+        .map_err(SimulationError::Circuit)?;
+        Ok(Self {
+            fmax: config.fmax,
+            fmin: config.fmin.unwrap_or(1.0 / tstop),
+            nt,
+            sample_count,
+        })
+    }
+
+    /// The frequencies a process's injection gains are compared at to prove
+    /// them frequency-flat: the band's two ends and their geometric mean.
+    ///
+    /// Frequency enters a gain program only through `ddt`, `idt`, `laplace_*`,
+    /// `zi_*` and `absdelay`, so a gain that is identical and real at all
+    /// three carries none of them on its path.
+    fn classification_frequencies(&self) -> [Value; 3] {
+        [self.fmin, (self.fmin * self.fmax).sqrt(), self.fmax]
+    }
+}
+
+/// What a transient-noise run renders, decided before any train is drawn.
+///
+/// This is the `TransientNoiseRenderable` capability gate: building it walks
+/// every mechanism the run would inject and refuses the first one that
+/// cannot be rendered, naming it.
+pub(in crate::engine) struct TransientNoiseRenderPlan {
+    /// The native catalog, with this run's physical constants applied.
+    native: CollectedNoiseSources,
+    /// The law each native elementary source renders with, by position;
+    /// `None` injects nothing.
+    native_laws: Vec<Option<AmplitudeLaw>>,
+    /// Every active Verilog-A process, proven frequency-flat, with its law.
+    processes: Vec<(CollectedNoiseProcess, AmplitudeLaw)>,
+    /// Whether the circuit holds Verilog-A processes at all, active or not.
+    tracks_processes: bool,
+}
+
 /// The run-local half of transient noise: everything needed to refresh the
 /// amplitudes the circuit stamps.
 pub(super) struct TransientNoiseRuntime {
     dialect: SpiceDialect,
     ambient_temperature: Value,
     scale: Value,
-    fmax: Value,
+    grid: NoiseGrid,
     /// The seed the whole run was derived from, for the run log.
     seed: u64,
+    /// Native mechanisms; their sources lead the installed plan, in order.
     entries: Vec<AmplitudeEntry>,
+    /// Verilog-A processes, each owning one source of the installed plan.
+    processes: Vec<ProcessEntry>,
+    process_index: HashMap<NoiseProcessKey, usize>,
+    /// Whether the circuit holds Verilog-A processes, so a refresh has to
+    /// look for processes that become active after the operating point.
+    tracks_processes: bool,
+    /// What remains of the run's materialized-sample allowance.
+    materialized_budget: usize,
     /// Newton's own statement of when two solutions are the same bias.
     reltol: Value,
     node_abstol: Value,
@@ -211,7 +429,7 @@ pub(super) struct TransientNoiseRuntime {
 impl TransientNoiseRuntime {
     /// How many mechanisms are injected.
     pub(super) fn source_count(&self) -> usize {
-        self.entries.len()
+        self.entries.len() + self.processes.len()
     }
 
     /// The seed every injected stream was derived from.
@@ -254,40 +472,55 @@ impl TransientNoiseRuntime {
 
     /// Re-derive every injected amplitude from an accepted solution.
     ///
+    /// Called at accepted points only — the ordinary acceptance and the
+    /// force-accepted one alike — so a rejected step restamps exactly the
+    /// amplitudes and gains the last accepted point left, and the samples
+    /// themselves are functions of their index alone: nothing a rejection
+    /// touches needs restoring.
+    ///
     /// Re-collecting the catalog is what makes the density the device model's
     /// own at the present bias rather than a frozen operating-point value.
     /// The catalog's order is a function of the circuit's fixed device arrays,
     /// so the common case matches position for position; the structural check
-    /// in [`Self::apply`] is what proves that rather than assuming it, and a
-    /// mechanism whose bias-dependent guard has flipped falls back to a keyed
-    /// match.
+    /// in [`Self::apply_native`] is what proves that rather than assuming it,
+    /// and a mechanism whose bias-dependent guard has flipped falls back to a
+    /// keyed match.
     pub(super) fn refresh(
         &mut self,
         circuit: &mut CircuitData,
         solution: &[Value],
+        time: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<(), SimulationError> {
-        if self.entries.is_empty() || !self.bias_moved(solution) {
+        if (self.entries.is_empty() && !self.tracks_processes) || !self.bias_moved(solution) {
             return Ok(());
         }
-        let mut collected = Engine::try_collect_noise_sources(circuit, solution, self.dialect)?;
-        Engine::configure_noise_physical_constants(
-            &mut collected.elementary,
-            &mut collected.correlated,
-            self.dialect,
-        );
-        self.apply(circuit, &collected.elementary)?;
+        if !self.entries.is_empty() {
+            let mut collected = Engine::try_collect_noise_sources(circuit, solution, self.dialect)?;
+            Engine::configure_noise_physical_constants(
+                &mut collected.elementary,
+                &mut collected.correlated,
+                self.dialect,
+            );
+            self.apply_native(circuit, &collected.elementary, time)?;
+        }
+        if self.tracks_processes {
+            let processes = collect_noise_processes(circuit, solution, self.grid.fmax)?;
+            self.apply_processes(circuit, solution, processes, time, abort)?;
+        }
         self.reference.clear();
         self.reference.extend_from_slice(solution);
         self.refreshes = self.refreshes.saturating_add(1);
         Ok(())
     }
 
-    /// Re-derive the amplitudes from a catalog the caller has already
+    /// Re-derive the native amplitudes from a catalog the caller has already
     /// collected and given this run's physical constants.
-    fn apply(
+    fn apply_native(
         &self,
         circuit: &mut CircuitData,
         collected: &[NoiseSource],
+        time: Value,
     ) -> Result<(), SimulationError> {
         let positional = collected.len() == self.entries.len()
             && collected.iter().zip(&self.entries).all(|(source, entry)| {
@@ -325,22 +558,29 @@ impl TransientNoiseRuntime {
                 amplitudes.push(0.0);
                 continue;
             };
+            if entry
+                .frozen
+                .moved(&FrozenOperands::of_source(source), self.reltol)
+            {
+                return Err(bias_dependent_spectrum_refusal(
+                    &entry.identity.device,
+                    None,
+                    &describe(&entry.identity),
+                    time,
+                ));
+            }
             amplitudes.push(self.amplitude(source, entry)?);
         }
 
-        let Some(plan) = circuit.transient_device_noise_mut() else {
-            return Err(SimulationError::Circuit(
-                "transient noise amplitudes were refreshed without an installed injection plan"
-                    .to_string(),
-            ));
-        };
+        let plan = installed_plan(circuit)?;
         for (injected, amplitude) in plan.sources_mut().iter_mut().zip(amplitudes) {
             injected.amplitude = amplitude;
         }
         Ok(())
     }
 
-    /// The complete multiplier one mechanism's unit process is scaled by.
+    /// The complete multiplier one native mechanism's unit process is scaled
+    /// by.
     fn amplitude(
         &self,
         source: &NoiseSource,
@@ -361,17 +601,338 @@ impl TransientNoiseRuntime {
                 ))
             })?;
         let coefficient = match entry.law {
-            AmplitudeLaw::Flat => density * self.fmax,
+            AmplitudeLaw::Flat => density * self.grid.fmax,
             AmplitudeLaw::PowerLaw => density,
         };
+        self.checked_amplitude(coefficient, &describe(&entry.identity))
+    }
+
+    /// `NOISESCALE · sqrt(coefficient)`, refusing a power no density has.
+    fn checked_amplitude(&self, coefficient: Value, named: &str) -> Result<Value, SimulationError> {
         if !coefficient.is_finite() || coefficient < 0.0 {
             return Err(SimulationError::Circuit(format!(
-                "transient noise source '{}' produced a {coefficient} noise power",
-                describe(&entry.identity)
+                "transient noise source '{named}' produced a {coefficient} noise power"
             )));
         }
         Ok(self.scale * coefficient.sqrt())
     }
+
+    /// The amplitude one process's train carries at a power argument.
+    fn process_amplitude(
+        &self,
+        law: AmplitudeLaw,
+        psd: Value,
+        named: &str,
+    ) -> Result<Value, SimulationError> {
+        let coefficient = match law {
+            AmplitudeLaw::Flat => psd * self.grid.fmax,
+            AmplitudeLaw::PowerLaw => psd,
+        };
+        self.checked_amplitude(coefficient, named)
+    }
+
+    /// Draw one mechanism's unit train.
+    fn draw_train(
+        &mut self,
+        law: AmplitudeLaw,
+        operands: &FrozenOperands,
+        seed: u64,
+        named: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<NoiseTrain, SimulationError> {
+        let grid = self.grid;
+        Ok(match (law, operands) {
+            (AmplitudeLaw::Flat, _) => NoiseTrain::Flat { stream_seed: seed },
+            (AmplitudeLaw::PowerLaw, FrozenOperands::Exponent(ef)) => NoiseTrain::Materialized {
+                samples: Arc::new(Engine::flicker_unit_train(
+                    *ef,
+                    grid,
+                    seed,
+                    &mut self.materialized_budget,
+                    named,
+                    abort,
+                )?),
+            },
+            _ => {
+                return Err(SimulationError::Circuit(format!(
+                    "transient noise source '{named}' has no operands for its rendering law"
+                )));
+            }
+        })
+    }
+
+    /// The source one process injects: its train and every injection, with
+    /// the amplitude and gains of this evaluation.
+    fn process_source(
+        &mut self,
+        process: &CollectedNoiseProcess,
+        law: AmplitudeLaw,
+        abort: &dyn AbortSignal,
+    ) -> Result<(InjectedNoiseSource, ProcessEntry), SimulationError> {
+        let named = process.describe();
+        let frozen = FrozenOperands::of_process(&process.spectrum);
+        let seed = process_stream_seed(self.seed, process);
+        let train = self.draw_train(law, &frozen, seed, &named, abort)?;
+        let amplitude = self.process_amplitude(law, process.psd, &named)?;
+        let source = InjectedNoiseSource {
+            train,
+            amplitude,
+            injections: process_injections(process),
+        };
+        let entry = ProcessEntry {
+            key: process.key(),
+            mechanism: process.mechanism.clone(),
+            law,
+            frozen,
+            classified: process
+                .injections
+                .iter()
+                .map(|injection| (injection.node_pos, injection.node_neg))
+                .collect(),
+            slot: usize::MAX,
+        };
+        Ok((source, entry))
+    }
+
+    /// Re-derive every process's amplitude and gains, and start injecting
+    /// any process that has become active since the last accepted point.
+    fn apply_processes(
+        &mut self,
+        circuit: &mut CircuitData,
+        solution: &[Value],
+        collected: Vec<CollectedNoiseProcess>,
+        time: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), SimulationError> {
+        let mut active = vec![false; self.processes.len()];
+        let mut known = Vec::with_capacity(collected.len());
+        let mut fresh = Vec::new();
+        for process in collected {
+            match self.process_index.get(&process.key()) {
+                Some(&index) => {
+                    let entry = &self.processes[index];
+                    if entry
+                        .frozen
+                        .moved(&FrozenOperands::of_process(&process.spectrum), self.reltol)
+                    {
+                        return Err(bias_dependent_spectrum_refusal(
+                            &process.instance,
+                            Some(&process.module),
+                            &entry.mechanism,
+                            time,
+                        ));
+                    }
+                    active[index] = true;
+                    known.push((index, process));
+                }
+                None => fresh.push(process),
+            }
+        }
+
+        // A process whose injection structure is not the one proven flat —
+        // an injection switched on by the bias, or one that turned complex —
+        // and a process seen for the first time are classified before they
+        // inject anything.
+        let unproven: Vec<&CollectedNoiseProcess> = known
+            .iter()
+            .filter(|(index, process)| !self.processes[*index].covers(process))
+            .map(|(_, process)| process)
+            .chain(fresh.iter())
+            .collect();
+        classify_processes(circuit, solution, &self.grid, &unproven, time)?;
+
+        let mut updates = Vec::with_capacity(known.len());
+        for (index, process) in &known {
+            let entry = &self.processes[*index];
+            let amplitude = self.process_amplitude(entry.law, process.psd, &process.describe())?;
+            updates.push((entry.slot, amplitude, process_injections(process)));
+        }
+        for (index, process) in &known {
+            self.processes[*index].classified = process
+                .injections
+                .iter()
+                .map(|injection| (injection.node_pos, injection.node_neg))
+                .collect();
+        }
+        let mut added = Vec::with_capacity(fresh.len());
+        for process in &fresh {
+            let law = process_law(process)?;
+            added.push(self.process_source(process, law, abort)?);
+        }
+
+        let silent: Vec<usize> = self
+            .processes
+            .iter()
+            .zip(&active)
+            .filter(|(_, active)| !**active)
+            .map(|(entry, _)| entry.slot)
+            .collect();
+        let plan = installed_plan(circuit)?;
+        let sources = plan.sources_mut();
+        for (slot, amplitude, injections) in updates {
+            if let Some(source) = sources.get_mut(slot) {
+                source.amplitude = amplitude;
+                source.injections = injections;
+            }
+        }
+        // An inactive process injects nothing, which is what its own model
+        // reports at this bias.
+        for slot in silent {
+            if let Some(source) = sources.get_mut(slot) {
+                source.amplitude = 0.0;
+            }
+        }
+        for (source, mut entry) in added {
+            entry.slot = plan.push_source(source);
+            self.process_index
+                .insert(entry.key.clone(), self.processes.len());
+            self.processes.push(entry);
+        }
+        Ok(())
+    }
+}
+
+/// The installed injection plan, which every refresh writes to.
+fn installed_plan(circuit: &mut CircuitData) -> Result<&mut TransientDeviceNoise, SimulationError> {
+    circuit.transient_device_noise_mut().ok_or_else(|| {
+        SimulationError::Circuit(
+            "transient noise amplitudes were refreshed without an installed injection plan"
+                .to_string(),
+        )
+    })
+}
+
+/// The circuit injections of one process at this evaluation.
+///
+/// Classification has proven every gain real, so the real part is the gain.
+fn process_injections(process: &CollectedNoiseProcess) -> Vec<NoiseInjection> {
+    process
+        .injections
+        .iter()
+        .map(|injection| NoiseInjection {
+            node_pos: injection.node_pos,
+            node_neg: injection.node_neg,
+            gain: injection.gain.re,
+        })
+        .collect()
+}
+
+/// Prove every candidate process frequency-flat, or refuse the first that is
+/// not.
+///
+/// A process is flat when each of its injection gains is real and identical
+/// at both ends of the band and at their geometric mean. The candidates were
+/// evaluated at `fmax`; the other two frequencies are collected here.
+fn classify_processes(
+    circuit: &CircuitData,
+    solution: &[Value],
+    grid: &NoiseGrid,
+    candidates: &[&CollectedNoiseProcess],
+    time: Value,
+) -> Result<(), SimulationError> {
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let [low, middle, _] = grid.classification_frequencies();
+    let at_low = collect_noise_processes(circuit, solution, low)?;
+    let at_middle = collect_noise_processes(circuit, solution, middle)?;
+    let index = |processes: &[CollectedNoiseProcess]| {
+        processes
+            .iter()
+            .enumerate()
+            .map(|(position, process)| (process.key(), position))
+            .collect::<HashMap<_, _>>()
+    };
+    let (low_index, middle_index) = (index(&at_low), index(&at_middle));
+    for candidate in candidates {
+        let key = candidate.key();
+        let same_everywhere = [(&at_low, &low_index), (&at_middle, &middle_index)]
+            .iter()
+            .all(|(processes, positions)| {
+                positions.get(&key).is_some_and(|&position| {
+                    let other = &processes[position];
+                    other.injections.len() == candidate.injections.len()
+                        && other.injections.iter().zip(&candidate.injections).all(
+                            |(left, right)| {
+                                left.node_pos == right.node_pos
+                                    && left.node_neg == right.node_neg
+                                    && left.gain == right.gain
+                            },
+                        )
+                })
+            });
+        let real = candidate
+            .injections
+            .iter()
+            .all(|injection| injection.gain.im == 0.0);
+        if !(same_everywhere && real) {
+            return Err(shaped_process_refusal(candidate, time));
+        }
+    }
+    Ok(())
+}
+
+/// The refusal for a process whose injection depends on frequency.
+fn shaped_process_refusal(process: &CollectedNoiseProcess, time: Value) -> SimulationError {
+    let at = if time > 0.0 {
+        format!(" at t={time:e} s")
+    } else {
+        String::new()
+    };
+    let (token, detail) = if process.non_rational_operators.is_empty() {
+        (
+            "analysis.tran.noise.shaped_process",
+            format!(
+                "transient noise cannot render noise process '{}' of instance '{}' (module \
+                 '{}'){at}: its injection gain depends on frequency, so the module shapes the \
+                 noise through ddt, idt or laplace_*, and this build renders only noise whose \
+                 injection is frequency-flat. Use .NOISE for this instance.",
+                process.mechanism, process.instance, process.module
+            ),
+        )
+    } else {
+        (
+            "analysis.tran.noise.non_rational_shaping",
+            format!(
+                "transient noise cannot render noise process '{}' of instance '{}' (module \
+                 '{}'){at}: its injection gain depends on frequency and the module carries {}, \
+                 which no finite-state realization represents. Use .NOISE for this instance.",
+                process.mechanism,
+                process.instance,
+                process.module,
+                process.non_rational_operators.join(", ")
+            ),
+        )
+    };
+    UnsupportedCapabilityError::new(token, detail)
+        .for_analysis_kind(AnalysisKind::Tran)
+        .for_instance(process.instance.clone())
+        .for_module(process.module.clone())
+        .into()
+}
+
+/// The refusal for a mechanism whose spectral operand moved with the bias.
+fn bias_dependent_spectrum_refusal(
+    instance: &str,
+    module: Option<&str>,
+    mechanism: &str,
+    time: Value,
+) -> SimulationError {
+    let mut refusal = UnsupportedCapabilityError::new(
+        "analysis.tran.noise.bias_dependent_spectrum",
+        format!(
+            "transient noise cannot follow noise mechanism '{mechanism}' of instance \
+             '{instance}' at t={time:e} s: its spectral exponent changed with the bias, \
+             and a rendered train realizes the shape it was drawn for. Use .NOISE at the \
+             operating points of interest."
+        ),
+    )
+    .for_analysis_kind(AnalysisKind::Tran)
+    .for_instance(instance);
+    if let Some(module) = module {
+        refusal = refusal.for_module(module);
+    }
+    refusal.into()
 }
 
 /// A device and mechanism, as a diagnostic names it.
@@ -382,7 +943,7 @@ fn describe(identity: &NoiseSourceIdentity) -> String {
     }
 }
 
-/// The stream seed of one mechanism.
+/// The stream seed of one native mechanism.
 ///
 /// Content-addressed so that reruns are bit-identical and adding an unrelated
 /// device cannot reshuffle another device's train: the run seed is mixed with
@@ -409,6 +970,24 @@ fn stream_seed(
     run_seed ^ fnv1a(&key)
 }
 
+/// The stream seed of one Verilog-A process.
+///
+/// The same key shape as a native mechanism's: the instance, the canonical
+/// mechanism, the noise-function family and the call's own `process_id`,
+/// which is what keeps two calls with one name independent. Nothing in it
+/// depends on node numbering, thread count or whether the module runs on the
+/// interpreter or a compiled route.
+fn process_stream_seed(run_seed: u64, process: &CollectedNoiseProcess) -> u64 {
+    let key = format!(
+        "{}|{}|{}|{}",
+        process.instance.to_ascii_uppercase(),
+        process.mechanism,
+        process.spectrum.kind_label(),
+        process.process_id,
+    );
+    run_seed ^ fnv1a(&key)
+}
+
 impl Engine {
     /// The refusal a checkpointed or resumed transient-noise run receives.
     ///
@@ -428,6 +1007,73 @@ impl Engine {
         .into()
     }
 
+    /// Decide how every mechanism of a transient-noise run is rendered, and
+    /// refuse the first that cannot be.
+    ///
+    /// The native catalog and the Verilog-A processes are both evaluated at
+    /// `solution`; a process is admitted only once its injection gains are
+    /// proven frequency-flat across the band.
+    pub(in crate::engine) fn transient_noise_render_plan(
+        &self,
+        circuit: &CircuitData,
+        solution: &[Value],
+        grid: &NoiseGrid,
+    ) -> Result<TransientNoiseRenderPlan, SimulationError> {
+        let mut native =
+            Self::try_collect_noise_sources(circuit, solution, self.config.spice_dialect)?;
+        Self::configure_noise_physical_constants(
+            &mut native.elementary,
+            &mut native.correlated,
+            self.config.spice_dialect,
+        );
+        if !native.correlated.is_empty() {
+            let mut named: Vec<String> = native
+                .correlated
+                .iter()
+                .map(|pair| pair.identity.device.clone())
+                .collect();
+            named.sort_unstable();
+            named.dedup();
+            return Err(SimulationError::Circuit(format!(
+                "transient noise cannot inject correlated channel/gate thermal noise, which is \
+                 defined by a cross-spectrum rather than by independent currents: {}. Select \
+                 tnoiMod=0 or 1 on those models, or use .NOISE.",
+                named.join(", ")
+            )));
+        }
+        let matrix_rows = circuit.matrix_size();
+        let mut native_laws = Vec::with_capacity(native.elementary.len());
+        for source in &native.elementary {
+            if source.node_pos > matrix_rows || source.node_neg > matrix_rows {
+                return Err(SimulationError::Circuit(format!(
+                    "transient noise cannot inject '{}': its mechanism lives on a noise-only \
+                     private row that a transient does not solve for. Use .NOISE for that \
+                     device, or remove its distributed base resistance.",
+                    describe(&source.identity)
+                )));
+            }
+            native_laws.push(rendering_law(source).map_err(SimulationError::Circuit)?);
+        }
+
+        let tracks_processes = has_structural_noise_processes(circuit);
+        let mut processes = Vec::new();
+        if tracks_processes {
+            let collected = collect_noise_processes(circuit, solution, grid.fmax)?;
+            let candidates: Vec<&CollectedNoiseProcess> = collected.iter().collect();
+            classify_processes(circuit, solution, grid, &candidates, 0.0)?;
+            for process in collected {
+                let law = process_law(&process)?;
+                processes.push((process, law));
+            }
+        }
+        Ok(TransientNoiseRenderPlan {
+            native,
+            native_laws,
+            processes,
+            tracks_processes,
+        })
+    }
+
     /// Build the injection plan for a transient-noise run and install it on
     /// the circuit.
     ///
@@ -444,78 +1090,55 @@ impl Engine {
         options_seed: Option<u64>,
         abort: &dyn AbortSignal,
     ) -> Result<TransientNoiseRuntime, SimulationError> {
-        config.validate().map_err(SimulationError::Circuit)?;
-        if !(tstop.is_finite() && tstop > 0.0) {
-            return Err(SimulationError::Circuit(format!(
-                "transient noise requires a finite positive stop time, found {tstop}"
-            )));
-        }
+        let grid = NoiseGrid::resolve(&config, tstop)?;
         check_noise_abort(abort)?;
+        let plan = self.transient_noise_render_plan(circuit, solution, &grid)?;
 
-        let nt = 1.0 / (2.0 * config.fmax);
-        if !(nt.is_finite() && nt > 0.0) {
-            return Err(SimulationError::Circuit(format!(
-                "NOISEFMAX={} does not give a representable sample interval",
-                config.fmax
-            )));
-        }
-        let sample_count = checked_noise_sample_count(
-            "transient noise",
-            "the .TRAN card",
-            tstop / nt,
-            1,
-            "tstop·2·NOISEFMAX",
-            "Lower NOISEFMAX or shorten the transient.",
-        )
-        .map_err(SimulationError::Circuit)?;
-
-        let mut collected =
-            Self::try_collect_noise_sources(circuit, solution, self.config.spice_dialect)?;
-        Self::configure_noise_physical_constants(
-            &mut collected.elementary,
-            &mut collected.correlated,
-            self.config.spice_dialect,
-        );
-        if !collected.correlated.is_empty() {
-            let mut named: Vec<String> = collected
-                .correlated
-                .iter()
-                .map(|pair| pair.identity.device.clone())
-                .collect();
-            named.sort_unstable();
-            named.dedup();
-            return Err(SimulationError::Circuit(format!(
-                "transient noise cannot inject correlated channel/gate thermal noise, which is \
-                 defined by a cross-spectrum rather than by independent currents: {}. Select \
-                 tnoiMod=0 or 1 on those models, or use .NOISE.",
-                named.join(", ")
-            )));
-        }
-
-        let matrix_rows = circuit.matrix_size();
+        let convergence = &self.config.convergence_config;
+        let node_abstol = if convergence.voltage_abstol > 0.0 {
+            convergence.voltage_abstol
+        } else {
+            self.config.tolerance
+        };
         let run_seed = config.seed.or(options_seed).unwrap_or(DEFAULT_NOISE_SEED);
+        let mut runtime = TransientNoiseRuntime {
+            dialect: self.config.spice_dialect,
+            ambient_temperature: self.config.temperature,
+            scale: config.scale,
+            grid,
+            seed: run_seed,
+            entries: Vec::new(),
+            processes: Vec::new(),
+            process_index: HashMap::new(),
+            tracks_processes: plan.tracks_processes,
+            materialized_budget: MAX_TOTAL_MATERIALIZED_SAMPLES,
+            reltol: convergence.voltage_reltol,
+            node_abstol,
+            branch_abstol: convergence.current_abstol,
+            num_nodes: circuit.num_nodes(),
+            reference: Vec::new(),
+            refreshes: 1,
+        };
+
         let mut injected = Vec::new();
-        let mut entries = Vec::new();
-        let mut materialized_budget = MAX_TOTAL_MATERIALIZED_SAMPLES;
         let mut ordinals: HashMap<(String, Option<String>, NoiseSourceType), usize> =
             HashMap::new();
-        for (position, source) in collected.elementary.iter().enumerate() {
+        for (position, (source, law)) in plan
+            .native
+            .elementary
+            .iter()
+            .zip(&plan.native_laws)
+            .enumerate()
+        {
             if position.is_multiple_of(64) {
                 check_noise_abort(abort)?;
             }
-            let identity = &source.identity;
-            if source.node_pos > matrix_rows || source.node_neg > matrix_rows {
-                return Err(SimulationError::Circuit(format!(
-                    "transient noise cannot inject '{}': its mechanism lives on a noise-only \
-                     private row that a transient does not solve for. Use .NOISE for that \
-                     device, or remove its distributed base resistance.",
-                    describe(identity)
-                )));
-            }
-            let Some(law) = rendering_law(source).map_err(SimulationError::Circuit)? else {
+            let Some(law) = *law else {
                 continue;
             };
-            let absolute_temperature = collected
+            let identity = &source.identity;
+            let absolute_temperature = plan
+                .native
                 .elementary_absolute_temperatures
                 .get(position)
                 .copied()
@@ -529,67 +1152,41 @@ impl Engine {
                 .or_insert(0);
             let seed = stream_seed(run_seed, identity, source.noise_type, *ordinal);
             *ordinal += 1;
-            let train = match law {
-                AmplitudeLaw::Flat => NoiseTrain::Flat { stream_seed: seed },
-                AmplitudeLaw::PowerLaw => {
-                    let samples = Self::flicker_unit_train(
-                        source.ef,
-                        nt,
-                        sample_count,
-                        config.fmin.unwrap_or(1.0 / tstop),
-                        seed,
-                        &mut materialized_budget,
-                        identity,
-                        abort,
-                    )?;
-                    NoiseTrain::Materialized {
-                        samples: Arc::new(samples),
-                    }
-                }
-            };
+            let frozen = FrozenOperands::of_source(source);
+            let train = runtime.draw_train(law, &frozen, seed, &describe(identity), abort)?;
             injected.push(InjectedNoiseSource {
                 train,
                 amplitude: 0.0,
                 injections: vec![NoiseInjection::unit(source.node_pos, source.node_neg)],
             });
-            entries.push(AmplitudeEntry {
+            runtime.entries.push(AmplitudeEntry {
                 identity: identity.clone(),
                 noise_type: source.noise_type,
                 node_pos: source.node_pos,
                 node_neg: source.node_neg,
                 law,
                 absolute_temperature,
+                frozen,
             });
         }
+        for (process, law) in &plan.processes {
+            check_noise_abort(abort)?;
+            let (source, mut entry) = runtime.process_source(process, *law, abort)?;
+            entry.slot = injected.len();
+            injected.push(source);
+            runtime
+                .process_index
+                .insert(entry.key.clone(), runtime.processes.len());
+            runtime.processes.push(entry);
+        }
 
-        circuit.install_transient_device_noise(TransientDeviceNoise::new(
-            nt,
-            sample_count,
-            injected,
-        ));
-        let convergence = &self.config.convergence_config;
-        let node_abstol = if convergence.voltage_abstol > 0.0 {
-            convergence.voltage_abstol
-        } else {
-            self.config.tolerance
-        };
-        let mut runtime = TransientNoiseRuntime {
-            dialect: self.config.spice_dialect,
-            ambient_temperature: self.config.temperature,
-            scale: config.scale,
-            fmax: config.fmax,
-            seed: run_seed,
-            entries,
-            reltol: convergence.voltage_reltol,
-            node_abstol,
-            branch_abstol: convergence.current_abstol,
-            num_nodes: circuit.num_nodes(),
-            reference: Vec::new(),
-            refreshes: 1,
-        };
+        circuit.install_transient_device_noise(
+            TransientDeviceNoise::new(grid.nt, grid.sample_count, injected)
+                .with_dormant_sources(plan.tracks_processes),
+        );
         // The catalog in hand is the one the operating point produced, so the
         // first amplitudes come from it rather than from a second collection.
-        runtime.apply(circuit, &collected.elementary)?;
+        runtime.apply_native(circuit, &plan.native.elementary, 0.0)?;
         runtime.reference.extend_from_slice(solution);
         Ok(runtime)
     }
@@ -635,17 +1232,20 @@ impl Engine {
     /// taps that `fmin` covers, and that many leading samples are generated
     /// and discarded, so the retained record is stationary rather than opening
     /// with the filter's warm-up.
-    #[allow(clippy::too_many_arguments)]
     fn flicker_unit_train(
         ef: Value,
-        nt: Value,
-        sample_count: usize,
-        fmin: Value,
+        grid: NoiseGrid,
         seed: u64,
         budget: &mut usize,
-        identity: &NoiseSourceIdentity,
+        named: &str,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        let NoiseGrid {
+            fmin,
+            nt,
+            sample_count,
+            ..
+        } = grid;
         let periods = 1.0 / (fmin * nt);
         if !(periods.is_finite() && periods >= 1.0) {
             return Err(SimulationError::Circuit(format!(
@@ -658,28 +1258,18 @@ impl Engine {
             .filter(|total| *total <= MAX_NOISE_SAMPLES)
             .ok_or_else(|| {
                 SimulationError::Circuit(format!(
-                    "transient noise source '{}' needs {sample_count} samples plus a \
+                    "transient noise source '{named}' needs {sample_count} samples plus a \
                      {taps}-sample warm-up, past the {MAX_NOISE_SAMPLES} limit. Raise \
-                     NOISEFMIN, lower NOISEFMAX, or shorten the transient.",
-                    describe(identity)
+                     NOISEFMIN, lower NOISEFMAX, or shorten the transient."
                 ))
             })?;
-        if total > *budget {
-            return Err(SimulationError::Circuit(format!(
-                "transient noise materialized trains exceed the \
-                 {MAX_TOTAL_MATERIALIZED_SAMPLES}-sample budget at source '{}'. Raise NOISEFMIN, \
-                 lower NOISEFMAX, or shorten the transient.",
-                describe(identity)
-            )));
-        }
-        *budget -= total;
+        charge_materialized_budget(budget, total, named)?;
 
         let variance = (2.0 * std::f64::consts::PI * nt).powf(ef) / (2.0 * nt);
         if !(variance.is_finite() && variance > 0.0) {
             return Err(SimulationError::Circuit(format!(
-                "transient noise source '{}' has no representable 1/f^{ef} normalization at a \
-                 {nt} s sample interval",
-                describe(identity)
+                "transient noise source '{named}' has no representable 1/f^{ef} normalization \
+                 at a {nt} s sample interval"
             )));
         }
         let mut rng = SplitMix64::new(seed);
@@ -687,8 +1277,7 @@ impl Engine {
         train.drain(..taps);
         if train.iter().any(|value| !value.is_finite()) {
             return Err(SimulationError::Circuit(format!(
-                "transient noise source '{}' generated a non-finite 1/f sample",
-                describe(identity)
+                "transient noise source '{named}' generated a non-finite 1/f sample"
             )));
         }
         Ok(train)

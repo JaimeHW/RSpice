@@ -730,7 +730,7 @@ mod charge_event;
 mod periodic_endpoint;
 pub(in crate::engine) use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
-mod device_noise;
+pub(in crate::engine) mod device_noise;
 mod globalization;
 pub(in crate::engine) mod noise;
 mod nox_status;
@@ -11292,7 +11292,7 @@ impl Engine {
             // so the next step's stamp carries this bias, and never from a
             // candidate the solver may still reject.
             if let Some(runtime) = transient_noise.as_mut() {
-                runtime.refresh(&mut circuit, &solution)?;
+                runtime.refresh(&mut circuit, &solution, t, abort)?;
             }
             if let Some(history) = xyce_static_history_candidate {
                 xyce_static_history = Some(history);

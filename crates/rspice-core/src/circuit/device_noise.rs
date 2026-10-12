@@ -122,6 +122,10 @@ pub(crate) struct TransientDeviceNoise {
     sample_count: usize,
     /// Every injected mechanism, in the order the engine collected them.
     sources: Vec<InjectedNoiseSource>,
+    /// Whether sources may join the plan during the run: a circuit whose
+    /// noise processes are all dormant at the operating point still needs
+    /// its sample grid.
+    dormant_sources: bool,
 }
 
 impl std::fmt::Debug for TransientDeviceNoise {
@@ -140,6 +144,7 @@ impl std::fmt::Debug for TransientDeviceNoise {
             .field("sample_count", &self.sample_count)
             .field("sources", &self.sources.len())
             .field("materialized_sources", &materialized)
+            .field("dormant_sources", &self.dormant_sources)
             .finish()
     }
 }
@@ -152,7 +157,22 @@ impl TransientDeviceNoise {
             nt,
             sample_count,
             sources,
+            dormant_sources: false,
         }
+    }
+
+    /// Declare that sources may become active after the operating point.
+    #[must_use]
+    pub(crate) fn with_dormant_sources(mut self, dormant: bool) -> Self {
+        self.dormant_sources = dormant;
+        self
+    }
+
+    /// Start injecting a source that became active during the run, returning
+    /// its position.
+    pub(crate) fn push_source(&mut self, source: InjectedNoiseSource) -> usize {
+        self.sources.push(source);
+        self.sources.len() - 1
     }
 
     /// Sample interval in seconds.
@@ -165,13 +185,13 @@ impl TransientDeviceNoise {
         self.sample_count
     }
 
-    /// Whether this run injects nothing.
+    /// Whether this run injects nothing, now or later.
     ///
     /// A deck that asked for transient noise and turned out to hold no noise
     /// mechanism runs as an ordinary deterministic transient, which means it
     /// must not pay for the sample breakpoints either.
     pub(crate) fn is_empty(&self) -> bool {
-        self.sources.is_empty()
+        self.sources.is_empty() && !self.dormant_sources
     }
 
     /// Mutable access to the amplitude slots, for the accepted-step refresh.
@@ -233,6 +253,12 @@ impl TransientDeviceNoise {
             return 0.0;
         };
         source.amplitude * Self::unit_sample(source, sample)
+    }
+
+    /// Every source's amplitude, in plan order, for the oracle tests.
+    #[cfg(test)]
+    pub(crate) fn amplitudes(&self) -> Vec<Value> {
+        self.sources.iter().map(|source| source.amplitude).collect()
     }
 
     /// Add every injected noise current to a transient right-hand side.
@@ -452,6 +478,23 @@ mod tests {
         let mut rhs = vec![0.0; 3];
         plan.stamp_transient_rhs(&mut rhs, 1.0e-9);
         assert_eq!(rhs, vec![-1.0, 2.0, -2.0]);
+    }
+
+    /// A plan whose sources may join later keeps its sample grid even while
+    /// nothing is injected yet.
+    #[test]
+    fn a_plan_with_dormant_sources_is_not_empty() {
+        let plan = TransientDeviceNoise::new(1.0e-9, 4, Vec::new());
+        assert!(plan.is_empty());
+        let mut dormant = plan.with_dormant_sources(true);
+        assert!(!dormant.is_empty());
+        let position = dormant.push_source(InjectedNoiseSource {
+            train: NoiseTrain::Flat { stream_seed: 1 },
+            amplitude: 1.0,
+            injections: vec![NoiseInjection::unit(1, 0)],
+        });
+        assert_eq!(position, 0);
+        assert_eq!(dormant.amplitudes(), vec![1.0]);
     }
 
     #[test]

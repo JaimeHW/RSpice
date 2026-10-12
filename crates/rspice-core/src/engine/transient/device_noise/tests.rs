@@ -542,7 +542,7 @@ fn the_installed_shot_noise_amplitude_follows_the_operating_point() {
     moved[node - 1] += step;
     circuit.update_nonlinear(&moved);
     runtime
-        .refresh(&mut circuit, &moved)
+        .refresh(&mut circuit, &moved, nt, &NoAbort)
         .expect("the refresh re-derives the density");
     let refreshed_amplitude = circuit
         .transient_device_noise()
