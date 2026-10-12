@@ -3193,12 +3193,25 @@ impl MixedSignalHost {
         M: FnMut(usize, usize, f64),
         R: FnMut(usize, f64),
     {
+        // The left limit, as every digital-to-analog path drives it (see
+        // `xspice::models::bridges`'s `dac_bridge_ramp_value`): a bit this
+        // trial's own activations moved changes the drive from the first
+        // instant after the trial's timepoint, so the solution AT it is solved
+        // with the bit the trial opened with. The move is still reported, by
+        // `candidate_discontinuity`, so the step leaving this timepoint restarts
+        // integration from it. An operating point has no "before" to hold: it
+        // is solved at the settled state, which is what its zero interval says.
+        let digital = match &self.trial {
+            Some(trial) if trial.timestep_seconds > 0.0 => &trial.rollback,
+            _ => &self.state.digital,
+        };
         for bridge in &self.state.bridges.dac {
-            let value = self.state.digital.read(bridge.signal).ok_or_else(|| {
-                MixedSignalError::InvalidBridge {
-                    detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
-                }
-            })?;
+            let value =
+                digital
+                    .read(bridge.signal)
+                    .ok_or_else(|| MixedSignalError::InvalidBridge {
+                        detail: format!("D/A signal `{}` disappeared", bridge.signal_name),
+                    })?;
             let Some(level) = bridge.driven_level(value.bit(bridge.bit)) else {
                 continue;
             };

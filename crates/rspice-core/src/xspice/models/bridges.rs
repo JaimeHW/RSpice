@@ -358,7 +358,14 @@ impl CodeModel for MixedDacBridge {
         })
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        DacBridge.init(ctx)
+        DacBridge.init(ctx)?;
+        let width = bridge_vector_width(ctx, self.name())?;
+        let released = mixed_dac_released_base(width)?;
+        let total = released
+            .checked_add(width)
+            .ok_or_else(|| dac_bridge_state_layout_error(width))?;
+        ctx.allocate_states(total);
+        Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let width = bridge_vector_width(ctx, self.name())?;
@@ -385,14 +392,34 @@ impl CodeModel for MixedDacBridge {
             },
             out_undef,
         )?;
+        let released_base = mixed_dac_released_base(width)?;
+        let commit = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
         for index in 0..width {
             let voltage = ctx.output_vector_value("out", index);
-            let conductance =
-                if digital_vector_input_value(ctx, "in", index).state == DigitalState::HighZ {
-                    0.0
-                } else {
-                    1.0 / resistance
-                };
+            // The impedance keeps the left limit the level keeps: a bit that
+            // released or seized the net at this very timepoint still drives
+            // it as it did before, from the slot the last accepted point left.
+            // `z` and `x` share a level, so the ramp state cannot tell them
+            // apart; this slot is what can.
+            let slot = released_base + index;
+            let released_now =
+                digital_vector_input_value(ctx, "in", index).state == DigitalState::HighZ;
+            let released_before = ctx.state_prev(slot) != 0.0;
+            let changed_here = ctx.is_transient()
+                && ctx.time > 0.0
+                && released_now != released_before
+                && ctx
+                    .input_digital_vector_event_time("in", index)
+                    .is_none_or(|event| event >= ctx.time);
+            let released = if changed_here {
+                released_before
+            } else {
+                released_now
+            };
+            if commit {
+                ctx.set_state(slot, if released_now { 1.0 } else { 0.0 });
+            }
+            let conductance = if released { 0.0 } else { 1.0 / resistance };
             ctx.set_output_vector_element_with_partial(
                 "out",
                 index,
@@ -405,6 +432,13 @@ impl CodeModel for MixedDacBridge {
     fn excludes_output_from_transient_voltage_lte(&self, port: &str) -> bool {
         DacBridge.excludes_output_from_transient_voltage_lte(port)
     }
+}
+
+/// The first of the built-in converter's per-bit release slots, after the ramp
+/// block it shares with `dac_bridge`.
+#[cfg(feature = "veriloga")]
+fn mixed_dac_released_base(width: usize) -> CmResult<usize> {
+    Ok(dac_bridge_state_layout(width)?.state_count)
 }
 
 const DAC_BRIDGE_STATE_STRIDE: usize = 4;
@@ -1217,6 +1251,20 @@ struct DacBridgeRamp {
     t_fall: Value,
 }
 
+/// The output of a transition that started from `start_value` at `start_time`
+/// towards `target`, read at `time`.
+///
+/// A transition starts AT its own instant: at `time <= start_time` the output is
+/// still `start_value`, the left limit, whatever the edge rate. That is the one
+/// rule every digital-to-analog path keeps — ngspice-46's `dac_bridge` holds
+/// "the previous input value in force for the whole step" when the analog point
+/// is the input change itself (`cfunc.mod`, `T(0) - i_changed < iota`), and
+/// Verilog-AMS `transition()` starts its output moving at the input change. A
+/// zero rise time is the case it decides: the analog solution at the edge is
+/// computed with the drive from before it, and the output is at its target from
+/// the first instant after it, so the edge is a discontinuity the step leaving
+/// it restarts from rather than a level the step arriving at it is integrated
+/// against.
 fn dac_bridge_ramp_value(
     time: Value,
     start_time: Value,
@@ -1230,11 +1278,14 @@ fn dac_bridge_ramp_value(
         t_rise,
         t_fall,
     } = ramp;
+    if time <= start_time {
+        return start_value;
+    }
     // ngspice's signed-slope branches collapse reversed output ranges to the target.
     if out_low > out_high {
         return target;
     }
-    let elapsed = (time - start_time).max(0.0);
+    let elapsed = time - start_time;
     let span = (out_high - out_low).abs();
     if (target - start_value).abs() < 1e-12 || span <= 1e-12 {
         target
@@ -2279,6 +2330,96 @@ mod tests {
             "ngspice's signed DAC slope snaps inverted output ranges to the target"
         );
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+    }
+
+    /// One accepted evaluation of the built-in converter at `time` with `bit`
+    /// on its input, changed at `event`. Returns the Norton pair it stamps:
+    /// `(-g·v, g)`.
+    #[cfg(feature = "veriloga")]
+    fn mixed_dac_step(
+        ctx: &mut CmContext,
+        time: Value,
+        bit: DigitalValue,
+        event: Option<Value>,
+    ) -> (Value, Value) {
+        ctx.time = time;
+        ctx.set_input("in", InputValue::DigitalVector(vec![bit]));
+        ctx.set_input_digital_vector_event_times("in", vec![event]);
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        MixedDacBridge
+            .evaluate(ctx)
+            .expect("the built-in converter evaluates");
+        let pair = (
+            ctx.output_vector_value("out", 0),
+            ctx.partial_vector_value("out", 0),
+        );
+        ctx.advance_state();
+        pair
+    }
+
+    /// A zero-rise edge is a discontinuity *after* its instant: the converter
+    /// drives the analog solution at the edge's own timepoint with the level
+    /// and the impedance it had before it, and with the new ones from the first
+    /// instant after it — ngspice-46 `dac_bridge`'s "previous input value in
+    /// force for the whole step" when the analog point is the input change.
+    #[cfg(feature = "veriloga")]
+    #[test]
+    fn the_built_in_converter_holds_its_drive_from_before_an_edge_at_the_edge() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        for (name, value) in [
+            ("out_low", 0.0),
+            ("out_high", 3.3),
+            ("out_undef", 1.65),
+            ("input_load", 1.0e-12),
+            ("t_rise", 0.0),
+            ("t_fall", 0.0),
+            ("output_resistance", 20.0),
+        ] {
+            ctx.set_param(name, value);
+        }
+        ctx.init_output_vector("out", PortType::Conductance, 1);
+        ctx.analysis = AnalysisType::Transient;
+        ctx.call_type = CallType::TransientAnalysis;
+        ctx.timestep = 1.0e-9;
+        MixedDacBridge
+            .init(&mut ctx)
+            .expect("the built-in converter initializes");
+        let g = 1.0 / 20.0;
+
+        assert_eq!(
+            mixed_dac_step(&mut ctx, 0.0, DigitalValue::zero(), None),
+            (0.0, g)
+        );
+        // The rise at 5 ns: the point on it is driven low, the next one high.
+        assert_eq!(
+            mixed_dac_step(&mut ctx, 5.0e-9, DigitalValue::one(), Some(5.0e-9)),
+            (0.0, g),
+            "the solution at the edge must be the left limit"
+        );
+        assert_eq!(
+            mixed_dac_step(&mut ctx, 5.1e-9, DigitalValue::one(), Some(5.0e-9)),
+            (-g * 3.3, g)
+        );
+        // A release at 7 ns: still driven high on the edge, released after it.
+        assert_eq!(
+            mixed_dac_step(&mut ctx, 7.0e-9, DigitalValue::high_z(), Some(7.0e-9)),
+            (-g * 3.3, g),
+            "a release keeps the impedance it had before it on its own timepoint"
+        );
+        let (_, released) = mixed_dac_step(&mut ctx, 7.1e-9, DigitalValue::high_z(), Some(7.0e-9));
+        assert_eq!(released, 0.0, "and lets go of the net after it");
+        // Seized again at 9 ns: still released on the edge, driven after it.
+        let (_, held) = mixed_dac_step(&mut ctx, 9.0e-9, DigitalValue::zero(), Some(9.0e-9));
+        assert_eq!(
+            held, 0.0,
+            "a seize keeps the net released on its own timepoint"
+        );
+        assert_eq!(
+            mixed_dac_step(&mut ctx, 9.1e-9, DigitalValue::zero(), Some(9.0e-9)),
+            (0.0, g)
+        );
     }
 
     #[test]

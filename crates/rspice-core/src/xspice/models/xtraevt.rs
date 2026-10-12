@@ -82,14 +82,18 @@ fn real_to_v_output(
     transition_time: Value,
     gain: Value,
 ) -> Value {
+    // The left limit at the transition's own instant, whatever its duration:
+    // the rule `bridges::dac_bridge_ramp_value` documents for every
+    // digital-to-analog path.
+    if time <= start_time {
+        return start_value * gain;
+    }
     if transition_time <= 0.0 {
         return target * gain;
     }
 
     let end_time = start_time + transition_time;
-    if time <= start_time {
-        start_value * gain
-    } else if time >= end_time {
+    if time >= end_time {
         target * gain
     } else {
         let fraction = (time - start_time) / transition_time;
