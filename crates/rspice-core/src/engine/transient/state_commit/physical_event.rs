@@ -740,6 +740,7 @@ impl Engine {
                     current: forward,
                     delay,
                     event,
+                    input: crate::device::Bjt::legacy_forward_transport_input(&input, &internal),
                 };
                 if startup {
                     sample
@@ -794,12 +795,8 @@ impl Engine {
             accepted_time: step.time,
         };
         if !startup
-            && let Some(control) = bjt.phase_step_control(
-                circuit,
-                history,
-                self.transient_lte_reltol(),
-                self.current_abstol(),
-            )?
+            && let Some(control) =
+                bjt.phase_step_control(circuit, history, self.phase_interpolation_budget())?
         {
             control.ensure_acceptable(circuit)?;
         }

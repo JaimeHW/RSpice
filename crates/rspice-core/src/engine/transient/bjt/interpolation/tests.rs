@@ -34,8 +34,12 @@ fn phase_interpolation_uses_analytic_outgoing_slope_after_a_corner() {
                     Some(polarity * signal_scale / time_scale),
                     1.5 * time_scale,
                     2.625 * polarity * signal_scale,
-                    0.0,
-                    0.03125 * signal_scale,
+                    PhaseInterpolationTolerance {
+                        reltol: 0.0,
+                        abstol: 0.03125 * signal_scale,
+                        input_referred: 0.0,
+                    },
+                    None,
                     0,
                 )
                 .unwrap();
@@ -55,9 +59,22 @@ fn phase_interpolation_uses_analytic_outgoing_slope_after_a_corner() {
 fn phase_interpolation_refuses_nonfinite_outgoing_slope() {
     let buffer = history(&[(0.0, 1.0)], 1.0);
     for slope in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+        let tolerance = PhaseInterpolationTolerance {
+            reltol: 1e-3,
+            abstol: 1e-9,
+            input_referred: 0.0,
+        };
         assert!(
-            phase_interpolation_control_with_slope(&buffer, Some(slope), 0.1, 1.1, 1e-3, 1e-9, 0)
-                .is_err()
+            phase_interpolation_control_with_slope(
+                &buffer,
+                Some(slope),
+                0.1,
+                1.1,
+                tolerance,
+                None,
+                0
+            )
+            .is_err()
         );
     }
 }
@@ -278,4 +295,148 @@ fn phase_interpolation_smooth_refinement_converges_and_replays_with_steps_above_
             assert!(fine.0.windows(2).any(|p| p[1] - p[0] > 1000.0 * delay));
         }
     }
+}
+
+/// A fixed delay shorter than half the interval reads the new interval only
+/// on its last `delay`: for `f = t^2` the chord error there peaks at the read
+/// window's start, `delay * (h - delay)`, not at the midpoint's `h^2 / 4`. The
+/// predicted step brings that read-window error to 0.81 of the tolerance.
+#[test]
+fn phase_interpolation_judges_only_the_window_a_fixed_delay_reads() {
+    let buffer = history(&[(0.0, 0.0), (1.0, 1.0)], 0.1);
+    let tolerance = |abstol| PhaseInterpolationTolerance {
+        reltol: 0.0,
+        abstol,
+        input_referred: 0.0,
+    };
+    let control = |abstol, delay| {
+        phase_interpolation_control_with_slope(&buffer, None, 2.0, 4.0, tolerance(abstol), delay, 0)
+            .unwrap()
+    };
+    assert!((control(1.0, None).normalized_error - 0.25).abs() < 1e-15);
+    let windowed = control(1.0, Some(0.1));
+    assert!((windowed.normalized_error - 0.1 * 0.9).abs() < 1e-15);
+    // Accepted on the read window (0.9) though the whole interval is not
+    // (2.5); the next step lands the read-window error on 0.81.
+    let windowed = control(0.1, Some(0.1));
+    assert!((windowed.normalized_error - 0.9).abs() < 1e-14);
+    let next = windowed.next_step;
+    assert!((0.1 * (next - 0.1) / 0.1 - 0.81).abs() < 1e-12, "{next}");
+    // A step below twice the delay is read whole: the sqrt rule applies.
+    let short = control(0.01, Some(0.1));
+    assert!((short.next_step - 0.18).abs() < 1e-12, "{short:?}");
+    // A delay of half the interval or more reads all of it.
+    assert_eq!(
+        control(1.0, Some(0.5)).normalized_error,
+        control(1.0, None).normalized_error
+    );
+}
+
+/// The input-referred budget replaces the current tolerance only where it is
+/// the larger of the two.
+#[test]
+fn phase_interpolation_takes_the_larger_of_the_current_and_input_budgets() {
+    let buffer = history(&[(0.0, 0.0), (1.0, 1.0)], 10.0);
+    let control = |abstol, input_referred| {
+        phase_interpolation_control_with_slope(
+            &buffer,
+            None,
+            2.0,
+            4.0,
+            PhaseInterpolationTolerance {
+                reltol: 0.0,
+                abstol,
+                input_referred,
+            },
+            None,
+            0,
+        )
+        .unwrap()
+        .normalized_error
+    };
+    assert!((control(0.01, 0.0) - 25.0).abs() < 1e-12);
+    assert!((control(0.01, 0.5) - 0.5).abs() < 1e-15);
+    assert!((control(1.0, 0.01) - 0.25).abs() < 1e-15);
+    for invalid in [Value::NAN, Value::INFINITY, -1.0] {
+        assert!(
+            phase_interpolation_control_with_slope(
+                &buffer,
+                None,
+                2.0,
+                4.0,
+                PhaseInterpolationTolerance {
+                    reltol: 0.0,
+                    abstol: 1.0,
+                    input_referred: invalid,
+                },
+                None,
+                0,
+            )
+            .is_err()
+        );
+    }
+}
+
+/// On a smooth signal with a delay far below the step, the windowed control
+/// takes about a tenth of the steps (334 against 3,785), and every value the
+/// history can supply, read at `t - delay` for any later `t`, stays within
+/// the slack the whole-interval control is held to: 1.67e-9 here against a
+/// 1e-9 tolerance, where the whole-interval control's worst is 1.21e-9.
+#[test]
+fn phase_interpolation_window_holds_every_delayed_read_to_the_tolerance() {
+    let delay: Value = 1e-5;
+    let tolerance: Value = 1e-9;
+    let f = |t: Value| 1e-3 * (2.0 + (std::f64::consts::TAU * t).sin());
+    let mut buffer = DelayBuffer::new(4);
+    buffer.accept_sample(0.0, f(0.0), delay, None).unwrap();
+    let (mut time, mut dt, mut points, mut worst): (Value, Value, usize, Value) =
+        (0.0, 0.03, 1, 0.0);
+    while time < 2.0 {
+        dt = dt.min(2.0 - time).min(0.03);
+        let next = time + dt;
+        let current = f(next);
+        let control = phase_interpolation_control_with_slope(
+            &buffer,
+            None,
+            next,
+            current,
+            PhaseInterpolationTolerance {
+                reltol: 0.0,
+                abstol: tolerance,
+                input_referred: 0.0,
+            },
+            Some(delay),
+            0,
+        )
+        .unwrap();
+        if control.normalized_error > 1.0 {
+            dt = control.next_step;
+            continue;
+        }
+        buffer.accept_sample(next, current, delay, None).unwrap();
+        // The history's linear interpolant, read at `t - delay` for the solve
+        // at `next` and every later `t` that still lands in this interval.
+        for i in 0..=32 {
+            let at = next - f64::from(i) / 32.0 * delay.min(next - time);
+            let fraction = (at - time) / (next - time);
+            let interpolated = (1.0 - fraction) * f(time) + fraction * current;
+            worst = worst.max((interpolated - f(at)).abs());
+        }
+        time = next;
+        points += 1;
+        dt = control.next_step;
+        assert!(points < 100_000);
+    }
+    let (unwindowed, ..) = smooth_grid(tolerance, delay, false);
+    assert!(
+        points * 3 < unwindowed.len(),
+        "windowed {points} against whole-interval {}",
+        unwindowed.len()
+    );
+    // The same three-knot curvature estimate, and the same slack, as the
+    // whole-interval control's refinement test above.
+    assert!(
+        worst < 3.0 * tolerance,
+        "worst delayed read error {worst:e}"
+    );
 }

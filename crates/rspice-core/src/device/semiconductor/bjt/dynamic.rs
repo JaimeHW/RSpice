@@ -62,6 +62,23 @@ impl Bjt {
         Some(branch)
     }
 
+    /// The base-emitter sensitivity of a [`Self::legacy_forward_transport_branch`]
+    /// and the base-emitter voltage it was evaluated at, both as magnitudes.
+    ///
+    /// A delayed forward current is the current of a delayed junction
+    /// voltage, so an error in the one is an error of `|di| / gm` in the
+    /// other. The base-collector partial only raises the current a voltage
+    /// error moves, so leaving it out keeps that conversion conservative.
+    pub(crate) fn legacy_forward_transport_input(
+        branch: &BjtCurrentBranch,
+        internal: &[Value; BJT_INTERNAL_STATE_DIM],
+    ) -> (Value, Value) {
+        (
+            branch.d_internal[IDX_VEI].abs(),
+            (internal[IDX_VBI] - internal[IDX_VEI]).abs(),
+        )
+    }
+
     /// Complete the derivative of the physical base-spreading resistance
     /// for a coherent transient operator. Legacy SPICE Newton/AC freezes R
     /// at each bias; this correction changes its tangent, not its current.

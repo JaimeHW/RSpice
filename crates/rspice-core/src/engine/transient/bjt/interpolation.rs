@@ -45,6 +45,21 @@ impl PhaseInterpolationControl {
     }
 }
 
+/// The budget one phase-history interval's interpolation error is held to.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::engine::transient) struct PhaseInterpolationTolerance {
+    /// Relative current tolerance, on the larger of the interval's two ends.
+    pub reltol: Value,
+    /// Absolute current tolerance.
+    pub abstol: Value,
+    /// The current error that is an error in the delayed junction voltage no
+    /// larger than the transient truncation tolerance holds the junction
+    /// voltage itself to: `gm * (lte_abstol + lte_reltol * |vbe|)`. A
+    /// small-signal reading, so it applies to the smooth chord estimate only.
+    /// Zero leaves only the current tolerance.
+    pub input_referred: Value,
+}
+
 /// Estimate the largest linear-interpolation error on the interval being
 /// proposed, before that interval becomes immutable delay history. For a
 /// quadratic signal this is exactly |f[t0,t1,t2]|*(t2-t1)^2/4. Irregular
@@ -65,21 +80,40 @@ pub(in crate::engine::transient) fn phase_interpolation_control(
         None,
         time,
         current,
-        reltol,
-        abstol,
+        PhaseInterpolationTolerance {
+            reltol,
+            abstol,
+            input_referred: 0.0,
+        },
+        None,
         device_index,
     )
 }
 
+/// [`phase_interpolation_control`] with an outgoing anchor slope, the full
+/// tolerance, and the transport delay the history is read through.
+///
+/// A fixed delay reads the new interval `[t1, t2]` only at `t - delay` for the
+/// solve at `t2` and for later times `t > t2`: never before `t2 - delay`. When
+/// the interval is longer than twice the delay, the quadratic error model's
+/// largest chord error on that read window is `|f[t0,t1,t2]| * d * (h - d)`
+/// (with `d` the delay and `h` the interval) rather than the whole interval's
+/// `|f[t0,t1,t2]| * h^2 / 4`; every value the history will ever supply is held
+/// to the tolerance, and only those.
 pub(in crate::engine::transient) fn phase_interpolation_control_with_slope(
     history: &DelayBuffer,
     outgoing_slope: Option<Value>,
     time: Value,
     current: Value,
-    reltol: Value,
-    abstol: Value,
+    tolerance: PhaseInterpolationTolerance,
+    delay: Option<Value>,
     device_index: usize,
 ) -> Result<PhaseInterpolationControl, String> {
+    let PhaseInterpolationTolerance {
+        reltol,
+        abstol,
+        input_referred,
+    } = tolerance;
     if outgoing_slope.is_some_and(|slope| !slope.is_finite())
         || !time.is_finite()
         || !current.is_finite()
@@ -87,6 +121,9 @@ pub(in crate::engine::transient) fn phase_interpolation_control_with_slope(
         || reltol < 0.0
         || !abstol.is_finite()
         || abstol <= 0.0
+        || !input_referred.is_finite()
+        || input_referred < 0.0
+        || delay.is_some_and(|delay| !delay.is_finite() || delay <= 0.0)
     {
         return Err(
             "phase interpolation requires finite time/current and valid current tolerances".into(),
@@ -159,14 +196,36 @@ pub(in crate::engine::transient) fn phase_interpolation_control_with_slope(
         // two physical samples exist, use their measured divided difference.
         (s(current).plus(s(-previous)), 1)
     };
-    let normalized_error = error.divide(tolerance).binary64().abs();
-    if normalized_error.is_nan() {
+    let current_error = error.divide(tolerance).binary64().abs();
+    if current_error.is_nan() {
         return Err("phase interpolation error is indeterminate".into());
     }
-    let scale = if order == 1 {
-        0.9 / normalized_error
+    if order == 1 {
+        // A change from a constant prehistory is a large-signal step, not a
+        // chord error a junction-voltage tolerance can stand for.
+        return Ok(PhaseInterpolationControl {
+            device_index,
+            normalized_error: current_error,
+            next_step: dt * (0.9 / current_error).clamp(0.1, 2.0),
+        });
+    }
+    // Divide by each budget separately: the larger budget is the smaller
+    // ratio, and neither division can overflow the other's scale.
+    let full_error = if input_referred > 0.0 {
+        current_error.min(error.divide(s(input_referred)).binary64().abs())
     } else {
-        0.9 / normalized_error.sqrt()
+        current_error
+    };
+    // The read window's share of the whole-interval error, and the step that
+    // brings the read-window error to the same 0.81 the unwindowed sqrt rule
+    // aims at: `x^2 * E = 0.81` while `x <= 2r`, else `4 r (x - r) E = 0.81`.
+    let window = delay.map(|delay| delay / dt).filter(|ratio| *ratio < 0.5);
+    let normalized_error =
+        window.map_or(full_error, |ratio| full_error * 4.0 * ratio * (1.0 - ratio));
+    let unwindowed = 0.9 / full_error.sqrt();
+    let scale = match window {
+        Some(ratio) if unwindowed > 2.0 * ratio => ratio + 0.81 / (4.0 * full_error * ratio),
+        _ => unwindowed,
     }
     .clamp(0.1, 2.0);
     Ok(PhaseInterpolationControl {

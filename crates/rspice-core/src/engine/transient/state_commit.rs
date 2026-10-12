@@ -74,6 +74,9 @@ struct AcceptedBjtPhaseSample {
     current: Value,
     delay: Value,
     event: Option<AcceptedBjtPhaseEvent>,
+    /// `Bjt::legacy_forward_transport_input` at this sample: the current's
+    /// base-emitter sensitivity and that voltage's magnitude.
+    input: (Value, Value),
 }
 
 /// Sided value and smoothness provenance belong to one accepted event. A
@@ -161,8 +164,7 @@ impl PreparedBjtHistory {
         &self,
         circuit: &crate::CircuitData,
         history: &BjtTransientHistory,
-        reltol: Value,
-        abstol: Value,
+        budget: PhaseInterpolationBudget,
     ) -> Result<Option<bjt::interpolation::PhaseInterpolationControl>, SimulationError> {
         let mut limiting: Option<bjt::interpolation::PhaseInterpolationControl> = None;
         for (index, value) in self.values.iter().enumerate() {
@@ -178,8 +180,8 @@ impl PreparedBjtHistory {
                 sample
                     .event
                     .map_or(sample.current, |event| event.left_limit),
-                reltol,
-                abstol,
+                budget.tolerance(sample.input),
+                Some(sample.delay),
                 index,
             )
             .map_err(|error| {
@@ -208,7 +210,51 @@ pub(super) struct PreparedReactiveHistory<'engine> {
     engine: std::marker::PhantomData<&'engine Engine>,
 }
 
+/// What a GP phase-history interval's interpolation error is judged against.
+///
+/// The stored forward current is an exponential of the junction voltage it is
+/// delayed with, so a small current error is a voltage error of `|di| / gm`.
+/// The transient truncation tolerance holds that voltage itself to
+/// `lte_abstol + lte_reltol * |vbe|` (no `trtol`: the chord estimate is not an
+/// inflated divided difference). A delayed copy is held to no more than its
+/// original, and never to less than the current tolerance.
+#[derive(Clone, Copy)]
+pub(super) struct PhaseInterpolationBudget {
+    current_reltol: Value,
+    current_abstol: Value,
+    voltage_reltol: Value,
+    voltage_abstol: Value,
+}
+
+impl PhaseInterpolationBudget {
+    fn tolerance(
+        self,
+        (transconductance, junction_voltage): (Value, Value),
+    ) -> bjt::interpolation::PhaseInterpolationTolerance {
+        let input_referred =
+            transconductance * (self.voltage_abstol + self.voltage_reltol * junction_voltage);
+        bjt::interpolation::PhaseInterpolationTolerance {
+            reltol: self.current_reltol,
+            abstol: self.current_abstol,
+            input_referred: if input_referred.is_finite() {
+                input_referred
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
 impl Engine {
+    pub(super) fn phase_interpolation_budget(&self) -> PhaseInterpolationBudget {
+        PhaseInterpolationBudget {
+            current_reltol: self.transient_lte_reltol(),
+            current_abstol: self.current_abstol(),
+            voltage_reltol: self.transient_lte_reltol(),
+            voltage_abstol: self.transient_lte_abstol(),
+        }
+    }
+
     pub(super) fn bjt_phase_step_control(
         &self,
         circuit: &crate::CircuitData,
@@ -231,12 +277,7 @@ impl Engine {
             Some(snapshots),
             phase_context,
         )?
-        .phase_step_control(
-            circuit,
-            history,
-            self.transient_lte_reltol(),
-            self.current_abstol(),
-        )
+        .phase_step_control(circuit, history, self.phase_interpolation_budget())
     }
 
     /// Commit all accepted JFET charge and trap histories. Trial evaluations
@@ -602,6 +643,9 @@ impl Engine {
                             left_limit,
                             order: DelayEventOrder::Unknown,
                         }),
+                        input: crate::device::Bjt::legacy_forward_transport_input(
+                            &forward, &internal,
+                        ),
                     };
                     sample.validate(phase, accepted_time)?;
                     Ok::<_, DelayAcceptanceError>(sample)
@@ -864,12 +908,9 @@ impl Engine {
         // Settling can project a different final electrical solution after
         // the stepper checked LTE. Recheck the prepared physical samples at
         // the all-device barrier, before any accepted history is advanced.
-        if let Some(control) = bjt.phase_step_control(
-            circuit,
-            histories.bjt,
-            self.transient_lte_reltol(),
-            self.current_abstol(),
-        )? {
+        if let Some(control) =
+            bjt.phase_step_control(circuit, histories.bjt, self.phase_interpolation_budget())?
+        {
             control.ensure_acceptable(circuit)?;
         }
         // Reserve every growing transport buffer while failure can still
