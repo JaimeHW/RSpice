@@ -49,8 +49,8 @@ const VCC_PWM: f64 = 3.3;
 const PWM_RC: f64 = (100e3 + 20.0) * 1e-6;
 const PWM_TICK: f64 = 1e-6;
 const PWM_CYCLES: i64 = 100;
-/// `M_TWO_PI` as pwm.v spells it.
-const PWM_TWO_PI: f64 = 6.283_185_307_179_586;
+/// pwm.v's `M_TWO_PI` (6.28318530717958647652) rounds to this double.
+const PWM_TWO_PI: f64 = std::f64::consts::TAU;
 
 /// Astable period away from a reset: charge from vcc/3 to 2vcc/3 through
 /// r1 + r2, discharge from 2vcc/3 to vcc/3 through r2 into the saturated
