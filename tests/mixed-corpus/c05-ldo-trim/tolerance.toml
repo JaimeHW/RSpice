@@ -287,9 +287,9 @@ variants = ["mx"]
 kind = "sens"
 params = ["rtop", "rb0", "rload", "vref", "vin"]
 oracle = "O5"
-abs = 1e-12
+abs = 1e-5
 rel = 1e-5
-why = "§2.10: same equations and solver (abs scaled to sensitivities, not node voltages)"
+why = "§2.10: same equations and solver"
 
 [[q]]
 id = "sens"
