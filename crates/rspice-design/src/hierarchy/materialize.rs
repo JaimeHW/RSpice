@@ -32,6 +32,58 @@ pub(super) fn materialize_schematic_binding(
     Ok(materialized)
 }
 
+/// What a source view runs: where the deck reads its master from, and the
+/// project bundle it is, when it is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceViewSource {
+    /// The file, or the project source key, the master is read from.
+    pub path: PathBuf,
+    /// The project bundle a Verilog-A view runs. A Verilog-A view has no
+    /// other source.
+    pub project_veriloga: Option<ConfigurationVerilogABinding>,
+}
+
+/// The source a source view runs, by the one rule netlisting binds it with.
+///
+/// A Verilog-A view runs the project bundle it owns, and nothing else: a
+/// view without one has nothing to run, whatever path it names. Any other
+/// source view runs the file it or its cell names. The component shelf asks
+/// this same question before it calls a view ready to place, so a cell it
+/// offers is one the netlister can bind.
+pub fn source_view_source(
+    library: &Library,
+    cell: &Cell,
+    view: &View,
+    project_id: ProjectId,
+    project_sources: &ProjectSourceRegistry,
+    libraries: &LibraryCatalog,
+) -> Result<SourceViewSource, String> {
+    if view.view_type == ViewType::VerilogA {
+        let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
+        let binding =
+            project_veriloga_binding_for_view(project_id, project_sources, libraries, &reference)?;
+        return Ok(SourceViewSource {
+            path: PathBuf::from(binding.source_key()),
+            project_veriloga: Some(binding),
+        });
+    }
+    let path = view
+        .file_path
+        .clone()
+        .or_else(|| metadata_source_path(&view.metadata).map(Path::to_path_buf))
+        .or_else(|| metadata_source_path(&cell.metadata).map(Path::to_path_buf))
+        .ok_or_else(|| {
+            format!(
+                "authoritative source view {}/{}/{} has no source identity",
+                library.name, cell.name, view.name
+            )
+        })?;
+    Ok(SourceViewSource {
+        path,
+        project_veriloga: None,
+    })
+}
+
 pub fn materialize_authoritative_source_binding(
     placed: &LibraryCellInstance,
     library: &Library,
@@ -41,26 +93,10 @@ pub fn materialize_authoritative_source_binding(
     project_sources: &ProjectSourceRegistry,
     libraries: &LibraryCatalog,
 ) -> Result<LibraryCellInstance, String> {
-    let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
-    let project_veriloga = (view.view_type == ViewType::VerilogA)
-        .then(|| {
-            project_veriloga_binding_for_view(project_id, project_sources, libraries, &reference)
-        })
-        .transpose()?;
-    let source_path = if let Some(binding) = project_veriloga.as_ref() {
-        PathBuf::from(binding.source_key())
-    } else {
-        view.file_path
-            .clone()
-            .or_else(|| metadata_source_path(&view.metadata).map(Path::to_path_buf))
-            .or_else(|| metadata_source_path(&cell.metadata).map(Path::to_path_buf))
-            .ok_or_else(|| {
-                format!(
-                    "authoritative source view {}/{}/{} has no source identity",
-                    library.name, cell.name, view.name
-                )
-            })?
-    };
+    let SourceViewSource {
+        path: source_path,
+        project_veriloga,
+    } = source_view_source(library, cell, view, project_id, project_sources, libraries)?;
     let ports = metadata_terminal_ports(&view.metadata)
         .or_else(|| metadata_terminal_ports(&cell.metadata))
         .ok_or_else(|| {

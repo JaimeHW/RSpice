@@ -43,8 +43,8 @@ mod materialize;
 mod source;
 use materialize::*;
 pub use materialize::{
-    hierarchy_stop_view, materialize_authoritative_source_binding, metadata_value,
-    project_veriloga_binding_for_view,
+    SourceViewSource, hierarchy_stop_view, materialize_authoritative_source_binding,
+    metadata_value, project_veriloga_binding_for_view, source_view_source,
 };
 pub use source::HierarchySource;
 
