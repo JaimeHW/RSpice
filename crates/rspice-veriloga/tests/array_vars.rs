@@ -516,9 +516,13 @@ endmodule
 }
 
 #[test]
-fn parameter_dependent_bounds_are_rejected() {
-    // Parameter-shaped storage would vary per instance
-    let err = compile_err(
+fn parameter_dependent_bounds_bind_their_parameter_to_elaboration() {
+    // Parameter-shaped storage must not vary per instance at run time. This
+    // used to be refused outright ("compile-time constants"). Since c6adb4c1d
+    // the bound is evaluated at elaboration and every parameter it reads
+    // becomes elaboration-bound: storage is sized from that value, and a
+    // runtime override is refused in favour of source specialization.
+    let model = compile(
         r#"
 `include "disciplines.vams"
 module pdim(p, n);
@@ -530,7 +534,24 @@ module pdim(p, n);
 endmodule
 "#,
     );
-    assert!(err.contains("compile-time constants"), "got: {err}");
+    let element_count = model
+        .variable_names
+        .iter()
+        .filter(|name| name.starts_with("w["))
+        .count();
+    assert_eq!(element_count, 4);
+    let nseg = model
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "nseg")
+        .expect("nseg parameter");
+    assert_eq!(nseg.elaboration_value, Some(4.0));
+    let mut device = model.device("X", &[1, 0]);
+    let err = device
+        .try_set_parameter("nseg", 8.0)
+        .expect_err("a storage-shaping parameter must not change at run time")
+        .to_string();
+    assert!(err.contains("specialize the source"), "got: {err}");
 }
 
 #[test]
