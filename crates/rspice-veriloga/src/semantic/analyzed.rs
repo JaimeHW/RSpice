@@ -74,7 +74,12 @@ pub struct AnalyzedModule {
     /// IDs are dense from zero and are remapped per instance during hierarchy
     /// elaboration so repeated children never alias one another.
     pub noise_process_count: u32,
+    /// One entry per scalar terminal, in binding order: a vector port has
+    /// already expanded into its lanes here.
     pub ports: Vec<AnalyzedPort>,
+    /// The module header's ports as declared, each naming its lanes in
+    /// [`Self::ports`].
+    pub formal_ports: Vec<AnalyzedFormalPort>,
     pub parameters: Vec<AnalyzedParameter>,
     /// Typed, bounded expansion of local constants in child override expressions.
     pub(crate) parameter_locals: std::sync::Arc<super::parameter_defaults::LocalDefaults>,
@@ -312,6 +317,23 @@ pub struct AnalyzedPort {
     pub nature_flow: Option<SmolStr>,
 }
 
+/// One port of the module header, before vector expansion.
+///
+/// `inout [7:0] d` is one formal port whose lanes are `d[7]` through `d[0]`
+/// in [`AnalyzedModule::ports`]. Every lane carries the port's direction and
+/// discipline, so those are read from the lanes rather than repeated here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalyzedFormalPort {
+    pub name: SmolStr,
+    /// Domain of the port's discipline.
+    pub domain: crate::disciplines::Domain,
+    /// Declared `[msb:lsb]`, exactly as written; `None` for a scalar.
+    pub bounds: Option<super::VectorBounds>,
+    /// Indices into [`AnalyzedModule::ports`], most significant first. A
+    /// discrete vector is one lane: its bits travel as one digital signal.
+    pub lanes: Vec<usize>,
+}
+
 /// Analyzed parameter
 #[derive(Debug, Clone)]
 pub struct AnalyzedParameter {
@@ -342,6 +364,10 @@ pub struct AnalyzedParameter {
     /// Full default expression (may reference previously declared parameters)
     pub default_expr: Option<Expression>,
     pub range: Option<TypedParameterRange>,
+    /// The `units` (or `unit`) attribute on the declaration.
+    pub units: Option<SmolStr>,
+    /// The `desc` (or `info`) attribute on the declaration.
+    pub description: Option<SmolStr>,
 }
 
 /// One parameter-array declaration dimension, preserving the source's left to

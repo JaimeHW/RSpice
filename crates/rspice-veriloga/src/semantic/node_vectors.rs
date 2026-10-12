@@ -272,6 +272,58 @@ pub(super) fn declarations<'a>(
 }
 
 impl SemanticAnalyzer {
+    /// Regroup an analyzed module's scalar ports into the formal ports its
+    /// header declares.
+    ///
+    /// The bounds come from whichever declaration expanded the port: a
+    /// continuous vector or a real bus became lanes, while a discrete vector
+    /// stays one signal and keeps its packed range on that signal.
+    pub(super) fn formal_ports(&self, analyzed: &AnalyzedModule) -> Vec<AnalyzedFormalPort> {
+        let positions: HashMap<&SmolStr, usize> = analyzed
+            .ports
+            .iter()
+            .enumerate()
+            .map(|(index, port)| (&port.name, index))
+            .collect();
+        let physical = &analyzed.physical_nodes;
+        physical
+            .ports
+            .iter()
+            .map(|(name, lanes)| {
+                let lanes: Vec<usize> = lanes
+                    .iter()
+                    .filter_map(|lane| positions.get(lane).copied())
+                    .collect();
+                let domain = lanes
+                    .first()
+                    .and_then(|&lane| {
+                        self.disciplines
+                            .get_discipline(&analyzed.ports[lane].discipline)
+                    })
+                    .map_or(Domain::Continuous, |discipline| discipline.domain);
+                let bounds = physical
+                    .vectors
+                    .get(name)
+                    .map(|vector| vector.bounds)
+                    .or_else(|| physical.real_buses.get(name).map(|bus| bus.bounds))
+                    .or_else(|| {
+                        analyzed
+                            .digital
+                            .signals
+                            .iter()
+                            .find(|signal| signal.name == *name)
+                            .and_then(|signal| signal.range)
+                    });
+                AnalyzedFormalPort {
+                    name: name.clone(),
+                    domain,
+                    bounds,
+                    lanes,
+                }
+            })
+            .collect()
+    }
+
     /// Resolve after analog loop substitutions, before any backend or branch
     /// inventory sees the probe. A dynamic coordinate cannot select topology.
     pub(super) fn resolve_vector_access(

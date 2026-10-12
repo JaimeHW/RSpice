@@ -20,10 +20,11 @@ use crate::ast::{
     AccessKind, AnalogOperator, ArrayLiteralElement, BinaryOp, BranchAccess, Expression,
     LimiterArgument, NoiseSource, PortDirection, UnaryOp,
 };
+use crate::disciplines::Domain;
 use crate::numeric_literal::parse_integer_literal;
 use crate::semantic::{
     AnalogSiteGuard, AnalogSiteId, AnalyzedModule, AnalyzedRegion, AnalyzedStatement,
-    ParameterScope,
+    ParameterScope, VectorBounds,
 };
 use crate::types::{ParameterRange, ValueType};
 
@@ -91,6 +92,17 @@ pub struct HirParamRange {
     pub exclude_parameters: Vec<SmolStr>,
     #[serde(default)]
     pub exclude_expressions: Vec<HirExprRef>,
+    /// How [`Self::min_expression`] reads in the preprocessed source. Only
+    /// for presentation: the expression is what gets evaluated.
+    #[serde(default)]
+    pub min_text: Option<SmolStr>,
+    /// How [`Self::max_expression`] reads in the preprocessed source.
+    #[serde(default)]
+    pub max_text: Option<SmolStr>,
+    /// How each of [`Self::exclude_expressions`] reads in the preprocessed
+    /// source, in the same order.
+    #[serde(default)]
+    pub exclude_texts: Vec<SmolStr>,
 }
 
 impl HirParamRange {
@@ -107,7 +119,30 @@ impl HirParamRange {
             exclude: range.exclude.clone(),
             exclude_parameters: range.exclude_parameters.clone(),
             exclude_expressions: Vec::new(),
+            min_text: None,
+            max_text: None,
+            exclude_texts: Vec::new(),
         }
+    }
+
+    /// Fill the presentation text of every expression-valued bound and
+    /// exclusion from the source its spans index.
+    fn record_source_text(&mut self, source: &str) {
+        let text = |expression: &HirExprRef| {
+            let span = expression.span;
+            let text = usize::try_from(span.start)
+                .ok()
+                .zip(usize::try_from(span.end).ok())
+                .and_then(|(start, end)| source.get(start..end))
+                .map(str::trim)
+                .filter(|text| !text.is_empty());
+            // A span that does not index this source still names a bound
+            // that depends on other parameters; say what kind it is.
+            SmolStr::from(text.unwrap_or(expression.kind.as_str()))
+        };
+        self.min_text = self.min_expression.as_ref().map(text);
+        self.max_text = self.max_expression.as_ref().map(text);
+        self.exclude_texts = self.exclude_expressions.iter().map(text).collect();
     }
 }
 
@@ -237,14 +272,33 @@ pub enum HirExprKind {
     },
 }
 
+/// One scalar terminal. A vector port contributes one of these per lane,
+/// most significant first; [`HirFormalPort`] records how they group.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirPort {
     pub id: PortId,
     pub name: SmolStr,
-    pub direction: SmolStr,
+    pub direction: PortDirection,
     pub discipline: SmolStr,
     pub nature_potential: Option<SmolStr>,
     pub nature_flow: Option<SmolStr>,
+}
+
+/// One port of the module header as declared, before vector expansion.
+///
+/// Direction and discipline belong to every lane alike and are read from
+/// [`HirModel::ports`]; validation requires the lanes to agree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirFormalPort {
+    pub name: SmolStr,
+    /// Domain of the port's discipline.
+    pub domain: Domain,
+    /// Declared `[msb:lsb]`, exactly as written (`[0:7]` stays ascending);
+    /// `None` for a scalar.
+    pub range: Option<VectorBounds>,
+    /// The terminals this port binds, most significant first. A discrete
+    /// vector is a single terminal carrying the whole signal.
+    pub lanes: Vec<PortId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -274,6 +328,12 @@ pub struct HirParameter {
     pub default_expr: Option<HirExprRef>,
     pub range: Option<HirParamRange>,
     pub aliases: Vec<SmolStr>,
+    /// The declaration's `units` attribute.
+    #[serde(default)]
+    pub units: Option<SmolStr>,
+    /// The declaration's `desc` attribute.
+    #[serde(default)]
+    pub description: Option<SmolStr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -841,6 +901,8 @@ pub struct HirModel {
     #[serde(default = "canonical_default_transition")]
     pub default_transition: f64,
     pub ports: Vec<HirPort>,
+    /// The header's ports as declared, partitioning [`Self::ports`].
+    pub formal_ports: Vec<HirFormalPort>,
     pub parameters: Vec<HirParameter>,
     pub variables: Vec<HirVariable>,
     /// Value/validity state slot pairs for numeric discrete reads.
@@ -939,6 +1001,8 @@ impl HirModel {
                     default_expr,
                     range,
                     aliases: Vec::new(),
+                    units: parameter.units.clone(),
+                    description: parameter.description.clone(),
                 }
             })
             .collect();
@@ -1061,10 +1125,20 @@ impl HirModel {
                 .map(|(index, port)| HirPort {
                     id: PortId::from(index),
                     name: port.name.clone(),
-                    direction: port_direction_label(port.direction),
+                    direction: port.direction,
                     discipline: port.discipline.clone(),
                     nature_potential: port.nature_potential.clone(),
                     nature_flow: port.nature_flow.clone(),
+                })
+                .collect(),
+            formal_ports: module
+                .formal_ports
+                .iter()
+                .map(|port| HirFormalPort {
+                    name: port.name.clone(),
+                    domain: port.domain,
+                    range: port.bounds,
+                    lanes: port.lanes.iter().copied().map(PortId::from).collect(),
                 })
                 .collect(),
             parameters,
@@ -1155,6 +1229,22 @@ impl HirModel {
         }
     }
 
+    /// Record how each parameter-dependent range bound reads in `source`,
+    /// the preprocessed text this model's spans index.
+    ///
+    /// Lowering sees only the analyzed module, which carries spans and no
+    /// text, so the compile entry that holds the source calls this before the
+    /// artifact is sealed.
+    pub fn record_parameter_source_text(&mut self, source: &str) {
+        for range in self
+            .parameters
+            .iter_mut()
+            .filter_map(|parameter| parameter.range.as_mut())
+        {
+            range.record_source_text(source);
+        }
+    }
+
     pub fn validate(&self) -> IrValidationResult {
         if self.schema_version != CANONICAL_IR_SCHEMA_VERSION {
             return Err(vec![IrDiagnostic::global_error(
@@ -1186,6 +1276,7 @@ impl HirModel {
         }
 
         validate_dense_port_ids(&mut diagnostics, &self.ports);
+        validate_formal_ports(&mut diagnostics, &self.ports, &self.formal_ports);
         validate_dense_parameter_ids(&mut diagnostics, &self.parameters);
         validate_dense_variable_ids(&mut diagnostics, &self.variables);
         if self
@@ -2674,6 +2765,58 @@ fn validate_dense_port_ids(diagnostics: &mut Vec<IrDiagnostic>, ports: &[HirPort
     }
 }
 
+/// Every terminal belongs to exactly one formal port, and the lanes of one
+/// formal port share the direction and discipline the port is reported with.
+fn validate_formal_ports(
+    diagnostics: &mut Vec<IrDiagnostic>,
+    ports: &[HirPort],
+    formal_ports: &[HirFormalPort],
+) {
+    let mut owner = vec![None; ports.len()];
+    for formal in formal_ports {
+        let mut error = |detail: String| {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!("HIR formal port '{}' {detail}", formal.name),
+            ));
+        };
+        let Some(first) = formal.lanes.first() else {
+            error("binds no terminal".into());
+            continue;
+        };
+        let Some(first) = ports.get(usize::from(*first)) else {
+            error(format!("names missing terminal {first}"));
+            continue;
+        };
+        for lane in &formal.lanes {
+            let Some(port) = ports.get(usize::from(*lane)) else {
+                error(format!("names missing terminal {lane}"));
+                continue;
+            };
+            if let Some(previous) = owner[usize::from(*lane)].replace(&formal.name) {
+                error(format!(
+                    "shares terminal '{}' with formal port '{previous}'",
+                    port.name
+                ));
+            }
+            if port.direction != first.direction || port.discipline != first.discipline {
+                error(format!(
+                    "lane '{}' disagrees with lane '{}' on direction or discipline",
+                    port.name, first.name
+                ));
+            }
+        }
+    }
+    for (port, owner) in ports.iter().zip(&owner) {
+        if owner.is_none() {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                format!("HIR terminal '{}' belongs to no formal port", port.name),
+            ));
+        }
+    }
+}
+
 fn validate_dense_parameter_ids(diagnostics: &mut Vec<IrDiagnostic>, parameters: &[HirParameter]) {
     for (expected, parameter) in parameters.iter().enumerate() {
         let expected = u32::try_from(expected).expect("HIR parameter count exceeds u32::MAX");
@@ -3652,13 +3795,4 @@ fn builtin_constant_value(name: &str) -> Option<f64> {
         "inf" => Some(f64::INFINITY),
         _ => None,
     }
-}
-
-fn port_direction_label(direction: PortDirection) -> SmolStr {
-    match direction {
-        PortDirection::Input => "input",
-        PortDirection::Output => "output",
-        PortDirection::Inout => "inout",
-    }
-    .into()
 }

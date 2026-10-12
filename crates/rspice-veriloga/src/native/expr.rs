@@ -10169,6 +10169,16 @@ mod tests {
                     nature_flow: Some("current".into()),
                 },
             ],
+            formal_ports: ["p", "n"]
+                .into_iter()
+                .enumerate()
+                .map(|(lane, name)| crate::semantic::AnalyzedFormalPort {
+                    name: name.into(),
+                    domain: crate::disciplines::Domain::Continuous,
+                    bounds: None,
+                    lanes: vec![lane],
+                })
+                .collect(),
             parameters: Vec::new(),
             parameter_locals: Default::default(),
             param_aliases: Vec::new(),

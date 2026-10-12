@@ -819,7 +819,7 @@ pub(crate) fn runtime_contract_identity(
     hasher.usize(runtime.abi.analog_ports.len());
     for port in &runtime.abi.analog_ports {
         hasher.field(port.name.as_bytes());
-        hasher.field(port.direction.as_bytes());
+        hasher.field(port.direction.label().as_bytes());
         hasher.field(port.discipline.as_bytes());
         hasher.optional_text(port.potential_nature.as_deref());
         hasher.optional_text(port.flow_nature.as_deref());

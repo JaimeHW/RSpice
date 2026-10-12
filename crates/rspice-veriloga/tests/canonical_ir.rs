@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use rspice_veriloga::ast::{
-    ArrayLiteralElement, ArrayLiteralExpr, Expression, NumberLit, ReplicationExpr,
+    ArrayLiteralElement, ArrayLiteralExpr, Expression, NumberLit, PortDirection, ReplicationExpr,
 };
 use rspice_veriloga::canonical_ir::{
     BranchId, BranchUnknownId, CANONICAL_IR_SCHEMA_VERSION, ContributionId, EquationId, ExprId,
@@ -1911,6 +1911,9 @@ fn canonical_parameter_array_contract_rejects_matching_default_and_metadata_tamp
         exclude: Vec::new(),
         exclude_parameters: Vec::new(),
         exclude_expressions: Vec::new(),
+        min_text: None,
+        max_text: None,
+        exclude_texts: Vec::new(),
     };
     assert_matching_parameter_array_tamper_rejected(
         parameter_array_source(),
@@ -2720,7 +2723,7 @@ fn artifact_digests_distinguish_same_count_ir_content() {
     let baseline = CanonicalIrArtifact::from_parts(metadata.clone(), hir.clone(), mir.clone())
         .expect("build baseline artifact");
     let mut changed_hir = hir;
-    changed_hir.ports[0].direction = "output".into();
+    changed_hir.ports[0].direction = PortDirection::Output;
     let changed = CanonicalIrArtifact::from_parts(metadata, changed_hir, mir)
         .expect("build changed artifact");
 

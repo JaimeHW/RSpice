@@ -624,11 +624,23 @@ pub enum PortNetType {
 }
 
 /// Port direction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum PortDirection {
     Input,
     Output,
     Inout,
+}
+
+impl PortDirection {
+    /// The keyword that declares this direction.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Output => "output",
+            Self::Inout => "inout",
+        }
+    }
 }
 
 /// Parameter declaration

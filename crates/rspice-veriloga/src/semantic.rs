@@ -1089,6 +1089,7 @@ impl SemanticAnalyzer {
             default_discipline: None,
             noise_process_count: 0,
             ports: Vec::new(),
+            formal_ports: Vec::new(),
             parameters: Vec::new(),
             parameter_locals: Default::default(),
             param_aliases: Vec::new(),
@@ -1879,6 +1880,8 @@ impl SemanticAnalyzer {
                         .transpose()?
                 },
                 range: range.clone(),
+                units: param.units.clone(),
+                description: param.description.clone(),
             });
 
             self.define_symbol(Symbol {
@@ -2378,6 +2381,7 @@ impl SemanticAnalyzer {
         }
         analyzed.parameter_locals = std::sync::Arc::new(local_defaults);
         self.protect_physical_parameters(original_source, &mut analyzed)?;
+        analyzed.formal_ports = self.formal_ports(&analyzed);
         Ok(analyzed)
     }
 

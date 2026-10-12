@@ -1836,7 +1836,7 @@ impl ModelPlan {
             shape.u64(slot as u64);
             shape.u64(port.id.index() as u64);
             shape.field(port.name.as_bytes());
-            shape.field(port.direction.as_bytes());
+            shape.field(port.direction.label().as_bytes());
             shape.field(port.discipline.as_bytes());
             shape.field(b"accepted:f64:finite");
         }

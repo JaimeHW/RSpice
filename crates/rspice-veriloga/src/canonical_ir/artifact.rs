@@ -15,10 +15,10 @@ use super::digital::CanonicalDigitalPlan;
 use super::{
     CANONICAL_IR_SCHEMA_VERSION, CanonicalMetadata, CanonicalValueType, CompilerPhase,
     HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution, HirContributionKind,
-    HirExprKind, HirExprRef, HirExpression, HirInternalNode, HirLoop, HirModel, HirParamRange,
-    HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable, IrDiagnostic,
-    IrValidationResult, MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown, MirEquation,
-    MirEquationKind, MirModel, MirNode, MirParameterSlot, MirStateSlot, SourceSpanRef,
+    HirExprKind, HirExprRef, HirExpression, HirFormalPort, HirInternalNode, HirLoop, HirModel,
+    HirParamRange, HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable,
+    IrDiagnostic, IrValidationResult, MirAnalysisDomain, MirBranch, MirBranchRef, MirBranchUnknown,
+    MirEquation, MirEquationKind, MirModel, MirNode, MirParameterSlot, MirStateSlot, SourceSpanRef,
     StableDigest,
 };
 
@@ -939,6 +939,9 @@ fn hir_summary(hir: &HirModel) -> String {
     for port in &hir.ports {
         write_hir_port(&mut out, port);
     }
+    for port in &hir.formal_ports {
+        write_hir_formal_port(&mut out, port);
+    }
     for parameter in &hir.parameters {
         write_hir_parameter(&mut out, parameter);
     }
@@ -1010,10 +1013,29 @@ fn write_hir_port(out: &mut String, port: &HirPort) {
         "port id={} name={} direction={} discipline={} nature_potential={} nature_flow={}",
         port.id.index(),
         enc_str(&port.name),
-        enc_str(&port.direction),
+        enc_str(port.direction.label()),
         enc_str(&port.discipline),
         option_smol(port.nature_potential.as_ref()),
         option_smol(port.nature_flow.as_ref())
+    )
+    .expect("write to string");
+}
+
+fn write_hir_formal_port(out: &mut String, port: &HirFormalPort) {
+    writeln!(
+        out,
+        "formal_port name={} domain={} range={} lanes={}",
+        enc_str(&port.name),
+        port.domain.label(),
+        port.range
+            .map(|range| format!("{}:{}", range.msb, range.lsb))
+            .unwrap_or_else(|| "-".to_string()),
+        enc_list(
+            port.lanes
+                .iter()
+                .map(|lane| lane.index().to_string())
+                .collect()
+        )
     )
     .expect("write to string");
 }
@@ -1041,6 +1063,26 @@ fn write_hir_parameter(out: &mut String, parameter: &HirParameter) {
     if let Some(given) = parameter.elaboration_given {
         writeln!(out, "elaboration_given={given}").expect("write to string");
     }
+    // Presentation metadata, certified here and kept out of the MIR digest:
+    // none of it changes what the model computes.
+    let range_text = parameter.range.as_ref().map_or_else(
+        || "-".to_string(),
+        |range| {
+            format!(
+                "min:{} max:{} exclude:{}",
+                option_smol(range.min_text.as_ref()),
+                option_smol(range.max_text.as_ref()),
+                join_smol(&range.exclude_texts)
+            )
+        },
+    );
+    writeln!(
+        out,
+        "parameter_metadata units={} description={} range_text={range_text}",
+        option_smol(parameter.units.as_ref()),
+        option_smol(parameter.description.as_ref()),
+    )
+    .expect("write to string");
 }
 
 fn write_hir_variable(out: &mut String, variable: &HirVariable) {

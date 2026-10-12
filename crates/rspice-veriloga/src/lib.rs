@@ -1361,6 +1361,7 @@ impl VerilogACompiler {
         trace_canonical_ir_phase(trace, &module.name, "hir", None);
         let phase_started = web_time::Instant::now();
         let mut hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
+        hir.record_parameter_source_text(source);
         hir.digital_observations = digital
             .analog_probes
             .iter()

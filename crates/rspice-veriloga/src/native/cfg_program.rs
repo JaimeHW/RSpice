@@ -2061,6 +2061,7 @@ mod tests {
             feature_flags: Vec::new(),
             default_transition: 0.0,
             ports: Vec::new(),
+            formal_ports: Vec::new(),
             parameters: Vec::new(),
             variables: Vec::new(),
             arrays: Vec::new(),

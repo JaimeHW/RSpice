@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use thiserror::Error;
 
+use crate::ast::PortDirection;
 use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType, HirExprKind};
 use crate::codegen::CompiledModel;
 use crate::error::CompileError;
@@ -350,7 +351,7 @@ impl RuntimeAbiSummary {
                 .iter()
                 .map(|port| RuntimeAbiPort {
                     name: port.name.clone(),
-                    direction: port.direction.clone(),
+                    direction: port.direction,
                     discipline: port.discipline.clone(),
                     potential_nature: port.nature_potential.clone(),
                     flow_nature: port.nature_flow.clone(),
@@ -409,7 +410,7 @@ impl RuntimeAbiSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeAbiPort {
     pub name: SmolStr,
-    pub direction: SmolStr,
+    pub direction: PortDirection,
     pub discipline: SmolStr,
     pub potential_nature: Option<SmolStr>,
     pub flow_nature: Option<SmolStr>,

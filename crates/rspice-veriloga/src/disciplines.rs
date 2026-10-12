@@ -61,13 +61,26 @@ pub struct Discipline {
 }
 
 /// Discipline domain
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Domain {
     /// Continuous-time domain (analog)
     #[default]
     Continuous,
     /// Discrete-time domain (digital)
     Discrete,
+}
+
+impl Domain {
+    /// The keyword a `domain` declaration names this with.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::Discrete => "discrete",
+        }
+    }
 }
 
 impl Discipline {

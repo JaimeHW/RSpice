@@ -14,6 +14,7 @@ use std::fmt::Write as _;
 
 use smol_str::SmolStr;
 
+use crate::ast::PortDirection;
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, ExprId, HirExprKind, HirPort, MirParameterSlot,
 };
@@ -404,8 +405,8 @@ pub(super) fn generate_state_file_with_extensions(
             .hir
             .ports
             .iter()
-            .map(|port| generated_terminal_descriptor_literal(artifact, port))
-            .collect::<Result<Vec<_>, _>>()?
+            .map(generated_terminal_descriptor_literal)
+            .collect::<Vec<_>>()
             .join(", ")
     ));
     emit_public_parameter_descriptors(artifact, &mut out);
@@ -1308,30 +1309,18 @@ pub(super) fn generate_state_file_with_extensions(
     Ok(compact_generated_indentation(&out))
 }
 
-fn generated_terminal_descriptor_literal(
-    artifact: &CanonicalIrArtifact,
-    port: &HirPort,
-) -> Result<String, RustBackendError> {
-    let direction = match port.direction.to_ascii_lowercase().as_str() {
-        "input" => "GeneratedVerilogATerminalDirection::Input",
-        "output" => "GeneratedVerilogATerminalDirection::Output",
-        "inout" => "GeneratedVerilogATerminalDirection::InOut",
-        direction => {
-            return Err(unsupported(
-                artifact,
-                format!(
-                    "port '{}' has unsupported canonical direction '{}'",
-                    port.name, direction
-                ),
-            ));
-        }
+fn generated_terminal_descriptor_literal(port: &HirPort) -> String {
+    let direction = match port.direction {
+        PortDirection::Input => "GeneratedVerilogATerminalDirection::Input",
+        PortDirection::Output => "GeneratedVerilogATerminalDirection::Output",
+        PortDirection::Inout => "GeneratedVerilogATerminalDirection::InOut",
     };
-    Ok(format!(
+    format!(
         "GeneratedVerilogATerminalDescriptor {{ name: {:?}, direction: {direction}, discipline: {:?}, current_parameter: {:?} }}",
         port.name.as_str(),
         port.discipline.as_str(),
         format!("i{}", port.name.to_ascii_lowercase())
-    ))
+    )
 }
 
 fn emit_public_parameter_descriptors(artifact: &CanonicalIrArtifact, out: &mut String) {
