@@ -174,6 +174,7 @@ jobs:
           --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion
+          --test mixed_bit_aliases
           --test spectre_analog_statements
           --test transient_checkpoint
           --test veriloga_ac
@@ -348,6 +349,7 @@ jobs:
           --test boundary_supply_derivation
           --test capability_refusals
           --test connect_module_insertion
+          --test mixed_bit_aliases
           --test spectre_analog_statements
           --test transient_checkpoint
           --test veriloga_ac
