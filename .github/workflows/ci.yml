@@ -444,6 +444,8 @@ jobs:
         run: cargo test --locked -p rspice-cli --tests
       - name: UI library tests
         run: cargo test --locked -p rspice-app --lib
+      - name: Callback host code generation regression
+        run: cargo test --locked -p rspice-simulation --test wasmi_callback_codegen -- --test-threads=1
       - name: Verilog-A native JIT unit tests
         run: |
           cargo test --locked -p rspice-veriloga --features native --lib native:: -- --test-threads=1

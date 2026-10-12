@@ -230,7 +230,7 @@ incremental = true
 # override both halves together, since setting `RUSTFLAGS` replaces the
 # config's target rustflags entirely:
 #
-#   RUSTFLAGS="-C debuginfo=2 -C link-arg=/DEBUG:FULL" \
+#   RUSTFLAGS="-C debuginfo=2 -C link-arg=/DEBUG:FULL -C llvm-args=-fast-isel=false" \
 #     cargo test -p <crate> --test <target> --no-run
 debug = 0
 

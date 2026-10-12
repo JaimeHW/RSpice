@@ -1,7 +1,15 @@
-[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+[target.'cfg(all(target_os = "windows", target_env = "msvc", target_arch = "x86_64"))']
 # Large Windows/MSVC release test binaries in this workspace can trigger
 # link.exe LNK1328 while emitting PDB data. Disabling linker-generated debug
 # info keeps `cargo test --release` reliable on Windows.
+# LLVM's x86 FastISel miscompiles the unoptimized wasmi 2.0 Caller::get_export
+# on the pinned Rust 1.94 toolchain (also reproduced with 1.95). It reads the
+# export-name length as an instance pointer, causing an access violation.
+# Use SelectionDAG; this preserves the interpreter, checks, and opt levels.
+# The minimized regression is rspice-simulation/tests/wasmi_callback_codegen.rs.
+rustflags = ["-C", "link-arg=/DEBUG:NONE", "-C", "llvm-args=-fast-isel=false"]
+
+[target.'cfg(all(target_os = "windows", target_env = "msvc", not(target_arch = "x86_64")))']
 rustflags = ["-C", "link-arg=/DEBUG:NONE"]
 
 [target.wasm32-unknown-unknown]
