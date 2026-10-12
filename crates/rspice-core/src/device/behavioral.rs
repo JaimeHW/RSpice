@@ -283,6 +283,8 @@ pub struct BehavioralVoltageSource {
     expression_dialect: ExpressionDialect,
     /// True when the expression can jump discontinuously as its inputs cross a predicate.
     transient_voltage_lte_excluded: bool,
+    /// Partials of an expression that are constants. See [`ConstantPartials`].
+    constant_partials: ConstantPartials,
 }
 
 impl BehavioralVoltageSource {
@@ -425,6 +427,7 @@ impl BehavioralVoltageSource {
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
             transient_voltage_lte_excluded,
+            constant_partials: ConstantPartials::default(),
         })
     }
 
@@ -439,6 +442,7 @@ impl BehavioralVoltageSource {
         FB: Fn(&str) -> BehavioralBranchResolution,
     {
         self.invalidate_cached_exact_constraint();
+        self.constant_partials = ConstantPartials::for_expression(&self.ast);
         self.node_bindings = vec![None; self.program.node_map.len()];
         for (name, &local_idx) in &self.program.node_map {
             let resolved = if crate::naming::is_spice_ground_name(name) {
@@ -615,6 +619,7 @@ impl BehavioralVoltageSource {
     /// Set dialect-specific expression-function semantics.
     pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
         self.invalidate_cached_exact_constraint();
+        self.constant_partials.forget();
         self.expression_dialect = dialect;
     }
 
@@ -689,53 +694,68 @@ impl BehavioralVoltageSource {
             return Err(self.nonfinite_error("expression value", time, f0));
         }
 
-        for idx in 0..self.node_bindings.len() {
-            self.node_partials[idx] = if self.node_bindings[idx].is_some() {
-                analytic_expression_partial(
-                    &self.ast,
-                    &self.program,
-                    &self.node_values,
-                    &self.branch_values,
-                    BehavioralEnvironment {
-                        time,
-                        frequency: self.frequency,
-                        temperature: self.temperature,
-                        gmin: self.gmin,
-                        expression_dialect: self.expression_dialect,
-                        logarithm_domain: LogarithmDomain::Ieee,
-                    },
-                    DerivativeTarget::Node(idx),
-                )
-                .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
-                .map(Ok)
-                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
-            } else {
-                0.0
-            };
-        }
-        for idx in 0..self.branch_bindings.len() {
-            self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
-                analytic_expression_partial(
-                    &self.ast,
-                    &self.program,
-                    &self.node_values,
-                    &self.branch_values,
-                    BehavioralEnvironment {
-                        time,
-                        frequency: self.frequency,
-                        temperature: self.temperature,
-                        gmin: self.gmin,
-                        expression_dialect: self.expression_dialect,
-                        logarithm_domain: LogarithmDomain::Ieee,
-                    },
-                    DerivativeTarget::Branch(idx),
-                )
-                .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
-                .map(Ok)
-                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
-            } else {
-                0.0
-            };
+        if let Some((node_partials, branch_partials)) = self.constant_partials.get() {
+            self.node_partials.copy_from_slice(node_partials);
+            self.branch_partials.copy_from_slice(branch_partials);
+        } else {
+            let mut analytic_everywhere = true;
+            for idx in 0..self.node_bindings.len() {
+                self.node_partials[idx] = if self.node_bindings[idx].is_some() {
+                    let analytic = analytic_expression_partial(
+                        &self.ast,
+                        &self.program,
+                        &self.node_values,
+                        &self.branch_values,
+                        BehavioralEnvironment {
+                            time,
+                            frequency: self.frequency,
+                            temperature: self.temperature,
+                            gmin: self.gmin,
+                            expression_dialect: self.expression_dialect,
+                            logarithm_domain: LogarithmDomain::Ieee,
+                        },
+                        DerivativeTarget::Node(idx),
+                    );
+                    analytic_everywhere &= analytic.is_some();
+                    analytic
+                        .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
+                        .map(Ok)
+                        .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
+                } else {
+                    0.0
+                };
+            }
+            for idx in 0..self.branch_bindings.len() {
+                self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
+                    let analytic = analytic_expression_partial(
+                        &self.ast,
+                        &self.program,
+                        &self.node_values,
+                        &self.branch_values,
+                        BehavioralEnvironment {
+                            time,
+                            frequency: self.frequency,
+                            temperature: self.temperature,
+                            gmin: self.gmin,
+                            expression_dialect: self.expression_dialect,
+                            logarithm_domain: LogarithmDomain::Ieee,
+                        },
+                        DerivativeTarget::Branch(idx),
+                    );
+                    analytic_everywhere &= analytic.is_some();
+                    analytic
+                        .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
+                        .map(Ok)
+                        .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
+                } else {
+                    0.0
+                };
+            }
+            self.constant_partials.retain(
+                analytic_everywhere,
+                (&self.node_bindings, &self.node_partials),
+                (&self.branch_bindings, &self.branch_partials),
+            );
         }
 
         let mut affine = f0;
@@ -1070,6 +1090,151 @@ pub(crate) fn expression_descriptor_gap(
         Some("time-dependent constitutive expression has no autonomous descriptor")
     } else {
         None
+    }
+}
+
+/// How an expression depends on the circuit unknowns (node voltages and
+/// branch currents), for deciding whether its partials are constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnknownDependence {
+    /// A number fixed when the source is built.
+    Constant,
+    /// Free of the unknowns, but moved by time, frequency, temperature, GMIN
+    /// or a function's own state.
+    Varying,
+    /// Affine in the unknowns, every coefficient `Constant`.
+    Affine,
+    /// Anything else.
+    Nonlinear,
+}
+
+fn unknown_dependence(expr: &Expr) -> UnknownDependence {
+    use UnknownDependence::{Affine, Constant, Nonlinear, Varying};
+    let free = |left: UnknownDependence, right: UnknownDependence| {
+        if left == Constant && right == Constant {
+            Constant
+        } else {
+            Varying
+        }
+    };
+    match expr {
+        Expr::Const(_) | Expr::StringLiteral(_) => Constant,
+        Expr::Time | Expr::Frequency | Expr::Temperature | Expr::ThermalVoltage | Expr::Gmin => {
+            Varying
+        }
+        Expr::NodeVoltage(_) | Expr::BranchCurrent(_) => Affine,
+        Expr::Unary {
+            op: UnaryOp::Neg,
+            operand,
+        } => unknown_dependence(operand),
+        Expr::Unary {
+            op: UnaryOp::Not,
+            operand,
+        } => match unknown_dependence(operand) {
+            dependence @ (Constant | Varying) => dependence,
+            Affine | Nonlinear => Nonlinear,
+        },
+        Expr::Binary { op, left, right } => {
+            let (left, right) = (unknown_dependence(left), unknown_dependence(right));
+            if left == Nonlinear || right == Nonlinear {
+                return Nonlinear;
+            }
+            match op {
+                BinaryOp::Add | BinaryOp::Sub if left == Affine || right == Affine => Affine,
+                BinaryOp::Mul => match (left, right) {
+                    (Affine, Constant) | (Constant, Affine) => Affine,
+                    (Affine, _) | (_, Affine) => Nonlinear,
+                    _ => free(left, right),
+                },
+                BinaryOp::Div => match (left, right) {
+                    (Affine, Constant) => Affine,
+                    (Affine, _) | (_, Affine) => Nonlinear,
+                    _ => free(left, right),
+                },
+                _ if left == Affine || right == Affine => Nonlinear,
+                _ => free(left, right),
+            }
+        }
+        // A function can hold state or move with time even on constant
+        // arguments, so it is never a constant coefficient.
+        Expr::Function { args, .. } => {
+            if args
+                .iter()
+                .all(|arg| matches!(unknown_dependence(arg), Constant | Varying))
+            {
+                Varying
+            } else {
+                Nonlinear
+            }
+        }
+        Expr::LookupTable { input, .. } => match unknown_dependence(input) {
+            Constant | Varying => Varying,
+            Affine | Nonlinear => Nonlinear,
+        },
+    }
+}
+
+/// The partials of a behavioral expression, kept once they are known to be
+/// constants.
+///
+/// Linearizing a source evaluates the analytic derivative once per referenced
+/// node and branch, so an expression of `n` inputs costs `n` derivative passes
+/// at every Newton iterate. When the expression is affine in the unknowns with
+/// coefficients nothing at run time moves -- no input, time, frequency,
+/// temperature or GMIN -- every partial is a constant: an unknown enters a
+/// partial only through a product with a zero derivative, which adds a signed
+/// zero to a non-zero result. Such partials are evaluated once, by the same
+/// evaluator, and reused.
+///
+/// Only a fully analytic set with every bound partial finite and non-zero is
+/// kept, so neither a finite-difference fallback nor the sign of a zero partial
+/// is ever frozen. Binding the references again, which is also how a rewritten
+/// expression is installed, or changing the dialect that normalizes the
+/// derivative, discards it.
+#[derive(Debug, Clone, Default)]
+struct ConstantPartials {
+    /// The expression qualifies; decided when its references are bound.
+    eligible: bool,
+    /// Node partials, then branch partials, once evaluated.
+    values: Option<Arc<(Vec<Value>, Vec<Value>)>>,
+}
+
+impl ConstantPartials {
+    fn for_expression(ast: &Expr) -> Self {
+        Self {
+            eligible: unknown_dependence(ast) == UnknownDependence::Affine,
+            values: None,
+        }
+    }
+
+    fn get(&self) -> Option<&(Vec<Value>, Vec<Value>)> {
+        self.values.as_deref()
+    }
+
+    fn forget(&mut self) {
+        self.values = None;
+    }
+
+    /// Keep a set the caller evaluated analytically everywhere, if it qualifies.
+    fn retain(
+        &mut self,
+        analytic_everywhere: bool,
+        (node_bindings, node_partials): (&[Option<usize>], &[Value]),
+        (branch_bindings, branch_partials): (&[Option<usize>], &[Value]),
+    ) {
+        let usable = |bindings: &[Option<usize>], partials: &[Value]| {
+            bindings.len() == partials.len()
+                && bindings.iter().zip(partials).all(|(binding, partial)| {
+                    binding.is_none() || (partial.is_finite() && *partial != 0.0)
+                })
+        };
+        if self.eligible
+            && analytic_everywhere
+            && usable(node_bindings, node_partials)
+            && usable(branch_bindings, branch_partials)
+        {
+            self.values = Some(Arc::new((node_partials.to_vec(), branch_partials.to_vec())));
+        }
     }
 }
 
@@ -2141,6 +2306,8 @@ pub struct BehavioralCurrentSource {
     /// Whether this expression represents a two-terminal device whose lead
     /// current and power are part of the public device-observable surface.
     two_terminal_observables: bool,
+    /// Partials of an expression that are constants. See [`ConstantPartials`].
+    constant_partials: ConstantPartials,
 }
 
 impl BehavioralCurrentSource {
@@ -2236,6 +2403,7 @@ impl BehavioralCurrentSource {
             gmin: crate::constants::GMIN,
             expression_dialect: ExpressionDialect::Ngspice,
             two_terminal_observables: false,
+            constant_partials: ConstantPartials::default(),
         })
     }
 
@@ -2249,6 +2417,7 @@ impl BehavioralCurrentSource {
         FN: Fn(&str) -> Option<usize>,
         FB: Fn(&str) -> BehavioralBranchResolution,
     {
+        self.constant_partials = ConstantPartials::for_expression(&self.ast);
         self.node_bindings = vec![None; self.program.node_map.len()];
         for (name, &local_idx) in &self.program.node_map {
             let resolved = if crate::naming::is_spice_ground_name(name) {
@@ -2398,6 +2567,7 @@ impl BehavioralCurrentSource {
 
     /// Set dialect-specific expression-function semantics.
     pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
+        self.constant_partials.forget();
         self.expression_dialect = dialect;
     }
 
@@ -2482,53 +2652,68 @@ impl BehavioralCurrentSource {
             return Err(self.nonfinite_error("expression value", time, f0));
         }
 
-        for idx in 0..self.node_bindings.len() {
-            self.node_partials[idx] = if self.node_bindings[idx].is_some() {
-                analytic_expression_partial(
-                    &self.ast,
-                    &self.program,
-                    &self.node_values,
-                    &self.branch_values,
-                    BehavioralEnvironment {
-                        time,
-                        frequency: self.frequency,
-                        temperature: self.temperature,
-                        gmin: self.gmin,
-                        expression_dialect: self.expression_dialect,
-                        logarithm_domain: LogarithmDomain::Ieee,
-                    },
-                    DerivativeTarget::Node(idx),
-                )
-                .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
-                .map(Ok)
-                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
-            } else {
-                0.0
-            };
-        }
-        for idx in 0..self.branch_bindings.len() {
-            self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
-                analytic_expression_partial(
-                    &self.ast,
-                    &self.program,
-                    &self.node_values,
-                    &self.branch_values,
-                    BehavioralEnvironment {
-                        time,
-                        frequency: self.frequency,
-                        temperature: self.temperature,
-                        gmin: self.gmin,
-                        expression_dialect: self.expression_dialect,
-                        logarithm_domain: LogarithmDomain::Ieee,
-                    },
-                    DerivativeTarget::Branch(idx),
-                )
-                .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
-                .map(Ok)
-                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
-            } else {
-                0.0
-            };
+        if let Some((node_partials, branch_partials)) = self.constant_partials.get() {
+            self.node_partials.copy_from_slice(node_partials);
+            self.branch_partials.copy_from_slice(branch_partials);
+        } else {
+            let mut analytic_everywhere = true;
+            for idx in 0..self.node_bindings.len() {
+                self.node_partials[idx] = if self.node_bindings[idx].is_some() {
+                    let analytic = analytic_expression_partial(
+                        &self.ast,
+                        &self.program,
+                        &self.node_values,
+                        &self.branch_values,
+                        BehavioralEnvironment {
+                            time,
+                            frequency: self.frequency,
+                            temperature: self.temperature,
+                            gmin: self.gmin,
+                            expression_dialect: self.expression_dialect,
+                            logarithm_domain: LogarithmDomain::Ieee,
+                        },
+                        DerivativeTarget::Node(idx),
+                    );
+                    analytic_everywhere &= analytic.is_some();
+                    analytic
+                        .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
+                        .map(Ok)
+                        .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))?
+                } else {
+                    0.0
+                };
+            }
+            for idx in 0..self.branch_bindings.len() {
+                self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
+                    let analytic = analytic_expression_partial(
+                        &self.ast,
+                        &self.program,
+                        &self.node_values,
+                        &self.branch_values,
+                        BehavioralEnvironment {
+                            time,
+                            frequency: self.frequency,
+                            temperature: self.temperature,
+                            gmin: self.gmin,
+                            expression_dialect: self.expression_dialect,
+                            logarithm_domain: LogarithmDomain::Ieee,
+                        },
+                        DerivativeTarget::Branch(idx),
+                    );
+                    analytic_everywhere &= analytic.is_some();
+                    analytic
+                        .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
+                        .map(Ok)
+                        .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))?
+                } else {
+                    0.0
+                };
+            }
+            self.constant_partials.retain(
+                analytic_everywhere,
+                (&self.node_bindings, &self.node_partials),
+                (&self.branch_bindings, &self.branch_partials),
+            );
         }
 
         let mut affine = f0;
@@ -2942,6 +3127,108 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn bound_voltage_source(expression: &str) -> BehavioralVoltageSource {
+        let mut source = BehavioralVoltageSource::new("Bx".to_string(), 1, 0, 1, expression)
+            .expect("behavioral voltage source parses");
+        source
+            .bind_references(
+                |name| match name {
+                    "a" => Some(2),
+                    "b" => Some(3),
+                    _ => None,
+                },
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("behavioral voltage source binds");
+        source
+    }
+
+    fn partial_bits(source: &BehavioralVoltageSource) -> Vec<(usize, u64)> {
+        source
+            .linearized_partials()
+            .map(|(index, partial)| (index, partial.to_bits()))
+            .collect()
+    }
+
+    #[test]
+    fn constant_partials_are_reused_bit_for_bit_and_match_a_fresh_evaluation() {
+        let expression = "(v(a)/2 + v(b)/4)*3 - v(a)/1024 + sin(time)";
+        let mut source = bound_voltage_source(expression);
+        source
+            .linearize_expression(&[0.0, 0.7, -1.3], 1.0e-6)
+            .expect("finite linearization");
+        assert!(
+            source.constant_partials.get().is_some(),
+            "an affine expression keeps its partials"
+        );
+        let kept = partial_bits(&source);
+
+        let solution = [0.0, -4.25e3, 3.0e-9];
+        let time = 2.5e-3;
+        let reused = source
+            .linearize_expression(&solution, time)
+            .expect("finite reuse");
+        let mut fresh = bound_voltage_source(expression);
+        let evaluated = fresh
+            .linearize_expression(&solution, time)
+            .expect("finite fresh linearization");
+        assert_eq!(partial_bits(&source), kept);
+        assert_eq!(partial_bits(&source), partial_bits(&fresh));
+        assert_eq!(reused.to_bits(), evaluated.to_bits());
+    }
+
+    #[test]
+    fn only_affine_expressions_with_constant_coefficients_keep_partials() {
+        for expression in [
+            "v(a)*v(b)",
+            "v(a)*time",
+            "v(a)/v(b)",
+            "abs(v(a))",
+            "v(a) > 0 ? 1 : -1",
+            "v(a)*temper",
+            "v(a) - v(a)",
+        ] {
+            let mut source = bound_voltage_source(expression);
+            source
+                .linearize_expression(&[0.0, 0.7, 1.3], 1.0e-6)
+                .expect("finite linearization");
+            assert!(
+                source.constant_partials.get().is_none(),
+                "{expression} must be re-differentiated at every iterate"
+            );
+        }
+        assert_eq!(
+            unknown_dependence(&parse_expression_strict("2*(v(a)-1)/4").expect("parses")),
+            UnknownDependence::Affine
+        );
+        assert_eq!(
+            unknown_dependence(&parse_expression_strict("time*3").expect("parses")),
+            UnknownDependence::Varying
+        );
+    }
+
+    #[test]
+    fn rebinding_or_a_dialect_change_discards_constant_partials() {
+        let mut source = bound_voltage_source("v(a)/2 + v(b)");
+        source
+            .linearize_expression(&[0.0, 1.0, 2.0], 0.0)
+            .expect("finite linearization");
+        assert!(source.constant_partials.get().is_some());
+        source.set_expression_dialect(ExpressionDialect::Xyce);
+        assert!(source.constant_partials.get().is_none());
+        source
+            .linearize_expression(&[0.0, 1.0, 2.0], 0.0)
+            .expect("finite linearization");
+        assert!(source.constant_partials.get().is_some());
+        source
+            .bind_references(
+                |name| (name == "a" || name == "b").then_some(2),
+                |_| BehavioralBranchResolution::MissingDevice,
+            )
+            .expect("rebinds");
+        assert!(source.constant_partials.get().is_none());
+    }
 
     #[test]
     fn exact_voltage_constraint_requires_same_time_and_no_solution_dependencies() {
